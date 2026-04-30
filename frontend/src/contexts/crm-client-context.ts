@@ -6,6 +6,7 @@ export interface CrmClientContextValue {
   selectedClientId: string;
   selectedClient: LeadClient | null;
   isLoading: boolean;
+  error: Error | null;
   setSelectedClientId: (clientId: string) => void;
 }
 

@@ -46,6 +46,8 @@ const Dashboard = ({
   const selectedClient = crmClient?.selectedClient || null;
   const resolvedClientName = fixedClientName || selectedClient?.name || effectiveClientId;
   const { data, isLoading, error } = useDashboard(effectiveClientId);
+  const isWaitingForClient = !effectiveClientId && !!crmClient?.isLoading;
+  const clientLoadError = !effectiveClientId ? crmClient?.error || null : null;
 
   const summary = data?.summary ?? {
     totalLeads: 0,
@@ -82,7 +84,14 @@ const Dashboard = ({
       contentClassName="px-4 py-4 lg:px-5 lg:py-4"
       showGlobalClientSelector={!fixedClientId}
     >
-      {!effectiveClientId && !(crmClient?.isLoading) && (
+      {isWaitingForClient && (
+        <EmptyState
+          title="Carregando empresas"
+          description="Estamos buscando a empresa selecionada para liberar os indicadores do CRM."
+        />
+      )}
+
+      {!effectiveClientId && !isWaitingForClient && !clientLoadError && (
         <EmptyState
           title="Nenhum cliente cadastrado"
           description="Cadastre um registro em leads_clients para liberar o dashboard."
@@ -95,7 +104,10 @@ const Dashboard = ({
         </p>
       )}
 
-      <ErrorMessage message={error ? (error as Error).message : null} variant="dashboard" />
+      <ErrorMessage
+        message={clientLoadError ? `Nao foi possivel carregar empresas: ${clientLoadError.message}` : error ? (error as Error).message : null}
+        variant="dashboard"
+      />
 
       {effectiveClientId && (
         <>
