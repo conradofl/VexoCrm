@@ -44,21 +44,29 @@ export function PageShell({
     .join("");
   const isDark = resolvedTheme !== "light";
   const shouldShowGlobalClientSelector =
-    showGlobalClientSelector && crmClient && crmClient.clients.length > 0;
+    showGlobalClientSelector &&
+    crmClient &&
+    (crmClient.clients.length > 0 || crmClient.isLoading || Boolean(crmClient.selectedClientId));
+  const selectedClientFallback = crmClient?.selectedClientId
+    ? {
+        id: crmClient.selectedClientId,
+        name: crmClient.selectedClient?.name || crmClient.selectedClientId,
+      }
+    : null;
+  const selectorClients =
+    crmClient && selectedClientFallback && !crmClient.clients.some((client) => client.id === selectedClientFallback.id)
+      ? [selectedClientFallback, ...crmClient.clients]
+      : crmClient?.clients || [];
 
   const globalClientSelector = shouldShowGlobalClientSelector ? (
-    <div className="flex min-w-[220px] items-center gap-2">
+    <div className="hidden min-w-[230px] items-center gap-2 xl:flex">
       <Building2 className="h-4 w-4 text-muted-foreground" />
-      <Select
-        value={crmClient.selectedClientId}
-        onValueChange={crmClient.setSelectedClientId}
-        disabled={crmClient.isLoading}
-      >
-        <SelectTrigger className="h-11 rounded-xl">
-          <SelectValue placeholder="Selecionar empresa" />
+      <Select value={crmClient.selectedClientId || undefined} onValueChange={crmClient.setSelectedClientId} disabled={crmClient.isLoading || selectorClients.length === 0}>
+        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white/85 shadow-[0_14px_28px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
+          <SelectValue placeholder={crmClient.isLoading ? "Carregando empresas" : "Selecionar empresa"} />
         </SelectTrigger>
         <SelectContent>
-          {crmClient.clients.map((client) => (
+          {selectorClients.map((client) => (
             <SelectItem key={client.id} value={client.id}>
               {client.name}
             </SelectItem>
@@ -95,6 +103,7 @@ export function PageShell({
           </div>
 
           <div className="flex items-center gap-3">
+            {globalClientSelector}
             <button
               type="button"
               onClick={() => mounted && setTheme(isDark ? "light" : "dark")}
@@ -135,9 +144,8 @@ export function PageShell({
             </h1>
             {subtitle && <p className={compactHero ? "mt-1 text-xs text-muted-foreground" : "mt-2 text-sm text-muted-foreground"}>{subtitle}</p>}
           </div>
-          {(globalClientSelector || headerRight) && (
+          {headerRight && (
             <div className="flex flex-wrap items-center gap-3">
-              {globalClientSelector}
               {headerRight}
             </div>
           )}

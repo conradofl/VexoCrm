@@ -362,6 +362,9 @@ export function useCommercialIntelligence(clientId: string, filters: CommercialI
       return res.json();
     },
     staleTime: 30 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
 }
 

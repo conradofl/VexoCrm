@@ -82,7 +82,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -387,19 +386,23 @@ function PaginationBar({
 
 function LoadingState() {
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 rounded-[1.5rem]" />
+    <DashboardPanel
+      title="Carregando inteligencia comercial"
+      subtitle="Estamos organizando metricas, rankings, distribuicao e insights desta empresa."
+      className="p-6"
+    >
+      <div className="grid gap-3 md:grid-cols-4">
+        {["Metricas", "Rankings", "Distribuicao", "Insights"].map((label) => (
+          <div key={label} className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              {label}
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">Preparando dados operacionais para uso.</p>
+          </div>
         ))}
       </div>
-      <Skeleton className="h-20 rounded-[1.5rem]" />
-      <div className="grid gap-3 xl:grid-cols-2">
-        <Skeleton className="h-[340px] rounded-[1.85rem]" />
-        <Skeleton className="h-[340px] rounded-[1.85rem]" />
-      </div>
-      <Skeleton className="h-[420px] rounded-[1.85rem]" />
-    </div>
+    </DashboardPanel>
   );
 }
 
@@ -1633,31 +1636,31 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
       </DashboardPanel>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="space-y-4">
-        <div className="overflow-x-auto pb-1">
-          <TabsList className="h-auto gap-2 rounded-full border border-slate-200/90 bg-white/85 p-1 dark:border-white/10 dark:bg-white/[0.04]">
-            <TabsTrigger value="visao-geral" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+        <div className="rounded-[1.5rem] border border-slate-200/90 bg-white/75 p-2 dark:border-white/10 dark:bg-white/[0.04]">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 bg-transparent p-0 md:grid-cols-4 xl:grid-cols-8">
+            <TabsTrigger value="visao-geral" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Visao Geral
             </TabsTrigger>
-            <TabsTrigger value="metricas" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+            <TabsTrigger value="metricas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Metricas
             </TabsTrigger>
-            <TabsTrigger value="rankings" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+            <TabsTrigger value="rankings" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Rankings
             </TabsTrigger>
-            <TabsTrigger value="distribuicao" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
-              Distribuicao de Leads
+            <TabsTrigger value="distribuicao" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+              Distribuicao
             </TabsTrigger>
-            <TabsTrigger value="consultores" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+            <TabsTrigger value="consultores" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Consultores
             </TabsTrigger>
-            <TabsTrigger value="campanhas" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+            <TabsTrigger value="campanhas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Campanhas
             </TabsTrigger>
-            <TabsTrigger value="insights" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+            <TabsTrigger value="insights" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
               Insights
             </TabsTrigger>
-            <TabsTrigger value="configuracoes" className="rounded-full px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
-              Configuracoes
+            <TabsTrigger value="configuracoes" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+              Ajustes
             </TabsTrigger>
           </TabsList>
         </div>
