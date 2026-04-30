@@ -1724,6 +1724,7 @@ export default function UserAccessManagement() {
   const selectedHiddenByFilter = Boolean(
     selectedUser && selectedDraft && !filteredUsers.some((user) => user.uid === selectedUser.uid)
   );
+  const showAdvancedTypeEditor = false;
 
   const showActionFeedback = ({ tone, title, message, details }: ActionFeedbackState) => {
     setActionFeedback({ tone, title, message, details: details || null });
@@ -2158,8 +2159,8 @@ export default function UserAccessManagement() {
             <CardHeader className="space-y-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-1">
-                  <CardTitle className="text-xl">Associacoes e acessos</CardTitle>
-                  <CardDescription>Edite um usuario por vez com o mesmo fluxo simples do cadastro.</CardDescription>
+                  <CardTitle className="text-xl">Liberacao e acessos dos usuarios</CardTitle>
+                  <CardDescription>Selecione uma pessoa, defina a funcao, vincule a empresa e marque exatamente os modulos que ela pode acessar.</CardDescription>
                 </div>
 
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -2481,6 +2482,7 @@ export default function UserAccessManagement() {
               </CardContent>
             </Card>
 
+            {showAdvancedTypeEditor ? (
             <Card className="border-border/80">
                 <CardHeader className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2684,6 +2686,7 @@ export default function UserAccessManagement() {
                   </Card>
                 </CardContent>
               </Card>
+            ) : null}
           </>
         ) : null}
       </div>
