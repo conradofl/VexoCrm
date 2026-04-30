@@ -12,6 +12,12 @@ export interface DashboardSummary {
   warmLeads: number;
   coldLeads: number;
   noSignalLeads: number;
+  conversions: number;
+  conversionRate: number;
+  revenueGenerated: number;
+  averageTicket: number;
+  performanceScore: number;
+  funnelCoverage: number;
 }
 
 export interface DashboardChartPoint {

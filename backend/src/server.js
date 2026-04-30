@@ -1420,7 +1420,7 @@ function detectTemperature(lead) {
   return "unknown";
 }
 
-function buildDashboardPayload(client, leads) {
+function buildDashboardPayload(client, leads, conversions = []) {
   const now = new Date();
   const timeZone = "America/Sao_Paulo";
   const todayKey = getDateKey(now, timeZone);
@@ -1484,6 +1484,25 @@ function buildDashboardPayload(client, leads) {
 
   const totalLeads = leads.length;
   const qualificationRate = totalLeads === 0 ? 0 : Math.round((qualifiedLeads / totalLeads) * 100);
+  const closedConversions = (conversions || []).filter((conversion) => {
+    const status = normalizeLooseText(conversion.conversion_status || conversion.status);
+    return status.includes("won") || status.includes("ganho") || status.includes("fechado") || status.includes("convertido");
+  });
+  const conversionsCount = closedConversions.length;
+  const revenueGenerated = Math.round(
+    closedConversions.reduce((sum, conversion) => {
+      const value = Number(conversion.revenue_amount ?? conversion.contract_value ?? 0);
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0)
+  );
+  const conversionRate = totalLeads === 0 ? 0 : Math.round((conversionsCount / totalLeads) * 100);
+  const averageTicket = conversionsCount === 0 ? 0 : Math.round(revenueGenerated / conversionsCount);
+  const performanceScore = Math.round(
+    (qualificationRate * 0.45) +
+      (conversionRate * 0.45) +
+      (totalLeads === 0 ? 0 : Math.min(100, Math.round((temperatureCounts.hot / totalLeads) * 100)) * 0.1)
+  );
+  const funnelCoverage = totalLeads === 0 ? 0 : Math.round(((qualifiedLeads + conversionsCount) / Math.max(totalLeads * 2, 1)) * 100);
 
   return {
     client,
@@ -1497,6 +1516,12 @@ function buildDashboardPayload(client, leads) {
       warmLeads: temperatureCounts.warm,
       coldLeads: temperatureCounts.cold,
       noSignalLeads: temperatureCounts.unknown,
+      conversions: conversionsCount,
+      conversionRate,
+      revenueGenerated,
+      averageTicket,
+      performanceScore,
+      funnelCoverage,
     },
     leadsByDay: recentDays,
     temperatureBreakdown: [
@@ -1505,12 +1530,15 @@ function buildDashboardPayload(client, leads) {
       { name: "Frio", value: temperatureCounts.cold, color: "hsl(217, 91%, 60%)" },
       { name: "Sem sinal", value: temperatureCounts.unknown, color: "hsl(220, 12%, 60%)" },
     ],
-    statusBreakdown: Array.from(statusCounts.entries())
+    statusBreakdown: [
+      ...Array.from(statusCounts.entries())
       .map(([status, value]) => ({
         name: humanizeStatus(status),
         value,
       }))
       .sort((a, b) => b.value - a.value),
+      ...(conversionsCount > 0 ? [{ name: "Fechamentos", value: conversionsCount }] : []),
+    ],
     typeBreakdown: Array.from(typeCounts.entries())
       .map(([type, value]) => ({
         name: type === "nao_informado" ? "Nao informado" : humanizeStatus(type),
@@ -1528,6 +1556,107 @@ function buildDashboardPayload(client, leads) {
       data_hora: lead.data_hora || lead.created_at,
     })),
   };
+}
+
+function normalizeLooseText(value) {
+  return normalizeString(value)
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim() || "";
+}
+
+function getNormalizedField(data = {}, keys = []) {
+  for (const key of keys) {
+    const directValue = data[key];
+    if (directValue !== undefined && directValue !== null && normalizeString(directValue)) {
+      return normalizeString(directValue);
+    }
+  }
+
+  const entries = Object.entries(data || {});
+  for (const [key, value] of entries) {
+    const normalizedKey = normalizeLooseText(key).replace(/[^a-z0-9]/g, "");
+    if (keys.some((candidate) => normalizeLooseText(candidate).replace(/[^a-z0-9]/g, "") === normalizedKey)) {
+      return normalizeString(value);
+    }
+  }
+
+  return "";
+}
+
+function parseMoneyLikeValue(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+
+  const cleaned = normalized
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function leadMatchesCampaignSegmentation(lead, segmentation = {}) {
+  const normalizedData = lead.normalized_data && typeof lead.normalized_data === "object"
+    ? lead.normalized_data
+    : lead;
+  const filters = segmentation && typeof segmentation === "object" ? segmentation : {};
+
+  const gender = normalizeLooseText(filters.gender);
+  if (gender && gender !== "todos") {
+    const leadGender = normalizeLooseText(getNormalizedField(normalizedData, ["genero", "gênero", "sexo"]));
+    if (!leadGender.includes(gender)) return false;
+  }
+
+  const productType = normalizeLooseText(filters.productType);
+  if (productType && productType !== "todos") {
+    const leadProduct = normalizeLooseText(
+      getNormalizedField(normalizedData, ["tipo_produto", "tipo de produto", "produto", "tipo_cliente", "perfil"])
+    );
+    if (!leadProduct.includes(productType)) return false;
+  }
+
+  const ticket = normalizeLooseText(filters.ticket);
+  const ticketThreshold = Number(filters.ticketThreshold || 0);
+  if (ticket && ticket !== "todos") {
+    const rawValue =
+      getNormalizedField(normalizedData, ["valor", "ticket", "valor_contrato", "contrato", "renda", "faixa_consumo", "consumo"]) ||
+      "";
+    const leadValue = parseMoneyLikeValue(rawValue);
+    const textValue = normalizeLooseText(rawValue);
+
+    if (leadValue !== null && ticketThreshold > 0) {
+      if (ticket === "alto" && leadValue < ticketThreshold) return false;
+      if (ticket === "baixo" && leadValue >= ticketThreshold) return false;
+    } else if (!textValue.includes(ticket)) {
+      return false;
+    }
+  }
+
+  const interest = normalizeLooseText(filters.interest);
+  if (interest) {
+    const leadInterest = normalizeLooseText(
+      [
+        getNormalizedField(normalizedData, ["interesse", "categoria", "segmento", "produto", "tipo_cliente"]),
+        getNormalizedField(normalizedData, ["observacao", "observações", "descricao", "descrição"]),
+      ].filter(Boolean).join(" ")
+    );
+    if (!leadInterest.includes(interest)) return false;
+  }
+
+  const campaignTag = normalizeLooseText(filters.campaignTag);
+  if (campaignTag) {
+    const source = normalizeLooseText(
+      [
+        getNormalizedField(normalizedData, ["campanha", "origem", "source", "utm_campaign"]),
+        lead.import_id,
+      ].filter(Boolean).join(" ")
+    );
+    if (!source.includes(campaignTag)) return false;
+  }
+
+  return true;
 }
 
 function isMissingSchemaError(error) {
@@ -3117,7 +3246,7 @@ async function getClientName(clientId) {
   return data?.name || clientId;
 }
 
-async function buildDispatchLeads({ clientId, importId = null, limit = null }) {
+async function buildDispatchLeads({ clientId, importId = null, limit = null, segmentation = null }) {
   if (!supabase) return [];
 
   let query = supabase
@@ -3132,7 +3261,7 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null }) {
     query = query.eq("import_id", importId);
   }
 
-  if (limit && Number.isInteger(limit) && limit > 0) {
+  if (limit && Number.isInteger(limit) && limit > 0 && !segmentation) {
     query = query.limit(limit);
   }
 
@@ -3141,7 +3270,7 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null }) {
     throw error;
   }
 
-  return Array.from(
+  const leads = Array.from(
     new Map(
       (data || [])
         .map((item) => {
@@ -3167,9 +3296,16 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null }) {
           };
         })
         .filter((item) => !!item.telefone)
+        .filter((item) => leadMatchesCampaignSegmentation(item, segmentation))
         .map((item) => [item.telefone, item])
     ).values()
   );
+
+  if (limit && Number.isInteger(limit) && limit > 0) {
+    return leads.slice(0, limit);
+  }
+
+  return leads;
 }
 
 app.get("/health", (_req, res) => {
@@ -3815,7 +3951,21 @@ app.get("/api/dashboard", requireFirebaseAuth, async (req, res) => {
       throw error;
     }
 
-    res.json(buildDashboardPayload(client || { id: clientId, name: clientId }, leads || []));
+    let conversions = [];
+    try {
+      const { data: conversionRows, error: conversionsError } = await supabase
+        .from("lead_conversions")
+        .select("id, conversion_status, contract_value, revenue_amount, closed_at, created_at")
+        .eq("client_id", clientId);
+
+      if (!conversionsError) {
+        conversions = conversionRows || [];
+      }
+    } catch (conversionError) {
+      console.warn("dashboard conversions unavailable:", conversionError?.message || conversionError);
+    }
+
+    res.json(buildDashboardPayload(client || { id: clientId, name: clientId }, leads || [], conversions));
   } catch (error) {
     console.error("dashboard query error:", error);
     sendError(res, 500, "DASHBOARD_QUERY_FAILED", "Failed to query dashboard data");
@@ -5426,9 +5576,13 @@ app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planil
   if (requestedClientId && !clientId) return;
 
   try {
+    const campaignSelect =
+      "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta";
+    const fallbackCampaignSelect =
+      "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at";
     let query = supabase
       .from("campaigns")
-      .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at")
+      .select(campaignSelect)
       .is("archived_at", null)
       .order("created_at", { ascending: false });
 
@@ -5436,11 +5590,24 @@ app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planil
       query = query.eq("client_id", clientId);
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
 
     if (error) {
-      sendError(res, 500, "CAMPAIGNS_FETCH_FAILED", "Failed to fetch campaigns", error.message);
-      return;
+      let fallbackQuery = supabase
+        .from("campaigns")
+        .select(fallbackCampaignSelect)
+        .is("archived_at", null)
+        .order("created_at", { ascending: false });
+      if (clientId) {
+        fallbackQuery = fallbackQuery.eq("client_id", clientId);
+      }
+      const fallback = await fallbackQuery;
+      data = fallback.data;
+      error = fallback.error;
+      if (error) {
+        sendError(res, 500, "CAMPAIGNS_FETCH_FAILED", "Failed to fetch campaigns", error.message);
+        return;
+      }
     }
 
     // Fetch client names separately (no FK declared in schema cache)
@@ -5456,6 +5623,7 @@ app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planil
 
     const items = (data || []).map((row) => ({
       ...row,
+      analytics_meta: row.analytics_meta || {},
       client_name: clientNameMap[row.client_id] ?? null,
       webhook_token: row.webhook_token ? "***" : null,
     }));
@@ -5477,11 +5645,21 @@ app.get("/api/campaigns/:id/leads", requireFirebaseAuth, requireInternalPageAcce
   }
 
   try {
-    const { data: campaign, error: fetchError } = await supabase
+    let { data: campaign, error: fetchError } = await supabase
       .from("campaigns")
-      .select("id, client_id, import_id, limit_per_run, phones")
+      .select("id, client_id, import_id, limit_per_run, phones, analytics_meta")
       .eq("id", id)
       .single();
+
+    if (fetchError && isMissingSchemaError(fetchError)) {
+      const fallback = await supabase
+        .from("campaigns")
+        .select("id, client_id, import_id, limit_per_run, phones")
+        .eq("id", id)
+        .single();
+      campaign = fallback.data;
+      fetchError = fallback.error;
+    }
 
     if (fetchError || !campaign) {
       sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
@@ -5512,6 +5690,7 @@ app.get("/api/campaigns/:id/leads", requireFirebaseAuth, requireInternalPageAcce
         clientId: authorizedClientId,
         importId: campaign.import_id || null,
         limit: campaign.limit_per_run,
+        segmentation: campaign.analytics_meta?.segmentation || null,
       });
     }
 
@@ -5534,13 +5713,17 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
   const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
   const webhookUrl = normalizeString(req.body?.webhookUrl);
   const webhookToken = normalizeString(req.body?.webhookToken) || null;
+  const analyticsMeta =
+    req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
+      ? req.body.analyticsMeta
+      : {};
 
   if (!name) { sendError(res, 400, "INVALID_BODY", "Missing name"); return; }
   if (!clientId) { sendError(res, 400, "INVALID_BODY", "Missing clientId"); return; }
   if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl"); return; }
 
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("campaigns")
       .insert({
         name,
@@ -5553,16 +5736,37 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
         status: "active",
         created_by_uid: req.authAccess?.uid || null,
         created_by_email: req.authAccess?.email || null,
+        analytics_meta: analyticsMeta,
       })
-      .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
+      .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
       .single();
 
     if (error) {
-      sendError(res, 500, "CAMPAIGN_CREATE_FAILED", "Failed to create campaign", error.message);
-      return;
+      const fallback = await supabase
+        .from("campaigns")
+        .insert({
+          name,
+          client_id: clientId,
+          import_id: importId,
+          limit_per_run: limitPerRun,
+          scheduled_for: scheduledFor,
+          webhook_url: webhookUrl,
+          webhook_token: webhookToken,
+          status: "active",
+          created_by_uid: req.authAccess?.uid || null,
+          created_by_email: req.authAccess?.email || null,
+        })
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
+        .single();
+      data = fallback.data;
+      error = fallback.error;
+      if (error) {
+        sendError(res, 500, "CAMPAIGN_CREATE_FAILED", "Failed to create campaign", error.message);
+        return;
+      }
     }
 
-    res.status(201).json({ item: { ...data, webhook_token: webhookToken ? "***" : null } });
+    res.status(201).json({ item: { ...data, analytics_meta: data.analytics_meta || analyticsMeta, webhook_token: webhookToken ? "***" : null } });
   } catch (error) {
     console.error("campaign create error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
@@ -5588,6 +5792,7 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
   if (req.body?.archived === false) updates.archived_at = null;
   if (req.body?.webhookUrl) updates.webhook_url = normalizeString(req.body.webhookUrl);
   if ("webhookToken" in req.body) updates.webhook_token = normalizeString(req.body.webhookToken);
+  if (req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object") updates.analytics_meta = req.body.analyticsMeta;
 
   if (Object.keys(updates).length === 0) {
     sendError(res, 400, "INVALID_BODY", "No valid fields to update");
@@ -5595,12 +5800,25 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
   }
 
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("campaigns")
       .update(updates)
       .eq("id", id)
-      .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
+      .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
       .single();
+
+    if (error && updates.analytics_meta && isMissingSchemaError(error)) {
+      const fallbackUpdates = { ...updates };
+      delete fallbackUpdates.analytics_meta;
+      const fallback = await supabase
+        .from("campaigns")
+        .update(fallbackUpdates)
+        .eq("id", id)
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
+        .single();
+      data = fallback.data ? { ...fallback.data, analytics_meta: updates.analytics_meta } : fallback.data;
+      error = fallback.error;
+    }
 
     if (error) {
       sendError(res, 500, "CAMPAIGN_UPDATE_FAILED", "Failed to update campaign", error.message);
@@ -5644,11 +5862,21 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
 
   try {
-    const { data: campaign, error: fetchError } = await supabase
+    let { data: campaign, error: fetchError } = await supabase
       .from("campaigns")
-      .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at")
+      .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, analytics_meta")
       .eq("id", id)
       .single();
+
+    if (fetchError && isMissingSchemaError(fetchError)) {
+      const fallback = await supabase
+        .from("campaigns")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at")
+        .eq("id", id)
+        .single();
+      campaign = fallback.data;
+      fetchError = fallback.error;
+    }
 
     if (fetchError || !campaign) {
       sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
@@ -5669,6 +5897,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       clientId: campaign.client_id,
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
+      segmentation: campaign.analytics_meta?.segmentation || null,
     });
 
     if (leads.length === 0) {
@@ -5692,6 +5921,9 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       client: { id: campaign.client_id, name: clientName },
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
+      segmentation: campaign.analytics_meta?.segmentation || null,
+      message: campaign.analytics_meta?.message || "",
+      image: campaign.analytics_meta?.image || null,
       total: leads.length,
       phones: leads.map((l) => l.telefone),
       leads: leads.map((l) => ({

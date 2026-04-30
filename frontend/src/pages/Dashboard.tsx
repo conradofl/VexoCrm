@@ -57,7 +57,18 @@ const Dashboard = ({
     warmLeads: 0,
     coldLeads: 0,
     noSignalLeads: 0,
+    conversions: 0,
+    conversionRate: 0,
+    revenueGenerated: 0,
+    averageTicket: 0,
+    performanceScore: 0,
+    funnelCoverage: 0,
   };
+  const formattedRevenue = new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: 0,
+  }).format(summary.revenueGenerated || 0);
 
   const activeTone = summary.qualificationRate >= 50 ? "text-cyan-700 dark:text-cyan-200" : "text-fuchsia-700 dark:text-fuchsia-200";
 
@@ -111,6 +122,41 @@ const Dashboard = ({
               trend="base analisada"
             />
           </KpiGrid>
+
+          <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
+            <KpiCard
+              title="Conversao final"
+              value={`${summary.conversionRate}%`}
+              icon={<Target className="h-4 w-4" />}
+              tone="pink"
+              trend={`${summary.conversions} fechamentos`}
+            />
+            <KpiCard
+              title="Performance"
+              value={`${summary.performanceScore}%`}
+              icon={<TrendingUp className="h-4 w-4" />}
+              tone="cyan"
+              trend="qualificacao + conversao"
+            />
+            <KpiCard
+              title="Receita"
+              value={formattedRevenue}
+              icon={<Users2 className="h-4 w-4" />}
+              tone="teal"
+              trend={`ticket medio ${new Intl.NumberFormat("pt-BR", {
+                style: "currency",
+                currency: "BRL",
+                maximumFractionDigits: 0,
+              }).format(summary.averageTicket || 0)}`}
+            />
+            <KpiCard
+              title="Funil"
+              value={`${summary.funnelCoverage}%`}
+              icon={<Bot className="h-4 w-4" />}
+              tone="amber"
+              trend="cobertura do funil"
+            />
+          </div>
 
           <Tabs defaultValue="resumo" className="space-y-3">
             <div className="overflow-x-auto pb-1">
