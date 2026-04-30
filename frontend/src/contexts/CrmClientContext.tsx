@@ -6,9 +6,12 @@ import { CrmClientContext, type CrmClientContextValue } from "@/contexts/crm-cli
 const STORAGE_KEY = "vexo.crm.selected-client";
 
 export function CrmClientProvider({ children }: { children: ReactNode }) {
-  const { isInternalUser, clientId, canAccessClient } = useAuth();
-  const { data: clients = [], isLoading } = useLeadClients();
-  const [selectedClientId, setSelectedClientIdState] = useState("");
+  const { isInternalUser, clientId, clientIds, canAccessClient } = useAuth();
+  const { data: clients = [], isLoading, error } = useLeadClients();
+  const [selectedClientId, setSelectedClientIdState] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(STORAGE_KEY) || "";
+  });
 
   const visibleClients = useMemo(() => {
     if (!isInternalUser) return [];
@@ -16,8 +19,11 @@ export function CrmClientProvider({ children }: { children: ReactNode }) {
   }, [canAccessClient, clients, isInternalUser]);
 
   useEffect(() => {
+    if (isLoading) return;
+
     if (!visibleClients.length) {
-      setSelectedClientIdState("");
+      const fallbackClientId = clientId || clientIds[0] || "";
+      setSelectedClientIdState((current) => current || fallbackClientId);
       return;
     }
 
@@ -32,7 +38,7 @@ export function CrmClientProvider({ children }: { children: ReactNode }) {
       }
       return resolvedClient?.id || "";
     });
-  }, [clientId, visibleClients]);
+  }, [clientId, clientIds, isLoading, visibleClients]);
 
   useEffect(() => {
     if (!selectedClientId || typeof window === "undefined") return;
@@ -49,9 +55,10 @@ export function CrmClientProvider({ children }: { children: ReactNode }) {
       selectedClientId,
       selectedClient: visibleClients.find((item) => item.id === selectedClientId) || null,
       isLoading,
+      error: error instanceof Error ? error : null,
       setSelectedClientId,
     }),
-    [isLoading, selectedClientId, visibleClients],
+    [error, isLoading, selectedClientId, visibleClients],
   );
 
   return <CrmClientContext.Provider value={value}>{children}</CrmClientContext.Provider>;
