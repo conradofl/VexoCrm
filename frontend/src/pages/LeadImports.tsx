@@ -6,8 +6,13 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Columns3,
   Clock3,
   FileSpreadsheet,
+  Filter,
+  ImagePlus,
+  LayoutGrid,
+  List,
   History,
   Megaphone,
   Pause,
@@ -51,6 +56,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { PageShell } from "@/components/PageShell";
@@ -58,6 +64,16 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
 
 type SheetTab = "dados" | "campanha" | "pendentes" | "enviadas" | "agendamentos";
+type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
+
+interface CampaignSegmentationState {
+  gender: string;
+  productType: string;
+  ticket: string;
+  ticketThreshold: string;
+  interest: string;
+  campaignTag: string;
+}
 
 interface LeadImportsProps {
   fixedClientId?: string;
@@ -103,6 +119,7 @@ const SCHEDULED = [
 
 const IMPORTS_PAGE_SIZE = 10;
 const ALL_IMPORTS_VALUE = "__all__";
+const ALL_SEGMENT_VALUE = "__all__";
 const DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL =
   "https://geracaodigital.app.n8n.cloud/webhook/c1a774a2-2172-4b4f-b557-a75d9561b720";
 const darkFieldClass =
@@ -111,6 +128,22 @@ const darkSelectContentClass =
   "border-slate-200/90 bg-white text-slate-900 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#090b17]/98 dark:text-white dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)]";
 const darkSelectItemClass =
   "rounded-md text-slate-700 focus:bg-slate-100 focus:text-slate-950 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary dark:text-white/78 dark:focus:bg-white/[0.06] dark:focus:text-white dark:data-[state=checked]:bg-primary/12 dark:data-[state=checked]:text-white";
+
+const defaultSegmentation: CampaignSegmentationState = {
+  gender: ALL_SEGMENT_VALUE,
+  productType: ALL_SEGMENT_VALUE,
+  ticket: ALL_SEGMENT_VALUE,
+  ticketThreshold: "",
+  interest: "",
+  campaignTag: "",
+};
+
+const leadViewOptions: Array<{ id: LeadsViewMode; label: string; icon: typeof List }> = [
+  { id: "lista", label: "Lista", icon: List },
+  { id: "cards", label: "Cards", icon: LayoutGrid },
+  { id: "funil", label: "Funil", icon: Filter },
+  { id: "kanban", label: "Kanban", icon: Columns3 },
+];
 
 function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
   return new Promise((resolve, reject) => {
@@ -160,6 +193,123 @@ function buildPaginationItems(currentPage: number, totalPages: number): Array<nu
 
   items.push(totalPages);
   return items;
+}
+
+function normalizeLooseText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function getLeadField(data: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = data[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value);
+  }
+
+  const entries = Object.entries(data);
+  for (const [key, value] of entries) {
+    const normalizedKey = normalizeLooseText(key).replace(/[^a-z0-9]/g, "");
+    if (keys.some((candidate) => normalizeLooseText(candidate).replace(/[^a-z0-9]/g, "") === normalizedKey)) {
+      return String(value ?? "");
+    }
+  }
+
+  return "";
+}
+
+function parseMoneyValue(value: string) {
+  const cleaned = value
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function leadMatchesSegmentation(data: Record<string, unknown>, filters: CampaignSegmentationState) {
+  if (filters.gender !== ALL_SEGMENT_VALUE) {
+    const gender = normalizeLooseText(getLeadField(data, ["genero", "gênero", "sexo"]));
+    if (!gender.includes(filters.gender)) return false;
+  }
+
+  if (filters.productType !== ALL_SEGMENT_VALUE) {
+    const product = normalizeLooseText(
+      getLeadField(data, ["tipo_produto", "tipo de produto", "produto", "tipo_cliente", "perfil"])
+    );
+    if (!product.includes(filters.productType)) return false;
+  }
+
+  if (filters.ticket !== ALL_SEGMENT_VALUE) {
+    const rawValue = getLeadField(data, ["valor", "ticket", "valor_contrato", "contrato", "renda", "faixa_consumo", "consumo"]);
+    const parsedValue = parseMoneyValue(rawValue);
+    const threshold = Number(filters.ticketThreshold || 0);
+    const textValue = normalizeLooseText(rawValue);
+
+    if (parsedValue !== null && threshold > 0) {
+      if (filters.ticket === "alto" && parsedValue < threshold) return false;
+      if (filters.ticket === "baixo" && parsedValue >= threshold) return false;
+    } else if (!textValue.includes(filters.ticket)) {
+      return false;
+    }
+  }
+
+  if (filters.interest.trim()) {
+    const interestSource = normalizeLooseText(
+      [
+        getLeadField(data, ["interesse", "categoria", "segmento", "produto", "tipo_cliente"]),
+        getLeadField(data, ["observacao", "observações", "descricao", "descrição"]),
+      ].join(" ")
+    );
+    if (!interestSource.includes(normalizeLooseText(filters.interest))) return false;
+  }
+
+  if (filters.campaignTag.trim()) {
+    const campaignSource = normalizeLooseText(
+      getLeadField(data, ["campanha", "origem", "source", "utm_campaign"])
+    );
+    if (!campaignSource.includes(normalizeLooseText(filters.campaignTag))) return false;
+  }
+
+  return true;
+}
+
+function toCampaignSegmentationPayload(filters: CampaignSegmentationState) {
+  return {
+    gender: filters.gender === ALL_SEGMENT_VALUE ? "" : filters.gender,
+    productType: filters.productType === ALL_SEGMENT_VALUE ? "" : filters.productType,
+    ticket: filters.ticket === ALL_SEGMENT_VALUE ? "" : filters.ticket,
+    ticketThreshold: filters.ticketThreshold.trim() ? Number(filters.ticketThreshold) : null,
+    interest: filters.interest.trim(),
+    campaignTag: filters.campaignTag.trim(),
+  };
+}
+
+function getLeadNormalizedData(item: { normalized_data?: Record<string, unknown> | null }) {
+  return item.normalized_data && typeof item.normalized_data === "object" ? item.normalized_data : {};
+}
+
+function readImageAsCampaignAsset(file: File): Promise<{ name: string; type: string; size: number; dataUrl: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Nao foi possivel carregar a imagem."));
+        return;
+      }
+      resolve({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        dataUrl: result,
+      });
+    };
+    reader.onerror = () => reject(new Error("Falha ao ler a imagem."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function PaginationControls({
@@ -258,11 +408,17 @@ export default function LeadImports({
   const [campaignName, setCampaignName] = useState("");
   const [scheduledFor, setScheduledFor] = useState("");
   const [dispatchLimit, setDispatchLimit] = useState("");
+  const [campaignMessage, setCampaignMessage] = useState("");
+  const [campaignImage, setCampaignImage] = useState<{ name: string; type: string; size: number; dataUrl: string } | null>(null);
+  const [campaignImageError, setCampaignImageError] = useState<string | null>(null);
+  const [segmentation, setSegmentation] = useState<CampaignSegmentationState>(defaultSegmentation);
+  const [leadViewMode, setLeadViewMode] = useState<LeadsViewMode>("lista");
   const [campaignSearch, setCampaignSearch] = useState("");
   const [selectedImportId, setSelectedImportId] = useState(ALL_IMPORTS_VALUE);
   const [importsPage, setImportsPage] = useState(1);
   const [campaignActionDialog, setCampaignActionDialog] = useState<CampaignActionDialogState>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const campaignImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: imports = [], isLoading: importsLoading, error: importsError, refetch } = useLeadImports(selectedClientId);
   const createLeadImport = useCreateLeadImport();
@@ -298,7 +454,40 @@ export default function LeadImports({
     () => imports.slice((safeImportsPage - 1) * IMPORTS_PAGE_SIZE, safeImportsPage * IMPORTS_PAGE_SIZE),
     [imports, safeImportsPage],
   );
-  const pendingItems = pendingData?.items ?? [];
+  const pendingItems = useMemo(() => pendingData?.items ?? [], [pendingData?.items]);
+  const segmentedPendingItems = useMemo(
+    () =>
+      pendingItems.filter((item) => {
+        const normalizedData = getLeadNormalizedData(item);
+        return leadMatchesSegmentation(normalizedData, segmentation);
+      }),
+    [pendingItems, segmentation],
+  );
+  const segmentMatchedCount = segmentedPendingItems.length;
+  const segmentRejectedCount = Math.max(0, pendingItems.length - segmentMatchedCount);
+  const funnelGroups = useMemo(() => {
+    const groups = [
+      {
+        id: "entrada",
+        title: "Entrada",
+        items: segmentedPendingItems,
+      },
+      {
+        id: "segmentados",
+        title: "Segmentados",
+        items: segmentedPendingItems.filter((item) => {
+          const data = getLeadNormalizedData(item);
+          return Boolean(getLeadField(data, ["genero", "sexo"]) || getLeadField(data, ["interesse", "produto", "tipo_cliente"]));
+        }),
+      },
+      {
+        id: "prontos",
+        title: "Prontos para disparo",
+        items: segmentedPendingItems.filter((item) => !item.dispatched),
+      },
+    ];
+    return groups;
+  }, [segmentedPendingItems]);
   const filteredCampaigns = useMemo(() => {
     const term = campaignSearch.trim().toLowerCase();
     const scoped = selectedClientId
@@ -348,6 +537,31 @@ export default function LeadImports({
       setPreviewRows(rows.slice(0, 8));
     } catch (error) {
       setParseError(error instanceof Error ? error.message : "Falha ao processar a planilha.");
+    }
+  }
+
+  async function handleCampaignImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
+    setCampaignImageError(null);
+    setCampaignImage(null);
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setCampaignImageError("Selecione uma imagem valida para a campanha.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setCampaignImageError("Use uma imagem de ate 2MB para manter o disparo leve.");
+      return;
+    }
+
+    try {
+      const asset = await readImageAsCampaignAsset(file);
+      setCampaignImage(asset);
+    } catch (error) {
+      setCampaignImageError(error instanceof Error ? error.message : "Falha ao carregar imagem.");
     }
   }
 
@@ -416,12 +630,21 @@ export default function LeadImports({
         scheduledFor: scheduledFor ? new Date(scheduledFor).toISOString() : null,
         webhookUrl: DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL,
         webhookToken: null,
+        analyticsMeta: {
+          segmentation: toCampaignSegmentationPayload(segmentation),
+          message: campaignMessage.trim(),
+          image: campaignImage,
+        },
       });
 
       setDispatchStatus(`Campanha ${campaignName.trim()} criada com sucesso.`);
       setCampaignName("");
       setScheduledFor("");
       setDispatchLimit("");
+      setCampaignMessage("");
+      setCampaignImage(null);
+      setCampaignImageError(null);
+      setSegmentation(defaultSegmentation);
       setSelectedImportId(ALL_IMPORTS_VALUE);
       setActiveTab("agendamentos");
       void refetchCampaigns();
@@ -824,10 +1047,33 @@ export default function LeadImports({
                   </Select>
                 </div>
 
-                <Button variant="outline" size="sm" onClick={() => refetchPending()} disabled={pendingLoading}>
-                  <RefreshCw className={cn("mr-1 h-4 w-4", pendingLoading && "animate-spin")} />
-                  Atualizar
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex rounded-xl border border-slate-200/90 bg-white/80 p-1 dark:border-white/10 dark:bg-white/[0.04]">
+                    {leadViewOptions.map((option) => {
+                      const Icon = option.icon;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setLeadViewMode(option.id)}
+                          className={cn(
+                            "inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors",
+                            leadViewMode === option.id
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:bg-slate-100 hover:text-foreground dark:hover:bg-white/[0.06]",
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => refetchPending()} disabled={pendingLoading}>
+                    <RefreshCw className={cn("mr-1 h-4 w-4", pendingLoading && "animate-spin")} />
+                    Atualizar
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -835,14 +1081,15 @@ export default function LeadImports({
               <CardContent className="p-4">
                 <ErrorMessage message={pendingError ? (pendingError as Error).message : null} variant="banner" />
                 {pendingLoading && <EmptyState message="Carregando leads..." />}
-                {!pendingLoading && pendingData && pendingData.items.length === 0 && (
+                {!pendingLoading && pendingData && segmentedPendingItems.length === 0 && (
                   <EmptyState
                     title={pendingFilter === "false" ? "Todos os leads ja foram disparados" : "Nenhum lead encontrado"}
                     description="Altere o filtro para ver leads em outro estado."
                   />
                 )}
-                {!pendingLoading && pendingData && pendingData.items.length > 0 && (
+                {!pendingLoading && pendingData && segmentedPendingItems.length > 0 && (
                   <div className="space-y-4">
+                    {leadViewMode === "lista" && (
                     <div className="overflow-x-auto rounded-xl border border-border/70">
                       <div className="max-h-[560px] overflow-y-auto">
                         <Table>
@@ -858,7 +1105,7 @@ export default function LeadImports({
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {pendingItems.map((item) => {
+                            {segmentedPendingItems.map((item) => {
                               const normalizedData =
                                 item.normalized_data && typeof item.normalized_data === "object"
                                   ? (item.normalized_data as Record<string, unknown>)
@@ -890,6 +1137,90 @@ export default function LeadImports({
                         </Table>
                       </div>
                     </div>
+                    )}
+
+                    {leadViewMode === "cards" && (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {segmentedPendingItems.map((item) => {
+                          const data = getLeadNormalizedData(item);
+                          return (
+                            <div key={item.id} className="rounded-2xl border border-slate-200/90 bg-white/85 p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold text-foreground">{String(data.nome || "Lead sem nome")}</p>
+                                  <p className="mt-1 font-mono text-xs text-muted-foreground">{item.telefone || "-"}</p>
+                                </div>
+                                <span className={cn("rounded-md px-2 py-1 font-mono text-[10px]", item.dispatched ? "bg-primary/10 text-primary" : "bg-amber-400/10 text-amber-500")}>
+                                  {item.dispatched ? "Enviado" : "Pendente"}
+                                </span>
+                              </div>
+                              <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                                <span>Cidade: {String(data.cidade || "-")}</span>
+                                <span>Estado: {String(data.estado || "-")}</span>
+                                <span>Perfil: {String(data.perfil || data.tipo_cliente || "-")}</span>
+                                <span>Interesse: {String(data.interesse || data.produto || "-")}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {leadViewMode === "funil" && (
+                      <div className="grid gap-3 lg:grid-cols-3">
+                        {funnelGroups.map((group) => (
+                          <div key={group.id} className="rounded-2xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                            <div className="mb-3 flex items-center justify-between">
+                              <p className="font-semibold text-foreground">{group.title}</p>
+                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{group.items.length}</span>
+                            </div>
+                            <div className="space-y-2">
+                              {group.items.slice(0, 8).map((item) => {
+                                const data = getLeadNormalizedData(item);
+                                return (
+                                  <div key={`${group.id}-${item.id}`} className="rounded-xl border border-slate-200/80 bg-slate-50/90 p-3 text-sm dark:border-white/10 dark:bg-black/25">
+                                    <p className="font-medium text-foreground">{String(data.nome || item.telefone || "Lead")}</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">{String(data.cidade || "-")} · {String(data.status || "sem status")}</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {leadViewMode === "kanban" && (
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {["novo", "em contato", "qualificado"].map((statusGroup) => {
+                          const items = segmentedPendingItems.filter((item) => {
+                            const status = normalizeLooseText(getLeadNormalizedData(item).status);
+                            if (statusGroup === "novo") return !status || status.includes("novo");
+                            if (statusGroup === "em contato") return status.includes("contato") || status.includes("morno");
+                            return status.includes("qualificado") || status.includes("quente");
+                          });
+                          return (
+                            <div key={statusGroup} className="min-h-[260px] rounded-2xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                              <div className="mb-3 flex items-center justify-between">
+                                <p className="capitalize font-semibold text-foreground">{statusGroup}</p>
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-muted-foreground dark:bg-white/[0.08]">{items.length}</span>
+                              </div>
+                              <div className="space-y-2">
+                                {items.slice(0, 10).map((item) => {
+                                  const data = getLeadNormalizedData(item);
+                                  return (
+                                    <div key={`${statusGroup}-${item.id}`} className="rounded-xl border border-slate-200/80 bg-slate-50/90 p-3 dark:border-white/10 dark:bg-black/25">
+                                      <p className="text-sm font-medium text-foreground">{String(data.nome || item.telefone || "Lead")}</p>
+                                      <p className="mt-1 text-xs text-muted-foreground">{String(data.interesse || data.produto || data.cidade || "-")}</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -967,6 +1298,138 @@ export default function LeadImports({
                   <p className="text-xs text-muted-foreground">
                     Em branco, a campanha sera criada com o lote padrao de 50 leads por execucao.
                   </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03] lg:grid-cols-[1fr_0.9fr]">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Segmentacao da base</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {segmentMatchedCount} leads entram nesta campanha
+                        {segmentRejectedCount > 0 ? ` · ${segmentRejectedCount} fora do filtro` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSegmentation(defaultSegmentation)}
+                    >
+                      Limpar filtros
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Genero</p>
+                      <Select value={segmentation.gender} onValueChange={(value) => setSegmentation((current) => ({ ...current, gender: value }))}>
+                        <SelectTrigger className={darkFieldClass}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className={darkSelectContentClass}>
+                          <SelectItem value={ALL_SEGMENT_VALUE} className={darkSelectItemClass}>Todos</SelectItem>
+                          <SelectItem value="homem" className={darkSelectItemClass}>Homem</SelectItem>
+                          <SelectItem value="mulher" className={darkSelectItemClass}>Mulher</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Produto</p>
+                      <Select value={segmentation.productType} onValueChange={(value) => setSegmentation((current) => ({ ...current, productType: value }))}>
+                        <SelectTrigger className={darkFieldClass}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className={darkSelectContentClass}>
+                          <SelectItem value={ALL_SEGMENT_VALUE} className={darkSelectItemClass}>Todos</SelectItem>
+                          <SelectItem value="imovel" className={darkSelectItemClass}>Imovel</SelectItem>
+                          <SelectItem value="veiculo" className={darkSelectItemClass}>Veiculo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Valor</p>
+                      <Select value={segmentation.ticket} onValueChange={(value) => setSegmentation((current) => ({ ...current, ticket: value }))}>
+                        <SelectTrigger className={darkFieldClass}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className={darkSelectContentClass}>
+                          <SelectItem value={ALL_SEGMENT_VALUE} className={darkSelectItemClass}>Todos</SelectItem>
+                          <SelectItem value="alto" className={darkSelectItemClass}>Ticket alto</SelectItem>
+                          <SelectItem value="baixo" className={darkSelectItemClass}>Ticket baixo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Corte de ticket</p>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="Ex: 50000"
+                        className={darkFieldClass}
+                        value={segmentation.ticketThreshold}
+                        onChange={(event) => setSegmentation((current) => ({ ...current, ticketThreshold: event.target.value }))}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Interesse</p>
+                      <Input
+                        placeholder="Investimento, automotivo..."
+                        className={darkFieldClass}
+                        value={segmentation.interest}
+                        onChange={(event) => setSegmentation((current) => ({ ...current, interest: event.target.value }))}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Campanha especifica</p>
+                      <Input
+                        placeholder="Dia das Maes, Black Friday..."
+                        className={darkFieldClass}
+                        value={segmentation.campaignTag}
+                        onChange={(event) => setSegmentation((current) => ({ ...current, campaignTag: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Texto de envio</p>
+                    <Textarea
+                      placeholder="Digite a mensagem que o agente usara nesta campanha..."
+                      className={cn("min-h-[142px]", darkFieldClass)}
+                      value={campaignMessage}
+                      onChange={(event) => setCampaignMessage(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <input ref={campaignImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleCampaignImageChange} />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-center"
+                      onClick={() => campaignImageInputRef.current?.click()}
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                      {campaignImage ? "Trocar imagem da campanha" : "Anexar imagem da campanha"}
+                    </Button>
+                    {campaignImage ? (
+                      <div className="flex items-center gap-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 text-sm dark:border-white/10 dark:bg-black/30">
+                        <img src={campaignImage.dataUrl} alt={campaignImage.name} className="h-14 w-14 rounded-lg object-cover" />
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-foreground">{campaignImage.name}</p>
+                          <p className="text-xs text-muted-foreground">{Math.round(campaignImage.size / 1024)} KB</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    <ErrorMessage message={campaignImageError} variant="banner" />
+                  </div>
                 </div>
               </div>
 

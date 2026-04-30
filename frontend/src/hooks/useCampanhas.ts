@@ -18,6 +18,27 @@ export interface Campaign {
   created_by_uid: string | null;
   created_by_email: string | null;
   created_at: string;
+  analytics_meta?: CampaignAnalyticsMeta;
+}
+
+export interface CampaignAnalyticsMeta {
+  segmentation?: CampaignSegmentation;
+  message?: string;
+  image?: {
+    name: string;
+    type: string;
+    size: number;
+    dataUrl: string;
+  } | null;
+}
+
+export interface CampaignSegmentation {
+  gender?: string;
+  productType?: string;
+  ticket?: string;
+  ticketThreshold?: number | null;
+  interest?: string;
+  campaignTag?: string;
 }
 
 export interface CampaignLead {
@@ -44,6 +65,7 @@ export interface CreateCampaignPayload {
   scheduledFor?: string | null;
   webhookUrl: string;
   webhookToken?: string | null;
+  analyticsMeta?: CampaignAnalyticsMeta;
 }
 
 export interface UpdateCampaignPayload {
@@ -54,6 +76,7 @@ export interface UpdateCampaignPayload {
   archived?: boolean;
   webhookUrl?: string;
   webhookToken?: string | null;
+  analyticsMeta?: CampaignAnalyticsMeta;
 }
 
 export interface TriggerCampaignResponse {
