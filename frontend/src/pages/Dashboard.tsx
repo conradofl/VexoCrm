@@ -49,7 +49,7 @@ const Dashboard = ({
   const isWaitingForClient = !effectiveClientId && !!crmClient?.isLoading;
   const clientLoadError = !effectiveClientId ? crmClient?.error || null : null;
 
-  const summary = data?.summary ?? {
+  const defaultSummary = {
     totalLeads: 0,
     leadsToday: 0,
     qualifiedLeads: 0,
@@ -65,6 +65,32 @@ const Dashboard = ({
     averageTicket: 0,
     performanceScore: 0,
     funnelCoverage: 0,
+  };
+
+  const toSafeNumber = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const rawSummary = data?.summary ?? defaultSummary;
+  const summary = {
+    ...defaultSummary,
+    ...rawSummary,
+    totalLeads: toSafeNumber(rawSummary.totalLeads),
+    leadsToday: toSafeNumber(rawSummary.leadsToday),
+    qualifiedLeads: toSafeNumber(rawSummary.qualifiedLeads),
+    qualificationRate: toSafeNumber(rawSummary.qualificationRate),
+    activeCities: toSafeNumber(rawSummary.activeCities),
+    hotLeads: toSafeNumber(rawSummary.hotLeads),
+    warmLeads: toSafeNumber(rawSummary.warmLeads),
+    coldLeads: toSafeNumber(rawSummary.coldLeads),
+    noSignalLeads: toSafeNumber(rawSummary.noSignalLeads),
+    conversions: toSafeNumber(rawSummary.conversions),
+    conversionRate: toSafeNumber(rawSummary.conversionRate),
+    revenueGenerated: toSafeNumber(rawSummary.revenueGenerated),
+    averageTicket: toSafeNumber(rawSummary.averageTicket),
+    performanceScore: toSafeNumber(rawSummary.performanceScore),
+    funnelCoverage: toSafeNumber(rawSummary.funnelCoverage),
   };
   const formattedRevenue = new Intl.NumberFormat("pt-BR", {
     style: "currency",
