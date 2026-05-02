@@ -3489,6 +3489,56 @@ app.post("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("em
   }
 });
 
+const LEAD_CLIENT_OPERATIONAL_TABLES = [
+  "analytics_insights",
+  "metric_snapshots",
+  "lead_distribution_rules",
+  "lead_conversions",
+  "lead_assignments",
+  "lead_messages",
+  "commercial_intelligence_settings",
+  "crm_consultants",
+  "campaigns",
+  "lead_import_items",
+  "lead_imports",
+  "leads",
+];
+
+async function deleteLeadClientRowsFromTable(tableName, tenantId) {
+  const { count, error } = await supabase
+    .from(tableName)
+    .delete({ count: "exact" })
+    .eq("client_id", tenantId);
+
+  if (error) {
+    if (isMissingSchemaError(error)) {
+      return {
+        table: tableName,
+        deleted: 0,
+        skipped: true,
+      };
+    }
+
+    throw error;
+  }
+
+  return {
+    table: tableName,
+    deleted: count ?? 0,
+    skipped: false,
+  };
+}
+
+async function purgeLeadClientOperationalData(tenantId) {
+  const results = [];
+
+  for (const tableName of LEAD_CLIENT_OPERATIONAL_TABLES) {
+    results.push(await deleteLeadClientRowsFromTable(tableName, tenantId));
+  }
+
+  return results;
+}
+
 async function deleteLeadClientHandler(req, res, explicitTenantId) {
   if (!ensureSupabase(res)) return;
 
@@ -3556,6 +3606,8 @@ async function deleteLeadClientHandler(req, res, explicitTenantId) {
       return;
     }
 
+    const purge = await purgeLeadClientOperationalData(tenantId);
+
     const { error: deleteError } = await supabase
       .from("leads_clients")
       .delete()
@@ -3570,6 +3622,7 @@ async function deleteLeadClientHandler(req, res, explicitTenantId) {
       item: {
         id: tenant.id,
         name: tenant.name,
+        purge,
       },
     });
   } catch (error) {
@@ -3584,6 +3637,14 @@ app.delete("/api/lead-clients/:tenantId", requireFirebaseAuth, requireInternalPa
 
 app.post("/api/lead-clients/delete", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
   await deleteLeadClientHandler(req, res);
+});
+
+app.post("/api/lead-clients/:tenantId/delete", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
+  await deleteLeadClientHandler(req, res);
+});
+
+app.delete("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
+  await deleteLeadClientHandler(req, res, req.query?.tenantId ?? req.query?.id ?? req.query?.clientId);
 });
 
 app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (_req, res) => {
