@@ -22,7 +22,20 @@ const toneClasses = {
     "border-indigo-200/80 text-indigo-700 shadow-[0_20px_40px_rgba(99,102,241,0.1)] before:bg-[radial-gradient(circle_at_20%_20%,rgba(99,102,241,0.18),transparent_36%),linear-gradient(135deg,rgba(99,102,241,0.12),rgba(255,255,255,0))] dark:border-indigo-300/20 dark:text-indigo-100 dark:shadow-[0_20px_40px_rgba(99,102,241,0.12)] dark:before:bg-[radial-gradient(circle_at_20%_20%,rgba(99,102,241,0.24),transparent_36%),linear-gradient(135deg,rgba(99,102,241,0.18),rgba(15,23,42,0))]",
 };
 
+function normalizeKpiText(value?: string) {
+  const text = String(value ?? "").trim();
+  if (!text) return "0";
+
+  return text
+    .replace(/undefined/gi, "0")
+    .replace(/\bNaN\b/g, "0")
+    .replace(/\bnull\b/gi, "0");
+}
+
 export function KpiCard({ title, value, icon, indicator, tone = "cyan", trend }: KpiCardProps) {
+  const displayValue = normalizeKpiText(value);
+  const displayTrend = trend ? normalizeKpiText(trend) : null;
+
   return (
     <div
       className={cn(
@@ -50,10 +63,10 @@ export function KpiCard({ title, value, icon, indicator, tone = "cyan", trend }:
         </div>
 
         <div>
-          <p className="text-[2rem] font-extrabold tracking-[-0.06em] text-foreground">{value}</p>
-          {trend && (
+          <p className="text-[2rem] font-extrabold tracking-[-0.06em] text-foreground">{displayValue}</p>
+          {displayTrend && (
             <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-500 dark:text-white/65">
-              {trend}
+              {displayTrend}
             </p>
           )}
         </div>

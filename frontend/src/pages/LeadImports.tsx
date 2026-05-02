@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import {
   AlertTriangle,
   Archive,
+  Building2,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -166,8 +167,32 @@ function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
   });
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString("pt-BR");
+function getValidDate(value: unknown) {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDate(value: unknown, fallback = "Sem data") {
+  const date = getValidDate(value);
+  return date ? date.toLocaleString("pt-BR") : fallback;
+}
+
+function getScheduleDateParts(campaign: Campaign) {
+  const date = getValidDate(campaign.scheduled_for) || getValidDate(campaign.created_at);
+  if (!date) {
+    return {
+      day: "--",
+      month: "sem data",
+      label: "sem data definida",
+    };
+  }
+
+  return {
+    day: date.toLocaleDateString("pt-BR", { day: "2-digit" }),
+    month: date.toLocaleDateString("pt-BR", { month: "short" }),
+    label: campaign.scheduled_for ? formatDate(campaign.scheduled_for) : "sem data definida",
+  };
 }
 
 function formatDateInput(value: string | null) {
@@ -507,16 +532,20 @@ export default function LeadImports({
   const queuedCampaigns = useMemo(
     () =>
       [...filteredCampaigns.filter((campaign) => !campaign.last_triggered_at)].sort((a, b) => {
-        const left = a.scheduled_for || a.created_at;
-        const right = b.scheduled_for || b.created_at;
-        return new Date(left).getTime() - new Date(right).getTime();
+        const left = getValidDate(a.scheduled_for) || getValidDate(a.created_at) || new Date(0);
+        const right = getValidDate(b.scheduled_for) || getValidDate(b.created_at) || new Date(0);
+        return left.getTime() - right.getTime();
       }),
     [filteredCampaigns],
   );
   const sentCampaigns = useMemo(
     () =>
       [...filteredCampaigns.filter((campaign) => Boolean(campaign.last_triggered_at))].sort(
-        (a, b) => new Date(b.last_triggered_at || b.created_at).getTime() - new Date(a.last_triggered_at || a.created_at).getTime(),
+        (a, b) => {
+          const left = getValidDate(b.last_triggered_at) || getValidDate(b.created_at) || new Date(0);
+          const right = getValidDate(a.last_triggered_at) || getValidDate(a.created_at) || new Date(0);
+          return left.getTime() - right.getTime();
+        },
       ),
     [filteredCampaigns],
   );
@@ -627,7 +656,7 @@ export default function LeadImports({
         clientId: selectedClientId,
         importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
         limitPerRun: parsedLimit ?? 50,
-        scheduledFor: scheduledFor ? new Date(scheduledFor).toISOString() : null,
+        scheduledFor: getValidDate(scheduledFor)?.toISOString() ?? null,
         webhookUrl: DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL,
         webhookToken: null,
         analyticsMeta: {
@@ -1495,6 +1524,20 @@ export default function LeadImports({
                         {campaign.scheduled_for ? `Agendada para ${formatDate(campaign.scheduled_for)}` : "Sem data agendada"}
                       </p>
                     </div>
+                    {(campaign.analytics_meta?.message || campaign.analytics_meta?.image) ? (
+                      <div className="rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
+                        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Conteudo da campanha</p>
+                        {campaign.analytics_meta?.message ? (
+                          <p className="mt-2 line-clamp-3 text-sm text-foreground">{campaign.analytics_meta.message}</p>
+                        ) : null}
+                        {campaign.analytics_meta?.image ? (
+                          <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
+                            <img src={campaign.analytics_meta.image.dataUrl} alt={campaign.analytics_meta.image.name} className="h-12 w-12 rounded-lg object-cover" />
+                            <span className="truncate">{campaign.analytics_meta.image.name}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="grid gap-4 md:grid-cols-3">
                       <div>
                         <p className="font-mono text-[12px] font-bold text-primary">{campaign.client_name ?? campaign.client_id}</p>
@@ -1543,40 +1586,58 @@ export default function LeadImports({
               />
             )}
             <div className="space-y-4">
-              {queuedCampaigns.map((campaign) => (
-                <Card key={campaign.id} className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-                  <CardContent className="flex flex-wrap items-center gap-5 p-5">
-                    <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-xl border border-primary/20 bg-primary/5">
-                      <span className="font-mono text-3xl font-bold text-primary">{new Date(campaign.scheduled_for || campaign.created_at).toLocaleDateString("pt-BR", { day: "2-digit" })}</span>
-                      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">{new Date(campaign.scheduled_for || campaign.created_at).toLocaleDateString("pt-BR", { month: "short" })}</span>
-                    </div>
-                    <div className="min-w-[220px] flex-1">
-                      <p className="text-xl font-extrabold tracking-tight text-foreground">{campaign.name}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-4 font-mono text-[11px] text-muted-foreground">
-                        <span className="inline-flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" />{campaign.client_name ?? campaign.client_id}</span>
-                        <span className="inline-flex items-center gap-1.5"><FileSpreadsheet className="h-3.5 w-3.5" />{campaign.import_id || "todas as bases"}</span>
-                        <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />lote {campaign.limit_per_run}</span>
-                        <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{campaign.scheduled_for ? formatDate(campaign.scheduled_for) : "sem data definida"}</span>
+              {queuedCampaigns.map((campaign) => {
+                const scheduleDateParts = getScheduleDateParts(campaign);
+
+                return (
+                  <Card key={campaign.id} className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+                    <CardContent className="flex flex-wrap items-center gap-5 p-5">
+                      <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-xl border border-primary/20 bg-primary/5">
+                        <span className="font-mono text-3xl font-bold text-primary">{scheduleDateParts.day}</span>
+                        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">{scheduleDateParts.month}</span>
                       </div>
-                    </div>
-                    <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.status === "active" ? "border-amber-400/20 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/5 text-muted-foreground")}>
-                      {campaign.status === "active" ? "PRONTA" : "PAUSADA"}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => void handleTriggerCampaign(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary">
-                        <Zap className="h-4 w-4" />
-                      </button>
-                      <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200">
-                        {campaign.status === "active" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      </button>
-                      <button type="button" onClick={() => setCampaignActionDialog({ action: "delete", campaign })} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-[0px] text-pink-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-pink-300">
-                        <Trash2 className="h-4 w-4 text-pink-400" />
-                        ×
-                      </button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                      <div className="min-w-[220px] flex-1">
+                        <p className="text-xl font-extrabold tracking-tight text-foreground">{campaign.name}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-4 font-mono text-[11px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" />{campaign.client_name ?? campaign.client_id}</span>
+                          <span className="inline-flex items-center gap-1.5"><FileSpreadsheet className="h-3.5 w-3.5" />{campaign.import_id || "todas as bases"}</span>
+                          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />lote {campaign.limit_per_run}</span>
+                          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{scheduleDateParts.label}</span>
+                        </div>
+                        {(campaign.analytics_meta?.message || campaign.analytics_meta?.image) ? (
+                          <div className="mt-4 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
+                            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Conteudo do disparo</p>
+                            {campaign.analytics_meta?.message ? (
+                              <p className="mt-2 line-clamp-2 text-sm text-foreground">{campaign.analytics_meta.message}</p>
+                            ) : null}
+                            {campaign.analytics_meta?.image ? (
+                              <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
+                                <img src={campaign.analytics_meta.image.dataUrl} alt={campaign.analytics_meta.image.name} className="h-12 w-12 rounded-lg object-cover" />
+                                <span className="truncate">{campaign.analytics_meta.image.name}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.status === "active" ? "border-amber-400/20 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/5 text-muted-foreground")}>
+                        {campaign.status === "active" ? "PRONTA" : "PAUSADA"}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary">
+                          <Zap className="h-4 w-4" />
+                        </button>
+                        <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200">
+                          {campaign.status === "active" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        </button>
+                        <button type="button" onClick={() => setCampaignActionDialog({ action: "delete", campaign })} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-[0px] text-pink-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-pink-300">
+                          <Trash2 className="h-4 w-4 text-pink-400" />
+                          ×
+                        </button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </div>
         )}
