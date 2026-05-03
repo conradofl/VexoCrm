@@ -51,6 +51,7 @@ import {
   useTriggerCampaign,
   useUpdateCampaign,
   type Campaign,
+  type CampaignStatus,
 } from "@/hooks/useCampanhas";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,8 +122,6 @@ const SCHEDULED = [
 const IMPORTS_PAGE_SIZE = 10;
 const ALL_IMPORTS_VALUE = "__all__";
 const ALL_SEGMENT_VALUE = "__all__";
-const DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL =
-  "https://geracaodigital.app.n8n.cloud/webhook/c1a774a2-2172-4b4f-b557-a75d9561b720";
 const darkFieldClass =
   "border-slate-200/90 bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all placeholder:text-slate-400 focus-visible:border-primary/35 focus-visible:ring-2 focus-visible:ring-primary/15 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-black/45 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.18)] dark:placeholder:text-white/30 dark:focus-visible:bg-black/60 dark:focus-visible:ring-1 dark:focus-visible:ring-primary/20";
 const darkSelectContentClass =
@@ -193,6 +192,57 @@ function getScheduleDateParts(campaign: Campaign) {
     month: date.toLocaleDateString("pt-BR", { month: "short" }),
     label: campaign.scheduled_for ? formatDate(campaign.scheduled_for) : "sem data definida",
   };
+}
+
+const campaignStatusView: Record<CampaignStatus, { label: string; className: string }> = {
+  active: {
+    label: "PRONTA",
+    className: "border-primary/20 bg-primary/10 text-primary",
+  },
+  paused: {
+    label: "PAUSADA",
+    className: "border-amber-500/20 bg-amber-500/10 text-amber-300",
+  },
+  draft: {
+    label: "RASCUNHO",
+    className: "border-slate-400/20 bg-slate-400/10 text-slate-500 dark:text-slate-300",
+  },
+  scheduled: {
+    label: "AGENDADA",
+    className: "border-sky-400/25 bg-sky-400/10 text-sky-600 dark:text-sky-300",
+  },
+  processing: {
+    label: "PROCESSANDO",
+    className: "border-cyan-400/25 bg-cyan-400/10 text-cyan-600 dark:text-cyan-300",
+  },
+  sent: {
+    label: "ENVIADA",
+    className: "border-emerald-400/25 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300",
+  },
+  failed: {
+    label: "FALHOU",
+    className: "border-red-400/25 bg-red-400/10 text-red-600 dark:text-red-300",
+  },
+  cancelled: {
+    label: "CANCELADA",
+    className: "border-slate-400/20 bg-slate-400/10 text-slate-500 dark:text-slate-300",
+  },
+};
+
+function getCampaignStatusView(status: CampaignStatus) {
+  return campaignStatusView[status] || campaignStatusView.draft;
+}
+
+function canPauseCampaign(status: CampaignStatus) {
+  return ["active", "draft", "scheduled", "failed"].includes(status);
+}
+
+function canResumeCampaign(status: CampaignStatus) {
+  return status === "paused";
+}
+
+function canCampaignBeDispatched(status: CampaignStatus) {
+  return ["active", "draft", "scheduled", "failed"].includes(status);
 }
 
 function formatDateInput(value: string | null) {
@@ -641,9 +691,25 @@ export default function LeadImports({
       return;
     }
 
+    if (!campaignMessage.trim()) {
+      setDispatchStatus("Escreva o texto que sera enviado na campanha.");
+      return;
+    }
+
     const parsedLimit = dispatchLimit.trim() ? Number(dispatchLimit) : undefined;
     if (parsedLimit !== undefined && (!Number.isFinite(parsedLimit) || parsedLimit <= 0 || !Number.isInteger(parsedLimit))) {
       setDispatchStatus("Informe uma quantidade valida por lote usando apenas numeros inteiros.");
+      return;
+    }
+
+    const scheduledDate = getValidDate(scheduledFor);
+    if (scheduledFor && !scheduledDate) {
+      setDispatchStatus("Informe uma data e hora validas para o agendamento.");
+      return;
+    }
+
+    if (scheduledDate && scheduledDate.getTime() < Date.now() - 60_000) {
+      setDispatchStatus("Escolha uma data futura para agendar a campanha.");
       return;
     }
 
@@ -656,8 +722,7 @@ export default function LeadImports({
         clientId: selectedClientId,
         importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
         limitPerRun: parsedLimit ?? 50,
-        scheduledFor: getValidDate(scheduledFor)?.toISOString() ?? null,
-        webhookUrl: DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL,
+        scheduledFor: scheduledDate?.toISOString() ?? null,
         webhookToken: null,
         analyticsMeta: {
           segmentation: toCampaignSegmentationPayload(segmentation),
@@ -697,12 +762,13 @@ export default function LeadImports({
 
   async function handleToggleCampaignStatus(campaign: Campaign) {
     try {
+      const nextStatus = canPauseCampaign(campaign.status) ? "paused" : "scheduled";
       await updateCampaign.mutateAsync({
         id: campaign.id,
-        status: campaign.status === "active" ? "paused" : "active",
+        status: nextStatus,
       });
       setDispatchStatus(
-        campaign.status === "active"
+        nextStatus === "paused"
           ? `Campanha ${campaign.name} pausada.`
           : `Campanha ${campaign.name} reativada.`
       );
@@ -1512,8 +1578,8 @@ export default function LeadImports({
                           {campaign.last_triggered_at ? formatDate(campaign.last_triggered_at) : "Sem disparo"} · {campaign.client_name ?? campaign.client_id}
                         </p>
                       </div>
-                      <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.status === "active" ? "border-primary/20 bg-primary/10 text-primary" : "border-amber-500/20 bg-amber-500/10 text-amber-300")}>
-                        {campaign.status === "active" ? "ATIVA" : "PAUSADA"}
+                      <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
+                        {getCampaignStatusView(campaign.status).label}
                       </span>
                     </div>
                     <div className="border-t border-border/70 pt-4">
@@ -1619,15 +1685,15 @@ export default function LeadImports({
                           </div>
                         ) : null}
                       </div>
-                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.status === "active" ? "border-amber-400/20 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/5 text-muted-foreground")}>
-                        {campaign.status === "active" ? "PRONTA" : "PAUSADA"}
+                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
+                        {getCampaignStatusView(campaign.status).label}
                       </span>
                       <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary">
+                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} disabled={!canCampaignBeDispatched(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary disabled:cursor-not-allowed disabled:opacity-45">
                           <Zap className="h-4 w-4" />
                         </button>
-                        <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200">
-                          {campaign.status === "active" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} disabled={!canPauseCampaign(campaign.status) && !canResumeCampaign(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-45">
+                          {canPauseCampaign(campaign.status) ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                         </button>
                         <button type="button" onClick={() => setCampaignActionDialog({ action: "delete", campaign })} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-[0px] text-pink-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-pink-300">
                           <Trash2 className="h-4 w-4 text-pink-400" />

@@ -18,9 +18,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const app = express();
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "15mb" }));
 const isProduction = process.env.NODE_ENV === "production";
 const MAX_CONVERSATION_BYTES = 1024 * 1024;
+const DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS = 60 * 1000;
 
 const rawCorsOrigins = (process.env.CORS_ORIGINS || "*")
   .split(",")
@@ -3308,6 +3309,474 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
   return leads;
 }
 
+function normalizeCampaignAnalyticsMeta(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function buildCampaignWebhookPayload({ campaign, clientName, leads, triggerSource = "manual" }) {
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta);
+  const message = normalizeString(analyticsMeta.message);
+  const image = analyticsMeta.image && typeof analyticsMeta.image === "object" ? analyticsMeta.image : null;
+
+  return {
+    source: "vexocrm",
+    action: "campaign_dispatch",
+    triggerSource,
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    userId: campaign.created_by_uid || null,
+    requestedBy: {
+      uid: campaign.created_by_uid || null,
+      email: campaign.created_by_email || null,
+    },
+    requestedAt: new Date().toISOString(),
+    scheduledFor: campaign.scheduled_for || null,
+    client: { id: campaign.client_id, name: clientName },
+    importId: campaign.import_id || null,
+    limit: campaign.limit_per_run,
+    segmentation: analyticsMeta.segmentation || null,
+    message,
+    image,
+    media: image
+      ? {
+          kind: "image",
+          name: image.name || "campanha",
+          mimeType: image.type || "image/jpeg",
+          size: image.size || null,
+          dataUrl: image.dataUrl || null,
+        }
+      : null,
+    total: leads.length,
+    phones: leads.map((lead) => lead.telefone),
+    leads: leads.map((lead) => ({
+      id: lead.id,
+      telefone: lead.telefone,
+      nome: lead.nome,
+      cidade: lead.cidade,
+      estado: lead.estado,
+      status: lead.status,
+      tipo_cliente: lead.tipo_cliente,
+      faixa_consumo: lead.faixa_consumo,
+      qualificacao: lead.qualificacao,
+      data_hora: lead.data_hora,
+      created_at: lead.created_at,
+    })),
+  };
+}
+
+async function insertCampaignDispatchLog({
+  campaign,
+  status,
+  triggerSource,
+  message = null,
+  payload = null,
+  n8nResponse = null,
+  error = null,
+  totalLeads = null,
+  webhookStatus = null,
+}) {
+  if (!supabase || !campaign?.id) return;
+
+  const { error: insertError } = await supabase.from("campaign_dispatch_logs").insert({
+    campaign_id: campaign.id,
+    client_id: campaign.client_id,
+    status,
+    trigger_source: triggerSource,
+    message,
+    total_leads: totalLeads,
+    webhook_status: webhookStatus,
+    payload,
+    n8n_response: n8nResponse,
+    error_message: error,
+  });
+
+  if (insertError && !isMissingSchemaError(insertError)) {
+    console.error("campaign dispatch log insert error:", insertError);
+  }
+}
+
+function canCampaignBeDispatched(status) {
+  return ["active", "draft", "scheduled", "failed"].includes(normalizeString(status));
+}
+
+async function claimCampaignForDispatch(campaign, triggerSource) {
+  const now = new Date().toISOString();
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta);
+  const processingMeta = {
+    ...analyticsMeta,
+    dispatch: {
+      ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
+      status: "processing",
+      triggerSource,
+      startedAt: now,
+      updatedAt: now,
+      error: null,
+    },
+  };
+
+  let { data, error } = await supabase
+    .from("campaigns")
+    .update({
+      status: "processing",
+      analytics_meta: processingMeta,
+    })
+    .eq("id", campaign.id)
+    .is("last_triggered_at", null)
+    .in("status", ["active", "draft", "scheduled", "failed"])
+    .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, analytics_meta")
+    .maybeSingle();
+
+  if (error && isMissingSchemaError(error)) {
+    const fallback = await supabase
+      .from("campaigns")
+      .update({ status: "processing" })
+      .eq("id", campaign.id)
+      .is("last_triggered_at", null)
+      .in("status", ["active", "draft", "scheduled", "failed"])
+      .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email")
+      .maybeSingle();
+    data = fallback.data ? { ...fallback.data, analytics_meta: processingMeta } : fallback.data;
+    error = fallback.error;
+  }
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    const lockError = new Error("Campaign is already processing or already sent");
+    lockError.statusCode = 409;
+    lockError.code = "CAMPAIGN_ALREADY_LOCKED";
+    throw lockError;
+  }
+
+  await insertCampaignDispatchLog({
+    campaign: data,
+    status: "processing",
+    triggerSource,
+    message: "Campanha entrou em processamento.",
+  });
+
+  return data;
+}
+
+async function markCampaignDispatchFailed(campaign, { triggerSource, error, webhookStatus = null }) {
+  const now = new Date().toISOString();
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta);
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const nextMeta = {
+    ...analyticsMeta,
+    dispatch: {
+      ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
+      status: "failed",
+      triggerSource,
+      error: errorMessage,
+      failedAt: now,
+      updatedAt: now,
+      webhookStatus,
+    },
+  };
+
+  let { error: updateError } = await supabase
+    .from("campaigns")
+    .update({
+      status: "failed",
+      analytics_meta: nextMeta,
+    })
+    .eq("id", campaign.id);
+
+  if (updateError && isMissingSchemaError(updateError)) {
+    const fallback = await supabase
+      .from("campaigns")
+      .update({ status: "failed" })
+      .eq("id", campaign.id);
+    updateError = fallback.error;
+  }
+
+  if (updateError) {
+    console.error("campaign failed state update error:", updateError);
+  }
+
+  await insertCampaignDispatchLog({
+    campaign,
+    status: "failed",
+    triggerSource,
+    message: "Falha ao disparar campanha.",
+    error: errorMessage,
+    webhookStatus,
+  });
+}
+
+async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = {}) {
+  if (!supabase) {
+    throw new Error("Supabase is not configured");
+  }
+
+  if (!campaign) {
+    const error = new Error("Campaign not found");
+    error.statusCode = 404;
+    error.code = "CAMPAIGN_NOT_FOUND";
+    throw error;
+  }
+
+  if (!canCampaignBeDispatched(campaign.status)) {
+    const error = new Error(`Campaign cannot be dispatched from status ${campaign.status}`);
+    error.statusCode = 400;
+    error.code = "CAMPAIGN_NOT_DISPATCHABLE";
+    throw error;
+  }
+
+  if (campaign.archived_at) {
+    const error = new Error("Campaign is archived");
+    error.statusCode = 400;
+    error.code = "CAMPAIGN_ARCHIVED";
+    throw error;
+  }
+
+  const webhookUrl = normalizeString(campaign.webhook_url) || normalizeString(process.env.N8N_DISPATCH_WEBHOOK_URL);
+  if (!webhookUrl) {
+    const error = new Error("Missing campaign webhook URL");
+    error.statusCode = 400;
+    error.code = "MISSING_WEBHOOK_URL";
+    throw error;
+  }
+
+  const claimedCampaign = await claimCampaignForDispatch(campaign, triggerSource);
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(claimedCampaign.analytics_meta);
+  const leads = await buildDispatchLeads({
+    clientId: claimedCampaign.client_id,
+    importId: claimedCampaign.import_id || null,
+    limit: claimedCampaign.limit_per_run,
+    segmentation: analyticsMeta.segmentation || null,
+  });
+
+  if (leads.length === 0) {
+    const error = new Error("No leads found for this campaign");
+    error.statusCode = 404;
+    error.code = "NO_DISPATCH_LEADS";
+    await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error });
+    throw error;
+  }
+
+  const clientName = await getClientName(claimedCampaign.client_id);
+  const headers = { "Content-Type": "application/json" };
+  const webhookToken = normalizeString(claimedCampaign.webhook_token) || normalizeString(process.env.N8N_DISPATCH_WEBHOOK_TOKEN);
+  if (webhookToken) {
+    headers.Authorization = `Bearer ${webhookToken}`;
+  }
+
+  const payload = buildCampaignWebhookPayload({ campaign: claimedCampaign, clientName, leads, triggerSource });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  let n8nResponse = null;
+  let webhookStatus = null;
+  try {
+    const webhookRes = await fetch(webhookUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    webhookStatus = webhookRes.status;
+    n8nResponse = await webhookRes.text();
+
+    if (!webhookRes.ok) {
+      const error = new Error(n8nResponse.slice(0, 1000) || "n8n webhook returned an error");
+      error.statusCode = 502;
+      error.code = "N8N_TRIGGER_FAILED";
+      await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error, webhookStatus });
+      throw error;
+    }
+  } catch (error) {
+    if (error?.code !== "N8N_TRIGGER_FAILED") {
+      await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error, webhookStatus });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const completedAt = new Date().toISOString();
+  const nextAnalyticsMeta = {
+    ...analyticsMeta,
+    dispatch: {
+      ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
+      status: "sent",
+      triggerSource,
+      total: leads.length,
+      webhookStatus,
+      n8nResponse: n8nResponse || null,
+      sentAt: completedAt,
+      updatedAt: completedAt,
+    },
+  };
+
+  let { error: updateError } = await supabase
+    .from("campaigns")
+    .update({
+      status: "sent",
+      last_triggered_at: completedAt,
+      scheduled_for: null,
+      phones: leads.map((lead) => lead.telefone).filter(Boolean),
+      analytics_meta: nextAnalyticsMeta,
+    })
+    .eq("id", campaign.id);
+
+  if (updateError && isMissingSchemaError(updateError)) {
+    const fallback = await supabase
+      .from("campaigns")
+      .update({
+        status: "sent",
+        last_triggered_at: completedAt,
+        scheduled_for: null,
+        phones: leads.map((lead) => lead.telefone).filter(Boolean),
+      })
+      .eq("id", campaign.id);
+    updateError = fallback.error;
+  }
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  await insertCampaignDispatchLog({
+    campaign: claimedCampaign,
+    status: "sent",
+    triggerSource,
+    message: "Campanha enviada ao n8n com sucesso.",
+    payload,
+    n8nResponse: n8nResponse || null,
+    totalLeads: leads.length,
+    webhookStatus,
+  });
+
+  return {
+    success: true,
+    campaignId: claimedCampaign.id,
+    campaignName: claimedCampaign.name,
+    webhookUrl,
+    total: leads.length,
+    phones: payload.phones,
+    payload,
+    n8nResponse: n8nResponse || null,
+  };
+}
+
+function getCampaignRunnerIntervalMs() {
+  const raw = Number.parseInt(String(process.env.CAMPAIGN_RUNNER_INTERVAL_MS || ""), 10);
+  if (Number.isFinite(raw) && raw >= 15_000) return raw;
+  return DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS;
+}
+
+function shouldStartCampaignScheduler() {
+  return String(process.env.CAMPAIGN_SCHEDULER_ENABLED || "true").toLowerCase() !== "false";
+}
+
+let campaignSchedulerRunning = false;
+
+async function runDueCampaignDispatches({ limit = 10, triggerSource = "scheduler" } = {}) {
+  if (!supabase) {
+    return { success: false, processed: 0, sent: 0, failed: 0, items: [], reason: "SUPABASE_NOT_CONFIGURED" };
+  }
+
+  const now = new Date().toISOString();
+  const campaignSelect =
+    "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, analytics_meta";
+  const fallbackCampaignSelect =
+    "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email";
+
+  let { data: campaigns, error } = await supabase
+    .from("campaigns")
+    .select(campaignSelect)
+    .in("status", ["active", "scheduled"])
+    .is("archived_at", null)
+    .is("last_triggered_at", null)
+    .not("scheduled_for", "is", null)
+    .lte("scheduled_for", now)
+    .order("scheduled_for", { ascending: true })
+    .limit(limit);
+
+  if (error && isMissingSchemaError(error)) {
+    const fallback = await supabase
+      .from("campaigns")
+      .select(fallbackCampaignSelect)
+      .in("status", ["active", "scheduled"])
+      .is("archived_at", null)
+      .is("last_triggered_at", null)
+      .not("scheduled_for", "is", null)
+      .lte("scheduled_for", now)
+      .order("scheduled_for", { ascending: true })
+      .limit(limit);
+    campaigns = fallback.data;
+    error = fallback.error;
+  }
+
+  if (error) {
+    throw error;
+  }
+
+  const items = [];
+  for (const campaign of campaigns || []) {
+    try {
+      const result = await executeCampaignDispatch(campaign, { triggerSource });
+      items.push({
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        status: "sent",
+        total: result.total,
+      });
+    } catch (error) {
+      items.push({
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      console.error("scheduled campaign dispatch error:", campaign.id, error);
+    }
+  }
+
+  return {
+    success: true,
+    processed: items.length,
+    sent: items.filter((item) => item.status === "sent").length,
+    failed: items.filter((item) => item.status === "failed").length,
+    items,
+  };
+}
+
+async function tickCampaignScheduler() {
+  if (campaignSchedulerRunning) return;
+  campaignSchedulerRunning = true;
+  try {
+    const result = await runDueCampaignDispatches({ triggerSource: "scheduler" });
+    if (result.processed > 0) {
+      console.log("[campaign-scheduler] processed due campaigns", result);
+    }
+  } catch (error) {
+    console.error("[campaign-scheduler] failed to process due campaigns:", error);
+  } finally {
+    campaignSchedulerRunning = false;
+  }
+}
+
+function startCampaignScheduler() {
+  if (!shouldStartCampaignScheduler()) {
+    console.log("[campaign-scheduler] disabled by CAMPAIGN_SCHEDULER_ENABLED=false");
+    return;
+  }
+
+  const intervalMs = getCampaignRunnerIntervalMs();
+  console.log(`[campaign-scheduler] enabled; checking due campaigns every ${intervalMs}ms`);
+  setTimeout(() => {
+    void tickCampaignScheduler();
+  }, 5_000);
+  setInterval(() => {
+    void tickCampaignScheduler();
+  }, intervalMs);
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -5772,16 +6241,34 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
   const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
   const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 500);
   const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
-  const webhookUrl = normalizeString(req.body?.webhookUrl);
+  const webhookUrl = normalizeString(req.body?.webhookUrl) || normalizeString(process.env.N8N_DISPATCH_WEBHOOK_URL);
   const webhookToken = normalizeString(req.body?.webhookToken) || null;
   const analyticsMeta =
     req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
       ? req.body.analyticsMeta
       : {};
+  const campaignMessage = normalizeString(analyticsMeta.message);
+  const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
+  const lifecycleStatus = scheduledFor ? "scheduled" : "draft";
+  const analyticsMetaWithDispatch = {
+    ...analyticsMeta,
+    message: campaignMessage,
+    dispatch: {
+      ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
+      status: lifecycleStatus,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  };
 
   if (!name) { sendError(res, 400, "INVALID_BODY", "Missing name"); return; }
   if (!clientId) { sendError(res, 400, "INVALID_BODY", "Missing clientId"); return; }
-  if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl"); return; }
+  if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl or N8N_DISPATCH_WEBHOOK_URL"); return; }
+  if (!campaignMessage) { sendError(res, 400, "INVALID_BODY", "Missing campaign message"); return; }
+  if (scheduledFor && (!scheduledDate || Number.isNaN(scheduledDate.getTime()))) {
+    sendError(res, 400, "INVALID_BODY", "Invalid scheduledFor");
+    return;
+  }
 
   try {
     let { data, error } = await supabase
@@ -5794,12 +6281,12 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
         scheduled_for: scheduledFor,
         webhook_url: webhookUrl,
         webhook_token: webhookToken,
-        status: "active",
+        status: lifecycleStatus,
         created_by_uid: req.authAccess?.uid || null,
         created_by_email: req.authAccess?.email || null,
-        analytics_meta: analyticsMeta,
+        analytics_meta: analyticsMetaWithDispatch,
       })
-      .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
+      .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta")
       .single();
 
     if (error) {
@@ -5813,11 +6300,11 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
           scheduled_for: scheduledFor,
           webhook_url: webhookUrl,
           webhook_token: webhookToken,
-          status: "active",
+          status: lifecycleStatus,
           created_by_uid: req.authAccess?.uid || null,
           created_by_email: req.authAccess?.email || null,
         })
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
+          .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at")
         .single();
       data = fallback.data;
       error = fallback.error;
@@ -5827,7 +6314,7 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
       }
     }
 
-    res.status(201).json({ item: { ...data, analytics_meta: data.analytics_meta || analyticsMeta, webhook_token: webhookToken ? "***" : null } });
+    res.status(201).json({ item: { ...data, analytics_meta: data.analytics_meta || analyticsMetaWithDispatch, webhook_token: webhookToken ? "***" : null } });
   } catch (error) {
     console.error("campaign create error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
@@ -5843,7 +6330,9 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
 
   const updates = {};
   if (req.body?.name) updates.name = normalizeString(req.body.name);
-  if (req.body?.status === "active" || req.body?.status === "paused") updates.status = req.body.status;
+  if (["active", "paused", "draft", "scheduled", "processing", "sent", "failed", "cancelled"].includes(req.body?.status)) {
+    updates.status = req.body.status;
+  }
   if (req.body?.limitPerRun) {
     const v = Number.parseInt(String(req.body.limitPerRun), 10);
     if (!Number.isNaN(v) && v > 0) updates.limit_per_run = Math.min(v, 500);
@@ -5915,6 +6404,56 @@ app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess(
   }
 });
 
+function requireCampaignRunnerSecret(req, res, next) {
+  const configuredSecret = normalizeString(
+    process.env.CAMPAIGN_RUNNER_SECRET || process.env.N8N_DISPATCH_WEBHOOK_TOKEN
+  );
+
+  if (!configuredSecret) {
+    sendError(
+      res,
+      500,
+      "CAMPAIGN_RUNNER_SECRET_MISSING",
+      "Configure CAMPAIGN_RUNNER_SECRET or N8N_DISPATCH_WEBHOOK_TOKEN"
+    );
+    return;
+  }
+
+  const authorization = normalizeString(req.headers.authorization);
+  const providedSecret =
+    authorization.toLowerCase().startsWith("bearer ")
+      ? authorization.slice(7).trim()
+      : normalizeString(req.headers["x-campaign-runner-secret"] || req.query?.secret);
+
+  if (providedSecret !== configuredSecret) {
+    sendError(res, 401, "UNAUTHORIZED", "Invalid campaign runner secret");
+    return;
+  }
+
+  next();
+}
+
+// POST /api/campaigns/run-due — usado por cron/n8n para executar campanhas agendadas vencidas
+app.post("/api/campaigns/run-due", requireCampaignRunnerSecret, async (req, res) => {
+  if (!ensureSupabase(res)) return;
+
+  const rawLimit = Number.parseInt(String(req.body?.limit ?? req.query?.limit ?? "10"), 10);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50) : 10;
+
+  try {
+    const result = await runDueCampaignDispatches({ limit, triggerSource: "external_runner" });
+    res.json(result);
+  } catch (error) {
+    console.error("campaign run-due error:", error);
+    sendError(
+      res,
+      500,
+      "CAMPAIGN_RUN_DUE_FAILED",
+      error instanceof Error ? error.message : "Failed to run due campaigns"
+    );
+  }
+});
+
 // POST /api/campaigns/:id/trigger — dispara campanha (chama webhook n8n)
 app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
   if (!ensureSupabase(res)) return;
@@ -5925,14 +6464,14 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
   try {
     let { data: campaign, error: fetchError } = await supabase
       .from("campaigns")
-      .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, analytics_meta")
+      .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, created_by_uid, created_by_email, analytics_meta")
       .eq("id", id)
       .single();
 
     if (fetchError && isMissingSchemaError(fetchError)) {
       const fallback = await supabase
         .from("campaigns")
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, created_by_uid, created_by_email")
         .eq("id", id)
         .single();
       campaign = fallback.data;
@@ -5944,8 +6483,8 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    if (campaign.status !== "active") {
-      sendError(res, 400, "CAMPAIGN_PAUSED", "Campaign is paused");
+    if (!canCampaignBeDispatched(campaign.status)) {
+      sendError(res, 400, "CAMPAIGN_NOT_DISPATCHABLE", `Campaign cannot be dispatched from status ${campaign.status}`);
       return;
     }
     if (campaign.archived_at) {
@@ -5953,99 +6492,20 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    // Buscar leads reais para incluir no payload
-    const leads = await buildDispatchLeads({
-      clientId: campaign.client_id,
-      importId: campaign.import_id || null,
-      limit: campaign.limit_per_run,
-      segmentation: campaign.analytics_meta?.segmentation || null,
-    });
-
-    if (leads.length === 0) {
-      sendError(res, 404, "NO_DISPATCH_LEADS", "No leads found for this campaign");
-      return;
-    }
-
-    const clientName = await getClientName(campaign.client_id);
-
-    const headers = { "Content-Type": "application/json" };
-    if (campaign.webhook_token) {
-      headers.Authorization = `Bearer ${campaign.webhook_token}`;
-    }
-
-    const payload = {
-      source: "vexocrm",
-      action: "campaign_dispatch",
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      requestedAt: new Date().toISOString(),
-      client: { id: campaign.client_id, name: clientName },
-      importId: campaign.import_id || null,
-      limit: campaign.limit_per_run,
-      segmentation: campaign.analytics_meta?.segmentation || null,
-      message: campaign.analytics_meta?.message || "",
-      image: campaign.analytics_meta?.image || null,
-      total: leads.length,
-      phones: leads.map((l) => l.telefone),
-      leads: leads.map((l) => ({
-        id: l.id,
-        telefone: l.telefone,
-        nome: l.nome,
-        cidade: l.cidade,
-        estado: l.estado,
-        status: l.status,
-        tipo_cliente: l.tipo_cliente,
-        faixa_consumo: l.faixa_consumo,
-        qualificacao: l.qualificacao,
-        data_hora: l.data_hora,
-        created_at: l.created_at,
-      })),
-    };
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    let n8nResponse = null;
-    try {
-      const webhookRes = await fetch(campaign.webhook_url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      n8nResponse = await webhookRes.text();
-
-      if (!webhookRes.ok) {
-        sendError(res, 502, "N8N_TRIGGER_FAILED", "n8n webhook returned an error", n8nResponse.slice(0, 500));
-        return;
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    await supabase
-      .from("campaigns")
-      .update({
-        last_triggered_at: new Date().toISOString(),
-        scheduled_for: null,
-        phones: leads.map((lead) => lead.telefone).filter(Boolean),
-      })
-      .eq("id", id);
-
-    res.json({
-      success: true,
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      webhookUrl: campaign.webhook_url,
-      n8nResponse: n8nResponse || null,
-    });
+    const result = await executeCampaignDispatch(campaign, { triggerSource: "manual" });
+    res.json(result);
   } catch (error) {
     console.error("campaign trigger error:", error);
     if (error?.name === "AbortError") {
       sendError(res, 504, "N8N_TIMEOUT", "n8n webhook timed out (15s)");
       return;
     }
-    sendError(res, 500, "INTERNAL_ERROR", error instanceof Error ? error.message : "Internal server error");
+    sendError(
+      res,
+      error?.statusCode || 500,
+      error?.code || "INTERNAL_ERROR",
+      error instanceof Error ? error.message : "Internal server error"
+    );
   }
 });
 
@@ -6117,7 +6577,7 @@ app.get("/api/leads-for-dispatch", requireN8nWebhookSecret, async (req, res) => 
 
 app.use((error, _req, res, _next) => {
   if (error?.type === "entity.too.large" || error?.status === 413) {
-    sendError(res, 413, "PAYLOAD_TOO_LARGE", "Request payload exceeds 1MB limit");
+    sendError(res, 413, "PAYLOAD_TOO_LARGE", "Request payload exceeds 15MB limit");
     return;
   }
 
@@ -6133,6 +6593,7 @@ app.use((error, _req, res, _next) => {
 const port = Number.parseInt(process.env.PORT || "3001", 10);
 app.listen(port, () => {
   console.log(`VexoApi listening on port ${port}`);
+  startCampaignScheduler();
 
   whatsappSessionManager.restorePersistedSession().catch((error) => {
     console.error("whatsapp startup restore error:", error);

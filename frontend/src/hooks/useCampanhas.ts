@@ -11,7 +11,7 @@ export interface Campaign {
   limit_per_run: number;
   webhook_url: string;
   webhook_token: string | null;
-  status: "active" | "paused";
+  status: CampaignStatus;
   scheduled_for: string | null;
   last_triggered_at: string | null;
   archived_at: string | null;
@@ -41,6 +41,16 @@ export interface CampaignSegmentation {
   campaignTag?: string;
 }
 
+export type CampaignStatus =
+  | "active"
+  | "paused"
+  | "draft"
+  | "scheduled"
+  | "processing"
+  | "sent"
+  | "failed"
+  | "cancelled";
+
 export interface CampaignLead {
   id: string;
   client_id: string;
@@ -63,14 +73,14 @@ export interface CreateCampaignPayload {
   importId?: string | null;
   limitPerRun?: number;
   scheduledFor?: string | null;
-  webhookUrl: string;
+  webhookUrl?: string;
   webhookToken?: string | null;
   analyticsMeta?: CampaignAnalyticsMeta;
 }
 
 export interface UpdateCampaignPayload {
   name?: string;
-  status?: "active" | "paused";
+  status?: CampaignStatus;
   limitPerRun?: number;
   scheduledFor?: string | null;
   archived?: boolean;
