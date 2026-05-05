@@ -256,10 +256,19 @@ Restaurar um caminho de verificacao que qualquer pessoa do time consiga executar
 
 ### PR 7 - Restaurar trilhos
 
+Status: **iniciado na PR `codex/testing-ci-baseline`**.
+
 1. definir script `test` no backend
 2. garantir dependencias minimas locais
 3. documentar setup unico de dev/test
 4. corrigir drift de mensagens de validacao do frontend
+
+Entregue nesta PR:
+
+- scripts locais na raiz para `check`, backend check/test, frontend test/build e `git diff --check`
+- `backend/package.json` com `check` e `test`
+- workflow `.github/workflows/ci.yml` para pull requests
+- `docs/TESTING_AND_CI.md` com comandos, bloqueios e padrao minimo
 
 ### PR 8 - Smoke tests minimos
 
@@ -270,6 +279,12 @@ Criar testes para:
 - notificacoes
 - payload de leads
 - claims de acesso
+
+Status:
+
+- usuarios/permissoes ja cobertos em `backend/src/test/userAccessScope.test.js`
+- payloads/aliases de leads ja cobertos em `backend/src/test/security.test.js`
+- campanhas e notificacoes entram como bloqueio automatico quando as respectivas branches de tenant scope forem incorporadas a base comum
 
 ### Criterio de saida da Etapa 3
 
