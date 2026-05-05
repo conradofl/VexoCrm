@@ -136,6 +136,21 @@ Objetivo:
 - confirmar se pagina `usuarios` e suficiente
 - ou se essas rotas devem ser elevadas para perfil mais restrito
 
+Status:
+
+- corrigido na branch `codex/tenant-scope-users`
+
+Resultado:
+
+- `GET /api/admin/users` exige `users.view` e filtra por tenant para gestores escopados
+- `PATCH /api/admin/users/:uid/access`, `POST /api/admin/users` e `DELETE /api/admin/users/:uid` exigem `users.manage`
+- gestores escopados nao podem operar usuarios fora do proprio tenant
+- gestores escopados nao podem atribuir `internal_admin`, `all_clients` ou `users.manage`
+
+Risco remanescente:
+
+- `access_profiles` ainda e global. Nesta PR, isso foi aceito porque a elevacao real fica bloqueada nas mutacoes de usuario. Uma futura PR pode decidir se perfis precisam virar tenant-aware.
+
 ### Criterio de saida da Etapa 1
 
 - nenhum endpoint mutavel de tenant sensivel opera apenas por `id`
