@@ -12,6 +12,7 @@ import {
   PanelLeft,
   FileSpreadsheet,
   MessageCircle,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -25,6 +26,7 @@ const navItems = [
   { title: "WhatsApp", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" as const },
   { title: "Agente", url: "/crm/agente", icon: Bot, page: "agente" as const },
   { title: "Campanhas", url: "/crm/campanhas", icon: Megaphone, page: "campanhas" as const },
+  { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
   { title: "Usuarios", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" as const },
 ] satisfies Array<{
   title: string;

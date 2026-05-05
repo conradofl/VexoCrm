@@ -1337,6 +1337,32 @@ app.get("/api/lead-clients", requireFirebaseAuth, async (req, res) => {
   }
 });
 
+app.delete("/api/lead-clients/:id", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+  if (!ensureSupabase(res)) return;
+
+  const clientId = normalizeString(req.params.id);
+  if (!clientId) {
+    sendError(res, 400, "INVALID_PARAMS", "Missing client id");
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from("leads_clients")
+      .delete()
+      .eq("id", clientId);
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("lead client delete error:", error);
+    sendError(res, 500, "LEAD_CLIENT_DELETE_FAILED", "Failed to delete lead client");
+  }
+});
+
 app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (_req, res) => {
   try {
     const users = await listAllFirebaseUsers();
