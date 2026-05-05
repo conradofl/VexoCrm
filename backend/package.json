@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check": "node --check src/server.js",
     "dev": "node --watch src/server.js",
+    "test": "vitest run",
     "start": "node src/server.js",
     "import-leads": "node scripts/import-leads.js"
   },
