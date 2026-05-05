@@ -1,0 +1,55 @@
+<main class="shell">
+  <section class="hero">
+    <div class="eyebrow">VEXO / ANGULAR SIDECAR</div>
+    <h1>{{ title() }}</h1>
+    <p class="summary">
+      Scaffold inicial isolado para rollout incremental do novo frontend Angular,
+      sem substituir o CRM atual em React/Vite.
+    </p>
+
+    <div class="badges">
+      <span>ADR-001 aprovada</span>
+      <span>React preservado</span>
+      <span>Build isolado validado</span>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Objetivo desta fase</h2>
+      <p>
+        Criar a base do sidecar Angular com isolamento estrutural, sem tocar no
+        frontend operacional atual.
+      </p>
+    </article>
+
+    <article class="card">
+      <h2>Escopo inicial</h2>
+      <ul>
+        <li>Vexo Labs</li>
+        <li>Dashboard</li>
+        <li>Requests</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h2>Dependências reaproveitadas</h2>
+      <ul>
+        <li>Backend Node/Express</li>
+        <li>Firebase Auth</li>
+        <li>Supabase</li>
+        <li>n8n e Edge Functions</li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="next-step">
+    <h2>Próximo passo planejado</h2>
+    <p>
+      Conectar autenticação, tenant selecionado e contratos de API antes de
+      implementar qualquer módulo funcional.
+    </p>
+  </section>
+</main>
+
+<router-outlet />
