@@ -96,6 +96,16 @@ Corrigir:
 - `POST /api/campaigns/:id/trigger`
 - `GET /api/campaigns`
 
+Status:
+
+- corrigido na branch `codex/tenant-scope-campaigns`
+
+Resultado:
+
+- listagem de campanhas nao retorna todos os tenants por default
+- criacao exige `clientId` autorizado
+- update/delete/trigger carregam a campanha, validam o `client_id` e aplicam a mutacao com filtro por tenant
+
 ### Motivo
 
 Essas rotas hoje permitem, em graus diferentes:
@@ -142,6 +152,21 @@ Objetivo:
 
 - confirmar se pagina `usuarios` e suficiente
 - ou se essas rotas devem ser elevadas para perfil mais restrito
+
+Status:
+
+- corrigido na branch `codex/tenant-scope-users`
+
+Resultado:
+
+- `GET /api/admin/users` exige `users.view` e filtra por tenant para gestores escopados
+- `PATCH /api/admin/users/:uid/access`, `POST /api/admin/users` e `DELETE /api/admin/users/:uid` exigem `users.manage`
+- gestores escopados nao podem operar usuarios fora do proprio tenant
+- gestores escopados nao podem atribuir `internal_admin`, `all_clients` ou `users.manage`
+
+Risco remanescente:
+
+- `access_profiles` ainda e global. Nesta PR, isso foi aceito porque a elevacao real fica bloqueada nas mutacoes de usuario. Uma futura PR pode decidir se perfis precisam virar tenant-aware.
 
 ### Criterio de saida da Etapa 1
 
@@ -259,15 +284,16 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 
 ## Primeira sequencia concreta de PRs
 
-| Ordem | Escopo | Tamanho esperado | Tipo |
-| --- | --- | --- | --- |
-| 1 | Docs de auditoria e mapeamento | Pequena | Documentacao |
-| 2 | Tenant scope em campanhas | Pequena | Correcao critica |
-| 3 | Notificacoes: global vs tenant | Pequena | Correcao critica - backend corrigido |
-| 4 | Rotas admin e perfis | Pequena | Seguranca/permissao |
-| 5 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao |
-| 6 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato |
-| 7 | Trilho de testes minimo | Pequena | Qualidade |
+| Ordem | Escopo | Tamanho esperado | Tipo | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Docs de auditoria e mapeamento | Pequena | Documentacao | Em PR |
+| 2 | Tenant scope em campanhas | Pequena | Correcao critica | Em PR |
+| 3 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
+| 4 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
+| 5 | Rotas admin e perfis | Pequena | Seguranca/permissao | Pendente |
+| 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Pendente |
+| 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Pendente |
+| 8 | Trilho de testes minimo | Pequena | Qualidade | Pendente |
 
 ---
 

@@ -12,12 +12,7 @@ import {
   buildCommercialIntelligencePayload,
   getCommercialIntelligenceDefaultSettings,
 } from "./commercial-intelligence.js";
-import {
-  canManageGlobalNotifications,
-  filterNotificationsForAccess,
-  getVisibleNotificationIds,
-  isNotificationVisibleToAccess,
-} from "./notificationScope.js";
+import { resolveRequiredAuthorizedClientId } from "./tenantScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -203,12 +198,6 @@ const ACCESS_PRESET_KEYS = [
   "client_operator",
   "client_viewer",
   "pending",
-];
-const USER_MANAGEMENT_PRESET_KEYS = [
-  "internal_admin",
-  "internal_manager",
-  "gestor",
-  "gerente",
 ];
 const ACCESS_PRESET_LABELS = {
   internal_admin: "Admin interno",
@@ -940,10 +929,7 @@ function requireUserManagementAccess(req, res, next) {
     return;
   }
 
-  if (
-    req.authAccess?.isAdmin ||
-    USER_MANAGEMENT_PRESET_KEYS.includes(req.authAccess?.accessPreset)
-  ) {
+  if (hasUserPermission(req.authAccess, "users.manage")) {
     next();
     return;
   }
@@ -3653,12 +3639,18 @@ app.delete("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("
   await deleteLeadClientHandler(req, res, req.query?.tenantId ?? req.query?.id ?? req.query?.clientId);
 });
 
-app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (_req, res) => {
+app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (req, res) => {
+  if (!hasUserPermission(req.authAccess, "users.view")) {
+    sendError(res, 403, "FORBIDDEN", "User view permission required");
+    return;
+  }
+
   try {
     const users = await listAllFirebaseUsers();
+    const mappedUsers = users.map(mapAdminUserRecord);
 
     res.json({
-      items: users.map(mapAdminUserRecord),
+      items: filterVisibleUserRecords(mappedUsers, req.authAccess),
     });
   } catch (error) {
     console.error("admin users query error:", error);
@@ -3666,7 +3658,12 @@ app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usua
   }
 });
 
-app.get("/api/admin/access-profiles", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (_req, res) => {
+app.get("/api/admin/access-profiles", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (req, res) => {
+  if (!hasUserPermission(req.authAccess, "users.view")) {
+    sendError(res, 403, "FORBIDDEN", "User view permission required");
+    return;
+  }
+
   try {
     const items = await listAccessProfiles();
     res.json({ items });
@@ -3718,6 +3715,16 @@ app.patch("/api/admin/users/:uid/access", requireFirebaseAuth, requireUserManage
 
     const user = await auth.getUser(uid);
     const isTargetFixedAdmin = isFixedAdminIdentity({ uid: user.uid, email: user.email });
+    const currentTargetAccess = extractManagedAccessClaims(user.customClaims || {}, {
+      uid: user.uid,
+      email: user.email,
+    });
+
+    if (!canManageTargetAccess(req.authAccess, currentTargetAccess)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You do not have permission to manage this user");
+      return;
+    }
+
     const managedClaims = isTargetFixedAdmin
       ? buildManagedClaims({
           role: "internal",
@@ -3747,6 +3754,11 @@ app.patch("/api/admin/users/:uid/access", requireFirebaseAuth, requireUserManage
           companyName: req.body?.companyName,
           internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
         });
+
+    if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
+      return;
+    }
 
     if (isTargetFixedAdmin && typeof req.body?.disabled === "boolean" && req.body.disabled) {
       sendError(res, 400, "INVALID_BODY", "Fixed admin accounts cannot be disabled");
@@ -3820,11 +3832,6 @@ app.post("/api/admin/users", requireFirebaseAuth, requireUserManagementAccess, a
       return;
     }
 
-    const user = await auth.createUser({
-      email,
-      password,
-      displayName: displayName || undefined,
-    });
     const managedClaims = buildManagedClaims({
       role: selectedProfile?.role || role,
       accessPreset: selectedProfile?.key || req.body?.accessPreset,
@@ -3838,6 +3845,17 @@ app.post("/api/admin/users", requireFirebaseAuth, requireUserManagementAccess, a
       allowedViews: req.body?.allowedViews ?? selectedProfile?.allowedViews,
       companyName: req.body?.companyName,
       internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
+    });
+
+    if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
+      return;
+    }
+
+    const user = await auth.createUser({
+      email,
+      password,
+      displayName: displayName || undefined,
     });
 
     await auth.setCustomUserClaims(user.uid, mergeManagedClaims({}, managedClaims));
@@ -3887,6 +3905,15 @@ app.delete("/api/admin/users/:uid", requireFirebaseAuth, requireUserManagementAc
   try {
     const auth = getAuth();
     const user = await auth.getUser(uid);
+    const targetAccess = extractManagedAccessClaims(user.customClaims || {}, {
+      uid: user.uid,
+      email: user.email,
+    });
+
+    if (!canManageTargetAccess(req.authAccess, targetAccess)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You do not have permission to delete this user");
+      return;
+    }
 
     if (isFixedAdminIdentity({ uid: user.uid, email: user.email })) {
       sendError(res, 400, "FIXED_ADMIN_DELETE_BLOCKED", "Fixed admin accounts cannot be deleted");
@@ -5701,8 +5728,14 @@ app.post("/api/whatsapp/messages/direct", requireFirebaseAuth, requireAdminAcces
 app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
   if (!ensureSupabase(res)) return;
   const requestedClientId = normalizeString(req.query.clientId);
-  const clientId = requestedClientId ? resolveAuthorizedClientId(req, res, requestedClientId) : null;
-  if (requestedClientId && !clientId) return;
+  const clientId = resolveRequiredAuthorizedClientId({
+    req,
+    res,
+    requestedClientId,
+    resolveAuthorizedClientId,
+    sendError,
+  });
+  if (!clientId) return;
 
   try {
     const campaignSelect =
@@ -5835,7 +5868,15 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
   if (!ensureSupabase(res)) return;
 
   const name = normalizeString(req.body?.name);
-  const clientId = normalizeString(req.body?.clientId);
+  const requestedClientId = normalizeString(req.body?.clientId);
+  const clientId = resolveRequiredAuthorizedClientId({
+    req,
+    res,
+    requestedClientId,
+    resolveAuthorizedClientId,
+    sendError,
+  });
+  if (!clientId) return;
   const importId = normalizeString(req.body?.importId) || null;
   const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
   const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 500);
@@ -5848,7 +5889,6 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
       : {};
 
   if (!name) { sendError(res, 400, "INVALID_BODY", "Missing name"); return; }
-  if (!clientId) { sendError(res, 400, "INVALID_BODY", "Missing clientId"); return; }
   if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl"); return; }
 
   try {
@@ -5929,10 +5969,25 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
   }
 
   try {
+    const { data: current, error: currentError } = await supabase
+      .from("campaigns")
+      .select("id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (currentError || !current) {
+      sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      return;
+    }
+
+    const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
+    if (!authorizedClientId) return;
+
     let { data, error } = await supabase
       .from("campaigns")
       .update(updates)
       .eq("id", id)
+      .eq("client_id", authorizedClientId)
       .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
       .single();
 
@@ -5943,6 +5998,7 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
         .from("campaigns")
         .update(fallbackUpdates)
         .eq("id", id)
+        .eq("client_id", authorizedClientId)
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
         .single();
       data = fallback.data ? { ...fallback.data, analytics_meta: updates.analytics_meta } : fallback.data;
@@ -5969,7 +6025,25 @@ app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess(
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
 
   try {
-    const { error } = await supabase.from("campaigns").delete().eq("id", id);
+    const { data: campaign, error: fetchError } = await supabase
+      .from("campaigns")
+      .select("id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !campaign) {
+      sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      return;
+    }
+
+    const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!authorizedClientId) return;
+
+    const { error } = await supabase
+      .from("campaigns")
+      .delete()
+      .eq("id", id)
+      .eq("client_id", authorizedClientId);
 
     if (error) {
       sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to delete campaign", error.message);
@@ -6012,6 +6086,9 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
+    const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!authorizedClientId) return;
+
     if (campaign.status !== "active") {
       sendError(res, 400, "CAMPAIGN_PAUSED", "Campaign is paused");
       return;
@@ -6023,7 +6100,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
 
     // Buscar leads reais para incluir no payload
     const leads = await buildDispatchLeads({
-      clientId: campaign.client_id,
+      clientId: authorizedClientId,
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: campaign.analytics_meta?.segmentation || null,
@@ -6034,7 +6111,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    const clientName = await getClientName(campaign.client_id);
+    const clientName = await getClientName(authorizedClientId);
 
     const headers = { "Content-Type": "application/json" };
     if (campaign.webhook_token) {
@@ -6047,7 +6124,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       campaignId: campaign.id,
       campaignName: campaign.name,
       requestedAt: new Date().toISOString(),
-      client: { id: campaign.client_id, name: clientName },
+      client: { id: authorizedClientId, name: clientName },
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: campaign.analytics_meta?.segmentation || null,
@@ -6098,7 +6175,8 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
         scheduled_for: null,
         phones: leads.map((lead) => lead.telefone).filter(Boolean),
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("client_id", authorizedClientId);
 
     res.json({
       success: true,
