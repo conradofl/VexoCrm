@@ -96,6 +96,16 @@ Corrigir:
 - `POST /api/campaigns/:id/trigger`
 - `GET /api/campaigns`
 
+Status:
+
+- corrigido na branch `codex/tenant-scope-campaigns`
+
+Resultado:
+
+- listagem de campanhas nao retorna todos os tenants por default
+- criacao exige `clientId` autorizado
+- update/delete/trigger carregam a campanha, validam o `client_id` e aplicam a mutacao com filtro por tenant
+
 ### Motivo
 
 Essas rotas hoje permitem, em graus diferentes:
@@ -106,13 +116,30 @@ Essas rotas hoje permitem, em graus diferentes:
 
 ### PR 2 - Tenant scope em notificacoes
 
-Decidir e implementar um dos caminhos:
+Status: **corrigido no backend atual pela PR `codex/tenant-scope-notifications`**.
 
-1. `notifications` e global de operacao
-   - restringir rota a admin real
-2. `notifications` deve respeitar tenant
-   - adicionar `client_id`
-   - escopar leitura e update
+Caminho escolhido:
+
+1. notificacoes com `client_id`, `tenant_id` ou `company_id` respeitam escopo do usuario interno
+2. notificacoes com `user_id` ficam visiveis apenas para o usuario alvo
+3. notificacoes sem escopo explicito sao tratadas como globais e ficam restritas a admin interno real
+
+Rotas corrigidas:
+
+- `GET /api/notifications`
+- `PATCH /api/notifications`
+
+Controles aplicados:
+
+- listagem filtra os itens visiveis antes de responder ao frontend
+- contagem de nao lidas usa o mesmo filtro para usuarios nao-admin
+- `PATCH` por `id` busca a notificacao e valida escopo antes de atualizar
+- `markAllRead` nao-admin marca apenas notificacoes visiveis
+- clientes e acessos invalidos continuam bloqueados por `requireFirebaseAuth` + `requireInternalPageAccess("agente")`
+
+Risco remanescente:
+
+- `frontend/supabase/functions/notifications-api` ainda duplica a rota usando JWT Supabase, service role e CORS `*`. Nao foi reescrita nesta PR porque isso pertence a uma etapa propria de consolidacao Edge/backend.
 
 ### PR 3 - Revisao de usuarios e perfis
 
@@ -279,11 +306,11 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 | --- | --- | --- | --- | --- |
 | 1 | Docs de auditoria e mapeamento | Pequena | Documentacao | Em PR |
 | 2 | Tenant scope em campanhas | Pequena | Correcao critica | Em PR |
-| 3 | Rotas admin e usuarios | Pequena | Seguranca/permissao | Em PR |
-| 4 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
-| 5 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
-| 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Parcial: `notifications` e `n8n_error_logs` corrigidos |
-| 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Iniciado com `API_CONTRACTS.md` e validadores |
+| 3 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
+| 4 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
+| 5 | Rotas admin e perfis | Pequena | Seguranca/permissao | Pendente |
+| 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Pendente |
+| 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Pendente |
 | 8 | Trilho de testes minimo | Pequena | Qualidade | Pendente |
 
 ---

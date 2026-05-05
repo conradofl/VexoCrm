@@ -12,12 +12,7 @@ import {
   buildCommercialIntelligencePayload,
   getCommercialIntelligenceDefaultSettings,
 } from "./commercial-intelligence.js";
-import {
-  canAssignManagedAccess,
-  canManageTargetAccess,
-  filterVisibleUserRecords,
-  hasUserPermission,
-} from "./userAccessScope.js";
+import { resolveRequiredAuthorizedClientId } from "./tenantScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -5177,14 +5172,18 @@ app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("ag
   if (!ensureSupabase(res)) return;
 
   try {
-    const limit = Math.min(Number.parseInt(String(req.query.limit || "20"), 10), 50);
+    const parsedLimit = Number.parseInt(String(req.query.limit || "20"), 10);
+    const limit = Math.min(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 50);
+    const fetchLimit = canManageGlobalNotifications(req.authAccess)
+      ? limit
+      : Math.min(Math.max(limit * 5, 50), 250);
     const onlyUnread = String(req.query.onlyUnread || "false") === "true";
 
     let query = supabase
       .from("notifications")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(Number.isNaN(limit) ? 20 : limit);
+      .limit(fetchLimit);
 
     if (onlyUnread) {
       query = query.eq("read", false);
@@ -5193,14 +5192,30 @@ app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("ag
     const { data: items, error: listError } = await query;
     if (listError) throw listError;
 
-    const { count, error: countError } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("read", false);
+    const visibleItems = filterNotificationsForAccess(items || [], req.authAccess).slice(0, limit);
+    let unreadCount = 0;
 
-    if (countError) throw countError;
+    if (canManageGlobalNotifications(req.authAccess)) {
+      const { count, error: countError } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("read", false);
 
-    res.json({ items: items || [], unreadCount: count || 0 });
+      if (countError) throw countError;
+      unreadCount = count || 0;
+    } else {
+      const { data: unreadItems, error: unreadError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("read", false)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+      if (unreadError) throw unreadError;
+      unreadCount = filterNotificationsForAccess(unreadItems || [], req.authAccess).length;
+    }
+
+    res.json({ items: visibleItems, unreadCount });
   } catch (error) {
     console.error("notifications query error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
@@ -5214,14 +5229,56 @@ app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("
     const { id, read, markAllRead } = req.body || {};
 
     if (markAllRead) {
-      const { error } = await supabase.from("notifications").update({ read: true }).eq("read", false);
+      if (canManageGlobalNotifications(req.authAccess)) {
+        const { error } = await supabase.from("notifications").update({ read: true }).eq("read", false);
+        if (error) throw error;
+        res.json({ success: true });
+        return;
+      }
+
+      const { data: unreadItems, error: listError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("read", false)
+        .limit(1000);
+
+      if (listError) throw listError;
+
+      const visibleIds = getVisibleNotificationIds(unreadItems || [], req.authAccess);
+      if (visibleIds.length === 0) {
+        res.json({ success: true, updated: 0 });
+        return;
+      }
+
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read: true })
+        .in("id", visibleIds);
       if (error) throw error;
-      res.json({ success: true });
+      res.json({ success: true, updated: visibleIds.length });
       return;
     }
 
     if (!id) {
       sendError(res, 400, "INVALID_BODY", "Missing id or markAllRead");
+      return;
+    }
+
+    const { data: notification, error: findError } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (findError) throw findError;
+
+    if (!notification) {
+      sendError(res, 404, "NOTIFICATION_NOT_FOUND", "Notification not found");
+      return;
+    }
+
+    if (!isNotificationVisibleToAccess(notification, req.authAccess)) {
+      sendError(res, 403, "FORBIDDEN_NOTIFICATION_SCOPE", "You do not have access to this notification");
       return;
     }
 
@@ -5671,8 +5728,14 @@ app.post("/api/whatsapp/messages/direct", requireFirebaseAuth, requireAdminAcces
 app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
   if (!ensureSupabase(res)) return;
   const requestedClientId = normalizeString(req.query.clientId);
-  const clientId = requestedClientId ? resolveAuthorizedClientId(req, res, requestedClientId) : null;
-  if (requestedClientId && !clientId) return;
+  const clientId = resolveRequiredAuthorizedClientId({
+    req,
+    res,
+    requestedClientId,
+    resolveAuthorizedClientId,
+    sendError,
+  });
+  if (!clientId) return;
 
   try {
     const campaignSelect =
@@ -5805,7 +5868,15 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
   if (!ensureSupabase(res)) return;
 
   const name = normalizeString(req.body?.name);
-  const clientId = normalizeString(req.body?.clientId);
+  const requestedClientId = normalizeString(req.body?.clientId);
+  const clientId = resolveRequiredAuthorizedClientId({
+    req,
+    res,
+    requestedClientId,
+    resolveAuthorizedClientId,
+    sendError,
+  });
+  if (!clientId) return;
   const importId = normalizeString(req.body?.importId) || null;
   const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
   const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 500);
@@ -5818,7 +5889,6 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
       : {};
 
   if (!name) { sendError(res, 400, "INVALID_BODY", "Missing name"); return; }
-  if (!clientId) { sendError(res, 400, "INVALID_BODY", "Missing clientId"); return; }
   if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl"); return; }
 
   try {
@@ -5899,10 +5969,25 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
   }
 
   try {
+    const { data: current, error: currentError } = await supabase
+      .from("campaigns")
+      .select("id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (currentError || !current) {
+      sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      return;
+    }
+
+    const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
+    if (!authorizedClientId) return;
+
     let { data, error } = await supabase
       .from("campaigns")
       .update(updates)
       .eq("id", id)
+      .eq("client_id", authorizedClientId)
       .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
       .single();
 
@@ -5913,6 +5998,7 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
         .from("campaigns")
         .update(fallbackUpdates)
         .eq("id", id)
+        .eq("client_id", authorizedClientId)
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
         .single();
       data = fallback.data ? { ...fallback.data, analytics_meta: updates.analytics_meta } : fallback.data;
@@ -5939,7 +6025,25 @@ app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess(
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
 
   try {
-    const { error } = await supabase.from("campaigns").delete().eq("id", id);
+    const { data: campaign, error: fetchError } = await supabase
+      .from("campaigns")
+      .select("id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !campaign) {
+      sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      return;
+    }
+
+    const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!authorizedClientId) return;
+
+    const { error } = await supabase
+      .from("campaigns")
+      .delete()
+      .eq("id", id)
+      .eq("client_id", authorizedClientId);
 
     if (error) {
       sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to delete campaign", error.message);
@@ -5982,6 +6086,9 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
+    const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!authorizedClientId) return;
+
     if (campaign.status !== "active") {
       sendError(res, 400, "CAMPAIGN_PAUSED", "Campaign is paused");
       return;
@@ -5993,7 +6100,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
 
     // Buscar leads reais para incluir no payload
     const leads = await buildDispatchLeads({
-      clientId: campaign.client_id,
+      clientId: authorizedClientId,
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: campaign.analytics_meta?.segmentation || null,
@@ -6004,7 +6111,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    const clientName = await getClientName(campaign.client_id);
+    const clientName = await getClientName(authorizedClientId);
 
     const headers = { "Content-Type": "application/json" };
     if (campaign.webhook_token) {
@@ -6017,7 +6124,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       campaignId: campaign.id,
       campaignName: campaign.name,
       requestedAt: new Date().toISOString(),
-      client: { id: campaign.client_id, name: clientName },
+      client: { id: authorizedClientId, name: clientName },
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: campaign.analytics_meta?.segmentation || null,
@@ -6068,7 +6175,8 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
         scheduled_for: null,
         phones: leads.map((lead) => lead.telefone).filter(Boolean),
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("client_id", authorizedClientId);
 
     res.json({
       success: true,
