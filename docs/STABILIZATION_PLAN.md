@@ -156,11 +156,18 @@ Fazer o repositorio representar o banco real e padronizar os campos mais fragis.
 
 ### PR 4 - Schema truth
 
-Mapear e, depois, corrigir em PR propria:
+Status: **parcialmente corrigido na PR `codex/schema-contracts-truth`**.
 
-- criacao versionada de `campaigns`
+Corrigido:
+
 - criacao versionada de `notifications`
 - criacao versionada de `n8n_error_logs`
+- contrato oficial de `client_id` como `TEXT`/slug de `leads_clients.id`
+- validacao backend aceitando `client_id` real e aliases legados de borda
+
+Ainda pendente em PR propria:
+
+- criacao versionada de `campaigns`
 - referencia orphan de `metric_snapshots`
 
 ### PR 5 - Normalizacao de identificadores
@@ -170,6 +177,17 @@ Definir padrao:
 - persistencia: `client_id`
 - aliases aceitos na borda: `clientId`, `tenantId`, `companyId`
 - normalizacao obrigatoria na entrada
+
+Status: **iniciado na PR `codex/schema-contracts-truth`**.
+
+Documento criado:
+
+- `docs/API_CONTRACTS.md`
+
+Primeira correcao segura:
+
+- `createLeadSchema` normaliza `clientId`, `tenantId`, `companyId`, `phone` e `qualification` para `client_id`, `telefone` e `qualificacao`.
+- codigo novo deve usar campos oficiais; aliases seguem apenas para compatibilidade gradual.
 
 ### PR 6 - Normalizacao de contratos do lead
 
@@ -264,8 +282,8 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 | 3 | Rotas admin e usuarios | Pequena | Seguranca/permissao | Em PR |
 | 4 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
 | 5 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
-| 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Pendente |
-| 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Pendente |
+| 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Parcial: `notifications` e `n8n_error_logs` corrigidos |
+| 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Iniciado com `API_CONTRACTS.md` e validadores |
 | 8 | Trilho de testes minimo | Pequena | Qualidade | Pendente |
 
 ---

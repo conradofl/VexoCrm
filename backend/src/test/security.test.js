@@ -5,6 +5,7 @@ import {
   createClientSchema,
   createUserSchema,
   loginSchema,
+  normalizeLeadContractPayload,
 } from '../validators.js';
 
 describe('Backend Security - Input Validation', () => {
@@ -31,15 +32,25 @@ describe('Backend Security - Input Validation', () => {
       }).toThrow();
     });
 
-    it('should reject lead with invalid UUID', () => {
+    it('should reject lead with invalid client_id format', () => {
       expect(() => {
         createLeadSchema.parse({
           nome: 'João Silva',
           email: 'joao@example.com',
           telefone: '11987654321',
-          client_id: 'not-a-uuid',
+          client_id: 'tenant invalido',
         });
       }).toThrow();
+    });
+
+    it('should accept slug client_id used by leads_clients', () => {
+      const result = createLeadSchema.parse({
+        nome: 'João Silva',
+        email: 'joao@example.com',
+        telefone: '11987654321',
+        client_id: 'infinie',
+      });
+      expect(result.client_id).toBe('infinie');
     });
 
     it('should reject lead with short name', () => {
@@ -288,7 +299,7 @@ describe('Backend Security - Input Validation', () => {
 
   describe('Phone Number Validation', () => {
     it('should accept valid Brazilian phone numbers', () => {
-      const validPhones = ['11987654321', '1133334444'];
+      const validPhones = ['11987654321', '1133334444', '5511987654321'];
 
       validPhones.forEach(phone => {
         const result = createLeadSchema.parse({
@@ -302,7 +313,7 @@ describe('Backend Security - Input Validation', () => {
     });
 
     it('should reject invalid phone numbers', () => {
-      const invalidPhones = ['123', '11(98765-4321', '+55 11 98765-4321'];
+      const invalidPhones = ['123', 'abc', '551198765432199'];
 
       invalidPhones.forEach(phone => {
         expect(() => {
@@ -314,6 +325,36 @@ describe('Backend Security - Input Validation', () => {
           });
         }).toThrow();
       });
+    });
+  });
+
+  describe('Contract aliases', () => {
+    it('should normalize legacy tenant and phone aliases to official lead contract fields', () => {
+      const payload = normalizeLeadContractPayload({
+        nome: 'Test User',
+        email: 'test@example.com',
+        phone: '+55 11 98765-4321',
+        tenantId: 'infinie',
+        qualification: 'Lead pediu retorno',
+      });
+
+      expect(payload.client_id).toBe('infinie');
+      expect(payload.telefone).toBe('5511987654321');
+      expect(payload.qualificacao).toBe('Lead pediu retorno');
+    });
+
+    it('should accept legacy aliases through createLeadSchema during migration', () => {
+      const result = createLeadSchema.parse({
+        nome: 'Test User',
+        email: 'test@example.com',
+        phone: '+55 11 98765-4321',
+        companyId: 'vexo',
+        qualification: 'Qualificado',
+      });
+
+      expect(result.client_id).toBe('vexo');
+      expect(result.telefone).toBe('5511987654321');
+      expect(result.qualificacao).toBe('Qualificado');
     });
   });
 });
