@@ -280,6 +280,18 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 4. reduzir duplicidade backend vs Edge Functions
 5. so depois avaliar modularizacao maior do backend
 
+Status inicial:
+
+- PR `codex/extract-access-helpers`: extrai predicados puros de acesso de `backend/src/server.js` para `backend/src/accessGuards.js`.
+- Comportamento preservado: acesso admin, acesso por pagina interna, excecao existente de `empresas` para `internal_manager` com `usuarios`, permissao `tenants.manage`, acesso de cliente por `allowedViews`.
+- Teste novo: `backend/src/test/accessGuards.test.js`.
+
+Pendente:
+
+- middlewares que ainda dependem de `sendError` continuam em `server.js`.
+- helpers de tenant com dependencia de request/response ficam para PR propria.
+- rotas estabilizadas nao foram movidas nesta PR.
+
 ### Criterio de saida da Etapa 4
 
 - PRs menores
@@ -299,7 +311,8 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 | 5 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
 | 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Parcial: `notifications` e `n8n_error_logs` corrigidos |
 | 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Iniciado com `API_CONTRACTS.md` e validadores |
-| 8 | Trilho de testes minimo | Pequena | Qualidade | Pendente |
+| 8 | Trilho de testes minimo | Pequena | Qualidade | Em PR |
+| 9 | Extracao inicial de helpers de acesso | Pequena | Organizacao backend | Em PR |
 
 ---
 
