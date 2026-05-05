@@ -35,11 +35,11 @@ Legenda de risco:
 
 | Metodo | Endpoint | Origem | Tabelas/Fonte | Filtro por tenant | Risco | Prioridade | Observacao |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/admin/users` | `backend/src/server.js` | Firebase Auth | Nao | Critico | P0 | Lista todos os usuarios do ambiente para quem tiver pagina `usuarios` |
-| GET | `/api/admin/access-profiles` | `backend/src/server.js` | `access_profiles` | Nao | Alto | P1 | Lista perfis globais de acesso; sem tenant scope |
-| PATCH | `/api/admin/users/:uid/access` | `backend/src/server.js` | Firebase Auth claims | Parcial | Alto | P1 | Atualiza claims multi-tenant, mas aceita varios aliases (`clientId`, `tenantId`, `clientIds`) |
-| POST | `/api/admin/users` | `backend/src/server.js` | Firebase Auth claims | Parcial | Alto | P1 | Cria usuario com claims; sem trilha de auditoria persistida em banco |
-| DELETE | `/api/admin/users/:uid` | `backend/src/server.js` | Firebase Auth | Nao | Medio | P2 | Operacao global protegida por `requireUserManagementAccess` |
+| GET | `/api/admin/users` | `backend/src/server.js` | Firebase Auth | Sim | Corrigido | Feito | Exige `users.view`; admin ve todos, gestor escopado ve apenas usuarios com tenant em comum |
+| GET | `/api/admin/access-profiles` | `backend/src/server.js` | `access_profiles` | Nao aplicavel | Corrigido parcial | Feito | Exige `users.view`; perfis seguem globais, mas mutacoes de usuario bloqueiam elevacao indevida |
+| PATCH | `/api/admin/users/:uid/access` | `backend/src/server.js` | Firebase Auth claims | Sim | Corrigido | Feito | Exige `users.manage`, valida tenant do alvo e bloqueia atribuicao fora do escopo/autoelevacao |
+| POST | `/api/admin/users` | `backend/src/server.js` | Firebase Auth claims | Sim | Corrigido | Feito | Exige `users.manage` e valida o acesso solicitado antes de criar o usuario no Firebase |
+| DELETE | `/api/admin/users/:uid` | `backend/src/server.js` | Firebase Auth | Sim | Corrigido | Feito | Exige `users.manage` e valida tenant do alvo antes de excluir |
 | POST | `/api/client-signup` | `backend/src/server.js` | Firebase Auth + `notifications` | Nao | Medio | P2 | Nao e rota multi-tenant, mas grava notificacao global |
 
 ---
@@ -130,9 +130,16 @@ Legenda de risco:
 
 ### P1 - segunda PR funcional
 
-3. revisar `GET /api/campaigns` para nunca retornar tudo por padrao a operadores internos
-4. revisar webhooks internos para tenant explícito, principalmente `/api/leads-webhook` e `/api/conversation-memory`
-5. revisar rotas de listagem global de usuarios e perfis
+3. pendente: revisar webhooks internos para tenant explícito, principalmente `/api/leads-webhook` e `/api/conversation-memory`
+4. pendente: decidir se perfis de acesso devem virar entidade tenant-aware no futuro
+
+### Concluido na PR de tenant scope de usuarios
+
+- `GET /api/admin/users`
+- `GET /api/admin/access-profiles`
+- `PATCH /api/admin/users/:uid/access`
+- `POST /api/admin/users`
+- `DELETE /api/admin/users/:uid`
 
 ### P2 - terceira PR funcional
 
