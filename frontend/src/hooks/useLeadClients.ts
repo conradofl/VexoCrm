@@ -13,17 +13,6 @@ export interface CreateLeadClientPayload {
   name: string;
 }
 
-type LeadClientDeleteResponse = {
-  item?: {
-    id: string;
-    name?: string;
-  };
-  error?: {
-    message?: string;
-    details?: string;
-  };
-};
-
 export function useLeadClients() {
   const { isAuthenticated, getIdToken } = useAuth();
 
@@ -104,74 +93,41 @@ export function useDeleteLeadClient() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const parseResponsePayload = async (res: Response): Promise<LeadClientDeleteResponse | null> => {
-        const text = await res.text().catch(() => "");
-        if (!text) return null;
+      const res = await fetch(
+        `${API_BASE_URL}/api/lead-clients/${encodeURIComponent(tenantId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
+      if (!res.ok) {
+        let message: string;
         try {
-          return JSON.parse(text);
+          const body = await res.json();
+          message = body?.error?.message || body?.error?.details || body?.message || "";
         } catch {
-          return { error: { message: text } };
+          message = "";
         }
-      };
 
-      const attempts = [
-        {
-          url: `${API_BASE_URL}/api/lead-clients/delete`,
-          options: {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ tenantId }),
-          },
-        },
-        {
-          url: `${API_BASE_URL}/api/lead-clients/${encodeURIComponent(tenantId)}`,
-          options: {
-            method: "DELETE",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        },
-        {
-          url: `${API_BASE_URL}/api/lead-clients/${encodeURIComponent(tenantId)}/delete`,
-          options: {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ tenantId }),
-          },
-        },
-      ] satisfies Array<{ url: string; options: RequestInit }>;
-
-      let res: Response | null = null;
-      let responsePayload: LeadClientDeleteResponse | null = null;
-
-      for (const attempt of attempts) {
-        res = await fetch(attempt.url, attempt.options);
-        responsePayload = await parseResponsePayload(res);
-
-        if (res.ok || res.status !== 404) {
-          break;
+        if (!message || message.includes("<!DOCTYPE") || message.includes("<html")) {
+          message =
+            res.status === 404
+              ? "Endpoint de exclusao nao encontrado. Verifique o deploy do backend."
+              : res.status === 403
+                ? "Sem permissao para excluir empresas."
+                : `Erro ao excluir empresa (${res.status}).`;
         }
+
+        throw new Error(message);
       }
 
-      if (!res || !res.ok) {
-        const apiMessage =
-          responsePayload?.error?.message ||
-          responsePayload?.error?.details ||
-          (res?.status === 404
-            ? "A rota de exclusao de empresas ainda nao esta publicada no backend."
-            : `Lead client delete failed: ${res?.status ?? "unknown"}`);
-        throw new Error(apiMessage);
+      try {
+        const data = await res.json();
+        return data?.item || { id: tenantId };
+      } catch {
+        return { id: tenantId };
       }
-
-      return responsePayload?.item || { id: tenantId };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lead-clients"] });
