@@ -107,12 +107,12 @@ Legenda de risco:
 
 | Metodo | Endpoint | Origem | Tabelas/Fonte | Filtro por tenant | Risco | Prioridade | Observacao |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/campaigns` | `backend/src/server.js` | `campaigns`, `leads_clients` | Parcial | Alto | P1 | Se `clientId` nao vier na query, usuario interno com acesso a `planilhas` recebe campanhas de todos os tenants |
+| GET | `/api/campaigns` | `backend/src/server.js` | `campaigns`, `leads_clients` | Sim | Corrigido | Feito | Agora exige `clientId` autorizado ou tenant derivado das claims; nao lista tudo por default |
 | GET | `/api/campaigns/:id/leads` | `backend/src/server.js` | `campaigns`, `leads` | Sim, resolve a partir do `client_id` da campanha | Baixo | P3 | Boa |
-| POST | `/api/campaigns` | `backend/src/server.js` | `campaigns` | **Nao valida** `clientId` com `resolveAuthorizedClientId` | Critico | P0 | Usuario interno pode criar campanha para qualquer tenant informado |
-| PATCH | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | **Nao** | Critico | P0 | Atualiza campanha por `id` sem verificar `client_id` do operador |
-| DELETE | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | **Nao** | Critico | P0 | Exclui campanha por `id` sem verificar tenant |
-| POST | `/api/campaigns/:id/trigger` | `backend/src/server.js` | `campaigns`, `leads`, `leads_clients` | **Nao** antes do dispatch | Critico | P0 | Carrega campanha por `id`, monta payload e dispara sem validar que o operador pode agir no tenant da campanha |
+| POST | `/api/campaigns` | `backend/src/server.js` | `campaigns` | Sim | Corrigido | Feito | `clientId` do body passa por tenant scope antes do insert |
+| PATCH | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | Sim | Corrigido | Feito | Carrega a campanha, valida `client_id` contra o operador e atualiza com `.eq("client_id", authorizedClientId)` |
+| DELETE | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | Sim | Corrigido | Feito | Carrega a campanha, valida `client_id` contra o operador e exclui com `.eq("client_id", authorizedClientId)` |
+| POST | `/api/campaigns/:id/trigger` | `backend/src/server.js` | `campaigns`, `leads`, `leads_clients` | Sim | Corrigido | Feito | Valida `client_id` antes de buscar leads, montar payload, chamar n8n e atualizar `last_triggered_at` |
 
 ---
 
@@ -120,13 +120,17 @@ Legenda de risco:
 
 ### P0 - primeira PR funcional de seguranca
 
-1. adicionar `resolveAuthorizedClientId` ou validacao equivalente em:
+1. pendente: adicionar `resolveAuthorizedClientId` ou validacao equivalente em:
    - `POST /api/lead-imports`
-   - `POST /api/campaigns`
-   - `PATCH /api/campaigns/:id`
-   - `DELETE /api/campaigns/:id`
-   - `POST /api/campaigns/:id/trigger`
-2. escopar `GET/PATCH /api/notifications` ou assumir explicitamente que notificacoes sao globais e restringir o acesso a admin real
+2. pendente: escopar `GET/PATCH /api/notifications` ou assumir explicitamente que notificacoes sao globais e restringir o acesso a admin real
+
+### Concluido na PR de tenant scope de campanhas
+
+- `GET /api/campaigns`
+- `POST /api/campaigns`
+- `PATCH /api/campaigns/:id`
+- `DELETE /api/campaigns/:id`
+- `POST /api/campaigns/:id/trigger`
 
 ### P1 - segunda PR funcional
 

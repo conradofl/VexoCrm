@@ -96,6 +96,16 @@ Corrigir:
 - `POST /api/campaigns/:id/trigger`
 - `GET /api/campaigns`
 
+Status:
+
+- corrigido na branch `codex/tenant-scope-campaigns`
+
+Resultado:
+
+- listagem de campanhas nao retorna todos os tenants por default
+- criacao exige `clientId` autorizado
+- update/delete/trigger carregam a campanha, validam o `client_id` e aplicam a mutacao com filtro por tenant
+
 ### Motivo
 
 Essas rotas hoje permitem, em graus diferentes:
@@ -261,9 +271,9 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 | --- | --- | --- | --- | --- |
 | 1 | Docs de auditoria e mapeamento | Pequena | Documentacao | Em PR |
 | 2 | Tenant scope em campanhas | Pequena | Correcao critica | Em PR |
-| 3 | Rotas admin e usuarios | Pequena | Seguranca/permissao | Em PR |
-| 4 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
-| 5 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
+| 3 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
+| 4 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
+| 5 | Rotas admin e perfis | Pequena | Seguranca/permissao | Pendente |
 | 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Pendente |
 | 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Pendente |
 | 8 | Trilho de testes minimo | Pequena | Qualidade | Pendente |
