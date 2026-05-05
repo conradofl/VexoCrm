@@ -12,6 +12,7 @@ import {
   buildCommercialIntelligencePayload,
   getCommercialIntelligenceDefaultSettings,
 } from "./commercial-intelligence.js";
+import { resolveRequiredAuthorizedClientId } from "./tenantScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -5633,8 +5634,14 @@ app.post("/api/whatsapp/messages/direct", requireFirebaseAuth, requireAdminAcces
 app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
   if (!ensureSupabase(res)) return;
   const requestedClientId = normalizeString(req.query.clientId);
-  const clientId = requestedClientId ? resolveAuthorizedClientId(req, res, requestedClientId) : null;
-  if (requestedClientId && !clientId) return;
+  const clientId = resolveRequiredAuthorizedClientId({
+    req,
+    res,
+    requestedClientId,
+    resolveAuthorizedClientId,
+    sendError,
+  });
+  if (!clientId) return;
 
   try {
     const campaignSelect =
@@ -5767,7 +5774,15 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
   if (!ensureSupabase(res)) return;
 
   const name = normalizeString(req.body?.name);
-  const clientId = normalizeString(req.body?.clientId);
+  const requestedClientId = normalizeString(req.body?.clientId);
+  const clientId = resolveRequiredAuthorizedClientId({
+    req,
+    res,
+    requestedClientId,
+    resolveAuthorizedClientId,
+    sendError,
+  });
+  if (!clientId) return;
   const importId = normalizeString(req.body?.importId) || null;
   const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
   const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 500);
@@ -5780,7 +5795,6 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
       : {};
 
   if (!name) { sendError(res, 400, "INVALID_BODY", "Missing name"); return; }
-  if (!clientId) { sendError(res, 400, "INVALID_BODY", "Missing clientId"); return; }
   if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl"); return; }
 
   try {
@@ -5861,10 +5875,25 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
   }
 
   try {
+    const { data: current, error: currentError } = await supabase
+      .from("campaigns")
+      .select("id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (currentError || !current) {
+      sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      return;
+    }
+
+    const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
+    if (!authorizedClientId) return;
+
     let { data, error } = await supabase
       .from("campaigns")
       .update(updates)
       .eq("id", id)
+      .eq("client_id", authorizedClientId)
       .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
       .single();
 
@@ -5875,6 +5904,7 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
         .from("campaigns")
         .update(fallbackUpdates)
         .eq("id", id)
+        .eq("client_id", authorizedClientId)
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at")
         .single();
       data = fallback.data ? { ...fallback.data, analytics_meta: updates.analytics_meta } : fallback.data;
@@ -5901,7 +5931,25 @@ app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess(
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
 
   try {
-    const { error } = await supabase.from("campaigns").delete().eq("id", id);
+    const { data: campaign, error: fetchError } = await supabase
+      .from("campaigns")
+      .select("id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !campaign) {
+      sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      return;
+    }
+
+    const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!authorizedClientId) return;
+
+    const { error } = await supabase
+      .from("campaigns")
+      .delete()
+      .eq("id", id)
+      .eq("client_id", authorizedClientId);
 
     if (error) {
       sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to delete campaign", error.message);
@@ -5944,6 +5992,9 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
+    const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!authorizedClientId) return;
+
     if (campaign.status !== "active") {
       sendError(res, 400, "CAMPAIGN_PAUSED", "Campaign is paused");
       return;
@@ -5955,7 +6006,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
 
     // Buscar leads reais para incluir no payload
     const leads = await buildDispatchLeads({
-      clientId: campaign.client_id,
+      clientId: authorizedClientId,
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: campaign.analytics_meta?.segmentation || null,
@@ -5966,7 +6017,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    const clientName = await getClientName(campaign.client_id);
+    const clientName = await getClientName(authorizedClientId);
 
     const headers = { "Content-Type": "application/json" };
     if (campaign.webhook_token) {
@@ -5979,7 +6030,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       campaignId: campaign.id,
       campaignName: campaign.name,
       requestedAt: new Date().toISOString(),
-      client: { id: campaign.client_id, name: clientName },
+      client: { id: authorizedClientId, name: clientName },
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: campaign.analytics_meta?.segmentation || null,
@@ -6030,7 +6081,8 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
         scheduled_for: null,
         phones: leads.map((lead) => lead.telefone).filter(Boolean),
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("client_id", authorizedClientId);
 
     res.json({
       success: true,
