@@ -5172,14 +5172,18 @@ app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("ag
   if (!ensureSupabase(res)) return;
 
   try {
-    const limit = Math.min(Number.parseInt(String(req.query.limit || "20"), 10), 50);
+    const parsedLimit = Number.parseInt(String(req.query.limit || "20"), 10);
+    const limit = Math.min(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 50);
+    const fetchLimit = canManageGlobalNotifications(req.authAccess)
+      ? limit
+      : Math.min(Math.max(limit * 5, 50), 250);
     const onlyUnread = String(req.query.onlyUnread || "false") === "true";
 
     let query = supabase
       .from("notifications")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(Number.isNaN(limit) ? 20 : limit);
+      .limit(fetchLimit);
 
     if (onlyUnread) {
       query = query.eq("read", false);
@@ -5188,14 +5192,30 @@ app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("ag
     const { data: items, error: listError } = await query;
     if (listError) throw listError;
 
-    const { count, error: countError } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("read", false);
+    const visibleItems = filterNotificationsForAccess(items || [], req.authAccess).slice(0, limit);
+    let unreadCount = 0;
 
-    if (countError) throw countError;
+    if (canManageGlobalNotifications(req.authAccess)) {
+      const { count, error: countError } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("read", false);
 
-    res.json({ items: items || [], unreadCount: count || 0 });
+      if (countError) throw countError;
+      unreadCount = count || 0;
+    } else {
+      const { data: unreadItems, error: unreadError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("read", false)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+      if (unreadError) throw unreadError;
+      unreadCount = filterNotificationsForAccess(unreadItems || [], req.authAccess).length;
+    }
+
+    res.json({ items: visibleItems, unreadCount });
   } catch (error) {
     console.error("notifications query error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
@@ -5209,14 +5229,56 @@ app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("
     const { id, read, markAllRead } = req.body || {};
 
     if (markAllRead) {
-      const { error } = await supabase.from("notifications").update({ read: true }).eq("read", false);
+      if (canManageGlobalNotifications(req.authAccess)) {
+        const { error } = await supabase.from("notifications").update({ read: true }).eq("read", false);
+        if (error) throw error;
+        res.json({ success: true });
+        return;
+      }
+
+      const { data: unreadItems, error: listError } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("read", false)
+        .limit(1000);
+
+      if (listError) throw listError;
+
+      const visibleIds = getVisibleNotificationIds(unreadItems || [], req.authAccess);
+      if (visibleIds.length === 0) {
+        res.json({ success: true, updated: 0 });
+        return;
+      }
+
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read: true })
+        .in("id", visibleIds);
       if (error) throw error;
-      res.json({ success: true });
+      res.json({ success: true, updated: visibleIds.length });
       return;
     }
 
     if (!id) {
       sendError(res, 400, "INVALID_BODY", "Missing id or markAllRead");
+      return;
+    }
+
+    const { data: notification, error: findError } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (findError) throw findError;
+
+    if (!notification) {
+      sendError(res, 404, "NOTIFICATION_NOT_FOUND", "Notification not found");
+      return;
+    }
+
+    if (!isNotificationVisibleToAccess(notification, req.authAccess)) {
+      sendError(res, 403, "FORBIDDEN_NOTIFICATION_SCOPE", "You do not have access to this notification");
       return;
     }
 
