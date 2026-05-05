@@ -80,11 +80,17 @@ Legenda de risco:
 
 | Metodo | Endpoint | Origem | Tabelas/Fonte | Filtro por tenant | Risco | Prioridade | Observacao |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/notifications` | `backend/src/server.js` | `notifications` | **Nao** | Critico | P0 | Lista notificacoes globais do sistema para qualquer usuario com acesso a `agente` |
-| PATCH | `/api/notifications` | `backend/src/server.js` | `notifications` | **Nao** | Critico | P0 | Marca notificacoes globais como lidas sem escopo de tenant |
+| GET | `/api/notifications` | `backend/src/server.js` | `notifications` | **Corrigido nesta PR** | Baixo | P4 | Filtra notificacoes por `client_id`/`tenant_id`/`company_id` ou `user_id`; notificacoes globais ficam restritas a admin interno real |
+| PATCH | `/api/notifications` | `backend/src/server.js` | `notifications` | **Corrigido nesta PR** | Baixo | P4 | Valida escopo antes de marcar uma notificacao como lida; `markAllRead` de usuario nao-admin atualiza apenas notificacoes visiveis |
 | POST | `/api/leads-webhook` | `backend/src/server.js` | `leads` | Nao via auth humana; recebe `client_id` do payload | Alto | P1 | Pode gravar em qualquer tenant se segredo vazar |
 | POST | `/api/n8n-error-webhook` | `backend/src/server.js` | `n8n_error_logs`, `notifications` | Nao | Alto | P1 | Registro e notificacao globais, sem tenant |
 | POST | `/api/conversation-memory` | `backend/src/server.js` | `leads`, `lead_conversations` | Nao por tenant | Alto | P1 | Persiste memoria por telefone, sem `client_id` |
+
+### Observacao da PR `codex/tenant-scope-notifications`
+
+- O backend atual do CRM consome `GET/PATCH /api/notifications`; por isso a correcao funcional ficou nesse caminho.
+- A Edge Function `frontend/supabase/functions/notifications-api` continua duplicando leitura/update com service role, JWT Supabase e CORS `*`. Ela nao foi removida nem reescrita nesta PR para evitar refactor amplo.
+- Proxima PR recomendada: decidir se `notifications-api` sera desativada, alinhada ao Firebase Auth do backend ou mantida apenas como endpoint legado bloqueado por tenant.
 
 ---
 
@@ -126,7 +132,7 @@ Legenda de risco:
    - `PATCH /api/campaigns/:id`
    - `DELETE /api/campaigns/:id`
    - `POST /api/campaigns/:id/trigger`
-2. escopar `GET/PATCH /api/notifications` ou assumir explicitamente que notificacoes sao globais e restringir o acesso a admin real
+2. ~~escopar `GET/PATCH /api/notifications` ou assumir explicitamente que notificacoes sao globais e restringir o acesso a admin real~~ corrigido na PR `codex/tenant-scope-notifications`
 
 ### P1 - segunda PR funcional
 
