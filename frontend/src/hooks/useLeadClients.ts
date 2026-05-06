@@ -6,11 +6,31 @@ export interface LeadClient {
   id: string;
   name: string;
   created_at?: string;
+  n8n_settings?: LeadClientN8nSettingsSummary;
+  n8n_onboarding_status?: string;
 }
 
 export interface CreateLeadClientPayload {
   id: string;
   name: string;
+  n8nSettings?: LeadClientN8nSettingsPayload;
+}
+
+export interface LeadClientN8nSettingsPayload {
+  dispatchWebhookUrl?: string | null;
+  dispatchWebhookToken?: string | null;
+  inboundBearerToken?: string | null;
+  active?: boolean;
+}
+
+export interface LeadClientN8nSettingsSummary {
+  client_id?: string;
+  dispatch_webhook_url: string | null;
+  has_dispatch_webhook_token: boolean;
+  has_inbound_bearer_token: boolean;
+  active: boolean;
+  updated_at: string | null;
+  updated_by_email?: string | null;
 }
 
 export function useLeadClients() {
@@ -128,6 +148,54 @@ export function useDeleteLeadClient() {
       } catch {
         return { id: tenantId };
       }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lead-clients"] });
+    },
+  });
+}
+
+export function useUpdateLeadClientN8nSettings() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      tenantId,
+      ...payload
+    }: LeadClientN8nSettingsPayload & { tenantId: string }): Promise<LeadClientN8nSettingsSummary> => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuario nao autenticado.");
+      }
+
+      const res = await fetch(
+        `${API_BASE_URL}/api/lead-clients/${encodeURIComponent(tenantId)}/n8n-settings`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const responsePayload = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const apiMessage =
+          responsePayload?.error?.message ||
+          responsePayload?.error?.details ||
+          `N8N settings update failed: ${res.status}`;
+        throw new Error(apiMessage);
+      }
+
+      if (!responsePayload?.item) {
+        throw new Error("N8N settings update failed: missing response payload");
+      }
+
+      return responsePayload.item;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lead-clients"] });

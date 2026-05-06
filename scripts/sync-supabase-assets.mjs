@@ -8,6 +8,8 @@ const sourceDir = join(repoRoot, "frontend", "supabase");
 const targetDir = join(repoRoot, "backend", "supabase");
 const sourceMigrationsDir = join(sourceDir, "migrations");
 const targetMigrationsDir = join(targetDir, "migrations");
+const sourceFunctionsDir = join(sourceDir, "functions");
+const targetFunctionsDir = join(targetDir, "functions");
 
 if (!existsSync(sourceDir)) {
   throw new Error(`Source Supabase directory not found: ${sourceDir}`);
@@ -27,6 +29,11 @@ for (const entry of readdirSync(sourceMigrationsDir)) {
   if (entry.endsWith(".sql")) {
     cpSync(join(sourceMigrationsDir, entry), join(targetMigrationsDir, entry));
   }
+}
+
+if (existsSync(sourceFunctionsDir)) {
+  rmSync(targetFunctionsDir, { recursive: true, force: true });
+  cpSync(sourceFunctionsDir, targetFunctionsDir, { recursive: true });
 }
 
 console.log("Synced frontend/supabase to backend/supabase");
