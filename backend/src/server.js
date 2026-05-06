@@ -11,12 +11,25 @@ import { getAuth } from "firebase-admin/auth";
 import {
   canAccessAppView,
   hasAccessPermission,
+  hasClientViewAccess,
   hasInternalPageAccess,
 } from "./accessGuards.js";
 import {
   buildCommercialIntelligencePayload,
   getCommercialIntelligenceDefaultSettings,
 } from "./commercial-intelligence.js";
+import {
+  dispatchCampaignSequence,
+  normalizeCampaignAnalyticsMeta,
+  validateCampaignAnalyticsMeta,
+} from "./campaign-outbound.js";
+import {
+  generateCampaignCopySuggestion,
+  getGroqCampaignAiStatus,
+  rewriteCampaignStep,
+  suggestCampaignDelays,
+  suggestCampaignSequence,
+} from "./campaign-ai.js";
 import { resolveRequiredAuthorizedClientId } from "./tenantScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
 
@@ -985,46 +998,6 @@ function requireAnyInternalPageAccess(pages) {
       `Missing permission for pages ${normalizedPages.join(", ")}`
     );
   };
-}
-
-function hasInternalPageAccess(access, page) {
-  if (access?.role !== "internal") {
-    return false;
-  }
-
-  if (page === "empresas") {
-    return !!access.isAdmin;
-  }
-
-  if (access.isAdmin || access.internalPages?.includes(page)) {
-    return true;
-  }
-
-  return false;
-}
-
-function hasClientViewAccess(access, view) {
-  return access?.role === "client" && access.allowedViews?.includes(view);
-}
-
-function hasAccessPermission(access, permission) {
-  if (access?.role !== "internal") {
-    return false;
-  }
-
-  if (permission === "tenants.manage") {
-    return !!access.isAdmin;
-  }
-
-  if (access.isAdmin || access.permissions?.includes(permission)) {
-    return true;
-  }
-
-  return false;
-}
-
-function canAccessAppView(access, view) {
-  return hasInternalPageAccess(access, view) || hasClientViewAccess(access, view);
 }
 
 function requireAppViewAccess(view) {
@@ -7265,8 +7238,8 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
     const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
     if (!authorizedClientId) return;
 
-    if (campaign.status !== "active") {
-      sendError(res, 400, "CAMPAIGN_PAUSED", "Campaign is paused");
+    if (!canCampaignBeDispatched(campaign.status)) {
+      sendError(res, 400, "CAMPAIGN_NOT_DISPATCHABLE", `Campaign cannot be dispatched from status ${campaign.status}`);
       return;
     }
     if (campaign.archived_at) {
@@ -7274,16 +7247,12 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    // Buscar leads reais para incluir no payload
-    const leads = await buildDispatchLeads({
-      clientId: authorizedClientId,
-      importId: campaign.import_id || null,
-      limit: campaign.limit_per_run,
-      segmentation: campaign.analytics_meta?.segmentation || null,
-    });
-
-    if (leads.length === 0) {
-      sendError(res, 404, "NO_DISPATCH_LEADS", "No leads found for this campaign");
+    const result = await executeCampaignDispatch({ ...campaign, client_id: authorizedClientId }, { triggerSource: "manual" });
+    res.json(result);
+  } catch (error) {
+    console.error("campaign trigger error:", error);
+    if (error?.name === "AbortError") {
+      sendError(res, 504, "N8N_TIMEOUT", "n8n webhook timed out (15s)");
       return;
     }
     sendError(
@@ -7295,41 +7264,22 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
   }
 });
 
-    const clientName = await getClientName(authorizedClientId);
+app.post("/api/campaigns/reply-webhook", async (req, res) => {
+  if (!ensureSupabase(res)) return;
 
-    const headers = { "Content-Type": "application/json" };
-    if (campaign.webhook_token) {
-      headers.Authorization = `Bearer ${campaign.webhook_token}`;
-    }
-
-    const payload = {
-      source: "vexocrm",
-      action: "campaign_dispatch",
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      requestedAt: new Date().toISOString(),
-      client: { id: authorizedClientId, name: clientName },
-      importId: campaign.import_id || null,
-      limit: campaign.limit_per_run,
-      segmentation: campaign.analytics_meta?.segmentation || null,
-      message: campaign.analytics_meta?.message || "",
-      image: campaign.analytics_meta?.image || null,
-      total: leads.length,
-      phones: leads.map((l) => l.telefone),
-      leads: leads.map((l) => ({
-        id: l.id,
-        telefone: l.telefone,
-        nome: l.nome,
-        cidade: l.cidade,
-        estado: l.estado,
-        status: l.status,
-        tipo_cliente: l.tipo_cliente,
-        faixa_consumo: l.faixa_consumo,
-        qualificacao: l.qualificacao,
-        data_hora: l.data_hora,
-        created_at: l.created_at,
-      })),
-    };
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? body.client?.id);
+  const phone = sanitizePhone(
+    body.phone ??
+    body.telefone ??
+    body.number ??
+    body.remoteJid ??
+    body.data?.key?.remoteJid ??
+    body.data?.message?.conversation
+  );
+  const repliedAt =
+    normalizeIsoDate(body.repliedAt ?? body.timestamp ?? body.created_at ?? body.data?.messageTimestamp) ||
+    new Date().toISOString();
 
   if (!clientId) {
     sendError(res, 400, "INVALID_BODY", "Missing clientId");
@@ -7346,15 +7296,27 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
       return;
     }
 
-    await supabase
-      .from("campaigns")
-      .update({
-        last_triggered_at: new Date().toISOString(),
-        scheduled_for: null,
-        phones: leads.map((lead) => lead.telefone).filter(Boolean),
-      })
-      .eq("id", id)
-      .eq("client_id", authorizedClientId);
+    const updatePayload = {
+      status_conversa: "em_atendimento",
+      ultima_interacao_usuario: repliedAt,
+    };
+    const [importItemsResult, leadsResult] = await Promise.all([
+      supabase
+        .from("lead_import_items")
+        .update(updatePayload)
+        .eq("client_id", clientId)
+        .eq("telefone", phone)
+        .select("id"),
+      supabase
+        .from("leads")
+        .update(updatePayload)
+        .eq("client_id", clientId)
+        .eq("telefone", phone)
+        .select("id"),
+    ]);
+
+    if (importItemsResult.error) throw importItemsResult.error;
+    if (leadsResult.error) throw leadsResult.error;
 
     res.json({
       success: true,
