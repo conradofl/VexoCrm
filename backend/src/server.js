@@ -37,7 +37,6 @@ import { whatsappSessionManager } from "./whatsapp.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
-const DEPLOY_MARKER = "campaign-evolution-routes-2026-05-06-01";
 const app = express();
 app.use(express.json({ limit: "15mb" }));
 const isProduction = process.env.NODE_ENV === "production";
@@ -1018,6 +1017,133 @@ function requireAppViewAccess(view) {
 
     sendError(res, 403, "FORBIDDEN", `Missing permission for view ${view}`);
   };
+}
+
+function canManageGlobalNotifications(access) {
+  if (access?.role !== "internal") {
+    return false;
+  }
+
+  return (
+    access.isAdmin ||
+    hasAccessPermission(access, "users.manage") ||
+    hasAccessPermission(access, "tenants.manage")
+  );
+}
+
+function normalizeNotificationScopeValues(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeString(item))
+      .filter(Boolean);
+  }
+
+  const singleValue = normalizeString(value);
+  return singleValue ? [singleValue] : [];
+}
+
+function matchesNotificationClientScope(notification, access) {
+  const notificationClientIds = Array.from(
+    new Set([
+      ...normalizeNotificationScopeValues(notification?.client_id),
+      ...normalizeNotificationScopeValues(notification?.clientId),
+      ...normalizeNotificationScopeValues(notification?.tenant_id),
+      ...normalizeNotificationScopeValues(notification?.tenantId),
+      ...normalizeNotificationScopeValues(notification?.client_ids),
+      ...normalizeNotificationScopeValues(notification?.clientIds),
+      ...normalizeNotificationScopeValues(notification?.tenant_ids),
+      ...normalizeNotificationScopeValues(notification?.tenantIds),
+    ])
+  );
+
+  if (notificationClientIds.length === 0) {
+    return true;
+  }
+
+  if (access?.role !== "internal") {
+    return false;
+  }
+
+  if (access.isAdmin || access.scopeMode === "all_clients") {
+    return true;
+  }
+
+  const accessClientIds = new Set(normalizeStringArray(access.clientIds || access.tenantIds || []));
+  if (accessClientIds.size === 0) {
+    return false;
+  }
+
+  return notificationClientIds.some((clientId) => accessClientIds.has(clientId));
+}
+
+function matchesNotificationInternalScope(notification, access) {
+  const requiredPages = Array.from(
+    new Set([
+      ...normalizeNotificationScopeValues(notification?.internal_page),
+      ...normalizeNotificationScopeValues(notification?.internalPage),
+      ...normalizeNotificationScopeValues(notification?.internal_pages),
+      ...normalizeNotificationScopeValues(notification?.internalPages),
+      ...normalizeNotificationScopeValues(notification?.target_page),
+      ...normalizeNotificationScopeValues(notification?.targetPage),
+      ...normalizeNotificationScopeValues(notification?.target_pages),
+      ...normalizeNotificationScopeValues(notification?.targetPages),
+    ])
+  );
+  const requiredPermissions = Array.from(
+    new Set([
+      ...normalizeNotificationScopeValues(notification?.permission),
+      ...normalizeNotificationScopeValues(notification?.permissions),
+      ...normalizeNotificationScopeValues(notification?.target_permission),
+      ...normalizeNotificationScopeValues(notification?.targetPermission),
+      ...normalizeNotificationScopeValues(notification?.target_permissions),
+      ...normalizeNotificationScopeValues(notification?.targetPermissions),
+    ])
+  );
+
+  if (requiredPages.length === 0 && requiredPermissions.length === 0) {
+    return true;
+  }
+
+  if (access?.role !== "internal") {
+    return false;
+  }
+
+  if (access.isAdmin) {
+    return true;
+  }
+
+  if (requiredPages.some((page) => hasInternalPageAccess(access, page))) {
+    return true;
+  }
+
+  if (requiredPermissions.some((permission) => hasAccessPermission(access, permission))) {
+    return true;
+  }
+
+  return false;
+}
+
+function isNotificationVisibleToAccess(notification, access) {
+  if (!notification || access?.role !== "internal") {
+    return false;
+  }
+
+  return (
+    matchesNotificationClientScope(notification, access) &&
+    matchesNotificationInternalScope(notification, access)
+  );
+}
+
+function filterNotificationsForAccess(items, access) {
+  return (Array.isArray(items) ? items : []).filter((item) =>
+    isNotificationVisibleToAccess(item, access)
+  );
+}
+
+function getVisibleNotificationIds(items, access) {
+  return filterNotificationsForAccess(items, access)
+    .map((item) => item?.id)
+    .filter(Boolean);
 }
 
 function ensureSharedRoutePageAccess(req, res, page) {
@@ -4192,7 +4318,6 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    deployMarker: DEPLOY_MARKER,
     timestamp: new Date().toISOString(),
     services: {
       supabase: !!supabase,

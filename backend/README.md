@@ -130,20 +130,23 @@ cd backend
 bash ./deploy.sh
 ```
 
-No EasyPanel com auto deploy, o comportamento automatico agora vem da propria imagem do backend:
+No EasyPanel com auto deploy, a imagem do backend inicia a API com `npm start` por padrao.
+
+Se voce quiser aplicar migrations no boot, habilite explicitamente `RUN_SUPABASE_MIGRATIONS_ON_START=1`. Nesse modo:
 
 - o container sobe;
 - executa `backend/scripts/apply-supabase-migrations.sh`;
 - aplica as migrations de `backend/supabase/migrations`;
 - e so depois inicia a API com `npm start`.
 
-Para isso funcionar no EasyPanel, configure no service as variaveis:
+Para esse fluxo opcional funcionar no EasyPanel, configure no service as variaveis:
 
+- `RUN_SUPABASE_MIGRATIONS_ON_START=1`
 - `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD`
 - ou `SUPABASE_DB_URL`
 - opcionalmente `SUPABASE_PROJECT_ID` se quiser sobrescrever `backend/supabase/config.toml`
 
-Se essas variaveis nao estiverem presentes e `RUN_SUPABASE_MIGRATIONS_ON_START=1`, o container falha antes de publicar uma versao possivelmente incompativel com o schema.
+Se essas variaveis nao estiverem presentes e `RUN_SUPABASE_MIGRATIONS_ON_START=1`, o container falha antes de iniciar a API.
 
 Use 1 replica no service se voce quiser evitar duas instancias tentando aplicar migrations ao mesmo tempo durante um deploy.
 

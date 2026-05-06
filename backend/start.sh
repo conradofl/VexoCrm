@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-if [[ "${RUN_SUPABASE_MIGRATIONS_ON_START:-1}" == "1" ]]; then
+if [[ "${RUN_SUPABASE_MIGRATIONS_ON_START:-0}" == "1" ]]; then
     echo "==> Running Supabase migrations before starting the API..."
     bash ./scripts/apply-supabase-migrations.sh
 else
