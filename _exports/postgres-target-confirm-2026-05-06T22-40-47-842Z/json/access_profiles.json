@@ -1,0 +1,113 @@
+[
+  {
+    "key": "internal_admin",
+    "label": "Admin interno",
+    "description": "Acesso total ao CRM e administracao do ambiente.",
+    "role": "internal",
+    "scope_mode": "all_clients",
+    "approval_level": "director",
+    "permissions": [
+      "dashboard.view",
+      "leads.view",
+      "leads.export",
+      "imports.manage",
+      "whatsapp.view",
+      "whatsapp.reply",
+      "campaigns.manage",
+      "agente.view",
+      "users.view",
+      "users.manage"
+    ],
+    "internal_pages": [
+      "dashboard",
+      "leads",
+      "planilhas",
+      "whatsapp",
+      "agente",
+      "usuarios",
+      "campanhas"
+    ],
+    "allowed_views": [],
+    "is_system": true,
+    "is_locked": true,
+    "created_at": "2026-04-13T22:32:58.561Z",
+    "updated_at": "2026-04-13T22:32:58.561Z"
+  },
+  {
+    "key": "internal_manager",
+    "label": "Gestor interno",
+    "description": "Gestao operacional com acesso ampliado aos modulos internos.",
+    "role": "internal",
+    "scope_mode": "assigned_clients",
+    "approval_level": "manager",
+    "permissions": [
+      "dashboard.view",
+      "leads.view",
+      "leads.export",
+      "imports.manage",
+      "whatsapp.view",
+      "whatsapp.reply",
+      "campaigns.manage",
+      "agente.view",
+      "users.view"
+    ],
+    "internal_pages": [
+      "dashboard",
+      "leads",
+      "planilhas",
+      "whatsapp",
+      "agente",
+      "usuarios",
+      "campanhas"
+    ],
+    "allowed_views": [],
+    "is_system": true,
+    "is_locked": false,
+    "created_at": "2026-04-13T22:32:58.561Z",
+    "updated_at": "2026-04-13T22:32:58.561Z"
+  },
+  {
+    "key": "pending",
+    "label": "Aguardando aprovacao",
+    "description": "Conta ainda sem liberacao operacional.",
+    "role": "pending",
+    "scope_mode": "no_client_access",
+    "approval_level": "none",
+    "permissions": [],
+    "internal_pages": [],
+    "allowed_views": [],
+    "is_system": true,
+    "is_locked": false,
+    "created_at": "2026-04-13T22:32:58.561Z",
+    "updated_at": "2026-04-13T22:32:58.561Z"
+  },
+  {
+    "key": "internal_operator",
+    "label": "Operador do cliente",
+    "description": "Perfil de cliente operacional para uso diario.",
+    "role": "internal",
+    "scope_mode": "assigned_clients",
+    "approval_level": "operator",
+    "permissions": [
+      "dashboard.view",
+      "leads.view",
+      "whatsapp.view",
+      "whatsapp.reply",
+      "imports.manage",
+      "leads.export"
+    ],
+    "internal_pages": [
+      "dashboard",
+      "leads",
+      "planilhas",
+      "whatsapp",
+      "agente",
+      "campanhas"
+    ],
+    "allowed_views": [],
+    "is_system": true,
+    "is_locked": false,
+    "created_at": "2026-04-13T22:32:58.561Z",
+    "updated_at": "2026-04-28T02:23:24.435Z"
+  }
+]

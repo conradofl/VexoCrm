@@ -1,0 +1,74 @@
+[
+  {
+    "id": "b7651fee-b5ef-432c-a85a-631c346c7e8b",
+    "client_id": "infinie",
+    "source_name": "planilha-numeros(Recuperado Automaticamente).xlsx",
+    "source_type": "xlsx",
+    "total_rows": 5,
+    "imported_rows": 5,
+    "skipped_rows": 0,
+    "uploaded_by_uid": "IozfnQTmWHQAxopr3FyNb1SdYs52",
+    "uploaded_by_email": "luizz.felipe.santos17@gmail.com",
+    "created_at": "2026-03-26T03:02:09.422Z"
+  },
+  {
+    "id": "eedc78c6-f425-406c-851c-d87e20b78377",
+    "client_id": "infinie",
+    "source_name": "Untitled 1.xls",
+    "source_type": "xls",
+    "total_rows": 5,
+    "imported_rows": 5,
+    "skipped_rows": 0,
+    "uploaded_by_uid": "IozfnQTmWHQAxopr3FyNb1SdYs52",
+    "uploaded_by_email": "luizz.felipe.santos17@gmail.com",
+    "created_at": "2026-03-27T11:37:16.941Z"
+  },
+  {
+    "id": "9f459d65-ab91-428c-8e61-9cc16d744617",
+    "client_id": "infinie",
+    "source_name": "EMPRESÁRIOS TRIÂNGULO MINEIRO.xlsx",
+    "source_type": "xlsx",
+    "total_rows": 865,
+    "imported_rows": 0,
+    "skipped_rows": 865,
+    "uploaded_by_uid": "3t50ENA5IRUjmG7MrbQ5XzKYFCp2",
+    "uploaded_by_email": "caioalmeid@yahoo.com.br",
+    "created_at": "2026-04-08T17:53:32.185Z"
+  },
+  {
+    "id": "d5fabc4c-4ca3-4ee5-8993-6dc6b54d103b",
+    "client_id": "outlier",
+    "source_name": "Campanha Conrado.csv",
+    "source_type": "csv",
+    "total_rows": 1,
+    "imported_rows": 1,
+    "skipped_rows": 0,
+    "uploaded_by_uid": "pKpOKg3Fttf6AnYsTzZD7xjJLaN2",
+    "uploaded_by_email": "conradofl@gmail.com",
+    "created_at": "2026-05-01T12:03:27.055Z"
+  },
+  {
+    "id": "4b8cdb72-0b67-4132-9ca1-fad63d8b9bb4",
+    "client_id": "outlier",
+    "source_name": "Lead2Teste.xlsx",
+    "source_type": "xlsx",
+    "total_rows": 2,
+    "imported_rows": 2,
+    "skipped_rows": 0,
+    "uploaded_by_uid": "IozfnQTmWHQAxopr3FyNb1SdYs52",
+    "uploaded_by_email": "luizz.felipe.santos17@gmail.com",
+    "created_at": "2026-05-02T01:17:26.320Z"
+  },
+  {
+    "id": "15a9bb7a-173d-4d85-929a-0610e12cbc45",
+    "client_id": "teste",
+    "source_name": "Lead2Teste.xlsx",
+    "source_type": "xlsx",
+    "total_rows": 2,
+    "imported_rows": 2,
+    "skipped_rows": 0,
+    "uploaded_by_uid": "IozfnQTmWHQAxopr3FyNb1SdYs52",
+    "uploaded_by_email": "luizz.felipe.santos17@gmail.com",
+    "created_at": "2026-05-06T00:35:33.480Z"
+  }
+]

@@ -1,0 +1,253 @@
+{
+  "generatedAt": "2026-05-06T22:40:48.823Z",
+  "tables": [
+    {
+      "table": "access_profiles",
+      "count": 4,
+      "columns": [
+        "key",
+        "label",
+        "description",
+        "role",
+        "scope_mode",
+        "approval_level",
+        "permissions",
+        "internal_pages",
+        "allowed_views",
+        "is_system",
+        "is_locked",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "table": "analytics_insights",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "campaign_dispatch_logs",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "campaigns",
+      "count": 3,
+      "columns": [
+        "id",
+        "name",
+        "client_id",
+        "import_id",
+        "limit_per_run",
+        "webhook_url",
+        "webhook_token",
+        "status",
+        "last_triggered_at",
+        "created_by_uid",
+        "created_by_email",
+        "created_at",
+        "scheduled_for",
+        "archived_at",
+        "budget_amount",
+        "channel",
+        "audience_type",
+        "target_city",
+        "target_state",
+        "analytics_meta"
+      ]
+    },
+    {
+      "table": "commercial_intelligence_settings",
+      "count": 2,
+      "columns": [
+        "client_id",
+        "qualification_threshold",
+        "sla_minutes",
+        "default_period",
+        "distribution_strategy",
+        "ranking_rules",
+        "metric_rules",
+        "alert_rules",
+        "permissions",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "table": "crm_consultants",
+      "count": 1,
+      "columns": [
+        "id",
+        "client_id",
+        "name",
+        "email",
+        "phone",
+        "city",
+        "state",
+        "territory_cities",
+        "territory_states",
+        "lead_types",
+        "contract_value_min",
+        "contract_value_max",
+        "daily_capacity",
+        "open_lead_limit",
+        "assignment_weight",
+        "priority_rank",
+        "available",
+        "active",
+        "performance_meta",
+        "created_at",
+        "updated_at",
+        "position",
+        "territory_regions",
+        "available_hours",
+        "accepts_auto_assign",
+        "notes"
+      ]
+    },
+    {
+      "table": "lead_assignments",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "lead_client_n8n_settings",
+      "count": 2,
+      "columns": [
+        "client_id",
+        "dispatch_webhook_url",
+        "dispatch_webhook_token",
+        "inbound_bearer_token",
+        "active",
+        "created_at",
+        "updated_at",
+        "updated_by_uid",
+        "updated_by_email"
+      ]
+    },
+    {
+      "table": "lead_conversations",
+      "count": 21,
+      "columns": [
+        "id",
+        "telefone",
+        "conversation_compressed",
+        "tamanho_original",
+        "unknown_lead",
+        "created_at"
+      ]
+    },
+    {
+      "table": "lead_conversions",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "lead_distribution_rules",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "lead_import_items",
+      "count": 880,
+      "columns": [
+        "id",
+        "import_id",
+        "client_id",
+        "row_number",
+        "telefone",
+        "lead_id",
+        "imported",
+        "skip_reason",
+        "raw_data",
+        "normalized_data",
+        "created_at",
+        "status_conversa",
+        "ultima_interacao_bot",
+        "ultima_interacao_usuario"
+      ]
+    },
+    {
+      "table": "lead_imports",
+      "count": 6,
+      "columns": [
+        "id",
+        "client_id",
+        "source_name",
+        "source_type",
+        "total_rows",
+        "imported_rows",
+        "skipped_rows",
+        "uploaded_by_uid",
+        "uploaded_by_email",
+        "created_at"
+      ]
+    },
+    {
+      "table": "lead_messages",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "leads",
+      "count": 12,
+      "columns": [
+        "id",
+        "client_id",
+        "telefone",
+        "nome",
+        "tipo_cliente",
+        "faixa_consumo",
+        "cidade",
+        "estado",
+        "status",
+        "data_hora",
+        "qualificacao",
+        "created_at",
+        "updated_at",
+        "source_campaign_id",
+        "lead_score",
+        "potential_contract_value",
+        "first_contact_at",
+        "qualified_at",
+        "closed_at",
+        "lead_temperature",
+        "lead_origin",
+        "behavior_meta",
+        "status_conversa"
+      ]
+    },
+    {
+      "table": "leads_clients",
+      "count": 4,
+      "columns": [
+        "id",
+        "name",
+        "created_at"
+      ]
+    },
+    {
+      "table": "metric_snapshots",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "n8n_error_logs",
+      "count": 0,
+      "columns": []
+    },
+    {
+      "table": "notifications",
+      "count": 5,
+      "columns": [
+        "id",
+        "type",
+        "title",
+        "description",
+        "link",
+        "read",
+        "created_at"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "client_id": "outlier",
+    "dispatch_webhook_url": null,
+    "dispatch_webhook_token": null,
+    "inbound_bearer_token": null,
+    "active": false,
+    "created_at": "2026-05-06T00:30:18.117Z",
+    "updated_at": "2026-05-06T00:30:18.692Z",
+    "updated_by_uid": "IozfnQTmWHQAxopr3FyNb1SdYs52",
+    "updated_by_email": "luizz.felipe.santos17@gmail.com"
+  },
+  {
+    "client_id": "teste",
+    "dispatch_webhook_url": "https://apps-evolution-api.ymqjmy.easypanel.host/message/sendText/Teste",
+    "dispatch_webhook_token": "B4E009131616-4B65-8D5E-80A7C6A49BF9",
+    "inbound_bearer_token": "teste",
+    "active": true,
+    "created_at": "2026-05-06T00:37:26.949Z",
+    "updated_at": "2026-05-06T04:11:06.510Z",
+    "updated_by_uid": "IozfnQTmWHQAxopr3FyNb1SdYs52",
+    "updated_by_email": "luizz.felipe.santos17@gmail.com"
+  }
+]

@@ -1,0 +1,43 @@
+[
+  {
+    "id": "e5266d00-78dd-489b-8775-d8f31b4f2a17",
+    "client_id": "infinie",
+    "name": "Conrado",
+    "email": "conradofl@gmail.com",
+    "phone": "5534997817660",
+    "city": "Uberlândia",
+    "state": "MG",
+    "territory_cities": [
+      "Uberlândia"
+    ],
+    "territory_states": [
+      "MG"
+    ],
+    "lead_types": [
+      "Residencial",
+      "Empresa"
+    ],
+    "contract_value_min": "100000.00",
+    "contract_value_max": "500000.00",
+    "daily_capacity": 20,
+    "open_lead_limit": 30,
+    "assignment_weight": "1.00",
+    "priority_rank": 1,
+    "available": true,
+    "active": true,
+    "performance_meta": {
+      "notes": "",
+      "position": "Closer",
+      "availableHours": {},
+      "acceptsAutoAssign": true,
+      "territory_regions": []
+    },
+    "created_at": "2026-05-02T01:06:01.821Z",
+    "updated_at": "2026-05-02T01:06:01.821Z",
+    "position": null,
+    "territory_regions": [],
+    "available_hours": {},
+    "accepts_auto_assign": true,
+    "notes": null
+  }
+]

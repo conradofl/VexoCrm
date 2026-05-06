@@ -1,0 +1,47 @@
+[
+  {
+    "id": "7a3940f8-cab6-44eb-8027-d4f3d1c646af",
+    "type": "client_signup",
+    "title": "Novo cadastro de cliente: Vexo",
+    "description": "Con (souvexo.ai@gmail.com) aguardando associacao de acessos.",
+    "link": null,
+    "read": true,
+    "created_at": "2026-03-18T16:23:36.002Z"
+  },
+  {
+    "id": "5a88e5e1-0a15-4f08-8796-e70b9418678b",
+    "type": "client_signup",
+    "title": "Novo cadastro de cliente: Infinie",
+    "description": "Prisicila (sdr.infinie@gmail.com) aguardando associacao de acessos.",
+    "link": null,
+    "read": true,
+    "created_at": "2026-03-19T12:57:27.557Z"
+  },
+  {
+    "id": "694737f9-1940-433b-97bb-4b7112ecdd5c",
+    "type": "client_signup",
+    "title": "Novo cadastro de cliente: Infinie",
+    "description": "Caio Almeida (caioalmeid@yahoo.com.br) aguardando associacao de acessos.",
+    "link": null,
+    "read": true,
+    "created_at": "2026-04-08T17:42:22.183Z"
+  },
+  {
+    "id": "261fe294-4fe4-45f1-bbe3-12ac3a4af110",
+    "type": "client_signup",
+    "title": "Novo cadastro de cliente: INFINIE",
+    "description": "Priscila Karina Silva (sdr.infinie@gmail.com) aguardando associacao de acessos.",
+    "link": null,
+    "read": true,
+    "created_at": "2026-04-27T19:51:32.164Z"
+  },
+  {
+    "id": "2ca564a8-13c4-47b6-a1f3-41882f5d77d0",
+    "type": "client_signup",
+    "title": "Novo cadastro de cliente: Infinie",
+    "description": "Joao (conrado.cfl@gmail.com) aguardando associacao de acessos.",
+    "link": null,
+    "read": true,
+    "created_at": "2026-04-27T23:58:08.046Z"
+  }
+]

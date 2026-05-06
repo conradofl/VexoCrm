@@ -1,0 +1,66 @@
+[
+  {
+    "client_id": "outlier",
+    "qualification_threshold": "60.00",
+    "sla_minutes": 30,
+    "default_period": "30d",
+    "distribution_strategy": "hybrid",
+    "ranking_rules": {
+      "cities": "qualificationRate",
+      "campaigns": "qualifiedLeads",
+      "consultants": "conversionRate"
+    },
+    "metric_rules": {
+      "qualificationStatus": [
+        "qualificado",
+        "qualificados",
+        "em_qualificacao"
+      ]
+    },
+    "alert_rules": {
+      "lowResponseRate": 15,
+      "lowConversionRate": 10,
+      "highQualificationDelayHours": 24,
+      "consultantBelowAverageFactor": 0.7
+    },
+    "permissions": {
+      "canEditSettings": true,
+      "canManageConsultants": true,
+      "canManageDistribution": true
+    },
+    "created_at": "2026-04-29T16:40:07.423Z",
+    "updated_at": "2026-04-29T16:40:27.214Z"
+  },
+  {
+    "client_id": "infinie",
+    "qualification_threshold": "60.00",
+    "sla_minutes": 30,
+    "default_period": "30d",
+    "distribution_strategy": "round_robin",
+    "ranking_rules": {
+      "cities": "qualificationRate",
+      "campaigns": "qualifiedLeads",
+      "consultants": "conversionRate"
+    },
+    "metric_rules": {
+      "qualificationStatus": [
+        "qualificado",
+        "qualificados",
+        "em_qualificacao"
+      ]
+    },
+    "alert_rules": {
+      "lowResponseRate": 15,
+      "lowConversionRate": 10,
+      "highQualificationDelayHours": 24,
+      "consultantBelowAverageFactor": 0.7
+    },
+    "permissions": {
+      "canEditSettings": true,
+      "canManageConsultants": true,
+      "canManageDistribution": true
+    },
+    "created_at": "2026-04-21T20:12:07.222Z",
+    "updated_at": "2026-05-02T01:03:27.108Z"
+  }
+]
