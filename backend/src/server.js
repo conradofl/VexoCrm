@@ -7832,7 +7832,7 @@ app.use((error, _req, res, _next) => {
 
 const port = Number.parseInt(process.env.PORT || "3001", 10);
 app.listen(port, () => {
-  console.log(`VexoApi listening on port ${port} (${DEPLOY_MARKER})`);
+  console.log(`VexoApi listening on port ${port}`);
   startCampaignScheduler();
 
   whatsappSessionManager.restorePersistedSession().catch((error) => {
