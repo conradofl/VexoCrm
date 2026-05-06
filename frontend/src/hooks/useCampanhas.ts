@@ -24,12 +24,35 @@ export interface Campaign {
 export interface CampaignAnalyticsMeta {
   segmentation?: CampaignSegmentation;
   message?: string;
-  image?: {
-    name: string;
-    type: string;
-    size: number;
-    dataUrl: string;
-  } | null;
+  image?: CampaignImageAsset | null;
+  sequence?: CampaignSequenceStep[];
+  dispatchOptions?: CampaignDispatchOptions;
+}
+
+export interface CampaignImageAsset {
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string;
+}
+
+export interface CampaignSequenceStep {
+  id: string;
+  type: "text" | "image";
+  order: number;
+  text: string;
+  image: CampaignImageAsset | null;
+  enabled: boolean;
+  delayAfterSeconds: number;
+}
+
+export interface CampaignDispatchOptions {
+  leadDelaySeconds: number;
+  stopOnStepFailure: boolean;
+  aiAssisted: boolean;
+  waitForReply?: boolean;
+  replyTimeoutSeconds?: number;
+  replyPollIntervalSeconds?: number;
 }
 
 export interface CampaignSegmentation {
@@ -73,9 +96,16 @@ export interface CreateCampaignPayload {
   importId?: string | null;
   limitPerRun?: number;
   scheduledFor?: string | null;
-  webhookUrl?: string;
-  webhookToken?: string | null;
   analyticsMeta?: CampaignAnalyticsMeta;
+}
+
+export interface DirectDispatchPayload {
+  clientId: string;
+  phone: string;
+  text?: string;
+  imageCaption?: string;
+  imageFirst?: boolean;
+  image?: CampaignImageAsset | null;
 }
 
 export interface UpdateCampaignPayload {
@@ -84,8 +114,6 @@ export interface UpdateCampaignPayload {
   limitPerRun?: number;
   scheduledFor?: string | null;
   archived?: boolean;
-  webhookUrl?: string;
-  webhookToken?: string | null;
   analyticsMeta?: CampaignAnalyticsMeta;
 }
 
@@ -93,8 +121,44 @@ export interface TriggerCampaignResponse {
   success: boolean;
   campaignId: string;
   campaignName: string;
-  webhookUrl: string;
-  n8nResponse: string | null;
+  provider: "evolution";
+  successCount: number;
+  failureCount: number;
+  successPhones: string[];
+  failures: Array<{
+    phone: string | null;
+    stepId: string | null;
+    stepType: "text" | "image" | null;
+    reason: string;
+  }>;
+  completedCampaign: boolean;
+}
+
+export interface DirectDispatchResponse {
+  success: boolean;
+  provider: "evolution";
+  phone: string;
+  successCount: number;
+  failureCount: number;
+  successPhones: string[];
+  failures: TriggerCampaignResponse["failures"];
+  completedCampaign: boolean;
+}
+
+export interface CampaignAiStatus {
+  enabled: boolean;
+  provider: "groq";
+  model: string;
+}
+
+export interface CampaignAiSuggestionContext {
+  campaignName?: string;
+  goal?: string;
+  style?: string;
+  segmentation?: CampaignSegmentation;
+  sequence?: CampaignSequenceStep[];
+  dispatchOptions?: CampaignDispatchOptions;
+  step?: CampaignSequenceStep;
 }
 
 export function useCampanhas(clientId?: string) {
@@ -269,4 +333,116 @@ export function useTriggerCampaign() {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     },
   });
+}
+
+export function useDirectDispatch() {
+  const { getIdToken } = useAuth();
+
+  return useMutation({
+    mutationFn: async (payload: DirectDispatchPayload): Promise<DirectDispatchResponse> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/direct-dispatch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error?.message || `Erro ao disparar mensagem: ${res.status}`);
+      }
+
+      return data;
+    },
+  });
+}
+
+export function useCampaignAiStatus() {
+  const { isAuthenticated, canAccessInternalPage, getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["campaign-ai-status"],
+    enabled: isAuthenticated && canAccessInternalPage("planilhas"),
+    queryFn: async (): Promise<CampaignAiStatus> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/ai/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Erro ao consultar IA: ${res.status} ${err}`);
+      }
+
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useCampaignAiMutation<TResponse>(
+  endpoint: string,
+  errorLabel: string,
+) {
+  const { getIdToken } = useAuth();
+
+  return useMutation({
+    mutationFn: async (payload: CampaignAiSuggestionContext): Promise<TResponse> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error?.message || `${errorLabel}: ${res.status}`);
+      }
+
+      return data.item;
+    },
+  });
+}
+
+export function useGenerateCampaignCopy() {
+  return useCampaignAiMutation<{ copy: string; rationale: string }>(
+    "/api/campaigns/ai/generate-copy",
+    "Erro ao gerar copy",
+  );
+}
+
+export function useSuggestCampaignSequence() {
+  return useCampaignAiMutation<{
+    sequence: CampaignSequenceStep[];
+    dispatchOptions: CampaignDispatchOptions;
+    rationale: string;
+  }>("/api/campaigns/ai/suggest-sequence", "Erro ao sugerir sequencia");
+}
+
+export function useSuggestCampaignDelays() {
+  return useCampaignAiMutation<{
+    sequence: CampaignSequenceStep[];
+    dispatchOptions: CampaignDispatchOptions;
+    rationale: string;
+  }>("/api/campaigns/ai/suggest-delays", "Erro ao sugerir atrasos");
+}
+
+export function useRewriteCampaignStep() {
+  return useCampaignAiMutation<{
+    step: CampaignSequenceStep;
+    rationale: string;
+  }>("/api/campaigns/ai/rewrite-step", "Erro ao reescrever passo");
 }

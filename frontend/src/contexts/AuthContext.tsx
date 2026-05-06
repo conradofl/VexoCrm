@@ -291,10 +291,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isInternalUser = accessRole === "internal";
   const isClientUser = accessRole === "client";
   const isPendingUser = accessRole === "pending";
-  const hasLegacyTenantPageAccess =
-    accessPreset === "internal_manager" && internalPages.includes("usuarios");
-  const hasLegacyTenantManagePermission =
-    hasLegacyTenantPageAccess && permissions.includes("users.view");
   const canAccessClient = useCallback(
     (targetClientId: string) => {
       if (isAdminUser) return true;
@@ -310,17 +306,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const canAccessInternalPage = useCallback(
     (page: InternalPage) =>
       isInternalUser &&
-      (isAdminUser ||
-        internalPages.includes(page) ||
-        (page === "empresas" && hasLegacyTenantPageAccess)),
-    [hasLegacyTenantPageAccess, internalPages, isAdminUser, isInternalUser]
+      (isAdminUser || (page !== "empresas" && internalPages.includes(page))),
+    [internalPages, isAdminUser, isInternalUser]
   );
   const hasPermission = useCallback(
     (permission: AccessPermission) =>
-      isAdminUser ||
-      permissions.includes(permission) ||
-      (permission === "tenants.manage" && hasLegacyTenantManagePermission),
-    [hasLegacyTenantManagePermission, isAdminUser, permissions]
+      isAdminUser || (permission !== "tenants.manage" && permissions.includes(permission)),
+    [isAdminUser, permissions]
   );
   const defaultRoute = isPendingUser
     ? "/aguardando-aprovacao"

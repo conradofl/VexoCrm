@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, KeyRound, Plus, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { Building2, CheckCircle2, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -21,7 +21,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { useCreateLeadClient, useDeleteLeadClient, useLeadClients } from "@/hooks/useLeadClients";
+import {
+  LeadClient,
+  useCreateLeadClient,
+  useDeleteLeadClient,
+  useLeadClients,
+  useUpdateLeadClientN8nSettings,
+} from "@/hooks/useLeadClients";
 import { createTenantSchema } from "@/lib/validationSchemas";
 
 function buildTenantKey(value: string) {
@@ -51,14 +57,30 @@ export default function Tenants() {
   const { data: tenants = [], isLoading, error } = useLeadClients();
   const createTenant = useCreateLeadClient();
   const deleteTenant = useDeleteLeadClient();
-  const { hasPermission } = useAuth();
+  const updateN8nSettings = useUpdateLeadClientN8nSettings();
+  const { hasPermission, isAdminUser } = useAuth();
   const [name, setName] = useState("");
   const [tenantId, setTenantId] = useState("");
+  const [dispatchWebhookUrl, setDispatchWebhookUrl] = useState("");
+  const [dispatchWebhookToken, setDispatchWebhookToken] = useState("");
+  const [inboundBearerToken, setInboundBearerToken] = useState("");
   const [search, setSearch] = useState("");
   const [formError, setFormError] = useState("");
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
+  const [n8nDrafts, setN8nDrafts] = useState<
+    Record<
+      string,
+      {
+        dispatchWebhookUrl?: string;
+        dispatchWebhookToken?: string;
+        inboundBearerToken?: string;
+        active?: boolean;
+      }
+    >
+  >({});
   const canManageTenants = hasPermission("tenants.manage");
+  const canManageN8n = isAdminUser;
 
   useEffect(() => {
     if (!tenantIdEdited) {
@@ -109,7 +131,27 @@ export default function Tenants() {
         id: tenantId,
       });
 
-      await createTenant.mutateAsync(payload);
+      const hasN8nSettings =
+        canManageN8n &&
+        Boolean(
+          dispatchWebhookUrl.trim() ||
+            dispatchWebhookToken.trim() ||
+            inboundBearerToken.trim()
+        );
+
+      await createTenant.mutateAsync({
+        ...payload,
+        ...(hasN8nSettings
+          ? {
+              n8nSettings: {
+                dispatchWebhookUrl: dispatchWebhookUrl.trim() || null,
+                dispatchWebhookToken: dispatchWebhookToken.trim() || null,
+                inboundBearerToken: inboundBearerToken.trim() || null,
+                active: true,
+              },
+            }
+          : {}),
+      });
 
       toast({
         title: "Tenant criado",
@@ -118,6 +160,9 @@ export default function Tenants() {
 
       setName("");
       setTenantId("");
+      setDispatchWebhookUrl("");
+      setDispatchWebhookToken("");
+      setInboundBearerToken("");
       setTenantIdEdited(false);
     } catch (submissionError) {
       if (submissionError instanceof ZodError) {
@@ -128,6 +173,99 @@ export default function Tenants() {
       setFormError(
         submissionError instanceof Error ? submissionError.message : "Nao foi possivel criar o tenant."
       );
+    }
+  };
+
+  const updateTenantN8nDraft = (
+    tenantId: string,
+    patch: {
+      dispatchWebhookUrl?: string;
+      dispatchWebhookToken?: string;
+      inboundBearerToken?: string;
+      active?: boolean;
+    }
+  ) => {
+    setN8nDrafts((current) => ({
+      ...current,
+      [tenantId]: {
+        ...current[tenantId],
+        ...patch,
+      },
+    }));
+  };
+
+  const getTenantN8nDraft = (tenant: LeadClient) => {
+    const draft = n8nDrafts[tenant.id] || {};
+    return {
+      dispatchWebhookUrl:
+        draft.dispatchWebhookUrl ?? tenant.n8n_settings?.dispatch_webhook_url ?? "",
+      dispatchWebhookToken: draft.dispatchWebhookToken ?? "",
+      inboundBearerToken: draft.inboundBearerToken ?? "",
+      active: draft.active ?? tenant.n8n_settings?.active ?? true,
+    };
+  };
+
+  const handleSaveTenantN8n = async (tenant: LeadClient) => {
+    const draft = getTenantN8nDraft(tenant);
+
+    try {
+      await updateN8nSettings.mutateAsync({
+        tenantId: tenant.id,
+        dispatchWebhookUrl: draft.dispatchWebhookUrl.trim() || null,
+        dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
+        inboundBearerToken: draft.inboundBearerToken.trim() || undefined,
+        active: draft.active,
+      });
+
+      setN8nDrafts((current) => ({
+        ...current,
+        [tenant.id]: {
+          dispatchWebhookUrl: draft.dispatchWebhookUrl,
+          dispatchWebhookToken: "",
+          inboundBearerToken: "",
+          active: draft.active,
+        },
+      }));
+
+      toast({
+        title: "Disparo Evolution atualizado",
+        description: `As configuracoes da empresa ${tenant.name} foram salvas.`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao salvar Evolution",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel atualizar a configuracao de disparo.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleClearTenantToken = async (
+    tenant: LeadClient,
+    tokenField: "dispatchWebhookToken" | "inboundBearerToken"
+  ) => {
+    try {
+      await updateN8nSettings.mutateAsync({
+        tenantId: tenant.id,
+        [tokenField]: null,
+      });
+
+      toast({
+        title: "Token removido",
+        description: `O token da empresa ${tenant.name} foi removido.`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao remover token",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel remover o token.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -166,6 +304,9 @@ export default function Tenants() {
           </Badge>
           <Badge className="border border-slate-300/80 bg-white/90 px-3 py-1 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
             {canManageTenants ? "Criacao liberada" : "Consulta apenas"}
+          </Badge>
+          <Badge className="border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-emerald-700 dark:text-emerald-200">
+            {canManageN8n ? "Disparo Evolution liberado" : "Evolution restrito a admins"}
           </Badge>
         </div>
       }
@@ -248,6 +389,38 @@ export default function Tenants() {
               </div>
 
               <ErrorMessage message={formError} variant="banner" />
+
+              {canManageN8n ? (
+                <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="flex items-start gap-3">
+                    <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Disparo Evolution</p>
+                      <p className="text-xs text-muted-foreground">
+                        Configure a URL de envio por empresa. O token inbound legado do n8n fica separado.
+                      </p>
+                    </div>
+                  </div>
+                  <Input
+                    placeholder="URL de disparo Evolution"
+                    value={dispatchWebhookUrl}
+                    onChange={(event) => setDispatchWebhookUrl(event.target.value)}
+                    disabled={!canManageTenants || createTenant.isPending}
+                  />
+                  <Input
+                    placeholder="Token opcional do disparo Evolution"
+                    value={dispatchWebhookToken}
+                    onChange={(event) => setDispatchWebhookToken(event.target.value)}
+                    disabled={!canManageTenants || createTenant.isPending}
+                  />
+                  <Input
+                    placeholder="Token inbound legado do n8n"
+                    value={inboundBearerToken}
+                    onChange={(event) => setInboundBearerToken(event.target.value)}
+                    disabled={!canManageTenants || createTenant.isPending}
+                  />
+                </div>
+              ) : null}
 
               {!canManageTenants && (
                 <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-200">
@@ -344,6 +517,9 @@ export default function Tenants() {
                             <Badge className="border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
                               {tenant.id}
                             </Badge>
+                            <Badge className="border border-emerald-400/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200">
+                              {tenant.n8n_onboarding_status || "pendente"}
+                            </Badge>
                           </div>
                           <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-white/45">
                             {formatCreatedAt(tenant.created_at)}
@@ -354,6 +530,98 @@ export default function Tenants() {
                           <p className="mt-1 font-mono">/clientes/{tenant.id}/dashboard</p>
                         </div>
                       </div>
+                      {canManageN8n ? (
+                        <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">Disparo Evolution</p>
+                              <p className="text-xs text-muted-foreground">
+                                A URL vale para campanhas novas e disparos futuros. Tokens existentes ficam mascarados.
+                              </p>
+                            </div>
+                            <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={getTenantN8nDraft(tenant).active}
+                                onChange={(event) =>
+                                  updateTenantN8nDraft(tenant.id, { active: event.target.checked })
+                                }
+                              />
+                              ativo
+                            </label>
+                          </div>
+                          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.85fr)_minmax(0,0.85fr)]">
+                            <Input
+                              placeholder="URL de disparo Evolution"
+                              value={getTenantN8nDraft(tenant).dispatchWebhookUrl}
+                              onChange={(event) =>
+                                updateTenantN8nDraft(tenant.id, {
+                                  dispatchWebhookUrl: event.target.value,
+                                })
+                              }
+                            />
+                            <Input
+                              placeholder={
+                                tenant.n8n_settings?.has_dispatch_webhook_token
+                                  ? "Token Evolution definido"
+                                  : "Novo token Evolution"
+                              }
+                              value={getTenantN8nDraft(tenant).dispatchWebhookToken}
+                              onChange={(event) =>
+                                updateTenantN8nDraft(tenant.id, {
+                                  dispatchWebhookToken: event.target.value,
+                                })
+                              }
+                            />
+                            <Input
+                              placeholder={
+                                tenant.n8n_settings?.has_inbound_bearer_token
+                                  ? "Token inbound legado definido"
+                                  : "Novo token inbound legado"
+                              }
+                              value={getTenantN8nDraft(tenant).inboundBearerToken}
+                              onChange={(event) =>
+                                updateTenantN8nDraft(tenant.id, {
+                                  inboundBearerToken: event.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {tenant.n8n_settings?.has_dispatch_webhook_token ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={updateN8nSettings.isPending}
+                                onClick={() => void handleClearTenantToken(tenant, "dispatchWebhookToken")}
+                              >
+                                Remover token Evolution
+                              </Button>
+                            ) : null}
+                            {tenant.n8n_settings?.has_inbound_bearer_token ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={updateN8nSettings.isPending}
+                                onClick={() => void handleClearTenantToken(tenant, "inboundBearerToken")}
+                              >
+                                Remover token inbound legado
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={updateN8nSettings.isPending}
+                              onClick={() => void handleSaveTenantN8n(tenant)}
+                            >
+                              <Save className="h-4 w-4" />
+                              {updateN8nSettings.isPending ? "Salvando..." : "Salvar Evolution"}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
                       {canManageTenants ? (
                         <div className="mt-4 flex justify-end">
                           <AlertDialog
