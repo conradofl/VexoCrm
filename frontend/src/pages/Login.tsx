@@ -15,6 +15,9 @@ import { useRateLimit } from "@/hooks/useRateLimit";
 import { toast } from "@/components/ui/sonner";
 import { ZodError } from "zod";
 
+const loginInputClass =
+  "border-white/10 bg-white/[0.06] text-white placeholder:text-white/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] [-webkit-text-fill-color:theme(colors.white)] focus-visible:border-primary/45 focus-visible:bg-white/[0.08] autofill:[-webkit-text-fill-color:theme(colors.white)] autofill:[box-shadow:inset_0_0_0px_1000px_rgba(15,20,38,0.98)] dark:border-white/10 dark:bg-white/[0.06]";
+
 export default function Login() {
   const location = useLocation();
   const { isAuthenticated, mustChangePassword, loading, login, defaultRoute } = useAuth();
@@ -138,9 +141,9 @@ export default function Login() {
       <LogoBlock icon="V" />
 
       <div className="w-full space-y-3">
-        <div className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm">
-          <p className="text-sm font-medium text-foreground">Login</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        <div className="w-full rounded-xl border border-white/10 bg-white/[0.05] px-4 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <p className="text-sm font-medium text-white">Login</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300/85">
             Entre com seu e-mail e senha. Os acessos liberados para cada usuario sao definidos internamente pela gestao do CRM.
           </p>
         </div>
@@ -154,6 +157,7 @@ export default function Login() {
             placeholder="seuemail@empresa.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            className={loginInputClass}
             required
           />
         </FormField>
@@ -164,6 +168,7 @@ export default function Login() {
             placeholder="Digite sua senha"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            className={loginInputClass}
             required
           />
         </FormField>

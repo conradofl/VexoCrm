@@ -52,8 +52,9 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `FIREBASE_PROJECT_ID` | projeto Firebase |
 | `FIREBASE_CLIENT_EMAIL` | service account Firebase |
 | `FIREBASE_PRIVATE_KEY` | chave privada Firebase |
-| `N8N_DISPATCH_WEBHOOK_URL` | webhook do fluxo de disparo no n8n |
-| `N8N_DISPATCH_WEBHOOK_TOKEN` | bearer opcional para o webhook de disparo |
+| `N8N_WEBHOOK_SECRET` | bearer global legado para webhooks que ainda nao usam escopo por empresa |
+| `GROQ_API_KEY` | chave opcional para assistencia de IA nas campanhas |
+| `GROQ_CAMPAIGN_AI_MODEL` | modelo Groq opcional para as sugestoes de campanha |
 
 Veja [backend/.env.example](./.env.example).
 

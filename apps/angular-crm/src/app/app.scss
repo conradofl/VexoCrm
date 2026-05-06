@@ -1,0 +1,99 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  color: #dbe6ff;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.18), transparent 24%),
+    linear-gradient(180deg, #08101f 0%, #0d1529 100%);
+}
+
+.shell {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding: 48px 24px 64px;
+}
+
+.hero {
+  margin-bottom: 32px;
+}
+
+.eyebrow {
+  margin-bottom: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(186, 200, 255, 0.72);
+}
+
+h1,
+h2,
+p,
+ul {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2.4rem, 5vw, 4rem);
+  line-height: 1;
+}
+
+.summary {
+  margin-top: 16px;
+  max-width: 760px;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: rgba(219, 230, 255, 0.78);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.badges span {
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  color: #d7e6ff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.card,
+.next-step {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(12, 20, 38, 0.82);
+  padding: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+
+.card h2,
+.next-step h2 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+.card p,
+.next-step p,
+.card li {
+  color: rgba(219, 230, 255, 0.78);
+  line-height: 1.6;
+}
+
+.card ul {
+  padding-left: 18px;
+}
+
+.next-step {
+  margin-top: 16px;
+}
