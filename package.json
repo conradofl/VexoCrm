@@ -1,0 +1,13 @@
+{
+  "name": "vexocrm-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "check": "npm run check:backend && npm run test:backend && npm run test:frontend && npm run build:frontend && npm run diff:check",
+    "check:backend": "npm --prefix backend run check",
+    "test:backend": "npm --prefix backend run test",
+    "test:frontend": "npm --prefix frontend test -- --run",
+    "build:frontend": "npm --prefix frontend run build",
+    "diff:check": "git diff --check"
+  }
+}

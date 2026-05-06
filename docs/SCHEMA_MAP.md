@@ -17,8 +17,8 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 | `lead_import_items` | Sim | Sim | Sim (`20260315000004`) | `client_id` | `import_id`, `client_id`, `telefone`, `skip_reason` | Drift no uso de `skip_reason` e no conceito de "disparado" |
 | `access_profiles` | Sim | Nao | Sim (`20260412000007`) | Nao aplicavel | `key`, `role`, `permissions` | Ok para leitura, sem CRUD completo no backend |
 | `campaigns` | Sim | Nao | **Parcial** (`20260414000008`, `20260430000011`) | `client_id` | `id`, `client_id`, `webhook_url`, `webhook_token`, `phones`, `status` | Falta migration explicita de criacao na serie atual |
-| `notifications` | Sim | Sim | **Parcial** (policy em `20260221031218`) | Nao tem `client_id` | `id`, `type`, `title`, `read` | Tabela usada sem isolamento por tenant |
-| `n8n_error_logs` | Sim | Sim | **Parcial** (policy em `20260221031218`) | Nao tem `client_id` | `execution_id`, `workflow_name`, `message` | Criacao nao aparece na serie atual |
+| `notifications` | Sim | Sim | Sim (`20260221031218`) | `client_id` opcional / `user_id` opcional | `id`, `type`, `title`, `read`, `client_id`, `user_id` | Criacao versionada nesta PR; notificacoes globais continuam sem tenant por regra |
+| `n8n_error_logs` | Sim | Sim | Sim (`20260221031218`) | `client_id` opcional | `execution_id`, `workflow_name`, `message`, `client_id` | Criacao versionada nesta PR; payloads antigos continuam aceitos sem tenant |
 | `crm_consultants` | Sim | Nao | Sim (`20260420000009`) | `client_id` | `id`, `client_id`, `name`, `available` | Ok |
 | `lead_messages` | Sim | Nao | Sim (`20260420000009`) | `client_id` | `id`, `lead_id`, `campaign_id`, `phone`, `direction` | Ok |
 | `lead_assignments` | Sim | Nao | Sim (`20260420000009`) | `client_id` | `id`, `lead_id`, `consultant_id`, `assignment_status` | Ok |
@@ -35,12 +35,32 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 | Tema | Migrations/documentacao | Runtime real | Gravidade | Observacao |
 | --- | --- | --- | --- | --- |
 | Criacao de `campaigns` | So aparecem migrations de alteracao (`20260414000008`, `20260430000011`) | Backend usa CRUD completo de `campaigns` | Critico | Nao da para reconstruir ambiente limpo com confianca |
-| Criacao de `notifications` | `20260221031218` aplica RLS/policy | Backend e function usam leitura/escrita | Critico | A criacao da tabela nao aparece na serie atual |
-| Criacao de `n8n_error_logs` | `20260221031218` cria policy | Backend e function fazem `upsert` | Critico | Tabela nao esta versionada na serie atual |
+| Criacao de `notifications` | `20260221031218` agora cria tabela, indices e RLS | Backend e function usam leitura/escrita | Baixo | Corrigido nesta PR de schema truth |
+| Criacao de `n8n_error_logs` | `20260221031218` agora cria tabela, indices e RLS | Backend e function fazem `upsert` | Baixo | Corrigido nesta PR de schema truth |
 | Campos legados de `leads` | Migration cria `conta_energia`, `bot_ativo`, `historico` | Docs mais novas dizem que parte disso nao faz mais parte do fluxo | Alto | Runtime ainda consulta `bot_ativo` e `historico` em revenue/commercial intelligence |
 | `lead_conversations` sem tenant | Migration nao possui `client_id` | Backend e n8n consultam por telefone | Alto | Mesmo telefone em duas empresas vira ambiguidade operacional |
 | `access_profiles` | Migration existe | Frontend opera como se houvesse CRUD completo | Medio | Backend expoe so listagem |
 | `metric_snapshots` | Nao encontrada em migration lida | Backend tenta limpar por tenant ao excluir empresa | Medio | Sinal de schema fora do repo ou codigo legado |
+
+### 2.1 Classificacao P0/P1
+
+| Prioridade | Divergencia | Precisa virar migration? | Status nesta PR |
+| --- | --- | --- | --- |
+| P0 | Criacao versionada de `notifications` ausente/incompleta | Sim | Corrigido em `20260221031218` com `CREATE TABLE IF NOT EXISTS`, indices e RLS; `client_id` fica sem FK por ordem historica das migrations |
+| P0 | Criacao versionada de `n8n_error_logs` ausente/incompleta | Sim | Corrigido em `20260221031218` com `CREATE TABLE IF NOT EXISTS`, indices e RLS; `client_id` fica sem FK por ordem historica das migrations |
+| P0 | `client_id` validado como UUID apesar do banco usar `TEXT`/slug | Nao | Corrigido em `backend/src/validators.js`; contrato oficial documentado |
+| P0 | Criacao versionada de `campaigns` ausente | Sim | Pendente; precisa PR propria para evitar tocar campanhas nesta PR |
+| P1 | `lead_conversations` sem `client_id` | Sim, se a decisao for isolar por tenant no banco | Pendente; requer migration e ajuste de Edge/backend |
+| P1 | Duplicidade backend `/api/notifications` vs Edge `notifications-api` | Nao necessariamente | Pendente; requer decisao operacional antes de remover/desativar |
+| P1 | `metric_snapshots` referenciada antes de migration clara | Sim ou remocao de referencia | Pendente; validar se tabela existe no banco real |
+
+### 2.2 Apenas documentacao por enquanto
+
+| Tema | Motivo |
+| --- | --- |
+| `tenantId`/`companyId` | Sao aliases de claims/payloads, nao colunas canonicas atuais |
+| `qualification` | Alias externo de `qualificacao`, deve ser normalizado na borda |
+| `phone` | Alias externo de `telefone`, deve ser normalizado para digitos antes de persistir |
 
 ---
 
@@ -99,10 +119,10 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 | --- | --- | --- | --- |
 | `telefone` | `validators.js` aceita `10-11` digitos em algumas validacoes, outros contratos aceitam ate `13`, runtime normaliza para `55...` | `backend/src/validators.js`, `backend/src/server.js`, docs do workflow | Critico |
 | `qualificacao` | ora e resumo textual do lead, ora e usada como sinal de status/qualificacao | `docs/workflow-n8n.md`, `docs/supabase-functions.md`, `backend/src/server.js` | Alto |
-| `client_id` | backend de validacao exige UUID em alguns schemas, banco usa slug textual (`infinie`) | `backend/src/validators.js`, `20260304000001_create_leads_tables.sql` | Critico |
+| `client_id` | contrato oficial passa a ser slug textual de `leads_clients.id`; aliases sao aceitos apenas na borda | `backend/src/validators.js`, `docs/API_CONTRACTS.md`, `20260304000001_create_leads_tables.sql` | Corrigido nesta PR |
 | `company_id` | aparece em claims, nao como padrao de persistencia | `backend/src/server.js` | Medio |
 | `tenant_id` | aparece em claims e params, nao no schema principal | `backend/src/server.js`, hooks do frontend | Medio |
-| `notifications` | docs apontam `notifications-api` na edge; frontend atual consome backend `/api/notifications` | `docs/supabase-functions.md`, `frontend/src/hooks/useNotifications.ts`, `backend/src/server.js` | Alto |
+| `notifications` | docs apontam `notifications-api` na edge; frontend atual consome backend `/api/notifications` | `docs/supabase-functions.md`, `frontend/src/hooks/useNotifications.ts`, `backend/src/server.js` | Alto; duplicidade operacional ainda pendente |
 | `password/senha` | contratos de mensagem divergem entre frontend e testes; backend so aplica regra minima de tamanho | `frontend/src/lib/validationSchemas.ts`, `frontend/src/test/security.test.ts`, `backend/src/server.js` | Medio |
 
 ---
@@ -118,8 +138,8 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 | `lead_import_items` | RLS deny-all | Depende do backend |
 | `access_profiles` | RLS deny-all | Dependencia total do backend |
 | revenue ops / commercial intelligence tables | RLS deny-all | Dependencia total do backend |
-| `notifications` | RLS deny-all | Mas backend atual lista/atualiza sem `client_id` |
-| `n8n_error_logs` | policy deny-all | Sem criacao versionada clara |
+| `notifications` | RLS deny-all | Backend deve aplicar escopo por `client_id`, `user_id` ou admin global |
+| `n8n_error_logs` | RLS deny-all | Criacao versionada nesta PR; backend/Edge usam service role |
 
 **Leitura pratica:** o isolamento hoje e uma responsabilidade de aplicacao, nao do banco. Isso e aceitavel por enquanto, mas exige rotas muito rigorosas e contrato unico de tenant.
 
@@ -127,8 +147,8 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 
 ## 6. Primeira sequencia de correcoes recomendada
 
-1. fechar a verdade do schema de `campaigns`, `notifications` e `n8n_error_logs`
-2. decidir se `lead_conversations` continua sem `client_id` ou se precisa migracao
-3. normalizar `client_id` como identificador oficial no backend
-4. alinhar validadores para aceitar o formato real de `client_id`
+1. fechar a verdade do schema de `campaigns`
+2. decidir se `lead_conversations` continua sem `client_id` ou se precisa migration
+3. propagar o contrato oficial de `client_id` para workflows n8n e Edge Functions
+4. reduzir duplicidade entre backend `/api/notifications` e Edge Function `notifications-api`
 5. remover docs que indiquem flows ou contratos divergentes do runtime

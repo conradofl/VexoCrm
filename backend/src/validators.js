@@ -25,18 +25,63 @@ export const handleValidationErrors = (req, res, next) => {
  * Schemas Zod para validação de dados
  */
 
+const tenantIdentifierSchema = z
+  .string()
+  .trim()
+  .min(1, 'client_id é obrigatório')
+  .max(100, 'client_id deve ter no máximo 100 caracteres')
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, 'client_id deve ser um identificador válido');
+
+const brazilianPhoneSchema = z
+  .string()
+  .regex(/^\d{10,13}$/, 'Telefone deve ter entre 10 e 13 dígitos');
+
+const normalizeString = (value) => {
+  if (value === null || value === undefined) return undefined;
+  const normalized = String(value).trim();
+  return normalized || undefined;
+};
+
+const normalizePhone = (value) => {
+  const normalized = normalizeString(value);
+  return normalized ? normalized.replace(/\D/g, '') : undefined;
+};
+
+export const normalizeLeadContractPayload = (payload = {}) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    client_id: normalizeString(
+      payload.client_id ??
+      payload.clientId ??
+      payload.tenant_id ??
+      payload.tenantId ??
+      payload.company_id ??
+      payload.companyId
+    ),
+    telefone: normalizePhone(payload.telefone ?? payload.phone),
+    qualificacao: normalizeString(payload.qualificacao ?? payload.qualification),
+  };
+};
+
 // Lead Schema
-export const createLeadSchema = z.object({
+const leadBaseSchema = z.object({
   nome: z.string().min(1, 'Nome é obrigatório').min(3, 'Nome deve ter mínimo 3 caracteres').max(255),
   email: z.string().email('E-mail inválido'),
-  telefone: z.string().regex(/^\d{10,11}$/, 'Telefone deve ter 10 ou 11 dígitos'),
+  telefone: brazilianPhoneSchema,
   empresa: z.string().max(255).optional(),
   status: z.enum(['novo', 'contato', 'proposta', 'cliente']).optional(),
-  client_id: z.string().uuid('client_id deve ser um UUID válido'),
+  client_id: tenantIdentifierSchema,
   origem: z.string().max(100).optional(),
+  qualificacao: z.string().max(2000).optional(),
 });
 
-export const updateLeadSchema = createLeadSchema.partial().extend({
+export const createLeadSchema = z.preprocess(normalizeLeadContractPayload, leadBaseSchema);
+
+export const updateLeadSchema = leadBaseSchema.partial().extend({
   id: z.string().uuid()
 });
 
@@ -69,8 +114,8 @@ export const loginSchema = z.object({
 
 // WhatsApp Session Schema
 export const createWhatsAppSessionSchema = z.object({
-  client_id: z.string().uuid(),
-  phone: z.string().regex(/^\d{10,13}$/, 'Número de telefone inválido'),
+  client_id: tenantIdentifierSchema,
+  phone: brazilianPhoneSchema,
 });
 
 /**
@@ -92,7 +137,8 @@ export const validateCreateLead = [
 
   body('telefone')
     .trim()
-    .matches(/^\d{10,11}$/).withMessage('Telefone deve ter 10 ou 11 dígitos'),
+    .customSanitizer((value) => String(value || '').replace(/\D/g, ''))
+    .matches(/^\d{10,13}$/).withMessage('Telefone deve ter entre 10 e 13 dígitos'),
 
   body('empresa')
     .optional()
@@ -106,7 +152,7 @@ export const validateCreateLead = [
   body('client_id')
     .trim()
     .notEmpty().withMessage('client_id é obrigatório')
-    .isUUID().withMessage('client_id deve ser um UUID válido'),
+    .matches(/^[A-Za-z0-9][A-Za-z0-9_-]*$/).withMessage('client_id deve ser um identificador válido'),
 
   body('origem')
     .optional()
@@ -134,7 +180,8 @@ export const validateUpdateLead = [
   body('telefone')
     .optional()
     .trim()
-    .matches(/^\d{10,11}$/).withMessage('Telefone deve ter 10 ou 11 dígitos'),
+    .customSanitizer((value) => String(value || '').replace(/\D/g, ''))
+    .matches(/^\d{10,13}$/).withMessage('Telefone deve ter entre 10 e 13 dígitos'),
 
   body('status')
     .optional()

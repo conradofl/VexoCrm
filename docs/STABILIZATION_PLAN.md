@@ -1,260 +1,144 @@
 # Stabilization Plan - Vexo CRM
 
-## Objetivo desta fase
+## Objetivo da fase
 
-Transformar a auditoria em uma sequencia de PRs pequenas, seguras e executaveis, sem abrir refactor grande e sem mexer em framework frontend.
+Encerrar o primeiro ciclo de estabilizacao do CRM com foco em seguranca de tenant, contratos criticos, trilho minimo de qualidade e uma primeira limpeza incremental do backend.
 
-Escopo desta fase:
-
-- mapear a estrutura real
-- priorizar riscos
-- ordenar as primeiras correcoes
-- padronizar o trabalho de duas pessoas
-
-Fora de escopo desta fase:
-
-- migracao para Angular
-- novas features
-- refatoracao ampla do backend
-- redesign de frontend
+Esta fase nao teve como objetivo criar features novas, migrar frontend, redesenhar UI ou reestruturar o produto. A prioridade foi deixar o sistema mais previsivel antes de avancar para testes com clientes.
 
 ---
 
-## Principios de estabilizacao
+## Principios adotados
 
 1. **Seguranca antes de organizacao**
-   - tenant leak, auth e permissao vem antes de limpeza estrutural.
+   - tenant leak, auth e permissao vieram antes de limpeza estrutural.
 
 2. **Verdade do schema antes de novas features**
-   - nao adicionar fluxo novo sobre tabelas cujo estado real ainda nao esta consolidado.
+   - contratos e migrations criticas foram documentados antes de ampliar funcionalidades.
 
 3. **PR pequena e monotematica**
-   - uma PR deve corrigir uma classe de problema, nao "aproveitar a viagem".
+   - cada PR resolveu um risco especifico.
 
-4. **Sem mexer em React agora**
-   - o frontend atual continua.
-   - so entra mudanca visual/UX se for necessaria para sustentar correcao de seguranca ou contrato.
+4. **React preservado**
+   - nenhuma migracao para Angular entrou neste ciclo.
 
-5. **Sem refactor grande sem base de testes minima**
-   - modularizacao do backend so depois que tenant scope e contratos estiverem fechados.
-
----
-
-## Linha de base desta PR de documentacao
-
-Esta PR deve entregar apenas:
-
-1. `docs/ARCHITECTURE_AUDIT.md`
-2. `docs/SCHEMA_MAP.md`
-3. `docs/ROUTES_TENANT_RISK_MAP.md`
-4. `docs/STABILIZATION_PLAN.md`
-
-Sem mudanca funcional.
+5. **Refactor pequeno depois de teste minimo**
+   - a primeira extracao do backend aconteceu somente depois do trilho minimo de testes/CI.
 
 ---
 
-## Sequencia recomendada de correcoes
+## PRs do ciclo #44 a #50
 
-## Etapa 0 - Congelar escopo e alinhar time
-
-### Objetivo
-
-Evitar continuar empilhando mudancas em cima de uma base instavel.
-
-### Acoes
-
-1. pausar qualquer migracao de framework
-2. proibir PR mista de feature + ajuste estrutural
-3. definir ownership temporario:
-   - Pessoa A: backend, tenant, auth, schema
-   - Pessoa B: hooks, telas e consumo de contrato
-4. toda PR deve citar explicitamente:
-   - risco de tenant
-   - tabelas afetadas
-   - rotas afetadas
-
-### Saida esperada
-
-- backlog sequenciado
-- escopo de cada PR menor
+| PR | Escopo | Resultado |
+| --- | --- | --- |
+| #44 | Auditoria e mapas de estabilizacao | Criou `ARCHITECTURE_AUDIT`, `SCHEMA_MAP`, `ROUTES_TENANT_RISK_MAP` e plano inicial |
+| #45 | Tenant isolation em campanhas | Corrigiu rotas criticas de campanhas para respeitar escopo de tenant |
+| #46 | Tenant isolation em usuarios/permissoes | Restringiu listagem/mutacao de usuarios e bloqueou elevacao indevida |
+| #47 | Tenant isolation em notificacoes | Escopou leitura/update de notificacoes e restringiu globais a admin real |
+| #48 | Schema truth e contratos criticos | Criou `API_CONTRACTS`, alinhou `client_id` slug e versionou `notifications`/`n8n_error_logs` |
+| #49 | Trilho minimo de testes e CI | Criou `npm run check`, scripts de teste/build e GitHub Actions |
+| #50 | Limpeza incremental do backend | Extraiu predicados puros de acesso para `backend/src/accessGuards.js` |
 
 ---
 
-## Etapa 1 - Correcoes criticas de tenant e auth
+## Concluido neste ciclo
 
-### Objetivo
+### Seguranca de tenant/auth
 
-Fechar os vazamentos mais perigosos antes de qualquer cliente.
+- Campanhas criticas passaram a validar tenant antes de mutacoes/disparo.
+- Rotas de usuarios passaram a respeitar escopo do operador.
+- Usuarios escopados nao conseguem operar usuarios de outro tenant.
+- Usuarios escopados nao conseguem atribuir `internal_admin`, `all_clients` ou `users.manage` indevidamente.
+- Notificacoes passaram a respeitar `client_id`, `user_id` ou admin global real.
 
-### PR 1 - Tenant scope em campanhas
+### Schema e contratos
 
-Corrigir:
+- `client_id` foi documentado como campo oficial de persistencia para tenant.
+- Aliases de borda ficaram documentados: `clientId`, `tenantId`, `companyId`, `phone`, `qualification`.
+- Validador de lead passou a aceitar slug textual de `leads_clients.id`, em vez de exigir UUID.
+- `notifications` e `n8n_error_logs` passaram a ter criacao versionada com `IF NOT EXISTS`, indices e RLS deny-all.
 
-- `POST /api/campaigns`
-- `PATCH /api/campaigns/:id`
-- `DELETE /api/campaigns/:id`
-- `POST /api/campaigns/:id/trigger`
-- `GET /api/campaigns`
+### Qualidade e CI
 
-### Motivo
+- `npm run check` na raiz virou o comando padrao de validacao local.
+- Backend ganhou scripts `check` e `test`.
+- GitHub Actions passou a rodar sintaxe backend, testes backend, testes frontend, build frontend e diff check.
+- Testes de regressao cobrem usuarios/permissoes, aliases de contrato, `client_id` slug e access guards.
 
-Essas rotas hoje permitem, em graus diferentes:
+### Backend
 
-- criar campanha para tenant arbitrario
-- alterar ou excluir campanha por `id` sem validar escopo
-- listar campanhas globais quando a query nao restringe `clientId`
-
-### PR 2 - Tenant scope em notificacoes
-
-Decidir e implementar um dos caminhos:
-
-1. `notifications` e global de operacao
-   - restringir rota a admin real
-2. `notifications` deve respeitar tenant
-   - adicionar `client_id`
-   - escopar leitura e update
-
-### PR 3 - Revisao de usuarios e perfis
-
-Revisar:
-
-- `GET /api/admin/users`
-- `GET /api/admin/access-profiles`
-
-Objetivo:
-
-- confirmar se pagina `usuarios` e suficiente
-- ou se essas rotas devem ser elevadas para perfil mais restrito
-
-### Criterio de saida da Etapa 1
-
-- nenhum endpoint mutavel de tenant sensivel opera apenas por `id`
-- nenhuma listagem critica retorna dados de todos os tenants por default
+- Primeiro bloco seguro extraido de `server.js`: predicados puros de acesso.
+- Middlewares e rotas permaneceram no `server.js` para evitar refactor amplo.
+- Nenhum comportamento funcional foi alterado na PR de limpeza.
 
 ---
 
-## Etapa 2 - Verdade do schema e contratos
+## Pendencias criticas antes de cliente
 
-### Objetivo
+Estas pendencias devem ser resolvidas antes de liberar clientes reais em producao.
 
-Fazer o repositorio representar o banco real e padronizar os campos mais fragis.
-
-### PR 4 - Schema truth
-
-Mapear e, depois, corrigir em PR propria:
-
-- criacao versionada de `campaigns`
-- criacao versionada de `notifications`
-- criacao versionada de `n8n_error_logs`
-- referencia orphan de `metric_snapshots`
-
-### PR 5 - Normalizacao de identificadores
-
-Definir padrao:
-
-- persistencia: `client_id`
-- aliases aceitos na borda: `clientId`, `tenantId`, `companyId`
-- normalizacao obrigatoria na entrada
-
-### PR 6 - Normalizacao de contratos do lead
-
-Fechar semantica de:
-
-- `telefone`
-- `qualificacao`
-- `status`
-
-Resultado esperado:
-
-- um formato canonico por campo
-- docs e validadores coerentes
-
-### Criterio de saida da Etapa 2
-
-- ambiente limpo reconstruivel
-- validadores coerentes com schema real
-- docs sem conflito com runtime
+| Prioridade | Pendencia | Motivo |
+| --- | --- | --- |
+| Critico | Confirmar merge/ordem final das PRs #45, #47, #48, #49 e #50 na base principal | O baseline precisa existir em uma linha unica antes de teste externo |
+| Critico | Criacao versionada de `campaigns` | Hoje ha migrations de alteracao, mas a criacao completa ainda precisa ficar reproduzivel |
+| Critico | Fechar `POST /api/lead-imports` com tenant scope | Continua listado como rota sensivel pendente |
+| Critico | Validar `lead_conversations` sem `client_id` | Conversas por telefone podem misturar contexto entre empresas com numeros iguais |
+| Critico | Revisar duplicidade backend `/api/notifications` vs Edge `notifications-api` | Evitar dois caminhos com auth/escopo diferentes para o mesmo dominio |
+| Critico | Rodar checklist manual de acesso com usuario Vexo admin, usuario interno escopado e usuario cliente | Confirmar isolamento real alem dos testes unitarios |
 
 ---
 
-## Etapa 3 - Trilho minimo de testes
+## Pendencias pos-go-live
 
-### Objetivo
+Podem ficar para depois do primeiro teste controlado, desde que clientes reais ainda estejam em acompanhamento proximo.
 
-Restaurar um caminho de verificacao que qualquer pessoa do time consiga executar.
-
-### Frontend - estado atual
-
-- em checkout limpo, `npm test -- --run` falhou porque `vitest` nao estava disponivel localmente (`sh: vitest: command not found`)
-- em checkout anterior com dependencias presentes, a trilha ja mostrava drift de mensagem em `frontend/src/test/security.test.ts`
-
-### Backend - estado atual
-
-- `npx vitest run` aborta antes de executar testes:
-  - `Cannot find package 'zod' imported from backend/src/test/security.test.js`
-- `backend/package.json` nao possui script `test`
-
-### PR 7 - Restaurar trilhos
-
-1. definir script `test` no backend
-2. garantir dependencias minimas locais
-3. documentar setup unico de dev/test
-4. corrigir drift de mensagens de validacao do frontend
-
-### PR 8 - Smoke tests minimos
-
-Criar testes para:
-
-- resolucao de tenant autorizado
-- campanhas fora do tenant
-- notificacoes
-- payload de leads
-- claims de acesso
-
-### Criterio de saida da Etapa 3
-
-- frontend e backend rodam testes minimos de forma reproduzivel
-- falhas de auth/tenant geram regressao visivel em PR
+| Pendencia | Motivo |
+| --- | --- |
+| Tornar `access_profiles` tenant-aware ou documentar formalmente que e global | Hoje a elevacao real esta bloqueada nas mutacoes, mas a tabela segue global |
+| Padronizar semantica final de `status` e `qualificacao` | Ainda ha uso misto entre resumo, etapa e qualificacao |
+| Adicionar smoke tests HTTP com mocks de Firebase/Supabase | A cobertura atual e majoritariamente de helpers/contratos |
+| Melhorar observabilidade de erros backend/n8n | Hoje logs existem, mas ainda nao ha padrao unico de evento |
+| Revisar CORS/Auth das Edge Functions | CORS e tokens ainda precisam politica operacional unica |
 
 ---
 
-## Etapa 4 - Padronizacao e melhoria incremental
+## Melhorias tecnicas futuras
 
-### Objetivo
-
-Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
-
-### Acoes
-
-1. extrair helpers de tenant/auth para modulo proprio
-2. padronizar shape de erro
-3. padronizar logging com evento + tenant + rota
-4. reduzir duplicidade backend vs Edge Functions
-5. so depois avaliar modularizacao maior do backend
-
-### Criterio de saida da Etapa 4
-
-- PRs menores
-- menos logica repetida
-- menor risco de drift entre docs e runtime
+| Tema | Proximo passo recomendado |
+| --- | --- |
+| `server.js` monolitico | Extrair middlewares com dependencia de `sendError` somente apos helpers de erro ficarem modulares |
+| Shape de erro | Criar modulo unico para `sendError` e codigos de erro |
+| Tenant helpers | Extrair resolucao de tenant sem carregar `req/res` para facilitar testes |
+| Rotas estabilizadas | Mover grupos pequenos depois de testes de rota existirem |
+| Lint | Corrigir warnings/erros legados e transformar lint em check obrigatorio |
+| Migrations | Criar teste de schema/migration em banco ephemeral quando o schema estabilizar |
 
 ---
 
-## Primeira sequencia concreta de PRs
+## Validacao baseline
 
-| Ordem | Escopo | Tamanho esperado | Tipo |
-| --- | --- | --- | --- |
-| 1 | Docs de auditoria e mapeamento | Pequena | Documentacao |
-| 2 | Tenant scope em campanhas | Pequena | Correcao critica |
-| 3 | Notificacoes: global vs tenant | Pequena | Correcao critica |
-| 4 | Rotas admin e perfis | Pequena | Seguranca/permissao |
-| 5 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao |
-| 6 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato |
-| 7 | Trilho de testes minimo | Pequena | Qualidade |
+Comandos obrigatorios antes de considerar a baseline pronta:
+
+```bash
+npm run check
+cd backend && node --check src/server.js
+cd backend && npx vitest run
+cd frontend && npm test -- --run
+cd frontend && npm run build
+git diff --check
+```
+
+Resultado esperado no encerramento do ciclo:
+
+- backend syntax check passa
+- backend vitest passa
+- frontend vitest passa
+- frontend build passa
+- diff check passa
 
 ---
 
-## Padrao de trabalho para duas pessoas
+## Padrao de trabalho para proximos ciclos
 
 ## Branches
 
@@ -264,9 +148,9 @@ Com tenant e contratos fechados, comecar a reduzir custo de manutencao.
 
 Exemplos:
 
-- `codex/tenant-scope-campaigns`
-- `codex/notifications-scope`
 - `codex/schema-truth-campaigns`
+- `codex/lead-import-tenant-scope`
+- `codex/edge-notifications-consolidation`
 
 ## Regra para abrir PR
 
@@ -276,6 +160,7 @@ Toda PR deve responder:
 2. quais rotas/tabelas toca?
 3. existe risco de tenant/auth?
 4. quais arquivos ficaram fora de escopo?
+5. quais checks passaram?
 
 ## Checklist antes de merge
 
@@ -286,20 +171,6 @@ Toda PR deve responder:
 - [ ] se tocou schema, documentou migration e compatibilidade
 - [ ] testes executados ou limitacao explicitada
 - [ ] revisado por outra pessoa
-
-## Padrao de commits
-
-Usar formato curto e objetivo:
-
-- `docs: map schema and tenant risks`
-- `fix: scope campaign mutations by authorized client`
-- `test: restore backend vitest entrypoint`
-
-Evitar:
-
-- `ajustes`
-- `corrigindo coisas`
-- `update`
 
 ## Regra para nao alterar arquivos fora do escopo
 
@@ -336,16 +207,12 @@ Criar ADRs simples em `docs/adr/` com:
 Temas recomendados para as proximas ADRs:
 
 1. ownership de webhooks (`backend` vs `edge functions`)
-2. identificador oficial de tenant
-3. estrategia de notificacoes (global vs tenant)
+2. estrategia de notificacoes (`backend` canonico vs Edge legado)
+3. ciclo de vida de `lead_conversations` com tenant
+4. status canonico de lead/campanha
 
 ---
 
-## Resultado esperado ao final do plano
+## Encerramento do ciclo
 
-Se a sequencia acima for seguida, o projeto fica em condicao muito melhor para receber os primeiros clientes porque:
-
-- os maiores vazamentos de tenant estarao fechados
-- o schema real passara a estar representado no repo
-- os contratos mais sensiveis deixarao de variar por camada
-- o time conseguira mexer com menos conflito e mais previsibilidade
+O ciclo #44-#50 fecha a primeira estabilizacao tecnica. O CRM ainda nao deve ser tratado como pronto para operacao ampla com clientes, mas a base ficou mais segura e verificavel para iniciar testes controlados apos resolver as pendencias criticas antes de cliente.

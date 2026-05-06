@@ -9,10 +9,20 @@ import { createClient } from "@supabase/supabase-js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import {
+  canAccessAppView,
+  hasAccessPermission,
+  hasInternalPageAccess,
+} from "./accessGuards.js";
+import {
   buildCommercialIntelligencePayload,
   getCommercialIntelligenceDefaultSettings,
 } from "./commercial-intelligence.js";
 import {
+  canAssignManagedAccess,
+  canManageTargetAccess,
+  filterVisibleUserRecords,
+  hasUserPermission,
+} from "./userAccessScope.js";
   dispatchCampaignSequence,
   normalizeCampaignAnalyticsMeta,
   validateCampaignAnalyticsMeta,
@@ -211,12 +221,6 @@ const ACCESS_PRESET_KEYS = [
   "client_operator",
   "client_viewer",
   "pending",
-];
-const USER_MANAGEMENT_PRESET_KEYS = [
-  "internal_admin",
-  "internal_manager",
-  "gestor",
-  "gerente",
 ];
 const ACCESS_PRESET_LABELS = {
   internal_admin: "Admin interno",
@@ -948,10 +952,7 @@ function requireUserManagementAccess(req, res, next) {
     return;
   }
 
-  if (
-    req.authAccess?.isAdmin ||
-    USER_MANAGEMENT_PRESET_KEYS.includes(req.authAccess?.accessPreset)
-  ) {
+  if (hasUserPermission(req.authAccess, "users.manage")) {
     next();
     return;
   }
@@ -4498,12 +4499,18 @@ app.delete("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("
   await deleteLeadClientHandler(req, res, req.query?.tenantId ?? req.query?.id ?? req.query?.clientId);
 });
 
-app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (_req, res) => {
+app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (req, res) => {
+  if (!hasUserPermission(req.authAccess, "users.view")) {
+    sendError(res, 403, "FORBIDDEN", "User view permission required");
+    return;
+  }
+
   try {
     const users = await listAllFirebaseUsers();
+    const mappedUsers = users.map(mapAdminUserRecord);
 
     res.json({
-      items: users.map(mapAdminUserRecord),
+      items: filterVisibleUserRecords(mappedUsers, req.authAccess),
     });
   } catch (error) {
     console.error("admin users query error:", error);
@@ -4511,7 +4518,12 @@ app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usua
   }
 });
 
-app.get("/api/admin/access-profiles", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (_req, res) => {
+app.get("/api/admin/access-profiles", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (req, res) => {
+  if (!hasUserPermission(req.authAccess, "users.view")) {
+    sendError(res, 403, "FORBIDDEN", "User view permission required");
+    return;
+  }
+
   try {
     const items = await listAccessProfiles();
     res.json({ items });
@@ -4563,6 +4575,16 @@ app.patch("/api/admin/users/:uid/access", requireFirebaseAuth, requireUserManage
 
     const user = await auth.getUser(uid);
     const isTargetFixedAdmin = isFixedAdminIdentity({ uid: user.uid, email: user.email });
+    const currentTargetAccess = extractManagedAccessClaims(user.customClaims || {}, {
+      uid: user.uid,
+      email: user.email,
+    });
+
+    if (!canManageTargetAccess(req.authAccess, currentTargetAccess)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You do not have permission to manage this user");
+      return;
+    }
+
     const managedClaims = isTargetFixedAdmin
       ? buildManagedClaims({
           role: "internal",
@@ -4592,6 +4614,11 @@ app.patch("/api/admin/users/:uid/access", requireFirebaseAuth, requireUserManage
           companyName: req.body?.companyName,
           internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
         });
+
+    if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
+      return;
+    }
 
     if (isTargetFixedAdmin && typeof req.body?.disabled === "boolean" && req.body.disabled) {
       sendError(res, 400, "INVALID_BODY", "Fixed admin accounts cannot be disabled");
@@ -4665,11 +4692,6 @@ app.post("/api/admin/users", requireFirebaseAuth, requireUserManagementAccess, a
       return;
     }
 
-    const user = await auth.createUser({
-      email,
-      password,
-      displayName: displayName || undefined,
-    });
     const managedClaims = buildManagedClaims({
       role: selectedProfile?.role || role,
       accessPreset: selectedProfile?.key || req.body?.accessPreset,
@@ -4683,6 +4705,17 @@ app.post("/api/admin/users", requireFirebaseAuth, requireUserManagementAccess, a
       allowedViews: req.body?.allowedViews ?? selectedProfile?.allowedViews,
       companyName: req.body?.companyName,
       internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
+    });
+
+    if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
+      return;
+    }
+
+    const user = await auth.createUser({
+      email,
+      password,
+      displayName: displayName || undefined,
     });
 
     await auth.setCustomUserClaims(user.uid, mergeManagedClaims({}, managedClaims));
@@ -4732,6 +4765,15 @@ app.delete("/api/admin/users/:uid", requireFirebaseAuth, requireUserManagementAc
   try {
     const auth = getAuth();
     const user = await auth.getUser(uid);
+    const targetAccess = extractManagedAccessClaims(user.customClaims || {}, {
+      uid: user.uid,
+      email: user.email,
+    });
+
+    if (!canManageTargetAccess(req.authAccess, targetAccess)) {
+      sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You do not have permission to delete this user");
+      return;
+    }
 
     if (isFixedAdminIdentity({ uid: user.uid, email: user.email })) {
       sendError(res, 400, "FIXED_ADMIN_DELETE_BLOCKED", "Fixed admin accounts cannot be deleted");
