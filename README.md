@@ -14,11 +14,13 @@ Nao existe mais fluxo operacional baseado em planilhas.
 
 ## Estado atual
 
-As cinco Edge Functions ativas do projeto sao:
+As sete Edge Functions ativas do projeto sao:
  
 - `conversation-memory`
 - `conversation-memory-latest`
 - `lead-webhook`
+- `n8n-planilha-webhook`
+- `mark-lead-dispatched`
 - `n8n-error-webhook`
 - `notifications-api`
 

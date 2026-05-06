@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode 
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Archive,
   Building2,
   CheckCircle2,
@@ -20,6 +22,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Sparkles,
   Trash2,
   Upload,
   Zap,
@@ -46,11 +49,21 @@ import {
 } from "@/hooks/useLeadImports";
 import {
   useCampanhas,
+  useCampaignAiStatus,
   useCreateCampaign,
   useDeleteCampaign,
+  useDirectDispatch,
+  useGenerateCampaignCopy,
+  useRewriteCampaignStep,
+  useSuggestCampaignDelays,
+  useSuggestCampaignSequence,
   useTriggerCampaign,
   useUpdateCampaign,
   type Campaign,
+  type CampaignStatus,
+  type CampaignDispatchOptions,
+  type CampaignImageAsset,
+  type CampaignSequenceStep,
 } from "@/hooks/useCampanhas";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,8 +77,9 @@ import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
 
-type SheetTab = "dados" | "campanha" | "pendentes" | "enviadas" | "agendamentos";
+type SheetTab = "dados" | "campanha" | "disparo-direto" | "pendentes" | "enviadas" | "agendamentos";
 type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
+type CampaignComposerMode = "simple" | "advanced";
 
 interface CampaignSegmentationState {
   gender: string;
@@ -95,6 +109,7 @@ const INTERNAL_TABS: Array<{ id: SheetTab; label: string }> = [
   { id: "dados", label: "Dados Gerais" },
   { id: "pendentes", label: "Leads Pendentes" },
   { id: "campanha", label: "Nova Campanha" },
+  { id: "disparo-direto", label: "Disparo Direto" },
   { id: "enviadas", label: "Campanhas Enviadas" },
   { id: "agendamentos", label: "Agendamentos" },
 ];
@@ -121,14 +136,27 @@ const SCHEDULED = [
 const IMPORTS_PAGE_SIZE = 10;
 const ALL_IMPORTS_VALUE = "__all__";
 const ALL_SEGMENT_VALUE = "__all__";
-const DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL =
-  "https://geracaodigital.app.n8n.cloud/webhook/c1a774a2-2172-4b4f-b557-a75d9561b720";
+const AI_STYLE_PRESETS = [
+  {
+    label: "Nome + curiosidade",
+    value: "Curiosidade com nome para WhatsApp, objecao vou pensar e recuperacao de leads indecisos",
+  },
+  {
+    label: "Consultivo direto",
+    value: "Consultivo, direto e sem pressao",
+  },
+  {
+    label: "Reativacao leve",
+    value: "Reativacao leve para leads frios",
+  },
+] as const;
 const darkFieldClass =
   "border-slate-200/90 bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all placeholder:text-slate-400 focus-visible:border-primary/35 focus-visible:ring-2 focus-visible:ring-primary/15 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-black/45 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.18)] dark:placeholder:text-white/30 dark:focus-visible:bg-black/60 dark:focus-visible:ring-1 dark:focus-visible:ring-primary/20";
 const darkSelectContentClass =
   "border-slate-200/90 bg-white text-slate-900 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#090b17]/98 dark:text-white dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)]";
 const darkSelectItemClass =
   "rounded-md text-slate-700 focus:bg-slate-100 focus:text-slate-950 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary dark:text-white/78 dark:focus:bg-white/[0.06] dark:focus:text-white dark:data-[state=checked]:bg-primary/12 dark:data-[state=checked]:text-white";
+const CAMPAIGN_TIME_ZONE = "America/Sao_Paulo";
 
 const defaultSegmentation: CampaignSegmentationState = {
   gender: ALL_SEGMENT_VALUE,
@@ -137,6 +165,15 @@ const defaultSegmentation: CampaignSegmentationState = {
   ticketThreshold: "",
   interest: "",
   campaignTag: "",
+};
+
+const defaultDispatchOptions: CampaignDispatchOptions = {
+  leadDelaySeconds: 2,
+  stopOnStepFailure: true,
+  aiAssisted: false,
+  waitForReply: false,
+  replyTimeoutSeconds: 60,
+  replyPollIntervalSeconds: 5,
 };
 
 const leadViewOptions: Array<{ id: LeadsViewMode; label: string; icon: typeof List }> = [
@@ -175,7 +212,49 @@ function getValidDate(value: unknown) {
 
 function formatDate(value: unknown, fallback = "Sem data") {
   const date = getValidDate(value);
-  return date ? date.toLocaleString("pt-BR") : fallback;
+  return date ? date.toLocaleString("pt-BR", { timeZone: CAMPAIGN_TIME_ZONE }) : fallback;
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const zonedTime = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+
+  return zonedTime - date.getTime();
+}
+
+function campaignLocalDateTimeToUtcIso(value: string) {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute] = match;
+  const localAsUtc = new Date(Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+  ));
+  const utcDate = new Date(localAsUtc.getTime() - getTimeZoneOffsetMs(localAsUtc, CAMPAIGN_TIME_ZONE));
+
+  return Number.isNaN(utcDate.getTime()) ? null : utcDate.toISOString();
 }
 
 function getScheduleDateParts(campaign: Campaign) {
@@ -189,10 +268,61 @@ function getScheduleDateParts(campaign: Campaign) {
   }
 
   return {
-    day: date.toLocaleDateString("pt-BR", { day: "2-digit" }),
-    month: date.toLocaleDateString("pt-BR", { month: "short" }),
+    day: date.toLocaleDateString("pt-BR", { day: "2-digit", timeZone: CAMPAIGN_TIME_ZONE }),
+    month: date.toLocaleDateString("pt-BR", { month: "short", timeZone: CAMPAIGN_TIME_ZONE }),
     label: campaign.scheduled_for ? formatDate(campaign.scheduled_for) : "sem data definida",
   };
+}
+
+const campaignStatusView: Record<CampaignStatus, { label: string; className: string }> = {
+  active: {
+    label: "PRONTA",
+    className: "border-primary/20 bg-primary/10 text-primary",
+  },
+  paused: {
+    label: "PAUSADA",
+    className: "border-amber-500/20 bg-amber-500/10 text-amber-300",
+  },
+  draft: {
+    label: "RASCUNHO",
+    className: "border-slate-400/20 bg-slate-400/10 text-slate-500 dark:text-slate-300",
+  },
+  scheduled: {
+    label: "AGENDADA",
+    className: "border-sky-400/25 bg-sky-400/10 text-sky-600 dark:text-sky-300",
+  },
+  processing: {
+    label: "PROCESSANDO",
+    className: "border-cyan-400/25 bg-cyan-400/10 text-cyan-600 dark:text-cyan-300",
+  },
+  sent: {
+    label: "ENVIADA",
+    className: "border-emerald-400/25 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300",
+  },
+  failed: {
+    label: "FALHOU",
+    className: "border-red-400/25 bg-red-400/10 text-red-600 dark:text-red-300",
+  },
+  cancelled: {
+    label: "CANCELADA",
+    className: "border-slate-400/20 bg-slate-400/10 text-slate-500 dark:text-slate-300",
+  },
+};
+
+function getCampaignStatusView(status: CampaignStatus) {
+  return campaignStatusView[status] || campaignStatusView.draft;
+}
+
+function canPauseCampaign(status: CampaignStatus) {
+  return ["active", "draft", "scheduled", "failed"].includes(status);
+}
+
+function canResumeCampaign(status: CampaignStatus) {
+  return status === "paused";
+}
+
+function canCampaignBeDispatched(status: CampaignStatus) {
+  return ["active", "draft", "scheduled", "failed"].includes(status);
 }
 
 function formatDateInput(value: string | null) {
@@ -337,6 +467,91 @@ function readImageAsCampaignAsset(file: File): Promise<{ name: string; type: str
   });
 }
 
+function makeCampaignStepId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createCampaignStep(type: "text" | "image", order: number, patch: Partial<CampaignSequenceStep> = {}): CampaignSequenceStep {
+  return {
+    id: patch.id || makeCampaignStepId(),
+    type,
+    order,
+    text: patch.text || "",
+    image: patch.image || null,
+    enabled: patch.enabled ?? true,
+    delayAfterSeconds: patch.delayAfterSeconds ?? 5,
+  };
+}
+
+function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): CampaignSequenceStep[] {
+  const provided = Array.isArray(meta?.sequence) ? meta.sequence : [];
+  const legacySteps: CampaignSequenceStep[] = [];
+
+  if (provided.length > 0) {
+    return [...provided]
+      .sort((left, right) => left.order - right.order)
+      .map((step, index) => ({
+        ...step,
+        order: index + 1,
+        image: step.image || null,
+        enabled: step.enabled !== false,
+        delayAfterSeconds: Number.isFinite(step.delayAfterSeconds) ? step.delayAfterSeconds : 5,
+      }));
+  }
+
+  if (meta?.message?.trim()) {
+    legacySteps.push(createCampaignStep("text", 1, { text: meta.message.trim() }));
+  }
+
+  if (meta?.image) {
+    legacySteps.push(createCampaignStep("image", legacySteps.length + 1, { image: meta.image }));
+  }
+
+  return legacySteps;
+}
+
+function buildSimpleCampaignSequence(
+  message: string,
+  image: CampaignImageAsset | null,
+  imageCaption: string,
+  imageFirst: boolean,
+) {
+  const textStep = message.trim()
+    ? createCampaignStep("text", 1, { text: message.trim() })
+    : null;
+  const imageStep = image
+    ? createCampaignStep("image", 1, { text: imageCaption.trim(), image })
+    : null;
+  const orderedSteps = imageFirst ? [imageStep, textStep] : [textStep, imageStep];
+  return normalizeStepOrder(orderedSteps.filter(Boolean) as CampaignSequenceStep[]);
+}
+
+function buildLegacySimpleCampaignSequence(message: string, image: CampaignImageAsset | null) {
+  const sequence: CampaignSequenceStep[] = [];
+  const trimmedMessage = message.trim();
+  if (trimmedMessage) {
+    sequence.push(createCampaignStep("text", 1, { text: trimmedMessage }));
+  }
+  if (image) {
+    sequence.push(createCampaignStep("image", sequence.length + 1, { image }));
+  }
+  return sequence;
+}
+
+function normalizeStepOrder(steps: CampaignSequenceStep[]) {
+  return steps.map((step, index) => ({
+    ...step,
+    order: index + 1,
+  }));
+}
+
+function getCampaignPreviewSteps(campaign: Campaign) {
+  return normalizeCampaignSequence(campaign.analytics_meta).filter((step) => step.enabled);
+}
+
 function PaginationControls({
   currentPage,
   totalPages,
@@ -430,12 +645,29 @@ export default function LeadImports({
   const [pendingFilter, setPendingFilter] = useState<string>("false");
   const [dispatchStatus, setDispatchStatus] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
+  const [directPhone, setDirectPhone] = useState("");
+  const [directMessage, setDirectMessage] = useState("");
+  const [directImageCaption, setDirectImageCaption] = useState("");
+  const [directImageFirst, setDirectImageFirst] = useState(false);
+  const [directImage, setDirectImage] = useState<CampaignImageAsset | null>(null);
+  const [directImageError, setDirectImageError] = useState<string | null>(null);
+  const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
   const [scheduledFor, setScheduledFor] = useState("");
   const [dispatchLimit, setDispatchLimit] = useState("");
   const [campaignMessage, setCampaignMessage] = useState("");
-  const [campaignImage, setCampaignImage] = useState<{ name: string; type: string; size: number; dataUrl: string } | null>(null);
+  const [campaignImage, setCampaignImage] = useState<CampaignImageAsset | null>(null);
+  const [campaignImageCaption, setCampaignImageCaption] = useState("");
+  const [campaignImageFirst, setCampaignImageFirst] = useState(false);
   const [campaignImageError, setCampaignImageError] = useState<string | null>(null);
+  const [campaignComposerMode, setCampaignComposerMode] = useState<CampaignComposerMode>("simple");
+  const [campaignSequence, setCampaignSequence] = useState<CampaignSequenceStep[]>([
+    createCampaignStep("text", 1),
+  ]);
+  const [dispatchOptions, setDispatchOptions] = useState<CampaignDispatchOptions>(defaultDispatchOptions);
+  const [aiGoal, setAiGoal] = useState("");
+  const [aiStyle, setAiStyle] = useState("");
+  const [selectedImageStepId, setSelectedImageStepId] = useState<string | null>(null);
   const [segmentation, setSegmentation] = useState<CampaignSegmentationState>(defaultSegmentation);
   const [leadViewMode, setLeadViewMode] = useState<LeadsViewMode>("lista");
   const [campaignSearch, setCampaignSearch] = useState("");
@@ -444,6 +676,8 @@ export default function LeadImports({
   const [campaignActionDialog, setCampaignActionDialog] = useState<CampaignActionDialogState>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const campaignImageInputRef = useRef<HTMLInputElement | null>(null);
+  const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
+  const directImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: imports = [], isLoading: importsLoading, error: importsError, refetch } = useLeadImports(selectedClientId);
   const createLeadImport = useCreateLeadImport();
@@ -453,6 +687,12 @@ export default function LeadImports({
   const updateCampaign = useUpdateCampaign();
   const deleteCampaign = useDeleteCampaign();
   const triggerCampaign = useTriggerCampaign();
+  const directDispatch = useDirectDispatch();
+  const { data: campaignAiStatus } = useCampaignAiStatus();
+  const generateCampaignCopy = useGenerateCampaignCopy();
+  const suggestCampaignSequence = useSuggestCampaignSequence();
+  const suggestCampaignDelays = useSuggestCampaignDelays();
+  const rewriteCampaignStep = useRewriteCampaignStep();
   const { data: pendingData, isLoading: pendingLoading, error: pendingError, refetch: refetchPending } = useLeadImportItems(
     selectedClientId,
     selectedImportId === ALL_IMPORTS_VALUE ? undefined : selectedImportId,
@@ -594,6 +834,195 @@ export default function LeadImports({
     }
   }
 
+  async function handleSequenceImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
+    const stepId = selectedImageStepId;
+    setCampaignImageError(null);
+
+    if (!file || !stepId) return;
+
+    if (!file.type.startsWith("image/")) {
+      setCampaignImageError("Selecione uma imagem valida para a sequencia.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setCampaignImageError("Use uma imagem de ate 2MB para manter o disparo leve.");
+      return;
+    }
+
+    try {
+      const asset = await readImageAsCampaignAsset(file);
+      setCampaignSequence((current) =>
+        current.map((step) => (step.id === stepId ? { ...step, image: asset } : step)),
+      );
+    } catch (error) {
+      setCampaignImageError(error instanceof Error ? error.message : "Falha ao carregar imagem.");
+    } finally {
+      event.target.value = "";
+      setSelectedImageStepId(null);
+    }
+  }
+
+  async function handleDirectImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
+    setDirectImageError(null);
+    setDirectImage(null);
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setDirectImageError("Selecione uma imagem valida para o disparo direto.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setDirectImageError("Use uma imagem de ate 2MB para manter o disparo leve.");
+      return;
+    }
+
+    try {
+      const asset = await readImageAsCampaignAsset(file);
+      setDirectImage(asset);
+    } catch (error) {
+      setDirectImageError(error instanceof Error ? error.message : "Falha ao carregar imagem.");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function updateCampaignStep(stepId: string, patch: Partial<CampaignSequenceStep>) {
+    setCampaignSequence((current) =>
+      normalizeStepOrder(current.map((step) => (step.id === stepId ? { ...step, ...patch } : step))),
+    );
+  }
+
+  function addCampaignStep(type: "text" | "image") {
+    setCampaignSequence((current) => normalizeStepOrder([...current, createCampaignStep(type, current.length + 1)]));
+  }
+
+  function removeCampaignStep(stepId: string) {
+    setCampaignSequence((current) => {
+      const next = current.filter((step) => step.id !== stepId);
+      return normalizeStepOrder(next.length > 0 ? next : [createCampaignStep("text", 1)]);
+    });
+  }
+
+  function moveCampaignStep(stepId: string, direction: -1 | 1) {
+    setCampaignSequence((current) => {
+      const index = current.findIndex((step) => step.id === stepId);
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
+
+      const next = [...current];
+      const [step] = next.splice(index, 1);
+      next.splice(targetIndex, 0, step);
+      return normalizeStepOrder(next);
+    });
+  }
+
+  function getCurrentSequenceForSubmit() {
+    return campaignComposerMode === "simple"
+      ? buildSimpleCampaignSequence(campaignMessage, campaignImage, campaignImageCaption, campaignImageFirst)
+      : normalizeStepOrder(campaignSequence);
+  }
+
+  function validateSequenceForSubmit(sequence: CampaignSequenceStep[]) {
+    const enabledSteps = sequence.filter((step) => step.enabled);
+    if (enabledSteps.length === 0) return "Adicione pelo menos um passo ativo na sequencia.";
+
+    const invalidStep = enabledSteps.find((step) =>
+      step.type === "text" ? !step.text.trim() : !step.image,
+    );
+
+    if (invalidStep) {
+      return invalidStep.type === "text"
+        ? `O passo ${invalidStep.order} precisa de texto.`
+        : `O passo ${invalidStep.order} precisa de imagem.`;
+    }
+
+    return null;
+  }
+
+  async function handleGenerateCampaignCopy() {
+    try {
+      const result = await generateCampaignCopy.mutateAsync({
+        campaignName,
+        goal: aiGoal,
+        style: aiStyle,
+        segmentation: toCampaignSegmentationPayload(segmentation),
+      });
+
+      if (campaignComposerMode === "simple") {
+        setCampaignMessage(result.copy);
+      } else {
+        setCampaignSequence((current) => {
+          const firstText = current.find((step) => step.type === "text");
+          if (!firstText) return normalizeStepOrder([createCampaignStep("text", 1, { text: result.copy }), ...current]);
+          return current.map((step) => (step.id === firstText.id ? { ...step, text: result.copy } : step));
+        });
+      }
+      setDispatchStatus(result.rationale || "Copy sugerida pela IA.");
+    } catch (error) {
+      setDispatchStatus(error instanceof Error ? error.message : "Falha ao gerar copy com IA.");
+    }
+  }
+
+  async function handleSuggestCampaignSequence() {
+    try {
+      const result = await suggestCampaignSequence.mutateAsync({
+        campaignName,
+        goal: aiGoal,
+        style: aiStyle,
+        segmentation: toCampaignSegmentationPayload(segmentation),
+        sequence: getCurrentSequenceForSubmit(),
+      });
+
+      setCampaignComposerMode("advanced");
+      setCampaignSequence(normalizeStepOrder(result.sequence));
+      setDispatchOptions(result.dispatchOptions);
+      setDispatchStatus(result.rationale || "Sequencia sugerida pela IA.");
+    } catch (error) {
+      setDispatchStatus(error instanceof Error ? error.message : "Falha ao sugerir sequencia com IA.");
+    }
+  }
+
+  async function handleSuggestCampaignDelays() {
+    try {
+      const result = await suggestCampaignDelays.mutateAsync({
+        campaignName,
+        goal: aiGoal,
+        style: aiStyle,
+        segmentation: toCampaignSegmentationPayload(segmentation),
+        sequence: getCurrentSequenceForSubmit(),
+        dispatchOptions,
+      });
+
+      setCampaignSequence(normalizeStepOrder(result.sequence));
+      setDispatchOptions(result.dispatchOptions);
+      setDispatchStatus(result.rationale || "Atrasos sugeridos pela IA.");
+    } catch (error) {
+      setDispatchStatus(error instanceof Error ? error.message : "Falha ao sugerir atrasos com IA.");
+    }
+  }
+
+  async function handleRewriteCampaignStep(step: CampaignSequenceStep) {
+    try {
+      const result = await rewriteCampaignStep.mutateAsync({
+        campaignName,
+        goal: aiGoal,
+        style: aiStyle,
+        segmentation: toCampaignSegmentationPayload(segmentation),
+        step,
+      });
+
+      updateCampaignStep(step.id, { text: result.step.text });
+      setDispatchStatus(result.rationale || "Passo reescrito pela IA.");
+    } catch (error) {
+      setDispatchStatus(error instanceof Error ? error.message : "Falha ao reescrever passo com IA.");
+    }
+  }
+
   async function handleImport() {
     if (!selectedClientId) {
       setParseError("Selecione um cliente antes de importar.");
@@ -641,9 +1070,32 @@ export default function LeadImports({
       return;
     }
 
+    if (!campaignMessage.trim()) {
+      setDispatchStatus("Escreva o texto que sera enviado na campanha.");
+      return;
+    }
+
     const parsedLimit = dispatchLimit.trim() ? Number(dispatchLimit) : undefined;
     if (parsedLimit !== undefined && (!Number.isFinite(parsedLimit) || parsedLimit <= 0 || !Number.isInteger(parsedLimit))) {
       setDispatchStatus("Informe uma quantidade valida por lote usando apenas numeros inteiros.");
+      return;
+    }
+
+    const scheduledDate = getValidDate(scheduledFor);
+    if (scheduledFor && !scheduledDate) {
+      setDispatchStatus("Informe uma data e hora validas para o agendamento.");
+      return;
+    }
+
+    if (scheduledDate && scheduledDate.getTime() < Date.now() - 60_000) {
+      setDispatchStatus("Escolha uma data futura para agendar a campanha.");
+      return;
+    }
+
+    const sequence = getCurrentSequenceForSubmit();
+    const sequenceError = validateSequenceForSubmit(sequence);
+    if (sequenceError) {
+      setDispatchStatus(sequenceError);
       return;
     }
 
@@ -656,13 +1108,13 @@ export default function LeadImports({
         clientId: selectedClientId,
         importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
         limitPerRun: parsedLimit ?? 50,
-        scheduledFor: getValidDate(scheduledFor)?.toISOString() ?? null,
-        webhookUrl: DEFAULT_N8N_CAMPAIGN_WEBHOOK_URL,
-        webhookToken: null,
+        scheduledFor: scheduledDate?.toISOString() ?? null,
         analyticsMeta: {
           segmentation: toCampaignSegmentationPayload(segmentation),
           message: campaignMessage.trim(),
           image: campaignImage,
+          sequence,
+          dispatchOptions,
         },
       });
 
@@ -672,7 +1124,14 @@ export default function LeadImports({
       setDispatchLimit("");
       setCampaignMessage("");
       setCampaignImage(null);
+      setCampaignImageCaption("");
+      setCampaignImageFirst(false);
       setCampaignImageError(null);
+      setCampaignComposerMode("simple");
+      setCampaignSequence([createCampaignStep("text", 1)]);
+      setDispatchOptions(defaultDispatchOptions);
+      setAiGoal("");
+      setAiStyle("");
       setSegmentation(defaultSegmentation);
       setSelectedImportId(ALL_IMPORTS_VALUE);
       setActiveTab("agendamentos");
@@ -687,7 +1146,9 @@ export default function LeadImports({
   async function handleTriggerCampaign(campaign: Campaign) {
     try {
       const result = await triggerCampaign.mutateAsync(campaign.id);
-      setDispatchStatus(`Campanha ${campaign.name} disparada com sucesso. ${result.n8nResponse ?? ""}`.trim());
+      setDispatchStatus(
+        `Campanha ${campaign.name}: ${result.successCount} enviados completos, ${result.failureCount} falhas.`
+      );
       void refetchCampaigns();
       void refetchPending();
     } catch (error) {
@@ -695,14 +1156,59 @@ export default function LeadImports({
     }
   }
 
+  async function handleDirectDispatch() {
+    if (!selectedClientId) {
+      setDirectDispatchStatus("Selecione uma empresa antes de disparar.");
+      return;
+    }
+
+    if (!directPhone.trim()) {
+      setDirectDispatchStatus("Informe um telefone para disparo.");
+      return;
+    }
+
+    if (!directMessage.trim() && !directImage) {
+      setDirectDispatchStatus("Digite uma mensagem ou selecione uma imagem para envio.");
+      return;
+    }
+
+    setDirectDispatchStatus(null);
+
+    try {
+      const result = await directDispatch.mutateAsync({
+        clientId: selectedClientId,
+        phone: directPhone.trim(),
+        text: directMessage.trim(),
+        imageCaption: directImageCaption.trim(),
+        imageFirst: directImageFirst,
+        image: directImage,
+      });
+
+      if (result.success) {
+        setDirectDispatchStatus(`Disparo enviado para ${result.phone}.`);
+        setDirectPhone("");
+        setDirectMessage("");
+        setDirectImageCaption("");
+        setDirectImageFirst(false);
+        setDirectImage(null);
+        return;
+      }
+
+      setDirectDispatchStatus(result.failures[0]?.reason || "Falha no disparo direto.");
+    } catch (error) {
+      setDirectDispatchStatus(error instanceof Error ? error.message : "Falha no disparo direto.");
+    }
+  }
+
   async function handleToggleCampaignStatus(campaign: Campaign) {
     try {
+      const nextStatus = canPauseCampaign(campaign.status) ? "paused" : "scheduled";
       await updateCampaign.mutateAsync({
         id: campaign.id,
-        status: campaign.status === "active" ? "paused" : "active",
+        status: nextStatus,
       });
       setDispatchStatus(
-        campaign.status === "active"
+        nextStatus === "paused"
           ? `Campanha ${campaign.name} pausada.`
           : `Campanha ${campaign.name} reativada.`
       );
@@ -1427,37 +1933,300 @@ export default function LeadImports({
                 </div>
 
                 <div className="space-y-4">
-                  <div className="space-y-2">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Texto de envio</p>
-                    <Textarea
-                      placeholder="Digite a mensagem que o agente usara nesta campanha..."
-                      className={cn("min-h-[142px]", darkFieldClass)}
-                      value={campaignMessage}
-                      onChange={(event) => setCampaignMessage(event.target.value)}
-                    />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Conteudo do disparo</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {campaignComposerMode === "simple" ? "Modo simples" : `${campaignSequence.length} passos na sequencia`}
+                      </p>
+                    </div>
+                    <div className="flex rounded-lg border border-slate-200/90 bg-white p-1 dark:border-white/10 dark:bg-black/30">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={campaignComposerMode === "simple" ? "secondary" : "ghost"}
+                        onClick={() => setCampaignComposerMode("simple")}
+                      >
+                        Simples
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={campaignComposerMode === "advanced" ? "secondary" : "ghost"}
+                        onClick={() => setCampaignComposerMode("advanced")}
+                      >
+                        Avancado
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <input ref={campaignImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleCampaignImageChange} />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full justify-center"
-                      onClick={() => campaignImageInputRef.current?.click()}
-                    >
-                      <ImagePlus className="h-4 w-4" />
-                      {campaignImage ? "Trocar imagem da campanha" : "Anexar imagem da campanha"}
-                    </Button>
-                    {campaignImage ? (
-                      <div className="flex items-center gap-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 text-sm dark:border-white/10 dark:bg-black/30">
-                        <img src={campaignImage.dataUrl} alt={campaignImage.name} className="h-14 w-14 rounded-lg object-cover" />
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-foreground">{campaignImage.name}</p>
-                          <p className="text-xs text-muted-foreground">{Math.round(campaignImage.size / 1024)} KB</p>
-                        </div>
+                  {campaignAiStatus?.enabled ? (
+                    <div className="space-y-2 rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input
+                          placeholder="Objetivo da campanha"
+                          className={darkFieldClass}
+                          value={aiGoal}
+                          onChange={(event) => setAiGoal(event.target.value)}
+                        />
+                        <Input
+                          placeholder="Estilo da copy"
+                          className={darkFieldClass}
+                          value={aiStyle}
+                          onChange={(event) => setAiStyle(event.target.value)}
+                        />
                       </div>
-                    ) : null}
-                    <ErrorMessage message={campaignImageError} variant="banner" />
+                      <div className="flex flex-wrap gap-2">
+                        {AI_STYLE_PRESETS.map((preset) => (
+                          <Button
+                            key={preset.label}
+                            type="button"
+                            variant={aiStyle === preset.value ? "secondary" : "outline"}
+                            size="sm"
+                            onClick={() => setAiStyle(preset.value)}
+                          >
+                            {preset.label}
+                          </Button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => void handleGenerateCampaignCopy()} disabled={generateCampaignCopy.isPending}>
+                          <Sparkles className="h-4 w-4" />
+                          Gerar copy
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void handleSuggestCampaignSequence()} disabled={suggestCampaignSequence.isPending}>
+                          <Sparkles className="h-4 w-4" />
+                          Sugerir sequencia
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void handleSuggestCampaignDelays()} disabled={suggestCampaignDelays.isPending}>
+                          <Clock3 className="h-4 w-4" />
+                          Sugerir atrasos
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {campaignComposerMode === "simple" ? (
+                    <>
+                      <div className="space-y-2">
+                        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Texto de envio</p>
+                        <Textarea
+                          placeholder="Digite a mensagem que sera enviada nesta campanha..."
+                          className={cn("min-h-[142px]", darkFieldClass)}
+                          value={campaignMessage}
+                          onChange={(event) => setCampaignMessage(event.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <input ref={campaignImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleCampaignImageChange} />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-center"
+                          onClick={() => campaignImageInputRef.current?.click()}
+                        >
+                          <ImagePlus className="h-4 w-4" />
+                          {campaignImage ? "Trocar imagem da campanha" : "Anexar imagem da campanha"}
+                        </Button>
+                        {campaignImage ? (
+                          <div className="space-y-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 text-sm dark:border-white/10 dark:bg-black/30">
+                            <div className="flex items-center gap-3">
+                              <img src={campaignImage.dataUrl} alt={campaignImage.name} className="h-14 w-14 rounded-lg object-cover" />
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-foreground">{campaignImage.name}</p>
+                                <p className="text-xs text-muted-foreground">{Math.round(campaignImage.size / 1024)} KB</p>
+                              </div>
+                            </div>
+                            <Input
+                              className={darkFieldClass}
+                              placeholder="Legenda da imagem opcional"
+                              value={campaignImageCaption}
+                              onChange={(event) => setCampaignImageCaption(event.target.value)}
+                            />
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Button
+                                type="button"
+                                variant={!campaignImageFirst ? "secondary" : "outline"}
+                                onClick={() => setCampaignImageFirst(false)}
+                              >
+                                Texto primeiro
+                              </Button>
+                              <Button
+                                type="button"
+                                variant={campaignImageFirst ? "secondary" : "outline"}
+                                onClick={() => setCampaignImageFirst(true)}
+                              >
+                                Imagem primeiro
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+                        <ErrorMessage message={campaignImageError} variant="banner" />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <input ref={sequenceImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleSequenceImageChange} />
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => addCampaignStep("text")}>
+                          <Megaphone className="h-4 w-4" />
+                          Texto
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => addCampaignStep("image")}>
+                          <ImagePlus className="h-4 w-4" />
+                          Imagem
+                        </Button>
+                      </div>
+
+                      {campaignSequence.map((step, index) => (
+                        <div key={step.id} className="space-y-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={step.enabled}
+                                onChange={(event) => updateCampaignStep(step.id, { enabled: event.target.checked })}
+                              />
+                              passo {step.order} ativo
+                            </label>
+                            <div className="flex gap-1">
+                              <Button type="button" variant="ghost" size="sm" onClick={() => moveCampaignStep(step.id, -1)} disabled={index === 0}>
+                                <ArrowUp className="h-4 w-4" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => moveCampaignStep(step.id, 1)} disabled={index === campaignSequence.length - 1}>
+                                <ArrowDown className="h-4 w-4" />
+                              </Button>
+                              {campaignAiStatus?.enabled ? (
+                                <Button type="button" variant="ghost" size="sm" onClick={() => void handleRewriteCampaignStep(step)} disabled={rewriteCampaignStep.isPending}>
+                                  <Sparkles className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+                              <Button type="button" variant="ghost" size="sm" onClick={() => removeCampaignStep(step.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          <Select value={step.type} onValueChange={(value) => updateCampaignStep(step.id, { type: value as "text" | "image" })}>
+                            <SelectTrigger className={darkFieldClass}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className={darkSelectContentClass}>
+                              <SelectItem value="text" className={darkSelectItemClass}>Texto</SelectItem>
+                              <SelectItem value="image" className={darkSelectItemClass}>Imagem</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          <Textarea
+                            placeholder={step.type === "image" ? "Legenda opcional da imagem" : "Texto do passo"}
+                            className={cn("min-h-[90px]", darkFieldClass)}
+                            value={step.text}
+                            onChange={(event) => updateCampaignStep(step.id, { text: event.target.value })}
+                          />
+
+                          {step.type === "image" ? (
+                            <div className="space-y-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedImageStepId(step.id);
+                                  sequenceImageInputRef.current?.click();
+                                }}
+                              >
+                                <ImagePlus className="h-4 w-4" />
+                                {step.image ? "Trocar imagem" : "Selecionar imagem"}
+                              </Button>
+                              {step.image ? (
+                                <div className="flex items-center gap-3 rounded-lg border border-slate-200/90 bg-white/80 p-2 text-xs dark:border-white/10 dark:bg-black/30">
+                                  <img src={step.image.dataUrl} alt={step.image.name} className="h-12 w-12 rounded-md object-cover" />
+                                  <span className="truncate">{step.image.name}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="space-y-1">
+                              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Atraso apos passo</p>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="1"
+                                className={darkFieldClass}
+                                value={step.delayAfterSeconds}
+                                onChange={(event) => updateCampaignStep(step.id, { delayAfterSeconds: Math.max(0, Number(event.target.value) || 0) })}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <ErrorMessage message={campaignImageError} variant="banner" />
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Atraso entre leads</p>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        className={darkFieldClass}
+                        value={dispatchOptions.leadDelaySeconds}
+                        onChange={(event) =>
+                          setDispatchOptions((current) => ({
+                            ...current,
+                            leadDelaySeconds: Math.max(0, Number(event.target.value) || 0),
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Tempo maximo aguardando resposta</p>
+                      <Input
+                        type="number"
+                        min="1"
+                        step="1"
+                        className={darkFieldClass}
+                        disabled={!dispatchOptions.waitForReply}
+                        value={dispatchOptions.replyTimeoutSeconds ?? 60}
+                        onChange={(event) =>
+                          setDispatchOptions((current) => ({
+                            ...current,
+                            replyTimeoutSeconds: Math.max(1, Number(event.target.value) || 60),
+                          }))
+                        }
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={dispatchOptions.stopOnStepFailure}
+                        onChange={(event) =>
+                          setDispatchOptions((current) => ({
+                            ...current,
+                            stopOnStepFailure: event.target.checked,
+                          }))
+                        }
+                      />
+                      cancelar proximos passos se um passo falhar
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(dispatchOptions.waitForReply)}
+                        onChange={(event) =>
+                          setDispatchOptions((current) => ({
+                            ...current,
+                            waitForReply: event.target.checked,
+                          }))
+                        }
+                      />
+                      aguardar resposta antes do proximo lead
+                    </label>
                   </div>
                 </div>
               </div>
@@ -1476,6 +2245,127 @@ export default function LeadImports({
                 <Button onClick={() => void handleDispatch()} disabled={isDispatching || !selectedClientId}>
                   <Megaphone className="mr-2 h-4 w-4" />
                   {isDispatching ? "Criando..." : "Criar campanha"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === "disparo-direto" && isInternalUser && (
+          <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+            <CardContent className="space-y-6 p-6">
+              <div>
+                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Disparo Direto</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Envie uma mensagem avulsa usando a URL Evolution configurada na empresa selecionada.
+                </p>
+              </div>
+
+              {directDispatchStatus ? (
+                <div
+                  className={cn(
+                    "rounded-xl border p-4 text-sm font-medium",
+                    directDispatchStatus.includes("enviada")
+                      ? "border-primary/30 bg-primary/10 text-primary"
+                      : "border-destructive/30 bg-destructive/10 text-destructive",
+                  )}
+                >
+                  {directDispatchStatus}
+                </div>
+              ) : null}
+
+              <div className="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
+                <div className="space-y-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Telefone</p>
+                  <Input
+                    className={darkFieldClass}
+                    inputMode="tel"
+                    placeholder="Ex: 11999999999"
+                    value={directPhone}
+                    onChange={(event) => setDirectPhone(event.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Mensagem de texto</p>
+                  <Textarea
+                    className={cn("min-h-[150px]", darkFieldClass)}
+                    placeholder="Digite a mensagem de texto que sera enviada pela Evolution..."
+                    value={directMessage}
+                    onChange={(event) => setDirectMessage(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-border/80 bg-background/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Imagem opcional</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Envie uma imagem com legenda propria, separada da mensagem de texto.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <input ref={directImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleDirectImageChange} />
+                    <Button type="button" variant="outline" onClick={() => directImageInputRef.current?.click()}>
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      {directImage ? "Trocar imagem" : "Selecionar imagem"}
+                    </Button>
+                    {directImage ? (
+                      <Button type="button" variant="ghost" onClick={() => setDirectImage(null)}>
+                        Remover
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {directImage ? (
+                  <div className="grid gap-3 rounded-xl border border-border/70 bg-card/80 p-3 md:grid-cols-[140px_1fr]">
+                    <img src={directImage.dataUrl} alt={directImage.name} className="h-28 w-full rounded-lg object-cover" />
+                    <div className="space-y-1 text-sm text-muted-foreground">
+                      <p className="font-medium text-foreground">{directImage.name}</p>
+                      <p>{directImage.type || "imagem"} · {(directImage.size / 1024).toFixed(1)} KB</p>
+                      <Input
+                        className={darkFieldClass}
+                        placeholder="Legenda da imagem opcional"
+                        value={directImageCaption}
+                        onChange={(event) => setDirectImageCaption(event.target.value)}
+                      />
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant={!directImageFirst ? "secondary" : "outline"}
+                          onClick={() => setDirectImageFirst(false)}
+                        >
+                          Texto primeiro
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={directImageFirst ? "secondary" : "outline"}
+                          onClick={() => setDirectImageFirst(true)}
+                        >
+                          Imagem primeiro
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {directImageError ? <p className="text-sm text-destructive">{directImageError}</p> : null}
+              </div>
+
+              <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
+                Texto envia <code>number</code> + <code>txt</code>. Imagem envia <code>number</code>, <code>caption</code> e base64 pela mesma URL Evolution da empresa.
+              </div>
+
+              <div className="flex flex-wrap gap-3 border-t border-border/70 pt-5">
+                <Button
+                  type="button"
+                  onClick={() => void handleDirectDispatch()}
+                  disabled={directDispatch.isPending || !selectedClientId}
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  {directDispatch.isPending ? "Enviando..." : "Disparar agora"}
                 </Button>
               </div>
             </CardContent>
@@ -1512,8 +2402,8 @@ export default function LeadImports({
                           {campaign.last_triggered_at ? formatDate(campaign.last_triggered_at) : "Sem disparo"} · {campaign.client_name ?? campaign.client_id}
                         </p>
                       </div>
-                      <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.status === "active" ? "border-primary/20 bg-primary/10 text-primary" : "border-amber-500/20 bg-amber-500/10 text-amber-300")}>
-                        {campaign.status === "active" ? "ATIVA" : "PAUSADA"}
+                      <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
+                        {getCampaignStatusView(campaign.status).label}
                       </span>
                     </div>
                     <div className="border-t border-border/70 pt-4">
@@ -1524,18 +2414,25 @@ export default function LeadImports({
                         {campaign.scheduled_for ? `Agendada para ${formatDate(campaign.scheduled_for)}` : "Sem data agendada"}
                       </p>
                     </div>
-                    {(campaign.analytics_meta?.message || campaign.analytics_meta?.image) ? (
+                    {getCampaignPreviewSteps(campaign).length > 0 ? (
                       <div className="rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
                         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Conteudo da campanha</p>
-                        {campaign.analytics_meta?.message ? (
-                          <p className="mt-2 line-clamp-3 text-sm text-foreground">{campaign.analytics_meta.message}</p>
-                        ) : null}
-                        {campaign.analytics_meta?.image ? (
-                          <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
-                            <img src={campaign.analytics_meta.image.dataUrl} alt={campaign.analytics_meta.image.name} className="h-12 w-12 rounded-lg object-cover" />
-                            <span className="truncate">{campaign.analytics_meta.image.name}</span>
-                          </div>
-                        ) : null}
+                        <div className="mt-2 space-y-2">
+                          {getCampaignPreviewSteps(campaign).slice(0, 4).map((step) => (
+                            <div key={step.id} className="rounded-lg border border-slate-200/80 bg-white/70 p-2 text-sm dark:border-white/10 dark:bg-black/25">
+                              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                                {step.order}. {step.type === "image" ? "imagem" : "texto"}
+                              </p>
+                              {step.text ? <p className="mt-1 line-clamp-2 text-foreground">{step.text}</p> : null}
+                              {step.image ? (
+                                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                  <img src={step.image.dataUrl} alt={step.image.name} className="h-10 w-10 rounded-md object-cover" />
+                                  <span className="truncate">{step.image.name}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-3">
@@ -1604,30 +2501,37 @@ export default function LeadImports({
                           <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />lote {campaign.limit_per_run}</span>
                           <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{scheduleDateParts.label}</span>
                         </div>
-                        {(campaign.analytics_meta?.message || campaign.analytics_meta?.image) ? (
+                        {getCampaignPreviewSteps(campaign).length > 0 ? (
                           <div className="mt-4 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
                             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Conteudo do disparo</p>
-                            {campaign.analytics_meta?.message ? (
-                              <p className="mt-2 line-clamp-2 text-sm text-foreground">{campaign.analytics_meta.message}</p>
-                            ) : null}
-                            {campaign.analytics_meta?.image ? (
-                              <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
-                                <img src={campaign.analytics_meta.image.dataUrl} alt={campaign.analytics_meta.image.name} className="h-12 w-12 rounded-lg object-cover" />
-                                <span className="truncate">{campaign.analytics_meta.image.name}</span>
-                              </div>
-                            ) : null}
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              {getCampaignPreviewSteps(campaign).slice(0, 4).map((step) => (
+                                <div key={step.id} className="rounded-lg border border-slate-200/80 bg-white/70 p-2 text-sm dark:border-white/10 dark:bg-black/25">
+                                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                                    {step.order}. {step.type === "image" ? "imagem" : "texto"}
+                                  </p>
+                                  {step.text ? <p className="mt-1 line-clamp-2 text-foreground">{step.text}</p> : null}
+                                  {step.image ? (
+                                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                      <img src={step.image.dataUrl} alt={step.image.name} className="h-10 w-10 rounded-md object-cover" />
+                                      <span className="truncate">{step.image.name}</span>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         ) : null}
                       </div>
-                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.status === "active" ? "border-amber-400/20 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/5 text-muted-foreground")}>
-                        {campaign.status === "active" ? "PRONTA" : "PAUSADA"}
+                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
+                        {getCampaignStatusView(campaign.status).label}
                       </span>
                       <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary">
+                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} disabled={!canCampaignBeDispatched(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary disabled:cursor-not-allowed disabled:opacity-45">
                           <Zap className="h-4 w-4" />
                         </button>
-                        <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200">
-                          {campaign.status === "active" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} disabled={!canPauseCampaign(campaign.status) && !canResumeCampaign(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-45">
+                          {canPauseCampaign(campaign.status) ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                         </button>
                         <button type="button" onClick={() => setCampaignActionDialog({ action: "delete", campaign })} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-[0px] text-pink-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-pink-300">
                           <Trash2 className="h-4 w-4 text-pink-400" />
