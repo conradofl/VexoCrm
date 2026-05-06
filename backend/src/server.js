@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { randomUUID } from "crypto";
 import { gunzipSync } from "zlib";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -1081,6 +1082,129 @@ function normalizeHttpUrl(value) {
   }
 }
 
+function getRequestId(req) {
+  return (
+    normalizeString(req.headers["x-request-id"]) ||
+    normalizeString(req.headers["x-correlation-id"]) ||
+    randomUUID()
+  );
+}
+
+function maskPhoneForLog(phone) {
+  const normalized = normalizeString(phone);
+  if (!normalized) return null;
+  const lastDigits = normalized.slice(-4);
+  return `${"*".repeat(Math.max(normalized.length - 4, 0))}${lastDigits}`;
+}
+
+function getClientEnvSuffix(clientId) {
+  const normalized = normalizeString(clientId);
+  if (!normalized) return null;
+  return normalized
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function parseJsonEnvMap(name) {
+  const raw = normalizeString(process.env[name]);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch (error) {
+    console.warn("[campaign-direct-dispatch] invalid json env map", {
+      env: name,
+      error: error instanceof Error ? error.message : "invalid json",
+    });
+    return null;
+  }
+}
+
+function resolveEnvDispatchWebhookSettings(clientId) {
+  const suffix = getClientEnvSuffix(clientId);
+  const candidates = [];
+
+  if (suffix) {
+    candidates.push({
+      source: `env:EVOLUTION_DISPATCH_WEBHOOK_URL_${suffix}`,
+      url: process.env[`EVOLUTION_DISPATCH_WEBHOOK_URL_${suffix}`],
+      token: process.env[`EVOLUTION_DISPATCH_WEBHOOK_TOKEN_${suffix}`],
+    });
+    candidates.push({
+      source: `env:N8N_DISPATCH_WEBHOOK_URL_${suffix}`,
+      url: process.env[`N8N_DISPATCH_WEBHOOK_URL_${suffix}`],
+      token: process.env[`N8N_DISPATCH_WEBHOOK_TOKEN_${suffix}`],
+    });
+  }
+
+  for (const envName of ["EVOLUTION_DISPATCH_WEBHOOKS_JSON", "N8N_DISPATCH_WEBHOOKS_JSON"]) {
+    const map = parseJsonEnvMap(envName);
+    if (!map) continue;
+
+    const rawConfig =
+      map[clientId] ||
+      map[normalizeTenantKey(clientId)] ||
+      (suffix ? map[suffix] : null);
+    if (!rawConfig) continue;
+
+    if (typeof rawConfig === "string") {
+      candidates.push({ source: `env:${envName}`, url: rawConfig, token: null });
+      continue;
+    }
+
+    if (rawConfig && typeof rawConfig === "object") {
+      candidates.push({
+        source: `env:${envName}`,
+        url: rawConfig.url || rawConfig.webhookUrl || rawConfig.dispatchWebhookUrl,
+        token: rawConfig.token || rawConfig.webhookToken || rawConfig.dispatchWebhookToken,
+      });
+    }
+  }
+
+  for (const candidate of candidates) {
+    const rawUrl = normalizeString(candidate.url);
+    if (!rawUrl) continue;
+
+    const webhookUrl = normalizeHttpUrl(rawUrl);
+    if (!webhookUrl) {
+      return {
+        source: candidate.source,
+        webhookUrl: null,
+        webhookToken: null,
+        invalid: true,
+      };
+    }
+
+    return {
+      source: candidate.source,
+      webhookUrl,
+      webhookToken: normalizeString(candidate.token),
+      invalid: false,
+    };
+  }
+
+  return null;
+}
+
+function getSafeDispatchSettingsLog(settingsResult) {
+  return {
+    source: settingsResult?.source || "missing",
+    schemaAvailable: settingsResult?.schemaAvailable !== false,
+    webhookConfigured: !!settingsResult?.webhookUrl,
+    settingsActive: settingsResult?.settings ? settingsResult.settings.active !== false : null,
+    hasWebhookToken: !!settingsResult?.webhookToken,
+  };
+}
+
+function logDirectDispatch(level, event, details = {}) {
+  const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+  logger("[campaign-direct-dispatch]", event, details);
+}
+
 function maskN8nSettings(row) {
   if (!row) {
     return {
@@ -1110,8 +1234,14 @@ function getN8nOnboardingStatus(settings) {
   return "evolution + inbound legado";
 }
 
-async function getLeadClientN8nSettings(clientId) {
-  if (!supabase || !clientId) return null;
+async function getLeadClientN8nSettingsStatus(clientId) {
+  if (!supabase || !clientId) {
+    return {
+      settings: null,
+      schemaAvailable: false,
+      source: "supabase_unavailable",
+    };
+  }
 
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
@@ -1122,11 +1252,27 @@ async function getLeadClientN8nSettings(clientId) {
     .maybeSingle();
 
   if (error) {
-    if (isMissingSchemaError(error)) return null;
+    if (isMissingSchemaError(error)) {
+      return {
+        settings: null,
+        schemaAvailable: false,
+        source: "schema_missing",
+        error,
+      };
+    }
     throw error;
   }
 
-  return data || null;
+  return {
+    settings: data || null,
+    schemaAvailable: true,
+    source: data ? "client_settings" : "missing",
+  };
+}
+
+async function getLeadClientN8nSettings(clientId) {
+  const { settings } = await getLeadClientN8nSettingsStatus(clientId);
+  return settings;
 }
 
 async function getLeadClientN8nSettingsMap(clientIds) {
@@ -1229,7 +1375,8 @@ async function validateN8nInboundBearer(req, res, clientId) {
 }
 
 async function resolveDispatchWebhookSettings(clientId) {
-  const settings = await getLeadClientN8nSettings(clientId);
+  const settingsStatus = await getLeadClientN8nSettingsStatus(clientId);
+  const settings = settingsStatus.settings;
   const hasActiveClientSettings =
     settings && settings.active !== false && !!settings.dispatch_webhook_url;
 
@@ -1239,14 +1386,46 @@ async function resolveDispatchWebhookSettings(clientId) {
       webhookUrl: settings.dispatch_webhook_url,
       webhookToken: settings.dispatch_webhook_token || null,
       source: "client_settings",
+      schemaAvailable: settingsStatus.schemaAvailable,
     };
   }
+
+  const envSettings = resolveEnvDispatchWebhookSettings(clientId);
+  if (envSettings?.webhookUrl) {
+    return {
+      settings,
+      webhookUrl: envSettings.webhookUrl,
+      webhookToken: envSettings.webhookToken || null,
+      source: envSettings.source,
+      schemaAvailable: settingsStatus.schemaAvailable,
+    };
+  }
+
+  if (envSettings?.invalid) {
+    return {
+      settings,
+      webhookUrl: null,
+      webhookToken: null,
+      source: "env_invalid",
+      schemaAvailable: settingsStatus.schemaAvailable,
+    };
+  }
+
+  const source =
+    settingsStatus.source === "schema_missing"
+      ? "schema_missing"
+      : settings && settings.active === false
+        ? "inactive"
+        : settings
+          ? "missing_url"
+          : "missing";
 
   return {
     settings,
     webhookUrl: null,
     webhookToken: null,
-    source: "missing",
+    source,
+    schemaAvailable: settingsStatus.schemaAvailable,
   };
 }
 
@@ -6671,6 +6850,9 @@ app.post("/api/campaigns/ai/rewrite-step", requireFirebaseAuth, requireInternalP
 app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
   if (!ensureSupabase(res)) return;
 
+  const requestId = getRequestId(req);
+  res.setHeader("X-Request-Id", requestId);
+
   const requestedClientId = normalizeString(req.body?.clientId);
   const phone = sanitizePhone(req.body?.phone ?? req.body?.telefone ?? req.body?.number);
   const text = normalizeString(req.body?.text ?? req.body?.message ?? req.body?.txt);
@@ -6679,31 +6861,83 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
   const image = req.body?.image && typeof req.body.image === "object" ? req.body.image : null;
 
   if (!requestedClientId) {
-    sendError(res, 400, "INVALID_BODY", "Missing clientId");
+    sendError(res, 400, "INVALID_BODY", "Missing clientId", { requestId });
     return;
   }
 
   if (!phone) {
-    sendError(res, 400, "INVALID_BODY", "Missing valid phone");
+    sendError(res, 400, "INVALID_BODY", "Missing valid phone", { requestId });
     return;
   }
 
   if (!text && !image) {
-    sendError(res, 400, "INVALID_BODY", "Missing message text or image");
+    sendError(res, 400, "INVALID_BODY", "Missing message text or image", { requestId });
     return;
   }
 
   try {
+    logDirectDispatch("info", "request_received", {
+      requestId,
+      requestedClientId,
+      hasText: !!text,
+      hasImage: !!image,
+      imageFirst,
+      phone: maskPhoneForLog(phone),
+      userUid: req.authAccess?.uid || null,
+    });
+
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const { webhookUrl, webhookToken } = await resolveDispatchWebhookSettings(clientId);
+    const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
+    const { webhookUrl, webhookToken } = dispatchSettings;
+
+    logDirectDispatch("info", "tenant_resolved", {
+      requestId,
+      requestedClientId,
+      resolvedClientId: clientId,
+      ...getSafeDispatchSettingsLog(dispatchSettings),
+    });
+
     if (!webhookUrl) {
+      const details = {
+        requestId,
+        clientId,
+        settingsSource: dispatchSettings.source,
+        schemaAvailable: dispatchSettings.schemaAvailable !== false,
+      };
+
+      if (dispatchSettings.source === "schema_missing") {
+        logDirectDispatch("error", "settings_schema_missing", details);
+        sendError(
+          res,
+          503,
+          "EVOLUTION_SETTINGS_SCHEMA_MISSING",
+          "A tabela de configuracao de disparo por empresa nao esta aplicada neste ambiente.",
+          details
+        );
+        return;
+      }
+
+      if (dispatchSettings.source === "env_invalid") {
+        logDirectDispatch("error", "settings_env_invalid", details);
+        sendError(
+          res,
+          500,
+          "EVOLUTION_SETTINGS_INVALID",
+          "A URL de disparo configurada para esta empresa e invalida.",
+          details
+        );
+        return;
+      }
+
+      logDirectDispatch("warn", "settings_missing", details);
       sendError(
         res,
         400,
         "EVOLUTION_SETTINGS_MISSING",
-        "Configure uma URL ativa de disparo Evolution para esta empresa"
+        "Configure uma URL ativa de disparo Evolution para esta empresa",
+        details
       );
       return;
     }
@@ -6733,6 +6967,14 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
     const sequence = imageFirst
       ? [imageStep, textStep].filter(Boolean).map((step, index) => ({ ...step, order: index + 1 }))
       : [textStep, imageStep].filter(Boolean).map((step, index) => ({ ...step, order: index + 1 }));
+
+    logDirectDispatch("info", "dispatch_started", {
+      requestId,
+      clientId,
+      steps: sequence.map((step) => ({ id: step.id, type: step.type, order: step.order })),
+      settingsSource: dispatchSettings.source,
+    });
+
     const { summary } = await dispatchCampaignSequence({
       webhookUrl,
       webhookToken,
@@ -6749,6 +6991,8 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
         campaign: {
           id: null,
           name: "Disparo direto",
+          mode: "direct_dispatch",
+          requestId,
           requestedAt: new Date().toISOString(),
           requestedBy: {
             uid: req.authAccess?.uid || null,
@@ -6759,10 +7003,43 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
       },
     });
 
+    logDirectDispatch(summary.successCount > 0 ? "info" : "warn", "dispatch_finished", {
+      requestId,
+      clientId,
+      successCount: summary.successCount,
+      failureCount: summary.failureCount,
+      completedCampaign: summary.completedCampaign,
+      firstFailure: summary.failures[0]
+        ? {
+          stepType: summary.failures[0].stepType,
+          reason: summary.failures[0].reason,
+        }
+        : null,
+    });
+
+    if (summary.successCount <= 0) {
+      const firstReason = summary.failures[0]?.reason;
+      sendError(
+        res,
+        502,
+        "EVOLUTION_DISPATCH_NO_SUCCESS",
+        firstReason ? `Falha no envio Evolution: ${firstReason}` : "Nenhuma mensagem foi aceita pelo provedor de disparo.",
+        {
+          requestId,
+          failureCount: summary.failureCount,
+          failures: summary.failures,
+          settingsSource: dispatchSettings.source,
+        }
+      );
+      return;
+    }
+
     res.json({
       success: summary.successCount > 0,
       provider: "evolution",
       phone,
+      requestId,
+      settingsSource: dispatchSettings.source,
       successCount: summary.successCount,
       failureCount: summary.failureCount,
       successPhones: summary.successPhones,
@@ -6770,8 +7047,18 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
       completedCampaign: summary.completedCampaign,
     });
   } catch (error) {
-    console.error("direct evolution dispatch error:", error);
-    sendError(res, 500, "EVOLUTION_DIRECT_DISPATCH_FAILED", error instanceof Error ? error.message : "Falha no disparo direto");
+    logDirectDispatch("error", "unexpected_error", {
+      requestId,
+      error: error instanceof Error ? error.message : "unknown error",
+      stack: isProduction ? undefined : error?.stack,
+    });
+    sendError(
+      res,
+      500,
+      "EVOLUTION_DIRECT_DISPATCH_FAILED",
+      error instanceof Error ? error.message : "Falha no disparo direto",
+      { requestId }
+    );
   }
 });
 

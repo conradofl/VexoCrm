@@ -149,6 +149,7 @@ export interface CampaignAiStatus {
   enabled: boolean;
   provider: "groq";
   model: string;
+  reason?: string;
 }
 
 export interface CampaignAiSuggestionContext {
@@ -159,6 +160,26 @@ export interface CampaignAiSuggestionContext {
   sequence?: CampaignSequenceStep[];
   dispatchOptions?: CampaignDispatchOptions;
   step?: CampaignSequenceStep;
+}
+
+async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
+  const contentType = res.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    const data = await res.json().catch(() => null);
+    return data?.error?.message || `${fallback}: ${res.status}`;
+  }
+
+  const text = await res.text().catch(() => "");
+  const isMissingExpressRoute =
+    res.status === 404 &&
+    (text.includes("Cannot GET") || text.includes("Cannot POST"));
+
+  if (isMissingExpressRoute) {
+    return "A API de producao ainda nao publicou esta rota. Reimplante o backend e confirme o deployMarker em /health.";
+  }
+
+  return text ? `${fallback}: ${res.status} ${text.slice(0, 240)}` : `${fallback}: ${res.status}`;
 }
 
 export function useCampanhas(clientId?: string) {
@@ -352,12 +373,11 @@ export function useDirectDispatch() {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(data?.error?.message || `Erro ao disparar mensagem: ${res.status}`);
+        throw new Error(await readApiErrorMessage(res, "Erro ao disparar mensagem"));
       }
 
-      return data;
+      return res.json();
     },
   });
 }
@@ -376,9 +396,17 @@ export function useCampaignAiStatus() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      if (res.status === 404) {
+        return {
+          enabled: false,
+          provider: "groq",
+          model: "",
+          reason: "backend_route_missing",
+        };
+      }
+
       if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Erro ao consultar IA: ${res.status} ${err}`);
+        throw new Error(await readApiErrorMessage(res, "Erro ao consultar IA"));
       }
 
       return res.json();

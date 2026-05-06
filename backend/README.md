@@ -55,8 +55,39 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `N8N_WEBHOOK_SECRET` | bearer global legado para webhooks que ainda nao usam escopo por empresa |
 | `GROQ_API_KEY` | chave opcional para assistencia de IA nas campanhas |
 | `GROQ_CAMPAIGN_AI_MODEL` | modelo Groq opcional para as sugestoes de campanha |
+| `EVOLUTION_DISPATCH_WEBHOOKS_JSON` | fallback opcional por tenant para URL/token de disparo direto |
+| `EVOLUTION_DISPATCH_WEBHOOK_URL_<TENANT>` | fallback opcional de URL por tenant, ex.: `EVOLUTION_DISPATCH_WEBHOOK_URL_INFINIE` |
+| `EVOLUTION_DISPATCH_WEBHOOK_TOKEN_<TENANT>` | token opcional do fallback por tenant |
 
 Veja [backend/.env.example](./.env.example).
+
+## Validacao de deploy do backend
+
+Depois de publicar alteracoes que criam rotas novas, valide se o EasyPanel esta servindo a imagem correta:
+
+```bash
+curl https://SEU_BACKEND/health
+```
+
+O retorno precisa conter `deployMarker`. Para esta versao, espere:
+
+```json
+{
+  "deployMarker": "campaign-evolution-routes-2026-05-06-01"
+}
+```
+
+Se `/api/campaigns/direct-dispatch` ou `/api/campaigns/ai/status` retornar `Cannot POST` ou `Cannot GET`, o frontend ja foi atualizado, mas o backend publicado ainda esta antigo ou apontando para outra instancia.
+
+## Disparo direto de campanhas
+
+O disparo direto usa esta ordem para resolver a URL Evolution/n8n da empresa:
+
+1. `lead_client_n8n_settings.dispatch_webhook_url` da empresa selecionada.
+2. Fallback opcional por tenant em `EVOLUTION_DISPATCH_WEBHOOKS_JSON`.
+3. Fallback opcional por tenant em `EVOLUTION_DISPATCH_WEBHOOK_URL_<TENANT>`.
+
+Nao use webhook global para disparo direto multi-tenant. Cada empresa precisa ter sua propria URL salva na tabela ou configurada por tenant nas variaveis acima.
 
 ## Dados expostos ao frontend
 
