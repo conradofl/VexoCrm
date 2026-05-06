@@ -36,6 +36,7 @@ import { whatsappSessionManager } from "./whatsapp.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
+const DEPLOY_MARKER = "campaign-evolution-routes-2026-05-06-01";
 const app = express();
 app.use(express.json({ limit: "15mb" }));
 const isProduction = process.env.NODE_ENV === "production";
@@ -4012,6 +4013,7 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
+    deployMarker: DEPLOY_MARKER,
     timestamp: new Date().toISOString(),
     services: {
       supabase: !!supabase,
@@ -7418,7 +7420,7 @@ app.use((error, _req, res, _next) => {
 
 const port = Number.parseInt(process.env.PORT || "3001", 10);
 app.listen(port, () => {
-  console.log(`VexoApi listening on port ${port}`);
+  console.log(`VexoApi listening on port ${port} (${DEPLOY_MARKER})`);
   startCampaignScheduler();
 
   whatsappSessionManager.restorePersistedSession().catch((error) => {
