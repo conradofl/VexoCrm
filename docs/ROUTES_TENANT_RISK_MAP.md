@@ -80,11 +80,17 @@ Legenda de risco:
 
 | Metodo | Endpoint | Origem | Tabelas/Fonte | Filtro por tenant | Risco | Prioridade | Observacao |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/notifications` | `backend/src/server.js` | `notifications` | **Nao** | Critico | P0 | Lista notificacoes globais do sistema para qualquer usuario com acesso a `agente` |
-| PATCH | `/api/notifications` | `backend/src/server.js` | `notifications` | **Nao** | Critico | P0 | Marca notificacoes globais como lidas sem escopo de tenant |
+| GET | `/api/notifications` | `backend/src/server.js` | `notifications` | **Corrigido nesta PR** | Baixo | P4 | Filtra notificacoes por `client_id`/`tenant_id`/`company_id` ou `user_id`; notificacoes globais ficam restritas a admin interno real |
+| PATCH | `/api/notifications` | `backend/src/server.js` | `notifications` | **Corrigido nesta PR** | Baixo | P4 | Valida escopo antes de marcar uma notificacao como lida; `markAllRead` de usuario nao-admin atualiza apenas notificacoes visiveis |
 | POST | `/api/leads-webhook` | `backend/src/server.js` | `leads` | Nao via auth humana; recebe `client_id` do payload | Alto | P1 | Pode gravar em qualquer tenant se segredo vazar |
 | POST | `/api/n8n-error-webhook` | `backend/src/server.js` | `n8n_error_logs`, `notifications` | Nao | Alto | P1 | Registro e notificacao globais, sem tenant |
 | POST | `/api/conversation-memory` | `backend/src/server.js` | `leads`, `lead_conversations` | Nao por tenant | Alto | P1 | Persiste memoria por telefone, sem `client_id` |
+
+### Observacao da PR `codex/tenant-scope-notifications`
+
+- O backend atual do CRM consome `GET/PATCH /api/notifications`; por isso a correcao funcional ficou nesse caminho.
+- A Edge Function `frontend/supabase/functions/notifications-api` continua duplicando leitura/update com service role, JWT Supabase e CORS `*`. Ela nao foi removida nem reescrita nesta PR para evitar refactor amplo.
+- Proxima PR recomendada: decidir se `notifications-api` sera desativada, alinhada ao Firebase Auth do backend ou mantida apenas como endpoint legado bloqueado por tenant.
 
 ---
 
@@ -107,12 +113,12 @@ Legenda de risco:
 
 | Metodo | Endpoint | Origem | Tabelas/Fonte | Filtro por tenant | Risco | Prioridade | Observacao |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/campaigns` | `backend/src/server.js` | `campaigns`, `leads_clients` | Parcial | Alto | P1 | Se `clientId` nao vier na query, usuario interno com acesso a `planilhas` recebe campanhas de todos os tenants |
+| GET | `/api/campaigns` | `backend/src/server.js` | `campaigns`, `leads_clients` | Sim | Corrigido | Feito | Agora exige `clientId` autorizado ou tenant derivado das claims; nao lista tudo por default |
 | GET | `/api/campaigns/:id/leads` | `backend/src/server.js` | `campaigns`, `leads` | Sim, resolve a partir do `client_id` da campanha | Baixo | P3 | Boa |
-| POST | `/api/campaigns` | `backend/src/server.js` | `campaigns` | **Nao valida** `clientId` com `resolveAuthorizedClientId` | Critico | P0 | Usuario interno pode criar campanha para qualquer tenant informado |
-| PATCH | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | **Nao** | Critico | P0 | Atualiza campanha por `id` sem verificar `client_id` do operador |
-| DELETE | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | **Nao** | Critico | P0 | Exclui campanha por `id` sem verificar tenant |
-| POST | `/api/campaigns/:id/trigger` | `backend/src/server.js` | `campaigns`, `leads`, `leads_clients` | **Nao** antes do dispatch | Critico | P0 | Carrega campanha por `id`, monta payload e dispara sem validar que o operador pode agir no tenant da campanha |
+| POST | `/api/campaigns` | `backend/src/server.js` | `campaigns` | Sim | Corrigido | Feito | `clientId` do body passa por tenant scope antes do insert |
+| PATCH | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | Sim | Corrigido | Feito | Carrega a campanha, valida `client_id` contra o operador e atualiza com `.eq("client_id", authorizedClientId)` |
+| DELETE | `/api/campaigns/:id` | `backend/src/server.js` | `campaigns` | Sim | Corrigido | Feito | Carrega a campanha, valida `client_id` contra o operador e exclui com `.eq("client_id", authorizedClientId)` |
+| POST | `/api/campaigns/:id/trigger` | `backend/src/server.js` | `campaigns`, `leads`, `leads_clients` | Sim | Corrigido | Feito | Valida `client_id` antes de buscar leads, montar payload, chamar n8n e atualizar `last_triggered_at` |
 
 ---
 
@@ -120,13 +126,17 @@ Legenda de risco:
 
 ### P0 - primeira PR funcional de seguranca
 
-1. adicionar `resolveAuthorizedClientId` ou validacao equivalente em:
+1. pendente: adicionar `resolveAuthorizedClientId` ou validacao equivalente em:
    - `POST /api/lead-imports`
-   - `POST /api/campaigns`
-   - `PATCH /api/campaigns/:id`
-   - `DELETE /api/campaigns/:id`
-   - `POST /api/campaigns/:id/trigger`
-2. escopar `GET/PATCH /api/notifications` ou assumir explicitamente que notificacoes sao globais e restringir o acesso a admin real
+2. pendente: escopar `GET/PATCH /api/notifications` ou assumir explicitamente que notificacoes sao globais e restringir o acesso a admin real
+
+### Concluido na PR de tenant scope de campanhas
+
+- `GET /api/campaigns`
+- `POST /api/campaigns`
+- `PATCH /api/campaigns/:id`
+- `DELETE /api/campaigns/:id`
+- `POST /api/campaigns/:id/trigger`
 
 ### P1 - segunda PR funcional
 

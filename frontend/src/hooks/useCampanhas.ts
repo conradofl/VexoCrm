@@ -166,7 +166,7 @@ export function useCampanhas(clientId?: string) {
 
   return useQuery({
     queryKey: ["campaigns", clientId || "all"],
-    enabled: isAuthenticated && canAccessInternalPage("planilhas"),
+    enabled: isAuthenticated && canAccessInternalPage("planilhas") && !!clientId,
     queryFn: async (): Promise<Campaign[]> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");

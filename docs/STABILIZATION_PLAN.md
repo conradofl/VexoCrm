@@ -43,7 +43,17 @@ Esta fase nao teve como objetivo criar features novas, migrar frontend, redesenh
 
 ## Concluido neste ciclo
 
-### Seguranca de tenant/auth
+Status:
+
+- corrigido na branch `codex/tenant-scope-campaigns`
+
+Resultado:
+
+- listagem de campanhas nao retorna todos os tenants por default
+- criacao exige `clientId` autorizado
+- update/delete/trigger carregam a campanha, validam o `client_id` e aplicam a mutacao com filtro por tenant
+
+### Motivo
 
 - Campanhas criticas passaram a validar tenant antes de mutacoes/disparo.
 - Rotas de usuarios passaram a respeitar escopo do operador.
@@ -58,12 +68,30 @@ Esta fase nao teve como objetivo criar features novas, migrar frontend, redesenh
 - Validador de lead passou a aceitar slug textual de `leads_clients.id`, em vez de exigir UUID.
 - `notifications` e `n8n_error_logs` passaram a ter criacao versionada com `IF NOT EXISTS`, indices e RLS deny-all.
 
-### Qualidade e CI
+Status: **corrigido no backend atual pela PR `codex/tenant-scope-notifications`**.
 
-- `npm run check` na raiz virou o comando padrao de validacao local.
-- Backend ganhou scripts `check` e `test`.
-- GitHub Actions passou a rodar sintaxe backend, testes backend, testes frontend, build frontend e diff check.
-- Testes de regressao cobrem usuarios/permissoes, aliases de contrato, `client_id` slug e access guards.
+Caminho escolhido:
+
+1. notificacoes com `client_id`, `tenant_id` ou `company_id` respeitam escopo do usuario interno
+2. notificacoes com `user_id` ficam visiveis apenas para o usuario alvo
+3. notificacoes sem escopo explicito sao tratadas como globais e ficam restritas a admin interno real
+
+Rotas corrigidas:
+
+- `GET /api/notifications`
+- `PATCH /api/notifications`
+
+Controles aplicados:
+
+- listagem filtra os itens visiveis antes de responder ao frontend
+- contagem de nao lidas usa o mesmo filtro para usuarios nao-admin
+- `PATCH` por `id` busca a notificacao e valida escopo antes de atualizar
+- `markAllRead` nao-admin marca apenas notificacoes visiveis
+- clientes e acessos invalidos continuam bloqueados por `requireFirebaseAuth` + `requireInternalPageAccess("agente")`
+
+Risco remanescente:
+
+- `frontend/supabase/functions/notifications-api` ainda duplica a rota usando JWT Supabase, service role e CORS `*`. Nao foi reescrita nesta PR porque isso pertence a uma etapa propria de consolidacao Edge/backend.
 
 ### Backend
 
@@ -130,11 +158,16 @@ git diff --check
 
 Resultado esperado no encerramento do ciclo:
 
-- backend syntax check passa
-- backend vitest passa
-- frontend vitest passa
-- frontend build passa
-- diff check passa
+| Ordem | Escopo | Tamanho esperado | Tipo | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Docs de auditoria e mapeamento | Pequena | Documentacao | Em PR |
+| 2 | Tenant scope em campanhas | Pequena | Correcao critica | Em PR |
+| 3 | Notificacoes: global vs tenant | Pequena | Correcao critica | Pendente |
+| 4 | `POST /api/lead-imports` com tenant scope | Pequena | Correcao critica | Pendente |
+| 5 | Rotas admin e perfis | Pequena | Seguranca/permissao | Pendente |
+| 6 | Schema truth de `campaigns`/`notifications`/`n8n_error_logs` | Media | Banco/documentacao | Pendente |
+| 7 | Normalizacao de `client_id`, `telefone`, `qualificacao` | Media | Contrato | Pendente |
+| 8 | Trilho de testes minimo | Pequena | Qualidade | Pendente |
 
 ---
 
