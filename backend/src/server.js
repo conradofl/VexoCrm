@@ -46,6 +46,14 @@ const MAX_CONVERSATION_BYTES = 1024 * 1024;
 const DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS = 60 * 1000;
 const CAMPAIGN_SCHEDULER_MAX_BATCH = 25;
 
+/** Trim and strip trailing slashes so env typos still match the browser Origin header. */
+function normalizeCorsOrigin(value) {
+  if (value == null || typeof value !== "string") return "";
+  const t = value.trim();
+  if (!t) return "";
+  return t.replace(/\/+$/u, "");
+}
+
 const rawCorsOrigins = (process.env.CORS_ORIGINS || "*")
   .split(",")
   .map((value) => value.trim())
@@ -56,14 +64,33 @@ const hasWildcard = rawCorsOrigins.includes("*");
 const allowAnyCorsOrigin = !isProduction;
 
 // In production, strip wildcard so only explicit origins are accepted.
-const corsOrigins = isProduction
-  ? rawCorsOrigins.filter((o) => o !== "*")
-  : rawCorsOrigins;
+let corsOrigins = isProduction ? rawCorsOrigins.filter((o) => o !== "*") : [...rawCorsOrigins];
+
+// Single-origin helper for EasyPanel: set FRONTEND_ORIGIN=https://your-app.vercel.app (merged into allowed list).
+const frontendOriginExtra = (process.env.FRONTEND_ORIGIN || "").trim();
+if (frontendOriginExtra && !corsOrigins.includes(frontendOriginExtra)) {
+  corsOrigins.push(frontendOriginExtra);
+}
+
+corsOrigins = [...new Set(corsOrigins.map(normalizeCorsOrigin).filter(Boolean))];
 
 if (isProduction && hasWildcard) {
   console.warn(
     "[security] CORS_ORIGINS contains '*' in production. Wildcard will be ignored; only explicit origins are allowed."
   );
+}
+
+if (isProduction && corsOrigins.length === 0) {
+  console.error(
+    "[cors] NODE_ENV=production but no allowed browser origins after parsing CORS_ORIGINS / FRONTEND_ORIGIN. " +
+      "Set CORS_ORIGINS to a comma-separated list of SPA URLs (e.g. https://your-app.vercel.app) or set FRONTEND_ORIGIN to one SPA URL. " +
+      "Do not rely on '*' alone in production — it is stripped for security."
+  );
+  process.exit(1);
+}
+
+if (isProduction && corsOrigins.length > 0) {
+  console.info("[cors] Allowed browser origins:", corsOrigins.join(", "));
 }
 
 function sendError(res, status, code, message, details) {
@@ -86,10 +113,18 @@ app.use(
         callback(null, true);
         return;
       }
-      if (corsOrigins.includes(origin)) {
+      const normalized = normalizeCorsOrigin(origin);
+      if (corsOrigins.includes(normalized)) {
         callback(null, true);
         return;
       }
+      console.warn(
+        "[cors] Blocked browser Origin:",
+        origin,
+        "(normalized:",
+        normalized + ")",
+        "| Ensure this normalized value is covered by CORS_ORIGINS or FRONTEND_ORIGIN in EasyPanel."
+      );
       callback(new Error(`Origin not allowed: ${origin}`));
     },
   })

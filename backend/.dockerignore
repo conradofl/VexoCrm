@@ -1,5 +1,6 @@
 node_modules
 npm-debug.log
+# Local secrets and CORS — never baked into the image. Set the same keys (CORS_ORIGINS, DATABASE_URL, …) in EasyPanel / host env.
 .env
 .env.*
 .cursor/

@@ -48,7 +48,8 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `PG_POOL_MAX` | max connections in the pg pool |
 | `PG_CONNECTION_TIMEOUT_MS` | pool connection timeout |
 | `PORT` | porta do servidor; padrao `3001` |
-| `CORS_ORIGINS` | origens permitidas |
+| `CORS_ORIGINS` | comma-separated browser origins; in production `*` is ignored (must list real SPA URLs) |
+| `FRONTEND_ORIGIN` | optional single SPA URL merged into CORS allow list (EasyPanel-friendly) |
 | `SUPABASE_URL` | URL do projeto Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | service role do Supabase |
 | `SUPABASE_ACCESS_TOKEN` | token da CLI para aplicar migrations no startup do container |

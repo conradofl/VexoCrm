@@ -90,6 +90,19 @@ Tabelas vazias preservadas:
   - antes: `n8n -> Edge Function Supabase -> banco Supabase`
   - depois: `n8n -> backend -> PostgreSQL VPS`
 
+## Deploy em producao (EasyPanel / VPS)
+
+Para o container em producao usar o Postgres da VPS (nao o projeto Supabase via JS):
+
+1. No painel do app, defina `DATABASE_URL` com a connection string do Postgres na VPS.
+2. Defina `DB_DRIVER=postgres` (recomendado; deixa explicito).
+3. Remova `DATA_SOURCE=supabase` se existir (essa flag forca o cliente Supabase).
+4. Salve e faca **redeploy** ou **restart** do servico.
+5. Confira os logs de boot: `[database] Using direct PostgreSQL (pg)`.
+6. Confira `GET /health`: `services.postgresPing` deve ser `true`.
+
+Documentacao detalhada: [deploy.md](../.cursor/context/topics/deploy.md) e [backend/.env.example](backend/.env.example).
+
 ## Proximo passo imediato
 
 Fazer o backend local rodar com o banco da VPS primeiro, mantendo a regra de negocio atual.
