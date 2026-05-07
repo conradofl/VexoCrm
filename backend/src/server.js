@@ -74,17 +74,20 @@ if (frontendOriginExtra && !corsOrigins.includes(frontendOriginExtra)) {
 
 corsOrigins = [...new Set(corsOrigins.map(normalizeCorsOrigin).filter(Boolean))];
 
+// If production ends up with zero origins (e.g. only "*" was set, or env not injected), every browser call would fail CORS.
+// Allow any Origin in that case so the API stays usable; log loudly so operators fix CORS_ORIGINS / FRONTEND_ORIGIN.
+const corsAllowAnyOriginBecauseListEmpty = isProduction && corsOrigins.length === 0;
+
 if (isProduction && hasWildcard) {
   console.warn(
     "[security] CORS_ORIGINS contains '*' in production. Wildcard will be ignored; only explicit origins are allowed."
   );
 }
 
-if (isProduction && corsOrigins.length === 0) {
+if (corsAllowAnyOriginBecauseListEmpty) {
   console.error(
-    "[cors] NODE_ENV=production but no allowed browser origins after parsing CORS_ORIGINS / FRONTEND_ORIGIN. " +
-      "Set CORS_ORIGINS (comma-separated SPA URLs) or FRONTEND_ORIGIN in EasyPanel. " +
-      "The API will still start; browser requests will fail CORS until this is fixed."
+    "[cors] Production with no explicit browser origins after parsing CORS_ORIGINS / FRONTEND_ORIGIN. " +
+      "Allowing any Origin until you set real SPA URLs (insecure — fix EasyPanel env)."
   );
 }
 
@@ -109,6 +112,10 @@ app.use(
   cors({
     origin(origin, callback) {
       if (!origin || allowAnyCorsOrigin) {
+        callback(null, true);
+        return;
+      }
+      if (corsAllowAnyOriginBecauseListEmpty) {
         callback(null, true);
         return;
       }
@@ -1949,12 +1956,30 @@ function isQualifiedStatus(value) {
 }
 
 function detectTemperature(lead) {
-  const source = normalizeString(lead.qualificacao)?.toLowerCase() || "";
+  try {
+    const raw = lead?.qualificacao;
+    const source =
+      raw != null && typeof raw === "object"
+        ? JSON.stringify(raw).toLowerCase()
+        : normalizeString(raw)?.toLowerCase() || "";
 
-  if (source.includes("quente")) return "hot";
-  if (source.includes("morno")) return "warm";
-  if (source.includes("frio")) return "cold";
-  return "unknown";
+    if (source.includes("quente")) return "hot";
+    if (source.includes("morno")) return "warm";
+    if (source.includes("frio")) return "cold";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** Safe date for bucketing; invalid spreadsheet values must not crash Intl formatting. */
+function parseLeadReferenceDate(lead) {
+  const tryParse = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  return tryParse(lead?.data_hora) ?? tryParse(lead?.created_at);
 }
 
 function buildDashboardPayload(client, leads, conversions = []) {
@@ -1988,12 +2013,20 @@ function buildDashboardPayload(client, leads, conversions = []) {
   const cities = new Set();
 
   for (const lead of leads) {
-    const referenceDate = lead.data_hora ? new Date(lead.data_hora) : new Date(lead.created_at);
-    const dateKey = getDateKey(referenceDate, timeZone);
     const statusKey = (normalizeString(lead.status) || "sem_status").toLowerCase();
     const typeKey = normalizeString(lead.tipo_cliente) || "nao_informado";
     const temperatureKey = detectTemperature(lead);
     const cityKey = normalizeString(lead.cidade);
+
+    const referenceDate = parseLeadReferenceDate(lead);
+    let dateKey = null;
+    if (referenceDate) {
+      try {
+        dateKey = getDateKey(referenceDate, timeZone);
+      } catch {
+        console.warn("[dashboard] invalid date for lead bucketing", lead?.id);
+      }
+    }
 
     if (dateKey === todayKey) {
       leadsToday += 1;
@@ -2010,7 +2043,7 @@ function buildDashboardPayload(client, leads, conversions = []) {
       cities.add(cityKey.toLowerCase());
     }
 
-    const dayEntry = recentDaysMap.get(dateKey);
+    const dayEntry = dateKey ? recentDaysMap.get(dateKey) : null;
     if (dayEntry) {
       dayEntry.leads += 1;
       if (isQualifiedStatus(statusKey)) {
@@ -5345,7 +5378,16 @@ app.get("/api/dashboard", requireFirebaseAuth, async (req, res) => {
     res.json(buildDashboardPayload(client || { id: clientId, name: clientId }, leads || [], conversions));
   } catch (error) {
     console.error("dashboard query error:", error);
-    sendError(res, 500, "DASHBOARD_QUERY_FAILED", "Failed to query dashboard data");
+    const details =
+      error && typeof error === "object" && "message" in error
+        ? {
+            cause: error.message,
+            code: error.code,
+            ...(error.details ? { pgDetails: error.details } : {}),
+            ...(error.hint ? { hint: error.hint } : {}),
+          }
+        : { cause: String(error) };
+    sendError(res, 500, "DASHBOARD_QUERY_FAILED", "Failed to query dashboard data", details);
   }
 });
 
