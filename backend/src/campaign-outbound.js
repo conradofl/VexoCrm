@@ -30,6 +30,20 @@ function normalizeNonNegativeInteger(value, fallback) {
   return parsed;
 }
 
+/**
+ * Replace per-lead placeholders in outbound copy (Evolution text/caption).
+ * Supports {{nome}} and {{telefone}} with optional spaces inside braces (case-insensitive tokens).
+ */
+function applyMessagePlaceholders(text, lead, phone) {
+  const raw = normalizeString(text);
+  if (!raw) return raw;
+  const nome = normalizeString(lead?.nome) || "cliente";
+  const tel = normalizeString(phone) || normalizeString(lead?.telefone || lead?.phone);
+  return raw
+    .replace(/\{\{\s*nome\s*\}\}/gi, nome)
+    .replace(/\{\{\s*telefone\s*\}\}/gi, tel || "");
+}
+
 function clampPositiveSize(value) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (Number.isNaN(parsed) || parsed < 0) return 0;
@@ -348,10 +362,22 @@ export async function dispatchCampaignSequence({
 
     for (let stepIndex = 0; stepIndex < enabledSteps.length; stepIndex += 1) {
       const step = enabledSteps[stepIndex];
+      const stepForPayload = {
+        ...step,
+        text: applyMessagePlaceholders(step.text, lead, phone),
+      };
+      const extendedContext = {
+        ...context,
+        lead: {
+          id: lead?.id || null,
+          nome: normalizeString(lead?.nome) || null,
+          telefone: phone,
+        },
+      };
       const payload =
         step.type === "image"
-          ? buildImagePayload(phone, step, context)
-          : buildTextPayload(phone, step, context);
+          ? buildImagePayload(phone, stepForPayload, extendedContext)
+          : buildTextPayload(phone, stepForPayload, extendedContext);
 
       try {
         await postEvolutionPayload(webhookUrl, webhookToken, payload);

@@ -117,6 +117,8 @@ Nao existe mais dependencia operacional de planilhas ou `Google Sheets` para a c
 
 ## Execucao local
 
+Variavel de ambiente da API: `VITE_API_BASE_URL` (sem barra final). Em desenvolvimento, se nao estiver definida, o codigo usa `http://127.0.0.1:3001` (backend local na porta padrao). Copie `.env.example` para `.env.local` e ajuste se o backend nao for esse endereco.
+
 ```powershell
 cd frontend
 npm install

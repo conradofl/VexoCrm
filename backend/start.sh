@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Optional DB migrations before `npm start`.
+# When targeting VPS Postgres only, read backend/scripts/README-db-migrations.md (often set RUN_SUPABASE_MIGRATIONS_ON_START=0).
 
 set -euo pipefail
 

@@ -36,11 +36,17 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 - `POST /api/leads-webhook`
 - `POST /api/n8n-error-webhook`
 - `POST /api/conversation-memory`
+- `GET /api/conversation-memory/latest`
 
 ## Variaveis de ambiente
 
 | Variavel | Uso |
 | --- | --- |
+| `DATABASE_URL` | Postgres connection string; activates pg driver unless `DATA_SOURCE=supabase` or `DB_DRIVER=supabase` |
+| `DATA_SOURCE` | set to `supabase` to keep Supabase JS when `DATABASE_URL` is also defined |
+| `DB_DRIVER` | optional `postgres` / `supabase` to force one stack explicitly |
+| `PG_POOL_MAX` | max connections in the pg pool |
+| `PG_CONNECTION_TIMEOUT_MS` | pool connection timeout |
 | `PORT` | porta do servidor; padrao `3001` |
 | `CORS_ORIGINS` | origens permitidas |
 | `SUPABASE_URL` | URL do projeto Supabase |
@@ -59,7 +65,7 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `EVOLUTION_DISPATCH_WEBHOOK_URL_<TENANT>` | fallback opcional de URL por tenant, ex.: `EVOLUTION_DISPATCH_WEBHOOK_URL_INFINIE` |
 | `EVOLUTION_DISPATCH_WEBHOOK_TOKEN_<TENANT>` | token opcional do fallback por tenant |
 
-Veja [backend/.env.example](./.env.example).
+Veja [backend/.env.example](./.env.example) e [scripts/README-db-migrations.md](./scripts/README-db-migrations.md) para migrations na VPS.
 
 ## Validacao de deploy do backend
 
@@ -69,13 +75,7 @@ Depois de publicar alteracoes que criam rotas novas, valide se o EasyPanel esta 
 curl https://SEU_BACKEND/health
 ```
 
-O retorno precisa conter `deployMarker`. Para esta versao, espere:
-
-```json
-{
-  "deployMarker": "campaign-evolution-routes-2026-05-06-01"
-}
-```
+O retorno precisa conter `ok: true`. Com Postgres direto, verifique tambem `services.postgresPing: true`. (Alguns deploys antigos documentavam `deployMarker`; hoje o health usa `uptimeSeconds` + `services`.)
 
 Se `/api/campaigns/direct-dispatch` ou `/api/campaigns/ai/status` retornar `Cannot POST` ou `Cannot GET`, o frontend ja foi atualizado, mas o backend publicado ainda esta antigo ou apontando para outra instancia.
 
@@ -149,6 +149,10 @@ Para esse fluxo opcional funcionar no EasyPanel, configure no service as variave
 Se essas variaveis nao estiverem presentes e `RUN_SUPABASE_MIGRATIONS_ON_START=1`, o container falha antes de iniciar a API.
 
 Use 1 replica no service se voce quiser evitar duas instancias tentando aplicar migrations ao mesmo tempo durante um deploy.
+
+### VPS Postgres
+
+Quando o schema ja esta aplicado na VPS via dump/restore, prefira `RUN_SUPABASE_MIGRATIONS_ON_START=0` ou aplique SQL com `SUPABASE_DB_URL` apontando para a VPS — veja [scripts/README-db-migrations.md](./scripts/README-db-migrations.md).
 
 ## Migrations no auto deploy
 

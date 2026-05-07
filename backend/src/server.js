@@ -7,6 +7,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
+import { createDatabasePool, createPgSupabaseClient } from "./pgSupabaseCompat.js";
+import { parseLeadQualificacaoBoolean } from "./leadQualificacaoBoolean.js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import {
@@ -93,14 +95,49 @@ app.use(
   })
 );
 
+const databaseUrl = (process.env.DATABASE_URL || "").trim();
+const dataSource = (process.env.DATA_SOURCE || "").trim().toLowerCase();
+const dbDriverEnv = (process.env.DB_DRIVER || "").trim().toLowerCase();
 const supabaseUrl = process.env.SUPABASE_URL || process.env.URL;
 const supabaseServiceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
 
-const supabase =
-  supabaseUrl && supabaseServiceRoleKey
-    ? createClient(supabaseUrl, supabaseServiceRoleKey)
-    : null;
+/**
+ * postgres: pg pool + query shim (VPS or any Postgres).
+ * supabase: official Supabase JS client (PostgREST).
+ * Legacy: DATABASE_URL without DATA_SOURCE=supabase still selects postgres unless DB_DRIVER=supabase.
+ */
+const useDirectPostgres =
+  dbDriverEnv === "postgres" ||
+  (dbDriverEnv !== "supabase" && Boolean(databaseUrl) && dataSource !== "supabase");
+
+let pgDatabasePool = null;
+let supabase = null;
+
+if (useDirectPostgres) {
+  if (!databaseUrl) {
+    console.error("[database] Postgres selected but DATABASE_URL is empty (set DB_DRIVER=supabase to use Supabase only)");
+    process.exit(1);
+  }
+  pgDatabasePool = createDatabasePool(databaseUrl);
+  supabase = createPgSupabaseClient(pgDatabasePool);
+  console.info("[database] Using direct PostgreSQL (pg)", dbDriverEnv ? `(DB_DRIVER=${dbDriverEnv})` : "(DATABASE_URL)");
+} else if (supabaseUrl && supabaseServiceRoleKey) {
+  supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+  console.info("[database] Using Supabase JS client");
+} else {
+  console.warn(
+    "[database] No database client configured. Set DATABASE_URL for VPS Postgres, or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for Supabase."
+  );
+}
+
+function shutdownPgPool() {
+  if (pgDatabasePool) {
+    pgDatabasePool.end().catch(() => {});
+  }
+}
+process.once("SIGTERM", shutdownPgPool);
+process.once("SIGINT", shutdownPgPool);
 
 // Firebase: prefer env vars; fallback to service account JSON in backend dir
 let firebaseConfig = {
@@ -140,14 +177,16 @@ if (firebaseReady && getApps().length === 0) {
   });
 }
 
-function ensureSupabase(res) {
+function ensureDb(res) {
   if (!supabase) {
     sendError(
       res,
       500,
-      "SUPABASE_NOT_CONFIGURED",
-      "Missing Supabase configuration",
-      "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
+      "DATABASE_NOT_CONFIGURED",
+      "Missing database configuration",
+      useDirectPostgres
+        ? "Set DATABASE_URL for Postgres (DB_DRIVER=postgres or unset DATA_SOURCE=supabase)"
+        : "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or use DATABASE_URL with DB_DRIVER=postgres"
     );
     return false;
   }
@@ -1365,7 +1404,7 @@ async function getLeadClientN8nSettingsStatus(clientId) {
     return {
       settings: null,
       schemaAvailable: false,
-      source: "supabase_unavailable",
+      source: "database_unavailable",
     };
   }
 
@@ -1630,7 +1669,7 @@ function normalizeWhatsAppChatId(value) {
 
 async function getAuthorizedClientWhatsAppChatIds(clientIds = []) {
   if (!supabase) {
-    throw new Error("Supabase is not configured");
+    throw new Error("Database is not configured");
   }
 
   if (!clientIds.length) {
@@ -1658,7 +1697,7 @@ async function getAuthorizedWhatsAppChatIdsForRequest(req, res) {
     return null;
   }
 
-  if (!ensureSupabase(res)) {
+  if (!ensureDb(res)) {
     return null;
   }
 
@@ -3965,7 +4004,7 @@ async function markCampaignDispatchFailed(campaign, { triggerSource, error, webh
 
 async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = {}) {
   if (!supabase) {
-    throw new Error("Supabase is not configured");
+    throw new Error("Database is not configured");
   }
 
   if (!campaign) {
@@ -3989,14 +4028,6 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     throw error;
   }
 
-  const webhookUrl = normalizeString(campaign.webhook_url) || normalizeString(process.env.N8N_DISPATCH_WEBHOOK_URL);
-  if (!webhookUrl) {
-    const error = new Error("Missing campaign webhook URL");
-    error.statusCode = 400;
-    error.code = "MISSING_WEBHOOK_URL";
-    throw error;
-  }
-
   const claimedCampaign = await claimCampaignForDispatch(campaign, triggerSource);
   const analyticsMeta = normalizeCampaignAnalyticsMeta(claimedCampaign.analytics_meta);
   const leads = await buildDispatchLeads({
@@ -4015,43 +4046,95 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
   }
 
   const clientName = await getClientName(claimedCampaign.client_id);
-  const headers = { "Content-Type": "application/json" };
-  const webhookToken = normalizeString(claimedCampaign.webhook_token) || normalizeString(process.env.N8N_DISPATCH_WEBHOOK_TOKEN);
-  if (webhookToken) {
-    headers.Authorization = `Bearer ${webhookToken}`;
+
+  // Campaign dispatch uses the same Evolution pipeline as POST /api/campaigns/direct-dispatch:
+  // - URL/token from tenant settings (resolveDispatchWebhookSettings), optionally cached on the row.
+  // - Per-lead execution via dispatchCampaignSequence: step order, delayAfterSeconds between steps,
+  //   leadDelaySeconds between leads, waitForReply / reply timeouts from analytics_meta.dispatchOptions.
+  // Always use the same Evolution endpoint as direct dispatch (tenant settings), not the global n8n webhook env.
+  let webhookUrl = normalizeString(claimedCampaign.webhook_url);
+  let webhookToken = normalizeString(claimedCampaign.webhook_token) || null;
+  const tenantDispatch = await resolveDispatchWebhookSettings(claimedCampaign.client_id);
+  if (!webhookUrl) {
+    webhookUrl = normalizeString(tenantDispatch.webhookUrl);
+  }
+  if (!webhookToken && tenantDispatch.webhookToken) {
+    webhookToken = normalizeString(tenantDispatch.webhookToken) || null;
+  }
+  if (!webhookUrl) {
+    const error = new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
+    error.statusCode = 400;
+    error.code = "EVOLUTION_SETTINGS_MISSING";
+    await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error });
+    throw error;
   }
 
-  const payload = buildCampaignWebhookPayload({ campaign: claimedCampaign, clientName, leads, triggerSource });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const meta = normalizeCampaignAnalyticsMeta(claimedCampaign.analytics_meta);
+  const waitForReply = meta.dispatchOptions?.waitForReply === true;
+  const replyWaitStartedAt = {};
+  const hasLeadReplied =
+    waitForReply && typeof hasCampaignLeadReplied === "function"
+      ? async ({ lead, phone }) => {
+          const key = `${lead?.id || "noid"}:${phone}`;
+          if (!replyWaitStartedAt[key]) {
+            replyWaitStartedAt[key] = new Date().toISOString();
+          }
+          return hasCampaignLeadReplied({
+            clientId: claimedCampaign.client_id,
+            lead,
+            phone,
+            dispatchedAt: replyWaitStartedAt[key],
+          });
+        }
+      : null;
 
-  let n8nResponse = null;
+  let dispatchSummary = null;
   let webhookStatus = null;
   try {
-    const webhookRes = await fetch(webhookUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
+    const { summary } = await dispatchCampaignSequence({
+      webhookUrl,
+      webhookToken,
+      leads,
+      analyticsMeta: meta,
+      context: {
+        campaign: {
+          id: claimedCampaign.id,
+          name: claimedCampaign.name,
+          mode: "campaign_dispatch",
+          triggerSource,
+        },
+        client: { id: claimedCampaign.client_id, name: clientName },
+      },
+      hasLeadReplied,
     });
-    webhookStatus = webhookRes.status;
-    n8nResponse = await webhookRes.text();
+    dispatchSummary = summary;
 
-    if (!webhookRes.ok) {
-      const error = new Error(n8nResponse.slice(0, 1000) || "n8n webhook returned an error");
+    if (summary.successCount <= 0) {
+      const firstReason = summary.failures[0]?.reason || "Evolution dispatch returned no successful sends";
+      const error = new Error(firstReason);
       error.statusCode = 502;
-      error.code = "N8N_TRIGGER_FAILED";
-      await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error, webhookStatus });
+      error.code = "EVOLUTION_TRIGGER_FAILED";
+      await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error, webhookStatus: 502 });
       throw error;
     }
+    webhookStatus = 200;
   } catch (error) {
-    if (error?.code !== "N8N_TRIGGER_FAILED") {
+    if (error?.code !== "EVOLUTION_TRIGGER_FAILED") {
       await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error, webhookStatus });
     }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const auditPayload = buildCampaignWebhookPayload({
+    campaign: claimedCampaign,
+    clientName,
+    leads,
+    triggerSource,
+  });
+  const evolutionAudit =
+    dispatchSummary && typeof dispatchSummary === "object"
+      ? JSON.stringify(dispatchSummary).slice(0, 8000)
+      : null;
 
   const completedAt = new Date().toISOString();
   const nextAnalyticsMeta = {
@@ -4061,8 +4144,12 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
       status: "sent",
       triggerSource,
       total: leads.length,
+      successCount: dispatchSummary?.successCount ?? null,
+      failureCount: dispatchSummary?.failureCount ?? null,
       webhookStatus,
-      n8nResponse: n8nResponse || null,
+      provider: "evolution",
+      evolutionSummary: evolutionAudit,
+      n8nResponse: null,
       sentAt: completedAt,
       updatedAt: completedAt,
     },
@@ -4100,9 +4187,9 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     campaign: claimedCampaign,
     status: "sent",
     triggerSource,
-    message: "Campanha enviada ao n8n com sucesso.",
-    payload,
-    n8nResponse: n8nResponse || null,
+    message: "Campanha enviada via Evolution com sucesso.",
+    payload: auditPayload,
+    n8nResponse: evolutionAudit,
     totalLeads: leads.length,
     webhookStatus,
   });
@@ -4113,9 +4200,9 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     campaignName: claimedCampaign.name,
     webhookUrl,
     total: leads.length,
-    phones: payload.phones,
-    payload,
-    n8nResponse: n8nResponse || null,
+    phones: auditPayload.phones,
+    payload: auditPayload,
+    n8nResponse: evolutionAudit,
   };
 }
 
@@ -4133,7 +4220,7 @@ let campaignSchedulerRunning = false;
 
 async function runDueCampaignDispatches({ limit = 10, triggerSource = "scheduler" } = {}) {
   if (!supabase) {
-    return { success: false, processed: 0, sent: 0, failed: 0, items: [], reason: "SUPABASE_NOT_CONFIGURED" };
+    return { success: false, processed: 0, sent: 0, failed: 0, items: [], reason: "DATABASE_NOT_CONFIGURED" };
   }
 
   const now = new Date().toISOString();
@@ -4315,12 +4402,24 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
   });
 }
 
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
+  let postgresPing = null;
+  if (useDirectPostgres && pgDatabasePool) {
+    try {
+      await pgDatabasePool.query("select 1 as ok");
+      postgresPing = true;
+    } catch {
+      postgresPing = false;
+    }
+  }
   res.json({
     ok: true,
     timestamp: new Date().toISOString(),
+    uptimeSeconds: process.uptime(),
     services: {
-      supabase: !!supabase,
+      databaseClient: !!supabase,
+      databaseDriver: useDirectPostgres ? "postgres" : supabase ? "supabase" : "none",
+      postgresPing,
       firebaseAuth: firebaseReady,
     },
   });
@@ -4384,7 +4483,7 @@ app.get("/api/sheets", requireFirebaseAuth, requireInternalPageAccess("planilhas
 });
 
 app.get("/api/lead-clients", requireFirebaseAuth, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   if (req.authAccess?.role === "pending") {
     sendError(res, 403, "PENDING_APPROVAL", "Your account is waiting for approval");
@@ -4439,7 +4538,7 @@ app.get("/api/lead-clients", requireFirebaseAuth, async (req, res) => {
 });
 
 app.post("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   if (!hasAccessPermission(req.authAccess, "tenants.manage")) {
     sendError(res, 403, "FORBIDDEN", "Tenant management permission required");
@@ -4589,7 +4688,7 @@ app.get(
   requireFirebaseAuth,
   requireAdminAccess,
   async (req, res) => {
-    if (!ensureSupabase(res)) return;
+    if (!ensureDb(res)) return;
 
     const tenantId = normalizeTenantKey(req.params?.tenantId);
     if (!tenantId) {
@@ -4612,7 +4711,7 @@ app.patch(
   requireFirebaseAuth,
   requireAdminAccess,
   async (req, res) => {
-    if (!ensureSupabase(res)) return;
+    if (!ensureDb(res)) return;
 
     const tenantId = normalizeTenantKey(req.params?.tenantId);
     if (!tenantId) {
@@ -4655,7 +4754,7 @@ app.patch(
 );
 
 async function deleteLeadClientHandler(req, res, explicitTenantId) {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   if (!hasAccessPermission(req.authAccess, "tenants.manage")) {
     sendError(res, 403, "FORBIDDEN", "Tenant management permission required");
@@ -5139,7 +5238,7 @@ app.post("/api/client-signup", async (req, res) => {
 });
 
 app.get("/api/dashboard", requireFirebaseAuth, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
   if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
 
   const requestedClientId = normalizeString(req.query.clientId);
@@ -5190,7 +5289,7 @@ app.get("/api/dashboard", requireFirebaseAuth, async (req, res) => {
 });
 
 app.get("/api/revenue-ops", requireFirebaseAuth, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
   if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
 
   const requestedClientId = normalizeString(req.query.clientId);
@@ -5329,7 +5428,7 @@ app.get("/api/revenue-ops", requireFirebaseAuth, async (req, res) => {
 });
 
 app.get("/api/commercial-intelligence", requireFirebaseAuth, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
   if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
 
   const requestedClientId = normalizeString(req.query.clientId);
@@ -5478,7 +5577,7 @@ app.get("/api/commercial-intelligence", requireFirebaseAuth, async (req, res) =>
 });
 
 app.post("/api/commercial-intelligence/consultants", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const authorizedClientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
   if (!authorizedClientId) return;
@@ -5536,7 +5635,7 @@ app.post("/api/commercial-intelligence/consultants", requireFirebaseAuth, requir
 });
 
 app.patch("/api/commercial-intelligence/consultants/:id", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) {
@@ -5608,7 +5707,7 @@ app.patch("/api/commercial-intelligence/consultants/:id", requireFirebaseAuth, r
 });
 
 app.delete("/api/commercial-intelligence/consultants/:id", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) {
@@ -5650,7 +5749,7 @@ app.delete("/api/commercial-intelligence/consultants/:id", requireFirebaseAuth, 
 });
 
 app.post("/api/commercial-intelligence/distribution-rules", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const authorizedClientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
   if (!authorizedClientId) return;
@@ -5693,7 +5792,7 @@ app.post("/api/commercial-intelligence/distribution-rules", requireFirebaseAuth,
 });
 
 app.patch("/api/commercial-intelligence/distribution-rules/:id", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) {
@@ -5752,7 +5851,7 @@ app.patch("/api/commercial-intelligence/distribution-rules/:id", requireFirebase
 });
 
 app.patch("/api/commercial-intelligence/assignments/:id/action", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   const action = normalizeString(req.body?.action);
@@ -5829,7 +5928,7 @@ app.patch("/api/commercial-intelligence/assignments/:id/action", requireFirebase
 });
 
 app.put("/api/commercial-intelligence/settings", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const authorizedClientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
   if (!authorizedClientId) return;
@@ -5867,7 +5966,7 @@ app.put("/api/commercial-intelligence/settings", requireFirebaseAuth, requireInt
 });
 
 app.patch("/api/commercial-intelligence/insights/:id/status", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   const status = normalizeString(req.body?.status);
@@ -5915,7 +6014,7 @@ app.patch("/api/commercial-intelligence/insights/:id/status", requireFirebaseAut
 });
 
 app.get("/api/leads", requireFirebaseAuth, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
   if (!ensureSharedRoutePageAccess(req, res, "leads")) return;
 
   const requestedClientId = normalizeString(req.query.clientId);
@@ -5942,7 +6041,7 @@ app.get("/api/leads", requireFirebaseAuth, async (req, res) => {
 });
 
 app.get("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const requestedClientId = normalizeString(req.query.clientId);
   const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
@@ -5968,7 +6067,7 @@ app.get("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilha
 });
 
 app.delete("/api/lead-imports/:importId", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const importId = normalizeString(req.params.importId);
   if (!importId) {
@@ -6012,7 +6111,7 @@ app.delete("/api/lead-imports/:importId", requireFirebaseAuth, requireAppViewAcc
 });
 
 app.get("/api/lead-import-items", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const requestedClientId = normalizeString(req.query.clientId);
   const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
@@ -6070,7 +6169,7 @@ app.get("/api/lead-import-items", requireFirebaseAuth, requireAppViewAccess("pla
 });
 
 app.post("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const clientId = normalizeString(req.body?.clientId);
   const sourceName = normalizeString(req.body?.sourceName) || "planilha";
@@ -6176,7 +6275,7 @@ app.post(
   requireFirebaseAuth,
   requireAppViewAccess("planilhas"),
   async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const requestedClientId = normalizeString(req.body?.clientId);
   const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
@@ -6275,7 +6374,7 @@ app.post(
 );
 
 app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("agente"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   try {
     const parsedLimit = Number.parseInt(String(req.query.limit || "20"), 10);
@@ -6329,7 +6428,7 @@ app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("ag
 });
 
 app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("agente"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   try {
     const { id, read, markAllRead } = req.body || {};
@@ -6403,7 +6502,7 @@ app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("
 });
 
 app.post("/api/leads-webhook", async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   try {
     const body = req.body || {};
@@ -6478,7 +6577,7 @@ app.post("/api/n8n-error-webhook", async (req, res) => {
     return;
   }
 
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   try {
     const body = req.body || {};
@@ -6545,7 +6644,7 @@ app.post(
   requireN8nWebhookSecret,
   validateConversationMemoryPayload,
   async (req, res) => {
-    if (!ensureSupabase(res)) return;
+    if (!ensureDb(res)) return;
 
     const { telefone, conversationCompressed, tamanhoOriginal, timestamp } = req.conversationMemory;
 
@@ -6601,6 +6700,8 @@ app.post(
         success: true,
         message: "Conversation stored",
         telefone,
+        // Match Edge `conversation-memory` POST success shape for n8n consumers.
+        created_at: req.conversationMemory.timestamp,
       });
     } catch (error) {
       console.error("conversation memory route error:", {
@@ -6612,6 +6713,93 @@ app.post(
     }
   }
 );
+
+// GET latest compressed conversation + lead qualification flag (replaces Edge `conversation-memory-latest`).
+// Auth: same global bearer as POST /api/conversation-memory (N8N_WEBHOOK_SECRET). Align env with legacy Edge token when migrating n8n.
+app.get("/api/conversation-memory/latest", requireN8nWebhookSecret, async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  const telefone = sanitizePhone(req.query?.telefone);
+  if (!telefone) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing required query param: telefone",
+    });
+  }
+
+  try {
+    const [leadsResult, convResult] = await Promise.all([
+      supabase.from("leads").select("telefone, qualificacao").eq("telefone", telefone).limit(1),
+      supabase
+        .from("lead_conversations")
+        .select("id, telefone, conversation_compressed, tamanho_original, unknown_lead, created_at")
+        .eq("telefone", telefone)
+        .order("created_at", { ascending: false })
+        .limit(1),
+    ]);
+
+    if (leadsResult.error) {
+      console.error("conversation-memory-latest leads error:", {
+        telefone,
+        message: leadsResult.error.message,
+        code: leadsResult.error.code ?? null,
+      });
+      return res.status(500).json({
+        success: false,
+        error: "Failed to query leads table",
+        details: leadsResult.error.message,
+        code: leadsResult.error.code ?? null,
+      });
+    }
+
+    if (convResult.error) {
+      console.error("conversation-memory-latest conversation error:", {
+        telefone,
+        message: convResult.error.message,
+        code: convResult.error.code ?? null,
+      });
+      return res.status(500).json({
+        success: false,
+        error: "Failed to load conversation",
+        details: convResult.error.message,
+        code: convResult.error.code ?? null,
+      });
+    }
+
+    const leadExiste = (leadsResult.data?.length ?? 0) > 0;
+    const conversaMaisRecente = convResult.data?.[0] ?? null;
+    const leadQualificado = parseLeadQualificacaoBoolean(leadsResult.data?.[0]?.qualificacao);
+    const encontrado = leadExiste && conversaMaisRecente !== null;
+
+    if (encontrado) {
+      return res.json({
+        success: true,
+        found: true,
+        telefone,
+        conversation: conversaMaisRecente,
+        latestConversation: conversaMaisRecente,
+        id: conversaMaisRecente.id,
+        conversation_compressed: conversaMaisRecente.conversation_compressed,
+        tamanho_original: conversaMaisRecente.tamanho_original,
+        unknown_lead: conversaMaisRecente.unknown_lead,
+        created_at: conversaMaisRecente.created_at,
+        qualificacao: leadQualificado,
+      });
+    }
+
+    return res.json({
+      success: true,
+      found: false,
+      telefone,
+      conversation: null,
+      latestConversation: null,
+      qualificacao: leadQualificado,
+    });
+  } catch (error) {
+    console.error("conversation-memory-latest route error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+  }
+});
 
 app.get("/api/whatsapp/session", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
   if (whatsappSessionManager.getState().hasPersistedSession) {
@@ -6973,7 +7161,7 @@ app.post("/api/campaigns/ai/rewrite-step", requireFirebaseAuth, requireInternalP
 });
 
 app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const requestId = getRequestId(req);
   res.setHeader("X-Request-Id", requestId);
@@ -7188,7 +7376,7 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
 });
 
 app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
   const requestedClientId = normalizeString(req.query.clientId);
   const clientId = resolveRequiredAuthorizedClientId({
     req,
@@ -7260,7 +7448,7 @@ app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planil
 });
 
 app.get("/api/campaigns/:id/leads", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) {
@@ -7327,7 +7515,7 @@ app.get("/api/campaigns/:id/leads", requireFirebaseAuth, requireInternalPageAcce
 
 // POST /api/campaigns — cria campanha
 app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const name = normalizeString(req.body?.name);
   const requestedClientId = normalizeString(req.body?.clientId);
@@ -7361,8 +7549,10 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
     },
   };
 
-  if (!name) { sendError(res, 400, "INVALID_BODY", "Missing name"); return; }
-  if (!webhookUrl) { sendError(res, 400, "INVALID_BODY", "Missing webhookUrl"); return; }
+  if (!name) {
+    sendError(res, 400, "INVALID_BODY", "Missing name");
+    return;
+  }
 
   try {
     const authorizedClientId = resolveAuthorizedClientId(req, res, clientId);
@@ -7428,7 +7618,6 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
       }
     }
 
-    res.status(201).json({ item: { ...data, analytics_meta: data.analytics_meta || analyticsMetaWithDispatch, webhook_token: webhookToken ? "***" : null } });
     res.status(201).json({
       item: {
         ...data,
@@ -7444,7 +7633,7 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
 
 // PATCH /api/campaigns/:id — atualiza campanha
 app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
@@ -7532,7 +7721,7 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
 
 // DELETE /api/campaigns/:id — exclui campanha
 app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
@@ -7599,7 +7788,7 @@ function requireCampaignRunnerSecret(req, res, next) {
 
 // POST /api/campaigns/run-due is used by cron/n8n to execute due scheduled campaigns.
 app.post("/api/campaigns/run-due", requireCampaignRunnerSecret, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const rawLimit = Number.parseInt(String(req.body?.limit ?? req.query?.limit ?? ""), 10);
   const limit = Number.isFinite(rawLimit)
@@ -7622,7 +7811,7 @@ app.post("/api/campaigns/run-due", requireCampaignRunnerSecret, async (req, res)
 
 // POST /api/campaigns/:id/trigger — dispara campanha (chama webhook n8n)
 app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params?.id);
   if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
@@ -7666,7 +7855,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
   } catch (error) {
     console.error("campaign trigger error:", error);
     if (error?.name === "AbortError") {
-      sendError(res, 504, "N8N_TIMEOUT", "n8n webhook timed out (15s)");
+      sendError(res, 504, "N8N_TIMEOUT", "n8n webhook timed out (20s)");
       return;
     }
     sendError(
@@ -7679,7 +7868,7 @@ app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageA
 });
 
 app.post("/api/campaigns/reply-webhook", async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const body = req.body && typeof req.body === "object" ? req.body : {};
   const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? body.client?.id);
@@ -7747,7 +7936,7 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
 
 // GET /api/leads-for-dispatch — n8n busca leads pendentes (autenticado por Bearer token)
 app.get("/api/leads-for-dispatch", async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const clientId = normalizeTenantKey(req.query?.clientId ?? req.query?.client_id);
   const importId = normalizeString(req.query?.importId) || null;
