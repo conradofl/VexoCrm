@@ -8069,20 +8069,23 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
       return;
     }
 
-    const updatePayload = {
+    const importItemsUpdatePayload = {
       status_conversa: "em_atendimento",
       ultima_interacao_usuario: repliedAt,
+    };
+    const leadsUpdatePayload = {
+      status_conversa: "em_atendimento",
     };
     const [importItemsResult, leadsResult] = await Promise.all([
       supabase
         .from("lead_import_items")
-        .update(updatePayload)
+        .update(importItemsUpdatePayload)
         .eq("client_id", clientId)
         .eq("telefone", phone)
         .select("id"),
       supabase
         .from("leads")
-        .update(updatePayload)
+        .update(leadsUpdatePayload)
         .eq("client_id", clientId)
         .eq("telefone", phone)
         .select("id"),
