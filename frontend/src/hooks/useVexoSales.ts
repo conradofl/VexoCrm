@@ -117,6 +117,25 @@ async function readApiError(res: Response) {
   }
 }
 
+function getVexoSalesApiCandidates(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return Array.from(new Set([`${API_BASE_URL}${normalizedPath}`, normalizedPath]));
+}
+
+async function fetchVexoSales(path: string, init: RequestInit) {
+  let networkError: unknown = null;
+
+  for (const url of getVexoSalesApiCandidates(path)) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      networkError = error;
+    }
+  }
+
+  throw networkError instanceof Error ? networkError : new Error("Falha de conexao com a API Vendas Vexo.");
+}
+
 export function useVexoSalesOpportunities(filters: VexoSalesFilters = {}) {
   const { isAuthenticated, isAdminUser, getIdToken } = useAuth();
 
@@ -127,7 +146,7 @@ export function useVexoSalesOpportunities(filters: VexoSalesFilters = {}) {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/vexo-sales/opportunities${buildVexoSalesQuery(filters)}`, {
+      const res = await fetchVexoSales(`/api/vexo-sales/opportunities${buildVexoSalesQuery(filters)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -160,7 +179,7 @@ export function useCreateVexoSalesOpportunity() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/vexo-sales/opportunities`, {
+      const res = await fetchVexoSales("/api/vexo-sales/opportunities", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -189,7 +208,7 @@ export function useUpdateVexoSalesOpportunity() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/vexo-sales/opportunities/${id}`, {
+      const res = await fetchVexoSales(`/api/vexo-sales/opportunities/${id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -218,7 +237,7 @@ export function useDeleteVexoSalesOpportunity() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/vexo-sales/opportunities/${id}`, {
+      const res = await fetchVexoSales(`/api/vexo-sales/opportunities/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -241,7 +260,7 @@ export function useVexoSalesInteractions(opportunityId?: string) {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/vexo-sales/opportunities/${opportunityId}/interactions`, {
+      const res = await fetchVexoSales(`/api/vexo-sales/opportunities/${opportunityId}/interactions`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -265,7 +284,7 @@ export function useCreateVexoSalesInteraction() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/vexo-sales/opportunities/${opportunityId}/interactions`, {
+      const res = await fetchVexoSales(`/api/vexo-sales/opportunities/${opportunityId}/interactions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
