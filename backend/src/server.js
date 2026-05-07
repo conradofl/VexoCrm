@@ -34,6 +34,12 @@ import {
   suggestCampaignSequence,
 } from "./campaign-ai.js";
 import { resolveRequiredAuthorizedClientId } from "./tenantScope.js";
+import {
+  canAssignManagedAccess,
+  canManageTargetAccess,
+  filterVisibleUserRecords,
+  hasUserPermission,
+} from "./userAccessScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -106,6 +112,33 @@ function sendError(res, status, code, message, details) {
     body.error.details = details;
   }
   res.status(status).json(body);
+}
+
+/** When true, INTERNAL_ERROR responses include a short `details` payload (for staging / temporary prod debugging). */
+function shouldExposeInternalErrorDetails() {
+  const raw = String(process.env.EXPOSE_INTERNAL_ERROR_DETAILS || "").toLowerCase();
+  return process.env.NODE_ENV !== "production" || raw === "1" || raw === "true" || raw === "yes";
+}
+
+/** Safe diagnostic object for 500 handlers (no stack traces unless non-production). */
+function internalErrorPayloadDetails(err) {
+  if (!shouldExposeInternalErrorDetails()) return undefined;
+  if (err instanceof Error) {
+    const out = { cause: err.message, name: err.name };
+    if (process.env.NODE_ENV !== "production" && err.stack) {
+      out.stack = err.stack.split("\n").slice(0, 8).join("\n");
+    }
+    return out;
+  }
+  if (err && typeof err === "object") {
+    const out = {};
+    if ("message" in err) out.cause = String(err.message);
+    if ("code" in err) out.code = String(err.code);
+    if ("details" in err && err.details != null) out.pgDetails = err.details;
+    if ("hint" in err && err.hint != null) out.hint = err.hint;
+    if (Object.keys(out).length) return out;
+  }
+  return { cause: String(err) };
 }
 
 app.use(
@@ -4498,24 +4531,37 @@ async function postgresHealthPing(pool) {
 
 app.get("/health", async (_req, res) => {
   let postgresPing = null;
+  /** Short diagnostic when ping fails (no secrets; may include host from PG error text). */
+  let postgresPingDetail = null;
   if (useDirectPostgres && pgDatabasePool) {
     try {
       await postgresHealthPing(pgDatabasePool);
       postgresPing = true;
-    } catch {
+    } catch (err) {
       postgresPing = false;
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = err && typeof err === "object" && "code" in err ? String(err.code) : undefined;
+      postgresPingDetail = {
+        code: code || (msg === "health_pg_ping_timeout" ? "HEALTH_PG_PING_TIMEOUT" : "UNKNOWN"),
+        message: msg.length > 240 ? `${msg.slice(0, 240)}…` : msg,
+        budgetMs: getHealthPostgresPingBudgetMs(),
+      };
     }
+  }
+  const services = {
+    databaseClient: !!supabase,
+    databaseDriver: useDirectPostgres ? "postgres" : supabase ? "supabase" : "none",
+    postgresPing,
+    firebaseAuth: firebaseReady,
+  };
+  if (postgresPingDetail) {
+    services.postgresPingDetail = postgresPingDetail;
   }
   res.json({
     ok: true,
     timestamp: new Date().toISOString(),
     uptimeSeconds: process.uptime(),
-    services: {
-      databaseClient: !!supabase,
-      databaseDriver: useDirectPostgres ? "postgres" : supabase ? "supabase" : "none",
-      postgresPing,
-      firebaseAuth: firebaseReady,
-    },
+    services,
   });
 });
 
@@ -6526,7 +6572,7 @@ app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("ag
     res.json({ items: visibleItems, unreadCount });
   } catch (error) {
     console.error("notifications query error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -6600,7 +6646,7 @@ app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("
     res.json({ success: true });
   } catch (error) {
     console.error("notifications update error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -6667,7 +6713,7 @@ app.post("/api/leads-webhook", async (req, res) => {
     res.json({ success: true, count: rows.length, ids: data?.map((item) => item.id) || [] });
   } catch (error) {
     console.error("leads webhook error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -6738,7 +6784,7 @@ app.post("/api/n8n-error-webhook", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("n8n webhook error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -6812,7 +6858,7 @@ app.post(
         telefone,
         message: error instanceof Error ? error.message : String(error),
       });
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   }
 );
@@ -6900,7 +6946,7 @@ app.get("/api/conversation-memory/latest", requireN8nWebhookSecret, async (req, 
     });
   } catch (error) {
     console.error("conversation-memory-latest route error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -7546,7 +7592,7 @@ app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planil
     res.json({ items });
   } catch (error) {
     console.error("campaigns fetch error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -7730,7 +7776,7 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
     });
   } catch (error) {
     console.error("campaign create error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -7818,7 +7864,7 @@ app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("
     });
   } catch (error) {
     console.error("campaign update error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -7858,7 +7904,7 @@ app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess(
     res.json({ success: true });
   } catch (error) {
     console.error("campaign delete error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
@@ -8103,11 +8149,11 @@ app.get("/api/leads-for-dispatch", async (req, res) => {
     res.json({ success: true, total: leads.length, leads });
   } catch (error) {
     console.error("leads-for-dispatch error:", error);
-    sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
-app.use((error, _req, res, _next) => {
+app.use((error, req, res, _next) => {
   if (error?.type === "entity.too.large" || error?.status === 413) {
     sendError(res, 413, "PAYLOAD_TOO_LARGE", "Request payload exceeds 15MB limit");
     return;
@@ -8118,8 +8164,8 @@ app.use((error, _req, res, _next) => {
     return;
   }
 
-  console.error("unhandled express error:", error);
-  sendError(res, 500, "INTERNAL_ERROR", "Internal server error");
+  console.error("unhandled express error:", req?.method, req?.originalUrl || req?.url, error);
+  sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
 });
 
 const port = Number.parseInt(process.env.PORT || "3001", 10);

@@ -49,6 +49,7 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `PG_CONNECTION_TIMEOUT_MS` | pool connection timeout (default 20s) |
 | `HEALTH_PG_PING_TIMEOUT_MS` | max wait for `select 1` inside `/health` (default 4s; keeps Docker HEALTHCHECK from hanging) |
 | `PORT` | porta do servidor; padrao `3001` |
+| `EXPOSE_INTERNAL_ERROR_DETAILS` | se `1`/`true` em produção, respostas `INTERNAL_ERROR` incluem `error.details` (mensagem / código) para depuração; desligar depois |
 | `CORS_ORIGINS` | comma-separated browser origins; in production `*` is ignored (must list real SPA URLs) |
 | `FRONTEND_ORIGIN` | optional single SPA URL merged into CORS allow list (EasyPanel-friendly) |
 | `SUPABASE_URL` | URL do projeto Supabase |
