@@ -17,7 +17,7 @@ export function createDatabasePool(connectionString) {
     connectionString,
     max: Number(process.env.PG_POOL_MAX || 20),
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 10_000),
+    connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 20_000),
   });
 }
 

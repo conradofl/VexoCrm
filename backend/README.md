@@ -46,7 +46,8 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `DATA_SOURCE` | set to `supabase` to keep Supabase JS when `DATABASE_URL` is also defined |
 | `DB_DRIVER` | optional `postgres` / `supabase` to force one stack explicitly |
 | `PG_POOL_MAX` | max connections in the pg pool |
-| `PG_CONNECTION_TIMEOUT_MS` | pool connection timeout |
+| `PG_CONNECTION_TIMEOUT_MS` | pool connection timeout (default 20s) |
+| `HEALTH_PG_PING_TIMEOUT_MS` | max wait for `select 1` inside `/health` (default 4s; keeps Docker HEALTHCHECK from hanging) |
 | `PORT` | porta do servidor; padrao `3001` |
 | `CORS_ORIGINS` | comma-separated browser origins; in production `*` is ignored (must list real SPA URLs) |
 | `FRONTEND_ORIGIN` | optional single SPA URL merged into CORS allow list (EasyPanel-friendly) |
@@ -76,7 +77,7 @@ Depois de publicar alteracoes que criam rotas novas, valide se o EasyPanel esta 
 curl https://SEU_BACKEND/health
 ```
 
-O retorno precisa conter `ok: true`. Com Postgres direto, verifique tambem `services.postgresPing: true`. (Alguns deploys antigos documentavam `deployMarker`; hoje o health usa `uptimeSeconds` + `services`.)
+O retorno precisa conter `ok: true`. Com Postgres direto, `services.postgresPing` indica se o ping ao banco respondeu dentro do orcamento do `/health` (timeout curto para nao travar probes do Docker). Se `false`, verifique `DATABASE_URL` a partir do container (rede/firewall/host).
 
 Se `/api/campaigns/direct-dispatch` ou `/api/campaigns/ai/status` retornar `Cannot POST` ou `Cannot GET`, o frontend ja foi atualizado, mas o backend publicado ainda esta antigo ou apontando para outra instancia.
 

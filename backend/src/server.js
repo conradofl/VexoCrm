@@ -83,10 +83,9 @@ if (isProduction && hasWildcard) {
 if (isProduction && corsOrigins.length === 0) {
   console.error(
     "[cors] NODE_ENV=production but no allowed browser origins after parsing CORS_ORIGINS / FRONTEND_ORIGIN. " +
-      "Set CORS_ORIGINS to a comma-separated list of SPA URLs (e.g. https://your-app.vercel.app) or set FRONTEND_ORIGIN to one SPA URL. " +
-      "Do not rely on '*' alone in production — it is stripped for security."
+      "Set CORS_ORIGINS (comma-separated SPA URLs) or FRONTEND_ORIGIN in EasyPanel. " +
+      "The API will still start; browser requests will fail CORS until this is fixed."
   );
-  process.exit(1);
 }
 
 if (isProduction && corsOrigins.length > 0) {
@@ -155,6 +154,9 @@ if (useDirectPostgres) {
     process.exit(1);
   }
   pgDatabasePool = createDatabasePool(databaseUrl);
+  pgDatabasePool.on("error", (err) => {
+    console.error("[database] pg pool error (idle client):", err?.message || err);
+  });
   supabase = createPgSupabaseClient(pgDatabasePool);
   console.info("[database] Using direct PostgreSQL (pg)", dbDriverEnv ? `(DB_DRIVER=${dbDriverEnv})` : "(DATABASE_URL)");
 } else if (supabaseUrl && supabaseServiceRoleKey) {
@@ -4334,6 +4336,12 @@ async function tickCampaignScheduler() {
     }
   } catch (error) {
     console.error("[campaign-scheduler] failed to process due campaigns:", error);
+    const msg = String(error?.message || error || "");
+    if (/timeout|terminated|ECONNREFUSED|ENOTFOUND/i.test(msg)) {
+      console.warn(
+        "[campaign-scheduler] DB connectivity hint: from Docker, DATABASE_URL must reach Postgres (firewall, correct host/IP; avoid 127.0.0.1 for DB on the host unless using host network). Increase PG_CONNECTION_TIMEOUT_MS if the link is slow."
+      );
+    }
   } finally {
     campaignSchedulerRunning = false;
   }
@@ -4349,7 +4357,7 @@ function startCampaignScheduler() {
   console.log(`[campaign-scheduler] enabled; checking due campaigns every ${intervalMs}ms`);
   setTimeout(() => {
     void tickCampaignScheduler();
-  }, 5_000);
+  }, 15_000);
   setInterval(() => {
     void tickCampaignScheduler();
   }, intervalMs);
@@ -4437,11 +4445,29 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
   });
 }
 
+/** Keep /health fast so Docker HEALTHCHECK does not kill the container when Postgres is slow or unreachable. */
+function getHealthPostgresPingBudgetMs() {
+  const raw = Number.parseInt(String(process.env.HEALTH_PG_PING_TIMEOUT_MS || ""), 10);
+  if (Number.isFinite(raw) && raw >= 500 && raw <= 10_000) return raw;
+  return 4000;
+}
+
+async function postgresHealthPing(pool) {
+  const budgetMs = getHealthPostgresPingBudgetMs();
+  return await Promise.race([
+    pool.query("select 1 as ok"),
+    new Promise((_, reject) => {
+      const id = setTimeout(() => reject(new Error("health_pg_ping_timeout")), budgetMs);
+      if (typeof id.unref === "function") id.unref();
+    }),
+  ]);
+}
+
 app.get("/health", async (_req, res) => {
   let postgresPing = null;
   if (useDirectPostgres && pgDatabasePool) {
     try {
-      await pgDatabasePool.query("select 1 as ok");
+      await postgresHealthPing(pgDatabasePool);
       postgresPing = true;
     } catch {
       postgresPing = false;
