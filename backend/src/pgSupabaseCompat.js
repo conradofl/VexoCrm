@@ -8,16 +8,60 @@ const { Pool } = pg;
 
 const IDENT_RE = /^[a-z_][a-z0-9_]*$/;
 
+function parseBooleanish(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function shouldRejectUnauthorized() {
+  const normalized = String(process.env.PG_SSL_REJECT_UNAUTHORIZED ?? "").trim().toLowerCase();
+  if (!normalized) return true;
+  return !(normalized === "0" || normalized === "false" || normalized === "no");
+}
+
+function parseSslConfigFromConnectionString(connectionString) {
+  try {
+    const url = new URL(connectionString);
+    const sslmode = (url.searchParams.get("sslmode") || "").trim().toLowerCase();
+
+    if (!sslmode || sslmode === "disable") {
+      return false;
+    }
+
+    if (sslmode === "require" || sslmode === "prefer" || sslmode === "allow") {
+      return {
+        rejectUnauthorized: shouldRejectUnauthorized(),
+      };
+    }
+  } catch {
+    // Fall back to env/default handling below.
+  }
+
+  if (parseBooleanish(process.env.PG_FORCE_SSL)) {
+    return {
+      rejectUnauthorized: shouldRejectUnauthorized(),
+    };
+  }
+
+  return false;
+}
+
 /**
  * @param {string} connectionString
  * @returns {import("pg").Pool}
  */
 export function createDatabasePool(connectionString) {
+  const ssl = parseSslConfigFromConnectionString(connectionString);
   return new Pool({
     connectionString,
-    max: Number(process.env.PG_POOL_MAX || 20),
+    max: Number(process.env.PG_POOL_MAX || 10),
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 45_000),
+    connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60_000),
+    maxUses: Number(process.env.PG_MAX_USES || 7500),
+    keepAlive: true,
+    keepAliveInitialDelayMillis: Number(process.env.PG_KEEPALIVE_INITIAL_DELAY_MS || 10_000),
+    ssl,
+    application_name: process.env.PG_APPLICATION_NAME || "vexoapi",
   });
 }
 
