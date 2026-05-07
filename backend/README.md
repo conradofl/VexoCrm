@@ -57,7 +57,8 @@ As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do wo
 | `SUPABASE_ACCESS_TOKEN` | token da CLI para aplicar migrations no startup do container |
 | `SUPABASE_DB_PASSWORD` | senha do banco remoto usada pelo Supabase CLI |
 | `SUPABASE_DB_URL` | string de conexao alternativa para aplicar migrations sem `link` |
-| `RUN_SUPABASE_MIGRATIONS_ON_START` | habilita ou desabilita migrations automaticas no boot |
+| `RUN_SUPABASE_MIGRATIONS_ON_START` | Docker `start.sh` only: `1` roda migrations antes do `npm start` dentro do container |
+| `SKIP_DB_MIGRATE` | Local `npm run dev` / `npm start`: defina `1` para pular o `db push` dos hooks `predev`/`prestart` |
 | `FIREBASE_PROJECT_ID` | projeto Firebase |
 | `FIREBASE_CLIENT_EMAIL` | service account Firebase |
 | `FIREBASE_PRIVATE_KEY` | chave privada Firebase |

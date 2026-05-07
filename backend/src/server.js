@@ -176,6 +176,19 @@ const supabaseUrl = process.env.SUPABASE_URL || process.env.URL;
 const supabaseServiceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
 
+function getDatabaseHostForLogging(connectionString) {
+  if (!connectionString) return null;
+  try {
+    return new URL(connectionString).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function isLikelyIpv4Host(hostname) {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(String(hostname || ""));
+}
+
 /**
  * postgres: pg pool + query shim (VPS or any Postgres).
  * supabase: official Supabase JS client (PostgREST).
@@ -193,12 +206,20 @@ if (useDirectPostgres) {
     console.error("[database] Postgres selected but DATABASE_URL is empty (set DB_DRIVER=supabase to use Supabase only)");
     process.exit(1);
   }
+  const databaseHost = getDatabaseHostForLogging(databaseUrl);
   pgDatabasePool = createDatabasePool(databaseUrl);
   pgDatabasePool.on("error", (err) => {
     console.error("[database] pg pool error (idle client):", err?.message || err);
   });
   supabase = createPgSupabaseClient(pgDatabasePool);
   console.info("[database] Using direct PostgreSQL (pg)", dbDriverEnv ? `(DB_DRIVER=${dbDriverEnv})` : "(DATABASE_URL)");
+  if (isProduction && isLikelyIpv4Host(databaseHost)) {
+    console.warn(
+      `[database] DATABASE_URL is using public host ${databaseHost}. ` +
+        "If API and Postgres run on the same EasyPanel/VPS, prefer the internal service host " +
+        "(for example apps_db-vexo:5432) to avoid NAT/firewall latency and intermittent timeouts."
+    );
+  }
 } else if (supabaseUrl && supabaseServiceRoleKey) {
   supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
   console.info("[database] Using Supabase JS client");
@@ -4514,8 +4535,8 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
 /** Keep /health fast so Docker HEALTHCHECK does not kill the container when Postgres is slow or unreachable. */
 function getHealthPostgresPingBudgetMs() {
   const raw = Number.parseInt(String(process.env.HEALTH_PG_PING_TIMEOUT_MS || ""), 10);
-  if (Number.isFinite(raw) && raw >= 500 && raw <= 10_000) return raw;
-  return 4000;
+  if (Number.isFinite(raw) && raw >= 500 && raw <= 20_000) return raw;
+  return 12_000;
 }
 
 async function postgresHealthPing(pool) {

@@ -1,5 +1,9 @@
 # Database migrations (Supabase CLI vs VPS Postgres)
 
+## Local development (`npm run dev` / `npm start`)
+
+From `VexoCrm/backend`, npm runs `predev` / `prestart`, which execute `scripts/conditional-migrate.mjs`. That script runs `npx supabase db push --db-url` using `SUPABASE_DB_URL` or `DATABASE_URL` from `backend/.env`. Set `SKIP_DB_MIGRATE=1` to skip. This path is independent of `RUN_SUPABASE_MIGRATIONS_ON_START` (that variable is only read by Docker `start.sh`).
+
 ## Supabase-hosted project
 
 `start.sh` runs [apply-supabase-migrations.sh](./apply-supabase-migrations.sh) when `RUN_SUPABASE_MIGRATIONS_ON_START=1`.

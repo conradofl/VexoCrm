@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "check": "node --check src/server.js",
+    "predev": "node scripts/conditional-migrate.mjs",
     "dev": "node --watch src/server.js",
+    "prestart": "node scripts/conditional-migrate.mjs",
     "test": "vitest run",
     "start": "node src/server.js",
     "import-leads": "node scripts/import-leads.js"
