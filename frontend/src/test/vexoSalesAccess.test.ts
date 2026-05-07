@@ -1,0 +1,32 @@
+import { readFileSync } from "fs";
+import { resolve } from "path";
+import { describe, expect, it } from "vitest";
+
+const appSource = readFileSync(resolve("src/App.tsx"), "utf8");
+const sidebarSource = readFileSync(resolve("src/components/AppSidebar.tsx"), "utf8");
+const protectedRouteSource = readFileSync(resolve("src/components/ProtectedRoute.tsx"), "utf8");
+const hookSource = readFileSync(resolve("src/hooks/useVexoSales.ts"), "utf8");
+
+describe("Vexo Sales frontend access control", () => {
+  it("protects the Vexo Sales route with internal role and admin guard", () => {
+    expect(appSource).toContain('path="vexo-sales"');
+    expect(appSource).toContain('<ProtectedRoute allowedRoles={["internal"]} requiredAdmin>');
+  });
+
+  it("renders the sidebar item only when the authenticated user is admin", () => {
+    expect(sidebarSource).toContain("isAdminUser");
+    expect(sidebarSource).toContain('"Vendas Vexo"');
+    expect(sidebarSource).toContain('/crm/vexo-sales');
+  });
+
+  it("redirects direct URL access when requiredAdmin is not satisfied", () => {
+    expect(protectedRouteSource).toContain("requiredAdmin");
+    expect(protectedRouteSource).toContain("!isAdminUser");
+    expect(protectedRouteSource).toContain("Navigate to={defaultRoute}");
+  });
+
+  it("does not enable Vexo Sales data fetching for non-admin users", () => {
+    expect(hookSource).toContain("enabled: isAuthenticated && isAdminUser");
+    expect(hookSource).toContain("/api/vexo-sales/opportunities");
+  });
+});

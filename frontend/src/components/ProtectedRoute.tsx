@@ -7,6 +7,7 @@ interface ProtectedRouteProps {
   allowedRoles?: AccessRole[];
   requiredView?: AccessView;
   requiredInternalPage?: InternalPage;
+  requiredAdmin?: boolean;
 }
 
 export default function ProtectedRoute({
@@ -14,6 +15,7 @@ export default function ProtectedRoute({
   allowedRoles,
   requiredView,
   requiredInternalPage,
+  requiredAdmin = false,
 }: ProtectedRouteProps) {
   const {
     isAuthenticated,
@@ -21,6 +23,7 @@ export default function ProtectedRoute({
     mustChangePassword,
     accessRole,
     defaultRoute,
+    isAdminUser,
     canAccessView,
     canAccessInternalPage,
   } = useAuth();
@@ -57,6 +60,10 @@ export default function ProtectedRoute({
 
   if (requiredInternalPage && !canAccessInternalPage(requiredInternalPage)) {
     return <Navigate to="/crm" replace />;
+  }
+
+  if (requiredAdmin && !isAdminUser) {
+    return <Navigate to={defaultRoute} replace />;
   }
 
   return <>{children}</>;

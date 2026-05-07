@@ -28,6 +28,7 @@ import UserAccessManagement from "./pages/UserAccessManagement";
 import WhatsAppInbox from "./pages/WhatsAppInbox";
 import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
+import VexoSales from "./pages/VexoSales";
 
 const queryClient = new QueryClient();
 
@@ -171,6 +172,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
                     <Tenants />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="vexo-sales"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
+                    <VexoSales />
                   </ProtectedRoute>
                 }
               />
