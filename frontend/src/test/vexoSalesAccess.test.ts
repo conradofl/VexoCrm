@@ -6,6 +6,8 @@ const appSource = readFileSync(resolve("src/App.tsx"), "utf8");
 const sidebarSource = readFileSync(resolve("src/components/AppSidebar.tsx"), "utf8");
 const protectedRouteSource = readFileSync(resolve("src/components/ProtectedRoute.tsx"), "utf8");
 const hookSource = readFileSync(resolve("src/hooks/useVexoSales.ts"), "utf8");
+const frontendVercelConfig = readFileSync(resolve("vercel.json"), "utf8");
+const rootVercelConfig = readFileSync(resolve("../vercel.json"), "utf8");
 
 describe("Vexo Sales frontend access control", () => {
   it("protects the Vexo Sales route with internal role and admin guard", () => {
@@ -28,5 +30,15 @@ describe("Vexo Sales frontend access control", () => {
   it("does not enable Vexo Sales data fetching for non-admin users", () => {
     expect(hookSource).toContain("enabled: isAuthenticated && isAdminUser");
     expect(hookSource).toContain("/api/vexo-sales/opportunities");
+  });
+
+  it("keeps a same-origin API fallback for production fetch failures", () => {
+    expect(hookSource).toContain("fetchVexoSales");
+    expect(hookSource).toContain("getVexoSalesApiCandidates");
+    expect(hookSource).toContain("normalizedPath");
+    expect(frontendVercelConfig).toContain('"source": "/api/:path*"');
+    expect(frontendVercelConfig).toContain("bks-bk-vexo.ymqjmy.easypanel.host/api/:path*");
+    expect(rootVercelConfig).toContain('"source": "/api/:path*"');
+    expect(rootVercelConfig).toContain("bks-bk-vexo.ymqjmy.easypanel.host/api/:path*");
   });
 });
