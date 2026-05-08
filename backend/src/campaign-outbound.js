@@ -341,6 +341,7 @@ export async function dispatchCampaignSequence({
     failureCount: 0,
     successPhones: [],
     failures: [],
+    warnings: [],
     completedCampaign: false,
   };
   const failedPhones = new Set();
@@ -384,15 +385,27 @@ export async function dispatchCampaignSequence({
       try {
         await postEvolutionPayload(webhookUrl, webhookToken, payload);
         if (typeof onStepDispatched === "function") {
-          await onStepDispatched({
-            lead,
-            phone,
-            step,
-            stepIndex,
-            totalSteps: enabledSteps.length,
-            sentAt: new Date().toISOString(),
-            hasNextStep: stepIndex < enabledSteps.length - 1,
-          });
+          try {
+            await onStepDispatched({
+              lead,
+              phone,
+              step,
+              stepIndex,
+              totalSteps: enabledSteps.length,
+              sentAt: new Date().toISOString(),
+              hasNextStep: stepIndex < enabledSteps.length - 1,
+            });
+          } catch (callbackError) {
+            summary.warnings.push({
+              phone,
+              stepId: step.id,
+              stepType: step.type,
+              reason:
+                callbackError instanceof Error
+                  ? callbackError.message
+                  : "Falha ao salvar o estado interno da campanha apos envio bem-sucedido.",
+            });
+          }
         }
       } catch (error) {
         leadFailed = true;

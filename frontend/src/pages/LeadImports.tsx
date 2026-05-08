@@ -2182,23 +2182,6 @@ export default function LeadImports({
                         }
                       />
                     </div>
-                    <div className="space-y-1">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Tempo maximo aguardando resposta</p>
-                      <Input
-                        type="number"
-                        min="1"
-                        step="1"
-                        className={darkFieldClass}
-                        disabled={!dispatchOptions.waitForReply}
-                        value={dispatchOptions.replyTimeoutSeconds ?? 60}
-                        onChange={(event) =>
-                          setDispatchOptions((current) => ({
-                            ...current,
-                            replyTimeoutSeconds: Math.max(1, Number(event.target.value) || 60),
-                          }))
-                        }
-                      />
-                    </div>
                     <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                       <input
                         type="checkbox"
