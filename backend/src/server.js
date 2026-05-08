@@ -5369,6 +5369,28 @@ function getVexoSalesActor(req) {
   };
 }
 
+function logVexoSalesApi(level, event, req, details = {}) {
+  const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+  logger("[vexo-sales-api]", event, {
+    method: req?.method,
+    path: req?.originalUrl || req?.url,
+    uid: normalizeString(req?.authUser?.uid),
+    role: normalizeString(req?.authAccess?.role),
+    isAdmin: Boolean(req?.authAccess?.isAdmin),
+    ...details,
+  });
+}
+
+function requireVexoSalesAdminAccess(req, res, next) {
+  if (req.authAccess?.role !== "internal" || !req.authAccess?.isAdmin) {
+    logVexoSalesApi("warn", "access_denied", req);
+    sendError(res, 403, "FORBIDDEN", "Admin permission required");
+    return;
+  }
+
+  next();
+}
+
 function buildVexoSalesOpportunityPayload(body, req, { partial = false } = {}) {
   const actor = getVexoSalesActor(req);
   const payload = {};
@@ -5449,7 +5471,7 @@ function buildVexoSalesSummary(items) {
   };
 }
 
-app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
   if (!ensureSupabase(res)) return;
 
   try {
@@ -5480,7 +5502,7 @@ app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireAdminAccess
       summary: buildVexoSalesSummary(data || []),
     });
   } catch (error) {
-    console.error("vexo sales opportunities query error:", error);
+    logVexoSalesApi("error", "opportunities_query_failed", req, { error: error?.message || String(error) });
     const missingSchema = isMissingSchemaError(error);
     sendError(
       res,
@@ -5491,11 +5513,12 @@ app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireAdminAccess
   }
 });
 
-app.post("/api/vexo-sales/opportunities", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+app.post("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
   if (!ensureSupabase(res)) return;
 
   const payload = buildVexoSalesOpportunityPayload(req.body || {}, req);
   if (!payload.company_name) {
+    logVexoSalesApi("warn", "opportunity_create_invalid_body", req);
     sendError(res, 400, "INVALID_BODY", "Company name is required");
     return;
   }
@@ -5508,24 +5531,27 @@ app.post("/api/vexo-sales/opportunities", requireFirebaseAuth, requireAdminAcces
       .single();
 
     if (error) throw error;
+    logVexoSalesApi("info", "opportunity_created", req, { opportunityId: data?.id });
     res.status(201).json({ item: data });
   } catch (error) {
-    console.error("vexo sales opportunity create error:", error);
+    logVexoSalesApi("error", "opportunity_create_failed", req, { error: error?.message || String(error) });
     sendError(res, 500, "VEXO_SALES_CREATE_FAILED", error instanceof Error ? error.message : "Failed to create opportunity");
   }
 });
 
-app.patch("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+app.patch("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
   if (!ensureSupabase(res)) return;
 
   const id = normalizeString(req.params.id);
   if (!id) {
+    logVexoSalesApi("warn", "opportunity_update_missing_id", req);
     sendError(res, 400, "INVALID_ID", "Missing opportunity id");
     return;
   }
 
   const payload = buildVexoSalesOpportunityPayload(req.body || {}, req, { partial: true });
   if (Object.prototype.hasOwnProperty.call(payload, "company_name") && !payload.company_name) {
+    logVexoSalesApi("warn", "opportunity_update_invalid_body", req, { opportunityId: id });
     sendError(res, 400, "INVALID_BODY", "Company name is required");
     return;
   }
@@ -5541,18 +5567,20 @@ app.patch("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireAdmin
       .single();
 
     if (error) throw error;
+    logVexoSalesApi("info", "opportunity_updated", req, { opportunityId: data?.id || id });
     res.json({ item: data });
   } catch (error) {
-    console.error("vexo sales opportunity update error:", error);
+    logVexoSalesApi("error", "opportunity_update_failed", req, { opportunityId: id, error: error?.message || String(error) });
     sendError(res, 500, "VEXO_SALES_UPDATE_FAILED", error instanceof Error ? error.message : "Failed to update opportunity");
   }
 });
 
-app.delete("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+app.delete("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
   if (!ensureSupabase(res)) return;
 
   const id = normalizeString(req.params.id);
   if (!id) {
+    logVexoSalesApi("warn", "opportunity_delete_missing_id", req);
     sendError(res, 400, "INVALID_ID", "Missing opportunity id");
     return;
   }
@@ -5566,18 +5594,20 @@ app.delete("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireAdmi
       .eq("internal_module", true);
 
     if (error) throw error;
+    logVexoSalesApi("info", "opportunity_deleted", req, { opportunityId: id });
     res.json({ success: true });
   } catch (error) {
-    console.error("vexo sales opportunity delete error:", error);
+    logVexoSalesApi("error", "opportunity_delete_failed", req, { opportunityId: id, error: error?.message || String(error) });
     sendError(res, 500, "VEXO_SALES_DELETE_FAILED", error instanceof Error ? error.message : "Failed to delete opportunity");
   }
 });
 
-app.get("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+app.get("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
   if (!ensureSupabase(res)) return;
 
   const id = normalizeString(req.params.id);
   if (!id) {
+    logVexoSalesApi("warn", "interactions_query_missing_id", req);
     sendError(res, 400, "INVALID_ID", "Missing opportunity id");
     return;
   }
@@ -5592,12 +5622,12 @@ app.get("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, r
     if (error) throw error;
     res.json({ items: data || [] });
   } catch (error) {
-    console.error("vexo sales interactions query error:", error);
+    logVexoSalesApi("error", "interactions_query_failed", req, { opportunityId: id, error: error?.message || String(error) });
     sendError(res, 500, "VEXO_SALES_INTERACTIONS_QUERY_FAILED", error instanceof Error ? error.message : "Failed to query interactions");
   }
 });
 
-app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
   if (!ensureSupabase(res)) return;
 
   const opportunityId = normalizeString(req.params.id);
@@ -5605,6 +5635,7 @@ app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, 
   const description = normalizeString(req.body?.description);
 
   if (!opportunityId || !type || !description) {
+    logVexoSalesApi("warn", "interaction_create_invalid_body", req, { opportunityId });
     sendError(res, 400, "INVALID_BODY", "Opportunity id, interaction type and description are required");
     return;
   }
@@ -5622,6 +5653,7 @@ app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, 
   };
 
   if (Number.isNaN(new Date(payload.interaction_at).getTime())) {
+    logVexoSalesApi("warn", "interaction_create_invalid_date", req, { opportunityId });
     sendError(res, 400, "INVALID_DATE", "Invalid interaction date");
     return;
   }
@@ -5636,6 +5668,7 @@ app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, 
       .single();
 
     if (opportunityError || !opportunity) {
+      logVexoSalesApi("warn", "interaction_create_opportunity_not_found", req, { opportunityId });
       sendError(res, 404, "OPPORTUNITY_NOT_FOUND", "Opportunity not found");
       return;
     }
@@ -5655,9 +5688,10 @@ app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, 
       .eq("owner_company", "vexo")
       .eq("internal_module", true);
 
+    logVexoSalesApi("info", "interaction_created", req, { opportunityId, interactionId: data?.id });
     res.status(201).json({ item: data });
   } catch (error) {
-    console.error("vexo sales interaction create error:", error);
+    logVexoSalesApi("error", "interaction_create_failed", req, { opportunityId, error: error?.message || String(error) });
     sendError(res, 500, "VEXO_SALES_INTERACTION_CREATE_FAILED", error instanceof Error ? error.message : "Failed to create interaction");
   }
 });

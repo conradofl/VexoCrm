@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
 
+const VEXO_SALES_REQUEST_TIMEOUT_MS = 15000;
+
 export const VEXO_SALES_STAGES = [
   "Novo lead",
   "Primeiro contato",
@@ -117,6 +119,20 @@ async function readApiError(res: Response) {
   }
 }
 
+async function readVexoSalesJson<T>(res: Response, context: string): Promise<T> {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    console.error("[vexo-sales-api] invalid_response", {
+      context,
+      status: res.status,
+      contentType,
+    });
+    throw new Error("Resposta invalida da API Vendas Vexo.");
+  }
+
+  return res.json() as Promise<T>;
+}
+
 function getVexoSalesApiCandidates(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return Array.from(new Set([`${API_BASE_URL}${normalizedPath}`, normalizedPath]));
@@ -124,15 +140,34 @@ function getVexoSalesApiCandidates(path: string) {
 
 async function fetchVexoSales(path: string, init: RequestInit) {
   let networkError: unknown = null;
+  const candidates = getVexoSalesApiCandidates(path);
 
-  for (const url of getVexoSalesApiCandidates(path)) {
+  for (const [index, url] of candidates.entries()) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), VEXO_SALES_REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(url, init);
+      const response = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+      if (index > 0) {
+        console.info("[vexo-sales-api] fallback_success", { path, status: response.status });
+      }
+      return response;
     } catch (error) {
       networkError = error;
+      const eventName = error instanceof DOMException && error.name === "AbortError" ? "request_timeout" : "network_error";
+      console.warn("[vexo-sales-api]", eventName, {
+        path,
+        attempt: index + 1,
+        fallbackAvailable: index < candidates.length - 1,
+      });
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
+  console.error("[vexo-sales-api] request_failed", { path });
   throw networkError instanceof Error ? networkError : new Error("Falha de conexao com a API Vendas Vexo.");
 }
 
@@ -154,7 +189,10 @@ export function useVexoSalesOpportunities(filters: VexoSalesFilters = {}) {
         throw new Error(`Erro ao buscar Vendas Vexo: ${res.status} ${await readApiError(res)}`);
       }
 
-      const payload = await res.json();
+      const payload = await readVexoSalesJson<{
+        items?: VexoSalesOpportunity[];
+        summary?: VexoSalesSummary;
+      }>(res, "list_opportunities");
       return {
         items: Array.isArray(payload.items) ? payload.items : [],
         summary: payload.summary || {
@@ -192,7 +230,7 @@ export function useCreateVexoSalesOpportunity() {
         throw new Error(`Erro ao criar oportunidade: ${res.status} ${await readApiError(res)}`);
       }
 
-      const data = await res.json();
+      const data = await readVexoSalesJson<{ item: VexoSalesOpportunity }>(res, "create_opportunity");
       return data.item;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["vexo-sales-opportunities"] }),
@@ -221,7 +259,7 @@ export function useUpdateVexoSalesOpportunity() {
         throw new Error(`Erro ao atualizar oportunidade: ${res.status} ${await readApiError(res)}`);
       }
 
-      const data = await res.json();
+      const data = await readVexoSalesJson<{ item: VexoSalesOpportunity }>(res, "update_opportunity");
       return data.item;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["vexo-sales-opportunities"] }),
@@ -268,7 +306,7 @@ export function useVexoSalesInteractions(opportunityId?: string) {
         throw new Error(`Erro ao buscar interacoes: ${res.status} ${await readApiError(res)}`);
       }
 
-      const payload = await res.json();
+      const payload = await readVexoSalesJson<{ items?: VexoSalesInteraction[] }>(res, "list_interactions");
       return Array.isArray(payload.items) ? payload.items : [];
     },
     staleTime: 30 * 1000,
@@ -297,7 +335,7 @@ export function useCreateVexoSalesInteraction() {
         throw new Error(`Erro ao registrar interacao: ${res.status} ${await readApiError(res)}`);
       }
 
-      const data = await res.json();
+      const data = await readVexoSalesJson<{ item: VexoSalesInteraction }>(res, "create_interaction");
       return data.item;
     },
     onSuccess: (_data, variables) => {

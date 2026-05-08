@@ -17,8 +17,15 @@ describe("Vexo Sales module backend guards", () => {
     expect(routeLines).toHaveLength(6);
     for (const line of routeLines) {
       expect(line).toContain("requireFirebaseAuth");
-      expect(line).toContain("requireAdminAccess");
+      expect(line).toContain("requireVexoSalesAdminAccess");
     }
+  });
+
+  it("logs Vexo Sales access failures without logging request payloads", () => {
+    expect(serverSource).toContain("function requireVexoSalesAdminAccess");
+    expect(serverSource).toContain('logVexoSalesApi("warn", "access_denied"');
+    expect(serverSource).toContain('logger("[vexo-sales-api]", event');
+    expect(serverSource).not.toContain("req.body,");
   });
 
   it("uses isolated Vexo Sales tables instead of client CRM lead or campaign tables", () => {
