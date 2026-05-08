@@ -4210,13 +4210,16 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
  * alinhado mesmo que os objetos lead usem nomes de campo alternativos ou normalização diferente.
  */
 function resolveCampaignPhonesForRow(leads, dispatchSummary) {
-  const fromSummary = dispatchSummary?.successPhones;
-  if (Array.isArray(fromSummary) && fromSummary.length > 0) {
-    return [...new Set(fromSummary.filter(Boolean))];
-  }
-  return leads
-    .map((lead) => lead.telefone || lead.phone || lead.number)
-    .filter(Boolean);
+  const fromSummary = Array.isArray(dispatchSummary?.successPhones)
+    ? dispatchSummary.successPhones.filter(Boolean)
+    : [];
+  const fromLeads = Array.isArray(leads)
+    ? leads
+      .map((lead) => lead?.telefone || lead?.phone || lead?.number)
+      .filter(Boolean)
+    : [];
+
+  return [...new Set([...fromLeads, ...fromSummary])];
 }
 
 function extractCampaignProgress(rawNormalizedData = {}, campaignId = null) {
