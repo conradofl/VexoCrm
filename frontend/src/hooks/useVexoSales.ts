@@ -139,7 +139,9 @@ async function readVexoSalesJson<T>(res: Response, context: string): Promise<T> 
 
 function getVexoSalesApiCandidates(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return Array.from(new Set([`${API_BASE_URL}${normalizedPath}`, normalizedPath]));
+  const absoluteApiUrl = `${API_BASE_URL}${normalizedPath}`;
+  const preferSameOrigin = !import.meta.env.DEV && typeof window !== "undefined";
+  return Array.from(new Set(preferSameOrigin ? [normalizedPath, absoluteApiUrl] : [absoluteApiUrl, normalizedPath]));
 }
 
 function shouldRetryVexoSalesResponse(response: Response) {
