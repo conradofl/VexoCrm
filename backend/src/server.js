@@ -2013,6 +2013,25 @@ function sanitizePhone(value) {
   return digits;
 }
 
+function buildPhoneLookupVariants(value) {
+  const phone = sanitizePhone(value);
+  if (!phone) return [];
+
+  const variants = new Set([phone]);
+
+  if (phone.startsWith("55")) {
+    const national = phone.slice(2);
+    if (national.length === 10) {
+      variants.add(`55${national.slice(0, 2)}9${national.slice(2)}`);
+    }
+    if (national.length === 11 && national[2] === "9") {
+      variants.add(`55${national.slice(0, 2)}${national.slice(3)}`);
+    }
+  }
+
+  return [...variants];
+}
+
 function normalizePhoneToWhatsAppChatId(value) {
   const phone = sanitizePhone(value);
   return phone ? `${phone}@c.us` : null;
@@ -4327,12 +4346,23 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     };
   }
 
+  const phoneVariants = buildPhoneLookupVariants(phone);
+  if (phoneVariants.length === 0) {
+    return {
+      phone,
+      importIds: [],
+      matches: [],
+      waitForReplyMatches: [],
+      processingWaitForReplyMatches: [],
+    };
+  }
+
   const [importItemsResult, campaignsResult] = await Promise.all([
     supabase
       .from("lead_import_items")
       .select("id, import_id, normalized_data, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, created_at")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .in("telefone", phoneVariants)
       .order("created_at", { ascending: false }),
     supabase
       .from("campaigns")
@@ -4360,7 +4390,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
         ? campaign.phones.map((value) => sanitizePhone(value)).filter(Boolean)
         : [];
       const phoneSet = new Set(storedPhones);
-      const matchedByStoredPhones = phoneSet.has(phone);
+      const matchedByStoredPhones = phoneVariants.some((variant) => phoneSet.has(variant));
       const matchedByImportId =
         Boolean(campaign.import_id) && importIds.includes(normalizeString(campaign.import_id));
       const matchedImportItem = campaign.import_id
