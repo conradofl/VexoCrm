@@ -2157,6 +2157,11 @@ export default function LeadImports({
                                 value={step.delayAfterSeconds}
                                 onChange={(event) => updateCampaignStep(step.id, { delayAfterSeconds: Math.max(0, Number(event.target.value) || 0) })}
                               />
+                              <p className="text-[11px] text-muted-foreground">
+                                {step.delayAfterSeconds >= 60
+                                  ? `${(step.delayAfterSeconds / 60).toFixed(step.delayAfterSeconds % 60 === 0 ? 0 : 1)} min`
+                                  : `${step.delayAfterSeconds}s`}
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -2181,6 +2186,11 @@ export default function LeadImports({
                           }))
                         }
                       />
+                      <p className="text-[11px] text-muted-foreground">
+                        {dispatchOptions.leadDelaySeconds >= 60
+                          ? `${(dispatchOptions.leadDelaySeconds / 60).toFixed(dispatchOptions.leadDelaySeconds % 60 === 0 ? 0 : 1)} min`
+                          : `${dispatchOptions.leadDelaySeconds}s`}
+                      </p>
                     </div>
                     <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                       <input

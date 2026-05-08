@@ -5137,16 +5137,19 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     nome: normalizeString(progress.leadName) || normalizeString(leadImportItem?.nome) || "cliente",
   };
 
+  const remainingSteps = steps.slice(nextStepIndex);
+  const finalStep = remainingSteps[remainingSteps.length - 1] || null;
   const { summary } = await dispatchCampaignSequence({
     webhookUrl,
     webhookToken,
     leads: [lead],
     analyticsMeta: {
       ...analyticsMeta,
-      sequence: steps.slice(nextStepIndex),
+      sequence: remainingSteps,
       dispatchOptions: {
         ...analyticsMeta.dispatchOptions,
         leadDelaySeconds: 0,
+        waitForReply: false,
       },
     },
     context: {
@@ -5157,24 +5160,25 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
       },
       client: { id: clientId, name: await getClientName(clientId) },
     },
-    onStepDispatched: async ({ lead: dispatchedLead, step, stepIndex, sentAt }) => {
-      const absoluteStepIndex = nextStepIndex + stepIndex;
-      await markCampaignLeadWaitingReply({
-        clientId,
-        lead: { id: leadImportItem?.id || dispatchedLead?.id || null },
-        phone,
-        campaign,
-        step,
-        stepIndex: absoluteStepIndex,
-        totalSteps: steps.length,
-        dispatchedAt: sentAt,
-        userRepliedAt: repliedAt,
-      });
-    },
-    waitForReplyMode: "step_progression",
+    waitForReplyMode: "block_next_lead",
   });
 
-  const finalizedCurrentLead = nextStepIndex >= steps.length - 1;
+  if (summary.successCount > 0 && leadImportItem?.id) {
+    const finalStepIndex = steps.length - 1;
+    await markCampaignLeadWaitingReply({
+      clientId,
+      lead: { id: leadImportItem.id, nome: lead.nome },
+      phone,
+      campaign,
+      step: finalStep,
+      stepIndex: finalStepIndex,
+      totalSteps: steps.length,
+      dispatchedAt: new Date().toISOString(),
+      userRepliedAt: repliedAt,
+    });
+  }
+
+  const finalizedCurrentLead = summary.successCount > 0;
   const campaignFinalization = finalizedCurrentLead
     ? await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId })
     : { finalized: false };
