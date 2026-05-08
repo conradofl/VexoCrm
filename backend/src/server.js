@@ -4241,6 +4241,104 @@ function resolveCampaignPhonesForRow(leads, dispatchSummary) {
   return [...new Set([...fromLeads, ...fromSummary])];
 }
 
+async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = null }) {
+  if (!supabase || !campaign?.id || !clientId) {
+    return { started: false, reason: "missing_context" };
+  }
+
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+  const steps = analyticsMeta.sequence.filter((step) => step.enabled);
+  if (analyticsMeta.dispatchOptions?.waitForReply !== true || steps.length === 0) {
+    return { started: false, reason: "campaign_not_wait_for_reply" };
+  }
+
+  const allLeads = await buildDispatchLeads({
+    clientId,
+    importId: campaign.import_id || null,
+    limit: campaign.limit_per_run,
+    segmentation: analyticsMeta.segmentation || null,
+  });
+
+  const { data: importItems, error: importItemsError } = await supabase
+    .from("lead_import_items")
+    .select("id, telefone, normalized_data")
+    .eq("client_id", clientId)
+    .eq("import_id", campaign.import_id || null);
+
+  if (importItemsError) throw importItemsError;
+  const itemByPhone = new Map(
+    (importItems || [])
+      .map((item) => [sanitizePhone(item.telefone), item])
+      .filter(([phone]) => Boolean(phone))
+  );
+
+  const nextLead = allLeads.find((lead) => {
+    const phone = sanitizePhone(lead.telefone);
+    const item = itemByPhone.get(phone);
+    const progress = extractCampaignProgress(item?.normalized_data || {}, campaign.id);
+    return Object.keys(progress).length === 0;
+  });
+
+  if (!nextLead) {
+    return { started: false, reason: "no_next_lead" };
+  }
+
+  let webhookUrl = normalizeString(campaign.webhook_url);
+  let webhookToken = normalizeString(campaign.webhook_token) || null;
+  const tenantDispatch = await resolveDispatchWebhookSettings(clientId);
+  if (!webhookUrl) webhookUrl = normalizeString(tenantDispatch.webhookUrl);
+  if (!webhookToken && tenantDispatch.webhookToken) webhookToken = normalizeString(tenantDispatch.webhookToken) || null;
+  if (!webhookUrl) throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
+
+  const firstStep = steps[0];
+  const targetItem = itemByPhone.get(sanitizePhone(nextLead.telefone)) || null;
+  const clientName = await getClientName(clientId);
+
+  const { summary } = await dispatchCampaignSequence({
+    webhookUrl,
+    webhookToken,
+    leads: [nextLead],
+    analyticsMeta: {
+      ...analyticsMeta,
+      sequence: [firstStep],
+      dispatchOptions: {
+        ...analyticsMeta.dispatchOptions,
+        waitForReply: false,
+        leadDelaySeconds: 0,
+      },
+    },
+    context: {
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        mode: "campaign_queue_progression",
+      },
+      client: { id: clientId, name: clientName },
+    },
+    waitForReplyMode: "block_next_lead",
+  });
+
+  if (summary.successCount > 0 && targetItem?.id) {
+    await markCampaignLeadWaitingReply({
+      clientId,
+      lead: { id: targetItem.id, nome: nextLead.nome },
+      phone: sanitizePhone(nextLead.telefone),
+      campaign,
+      step: firstStep,
+      stepIndex: 0,
+      totalSteps: steps.length,
+      dispatchedAt: new Date().toISOString(),
+      userRepliedAt: repliedAt || undefined,
+    });
+  }
+
+  return {
+    started: summary.successCount > 0,
+    phone: sanitizePhone(nextLead.telefone),
+    summary,
+  };
+}
+
 function extractCampaignProgress(rawNormalizedData = {}, campaignId = null) {
   const data = rawNormalizedData && typeof rawNormalizedData === "object" ? rawNormalizedData : {};
   const state = data.campaign_progress && typeof data.campaign_progress === "object"
@@ -4724,6 +4822,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
   const waitForReply = meta.dispatchOptions?.waitForReply === true;
   const enabledStepCount = meta.sequence.filter((step) => step.enabled).length;
   const keepCampaignProcessing = waitForReply && enabledStepCount > 1;
+  const leadsToDispatch = keepCampaignProcessing ? leads.slice(0, 1) : leads;
 
   let dispatchSummary = null;
   let webhookStatus = null;
@@ -4731,7 +4830,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     const { summary } = await dispatchCampaignSequence({
       webhookUrl,
       webhookToken,
-      leads,
+      leads: leadsToDispatch,
       analyticsMeta: meta,
       context: {
         campaign: {
@@ -4780,7 +4879,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
   const auditPayload = buildCampaignWebhookPayload({
     campaign: claimedCampaign,
     clientName,
-    leads,
+    leads: leadsToDispatch,
     triggerSource,
   });
   const evolutionAudit =
@@ -4795,7 +4894,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
       ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
       status: keepCampaignProcessing ? "processing" : "sent",
       triggerSource,
-      total: leads.length,
+      total: leadsToDispatch.length,
       successCount: dispatchSummary?.successCount ?? null,
       failureCount: dispatchSummary?.failureCount ?? null,
       webhookStatus,
@@ -4807,7 +4906,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     },
   };
 
-  const phonesForRow = resolveCampaignPhonesForRow(leads, dispatchSummary);
+  const phonesForRow = resolveCampaignPhonesForRow(leadsToDispatch, dispatchSummary);
 
   let { error: updateError } = await supabase
     .from("campaigns")
@@ -4846,7 +4945,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
       : "Campanha enviada via Evolution com sucesso.",
     payload: auditPayload,
     n8nResponse: evolutionAudit,
-    totalLeads: leads.length,
+    totalLeads: leadsToDispatch.length,
     webhookStatus,
   });
 
@@ -4855,7 +4954,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     campaignId: claimedCampaign.id,
     campaignName: claimedCampaign.name,
     webhookUrl,
-    total: leads.length,
+    total: leadsToDispatch.length,
     phones: auditPayload.phones,
     payload: auditPayload,
     n8nResponse: evolutionAudit,
@@ -5187,8 +5286,23 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   }
 
   const finalizedCurrentLead = summary.successCount > 0;
-  let campaignFinalization = { finalized: false };
+  let nextLeadProgression = { started: false };
   if (finalizedCurrentLead) {
+    try {
+      nextLeadProgression = await startNextCampaignLeadInQueue({
+        campaign,
+        clientId,
+        repliedAt,
+      });
+    } catch (error) {
+      finalizationWarning =
+        error instanceof Error
+          ? error.message
+          : "Falha ao iniciar o proximo lead da fila da campanha.";
+    }
+  }
+  let campaignFinalization = { finalized: false };
+  if (finalizedCurrentLead && nextLeadProgression.started !== true) {
     try {
       campaignFinalization = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
     } catch (error) {
@@ -5216,6 +5330,7 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     campaignName: campaign.name,
     sentStepIndex: nextStepIndex,
     remainingSteps: Math.max(steps.length - (nextStepIndex + 1), 0),
+    nextLeadProgression,
     summary,
   };
 }
@@ -5255,7 +5370,7 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
 
   const relevantItems = (items || []).filter((item) => {
     const progress = extractCampaignProgress(item.normalized_data || {}, campaign.id);
-    return Object.keys(progress).length > 0;
+    return true;
   });
 
   if (relevantItems.length === 0) {
@@ -5264,6 +5379,7 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
 
   const hasPendingItems = relevantItems.some((item) => {
     const progress = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+    if (Object.keys(progress).length === 0) return true;
     return progress.status !== "finalizado" || progress.nextStepIndex !== null;
   });
 
