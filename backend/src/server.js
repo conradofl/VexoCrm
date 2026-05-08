@@ -5163,25 +5163,50 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     waitForReplyMode: "block_next_lead",
   });
 
+  let finalizationWarning = null;
   if (summary.successCount > 0 && leadImportItem?.id) {
-    const finalStepIndex = steps.length - 1;
-    await markCampaignLeadWaitingReply({
-      clientId,
-      lead: { id: leadImportItem.id, nome: lead.nome },
-      phone,
-      campaign,
-      step: finalStep,
-      stepIndex: finalStepIndex,
-      totalSteps: steps.length,
-      dispatchedAt: new Date().toISOString(),
-      userRepliedAt: repliedAt,
-    });
+    try {
+      const finalStepIndex = steps.length - 1;
+      await markCampaignLeadWaitingReply({
+        clientId,
+        lead: { id: leadImportItem.id, nome: lead.nome },
+        phone,
+        campaign,
+        step: finalStep,
+        stepIndex: finalStepIndex,
+        totalSteps: steps.length,
+        dispatchedAt: new Date().toISOString(),
+        userRepliedAt: repliedAt,
+      });
+    } catch (error) {
+      finalizationWarning =
+        error instanceof Error
+          ? error.message
+          : "Falha ao salvar a finalizacao interna da campanha apos envio bem-sucedido.";
+    }
   }
 
   const finalizedCurrentLead = summary.successCount > 0;
-  const campaignFinalization = finalizedCurrentLead
-    ? await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId })
-    : { finalized: false };
+  let campaignFinalization = { finalized: false };
+  if (finalizedCurrentLead) {
+    try {
+      campaignFinalization = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
+    } catch (error) {
+      finalizationWarning =
+        error instanceof Error
+          ? error.message
+          : "Falha ao finalizar a campanha apos envio bem-sucedido.";
+    }
+  }
+
+  if (finalizationWarning) {
+    summary.warnings.push({
+      phone,
+      stepId: finalStep?.id || null,
+      stepType: finalStep?.type || null,
+      reason: finalizationWarning,
+    });
+  }
 
   return {
     continued: summary.successCount > 0,
