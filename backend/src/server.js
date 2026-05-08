@@ -4204,6 +4204,21 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
   return leads;
 }
 
+/**
+ * Monta a lista de telefones a gravar em `campaigns.phones` (os usados no disparo Evolution).
+ * Prioriza o resumo do dispatch (mesmos valores do payload HTTP) para manter `campaigns.phones`
+ * alinhado mesmo que os objetos lead usem nomes de campo alternativos ou normalização diferente.
+ */
+function resolveCampaignPhonesForRow(leads, dispatchSummary) {
+  const fromSummary = dispatchSummary?.successPhones;
+  if (Array.isArray(fromSummary) && fromSummary.length > 0) {
+    return [...new Set(fromSummary.filter(Boolean))];
+  }
+  return leads
+    .map((lead) => lead.telefone || lead.phone || lead.number)
+    .filter(Boolean);
+}
+
 function extractCampaignProgress(rawNormalizedData = {}, campaignId = null) {
   const data = rawNormalizedData && typeof rawNormalizedData === "object" ? rawNormalizedData : {};
   const state = data.campaign_progress && typeof data.campaign_progress === "object"
@@ -4751,13 +4766,15 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     },
   };
 
+  const phonesForRow = resolveCampaignPhonesForRow(leads, dispatchSummary);
+
   let { error: updateError } = await supabase
     .from("campaigns")
     .update({
       status: keepCampaignProcessing ? "processing" : "sent",
       last_triggered_at: completedAt,
       scheduled_for: null,
-      phones: leads.map((lead) => lead.telefone).filter(Boolean),
+      phones: phonesForRow,
       analytics_meta: nextAnalyticsMeta,
     })
     .eq("id", campaign.id);
@@ -4769,7 +4786,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
         status: keepCampaignProcessing ? "processing" : "sent",
         last_triggered_at: completedAt,
         scheduled_for: null,
-        phones: leads.map((lead) => lead.telefone).filter(Boolean),
+        phones: phonesForRow,
       })
       .eq("id", campaign.id);
     updateError = fallback.error;
