@@ -44,6 +44,7 @@ export interface CampaignSequenceStep {
   image: CampaignImageAsset | null;
   enabled: boolean;
   delayAfterSeconds: number;
+  triggerMode?: "immediate" | "after_reply";
 }
 
 export interface CampaignDispatchOptions {

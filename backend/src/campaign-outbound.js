@@ -4,6 +4,7 @@ export const DEFAULT_LEAD_DELAY_SECONDS = 2;
 export const DEFAULT_STEP_DELAY_SECONDS = 5;
 export const DEFAULT_REPLY_TIMEOUT_SECONDS = 60;
 export const DEFAULT_REPLY_POLL_INTERVAL_SECONDS = 5;
+export const DEFAULT_STEP_TRIGGER_MODE = "immediate";
 const DEFAULT_STEP_FAILURE_MODE = true;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_REPLY_TIMEOUT_SECONDS = 15 * 60;
@@ -98,6 +99,10 @@ function getLegacySequence(rawMeta = {}) {
 
 function normalizeSequenceStep(step, index) {
   const type = normalizeString(step?.type).toLowerCase() === "image" ? "image" : "text";
+  const triggerMode =
+    normalizeString(step?.triggerMode).toLowerCase() === "after_reply"
+      ? "after_reply"
+      : DEFAULT_STEP_TRIGGER_MODE;
 
   return {
     id: normalizeString(step?.id) || randomUUID(),
@@ -110,6 +115,7 @@ function normalizeSequenceStep(step, index) {
       step?.delayAfterSeconds,
       DEFAULT_STEP_DELAY_SECONDS
     ),
+    triggerMode,
   };
 }
 
@@ -175,6 +181,25 @@ export function getEnabledCampaignSteps(rawMeta = {}) {
   return normalizeCampaignAnalyticsMeta(rawMeta).sequence.filter((step) => step.enabled);
 }
 
+export function getCampaignStepPlan(rawMeta = {}) {
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(rawMeta);
+  const enabledSteps = analyticsMeta.sequence.filter((step) => step.enabled);
+  const immediateSteps = enabledSteps.filter((step) => step.triggerMode !== "after_reply");
+  const replySteps = enabledSteps
+    .map((step, index) => ({ step, index }))
+    .filter((entry) => entry.step.triggerMode === "after_reply");
+  const shouldUseReplyFlow =
+    analyticsMeta.dispatchOptions.waitForReply === true && replySteps.length > 0;
+
+  return {
+    analyticsMeta,
+    enabledSteps,
+    immediateSteps,
+    replySteps,
+    shouldUseReplyFlow,
+  };
+}
+
 export function validateCampaignAnalyticsMeta(rawMeta = {}) {
   const analyticsMeta = normalizeCampaignAnalyticsMeta(rawMeta);
   const enabledSteps = analyticsMeta.sequence.filter((step) => step.enabled);
@@ -201,6 +226,19 @@ export function validateCampaignAnalyticsMeta(rawMeta = {}) {
         valid: false,
         analyticsMeta,
         message: `O passo ${step.order} precisa de uma imagem valida para envio.`,
+      };
+    }
+  }
+
+  if (analyticsMeta.dispatchOptions.waitForReply === true) {
+    const immediateSteps = enabledSteps.filter((step) => step.triggerMode !== "after_reply");
+    const replySteps = enabledSteps.filter((step) => step.triggerMode === "after_reply");
+    if (replySteps.length > 0 && immediateSteps.length === 0) {
+      return {
+        valid: false,
+        analyticsMeta,
+        message:
+          "Campanhas com resposta avancada precisam de pelo menos um passo imediato antes dos passos apos resposta.",
       };
     }
   }
@@ -330,9 +368,7 @@ export async function dispatchCampaignSequence({
   analyticsMeta = {},
   context = {},
   onLeadDispatched = null,
-  hasLeadReplied = null,
   onStepDispatched = null,
-  waitForReplyMode = "block_next_lead",
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -362,6 +398,9 @@ export async function dispatchCampaignSequence({
     }
 
     let leadFailed = false;
+    let lastSuccessfulStep = null;
+    let lastSuccessfulStepIndex = null;
+    let lastSentAt = null;
 
     for (let stepIndex = 0; stepIndex < enabledSteps.length; stepIndex += 1) {
       const step = enabledSteps[stepIndex];
@@ -383,7 +422,11 @@ export async function dispatchCampaignSequence({
           : buildTextPayload(phone, stepForPayload, extendedContext);
 
       try {
+        const sentAt = new Date().toISOString();
         await postEvolutionPayload(webhookUrl, webhookToken, payload);
+        lastSuccessfulStep = step;
+        lastSuccessfulStepIndex = stepIndex;
+        lastSentAt = sentAt;
         if (typeof onStepDispatched === "function") {
           try {
             await onStepDispatched({
@@ -392,7 +435,7 @@ export async function dispatchCampaignSequence({
               step,
               stepIndex,
               totalSteps: enabledSteps.length,
-              sentAt: new Date().toISOString(),
+              sentAt,
               hasNextStep: stepIndex < enabledSteps.length - 1,
             });
           } catch (callbackError) {
@@ -428,9 +471,6 @@ export async function dispatchCampaignSequence({
       }
 
       const hasNextStep = stepIndex < enabledSteps.length - 1;
-      if (normalizedMeta.dispatchOptions.waitForReply && waitForReplyMode === "step_progression" && hasNextStep) {
-        break;
-      }
       if (hasNextStep) {
         await sleep(step.delayAfterSeconds * 1000);
       }
@@ -441,19 +481,14 @@ export async function dispatchCampaignSequence({
       summary.successPhones.push(phone);
 
       if (typeof onLeadDispatched === "function") {
-        await onLeadDispatched({ lead, phone });
-      }
-
-      if (normalizedMeta.dispatchOptions.waitForReply && typeof hasLeadReplied === "function") {
-        const timeoutMs = normalizedMeta.dispatchOptions.replyTimeoutSeconds * 1000;
-        const pollMs = normalizedMeta.dispatchOptions.replyPollIntervalSeconds * 1000;
-        const waitStartedAt = Date.now();
-
-        // Keep campaign flow simple: wait for one contact reply, then continue after reply or timeout.
-        while (Date.now() - waitStartedAt < timeoutMs) {
-          if (await hasLeadReplied({ lead, phone })) break;
-          await sleep(Math.min(pollMs, Math.max(timeoutMs - (Date.now() - waitStartedAt), 0)));
-        }
+        await onLeadDispatched({
+          lead,
+          phone,
+          sentAt: lastSentAt,
+          lastStep: lastSuccessfulStep,
+          lastStepIndex: lastSuccessfulStepIndex,
+          totalSteps: enabledSteps.length,
+        });
       }
     }
 

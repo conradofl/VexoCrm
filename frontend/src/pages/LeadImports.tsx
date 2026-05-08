@@ -483,6 +483,7 @@ function createCampaignStep(type: "text" | "image", order: number, patch: Partia
     image: patch.image || null,
     enabled: patch.enabled ?? true,
     delayAfterSeconds: patch.delayAfterSeconds ?? 5,
+    triggerMode: patch.triggerMode === "after_reply" ? "after_reply" : "immediate",
   };
 }
 
@@ -499,6 +500,7 @@ function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): CampaignS
         image: step.image || null,
         enabled: step.enabled !== false,
         delayAfterSeconds: Number.isFinite(step.delayAfterSeconds) ? step.delayAfterSeconds : 5,
+        triggerMode: step.triggerMode === "after_reply" ? "after_reply" : "immediate",
       }));
   }
 
@@ -930,6 +932,14 @@ export default function LeadImports({
   function validateSequenceForSubmit(sequence: CampaignSequenceStep[]) {
     const enabledSteps = sequence.filter((step) => step.enabled);
     if (enabledSteps.length === 0) return "Adicione pelo menos um passo ativo na sequencia.";
+
+    if (dispatchOptions.waitForReply) {
+      const immediateSteps = enabledSteps.filter((step) => step.triggerMode !== "after_reply");
+      const replySteps = enabledSteps.filter((step) => step.triggerMode === "after_reply");
+      if (replySteps.length > 0 && immediateSteps.length === 0) {
+        return "Campanhas com resposta avancada precisam de pelo menos um passo imediato antes dos passos apos resposta.";
+      }
+    }
 
     const invalidStep = enabledSteps.find((step) =>
       step.type === "text" ? !step.text.trim() : !step.image,
@@ -2148,6 +2158,25 @@ export default function LeadImports({
 
                           <div className="grid gap-2 sm:grid-cols-2">
                             <div className="space-y-1">
+                              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Quando enviar</p>
+                              <Select
+                                value={step.triggerMode === "after_reply" ? "after_reply" : "immediate"}
+                                onValueChange={(value) =>
+                                  updateCampaignStep(step.id, {
+                                    triggerMode: value === "after_reply" ? "after_reply" : "immediate",
+                                  })
+                                }
+                              >
+                                <SelectTrigger className={darkFieldClass}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="immediate">No disparo da campanha</SelectItem>
+                                  <SelectItem value="after_reply">Quando o lead responder</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
                               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Atraso apos passo</p>
                               <Input
                                 type="number"
@@ -2216,7 +2245,7 @@ export default function LeadImports({
                           }))
                         }
                       />
-                      aguardar resposta antes do proximo lead
+                      habilitar passos apos resposta no modo avancado
                     </label>
                   </div>
                 </div>
