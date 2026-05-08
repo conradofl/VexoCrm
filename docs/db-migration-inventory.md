@@ -39,7 +39,7 @@ Generated for the Postgres cutover. All SQL traffic from [backend/src/server.js]
 | Area | Routes (examples) | Tables |
 | --- | --- | --- |
 | Tenants / N8N settings | `/api/lead-clients`, `/api/lead-clients/:id/n8n-settings` | `leads_clients`, `lead_client_n8n_settings` |
-| Leads & webhooks | `/api/leads`, `/api/leads-webhook`, dashboard | `leads`, `leads_clients`, imports, campaigns, CI tables |
+| Leads & webhooks | `/api/leads`, `/api/import-lead-infinie-n8n`, dashboard | `leads`, `leads_clients`, imports, campaigns, CI tables |
 | Imports | `/api/lead-imports`, `/api/lead-import-items` | `lead_imports`, `lead_import_items` |
 | Campaigns | `/api/campaigns/*`, scheduler | `campaigns`, `campaign_dispatch_logs`, `leads`, `lead_import_items` |
 | Notifications | `/api/notifications` | `notifications` |

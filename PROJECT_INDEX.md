@@ -85,7 +85,7 @@ VexoCrm/
 ### Endpoints de compatibilidade (legado)
 
 Existem mas não são primários:
-- `POST /api/leads-webhook`
+- `POST /api/import-lead-infinie-n8n`
 - `POST /api/n8n-error-webhook`
 - `POST /api/conversation-memory`
 

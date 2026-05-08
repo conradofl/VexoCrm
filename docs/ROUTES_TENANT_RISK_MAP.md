@@ -82,7 +82,7 @@ Legenda de risco:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/notifications` | `backend/src/server.js` | `notifications` | **Corrigido nesta PR** | Baixo | P4 | Filtra notificacoes por `client_id`/`tenant_id`/`company_id` ou `user_id`; notificacoes globais ficam restritas a admin interno real |
 | PATCH | `/api/notifications` | `backend/src/server.js` | `notifications` | **Corrigido nesta PR** | Baixo | P4 | Valida escopo antes de marcar uma notificacao como lida; `markAllRead` de usuario nao-admin atualiza apenas notificacoes visiveis |
-| POST | `/api/leads-webhook` | `backend/src/server.js` | `leads` | Nao via auth humana; recebe `client_id` do payload | Alto | P1 | Pode gravar em qualquer tenant se segredo vazar |
+| POST | `/api/import-lead-infinie-n8n` | `backend/src/server.js` | `leads` | Nao via auth humana; recebe `client_id` do payload | Alto | P1 | Pode gravar em qualquer tenant se segredo vazar |
 | POST | `/api/n8n-error-webhook` | `backend/src/server.js` | `n8n_error_logs`, `notifications` | Nao | Alto | P1 | Registro e notificacao globais, sem tenant |
 | POST | `/api/conversation-memory` | `backend/src/server.js` | `leads`, `lead_conversations` | Nao por tenant | Alto | P1 | Persiste memoria por telefone, sem `client_id` |
 
@@ -140,7 +140,7 @@ Legenda de risco:
 
 ### P1 - segunda PR funcional
 
-3. pendente: revisar webhooks internos para tenant explícito, principalmente `/api/leads-webhook` e `/api/conversation-memory`
+3. pendente: revisar webhooks internos para tenant explícito, principalmente `/api/import-lead-infinie-n8n` e `/api/conversation-memory`
 4. pendente: decidir se perfis de acesso devem virar entidade tenant-aware no futuro
 
 ### Concluido na PR de tenant scope de usuarios

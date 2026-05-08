@@ -48,7 +48,8 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 const app = express();
 app.use(express.json({ limit: "15mb" }));
 const isProduction = process.env.NODE_ENV === "production";
-const MAX_CONVERSATION_BYTES = 1024 * 1024;
+/** Max decompressed conversation size for POST /api/conversation-memory (after gzip decode). */
+const MAX_CONVERSATION_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS = 60 * 1000;
 const CAMPAIGN_SCHEDULER_MAX_BATCH = 25;
 
@@ -1637,6 +1638,271 @@ async function validateN8nInboundBearer(req, res, clientId) {
   return settings;
 }
 
+// ---------------------------------------------------------------------------
+// Webhook estilo Edge `lead-webhook` + validação de import do chat outlier
+// ---------------------------------------------------------------------------
+// - sanitizePhoneLeadWebhookStyle / Bearer: paridade com a Edge (telefone só dígitos; sem expandir +55).
+// - validateLeadsOutlierRecord: monta uma linha para INSERT em `public.leads_outlier` a partir do JSON do outro chat.
+// ---------------------------------------------------------------------------
+
+/** Telefone só com dígitos — alinhado à Edge `lead-webhook` (sem normalização BR tipo +55). */
+function sanitizePhoneLeadWebhookStyle(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  const digits = normalized.replace(/\D/g, "");
+  return digits || null;
+}
+
+/** Segredo Bearer do POST /api/lead-webhook (paridade Edge). Em produção, sobrescrever com LEAD_WEBHOOK_BEARER_TOKEN. */
+function getLeadWebhookBearerSecret() {
+  return normalizeString(process.env.LEAD_WEBHOOK_BEARER_TOKEN) || "@Vexo2026";
+}
+
+/** Resposta JSON no mesmo estilo da Edge (sem cache no browser/proxy). */
+function sendLeadWebhookEdgeStyle(res, status, payload) {
+  res.set("Cache-Control", "no-store");
+  res.status(status).json(payload);
+}
+
+/** Confere Authorization: Bearer contra o segredo fixo do lead-webhook. */
+function validateLeadWebhookBearer(req, res) {
+  const token = getRequestBearerToken(req);
+  const expected = getLeadWebhookBearerSecret();
+  if (!token || token !== expected) {
+    sendLeadWebhookEdgeStyle(res, 401, { success: false, error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+/** Valores permitidos de `status_conversa` para `leads_outlier` (import do chat outlier). */
+const LEADS_OUTLIER_STATUS_CONVERSA = new Set(["aguardando_usuario", "em_atendimento", "finalizado"]);
+/** Temperatura do lead (nullable). O JSON pode enviar em `status` ou `lead_temperature`. */
+const LEADS_OUTLIER_TEMPERATURE = new Set(["QUENTE", "MORNO", "FRIO"]);
+/** Fases SPIN permitidas (nullable). */
+const LEADS_OUTLIER_SPIN_FASE = new Set(["situacao", "problema", "implicacao", "necessidade"]);
+/** Chaves opcionais conhecidas em `dados` (string, number ou null). */
+const LEADS_OUTLIER_DADOS_KEYS = new Set([
+  "nome",
+  "cidade",
+  "estado",
+  "interesse",
+  "objetivo",
+  "credito",
+  "parcela",
+  "prazo",
+  "lance_entrada_fgts",
+  "experiencia_consorcio",
+  "motivacao",
+  "decisor",
+  "melhor_horario",
+]);
+
+/** Limite máximo de registos por pedido nos endpoints de import outlier. */
+const MAX_LEADS_OUTLIER_BATCH = 2000;
+
+/** Garante que `dados` é um objeto só com chaves permitidas e valores string | number | null. */
+function sanitizeLeadsOutlierDados(raw) {
+  if (raw === undefined || raw === null) {
+    return { value: {} };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "dados tem de ser um objeto simples" };
+  }
+  const out = {};
+  for (const key of Object.keys(raw)) {
+    if (!LEADS_OUTLIER_DADOS_KEYS.has(key)) {
+      return { error: `dados tem chave desconhecida: ${key}` };
+    }
+    const v = raw[key];
+    if (v === null || v === undefined) {
+      out[key] = null;
+      continue;
+    }
+    if (typeof v === "string") {
+      out[key] = v;
+      continue;
+    }
+    if (typeof v === "number" && Number.isFinite(v)) {
+      out[key] = v;
+      continue;
+    }
+    return { error: `dados.${key} tem de ser string, número ou null` };
+  }
+  return { value: out };
+}
+
+/** Metadados opcionais de comportamento do bot (objeto livre, sem validação de chaves). */
+function sanitizeLeadsOutlierBehaviorMeta(raw) {
+  if (raw === undefined || raw === null) {
+    return { value: undefined };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "behavior_meta tem de ser um objeto simples" };
+  }
+  return { value: raw };
+}
+
+/** Número finito opcional; vazio vira null. `fieldLabel` entra na mensagem de erro. */
+function parseOptionalFiniteNumber(value, fieldLabel) {
+  if (value === undefined || value === null || value === "") {
+    return { value: null };
+  }
+  const n = typeof value === "number" ? value : Number.parseFloat(String(value));
+  if (!Number.isFinite(n)) {
+    return { error: `${fieldLabel} tem de ser um número finito` };
+  }
+  return { value: n };
+}
+
+/** UUID em string opcional; vazio vira null. */
+function parseOptionalUuid(value, fieldLabel) {
+  if (value === undefined || value === null || value === "") {
+    return { value: null };
+  }
+  const s = normalizeString(value);
+  if (!s || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
+    return { error: `${fieldLabel} tem de ser uma string UUID válida` };
+  }
+  return { value: s.toLowerCase() };
+}
+
+/**
+ * Valida um item do payload do chat outlier. Devolve `{ row }` para insert na BD ou `{ error }`.
+ * Espelha colunas de `public.leads` quando aplicável; estado do pipeline em `pipeline_status` → coluna `status`.
+ * Temperatura do bot: JSON `status` ou `lead_temperature` → coluna `lead_temperature`.
+ * @param {unknown} record objeto de um lead (outlier)
+ * @param {string} indexLabel rótulo para erros, ex.: `items[3]`
+ */
+function validateLeadsOutlierRecord(record, indexLabel = "") {
+  const prefix = indexLabel ? `${indexLabel}: ` : "";
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return { error: `${prefix}cada item tem de ser um objeto simples` };
+  }
+
+  const telefone = sanitizePhone(record.telefone ?? record.Telefone);
+  if (!telefone) {
+    return { error: `${prefix}telefone é obrigatório e tem de ser um número de telefone válido` };
+  }
+
+  if (typeof record.mensagem !== "string") {
+    return { error: `${prefix}mensagem tem de ser uma string` };
+  }
+  if (typeof record.finalizado !== "boolean") {
+    return { error: `${prefix}finalizado tem de ser um booleano` };
+  }
+  if (
+    typeof record.status_conversa !== "string" ||
+    !LEADS_OUTLIER_STATUS_CONVERSA.has(record.status_conversa)
+  ) {
+    return {
+      error: `${prefix}status_conversa tem de ser aguardando_usuario, em_atendimento ou finalizado`,
+    };
+  }
+
+  let leadTemperature = null;
+  const legacyTemp = record.status;
+  if (Object.prototype.hasOwnProperty.call(record, "lead_temperature")) {
+    const explicitTemp = record.lead_temperature;
+    if (explicitTemp === null || explicitTemp === undefined) {
+      leadTemperature = null;
+    } else if (typeof explicitTemp === "string" && LEADS_OUTLIER_TEMPERATURE.has(explicitTemp)) {
+      leadTemperature = explicitTemp;
+    } else {
+      return { error: `${prefix}lead_temperature tem de ser null, QUENTE, MORNO ou FRIO` };
+    }
+  } else if (legacyTemp !== undefined && legacyTemp !== null) {
+    if (typeof legacyTemp !== "string" || !LEADS_OUTLIER_TEMPERATURE.has(legacyTemp)) {
+      return {
+        error: `${prefix}status tem de ser null, QUENTE, MORNO ou FRIO (temperatura do lead), ou use pipeline_status para o estado do pipeline no CRM`,
+      };
+    }
+    leadTemperature = legacyTemp;
+  }
+
+  if (record.spin_fase !== undefined && record.spin_fase !== null) {
+    if (typeof record.spin_fase !== "string" || !LEADS_OUTLIER_SPIN_FASE.has(record.spin_fase)) {
+      return {
+        error: `${prefix}spin_fase tem de ser null ou situacao, problema, implicacao, necessidade`,
+      };
+    }
+  }
+
+  const dadosResult = sanitizeLeadsOutlierDados(record.dados);
+  if (dadosResult.error) {
+    return { error: `${prefix}${dadosResult.error}` };
+  }
+
+  const behaviorResult = sanitizeLeadsOutlierBehaviorMeta(record.behavior_meta);
+  if (behaviorResult.error) {
+    return { error: `${prefix}${behaviorResult.error}` };
+  }
+
+  const nomeFromRecord = normalizeString(record.nome ?? record.Nome);
+  const nomeFromDados =
+    dadosResult.value && typeof dadosResult.value.nome === "string"
+      ? normalizeString(dadosResult.value.nome)
+      : null;
+  const nome = nomeFromRecord ?? nomeFromDados;
+
+  const pipelineStatus = normalizeString(
+    record.pipeline_status ?? record.pipelineStatus ?? record.lead_status
+  );
+
+  const leadScoreParsed = parseOptionalFiniteNumber(record.lead_score, `${prefix}lead_score`);
+  if (leadScoreParsed.error) {
+    return { error: leadScoreParsed.error };
+  }
+  const potentialParsed = parseOptionalFiniteNumber(
+    record.potential_contract_value,
+    `${prefix}potential_contract_value`
+  );
+  if (potentialParsed.error) {
+    return { error: potentialParsed.error };
+  }
+
+  const uuidResult = parseOptionalUuid(record.source_campaign_id, `${prefix}source_campaign_id`);
+  if (uuidResult.error) {
+    return { error: uuidResult.error };
+  }
+
+  // Linha normalizada para INSERT em `leads_outlier` (campos alinhados à tabela).
+  /** @type {Record<string, unknown>} */
+  const row = {
+    telefone,
+    mensagem: record.mensagem,
+    finalizado: record.finalizado,
+    status_conversa: record.status_conversa,
+    lead_temperature: leadTemperature,
+    status: pipelineStatus,
+    spin_fase:
+      record.spin_fase === undefined || record.spin_fase === null ? null : record.spin_fase,
+    dados: dadosResult.value,
+    nome,
+    bot_ativo: record.bot_ativo !== undefined ? normalizeBool(record.bot_ativo) : false,
+    historico: normalizeString(record.historico),
+    data_hora: normalizeIsoDate(record.data_hora ?? record["Data e Hora"]),
+    qualificacao: normalizeString(
+      record.qualificacao ?? record.Qualificacao ?? record.resumo ?? record.Resumo
+    ),
+    ultima_interacao_bot: normalizeIsoDate(record.ultima_interacao_bot),
+    ultima_interacao_usuario: normalizeIsoDate(record.ultima_interacao_usuario),
+    lead_score: leadScoreParsed.value,
+    potential_contract_value: potentialParsed.value,
+    first_contact_at: normalizeIsoDate(record.first_contact_at),
+    qualified_at: normalizeIsoDate(record.qualified_at),
+    closed_at: normalizeIsoDate(record.closed_at),
+    lead_origin: normalizeString(record.lead_origin),
+    source_campaign_id: uuidResult.value,
+  };
+
+  if (behaviorResult.value !== undefined) {
+    row.behavior_meta = behaviorResult.value;
+  }
+
+  return { row };
+}
+
 async function resolveDispatchWebhookSettings(clientId) {
   const settingsStatus = await getLeadClientN8nSettingsStatus(clientId);
   const settings = settingsStatus.settings;
@@ -1857,11 +2123,16 @@ function isValidBase64(value) {
   return /^[A-Za-z0-9+/=]+$/.test(value);
 }
 
+/** Global bearer for n8n-facing routes (POST/GET conversation-memory*, POST n8n-error-webhook). Env overrides; default matches legacy Edge. */
+function getN8nWebhookBearerSecret() {
+  return normalizeString(process.env.N8N_WEBHOOK_SECRET) || "@Vexo2026";
+}
+
 function requireN8nWebhookSecret(req, res, next) {
   const authHeader = req.headers.authorization;
-  const expectedSecret = process.env.N8N_WEBHOOK_SECRET;
+  const expectedSecret = getN8nWebhookBearerSecret();
 
-  if (!authHeader || !expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
+  if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
     sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
     return;
   }
@@ -1927,7 +2198,7 @@ function validateConversationMemoryPayload(req, res, next) {
       res,
       413,
       "PAYLOAD_TOO_LARGE",
-      "Decompressed conversation exceeds 1MB limit"
+      "Decompressed conversation exceeds 5MB limit"
     );
     return;
   }
@@ -3800,7 +4071,6 @@ function normalizeImportedLead(row, clientId) {
       "consumo_mensal",
       "valor_conta",
       "conta_de_energia",
-      "conta_energia",
       "ticket",
     ])
   );
@@ -3875,7 +4145,7 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
 
   let query = supabase
     .from("lead_import_items")
-    .select("id, import_id, client_id, telefone, normalized_data, created_at")
+    .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
     .eq("client_id", clientId)
     .eq("imported", true)
     .not("telefone", "is", null)
@@ -3907,7 +4177,9 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
             id: item.id,
             import_id: item.import_id,
             client_id: item.client_id,
+            lead_id: item.lead_id || null,
             telefone: sanitizePhone(item.telefone),
+            normalized_data: normalizedData,
             nome: normalizeString(normalizedData.nome),
             tipo_cliente: normalizeString(normalizedData.tipo_cliente),
             faixa_consumo: normalizeString(normalizedData.faixa_consumo),
@@ -3930,6 +4202,205 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
   }
 
   return leads;
+}
+
+function extractCampaignProgress(rawNormalizedData = {}, campaignId = null) {
+  const data = rawNormalizedData && typeof rawNormalizedData === "object" ? rawNormalizedData : {};
+  const state = data.campaign_progress && typeof data.campaign_progress === "object"
+    ? data.campaign_progress
+    : {};
+
+  if (!campaignId) return state;
+  return state[campaignId] && typeof state[campaignId] === "object" ? state[campaignId] : {};
+}
+
+function mergeCampaignProgress(rawNormalizedData = {}, campaignId, progressPatch = {}) {
+  const data = rawNormalizedData && typeof rawNormalizedData === "object" ? rawNormalizedData : {};
+  const campaignProgress =
+    data.campaign_progress && typeof data.campaign_progress === "object"
+      ? { ...data.campaign_progress }
+      : {};
+  const current =
+    campaignProgress[campaignId] && typeof campaignProgress[campaignId] === "object"
+      ? campaignProgress[campaignId]
+      : {};
+
+  campaignProgress[campaignId] = {
+    ...current,
+    ...progressPatch,
+  };
+
+  return {
+    ...data,
+    campaign_progress: campaignProgress,
+  };
+}
+
+async function updateLeadImportItemCampaignProgress({
+  clientId,
+  leadImportItemId,
+  campaignId,
+  progressPatch = {},
+  statusConversa = undefined,
+  ultimaInteracaoBot = undefined,
+  ultimaInteracaoUsuario = undefined,
+}) {
+  if (!supabase || !clientId || !leadImportItemId || !campaignId) return null;
+
+  const { data: item, error: fetchError } = await supabase
+    .from("lead_import_items")
+    .select("id, normalized_data")
+    .eq("client_id", clientId)
+    .eq("id", leadImportItemId)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+  if (!item) return null;
+
+  const updatePayload = {
+    normalized_data: mergeCampaignProgress(item.normalized_data || {}, campaignId, progressPatch),
+  };
+  if (statusConversa !== undefined) updatePayload.status_conversa = statusConversa;
+  if (ultimaInteracaoBot !== undefined) updatePayload.ultima_interacao_bot = ultimaInteracaoBot;
+  if (ultimaInteracaoUsuario !== undefined) updatePayload.ultima_interacao_usuario = ultimaInteracaoUsuario;
+
+  const { data: updated, error: updateError } = await supabase
+    .from("lead_import_items")
+    .update(updatePayload)
+    .eq("client_id", clientId)
+    .eq("id", leadImportItemId)
+    .select("id, normalized_data, status_conversa, ultima_interacao_bot, ultima_interacao_usuario")
+    .maybeSingle();
+
+  if (updateError) throw updateError;
+  return updated;
+}
+
+async function updateLeadConversationState({
+  clientId,
+  phone,
+  statusConversa,
+  ultimaInteracaoBot = undefined,
+  ultimaInteracaoUsuario = undefined,
+}) {
+  if (!supabase || !clientId || !phone || !statusConversa) return;
+
+  const leadUpdatePayload = { status_conversa: statusConversa };
+  if (ultimaInteracaoBot !== undefined) leadUpdatePayload.ultima_interacao_bot = ultimaInteracaoBot;
+  if (ultimaInteracaoUsuario !== undefined) leadUpdatePayload.ultima_interacao_usuario = ultimaInteracaoUsuario;
+
+  const { error } = await supabase
+    .from("leads")
+    .update(leadUpdatePayload)
+    .eq("client_id", clientId)
+    .eq("telefone", phone);
+
+  if (error) throw error;
+}
+
+async function findCampaignReplyMatches({ clientId, phone }) {
+  if (!supabase || !clientId || !phone) {
+    return {
+      phone,
+      importIds: [],
+      matches: [],
+      waitForReplyMatches: [],
+      processingWaitForReplyMatches: [],
+    };
+  }
+
+  const [importItemsResult, campaignsResult] = await Promise.all([
+    supabase
+      .from("lead_import_items")
+      .select("id, import_id, normalized_data, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, created_at")
+      .eq("client_id", clientId)
+      .eq("telefone", phone)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("campaigns")
+      .select("id, name, client_id, import_id, status, scheduled_for, last_triggered_at, archived_at, phones, analytics_meta")
+      .eq("client_id", clientId)
+      .is("archived_at", null),
+  ]);
+
+  if (importItemsResult.error) throw importItemsResult.error;
+  if (campaignsResult.error) throw campaignsResult.error;
+
+  const importIds = Array.from(
+    new Set(
+      (importItemsResult.data || [])
+        .map((item) => normalizeString(item.import_id))
+        .filter(Boolean)
+    )
+  );
+  const importItems = importItemsResult.data || [];
+
+  const matches = (campaignsResult.data || [])
+    .map((campaign) => {
+      const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+      const storedPhones = Array.isArray(campaign.phones)
+        ? campaign.phones.map((value) => sanitizePhone(value)).filter(Boolean)
+        : [];
+      const phoneSet = new Set(storedPhones);
+      const matchedByStoredPhones = phoneSet.has(phone);
+      const matchedByImportId =
+        Boolean(campaign.import_id) && importIds.includes(normalizeString(campaign.import_id));
+      const matchedImportItem = campaign.import_id
+        ? importItems.find((item) => normalizeString(item.import_id) === normalizeString(campaign.import_id)) || null
+        : matchedByStoredPhones
+          ? importItems[0] || null
+          : null;
+
+      if (!matchedByStoredPhones && !matchedByImportId) {
+        return null;
+      }
+
+      const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
+
+      return {
+        id: campaign.id,
+        name: campaign.name,
+        clientId: campaign.client_id,
+        importId: campaign.import_id || null,
+        status: campaign.status || null,
+        scheduledFor: campaign.scheduled_for || null,
+        lastTriggeredAt: campaign.last_triggered_at || null,
+        waitForReply: analyticsMeta.dispatchOptions?.waitForReply === true,
+        analyticsMeta,
+        matchSource: matchedByStoredPhones && matchedByImportId ? "phones_and_import" : matchedByStoredPhones ? "phones" : "import",
+        leadImportItem: matchedImportItem
+          ? {
+            id: matchedImportItem.id,
+            importId: matchedImportItem.import_id || null,
+            nome: normalizeString(matchedImportItem.normalized_data?.nome) || null,
+            statusConversa: matchedImportItem.status_conversa || null,
+            ultimaInteracaoBot: matchedImportItem.ultima_interacao_bot || null,
+            ultimaInteracaoUsuario: matchedImportItem.ultima_interacao_usuario || null,
+            progress,
+          }
+          : null,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftScore = left.status === "processing" ? 0 : left.waitForReply ? 1 : 2;
+      const rightScore = right.status === "processing" ? 0 : right.waitForReply ? 1 : 2;
+      if (leftScore !== rightScore) return leftScore - rightScore;
+      const leftDate = left.lastTriggeredAt || left.scheduledFor || "";
+      const rightDate = right.lastTriggeredAt || right.scheduledFor || "";
+      return rightDate.localeCompare(leftDate);
+    });
+
+  const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply);
+  const processingWaitForReplyMatches = waitForReplyMatches.filter((campaign) => campaign.status === "processing");
+
+  return {
+    phone,
+    importIds,
+    matches,
+    waitForReplyMatches,
+    processingWaitForReplyMatches,
+  };
 }
 
 function buildCampaignWebhookPayload({ campaign, clientName, leads, triggerSource = "manual" }) {
@@ -4195,22 +4666,8 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
 
   const meta = normalizeCampaignAnalyticsMeta(claimedCampaign.analytics_meta);
   const waitForReply = meta.dispatchOptions?.waitForReply === true;
-  const replyWaitStartedAt = {};
-  const hasLeadReplied =
-    waitForReply && typeof hasCampaignLeadReplied === "function"
-      ? async ({ lead, phone }) => {
-          const key = `${lead?.id || "noid"}:${phone}`;
-          if (!replyWaitStartedAt[key]) {
-            replyWaitStartedAt[key] = new Date().toISOString();
-          }
-          return hasCampaignLeadReplied({
-            clientId: claimedCampaign.client_id,
-            lead,
-            phone,
-            dispatchedAt: replyWaitStartedAt[key],
-          });
-        }
-      : null;
+  const enabledStepCount = meta.sequence.filter((step) => step.enabled).length;
+  const keepCampaignProcessing = waitForReply && enabledStepCount > 1;
 
   let dispatchSummary = null;
   let webhookStatus = null;
@@ -4229,7 +4686,22 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
         },
         client: { id: claimedCampaign.client_id, name: clientName },
       },
-      hasLeadReplied,
+      onStepDispatched:
+        waitForReply
+          ? async ({ lead, phone, step, stepIndex, totalSteps, sentAt }) => {
+            await markCampaignLeadWaitingReply({
+              clientId: claimedCampaign.client_id,
+              lead,
+              phone,
+              campaign: claimedCampaign,
+              step,
+              stepIndex,
+              totalSteps,
+              dispatchedAt: sentAt,
+            });
+          }
+          : null,
+      waitForReplyMode: waitForReply ? "step_progression" : "block_next_lead",
     });
     dispatchSummary = summary;
 
@@ -4265,7 +4737,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     ...analyticsMeta,
     dispatch: {
       ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
-      status: "sent",
+      status: keepCampaignProcessing ? "processing" : "sent",
       triggerSource,
       total: leads.length,
       successCount: dispatchSummary?.successCount ?? null,
@@ -4282,7 +4754,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
   let { error: updateError } = await supabase
     .from("campaigns")
     .update({
-      status: "sent",
+      status: keepCampaignProcessing ? "processing" : "sent",
       last_triggered_at: completedAt,
       scheduled_for: null,
       phones: leads.map((lead) => lead.telefone).filter(Boolean),
@@ -4294,7 +4766,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     const fallback = await supabase
       .from("campaigns")
       .update({
-        status: "sent",
+        status: keepCampaignProcessing ? "processing" : "sent",
         last_triggered_at: completedAt,
         scheduled_for: null,
         phones: leads.map((lead) => lead.telefone).filter(Boolean),
@@ -4309,9 +4781,11 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
 
   await insertCampaignDispatchLog({
     campaign: claimedCampaign,
-    status: "sent",
+    status: keepCampaignProcessing ? "processing" : "sent",
     triggerSource,
-    message: "Campanha enviada via Evolution com sucesso.",
+    message: keepCampaignProcessing
+      ? "Campanha iniciou o fluxo com espera por resposta do lead."
+      : "Campanha enviada via Evolution com sucesso.",
     payload: auditPayload,
     n8nResponse: evolutionAudit,
     totalLeads: leads.length,
@@ -4450,40 +4924,309 @@ function startCampaignScheduler() {
   }, intervalMs);
 }
 
-async function markCampaignLeadWaitingReply({ clientId, lead, phone, dispatchedAt }) {
+async function markCampaignLeadWaitingReply({
+  clientId,
+  lead,
+  phone,
+  campaign,
+  step,
+  stepIndex,
+  totalSteps,
+  dispatchedAt,
+  userRepliedAt = undefined,
+}) {
   if (!supabase || !clientId || !phone) return;
 
-  const updatePayload = {
-    status_conversa: "aguardando_usuario",
-    ultima_interacao_bot: dispatchedAt,
-  };
+  const hasNextStep = Number.isInteger(stepIndex) && Number.isInteger(totalSteps) && stepIndex < totalSteps - 1;
+  const statusConversa = hasNextStep ? "aguardando_usuario" : "finalizado";
+  const storedUserTimestamp = userRepliedAt || undefined;
+  const progressPatch = campaign?.id
+    ? {
+      campaignId: campaign.id,
+      campaignName: campaign.name || null,
+      leadName: normalizeString(lead?.nome) || null,
+      waitForReply: true,
+      currentStepIndex: stepIndex,
+      currentStepOrder: step?.order ?? stepIndex + 1,
+      currentStepId: step?.id || null,
+      nextStepIndex: hasNextStep ? stepIndex + 1 : null,
+      totalSteps,
+      status: hasNextStep ? "aguardando_usuario" : "finalizado",
+      updatedAt: dispatchedAt,
+      completedAt: hasNextStep ? null : dispatchedAt,
+      lastReplyAt: userRepliedAt || null,
+    }
+    : null;
 
-  const updates = [
-    supabase
+  if (lead?.id && campaign?.id && progressPatch) {
+    await updateLeadImportItemCampaignProgress({
+      clientId,
+      leadImportItemId: lead.id,
+      campaignId: campaign.id,
+      progressPatch,
+      statusConversa,
+      ultimaInteracaoBot: dispatchedAt,
+      ultimaInteracaoUsuario: storedUserTimestamp,
+    });
+  } else {
+    const updatePayload = {
+      status_conversa: statusConversa,
+      ultima_interacao_bot: dispatchedAt,
+    };
+    if (storedUserTimestamp !== undefined) {
+      updatePayload.ultima_interacao_usuario = storedUserTimestamp;
+    }
+    const { error } = await supabase
       .from("lead_import_items")
       .update(updatePayload)
       .eq("client_id", clientId)
-      .eq("telefone", phone),
-    supabase
-      .from("leads")
-      .update(updatePayload)
-      .eq("client_id", clientId)
-      .eq("telefone", phone),
-  ];
-
-  if (lead?.id) {
-    updates.push(
-      supabase
-        .from("lead_import_items")
-        .update(updatePayload)
-        .eq("id", lead.id)
-        .eq("client_id", clientId)
-    );
+      .eq("telefone", phone);
+    if (error) throw error;
   }
 
-  const results = await Promise.all(updates);
-  const error = results.find((result) => result.error)?.error;
-  if (error) throw error;
+  await updateLeadConversationState({
+    clientId,
+    phone,
+    statusConversa,
+    ultimaInteracaoBot: dispatchedAt,
+    ultimaInteracaoUsuario: storedUserTimestamp,
+  });
+}
+
+async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch }) {
+  if (!supabase || !clientId || !phone || !campaignMatch?.id) {
+    return { continued: false, reason: "missing_context" };
+  }
+
+  let { data: campaign, error: fetchError } = await supabase
+    .from("campaigns")
+    .select("id, name, client_id, import_id, webhook_url, webhook_token, status, analytics_meta")
+    .eq("id", campaignMatch.id)
+    .maybeSingle();
+
+  if (fetchError && isMissingSchemaError(fetchError)) {
+    const fallback = await supabase
+      .from("campaigns")
+      .select("id, name, client_id, import_id, webhook_url, webhook_token, status")
+      .eq("id", campaignMatch.id)
+      .maybeSingle();
+    campaign = fallback.data ? { ...fallback.data, analytics_meta: campaignMatch.analyticsMeta || {} } : fallback.data;
+    fetchError = fallback.error;
+  }
+
+  if (fetchError) throw fetchError;
+  if (!campaign) return { continued: false, reason: "campaign_not_found" };
+
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+  const steps = analyticsMeta.sequence.filter((step) => step.enabled);
+  if (analyticsMeta.dispatchOptions?.waitForReply !== true) {
+    return { continued: false, reason: "campaign_not_waiting_reply" };
+  }
+  if (campaign.status !== "processing") {
+    return { continued: false, reason: "campaign_not_processing" };
+  }
+
+  const leadImportItem = campaignMatch.leadImportItem || null;
+  const progress = leadImportItem?.progress || {};
+  const nextStepIndex =
+    Number.isInteger(progress.nextStepIndex) && progress.nextStepIndex >= 0
+      ? progress.nextStepIndex
+      : 1;
+
+  if (nextStepIndex >= steps.length) {
+    if (leadImportItem?.id) {
+      await updateLeadImportItemCampaignProgress({
+        clientId,
+        leadImportItemId: leadImportItem.id,
+        campaignId: campaign.id,
+        progressPatch: {
+          ...progress,
+          status: "finalizado",
+          nextStepIndex: null,
+          updatedAt: repliedAt,
+          lastReplyAt: repliedAt,
+        },
+        statusConversa: "finalizado",
+        ultimaInteracaoUsuario: repliedAt,
+      });
+    }
+    await updateLeadConversationState({
+      clientId,
+      phone,
+      statusConversa: "finalizado",
+      ultimaInteracaoUsuario: repliedAt,
+    });
+    return { continued: false, reason: "campaign_already_complete", finalized: true, campaignId: campaign.id };
+  }
+
+  let webhookUrl = normalizeString(campaign.webhook_url);
+  let webhookToken = normalizeString(campaign.webhook_token) || null;
+  const tenantDispatch = await resolveDispatchWebhookSettings(clientId);
+  if (!webhookUrl) webhookUrl = normalizeString(tenantDispatch.webhookUrl);
+  if (!webhookToken && tenantDispatch.webhookToken) webhookToken = normalizeString(tenantDispatch.webhookToken) || null;
+  if (!webhookUrl) {
+    throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
+  }
+
+  const lead = {
+    id: leadImportItem?.id || null,
+    telefone: phone,
+    nome: normalizeString(progress.leadName) || normalizeString(leadImportItem?.nome) || "cliente",
+  };
+
+  const { summary } = await dispatchCampaignSequence({
+    webhookUrl,
+    webhookToken,
+    leads: [lead],
+    analyticsMeta: {
+      ...analyticsMeta,
+      sequence: steps.slice(nextStepIndex),
+      dispatchOptions: {
+        ...analyticsMeta.dispatchOptions,
+        leadDelaySeconds: 0,
+      },
+    },
+    context: {
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        mode: "campaign_reply_progression",
+      },
+      client: { id: clientId, name: await getClientName(clientId) },
+    },
+    onStepDispatched: async ({ lead: dispatchedLead, step, stepIndex, sentAt }) => {
+      const absoluteStepIndex = nextStepIndex + stepIndex;
+      await markCampaignLeadWaitingReply({
+        clientId,
+        lead: { id: leadImportItem?.id || dispatchedLead?.id || null },
+        phone,
+        campaign,
+        step,
+        stepIndex: absoluteStepIndex,
+        totalSteps: steps.length,
+        dispatchedAt: sentAt,
+        userRepliedAt: repliedAt,
+      });
+    },
+    waitForReplyMode: "step_progression",
+  });
+
+  const finalizedCurrentLead = nextStepIndex >= steps.length - 1;
+  const campaignFinalization = finalizedCurrentLead
+    ? await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId })
+    : { finalized: false };
+
+  return {
+    continued: summary.successCount > 0,
+    finalized: finalizedCurrentLead,
+    campaignFinalized: campaignFinalization.finalized === true,
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    sentStepIndex: nextStepIndex,
+    remainingSteps: Math.max(steps.length - (nextStepIndex + 1), 0),
+    summary,
+  };
+}
+
+async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSource = "reply_webhook" }) {
+  if (!supabase || !campaignId || !clientId) return { finalized: false, reason: "missing_context" };
+
+  const { data: campaign, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id, name, client_id, import_id, status, phones, analytics_meta")
+    .eq("id", campaignId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+
+  if (campaignError) throw campaignError;
+  if (!campaign) return { finalized: false, reason: "campaign_not_found" };
+  if (campaign.status !== "processing") return { finalized: false, reason: "campaign_not_processing" };
+
+  let query = supabase
+    .from("lead_import_items")
+    .select("id, telefone, normalized_data")
+    .eq("client_id", clientId)
+    .not("telefone", "is", null);
+
+  if (campaign.import_id) {
+    query = query.eq("import_id", campaign.import_id);
+  } else {
+    const phones = Array.isArray(campaign.phones)
+      ? campaign.phones.map((value) => sanitizePhone(value)).filter(Boolean)
+      : [];
+    if (phones.length === 0) return { finalized: false, reason: "campaign_without_target_phones" };
+    query = query.in("telefone", phones);
+  }
+
+  const { data: items, error: itemsError } = await query;
+  if (itemsError) throw itemsError;
+
+  const relevantItems = (items || []).filter((item) => {
+    const progress = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+    return Object.keys(progress).length > 0;
+  });
+
+  if (relevantItems.length === 0) {
+    return { finalized: false, reason: "campaign_without_progress_items" };
+  }
+
+  const hasPendingItems = relevantItems.some((item) => {
+    const progress = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+    return progress.status !== "finalizado" || progress.nextStepIndex !== null;
+  });
+
+  if (hasPendingItems) {
+    return { finalized: false, reason: "campaign_has_pending_leads" };
+  }
+
+  const completedAt = new Date().toISOString();
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+  const nextAnalyticsMeta = {
+    ...analyticsMeta,
+    dispatch: {
+      ...normalizeCampaignAnalyticsMeta(analyticsMeta.dispatch),
+      status: "sent",
+      triggerSource,
+      sentAt: completedAt,
+      updatedAt: completedAt,
+    },
+  };
+
+  let { error: updateError } = await supabase
+    .from("campaigns")
+    .update({
+      status: "sent",
+      last_triggered_at: completedAt,
+      scheduled_for: null,
+      analytics_meta: nextAnalyticsMeta,
+    })
+    .eq("id", campaign.id)
+    .eq("client_id", clientId);
+
+  if (updateError && isMissingSchemaError(updateError)) {
+    const fallback = await supabase
+      .from("campaigns")
+      .update({
+        status: "sent",
+        last_triggered_at: completedAt,
+        scheduled_for: null,
+      })
+      .eq("id", campaign.id)
+      .eq("client_id", clientId);
+    updateError = fallback.error;
+  }
+
+  if (updateError) throw updateError;
+
+  await insertCampaignDispatchLog({
+    campaign,
+    status: "sent",
+    triggerSource,
+    message: "Campanha finalizada apos ultima resposta do lead.",
+    totalLeads: relevantItems.length,
+  });
+
+  return { finalized: true, campaignId: campaign.id, completedAt };
 }
 
 async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
@@ -4806,6 +5549,7 @@ const LEAD_CLIENT_OPERATIONAL_TABLES = [
   "campaigns",
   "lead_import_items",
   "lead_imports",
+  "leads_outlier",
   "leads",
 ];
 
@@ -7041,7 +7785,188 @@ app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("
   }
 });
 
-app.post("/api/leads-webhook", async (req, res) => {
+// Supabase Edge `lead-webhook` parity: POST only, action create | finalize, same JSON bodies and responses.
+// Authorization: Bearer LEAD_WEBHOOK_BEARER_TOKEN or legacy default @Vexo2026 (matches Edge constant).
+app.post("/api/lead-webhook", async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  if (!validateLeadWebhookBearer(req, res)) return;
+
+  try {
+    const body = req.body || {};
+    const action = normalizeString(body.action)?.toLowerCase();
+
+    if (action !== "create" && action !== "finalize") {
+      sendLeadWebhookEdgeStyle(res, 400, {
+        success: false,
+        error: "action must be either create or finalize",
+      });
+      return;
+    }
+
+    const clientId = normalizeString(body.client_id) ?? "infinie";
+    const telefone = sanitizePhoneLeadWebhookStyle(body.telefone);
+    const nome = normalizeString(body.nome);
+    const now = new Date().toISOString();
+
+    if (!telefone) {
+      sendLeadWebhookEdgeStyle(res, 400, {
+        success: false,
+        error: "Missing required field: telefone",
+      });
+      return;
+    }
+
+    if (action === "create") {
+      const { data: existingLead, error: lookupError } = await supabase
+        .from("leads")
+        .select("id, nome")
+        .eq("client_id", clientId)
+        .eq("telefone", telefone)
+        .maybeSingle();
+
+      if (lookupError) {
+        console.error("lead-webhook create lookup error:", lookupError);
+        sendLeadWebhookEdgeStyle(res, 500, {
+          success: false,
+          error: "Failed to lookup lead",
+          details: lookupError.message,
+        });
+        return;
+      }
+
+      if (existingLead) {
+        sendLeadWebhookEdgeStyle(res, 200, {
+          success: true,
+          status: "ok",
+          action,
+          operation: "already_exists",
+          id: existingLead.id,
+          client_id: clientId,
+          telefone,
+        });
+        return;
+      }
+
+      const createPayload = {
+        client_id: clientId,
+        telefone,
+        nome,
+        status: normalizeString(body.status) ?? "novo",
+        data_hora: normalizeIsoDate(body.data_hora) ?? now,
+        created_at: now,
+        updated_at: now,
+      };
+
+      const { data: insertedLead, error: insertError } = await supabase
+        .from("leads")
+        .insert(createPayload)
+        .select("id")
+        .single();
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          const { data: duplicateLead, error: duplicateLookupError } = await supabase
+            .from("leads")
+            .select("id, nome")
+            .eq("client_id", clientId)
+            .eq("telefone", telefone)
+            .maybeSingle();
+
+          if (duplicateLookupError) {
+            console.error("lead-webhook create duplicate lookup error:", duplicateLookupError);
+            sendLeadWebhookEdgeStyle(res, 500, {
+              success: false,
+              error: "Failed to lookup duplicated lead",
+              details: duplicateLookupError.message,
+            });
+            return;
+          }
+
+          sendLeadWebhookEdgeStyle(res, 200, {
+            success: true,
+            status: "ok",
+            action,
+            operation: "already_exists",
+            id: duplicateLead?.id ?? null,
+            client_id: clientId,
+            telefone,
+          });
+          return;
+        }
+
+        console.error("lead-webhook create insert error:", insertError);
+        sendLeadWebhookEdgeStyle(res, 500, {
+          success: false,
+          error: "Failed to create lead",
+          details: insertError.message,
+        });
+        return;
+      }
+
+      sendLeadWebhookEdgeStyle(res, 200, {
+        success: true,
+        status: "ok",
+        action,
+        operation: "created",
+        id: insertedLead.id,
+        client_id: clientId,
+        telefone,
+      });
+      return;
+    }
+
+    const finalizePayload = {
+      client_id: clientId,
+      telefone,
+      nome,
+      tipo_cliente: normalizeString(body.tipo_cliente ?? body.perfil),
+      faixa_consumo: normalizeString(body.faixa_consumo ?? body.consumo),
+      cidade: normalizeString(body.cidade),
+      estado: normalizeString(body.estado),
+      status: normalizeString(body.status) ?? "qualificado",
+      data_hora: normalizeIsoDate(body.data_hora) ?? now,
+      qualificacao: normalizeString(body.qualificacao),
+      updated_at: now,
+    };
+
+    const { data: finalizedLead, error: finalizeError } = await supabase
+      .from("leads")
+      .upsert(finalizePayload, {
+        onConflict: "client_id,telefone",
+        ignoreDuplicates: false,
+      })
+      .select("id")
+      .single();
+
+    if (finalizeError) {
+      console.error("lead-webhook finalize error:", finalizeError);
+      sendLeadWebhookEdgeStyle(res, 500, {
+        success: false,
+        error: "Failed to finalize lead",
+        details: finalizeError.message,
+      });
+      return;
+    }
+
+    sendLeadWebhookEdgeStyle(res, 200, {
+      success: true,
+      status: "ok",
+      action,
+      operation: "upserted",
+      id: finalizedLead.id,
+      client_id: clientId,
+      telefone,
+    });
+  } catch (err) {
+    console.error("lead-webhook error:", err);
+    sendLeadWebhookEdgeStyle(res, 500, { success: false, error: "Internal server error" });
+  }
+});
+
+// Entrada n8n: upsert em `leads` (Bearer por tenant em lead_client_n8n_settings).
+// Caminho antigo: POST /api/leads-webhook — atualizar URLs no n8n após o rename.
+app.post("/api/import-lead-infinie-n8n", async (req, res) => {
   if (!ensureDb(res)) return;
 
   try {
@@ -7103,16 +8028,144 @@ app.post("/api/leads-webhook", async (req, res) => {
 
     res.json({ success: true, count: rows.length, ids: data?.map((item) => item.id) || [] });
   } catch (error) {
-    console.error("leads webhook error:", error);
+    console.error("import-lead-infinie-n8n error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+  }
+});
+
+// n8n / automação: insere leads no formato do chat outlier em `leads_outlier` (Bearer inbound por tenant).
+// O payload espelha colunas de `leads` (exceto tipo_cliente, faixa_consumo, cidade, estado) mais campos do chat.
+// Obrigatório: telefone, mensagem, finalizado, status_conversa. Temperatura: JSON `status` ou `lead_temperature` → BD `lead_temperature`; texto do pipeline CRM → `pipeline_status` → coluna `status`.
+app.post("/api/import-leads-outlier", async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  try {
+    const body = req.body || {};
+    const rawList =
+      body.leads ??
+      body.records ??
+      (body.lead != null ? [body.lead] : null) ??
+      (body.record != null ? [body.record] : null);
+    const items = Array.isArray(rawList) ? rawList : rawList != null ? [rawList] : [];
+
+    if (items.length === 0) {
+      sendError(res, 400, "INVALID_BODY", "Missing leads, records, lead, or record in body");
+      return;
+    }
+
+    if (items.length > MAX_LEADS_OUTLIER_BATCH) {
+      sendError(
+        res,
+        413,
+        "PAYLOAD_TOO_LARGE",
+        `Maximum ${MAX_LEADS_OUTLIER_BATCH} records per request`
+      );
+      return;
+    }
+
+    const clientId = normalizeTenantKey(body.client_id ?? body.clientId);
+    if (!clientId) {
+      sendError(res, 400, "INVALID_BODY", "Missing client_id");
+      return;
+    }
+
+    if (!(await validateN8nInboundBearer(req, res, clientId))) {
+      return;
+    }
+
+    const rows = [];
+    for (let i = 0; i < items.length; i++) {
+      const parsed = validateLeadsOutlierRecord(items[i], `items[${i}]`);
+      if (parsed.error) {
+        sendError(res, 400, "INVALID_BODY", parsed.error);
+        return;
+      }
+      rows.push({ client_id: clientId, ...parsed.row });
+    }
+
+    const { data, error } = await supabase.from("leads_outlier").insert(rows).select("id");
+
+    if (error) {
+      console.error("leads_outlier insert error:", error);
+      sendError(res, 500, "LEADS_OUTLIER_SAVE_FAILED", "Failed to save records", error.message);
+      return;
+    }
+
+    res.status(201).json({
+      success: true,
+      count: rows.length,
+      ids: data?.map((r) => r.id) || [],
+    });
+  } catch (error) {
+    console.error("import-leads-outlier error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+  }
+});
+
+// Entrada n8n: insert em `leads_outlier` (mesmo Bearer que outros imports; validação em validateLeadsOutlierRecord — ver import-leads-outlier).
+app.post("/api/import-lead-outlier-n8n", async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  try {
+    const body = req.body || {};
+    const leadsRaw = body.leads ?? (body.lead ? [body.lead] : []);
+    const leads = Array.isArray(leadsRaw) ? leadsRaw : [leadsRaw];
+
+    if (leads.length === 0) {
+      sendError(res, 400, "INVALID_BODY", "Missing lead or leads array in body");
+      return;
+    }
+
+    if (leads.length > MAX_LEADS_OUTLIER_BATCH) {
+      sendError(
+        res,
+        413,
+        "PAYLOAD_TOO_LARGE",
+        `Maximum ${MAX_LEADS_OUTLIER_BATCH} records per request`
+      );
+      return;
+    }
+
+    const clientId = normalizeTenantKey(body.client_id ?? body.clientId);
+    if (!clientId) {
+      sendError(res, 400, "INVALID_BODY", "Missing client_id");
+      return;
+    }
+
+    if (!(await validateN8nInboundBearer(req, res, clientId))) {
+      return;
+    }
+
+    const rows = [];
+    for (let i = 0; i < leads.length; i++) {
+      const parsed = validateLeadsOutlierRecord(leads[i], `leads[${i}]`);
+      if (parsed.error) {
+        sendError(res, 400, "INVALID_BODY", parsed.error);
+        return;
+      }
+      rows.push({ client_id: clientId, ...parsed.row });
+    }
+
+    const { data, error } = await supabase.from("leads_outlier").insert(rows).select("id");
+
+    if (error) {
+      console.error("leads_outlier insert error:", error);
+      sendError(res, 500, "LEADS_OUTLIER_SAVE_FAILED", "Failed to save records", error.message);
+      return;
+    }
+
+    res.json({ success: true, count: rows.length, ids: data?.map((item) => item.id) || [] });
+  } catch (error) {
+    console.error("import-lead-outlier-n8n error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
   }
 });
 
 app.post("/api/n8n-error-webhook", async (req, res) => {
   const authHeader = req.headers.authorization;
-  const expectedSecret = process.env.N8N_WEBHOOK_SECRET;
+  const expectedSecret = getN8nWebhookBearerSecret();
 
-  if (!authHeader || !expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
+  if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
     sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
     return;
   }
@@ -7255,7 +8308,7 @@ app.post(
 );
 
 // GET latest compressed conversation + lead qualification flag (replaces Edge `conversation-memory-latest`).
-// Auth: same global bearer as POST /api/conversation-memory (N8N_WEBHOOK_SECRET). Align env with legacy Edge token when migrating n8n.
+// Auth: same global bearer as POST /api/conversation-memory (N8N_WEBHOOK_SECRET or default @Vexo2026).
 app.get("/api/conversation-memory/latest", requireN8nWebhookSecret, async (req, res) => {
   if (!ensureDb(res)) return;
 
@@ -8439,6 +9492,41 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
       return;
     }
 
+    const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
+    const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+
+    if (activeWaitCampaign) {
+      const progression = await continueCampaignLeadFromReply({
+        clientId,
+        phone,
+        repliedAt,
+        campaignMatch: activeWaitCampaign,
+      });
+
+      res.json({
+        success: true,
+        clientId,
+        phone,
+        repliedAt,
+        progression,
+        campaignContext: {
+          isCampaignLead: true,
+          matchedCampaignCount: campaignReplyContext.matches.length,
+          waitForReplyCampaignCount: campaignReplyContext.waitForReplyMatches.length,
+          processingWaitForReplyCampaignCount: campaignReplyContext.processingWaitForReplyMatches.length,
+          shouldReturnLeadToCampaignFlow: progression.continued === true || progression.finalized === true,
+          signal: progression.campaignFinalized
+            ? "campaign_completed"
+            : progression.finalized
+              ? "campaign_last_step_sent"
+              : "campaign_step_sent_waiting_next_reply",
+          importIds: campaignReplyContext.importIds,
+          matchedCampaigns: campaignReplyContext.matches,
+        },
+      });
+      return;
+    }
+
     const importItemsUpdatePayload = {
       status_conversa: "em_atendimento",
       ultima_interacao_usuario: repliedAt,
@@ -8468,8 +9556,24 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
       success: true,
       clientId,
       phone,
+      repliedAt,
       updatedImportItems: importItemsResult.data?.length || 0,
       updatedLeads: leadsResult.data?.length || 0,
+      campaignContext: {
+        isCampaignLead: campaignReplyContext.matches.length > 0,
+        matchedCampaignCount: campaignReplyContext.matches.length,
+        waitForReplyCampaignCount: campaignReplyContext.waitForReplyMatches.length,
+        processingWaitForReplyCampaignCount: campaignReplyContext.processingWaitForReplyMatches.length,
+        shouldReturnLeadToCampaignFlow: false,
+        signal:
+          campaignReplyContext.waitForReplyMatches.length > 0
+            ? "lead_in_wait_for_reply_campaign"
+            : campaignReplyContext.matches.length > 0
+              ? "lead_in_campaign"
+                : "lead_not_in_campaign",
+        importIds: campaignReplyContext.importIds,
+        matchedCampaigns: campaignReplyContext.matches,
+      },
     });
   } catch (error) {
     console.error("campaign reply webhook error:", error);

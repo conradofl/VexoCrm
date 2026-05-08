@@ -68,7 +68,7 @@ O principal problema nao e falta de tecnologia. O principal problema e falta de 
 | --- | --- | --- | --- |
 | 1 | Critico | `backend/src/server.js` concentra auth, permissao, rotas, dashboard, campanhas, webhooks, WhatsApp e normalizacao num unico modulo | `backend/src/server.js` |
 | 2 | Critico | Schema real e migrations ainda divergem em pontos sensiveis, especialmente em torno de `campaigns`, `notifications`, `n8n_error_logs` e campos legados de `leads` | `frontend/supabase/migrations/`, `backend/src/server.js`, `docs/supabase-functions.md` |
-| 3 | Critico | Existem fluxos duplicados entre backend e Edge Functions para leads, memoria e erro operacional | `/api/leads-webhook`, `/api/n8n-error-webhook`, `/api/conversation-memory` vs `lead-webhook`, `n8n-error-webhook`, `conversation-memory*` |
+| 3 | Critico | Existem fluxos duplicados entre backend e Edge Functions para leads, memoria e erro operacional | `/api/import-lead-infinie-n8n`, `/api/n8n-error-webhook`, `/api/conversation-memory` vs `lead-webhook`, `n8n-error-webhook`, `conversation-memory*` |
 | 4 | Critico | Ha rotas sem filtro consistente por `client_id`, inclusive notificacoes e campanhas, com risco real de tenant leak | `backend/src/server.js` |
 | 5 | Alto | Auth e permissoes sao reconstruidos em mais de uma camada, com regras especiais e escalacoes implicitas | `backend/src/server.js`, `frontend/src/lib/access.ts`, `frontend/src/contexts/AuthContext.tsx` |
 | 6 | Alto | Edge Functions usam `Access-Control-Allow-Origin: *` e ainda dependem de bearer interno, aumentando superficie operacional | `frontend/supabase/functions/*` |
@@ -204,7 +204,7 @@ As Edge Functions existem com papel operacional valido, mas hoje competem em par
 
 | Function | Finalidade | Variaveis sensiveis | Bearer/token | CORS | Duplicidade com backend | Risco operacional |
 | --- | --- | --- | --- | --- | --- | --- |
-| `lead-webhook` | criar/finalizar leads a partir do n8n | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | `/api/leads-webhook` | Alto |
+| `lead-webhook` | criar/finalizar leads a partir do n8n | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | `/api/import-lead-infinie-n8n` | Alto |
 | `conversation-memory` | salvar e ler memoria comprimida de conversa | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | `/api/conversation-memory` | Alto |
 | `conversation-memory-latest` | recuperar memoria mais recente por telefone | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | backend tem endpoint de persistencia e runtime paralelo | Alto |
 | `n8n-error-webhook` | registrar falha e criar notificacao | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `N8N_WEBHOOK_SECRET` | Sim | `*` | `/api/n8n-error-webhook` | Alto |
@@ -221,7 +221,7 @@ As Edge Functions existem com papel operacional valido, mas hoje competem em par
    - `lead-webhook`, `conversation-memory`, `conversation-memory-latest`, `get-leads-disparo`, `mark-lead-dispatched` dependem de bearer interno e `SUPABASE_SERVICE_ROLE_KEY`.
 
 3. **Duplicidade com backend**
-   - `lead-webhook` x `/api/leads-webhook`
+   - `lead-webhook` x `/api/import-lead-infinie-n8n`
    - `n8n-error-webhook` x `/api/n8n-error-webhook`
    - `conversation-memory*` x `/api/conversation-memory`
 

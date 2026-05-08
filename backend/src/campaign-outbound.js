@@ -331,6 +331,8 @@ export async function dispatchCampaignSequence({
   context = {},
   onLeadDispatched = null,
   hasLeadReplied = null,
+  onStepDispatched = null,
+  waitForReplyMode = "block_next_lead",
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -381,6 +383,17 @@ export async function dispatchCampaignSequence({
 
       try {
         await postEvolutionPayload(webhookUrl, webhookToken, payload);
+        if (typeof onStepDispatched === "function") {
+          await onStepDispatched({
+            lead,
+            phone,
+            step,
+            stepIndex,
+            totalSteps: enabledSteps.length,
+            sentAt: new Date().toISOString(),
+            hasNextStep: stepIndex < enabledSteps.length - 1,
+          });
+        }
       } catch (error) {
         leadFailed = true;
         failedPhones.add(phone);
@@ -402,6 +415,9 @@ export async function dispatchCampaignSequence({
       }
 
       const hasNextStep = stepIndex < enabledSteps.length - 1;
+      if (normalizedMeta.dispatchOptions.waitForReply && waitForReplyMode === "step_progression" && hasNextStep) {
+        break;
+      }
       if (hasNextStep) {
         await sleep(step.delayAfterSeconds * 1000);
       }

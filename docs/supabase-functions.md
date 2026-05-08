@@ -111,6 +111,10 @@ Arquivo fonte:
 
 - `POST`
 
+### Substituto no backend (VPS)
+
+- `POST /api/lead-webhook` em [`backend/src/server.js`](../backend/src/server.js) replica o mesmo contrato (create/finalize, JSON de sucesso/erro). Bearer: variável `LEAD_WEBHOOK_BEARER_TOKEN` ou, se ausente, o mesmo valor fixo `@Vexo2026` da Edge.
+
 ### Autenticacao
 
 - `Authorization: Bearer @Vexo2026` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
