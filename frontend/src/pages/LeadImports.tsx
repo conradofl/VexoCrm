@@ -1070,10 +1070,8 @@ export default function LeadImports({
       return;
     }
 
-    if (!campaignMessage.trim()) {
-      setDispatchStatus("Escreva o texto que sera enviado na campanha.");
-      return;
-    }
+    // Text content is validated via validateSequenceForSubmit (simple + advanced).
+    // Advanced mode uses step texts only; backend fills legacy message from the first text step.
 
     const parsedLimit = dispatchLimit.trim() ? Number(dispatchLimit) : undefined;
     if (parsedLimit !== undefined && (!Number.isFinite(parsedLimit) || parsedLimit <= 0 || !Number.isInteger(parsedLimit))) {
