@@ -40,6 +40,9 @@ describe("Vexo Sales frontend access control", () => {
     expect(hookSource).toContain("[vexo-sales-api]");
     expect(hookSource).toContain("fallback_success");
     expect(hookSource).toContain("request_timeout");
+    expect(hookSource).toContain("shouldRetryVexoSalesResponse");
+    expect(hookSource).toContain("retryable_response");
+    expect(hookSource).toContain("Resposta HTML inesperada da API.");
     expect(frontendVercelConfig).toContain('"source": "/api/:path*"');
     expect(frontendVercelConfig).toContain("bks-bk-vexo.ymqjmy.easypanel.host/api/:path*");
     expect(rootVercelConfig).toContain('"source": "/api/:path*"');
