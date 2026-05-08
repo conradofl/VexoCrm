@@ -4434,6 +4434,21 @@ async function updateLeadConversationState({
   if (error) throw error;
 }
 
+/**
+ * Coerce campaign timestamps from Postgres (Date) or JSON/API (string) into a stable string
+ * for localeCompare-based sorting. Plain Date objects do not implement localeCompare.
+ */
+function toComparableCampaignTimestamp(value) {
+  if (value == null || value === "") return "";
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isNaN(ms) ? "" : value.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value).toISOString();
+  if (typeof value === "string") return value;
+  return String(value);
+}
+
 async function findCampaignReplyMatches({ clientId, phone }) {
   if (!supabase || !clientId || !phone) {
     return {
@@ -4539,8 +4554,8 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       const leftScore = left.status === "processing" ? 0 : left.waitForReply ? 1 : 2;
       const rightScore = right.status === "processing" ? 0 : right.waitForReply ? 1 : 2;
       if (leftScore !== rightScore) return leftScore - rightScore;
-      const leftDate = left.lastTriggeredAt || left.scheduledFor || "";
-      const rightDate = right.lastTriggeredAt || right.scheduledFor || "";
+      const leftDate = toComparableCampaignTimestamp(left.lastTriggeredAt || left.scheduledFor);
+      const rightDate = toComparableCampaignTimestamp(right.lastTriggeredAt || right.scheduledFor);
       return rightDate.localeCompare(leftDate);
     });
 
