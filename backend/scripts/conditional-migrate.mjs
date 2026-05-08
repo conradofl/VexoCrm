@@ -159,6 +159,13 @@ async function migrationAlreadyRepresented(client, fileName) {
         where table_schema = 'public' and table_name = 'leads_outlier' and column_name = 'source_campaign_id'
       ) as ok
     `,
+    // Coluna criada manualmente em VPS / ou aplicada antes do ficheiro existir no repo: marca como já aplicada no bootstrap.
+    "20260508120000_add_campaigns_phones_column.sql": `
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'campaigns' and column_name = 'phones'
+      ) as ok
+    `,
   };
 
   const query = checks[fileName];

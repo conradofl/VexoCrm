@@ -6216,7 +6216,7 @@ function buildVexoSalesSummary(items) {
 }
 
 app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   try {
     let query = supabase
@@ -6258,7 +6258,7 @@ app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAd
 });
 
 app.post("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const payload = buildVexoSalesOpportunityPayload(req.body || {}, req);
   if (!payload.company_name) {
@@ -6284,7 +6284,7 @@ app.post("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesA
 });
 
 app.patch("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params.id);
   if (!id) {
@@ -6320,7 +6320,7 @@ app.patch("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoS
 });
 
 app.delete("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params.id);
   if (!id) {
@@ -6347,7 +6347,7 @@ app.delete("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexo
 });
 
 app.get("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const id = normalizeString(req.params.id);
   if (!id) {
@@ -6372,7 +6372,7 @@ app.get("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, r
 });
 
 app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
-  if (!ensureSupabase(res)) return;
+  if (!ensureDb(res)) return;
 
   const opportunityId = normalizeString(req.params.id);
   const type = normalizeVexoSalesChoice(req.body?.type, VEXO_SALES_INTERACTION_TYPES, null);
