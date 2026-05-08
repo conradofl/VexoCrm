@@ -15,6 +15,30 @@ const CURIOSITY_NAME_TECHNIQUE = {
     "Oi, {{nome}}, rapidinho... antes de voce decidir, deixa eu te mostrar um ponto que talvez mude sua visao.",
 };
 
+// Groq was returning unrealistic gaps (e.g. 172800s = 48h) for WhatsApp steps; AI assist stays within chat-like ranges.
+const MAX_AI_STEP_DELAY_SECONDS = 3600;
+const MAX_AI_LEAD_DELAY_SECONDS = 3600;
+
+function clampAiDelaySeconds(value, maxSeconds) {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, maxSeconds);
+}
+
+/** Normalize delay fields after Groq (defense in depth vs schema drift or json_object mode). */
+function clampCampaignAiDelaySuggestion(parsed) {
+  if (!parsed || typeof parsed !== "object") return parsed;
+  const seq = Array.isArray(parsed.sequence) ? parsed.sequence : [];
+  return {
+    ...parsed,
+    sequence: seq.map((step) => ({
+      ...step,
+      delayAfterSeconds: clampAiDelaySeconds(step.delayAfterSeconds, MAX_AI_STEP_DELAY_SECONDS),
+    })),
+    leadDelaySeconds: clampAiDelaySeconds(parsed.leadDelaySeconds, MAX_AI_LEAD_DELAY_SECONDS),
+  };
+}
+
 function getGroqModel() {
   return process.env.GROQ_CAMPAIGN_AI_MODEL || DEFAULT_GROQ_MODEL;
 }
@@ -201,7 +225,7 @@ export async function suggestCampaignSequence(input = {}) {
     technique: buildTechniqueContext(input.style),
   };
 
-  return callGroqJson({
+  const parsed = await callGroqJson({
     schemaName: "campaign_sequence_suggestion",
     schema: {
       type: "object",
@@ -213,14 +237,14 @@ export async function suggestCampaignSequence(input = {}) {
             properties: {
               type: { type: "string", enum: ["text", "image"] },
               text: { type: "string" },
-              delayAfterSeconds: { type: "integer", minimum: 0 },
+              delayAfterSeconds: { type: "integer", minimum: 0, maximum: MAX_AI_STEP_DELAY_SECONDS },
               enabled: { type: "boolean" },
             },
             required: ["type", "text", "delayAfterSeconds", "enabled"],
             additionalProperties: false,
           },
         },
-        leadDelaySeconds: { type: "integer", minimum: 0 },
+        leadDelaySeconds: { type: "integer", minimum: 0, maximum: MAX_AI_LEAD_DELAY_SECONDS },
         rationale: { type: "string" },
       },
       required: ["sequence", "leadDelaySeconds", "rationale"],
@@ -234,11 +258,13 @@ Regras:
 - Entregue entre 1 e 5 passos.
 - Use type=image apenas quando fizer sentido indicar um passo com imagem.
 - Quando type=image, o campo text deve ser a legenda/caption sugerida ou string vazia.
-- Delays devem ser inteiros em segundos.
+- Delays em segundos: entre passos na mesma conversa prefira 60 a 900; raramente ate 1800; nunca acima de ${MAX_AI_STEP_DELAY_SECONDS} (teto do schema).
+- leadDelaySeconds entre leads diferentes: prefira 30 a 180; nunca acima de ${MAX_AI_LEAD_DELAY_SECONDS}.
 - Nao use markdown.
 - Inclua pelo menos um passo de recuperacao com {{nome}} e curiosidade se a campanha permitir follow-up.
 - Nao inclua nenhuma informacao pessoal real.`,
   });
+  return clampCampaignAiDelaySuggestion(parsed);
 }
 
 export async function suggestCampaignDelays(input = {}) {
@@ -251,7 +277,7 @@ export async function suggestCampaignDelays(input = {}) {
     technique: buildTechniqueContext(input.style),
   };
 
-  return callGroqJson({
+  const parsed = await callGroqJson({
     schemaName: "campaign_delay_suggestion",
     schema: {
       type: "object",
@@ -262,13 +288,13 @@ export async function suggestCampaignDelays(input = {}) {
             type: "object",
             properties: {
               id: { type: "string" },
-              delayAfterSeconds: { type: "integer", minimum: 0 },
+              delayAfterSeconds: { type: "integer", minimum: 0, maximum: MAX_AI_STEP_DELAY_SECONDS },
             },
             required: ["id", "delayAfterSeconds"],
             additionalProperties: false,
           },
         },
-        leadDelaySeconds: { type: "integer", minimum: 0 },
+        leadDelaySeconds: { type: "integer", minimum: 0, maximum: MAX_AI_LEAD_DELAY_SECONDS },
         rationale: { type: "string" },
       },
       required: ["sequence", "leadDelaySeconds", "rationale"],
@@ -282,8 +308,12 @@ Regras:
 - Nao altere ids.
 - Responda apenas com novos delays.
 - Valores em segundos inteiros.
+- Entre passos na mesma conversa prefira 60 a 900 segundos; raramente ate 1800; nunca acima de ${MAX_AI_STEP_DELAY_SECONDS}.
+- leadDelaySeconds entre leads: prefira 30 a 180; nunca acima de ${MAX_AI_LEAD_DELAY_SECONDS}.
+- Nao sugira intervalos de dias ou dezenas de horas; isso nao eh adequado para assistente de atraso entre mensagens.
 - Nao inclua markdown.`,
   });
+  return clampCampaignAiDelaySuggestion(parsed);
 }
 
 export async function rewriteCampaignStep(input = {}) {
