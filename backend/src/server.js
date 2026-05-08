@@ -4449,6 +4449,47 @@ function toComparableCampaignTimestamp(value) {
   return String(value);
 }
 
+/**
+ * JSON/Postgres may yield step indexes as strings; Number.isInteger("2") is false and would skip reply continuation.
+ */
+function normalizeCampaignPendingStepIndex(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(n) || Number.isNaN(n)) return null;
+  const intVal = Math.trunc(n);
+  return intVal >= 0 ? intVal : null;
+}
+
+function resolveMatchedImportItemForCampaign(importItems, campaign) {
+  if (!Array.isArray(importItems) || importItems.length === 0) return null;
+  const importIdNorm = normalizeString(campaign.import_id);
+
+  if (importIdNorm) {
+    const byImport = importItems.filter((item) => normalizeString(item.import_id) === importIdNorm);
+    if (byImport.length === 1) return byImport[0];
+    if (byImport.length > 1) {
+      // Prefer the row that already holds progress for this campaign (multi-row same phone / reimports).
+      const withProgress = byImport.find((item) => {
+        const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+        return p && Object.keys(p).length > 0;
+      });
+      return withProgress || byImport[0];
+    }
+    return null;
+  }
+
+  const withReplyProgress = importItems.find((item) => {
+    const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+    return (
+      p &&
+      p.waitForReply === true &&
+      p.status === "aguardando_usuario" &&
+      normalizeCampaignPendingStepIndex(p.nextStepIndex) !== null
+    );
+  });
+  return withReplyProgress || importItems[0] || null;
+}
+
 async function findCampaignReplyMatches({ clientId, phone }) {
   if (!supabase || !clientId || !phone) {
     return {
@@ -4507,11 +4548,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       const matchedByStoredPhones = phoneVariants.some((variant) => phoneSet.has(variant));
       const matchedByImportId =
         Boolean(campaign.import_id) && importIds.includes(normalizeString(campaign.import_id));
-      const matchedImportItem = campaign.import_id
-        ? importItems.find((item) => normalizeString(item.import_id) === normalizeString(campaign.import_id)) || null
-        : matchedByStoredPhones
-          ? importItems[0] || null
-          : null;
+      const matchedImportItem = resolveMatchedImportItemForCampaign(importItems, campaign);
 
       if (!matchedByStoredPhones && !matchedByImportId) {
         return null;
@@ -4522,7 +4559,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
         progress &&
         progress.waitForReply === true &&
         progress.status === "aguardando_usuario" &&
-        Number.isInteger(progress.nextStepIndex);
+        normalizeCampaignPendingStepIndex(progress.nextStepIndex) !== null;
 
       return {
         id: campaign.id,
@@ -4551,6 +4588,9 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     })
     .filter(Boolean)
     .sort((left, right) => {
+      const leftPending = left.hasPendingProgress ? 0 : 1;
+      const rightPending = right.hasPendingProgress ? 0 : 1;
+      if (leftPending !== rightPending) return leftPending - rightPending;
       const leftScore = left.status === "processing" ? 0 : left.waitForReply ? 1 : 2;
       const rightScore = right.status === "processing" ? 0 : right.waitForReply ? 1 : 2;
       if (leftScore !== rightScore) return leftScore - rightScore;
@@ -4560,9 +4600,9 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     });
 
   const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply);
-  const processingWaitForReplyMatches = waitForReplyMatches.filter(
-    (campaign) => campaign.status === "processing" || campaign.hasPendingProgress === true
-  );
+  // Only this phone's pending reply row qualifies — avoid picking another "processing" campaign
+  // where this lead has no progress (multi-campaign / stale rows).
+  const processingWaitForReplyMatches = waitForReplyMatches.filter((campaign) => campaign.hasPendingProgress === true);
 
   return {
     phone,
@@ -5218,19 +5258,18 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   }
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
+  const nextIdxBase = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
   const hasPendingProgress =
     progress &&
     progress.waitForReply === true &&
     progress.status === "aguardando_usuario" &&
-    Number.isInteger(progress.nextStepIndex);
+    nextIdxBase !== null;
 
-  if (campaign.status !== "processing" && !hasPendingProgress) {
-    return { continued: false, reason: "campaign_not_processing" };
+  if (!hasPendingProgress) {
+    return { continued: false, reason: "lead_not_waiting_reply" };
   }
-  const nextStepIndex =
-    Number.isInteger(progress.nextStepIndex) && progress.nextStepIndex >= 0
-      ? progress.nextStepIndex
-      : 1;
+
+  const nextStepIndex = nextIdxBase;
 
   if (nextStepIndex >= steps.length) {
     if (leadImportItem?.id) {
