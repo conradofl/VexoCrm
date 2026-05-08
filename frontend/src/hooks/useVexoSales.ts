@@ -111,11 +111,15 @@ function buildVexoSalesQuery(filters: VexoSalesFilters) {
 
 async function readApiError(res: Response) {
   const text = await res.text();
+  if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
+    return "Resposta HTML inesperada da API.";
+  }
+
   try {
     const payload = JSON.parse(text);
     return payload?.error?.message || text;
   } catch {
-    return text;
+    return text.length > 240 ? `${text.slice(0, 240)}...` : text;
   }
 }
 
@@ -138,6 +142,11 @@ function getVexoSalesApiCandidates(path: string) {
   return Array.from(new Set([`${API_BASE_URL}${normalizedPath}`, normalizedPath]));
 }
 
+function shouldRetryVexoSalesResponse(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+  return [502, 503, 504].includes(response.status) || (response.status >= 500 && contentType.includes("text/html"));
+}
+
 async function fetchVexoSales(path: string, init: RequestInit) {
   let networkError: unknown = null;
   const candidates = getVexoSalesApiCandidates(path);
@@ -150,6 +159,14 @@ async function fetchVexoSales(path: string, init: RequestInit) {
         ...init,
         signal: controller.signal,
       });
+      if (shouldRetryVexoSalesResponse(response) && index < candidates.length - 1) {
+        console.warn("[vexo-sales-api] retryable_response", {
+          path,
+          attempt: index + 1,
+          status: response.status,
+        });
+        continue;
+      }
       if (index > 0) {
         console.info("[vexo-sales-api] fallback_success", { path, status: response.status });
       }
