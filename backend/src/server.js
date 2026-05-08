@@ -4404,6 +4404,11 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       }
 
       const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
+      const hasPendingProgress =
+        progress &&
+        progress.waitForReply === true &&
+        progress.status === "aguardando_usuario" &&
+        Number.isInteger(progress.nextStepIndex);
 
       return {
         id: campaign.id,
@@ -4414,6 +4419,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
         scheduledFor: campaign.scheduled_for || null,
         lastTriggeredAt: campaign.last_triggered_at || null,
         waitForReply: analyticsMeta.dispatchOptions?.waitForReply === true,
+        hasPendingProgress,
         analyticsMeta,
         matchSource: matchedByStoredPhones && matchedByImportId ? "phones_and_import" : matchedByStoredPhones ? "phones" : "import",
         leadImportItem: matchedImportItem
@@ -4440,7 +4446,9 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     });
 
   const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply);
-  const processingWaitForReplyMatches = waitForReplyMatches.filter((campaign) => campaign.status === "processing");
+  const processingWaitForReplyMatches = waitForReplyMatches.filter(
+    (campaign) => campaign.status === "processing" || campaign.hasPendingProgress === true
+  );
 
   return {
     phone,
@@ -5072,12 +5080,17 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   if (analyticsMeta.dispatchOptions?.waitForReply !== true) {
     return { continued: false, reason: "campaign_not_waiting_reply" };
   }
-  if (campaign.status !== "processing") {
-    return { continued: false, reason: "campaign_not_processing" };
-  }
-
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
+  const hasPendingProgress =
+    progress &&
+    progress.waitForReply === true &&
+    progress.status === "aguardando_usuario" &&
+    Number.isInteger(progress.nextStepIndex);
+
+  if (campaign.status !== "processing" && !hasPendingProgress) {
+    return { continued: false, reason: "campaign_not_processing" };
+  }
   const nextStepIndex =
     Number.isInteger(progress.nextStepIndex) && progress.nextStepIndex >= 0
       ? progress.nextStepIndex
