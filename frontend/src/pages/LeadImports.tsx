@@ -732,6 +732,24 @@ export default function LeadImports({
   );
   const segmentMatchedCount = segmentedPendingItems.length;
   const segmentRejectedCount = Math.max(0, pendingItems.length - segmentMatchedCount);
+  const pendingSummaryLabel = pendingLoading
+    ? "Carregando..."
+    : pendingError
+      ? "Falha ao carregar leads pendentes"
+      : pendingData
+        ? `${pendingData.pendingCount} pendentes de ${pendingData.total} total`
+        : selectedClientId
+          ? "Nenhum lead encontrado"
+          : "Selecione uma empresa";
+  const campaignPendingLabel = pendingLoading
+    ? "Carregando..."
+    : pendingError
+      ? "Falha ao carregar leads"
+      : pendingData
+        ? `${pendingData.pendingCount} aguardando disparo`
+        : selectedClientId
+          ? "Nenhum lead pendente"
+          : "Selecione uma empresa";
   const funnelGroups = useMemo(() => {
     const groups = [
       {
@@ -1055,7 +1073,13 @@ export default function LeadImports({
       });
       setImportPreview(response.preview);
       setSelectedImportId(response.item.id);
+      await Promise.allSettled([refetch(), refetchPending()]);
     } catch (error) {
+      console.error("[lead-imports-ui] import_failed", {
+        clientId: selectedClientId,
+        fileName: selectedFile.name,
+        rowCount: parsedRows.length,
+      });
       setParseError(error instanceof Error ? error.message : "Falha ao importar planilha.");
     }
   }
@@ -1521,7 +1545,7 @@ export default function LeadImports({
               <div>
                 <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Leads Pendentes de Disparo</h2>
                 <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  {pendingData ? `${pendingData.pendingCount} pendentes de ${pendingData.total} total` : "Carregando..."}
+                  {pendingSummaryLabel}
                 </p>
               </div>
 
@@ -1624,6 +1648,20 @@ export default function LeadImports({
               <CardContent className="p-4">
                 <ErrorMessage message={pendingError ? (pendingError as Error).message : null} variant="banner" />
                 {pendingLoading && <EmptyState message="Carregando leads..." />}
+                {!pendingLoading && pendingError && (
+                  <div className="space-y-3">
+                    <EmptyState
+                      title="Nao foi possivel carregar os leads"
+                      description="A tentativa de buscar os leads pendentes falhou. Verifique a conexao com a API e tente atualizar."
+                    />
+                    <div className="flex justify-center">
+                      <Button variant="outline" size="sm" onClick={() => refetchPending()}>
+                        <RefreshCw className="h-4 w-4" />
+                        Tentar novamente
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {!pendingLoading && pendingData && segmentedPendingItems.length === 0 && (
                   <EmptyState
                     title={pendingFilter === "false" ? "Todos os leads ja foram disparados" : "Nenhum lead encontrado"}
@@ -1823,7 +1861,7 @@ export default function LeadImports({
                 <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Leads pendentes</p>
                   <div className={cn("flex h-10 items-center rounded-md px-3 font-mono text-sm text-slate-500 dark:text-white/62", darkFieldClass)}>
-                    {pendingData ? `${pendingData.pendingCount} aguardando disparo` : "Carregando..."}
+                    {campaignPendingLabel}
                   </div>
                 </div>
                 <div className="space-y-2 md:col-span-2">
