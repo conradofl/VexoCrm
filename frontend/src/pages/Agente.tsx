@@ -15,7 +15,7 @@ type ReadFilter = "all" | "unread" | "read";
 type TypeFilter = "all" | "n8n_error" | "other";
 
 export default function Agente() {
-  const { items, unreadCount, loading, markAsRead, markAllRead } = useNotifications();
+  const { items, unreadCount, loading, error, markAsRead, markAllRead } = useNotifications();
   const [search, setSearch] = useState("");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -96,6 +96,12 @@ export default function Agente() {
       <NotificationList count={filteredItems.length} unreadCount={unreadCount} onMarkAllRead={markAllRead}>
         {loading ? (
           <EmptyState message="Carregando notificações..." />
+        ) : error ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Notificacoes indisponiveis"
+            description={error}
+          />
         ) : filteredItems.length === 0 ? (
           <EmptyState
             icon={AlertTriangle}

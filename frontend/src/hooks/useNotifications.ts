@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { toast } from "sonner";
-import { API_BASE_URL } from "@/lib/api";
+import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 
 interface Notification {
   id: string;
@@ -14,8 +14,8 @@ interface Notification {
   created_at: string;
 }
 
-const API_URL = `${API_BASE_URL}/api/notifications`;
 const POLL_INTERVAL = 15000;
+const ERROR_POLL_INTERVAL = 60000;
 const LAST_SEEN_KEY = "notifications_lastSeenCreatedAt";
 
 function matchesSelectedClient(
@@ -35,7 +35,10 @@ export function useNotifications() {
   const crmClient = useOptionalCrmClient();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const lastSeenRef = useRef(localStorage.getItem(LAST_SEEN_KEY) || "");
+  const inFlightRef = useRef(false);
+  const lastFailureAtRef = useRef(0);
   const canReadNotifications = canAccessInternalPage("agente");
   const selectedClientName = crmClient?.selectedClient?.name || null;
 
@@ -50,18 +53,43 @@ export function useNotifications() {
 
   const fetchNotifications = useCallback(async () => {
     if (!user || !canReadNotifications) return;
+    if (inFlightRef.current) {
+      console.info("[notifications-api] skipped_duplicate_request");
+      return;
+    }
+
+    const now = Date.now();
+    if (lastFailureAtRef.current && now - lastFailureAtRef.current < ERROR_POLL_INTERVAL) {
+      console.info("[notifications-api] skipped_error_cooldown", {
+        retryInMs: ERROR_POLL_INTERVAL - (now - lastFailureAtRef.current),
+      });
+      return;
+    }
+
+    inFlightRef.current = true;
+    const startedAt = Date.now();
+
     try {
       const token = await getIdToken();
       if (!token) return;
 
-      const res = await fetch(`${API_URL}?limit=20`, {
+      const res = await fetchApi("/api/notifications?limit=20", {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        const message = await readApiErrorMessage(res, "Failed to fetch notifications");
+        throw new Error(`Failed to fetch notifications: ${res.status} ${message}`);
+      }
 
-      const data = await res.json();
+      const data = await readApiJson<{ items?: Notification[] }>(res, "notifications");
       setItems(data.items || []);
+      setError(null);
+      lastFailureAtRef.current = 0;
+      console.info("[notifications-api] fetch_success", {
+        total: data.items?.length || 0,
+        durationMs: Date.now() - startedAt,
+      });
 
       // Toast for new notifications
       const newItems = (data.items || []).filter(
@@ -80,7 +108,15 @@ export function useNotifications() {
         }
       }
     } catch (err) {
-      console.error("Failed to fetch notifications:", err);
+      lastFailureAtRef.current = Date.now();
+      const message = err instanceof Error ? err.message : "Failed to fetch notifications";
+      setError(message);
+      console.error("[notifications-api] fetch_failed", {
+        message,
+        durationMs: Date.now() - startedAt,
+      });
+    } finally {
+      inFlightRef.current = false;
     }
   }, [canReadNotifications, getIdToken, user]);
 
@@ -88,6 +124,7 @@ export function useNotifications() {
     if (!user || !canReadNotifications) {
       setItems([]);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -103,7 +140,7 @@ export function useNotifications() {
       const token = await getIdToken();
       if (!token) return;
 
-      await fetch(API_URL, {
+      const res = await fetchApi("/api/notifications", {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -111,6 +148,11 @@ export function useNotifications() {
         },
         body: JSON.stringify({ id, read: true }),
       });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Failed to mark notification as read"));
+      }
+
       await fetchNotifications();
     },
     [canReadNotifications, fetchNotifications, getIdToken]
@@ -121,7 +163,7 @@ export function useNotifications() {
     const token = await getIdToken();
     if (!token) return;
 
-    await fetch(API_URL, {
+    const res = await fetchApi("/api/notifications", {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -129,8 +171,13 @@ export function useNotifications() {
       },
       body: JSON.stringify({ markAllRead: true }),
     });
+
+    if (!res.ok) {
+      throw new Error(await readApiErrorMessage(res, "Failed to mark notifications as read"));
+    }
+
     await fetchNotifications();
   }, [canReadNotifications, fetchNotifications, getIdToken]);
 
-  return { items: filteredItems, unreadCount, loading, markAsRead, markAllRead };
+  return { items: filteredItems, unreadCount, loading, error, markAsRead, markAllRead };
 }
