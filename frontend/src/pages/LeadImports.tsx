@@ -1134,21 +1134,32 @@ export default function LeadImports({
     setIsDispatching(true);
     setDispatchStatus(null);
 
+    const campaignPayload = {
+      name: campaignName.trim(),
+      clientId: selectedClientId,
+      importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
+      limitPerRun: parsedLimit ?? 50,
+      scheduledFor: scheduledDate?.toISOString() ?? null,
+      analyticsMeta: {
+        segmentation: toCampaignSegmentationPayload(segmentation),
+        message: campaignMessage.trim(),
+        image: campaignImage,
+        sequence,
+        dispatchOptions,
+      },
+    };
+
+    console.info("[campaigns-ui] create_campaign_start", {
+      clientId: campaignPayload.clientId,
+      importId: campaignPayload.importId,
+      scheduledFor: campaignPayload.scheduledFor,
+      limitPerRun: campaignPayload.limitPerRun,
+      sequenceSteps: sequence.length,
+      hasImage: Boolean(campaignImage),
+    });
+
     try {
-      await createCampaign.mutateAsync({
-        name: campaignName.trim(),
-        clientId: selectedClientId,
-        importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
-        limitPerRun: parsedLimit ?? 50,
-        scheduledFor: scheduledDate?.toISOString() ?? null,
-        analyticsMeta: {
-          segmentation: toCampaignSegmentationPayload(segmentation),
-          message: campaignMessage.trim(),
-          image: campaignImage,
-          sequence,
-          dispatchOptions,
-        },
-      });
+      const createdCampaign = await createCampaign.mutateAsync(campaignPayload);
 
       setDispatchStatus(`Campanha ${campaignName.trim()} criada com sucesso.`);
       setCampaignName("");
@@ -1167,8 +1178,18 @@ export default function LeadImports({
       setSegmentation(defaultSegmentation);
       setSelectedImportId(ALL_IMPORTS_VALUE);
       setActiveTab("agendamentos");
-      void refetchCampaigns();
+      await refetchCampaigns();
+      console.info("[campaigns-ui] create_campaign_success", {
+        campaignId: createdCampaign.id,
+        clientId: createdCampaign.client_id,
+        status: createdCampaign.status,
+      });
     } catch (error) {
+      console.error("[campaigns-ui] create_campaign_failed", {
+        clientId: campaignPayload.clientId,
+        importId: campaignPayload.importId,
+        message: error instanceof Error ? error.message : String(error),
+      });
       setDispatchStatus(error instanceof Error ? error.message : "Falha ao criar campanha.");
     } finally {
       setIsDispatching(false);
@@ -2300,9 +2321,9 @@ export default function LeadImports({
               </div>
 
               <div className="flex flex-wrap gap-3 border-t border-border/70 pt-5">
-                <Button onClick={() => void handleDispatch()} disabled={isDispatching || !selectedClientId}>
+                <Button onClick={() => void handleDispatch()} disabled={isDispatching || createCampaign.isPending || !selectedClientId}>
                   <Megaphone className="mr-2 h-4 w-4" />
-                  {isDispatching ? "Criando..." : "Criar campanha"}
+                  {isDispatching || createCampaign.isPending ? "Criando..." : "Criar campanha"}
                 </Button>
               </div>
             </CardContent>
