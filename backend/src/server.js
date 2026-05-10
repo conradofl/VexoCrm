@@ -1470,6 +1470,88 @@ function logDirectDispatch(level, event, details = {}) {
   logger("[campaign-direct-dispatch]", event, details);
 }
 
+function logCampaignReplyFlow(level, event, details = {}) {
+  const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+  logger("[campaign-reply-flow]", event, details);
+}
+
+function resolveEnvCampaignQualificationWebhookSettings(clientId) {
+  const suffix = getClientEnvSuffix(clientId);
+  const candidates = [];
+
+  if (suffix) {
+    candidates.push({
+      source: `env:CAMPAIGN_QUALIFICATION_WEBHOOK_URL_${suffix}`,
+      url: process.env[`CAMPAIGN_QUALIFICATION_WEBHOOK_URL_${suffix}`],
+      token: process.env[`CAMPAIGN_QUALIFICATION_WEBHOOK_TOKEN_${suffix}`],
+    });
+    candidates.push({
+      source: `env:N8N_QUALIFICATION_WEBHOOK_URL_${suffix}`,
+      url: process.env[`N8N_QUALIFICATION_WEBHOOK_URL_${suffix}`],
+      token: process.env[`N8N_QUALIFICATION_WEBHOOK_TOKEN_${suffix}`],
+    });
+  }
+
+  for (const envName of ["CAMPAIGN_QUALIFICATION_WEBHOOKS_JSON", "N8N_QUALIFICATION_WEBHOOKS_JSON"]) {
+    const map = parseJsonEnvMap(envName);
+    if (!map) continue;
+
+    const rawConfig =
+      map[clientId] ||
+      map[normalizeTenantKey(clientId)] ||
+      (suffix ? map[suffix] : null);
+    if (!rawConfig) continue;
+
+    if (typeof rawConfig === "string") {
+      candidates.push({ source: `env:${envName}`, url: rawConfig, token: null });
+      continue;
+    }
+
+    if (rawConfig && typeof rawConfig === "object") {
+      candidates.push({
+        source: `env:${envName}`,
+        url: rawConfig.url || rawConfig.webhookUrl || rawConfig.qualificationWebhookUrl,
+        token: rawConfig.token || rawConfig.webhookToken || rawConfig.qualificationWebhookToken,
+      });
+    }
+  }
+
+  candidates.push({
+    source: "env:CAMPAIGN_QUALIFICATION_WEBHOOK_URL",
+    url: process.env.CAMPAIGN_QUALIFICATION_WEBHOOK_URL,
+    token: process.env.CAMPAIGN_QUALIFICATION_WEBHOOK_TOKEN,
+  });
+  candidates.push({
+    source: "env:N8N_QUALIFICATION_WEBHOOK_URL",
+    url: process.env.N8N_QUALIFICATION_WEBHOOK_URL,
+    token: process.env.N8N_QUALIFICATION_WEBHOOK_TOKEN,
+  });
+
+  for (const candidate of candidates) {
+    const rawUrl = normalizeString(candidate.url);
+    if (!rawUrl) continue;
+
+    const webhookUrl = normalizeHttpUrl(rawUrl);
+    if (!webhookUrl) {
+      return {
+        source: candidate.source,
+        webhookUrl: null,
+        webhookToken: null,
+        invalid: true,
+      };
+    }
+
+    return {
+      source: candidate.source,
+      webhookUrl,
+      webhookToken: normalizeString(candidate.token),
+      invalid: false,
+    };
+  }
+
+  return null;
+}
+
 function maskN8nSettings(row) {
   if (!row) {
     return {
@@ -4281,6 +4363,10 @@ async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = nu
   });
 
   if (!nextLead) {
+    logCampaignReplyFlow("info", "queue_no_next_lead", {
+      clientId,
+      campaignId: campaign.id,
+    });
     return { started: false, reason: "no_next_lead" };
   }
 
@@ -4320,6 +4406,13 @@ async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = nu
   });
 
   if (summary.successCount > 0 && targetItem?.id) {
+    logCampaignReplyFlow("info", "queue_next_lead_started", {
+      clientId,
+      campaignId: campaign.id,
+      phone: maskPhone(nextLead.telefone),
+      stepId: firstStep?.id || null,
+      stepType: firstStep?.type || null,
+    });
     await markCampaignLeadWaitingReply({
       clientId,
       lead: { id: targetItem.id, nome: nextLead.nome },
@@ -5185,6 +5278,10 @@ async function markCampaignLeadWaitingReply({
       nextStepIndex: hasNextStep ? (nextStepIndex ?? stepIndex + 1) : null,
       totalSteps,
       status: normalizedStatus,
+      leadStatus:
+        normalizedStatus === "finalizado"
+          ? "sequencia_concluida"
+          : "aguardando_resposta",
       updatedAt: dispatchedAt,
       completedAt: normalizedStatus === "finalizado" ? dispatchedAt : null,
       lastReplyAt: userRepliedAt || null,
@@ -5226,7 +5323,132 @@ async function markCampaignLeadWaitingReply({
   });
 }
 
-async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch }) {
+function buildCampaignAutomationHeaders(token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) {
+    headers.apikey = token;
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function callCampaignQualificationWebhook({
+  clientId,
+  campaign,
+  lead,
+  phone,
+  repliedAt,
+  replyPayload = {},
+  summary = null,
+}) {
+  const settings = resolveEnvCampaignQualificationWebhookSettings(clientId);
+  if (!settings?.webhookUrl || settings.invalid) {
+    logCampaignReplyFlow(settings?.invalid ? "warn" : "info", "n8n_qualification_skipped", {
+      clientId,
+      campaignId: campaign?.id || null,
+      phone: maskPhone(phone),
+      reason: settings?.invalid ? "invalid_webhook_url" : "missing_webhook_url",
+      source: settings?.source || "missing",
+    });
+    return {
+      called: false,
+      ok: false,
+      skipped: true,
+      reason: settings?.invalid ? "invalid_webhook_url" : "missing_webhook_url",
+      source: settings?.source || "missing",
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+  const payload = {
+    action: "campaign_sequence_completed",
+    source: "vexocrm",
+    clientId,
+    campaign: {
+      id: campaign?.id || null,
+      name: campaign?.name || null,
+      importId: campaign?.import_id || null,
+    },
+    lead: {
+      id: lead?.id || null,
+      name: normalizeString(lead?.nome || lead?.name) || null,
+      phone,
+    },
+    reply: {
+      repliedAt,
+      text:
+        normalizeString(replyPayload?.message || replyPayload?.text || replyPayload?.body || replyPayload?.data?.message?.conversation) ||
+        null,
+      raw: replyPayload || null,
+    },
+    sequence: {
+      status: "sequencia_concluida",
+      summary,
+    },
+  };
+
+  try {
+    logCampaignReplyFlow("info", "n8n_qualification_started", {
+      clientId,
+      campaignId: campaign?.id || null,
+      phone: maskPhone(phone),
+      source: settings.source,
+    });
+
+    const response = await fetch(settings.webhookUrl, {
+      method: "POST",
+      headers: buildCampaignAutomationHeaders(settings.webhookToken),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new Error(body ? `HTTP ${response.status}: ${body.slice(0, 500)}` : `HTTP ${response.status}`);
+    }
+
+    logCampaignReplyFlow("info", "n8n_qualification_finished", {
+      clientId,
+      campaignId: campaign?.id || null,
+      phone: maskPhone(phone),
+      status: response.status,
+    });
+
+    return {
+      called: true,
+      ok: true,
+      skipped: false,
+      status: response.status,
+      body: body || null,
+      source: settings.source,
+    };
+  } catch (error) {
+    const reason =
+      error?.name === "AbortError"
+        ? "Timeout ao chamar webhook de qualificacao n8n."
+        : error instanceof Error
+          ? error.message
+          : "Falha ao chamar webhook de qualificacao n8n.";
+    logCampaignReplyFlow("warn", "n8n_qualification_failed", {
+      clientId,
+      campaignId: campaign?.id || null,
+      phone: maskPhone(phone),
+      reason,
+    });
+    return {
+      called: true,
+      ok: false,
+      skipped: false,
+      reason,
+      source: settings.source,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch, replyPayload = {} }) {
   if (!supabase || !clientId || !phone || !campaignMatch?.id) {
     return { continued: false, reason: "missing_context" };
   }
@@ -5314,7 +5536,7 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
 
   const remainingReplyEntries = steps
     .map((step, index) => ({ step, index }))
-    .filter((entry) => entry.index >= nextStepIndex && entry.step.triggerMode === "after_reply");
+    .filter((entry) => entry.index >= nextStepIndex);
   const remainingSteps = remainingReplyEntries.map((entry) => entry.step);
   const finalStepEntry = remainingReplyEntries[remainingReplyEntries.length - 1] || null;
   const finalStep = finalStepEntry?.step || null;
@@ -5357,6 +5579,37 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     };
   }
 
+  logCampaignReplyFlow("info", "reply_received_advancing_sequence", {
+    clientId,
+    campaignId: campaign.id,
+    phone: maskPhone(phone),
+    nextStepIndex,
+    remainingSteps: remainingSteps.map((step) => ({
+      id: step.id,
+      order: step.order,
+      type: step.type,
+      triggerMode: step.triggerMode || "immediate",
+    })),
+  });
+
+  if (leadImportItem?.id) {
+    await updateLeadImportItemCampaignProgress({
+      clientId,
+      leadImportItemId: leadImportItem.id,
+      campaignId: campaign.id,
+      progressPatch: {
+        ...progress,
+        status: "enviando_proximas_etapas",
+        leadStatus: "enviando_proximas_etapas",
+        nextStepIndex,
+        updatedAt: repliedAt,
+        lastReplyAt: repliedAt,
+      },
+      statusConversa: "em_atendimento",
+      ultimaInteracaoUsuario: repliedAt,
+    });
+  }
+
   const { summary } = await dispatchCampaignSequence({
     webhookUrl,
     webhookToken,
@@ -5378,9 +5631,113 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
       },
       client: { id: clientId, name: await getClientName(clientId) },
     },
+    onStepDispatched: async ({ step, stepIndex, sentAt }) => {
+      const originalStepIndex = nextStepIndex + stepIndex;
+      logCampaignReplyFlow("info", "reply_step_sent", {
+        clientId,
+        campaignId: campaign.id,
+        phone: maskPhone(phone),
+        stepId: step.id,
+        stepType: step.type,
+        originalStepIndex,
+      });
+      if (leadImportItem?.id) {
+        await updateLeadImportItemCampaignProgress({
+          clientId,
+          leadImportItemId: leadImportItem.id,
+          campaignId: campaign.id,
+          progressPatch: {
+            ...progress,
+            status: "enviando_proximas_etapas",
+            leadStatus: "enviando_proximas_etapas",
+            currentStepIndex: originalStepIndex,
+            currentStepOrder: step.order ?? originalStepIndex + 1,
+            currentStepId: step.id || null,
+            nextStepIndex: originalStepIndex < steps.length - 1 ? originalStepIndex + 1 : null,
+            updatedAt: sentAt,
+            lastReplyAt: repliedAt,
+          },
+          statusConversa: "em_atendimento",
+          ultimaInteracaoBot: sentAt,
+          ultimaInteracaoUsuario: repliedAt,
+        });
+      }
+    },
   });
 
   let finalizationWarning = null;
+  let nextLeadStart = { started: false, reason: "not_attempted" };
+
+  if (summary.failureCount > 0 || summary.successCount <= 0) {
+    const firstFailure = summary.failures?.[0] || null;
+    const failedStepEntry = firstFailure?.stepId
+      ? remainingReplyEntries.find((entry) => entry.step.id === firstFailure.stepId)
+      : remainingReplyEntries[0];
+    const failedStepIndex = failedStepEntry?.index ?? nextStepIndex;
+    const failureReason = firstFailure?.reason || "Falha ao enviar proximas etapas da campanha.";
+
+    logCampaignReplyFlow("warn", "reply_sequence_failed_for_lead", {
+      clientId,
+      campaignId: campaign.id,
+      phone: maskPhone(phone),
+      failedStepIndex,
+      reason: failureReason,
+    });
+
+    if (leadImportItem?.id) {
+      await updateLeadImportItemCampaignProgress({
+        clientId,
+        leadImportItemId: leadImportItem.id,
+        campaignId: campaign.id,
+        progressPatch: {
+          ...progress,
+          status: "erro",
+          leadStatus: "erro",
+          nextStepIndex: null,
+          failedStepIndex,
+          updatedAt: new Date().toISOString(),
+          lastReplyAt: repliedAt,
+          errorMessage: failureReason,
+        },
+        statusConversa: "em_atendimento",
+        ultimaInteracaoUsuario: repliedAt,
+      });
+    }
+
+    let campaignFinalizationAfterError = { finalized: false };
+    try {
+      nextLeadStart = await startNextCampaignLeadInQueue({ campaign, clientId, repliedAt });
+      if (!nextLeadStart.started) {
+        campaignFinalizationAfterError = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
+      }
+    } catch (error) {
+      finalizationWarning =
+        error instanceof Error
+          ? error.message
+          : "Falha ao iniciar o proximo lead apos erro na sequencia atual.";
+    }
+
+    return {
+      continued: false,
+      finalized: false,
+      campaignFinalized: campaignFinalizationAfterError.finalized === true,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      sentStepIndex: nextStepIndex,
+      remainingSteps: remainingSteps.length,
+      nextLeadStart,
+      summary: {
+        ...summary,
+        warnings: finalizationWarning
+          ? [
+              ...(summary.warnings || []),
+              { phone, stepId: failedStepEntry?.step?.id || null, stepType: failedStepEntry?.step?.type || null, reason: finalizationWarning },
+            ]
+          : summary.warnings,
+      },
+    };
+  }
+
   if (summary.successCount > 0 && leadImportItem?.id) {
     try {
       await markCampaignLeadWaitingReply({
@@ -5405,15 +5762,47 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   }
 
   const finalizedCurrentLead = summary.successCount > 0;
+  let n8nQualification = { called: false, skipped: true, reason: "lead_not_finalized" };
+  if (finalizedCurrentLead) {
+    n8nQualification = await callCampaignQualificationWebhook({
+      clientId,
+      campaign,
+      lead,
+      phone,
+      repliedAt,
+      replyPayload,
+      summary,
+    });
+
+    if (leadImportItem?.id) {
+      await updateLeadImportItemCampaignProgress({
+        clientId,
+        leadImportItemId: leadImportItem.id,
+        campaignId: campaign.id,
+        progressPatch: {
+          status: "finalizado",
+          leadStatus: n8nQualification.ok ? "qualificado_em_n8n" : "sequencia_concluida",
+          nextStepIndex: null,
+          updatedAt: new Date().toISOString(),
+          n8nQualification,
+        },
+        statusConversa: "finalizado",
+      });
+    }
+  }
+
   let campaignFinalization = { finalized: false };
   if (finalizedCurrentLead) {
     try {
-      campaignFinalization = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
+      nextLeadStart = await startNextCampaignLeadInQueue({ campaign, clientId, repliedAt });
+      if (!nextLeadStart.started) {
+        campaignFinalization = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
+      }
     } catch (error) {
       finalizationWarning =
         error instanceof Error
           ? error.message
-          : "Falha ao finalizar a campanha apos envio bem-sucedido.";
+          : "Falha ao iniciar o proximo lead ou finalizar a campanha apos envio bem-sucedido.";
     }
   }
 
@@ -5434,6 +5823,8 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     campaignName: campaign.name,
     sentStepIndex: nextStepIndex,
     remainingSteps: Math.max(steps.length - (nextStepIndex + 1), 0),
+    nextLeadStart,
+    n8nQualification,
     summary,
   };
 }
@@ -5483,7 +5874,8 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
   const hasPendingItems = relevantItems.some((item) => {
     const progress = extractCampaignProgress(item.normalized_data || {}, campaign.id);
     if (Object.keys(progress).length === 0) return true;
-    return progress.status !== "finalizado" || progress.nextStepIndex !== null;
+    const terminalStatus = progress.status === "finalizado" || progress.status === "erro";
+    return !terminalStatus || progress.nextStepIndex !== null;
   });
 
   if (hasPendingItems) {
@@ -9781,9 +10173,11 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
     body.telefone ??
     body.number ??
     body.remoteJid ??
-    body.data?.key?.remoteJid ??
-    body.data?.message?.conversation
+    body.data?.key?.remoteJid
   );
+  const replyText =
+    normalizeString(body.message || body.text || body.body || body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text) ||
+    null;
   const repliedAt =
     normalizeIsoDate(body.repliedAt ?? body.timestamp ?? body.created_at ?? body.data?.messageTimestamp) ||
     new Date().toISOString();
@@ -9806,12 +10200,25 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
     const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
     const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
 
+    logCampaignReplyFlow("info", "webhook_received", {
+      clientId,
+      phone: maskPhone(phone),
+      hasReplyText: Boolean(replyText),
+      matchedCampaignCount: campaignReplyContext.matches.length,
+      waitForReplyCampaignCount: campaignReplyContext.waitForReplyMatches.length,
+      processingWaitForReplyCampaignCount: campaignReplyContext.processingWaitForReplyMatches.length,
+    });
+
     if (activeWaitCampaign) {
       const progression = await continueCampaignLeadFromReply({
         clientId,
         phone,
         repliedAt,
         campaignMatch: activeWaitCampaign,
+        replyPayload: {
+          ...body,
+          message: replyText,
+        },
       });
 
       res.json({
