@@ -260,6 +260,12 @@ function buildRequestHeaders(token) {
   return headers;
 }
 
+function maskOutboundPhone(value) {
+  const normalized = normalizeString(value).replace(/\D/g, "");
+  if (!normalized) return null;
+  return `${"*".repeat(Math.max(normalized.length - 4, 0))}${normalized.slice(-4)}`;
+}
+
 function resolveStepWebhookUrl(webhookUrl, payload) {
   if (payload?.type === "image" && typeof webhookUrl === "string") {
     return webhookUrl.replace("/message/sendText/", "/message/sendMedia/");
@@ -335,6 +341,14 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
   const stepWebhookUrl = resolveStepWebhookUrl(webhookUrl, payload);
 
   try {
+    console.info("[campaign-outbound] whatsapp_step_request", {
+      type: payload?.type || null,
+      stepId: payload?.stepId || null,
+      phone: maskOutboundPhone(payload?.number),
+      endpointMode: payload?.type === "image" ? "media" : "text",
+      hasMedia: Boolean(payload?.base64 || payload?.mediaBase64 || payload?.dataUrl),
+      hasCaption: Boolean(payload?.caption),
+    });
     const response = await fetch(stepWebhookUrl, {
       method: "POST",
       headers: buildRequestHeaders(webhookToken),
@@ -344,12 +358,25 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
     const responseText = await response.text();
 
     if (!response.ok) {
+      console.warn("[campaign-outbound] whatsapp_step_failed", {
+        type: payload?.type || null,
+        stepId: payload?.stepId || null,
+        phone: maskOutboundPhone(payload?.number),
+        status: response.status,
+      });
       throw new Error(
         responseText
           ? `HTTP ${response.status}: ${responseText.slice(0, 500)}`
           : `HTTP ${response.status}`
       );
     }
+
+    console.info("[campaign-outbound] whatsapp_step_success", {
+      type: payload?.type || null,
+      stepId: payload?.stepId || null,
+      phone: maskOutboundPhone(payload?.number),
+      status: response.status,
+    });
 
     return {
       ok: true,
