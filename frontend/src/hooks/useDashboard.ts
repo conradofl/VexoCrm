@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/api";
+import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 
 export interface DashboardSummary {
   totalLeads: number;
@@ -67,16 +67,17 @@ export function useDashboard(clientId: string) {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/dashboard?clientId=${encodeURIComponent(clientId)}`, {
+      const res = await fetchApi(`/api/dashboard?clientId=${encodeURIComponent(clientId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await readApiErrorMessage(res, "Dashboard fetch failed");
         throw new Error(`Dashboard fetch failed: ${res.status} ${errText}`);
       }
 
-      return res.json();
+      return readApiJson<DashboardPayload>(res, "dashboard");
     },
+    retry: 1,
     staleTime: 30 * 1000,
   });
 }
