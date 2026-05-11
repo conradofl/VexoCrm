@@ -53,6 +53,7 @@ const isProduction = process.env.NODE_ENV === "production";
 const MAX_CONVERSATION_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS = 60 * 1000;
 const CAMPAIGN_SCHEDULER_MAX_BATCH = 25;
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
 /** Trim and strip trailing slashes so env typos still match the browser Origin header. */
 function normalizeCorsOrigin(value) {
@@ -1456,12 +1457,14 @@ function resolveEnvDispatchWebhookSettings(clientId) {
 }
 
 function getSafeDispatchSettingsLog(settingsResult) {
+  const endpoint = getSafeEvolutionEndpointLog(settingsResult?.webhookUrl);
   return {
     source: settingsResult?.source || "missing",
     schemaAvailable: settingsResult?.schemaAvailable !== false,
     webhookConfigured: !!settingsResult?.webhookUrl,
     settingsActive: settingsResult?.settings ? settingsResult.settings.active !== false : null,
     hasWebhookToken: !!settingsResult?.webhookToken,
+    ...endpoint,
   };
 }
 
@@ -1473,6 +1476,11 @@ function logDirectDispatch(level, event, details = {}) {
 function logCampaignReplyFlow(level, event, details = {}) {
   const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
   logger("[campaign-reply-flow]", event, details);
+}
+
+function logCampaignDispatch(level, event, details = {}) {
+  const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+  logger("[campaign-dispatch]", event, details);
 }
 
 function resolveEnvCampaignQualificationWebhookSettings(clientId) {
@@ -1666,19 +1674,34 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
 
   if (dispatchWebhookTokenProvided) {
     const token = normalizeString(body.dispatchWebhookToken);
-    payload.dispatch_webhook_token = body.dispatchWebhookToken === null ? null : token || existing?.dispatch_webhook_token || null;
+    payload.dispatch_webhook_token =
+      body.dispatchWebhookToken === null
+        ? null
+        : isMaskedSecretPlaceholder(token)
+          ? existing?.dispatch_webhook_token || null
+          : token || existing?.dispatch_webhook_token || null;
   } else if (!existing) {
     payload.dispatch_webhook_token = null;
   }
 
   if (inboundBearerTokenProvided) {
     const token = normalizeString(body.inboundBearerToken);
-    payload.inbound_bearer_token = body.inboundBearerToken === null ? null : token || existing?.inbound_bearer_token || null;
+    payload.inbound_bearer_token =
+      body.inboundBearerToken === null
+        ? null
+        : isMaskedSecretPlaceholder(token)
+          ? existing?.inbound_bearer_token || null
+          : token || existing?.inbound_bearer_token || null;
   } else if (!existing) {
     payload.inbound_bearer_token = null;
   }
 
   return payload;
+}
+
+function isMaskedSecretPlaceholder(value) {
+  const text = normalizeString(value);
+  return Boolean(text) && /^[*•]+$/.test(text);
 }
 
 async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing = null) {
@@ -2038,6 +2061,178 @@ async function resolveDispatchWebhookSettings(clientId) {
     webhookToken: null,
     source,
     schemaAvailable: settingsStatus.schemaAvailable,
+  };
+}
+
+function parseEvolutionWebhookEndpoint(webhookUrl) {
+  const rawUrl = normalizeString(webhookUrl);
+  if (!rawUrl) return null;
+
+  try {
+    const url = new URL(rawUrl);
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const messageIndex = pathParts.findIndex((part) => part === "message");
+    const action = messageIndex >= 0 ? pathParts[messageIndex + 1] : null;
+    const instance = messageIndex >= 0 ? decodeURIComponent(pathParts[messageIndex + 2] || "") : "";
+
+    if (!url.origin || !instance || !action) {
+      return null;
+    }
+
+    return {
+      origin: url.origin,
+      path: url.pathname,
+      action,
+      instance,
+      healthUrl: `${url.origin}/instance/connectionState/${encodeURIComponent(instance)}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getSafeEvolutionEndpointLog(webhookUrl) {
+  const endpoint = parseEvolutionWebhookEndpoint(webhookUrl);
+  if (!endpoint) {
+    return {
+      endpointOrigin: null,
+      endpointPath: null,
+      endpointAction: null,
+      instance: null,
+    };
+  }
+
+  return {
+    endpointOrigin: endpoint.origin,
+    endpointPath: endpoint.path,
+    endpointAction: endpoint.action,
+    instance: endpoint.instance,
+  };
+}
+
+function buildEvolutionAuthHeaders(token) {
+  const headers = { Accept: "application/json" };
+  const normalizedToken = normalizeString(token);
+  if (normalizedToken) {
+    headers.apikey = normalizedToken;
+    headers.Authorization = `Bearer ${normalizedToken}`;
+  }
+  return headers;
+}
+
+function extractEvolutionConnectionState(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const candidates = [
+    payload.instance?.state,
+    payload.instance?.connectionStatus,
+    payload.instance?.status,
+    payload.state,
+    payload.status,
+    payload.connectionStatus,
+    payload.response?.instance?.state,
+    payload.response?.state,
+    payload.response?.status,
+    payload.response?.connectionStatus,
+  ];
+
+  return candidates.map((value) => normalizeString(value).toLowerCase()).find(Boolean) || null;
+}
+
+function isEvolutionOpenState(state) {
+  return ["open", "connected", "online"].includes(normalizeString(state).toLowerCase());
+}
+
+async function checkEvolutionInstanceHealth({ webhookUrl, webhookToken, context = {} }) {
+  const endpoint = parseEvolutionWebhookEndpoint(webhookUrl);
+  if (!endpoint) {
+    logCampaignDispatch("warn", "health_check_skipped_invalid_endpoint", {
+      ...context,
+      ...getSafeEvolutionEndpointLog(webhookUrl),
+    });
+    const error = new Error(
+      "URL Evolution invalida. Configure no formato https://host/message/sendText/NOME_DA_INSTANCIA."
+    );
+    error.statusCode = 400;
+    error.code = "EVOLUTION_ENDPOINT_INVALID";
+    throw error;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint.healthUrl, {
+      method: "GET",
+      headers: buildEvolutionAuthHeaders(webhookToken),
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    let payload = null;
+    try {
+      payload = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      payload = null;
+    }
+    const state = extractEvolutionConnectionState(payload);
+
+    logCampaignDispatch(response.ok ? "info" : "warn", "evolution_health_checked", {
+      ...context,
+      ...getSafeEvolutionEndpointLog(webhookUrl),
+      status: response.status,
+      state: state || "unknown",
+    });
+
+    if (!response.ok) {
+      const error = new Error(
+        responseText
+          ? `Falha ao verificar instancia Evolution: HTTP ${response.status}: ${responseText.slice(0, 300)}`
+          : `Falha ao verificar instancia Evolution: HTTP ${response.status}`
+      );
+      error.statusCode = 502;
+      error.code = "EVOLUTION_HEALTH_CHECK_FAILED";
+      throw error;
+    }
+
+    // Some Evolution builds return a very small response body. Do not block a configured instance
+    // just because the state field is not present, but do block explicit closed states.
+    if (state && !isEvolutionOpenState(state)) {
+      const error = new Error(`Instancia Evolution "${endpoint.instance}" nao esta conectada (${state}).`);
+      error.statusCode = 409;
+      error.code = "EVOLUTION_INSTANCE_NOT_OPEN";
+      throw error;
+    }
+
+    return { checked: true, state: state || "unknown" };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("Timeout ao verificar conexao da instancia Evolution.");
+      timeoutError.statusCode = 504;
+      timeoutError.code = "EVOLUTION_HEALTH_CHECK_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveCampaignDispatchSettings(clientId, campaign = {}) {
+  const tenantDispatch = await resolveDispatchWebhookSettings(clientId);
+  const tenantWebhookUrl = normalizeString(tenantDispatch.webhookUrl);
+  const tenantWebhookToken = normalizeString(tenantDispatch.webhookToken) || null;
+  const cachedWebhookUrl = normalizeString(campaign.webhook_url);
+  const cachedWebhookToken = normalizeString(campaign.webhook_token) || null;
+  const webhookUrl = tenantWebhookUrl || cachedWebhookUrl;
+  const webhookToken = tenantWebhookUrl ? tenantWebhookToken : tenantWebhookToken || cachedWebhookToken;
+
+  return {
+    ...tenantDispatch,
+    webhookUrl,
+    webhookToken,
+    source: tenantWebhookUrl ? tenantDispatch.source : cachedWebhookUrl ? "campaign_cache" : tenantDispatch.source,
+    usingCachedCampaignSettings: !tenantWebhookUrl && !!cachedWebhookUrl,
+    tenantSettingsSource: tenantDispatch.source,
   };
 }
 
@@ -4370,12 +4565,26 @@ async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = nu
     return { started: false, reason: "no_next_lead" };
   }
 
-  let webhookUrl = normalizeString(campaign.webhook_url);
-  let webhookToken = normalizeString(campaign.webhook_token) || null;
-  const tenantDispatch = await resolveDispatchWebhookSettings(clientId);
-  if (!webhookUrl) webhookUrl = normalizeString(tenantDispatch.webhookUrl);
-  if (!webhookToken && tenantDispatch.webhookToken) webhookToken = normalizeString(tenantDispatch.webhookToken) || null;
+  const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaign);
+  const { webhookUrl, webhookToken } = dispatchSettings;
+  logCampaignDispatch("info", "settings_resolved", {
+    clientId,
+    campaignId: campaign.id,
+    mode: "campaign_queue_progression",
+    ...getSafeDispatchSettingsLog(dispatchSettings),
+    usingCachedCampaignSettings: dispatchSettings.usingCachedCampaignSettings,
+    tenantSettingsSource: dispatchSettings.tenantSettingsSource,
+  });
   if (!webhookUrl) throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
+  await checkEvolutionInstanceHealth({
+    webhookUrl,
+    webhookToken,
+    context: {
+      clientId,
+      campaignId: campaign.id,
+      mode: "campaign_queue_progression",
+    },
+  });
 
   const firstStep = steps[0];
   const targetItem = itemByPhone.get(sanitizePhone(nextLead.telefone)) || null;
@@ -4501,6 +4710,32 @@ async function updateLeadImportItemCampaignProgress({
     .select("id, normalized_data, status_conversa, ultima_interacao_bot, ultima_interacao_usuario")
     .maybeSingle();
 
+  if (updateError && isMissingSchemaError(updateError)) {
+    logCampaignReplyFlow("warn", "conversation_columns_missing_import_item_fallback", {
+      clientId,
+      leadImportItemId,
+      campaignId,
+      error: updateError.message || updateError.code || "missing_schema",
+    });
+    const fallback = await supabase
+      .from("lead_import_items")
+      .update({ normalized_data: updatePayload.normalized_data })
+      .eq("client_id", clientId)
+      .eq("id", leadImportItemId)
+      .select("id, normalized_data")
+      .maybeSingle();
+
+    if (fallback.error) throw fallback.error;
+    return fallback.data
+      ? {
+          ...fallback.data,
+          status_conversa: null,
+          ultima_interacao_bot: null,
+          ultima_interacao_usuario: null,
+        }
+      : null;
+  }
+
   if (updateError) throw updateError;
   return updated;
 }
@@ -4524,31 +4759,17 @@ async function updateLeadConversationState({
     .eq("client_id", clientId)
     .eq("telefone", phone);
 
-  if (error) {
-    // Tolerate missing columns (e.g. ultima_interacao_bot not yet migrated).
-    // The dispatch must not fail just because the leads table lacks optional columns.
-    if (isMissingSchemaError(error)) {
-      console.warn("[updateLeadConversationState] schema_fallback", {
-        clientId,
-        code: error.code,
-        message: error.message,
-      });
-
-      // Retry with only status_conversa (the safest column).
-      const fallbackPayload = { status_conversa: statusConversa };
-      const { error: fallbackError } = await supabase
-        .from("leads")
-        .update(fallbackPayload)
-        .eq("client_id", clientId)
-        .eq("telefone", phone);
-
-      if (fallbackError && !isMissingSchemaError(fallbackError)) {
-        throw fallbackError;
-      }
-      return;
-    }
-    throw error;
+  if (error && isMissingSchemaError(error)) {
+    logCampaignReplyFlow("warn", "conversation_columns_missing_leads_fallback", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      statusConversa,
+      error: error.message || error.code || "missing_schema",
+    });
+    return;
   }
+
+  if (error) throw error;
 }
 
 /**
@@ -4629,7 +4850,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     };
   }
 
-  const [importItemsResult, campaignsResult] = await Promise.all([
+  let [importItemsResult, campaignsResult] = await Promise.all([
     supabase
       .from("lead_import_items")
       .select("id, import_id, normalized_data, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, created_at")
@@ -4642,6 +4863,30 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       .eq("client_id", clientId)
       .is("archived_at", null),
   ]);
+
+  if (importItemsResult.error && isMissingSchemaError(importItemsResult.error)) {
+    logCampaignReplyFlow("warn", "conversation_columns_missing_reply_match_fallback", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      error: importItemsResult.error.message || importItemsResult.error.code || "missing_schema",
+    });
+    const fallback = await supabase
+      .from("lead_import_items")
+      .select("id, import_id, normalized_data, created_at")
+      .eq("client_id", clientId)
+      .in("telefone", phoneVariants)
+      .order("created_at", { ascending: false });
+
+    importItemsResult = {
+      ...fallback,
+      data: (fallback.data || []).map((item) => ({
+        ...item,
+        status_conversa: null,
+        ultima_interacao_bot: null,
+        ultima_interacao_usuario: null,
+      })),
+    };
+  }
 
   if (importItemsResult.error) throw importItemsResult.error;
   if (campaignsResult.error) throw campaignsResult.error;
@@ -4974,20 +5219,44 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
   // - Per-lead execution via dispatchCampaignSequence: step order, delayAfterSeconds between steps,
   //   leadDelaySeconds between leads, waitForReply / reply timeouts from analytics_meta.dispatchOptions.
   // Always use the same Evolution endpoint as direct dispatch (tenant settings), not the global n8n webhook env.
-  let webhookUrl = normalizeString(claimedCampaign.webhook_url);
-  let webhookToken = normalizeString(claimedCampaign.webhook_token) || null;
-  const tenantDispatch = await resolveDispatchWebhookSettings(claimedCampaign.client_id);
-  if (!webhookUrl) {
-    webhookUrl = normalizeString(tenantDispatch.webhookUrl);
-  }
-  if (!webhookToken && tenantDispatch.webhookToken) {
-    webhookToken = normalizeString(tenantDispatch.webhookToken) || null;
-  }
+  const dispatchSettings = await resolveCampaignDispatchSettings(claimedCampaign.client_id, claimedCampaign);
+  const { webhookUrl, webhookToken } = dispatchSettings;
+  logCampaignDispatch("info", "settings_resolved", {
+    clientId: claimedCampaign.client_id,
+    campaignId: claimedCampaign.id,
+    campaignName: claimedCampaign.name,
+    triggerSource,
+    mode: "campaign_dispatch",
+    ...getSafeDispatchSettingsLog(dispatchSettings),
+    usingCachedCampaignSettings: dispatchSettings.usingCachedCampaignSettings,
+    tenantSettingsSource: dispatchSettings.tenantSettingsSource,
+  });
   if (!webhookUrl) {
     const error = new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
     error.statusCode = 400;
     error.code = "EVOLUTION_SETTINGS_MISSING";
     await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error });
+    throw error;
+  }
+
+  try {
+    await checkEvolutionInstanceHealth({
+      webhookUrl,
+      webhookToken,
+      context: {
+        clientId: claimedCampaign.client_id,
+        campaignId: claimedCampaign.id,
+        campaignName: claimedCampaign.name,
+        triggerSource,
+        mode: "campaign_dispatch",
+      },
+    });
+  } catch (error) {
+    await markCampaignDispatchFailed(claimedCampaign, {
+      triggerSource,
+      error,
+      webhookStatus: error?.statusCode || 502,
+    });
     throw error;
   }
 
@@ -5543,14 +5812,30 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     return { continued: false, reason: "campaign_already_complete", finalized: true, campaignId: campaign.id };
   }
 
-  let webhookUrl = normalizeString(campaign.webhook_url);
-  let webhookToken = normalizeString(campaign.webhook_token) || null;
-  const tenantDispatch = await resolveDispatchWebhookSettings(clientId);
-  if (!webhookUrl) webhookUrl = normalizeString(tenantDispatch.webhookUrl);
-  if (!webhookToken && tenantDispatch.webhookToken) webhookToken = normalizeString(tenantDispatch.webhookToken) || null;
+  const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaign);
+  const { webhookUrl, webhookToken } = dispatchSettings;
+  logCampaignDispatch("info", "settings_resolved", {
+    clientId,
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    mode: "campaign_reply_continuation",
+    ...getSafeDispatchSettingsLog(dispatchSettings),
+    usingCachedCampaignSettings: dispatchSettings.usingCachedCampaignSettings,
+    tenantSettingsSource: dispatchSettings.tenantSettingsSource,
+  });
   if (!webhookUrl) {
     throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
   }
+  await checkEvolutionInstanceHealth({
+    webhookUrl,
+    webhookToken,
+    context: {
+      clientId,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      mode: "campaign_reply_continuation",
+    },
+  });
 
   const lead = {
     id: leadImportItem?.id || null,
@@ -5989,6 +6274,14 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
 
   const results = await Promise.all(queries);
   const error = results.find((result) => result.error)?.error;
+  if (error && isMissingSchemaError(error)) {
+    logCampaignReplyFlow("warn", "conversation_columns_missing_lead_reply_check_fallback", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      error: error.message || error.code || "missing_schema",
+    });
+    return false;
+  }
   if (error) throw error;
 
   const rows = results.flatMap((result) => result.data || []);
@@ -8308,7 +8601,8 @@ app.post(
   );
 
   try {
-    const { webhookUrl, webhookToken } = await resolveDispatchWebhookSettings(clientId);
+    const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
+    const { webhookUrl, webhookToken } = dispatchSettings;
     if (!webhookUrl) {
       sendError(
         res,
@@ -8318,6 +8612,15 @@ app.post(
       );
       return;
     }
+    await checkEvolutionInstanceHealth({
+      webhookUrl,
+      webhookToken,
+      context: {
+        clientId,
+        mode: "legacy_manual_dispatch",
+        campaignName: campaignName || null,
+      },
+    });
 
     if (!validation.valid) {
       sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
@@ -9601,6 +9904,16 @@ app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalP
       ? [imageStep, textStep].filter(Boolean).map((step, index) => ({ ...step, order: index + 1 }))
       : [textStep, imageStep].filter(Boolean).map((step, index) => ({ ...step, order: index + 1 }));
 
+    await checkEvolutionInstanceHealth({
+      webhookUrl,
+      webhookToken,
+      context: {
+        requestId,
+        clientId,
+        mode: "direct_dispatch",
+      },
+    });
+
     logDirectDispatch("info", "dispatch_started", {
       requestId,
       clientId,
@@ -9878,7 +10191,8 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
     const authorizedClientId = resolveAuthorizedClientId(req, res, clientId);
     if (!authorizedClientId) return;
 
-    const { webhookUrl, webhookToken } = await resolveDispatchWebhookSettings(authorizedClientId);
+    const dispatchSettings = await resolveDispatchWebhookSettings(authorizedClientId);
+    const { webhookUrl, webhookToken } = dispatchSettings;
     if (!webhookUrl) {
       sendError(
         res,
@@ -9894,6 +10208,17 @@ app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("plani
       sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
       return;
     }
+
+    await checkEvolutionInstanceHealth({
+      webhookUrl,
+      webhookToken,
+      context: {
+        clientId: authorizedClientId,
+        campaignName: name,
+        mode: "campaign_create",
+        ...getSafeDispatchSettingsLog(dispatchSettings),
+      },
+    });
 
     let { data, error } = await supabase
       .from("campaigns")
@@ -10291,16 +10616,30 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
         .select("id"),
     ]);
 
-    if (importItemsResult.error) throw importItemsResult.error;
-    if (leadsResult.error) throw leadsResult.error;
+    if (importItemsResult.error && !isMissingSchemaError(importItemsResult.error)) throw importItemsResult.error;
+    if (leadsResult.error && !isMissingSchemaError(leadsResult.error)) throw leadsResult.error;
+    if (importItemsResult.error && isMissingSchemaError(importItemsResult.error)) {
+      logCampaignReplyFlow("warn", "conversation_columns_missing_import_reply_update_fallback", {
+        clientId,
+        phone: maskPhoneForLog(phone),
+        error: importItemsResult.error.message || importItemsResult.error.code || "missing_schema",
+      });
+    }
+    if (leadsResult.error && isMissingSchemaError(leadsResult.error)) {
+      logCampaignReplyFlow("warn", "conversation_columns_missing_lead_reply_update_fallback", {
+        clientId,
+        phone: maskPhoneForLog(phone),
+        error: leadsResult.error.message || leadsResult.error.code || "missing_schema",
+      });
+    }
 
     res.json({
       success: true,
       clientId,
       phone,
       repliedAt,
-      updatedImportItems: importItemsResult.data?.length || 0,
-      updatedLeads: leadsResult.data?.length || 0,
+      updatedImportItems: importItemsResult.error ? 0 : importItemsResult.data?.length || 0,
+      updatedLeads: leadsResult.error ? 0 : leadsResult.data?.length || 0,
       campaignContext: {
         isCampaignLead: campaignReplyContext.matches.length > 0,
         matchedCampaignCount: campaignReplyContext.matches.length,
