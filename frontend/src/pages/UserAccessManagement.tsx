@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   FileSpreadsheet,
   LockKeyhole,
   LineChart,
   Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
   Trash2,
@@ -27,12 +29,11 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/EmptyState";
-import { ErrorMessage } from "@/components/ErrorMessage";
 import { PageShell } from "@/components/PageShell";
 import { type AccessProfileRecord, useAccessProfiles } from "@/hooks/useAccessProfiles";
 import { type LeadClient, useLeadClients } from "@/hooks/useLeadClients";
 import { type AdminUserRecord, useAdminUsers } from "@/hooks/useAdminUsers";
-import { API_BASE_URL } from "@/lib/api";
+import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   ACCESS_PRESET_ORDER,
@@ -1791,7 +1792,7 @@ export default function UserAccessManagement() {
 
       const payload = buildPayload(preparedDraft);
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/users/${encodeURIComponent(user.uid)}/access`, {
+      const res = await fetchApi(`/api/admin/users/${encodeURIComponent(user.uid)}/access`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1800,11 +1801,11 @@ export default function UserAccessManagement() {
         body: JSON.stringify(payload),
       });
 
-      const body = await res.json().catch(() => null);
-
       if (!res.ok) {
-        throw new Error(body?.error?.message || body?.error?.details || "Nao foi possivel salvar este usuario.");
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel salvar este usuario"));
       }
+
+      const body = await readApiJson<{ item?: AdminUserRecord }>(res, "admin-user-access");
 
       showActionFeedback({
         tone: "success",
@@ -1865,7 +1866,7 @@ export default function UserAccessManagement() {
         sendPasswordReset: preparedDraft.sendPasswordReset,
       };
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/users`, {
+      const res = await fetchApi("/api/admin/users", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1874,11 +1875,11 @@ export default function UserAccessManagement() {
         body: JSON.stringify(payload),
       });
 
-      const body = await res.json().catch(() => null);
-
       if (!res.ok) {
-        throw new Error(body?.error?.message || body?.error?.details || "Nao foi possivel criar este usuario.");
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel criar este usuario"));
       }
+
+      const body = await readApiJson<{ item?: AdminUserRecord; passwordResetLink?: string }>(res, "admin-user-create");
 
       showActionFeedback({
         tone: "success",
@@ -1930,9 +1931,9 @@ export default function UserAccessManagement() {
       }
 
       const endpoint = isNew
-        ? `${API_BASE_URL}/api/admin/access-profiles`
-        : `${API_BASE_URL}/api/admin/access-profiles/${encodeURIComponent(preparedDraft.key)}`;
-      const res = await fetch(endpoint, {
+        ? "/api/admin/access-profiles"
+        : `/api/admin/access-profiles/${encodeURIComponent(preparedDraft.key)}`;
+      const res = await fetchApi(endpoint, {
         method: isNew ? "POST" : "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1951,11 +1952,14 @@ export default function UserAccessManagement() {
         }),
       });
 
-      const body = await res.json().catch(() => null);
-
       if (!res.ok) {
-        throw new Error(body?.error?.message || body?.error?.details || "Nao foi possivel salvar este tipo de usuario.");
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel salvar este tipo de usuario"));
       }
+
+      const body = await readApiJson<{ item?: AccessProfileRecord; sync?: { updatedUsers?: number; skippedUsers?: number } }>(
+        res,
+        "admin-access-profile-save"
+      );
 
       const savedProfile = body?.item as AccessProfileRecord | undefined;
       const syncMessage =
@@ -2005,17 +2009,15 @@ export default function UserAccessManagement() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/users/${encodeURIComponent(user.uid)}`, {
+      const res = await fetchApi(`/api/admin/users/${encodeURIComponent(user.uid)}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
-      const body = await res.json().catch(() => null);
-
       if (!res.ok) {
-        throw new Error(body?.error?.message || body?.error?.details || "Nao foi possivel apagar este usuario.");
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel apagar este usuario"));
       }
 
       showActionFeedback({
@@ -2077,17 +2079,15 @@ export default function UserAccessManagement() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/access-profiles/${encodeURIComponent(selectedProfile.key)}`, {
+      const res = await fetchApi(`/api/admin/access-profiles/${encodeURIComponent(selectedProfile.key)}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
-      const body = await res.json().catch(() => null);
-
       if (!res.ok) {
-        throw new Error(body?.error?.message || body?.error?.details || "Nao foi possivel apagar este tipo de usuario.");
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel apagar este tipo de usuario"));
       }
 
       showActionFeedback({
@@ -2122,9 +2122,6 @@ export default function UserAccessManagement() {
           Seu acesso esta em modo leitura. Apenas gestor, gerente ou admin interno podem criar usuarios, liberar cadastros e alterar permissoes.
         </div>
       )}
-
-      <ErrorMessage message={error ? (error as Error).message : null} variant="dashboard" />
-
       <Dialog open={Boolean(actionFeedback)} onOpenChange={(open) => (!open ? clearActionFeedback() : null)}>
         <DialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
           <DialogHeader className="space-y-3 text-left">
@@ -2193,7 +2190,28 @@ export default function UserAccessManagement() {
             <CardContent className="space-y-5">
               {isLoading ? <EmptyState message="Carregando usuarios..." /> : null}
 
-              {!isLoading && filteredUsers.length === 0 ? (
+              {!isLoading && error ? (
+                <div className="rounded-[1.5rem] border border-destructive/30 bg-destructive/10 p-8 text-center">
+                  <AlertTriangle className="mx-auto mb-3 h-6 w-6 text-destructive" />
+                  <p className="text-sm font-medium text-foreground">Nao foi possivel carregar usuarios</p>
+                  <p className="mx-auto mt-2 max-w-2xl text-xs leading-6 text-muted-foreground">
+                    {(error as Error).message ||
+                      "A API de usuarios nao respondeu dentro do tempo esperado. Tente novamente ou verifique o backend."}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => void refetch()}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Tentar novamente
+                  </Button>
+                </div>
+              ) : null}
+
+              {!isLoading && !error && filteredUsers.length === 0 ? (
                 <EmptyState
                   title="Nenhum usuario encontrado"
                   description={
@@ -2204,7 +2222,7 @@ export default function UserAccessManagement() {
                 />
               ) : null}
 
-              {!isLoading && filteredUsers.length > 0 ? (
+              {!isLoading && !error && filteredUsers.length > 0 ? (
                 <>
                   <div className="flex justify-end">
                     <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">

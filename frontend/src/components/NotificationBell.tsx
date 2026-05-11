@@ -12,7 +12,7 @@ interface NotificationBellProps {
 }
 
 export function NotificationBell({ collapsed }: NotificationBellProps) {
-  const { items, unreadCount, markAsRead, markAllRead } = useNotifications();
+  const { items, unreadCount, error, markAsRead, markAllRead } = useNotifications();
 
   const handleClick = (item: { id: string; link: string | null; read: boolean }) => {
     if (!item.read) markAsRead(item.id);
@@ -54,7 +54,12 @@ export function NotificationBell({ collapsed }: NotificationBellProps) {
           )}
         </div>
         <ScrollArea className="max-h-[320px]">
-          {items.length === 0 ? (
+          {error ? (
+            <div className="space-y-1 p-6 text-center text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Notificacoes indisponiveis</p>
+              <p className="text-xs leading-5">{error}</p>
+            </div>
+          ) : items.length === 0 ? (
             <div className="p-6 text-center text-sm text-muted-foreground">Nenhuma notificacao</div>
           ) : (
             <div className="divide-y divide-slate-200/80 dark:divide-white/8">

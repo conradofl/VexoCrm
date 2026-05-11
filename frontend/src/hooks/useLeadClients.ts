@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/api";
+import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 
 export interface LeadClient {
   id: string;
@@ -45,17 +45,18 @@ export function useLeadClients() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/lead-clients`, {
+      const res = await fetchApi("/api/lead-clients", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await readApiErrorMessage(res, "Lead clients fetch failed");
         throw new Error(`Lead clients fetch failed: ${res.status} ${errText}`);
       }
 
-      const payload = await res.json();
+      const payload = await readApiJson<{ items?: LeadClient[] }>(res, "lead_clients");
       return Array.isArray(payload.items) ? payload.items : [];
     },
+    retry: 1,
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -71,7 +72,7 @@ export function useCreateLeadClient() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/lead-clients`, {
+      const res = await fetchApi("/api/lead-clients", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -80,16 +81,11 @@ export function useCreateLeadClient() {
         body: JSON.stringify(payload),
       });
 
-      const responsePayload = await res.json().catch(() => null);
-
       if (!res.ok) {
-        const apiMessage =
-          responsePayload?.error?.message ||
-          responsePayload?.error?.details ||
-          `Lead client create failed: ${res.status}`;
-        throw new Error(apiMessage);
+        throw new Error(await readApiErrorMessage(res, "Lead client create failed"));
       }
 
+      const responsePayload = await readApiJson<{ item?: LeadClient }>(res, "create_lead_client");
       if (!responsePayload?.item) {
         throw new Error("Lead client create failed: missing response payload");
       }
@@ -113,8 +109,8 @@ export function useDeleteLeadClient() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(
-        `${API_BASE_URL}/api/lead-clients/${encodeURIComponent(tenantId)}`,
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
@@ -122,14 +118,7 @@ export function useDeleteLeadClient() {
       );
 
       if (!res.ok) {
-        let message: string;
-        try {
-          const body = await res.json();
-          message = body?.error?.message || body?.error?.details || body?.message || "";
-        } catch {
-          message = "";
-        }
-
+        let message = await readApiErrorMessage(res, "Lead client delete failed");
         if (!message || message.includes("<!DOCTYPE") || message.includes("<html")) {
           message =
             res.status === 404
@@ -143,7 +132,7 @@ export function useDeleteLeadClient() {
       }
 
       try {
-        const data = await res.json();
+        const data = await readApiJson<{ item?: { id: string; name?: string } }>(res, "delete_lead_client");
         return data?.item || { id: tenantId };
       } catch {
         return { id: tenantId };
@@ -169,8 +158,8 @@ export function useUpdateLeadClientN8nSettings() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(
-        `${API_BASE_URL}/api/lead-clients/${encodeURIComponent(tenantId)}/n8n-settings`,
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}/n8n-settings`,
         {
           method: "PATCH",
           headers: {
@@ -181,16 +170,11 @@ export function useUpdateLeadClientN8nSettings() {
         }
       );
 
-      const responsePayload = await res.json().catch(() => null);
-
       if (!res.ok) {
-        const apiMessage =
-          responsePayload?.error?.message ||
-          responsePayload?.error?.details ||
-          `N8N settings update failed: ${res.status}`;
-        throw new Error(apiMessage);
+        throw new Error(await readApiErrorMessage(res, "N8N settings update failed"));
       }
 
+      const responsePayload = await readApiJson<{ item?: LeadClientN8nSettingsSummary }>(res, "update_lead_client_n8n_settings");
       if (!responsePayload?.item) {
         throw new Error("N8N settings update failed: missing response payload");
       }

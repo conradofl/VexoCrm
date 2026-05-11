@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
 
+const CAMPAIGN_REQUEST_TIMEOUT_MS = 15000;
+
 export interface Campaign {
   id: string;
   name: string;
@@ -183,6 +185,128 @@ async function readApiErrorMessage(res: Response, fallback: string): Promise<str
   return text ? `${fallback}: ${res.status} ${text.slice(0, 240)}` : `${fallback}: ${res.status}`;
 }
 
+async function readCampaignJson<T>(res: Response, context: string): Promise<T> {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    console.error("[campaigns-api] invalid_response", {
+      context,
+      status: res.status,
+      contentType,
+    });
+    throw new Error("Resposta invalida da API de campanhas.");
+  }
+
+  return res.json() as Promise<T>;
+}
+
+const CAMPAIGN_ERROR_MESSAGES: Record<string, string> = {
+  CAMPAIGN_NOT_FOUND: "Campanha nao encontrada.",
+  CAMPAIGN_NOT_DISPATCHABLE: "Campanha nao pode ser disparada no status atual.",
+  CAMPAIGN_ARCHIVED: "Campanha arquivada nao pode ser disparada.",
+  NO_DISPATCH_LEADS: "Nenhum lead encontrado para esta campanha. Verifique a importacao e os filtros de segmentacao.",
+  EVOLUTION_SETTINGS_MISSING: "URL de disparo Evolution nao configurada. Acesse as configuracoes da empresa e configure a URL de disparo.",
+  EVOLUTION_SETTINGS_SCHEMA_MISSING: "Tabela de configuracao de disparo nao existe. Execute a migracao do banco de dados.",
+  EVOLUTION_TRIGGER_FAILED: "Falha no envio via Evolution API. Verifique se a instancia WhatsApp esta conectada.",
+  CAMPAIGN_REPLY_FLOW_INVALID: "Campanha com resposta avancada precisa de pelo menos um passo imediato.",
+  N8N_TIMEOUT: "Timeout na comunicacao com o servidor de disparo (20s).",
+};
+
+async function readTriggerErrorMessage(res: Response): Promise<string> {
+  const contentType = res.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    const data = await res.json().catch(() => null);
+    const code = data?.error?.code || "";
+    const apiMessage = data?.error?.message || data?.message || "";
+
+    // Use friendly message if we have a known error code
+    const friendlyMessage = CAMPAIGN_ERROR_MESSAGES[code];
+    if (friendlyMessage) {
+      // Append API detail if it contains useful info (e.g. Evolution session error)
+      const hasUsefulDetail =
+        apiMessage &&
+        !apiMessage.includes("<!DOCTYPE") &&
+        !apiMessage.includes("<html") &&
+        apiMessage !== friendlyMessage;
+      return hasUsefulDetail
+        ? `${friendlyMessage} Detalhe: ${apiMessage.slice(0, 200)}`
+        : friendlyMessage;
+    }
+
+    // Fallback: use API message if available
+    if (apiMessage && !apiMessage.includes("<!DOCTYPE")) {
+      return apiMessage.slice(0, 300);
+    }
+
+    return `Erro ao disparar campanha (${res.status}).`;
+  }
+
+  const text = await res.text().catch(() => "");
+  if (text.includes("Cannot POST") || text.includes("Cannot GET")) {
+    return "Rota de disparo nao encontrada. Verifique se o backend esta atualizado.";
+  }
+
+  return `Erro ao disparar campanha (${res.status}).`;
+}
+
+function getCampaignApiCandidates(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const absoluteApiUrl = `${API_BASE_URL}${normalizedPath}`;
+  const preferSameOrigin = !import.meta.env.DEV && typeof window !== "undefined";
+
+  return Array.from(new Set(preferSameOrigin ? [normalizedPath, absoluteApiUrl] : [absoluteApiUrl, normalizedPath]));
+}
+
+function shouldRetryCampaignResponse(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+  return [502, 503, 504].includes(response.status) || (response.status >= 500 && contentType.includes("text/html"));
+}
+
+async function fetchCampaignsApi(path: string, init: RequestInit) {
+  let networkError: unknown = null;
+  const candidates = getCampaignApiCandidates(path);
+
+  for (const [index, url] of candidates.entries()) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), CAMPAIGN_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      if (shouldRetryCampaignResponse(response) && index < candidates.length - 1) {
+        console.warn("[campaigns-api] retryable_response", {
+          path,
+          attempt: index + 1,
+          status: response.status,
+        });
+        continue;
+      }
+
+      if (index > 0) {
+        console.info("[campaigns-api] fallback_success", { path, status: response.status });
+      }
+
+      return response;
+    } catch (error) {
+      networkError = error;
+      const eventName = error instanceof DOMException && error.name === "AbortError" ? "request_timeout" : "network_error";
+      console.warn("[campaigns-api]", eventName, {
+        path,
+        attempt: index + 1,
+        fallbackAvailable: index < candidates.length - 1,
+      });
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
+
+  console.error("[campaigns-api] request_failed", { path });
+  throw networkError instanceof Error ? networkError : new Error("Falha de conexao com a API de campanhas.");
+}
+
 export function useCampanhas(clientId?: string) {
   const { isAuthenticated, canAccessInternalPage, getIdToken } = useAuth();
 
@@ -196,18 +320,19 @@ export function useCampanhas(clientId?: string) {
       const params = new URLSearchParams();
       if (clientId) params.set("clientId", clientId);
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns${params.toString() ? `?${params}` : ""}`, {
+      const res = await fetchCampaignsApi(`/api/campaigns${params.toString() ? `?${params}` : ""}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
-        const err = await res.text();
+        const err = await readApiErrorMessage(res, "Erro ao buscar campanhas");
         throw new Error(`Erro ao buscar campanhas: ${res.status} ${err}`);
       }
 
-      const payload = await res.json();
+      const payload = await readCampaignJson<{ items?: Campaign[] }>(res, "list_campaigns");
       return Array.isArray(payload.items) ? payload.items : [];
     },
+    retry: 1,
     staleTime: 30 * 1000,
   });
 }
@@ -222,18 +347,19 @@ export function useCampaignLeads(campaignId?: string) {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/leads`, {
+      const res = await fetchCampaignsApi(`/api/campaigns/${campaignId}/leads`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
-        const err = await res.text();
+        const err = await readApiErrorMessage(res, "Erro ao buscar leads da campanha");
         throw new Error(`Erro ao buscar leads da campanha: ${res.status} ${err}`);
       }
 
-      const payload = await res.json();
+      const payload = await readCampaignJson<{ items?: CampaignLead[] }>(res, "list_campaign_leads");
       return Array.isArray(payload.items) ? payload.items : [];
     },
+    retry: 1,
     staleTime: 30 * 1000,
   });
 }
@@ -247,7 +373,7 @@ export function useCreateCampaign() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns`, {
+      const res = await fetchCampaignsApi("/api/campaigns", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -257,15 +383,19 @@ export function useCreateCampaign() {
       });
 
       if (!res.ok) {
-        const err = await res.text();
+        const err = await readApiErrorMessage(res, "Erro ao criar campanha");
         throw new Error(`Erro ao criar campanha: ${res.status} ${err}`);
       }
 
-      const data = await res.json();
+      const data = await readCampaignJson<{ item?: Campaign }>(res, "create_campaign");
+      if (!data.item) {
+        throw new Error("A API nao retornou a campanha criada.");
+      }
       return data.item;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["campaigns", variables.clientId || "all"] });
     },
   });
 }
@@ -282,7 +412,7 @@ export function useUpdateCampaign() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/${id}`, {
+      const res = await fetchCampaignsApi(`/api/campaigns/${id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -292,11 +422,11 @@ export function useUpdateCampaign() {
       });
 
       if (!res.ok) {
-        const err = await res.text();
+        const err = await readApiErrorMessage(res, "Erro ao atualizar campanha");
         throw new Error(`Erro ao atualizar campanha: ${res.status} ${err}`);
       }
 
-      const data = await res.json();
+      const data = await readCampaignJson<{ item: Campaign }>(res, "update_campaign");
       return data.item;
     },
     onSuccess: () => {
@@ -314,13 +444,13 @@ export function useDeleteCampaign() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/${id}`, {
+      const res = await fetchCampaignsApi(`/api/campaigns/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
-        const err = await res.text();
+        const err = await readApiErrorMessage(res, "Erro ao excluir campanha");
         throw new Error(`Erro ao excluir campanha: ${res.status} ${err}`);
       }
     },
@@ -339,17 +469,17 @@ export function useTriggerCampaign() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/${id}/trigger`, {
+      const res = await fetchCampaignsApi(`/api/campaigns/${id}/trigger`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Erro ao disparar campanha: ${res.status} ${err}`);
+        const errMsg = await readTriggerErrorMessage(res);
+        throw new Error(errMsg);
       }
 
-      return res.json();
+      return readCampaignJson<TriggerCampaignResponse>(res, "trigger_campaign");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
@@ -365,7 +495,7 @@ export function useDirectDispatch() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/direct-dispatch`, {
+      const res = await fetchCampaignsApi("/api/campaigns/direct-dispatch", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -378,7 +508,7 @@ export function useDirectDispatch() {
         throw new Error(await readApiErrorMessage(res, "Erro ao disparar mensagem"));
       }
 
-      return res.json();
+      return readCampaignJson<DirectDispatchResponse>(res, "direct_dispatch");
     },
   });
 }
@@ -393,7 +523,7 @@ export function useCampaignAiStatus() {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/ai/status`, {
+      const res = await fetchCampaignsApi("/api/campaigns/ai/status", {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -410,8 +540,9 @@ export function useCampaignAiStatus() {
         throw new Error(await readApiErrorMessage(res, "Erro ao consultar IA"));
       }
 
-      return res.json();
+      return readCampaignJson<CampaignAiStatus>(res, "campaign_ai_status");
     },
+    retry: 1,
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -427,7 +558,7 @@ function useCampaignAiMutation<TResponse>(
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const res = await fetchCampaignsApi(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -436,11 +567,11 @@ function useCampaignAiMutation<TResponse>(
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(data?.error?.message || `${errorLabel}: ${res.status}`);
+        throw new Error(await readApiErrorMessage(res, errorLabel));
       }
 
+      const data = await readCampaignJson<{ item: TResponse }>(res, endpoint);
       return data.item;
     },
   });

@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
 const hookSource = readFileSync(resolve("src/hooks/useLeadImports.ts"), "utf8");
+const campaignsHookSource = readFileSync(resolve("src/hooks/useCampanhas.ts"), "utf8");
 const pageSource = readFileSync(resolve("src/pages/LeadImports.tsx"), "utf8");
 
 describe("Lead imports loading resilience", () => {
@@ -26,5 +27,16 @@ describe("Lead imports loading resilience", () => {
     expect(pageSource).toContain("Falha ao carregar leads pendentes");
     expect(pageSource).toContain("Nao foi possivel carregar os leads");
     expect(pageSource).toContain("Tentar novamente");
+  });
+
+  it("keeps campaign creation from staying pending forever", () => {
+    expect(campaignsHookSource).toContain("CAMPAIGN_REQUEST_TIMEOUT_MS");
+    expect(campaignsHookSource).toContain("fetchCampaignsApi");
+    expect(campaignsHookSource).toContain("AbortController");
+    expect(campaignsHookSource).toContain("create_campaign");
+    expect(campaignsHookSource).toContain("A API nao retornou a campanha criada.");
+    expect(pageSource).toContain("[campaigns-ui] create_campaign_start");
+    expect(pageSource).toContain("[campaigns-ui] create_campaign_failed");
+    expect(pageSource).toContain("createCampaign.isPending");
   });
 });

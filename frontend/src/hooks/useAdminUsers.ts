@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/api";
+import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import {
   type AccessPermission,
   type AccessPreset,
@@ -37,6 +37,10 @@ export interface AdminUserRecord {
   access: AdminUserAccess;
 }
 
+interface AdminUsersResponse {
+  items?: AdminUserRecord[];
+}
+
 export function useAdminUsers() {
   const { isAuthenticated, canAccessInternalPage, getIdToken } = useAuth();
 
@@ -49,20 +53,27 @@ export function useAdminUsers() {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/users`, {
+      const res = await fetchApi("/api/admin/users", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
       if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Admin users fetch failed: ${res.status} ${errText}`);
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel carregar usuarios"));
       }
 
-      const payload = await res.json();
+      const payload = await readApiJson<AdminUsersResponse>(res, "admin-users");
+      if (!Array.isArray(payload.items)) {
+        console.warn("[admin-users] invalid_items_payload", {
+          itemsType: typeof payload.items,
+        });
+        return [];
+      }
+
       return Array.isArray(payload.items) ? payload.items : [];
     },
+    retry: 1,
     staleTime: 30 * 1000,
   });
 }
