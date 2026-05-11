@@ -4524,7 +4524,31 @@ async function updateLeadConversationState({
     .eq("client_id", clientId)
     .eq("telefone", phone);
 
-  if (error) throw error;
+  if (error) {
+    // Tolerate missing columns (e.g. ultima_interacao_bot not yet migrated).
+    // The dispatch must not fail just because the leads table lacks optional columns.
+    if (isMissingSchemaError(error)) {
+      console.warn("[updateLeadConversationState] schema_fallback", {
+        clientId,
+        code: error.code,
+        message: error.message,
+      });
+
+      // Retry with only status_conversa (the safest column).
+      const fallbackPayload = { status_conversa: statusConversa };
+      const { error: fallbackError } = await supabase
+        .from("leads")
+        .update(fallbackPayload)
+        .eq("client_id", clientId)
+        .eq("telefone", phone);
+
+      if (fallbackError && !isMissingSchemaError(fallbackError)) {
+        throw fallbackError;
+      }
+      return;
+    }
+    throw error;
+  }
 }
 
 /**

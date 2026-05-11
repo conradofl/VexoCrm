@@ -199,6 +199,56 @@ async function readCampaignJson<T>(res: Response, context: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const CAMPAIGN_ERROR_MESSAGES: Record<string, string> = {
+  CAMPAIGN_NOT_FOUND: "Campanha nao encontrada.",
+  CAMPAIGN_NOT_DISPATCHABLE: "Campanha nao pode ser disparada no status atual.",
+  CAMPAIGN_ARCHIVED: "Campanha arquivada nao pode ser disparada.",
+  NO_DISPATCH_LEADS: "Nenhum lead encontrado para esta campanha. Verifique a importacao e os filtros de segmentacao.",
+  EVOLUTION_SETTINGS_MISSING: "URL de disparo Evolution nao configurada. Acesse as configuracoes da empresa e configure a URL de disparo.",
+  EVOLUTION_SETTINGS_SCHEMA_MISSING: "Tabela de configuracao de disparo nao existe. Execute a migracao do banco de dados.",
+  EVOLUTION_TRIGGER_FAILED: "Falha no envio via Evolution API. Verifique se a instancia WhatsApp esta conectada.",
+  CAMPAIGN_REPLY_FLOW_INVALID: "Campanha com resposta avancada precisa de pelo menos um passo imediato.",
+  N8N_TIMEOUT: "Timeout na comunicacao com o servidor de disparo (20s).",
+};
+
+async function readTriggerErrorMessage(res: Response): Promise<string> {
+  const contentType = res.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    const data = await res.json().catch(() => null);
+    const code = data?.error?.code || "";
+    const apiMessage = data?.error?.message || data?.message || "";
+
+    // Use friendly message if we have a known error code
+    const friendlyMessage = CAMPAIGN_ERROR_MESSAGES[code];
+    if (friendlyMessage) {
+      // Append API detail if it contains useful info (e.g. Evolution session error)
+      const hasUsefulDetail =
+        apiMessage &&
+        !apiMessage.includes("<!DOCTYPE") &&
+        !apiMessage.includes("<html") &&
+        apiMessage !== friendlyMessage;
+      return hasUsefulDetail
+        ? `${friendlyMessage} Detalhe: ${apiMessage.slice(0, 200)}`
+        : friendlyMessage;
+    }
+
+    // Fallback: use API message if available
+    if (apiMessage && !apiMessage.includes("<!DOCTYPE")) {
+      return apiMessage.slice(0, 300);
+    }
+
+    return `Erro ao disparar campanha (${res.status}).`;
+  }
+
+  const text = await res.text().catch(() => "");
+  if (text.includes("Cannot POST") || text.includes("Cannot GET")) {
+    return "Rota de disparo nao encontrada. Verifique se o backend esta atualizado.";
+  }
+
+  return `Erro ao disparar campanha (${res.status}).`;
+}
+
 function getCampaignApiCandidates(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const absoluteApiUrl = `${API_BASE_URL}${normalizedPath}`;
@@ -425,8 +475,8 @@ export function useTriggerCampaign() {
       });
 
       if (!res.ok) {
-        const err = await readApiErrorMessage(res, "Erro ao disparar campanha");
-        throw new Error(`Erro ao disparar campanha: ${res.status} ${err}`);
+        const errMsg = await readTriggerErrorMessage(res);
+        throw new Error(errMsg);
       }
 
       return readCampaignJson<TriggerCampaignResponse>(res, "trigger_campaign");
