@@ -266,6 +266,34 @@ function maskOutboundPhone(value) {
   return `${"*".repeat(Math.max(normalized.length - 4, 0))}${normalized.slice(-4)}`;
 }
 
+function getSafeEndpointInfo(webhookUrl) {
+  const rawUrl = normalizeString(webhookUrl);
+  if (!rawUrl) {
+    return {
+      endpointOrigin: null,
+      endpointPath: null,
+      instance: null,
+    };
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const messageIndex = pathParts.findIndex((part) => part === "message");
+    return {
+      endpointOrigin: url.origin,
+      endpointPath: url.pathname,
+      instance: messageIndex >= 0 ? decodeURIComponent(pathParts[messageIndex + 2] || "") || null : null,
+    };
+  } catch {
+    return {
+      endpointOrigin: null,
+      endpointPath: null,
+      instance: null,
+    };
+  }
+}
+
 function resolveStepWebhookUrl(webhookUrl, payload) {
   if (payload?.type === "image" && typeof webhookUrl === "string") {
     return webhookUrl.replace("/message/sendText/", "/message/sendMedia/");
@@ -339,6 +367,7 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
   const stepWebhookUrl = resolveStepWebhookUrl(webhookUrl, payload);
+  const endpointInfo = getSafeEndpointInfo(stepWebhookUrl);
 
   try {
     console.info("[campaign-outbound] whatsapp_step_request", {
@@ -346,6 +375,7 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
       stepId: payload?.stepId || null,
       phone: maskOutboundPhone(payload?.number),
       endpointMode: payload?.type === "image" ? "media" : "text",
+      ...endpointInfo,
       hasMedia: Boolean(payload?.base64 || payload?.mediaBase64 || payload?.dataUrl),
       hasCaption: Boolean(payload?.caption),
     });
@@ -362,6 +392,7 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
         type: payload?.type || null,
         stepId: payload?.stepId || null,
         phone: maskOutboundPhone(payload?.number),
+        ...endpointInfo,
         status: response.status,
       });
       throw new Error(
@@ -375,6 +406,7 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
       type: payload?.type || null,
       stepId: payload?.stepId || null,
       phone: maskOutboundPhone(payload?.number),
+      ...endpointInfo,
       status: response.status,
     });
 
@@ -508,14 +540,33 @@ export async function dispatchCampaignSequence({
       summary.successPhones.push(phone);
 
       if (typeof onLeadDispatched === "function") {
-        await onLeadDispatched({
-          lead,
-          phone,
-          sentAt: lastSentAt,
-          lastStep: lastSuccessfulStep,
-          lastStepIndex: lastSuccessfulStepIndex,
-          totalSteps: enabledSteps.length,
-        });
+        try {
+          await onLeadDispatched({
+            lead,
+            phone,
+            sentAt: lastSentAt,
+            lastStep: lastSuccessfulStep,
+            lastStepIndex: lastSuccessfulStepIndex,
+            totalSteps: enabledSteps.length,
+          });
+        } catch (callbackError) {
+          const reason =
+            callbackError instanceof Error
+              ? callbackError.message
+              : "Falha ao salvar o estado interno do lead apos envio bem-sucedido.";
+          summary.warnings.push({
+            phone,
+            stepId: lastSuccessfulStep?.id || null,
+            stepType: lastSuccessfulStep?.type || null,
+            reason,
+          });
+          console.warn("[campaign-outbound] lead_callback_failed", {
+            phone: maskOutboundPhone(phone),
+            stepId: lastSuccessfulStep?.id || null,
+            stepType: lastSuccessfulStep?.type || null,
+            reason,
+          });
+        }
       }
     }
 
