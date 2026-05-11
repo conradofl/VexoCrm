@@ -2136,7 +2136,10 @@ function extractEvolutionConnectionState(payload) {
     payload.response?.connectionStatus,
   ];
 
-  return candidates.map((value) => normalizeString(value).toLowerCase()).find(Boolean) || null;
+  return candidates.map((value) => {
+    const normalized = normalizeString(value);
+    return normalized ? normalized.toLowerCase() : null;
+  }).find(Boolean) || null;
 }
 
 function isEvolutionOpenState(state) {
@@ -4618,7 +4621,7 @@ async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = nu
     logCampaignReplyFlow("info", "queue_next_lead_started", {
       clientId,
       campaignId: campaign.id,
-      phone: maskPhone(nextLead.telefone),
+      phone: maskPhoneForLog(nextLead.telefone),
       stepId: firstStep?.id || null,
       stepType: firstStep?.type || null,
     });
@@ -5639,7 +5642,7 @@ async function callCampaignQualificationWebhook({
     logCampaignReplyFlow(settings?.invalid ? "warn" : "info", "n8n_qualification_skipped", {
       clientId,
       campaignId: campaign?.id || null,
-      phone: maskPhone(phone),
+      phone: maskPhoneForLog(phone),
       reason: settings?.invalid ? "invalid_webhook_url" : "missing_webhook_url",
       source: settings?.source || "missing",
     });
@@ -5685,7 +5688,7 @@ async function callCampaignQualificationWebhook({
     logCampaignReplyFlow("info", "n8n_qualification_started", {
       clientId,
       campaignId: campaign?.id || null,
-      phone: maskPhone(phone),
+      phone: maskPhoneForLog(phone),
       source: settings.source,
     });
 
@@ -5704,7 +5707,7 @@ async function callCampaignQualificationWebhook({
     logCampaignReplyFlow("info", "n8n_qualification_finished", {
       clientId,
       campaignId: campaign?.id || null,
-      phone: maskPhone(phone),
+      phone: maskPhoneForLog(phone),
       status: response.status,
     });
 
@@ -5726,7 +5729,7 @@ async function callCampaignQualificationWebhook({
     logCampaignReplyFlow("warn", "n8n_qualification_failed", {
       clientId,
       campaignId: campaign?.id || null,
-      phone: maskPhone(phone),
+      phone: maskPhoneForLog(phone),
       reason,
     });
     return {
@@ -5891,7 +5894,7 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   logCampaignReplyFlow("info", "reply_received_advancing_sequence", {
     clientId,
     campaignId: campaign.id,
-    phone: maskPhone(phone),
+    phone: maskPhoneForLog(phone),
     nextStepIndex,
     remainingSteps: remainingSteps.map((step) => ({
       id: step.id,
@@ -5945,7 +5948,7 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
       logCampaignReplyFlow("info", "reply_step_sent", {
         clientId,
         campaignId: campaign.id,
-        phone: maskPhone(phone),
+        phone: maskPhoneForLog(phone),
         stepId: step.id,
         stepType: step.type,
         originalStepIndex,
@@ -5988,7 +5991,7 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
     logCampaignReplyFlow("warn", "reply_sequence_failed_for_lead", {
       clientId,
       campaignId: campaign.id,
-      phone: maskPhone(phone),
+      phone: maskPhoneForLog(phone),
       failedStepIndex,
       reason: failureReason,
     });
@@ -10551,7 +10554,7 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
 
     logCampaignReplyFlow("info", "webhook_received", {
       clientId,
-      phone: maskPhone(phone),
+      phone: maskPhoneForLog(phone),
       hasReplyText: Boolean(replyText),
       matchedCampaignCount: campaignReplyContext.matches.length,
       waitForReplyCampaignCount: campaignReplyContext.waitForReplyMatches.length,
