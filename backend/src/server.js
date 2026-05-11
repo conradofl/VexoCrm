@@ -5315,10 +5315,12 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   const remainingReplyEntries = steps
     .map((step, index) => ({ step, index }))
     .filter((entry) => entry.index >= nextStepIndex && entry.step.triggerMode === "after_reply");
-  const remainingSteps = remainingReplyEntries.map((entry) => entry.step);
-  const finalStepEntry = remainingReplyEntries[remainingReplyEntries.length - 1] || null;
-  const finalStep = finalStepEntry?.step || null;
-  const finalStepIndex = finalStepEntry?.index ?? nextStepIndex;
+
+  // Disparar apenas o próximo passo "after_reply", não todos
+  const nextReplyEntry = remainingReplyEntries[0] || null;
+  const remainingSteps = nextReplyEntry ? [nextReplyEntry.step] : [];
+  const finalStepIndex = nextReplyEntry?.index ?? -1;
+  const finalStep = nextReplyEntry?.step || null;
 
   if (remainingSteps.length === 0) {
     if (leadImportItem?.id) {
@@ -5383,6 +5385,9 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
   let finalizationWarning = null;
   if (summary.successCount > 0 && leadImportItem?.id) {
     try {
+      // Verificar se há mais passos "after_reply" após o passo que acabamos de disparar
+      const hasMoreReplySteps = remainingReplyEntries.length > 1;
+
       await markCampaignLeadWaitingReply({
         clientId,
         lead: { id: leadImportItem.id, nome: lead.nome },
@@ -5392,8 +5397,8 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
         stepIndex: finalStepIndex,
         totalSteps: steps.length,
         dispatchedAt: new Date().toISOString(),
-        nextStepIndex: null,
-        status: "finalizado",
+        nextStepIndex: hasMoreReplySteps ? finalStepIndex + 1 : null,
+        status: hasMoreReplySteps ? "aguardando_usuario" : "finalizado",
         userRepliedAt: repliedAt,
       });
     } catch (error) {

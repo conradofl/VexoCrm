@@ -912,9 +912,23 @@ export default function LeadImports({
   }
 
   function updateCampaignStep(stepId: string, patch: Partial<CampaignSequenceStep>) {
-    setCampaignSequence((current) =>
-      normalizeStepOrder(current.map((step) => (step.id === stepId ? { ...step, ...patch } : step))),
-    );
+    setCampaignSequence((current) => {
+      const updated = current.map((step) => (step.id === stepId ? { ...step, ...patch } : step));
+
+      // Se triggerMode foi alterado para "after_reply", marcar todos os próximos passos também
+      if (patch.triggerMode === "after_reply") {
+        const stepIndex = updated.findIndex((s) => s.id === stepId);
+        if (stepIndex >= 0) {
+          for (let i = stepIndex + 1; i < updated.length; i++) {
+            updated[i] = { ...updated[i], triggerMode: "after_reply" };
+          }
+        }
+        // Ativar automaticamente waitForReply
+        setDispatchOptions((current) => ({ ...current, waitForReply: true }));
+      }
+
+      return normalizeStepOrder(updated);
+    });
   }
 
   function addCampaignStep(type: "text" | "image") {
