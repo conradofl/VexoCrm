@@ -5299,23 +5299,52 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
         },
         client: { id: claimedCampaign.client_id, name: clientName },
       },
-      onLeadDispatched:
-        waitForReply
-          ? async ({ lead, phone, sentAt, lastStep, lastStepIndex }) => {
-            await markCampaignLeadWaitingReply({
-              clientId: claimedCampaign.client_id,
-              lead,
-              phone,
-              campaign: claimedCampaign,
-              step: lastStep,
-              stepIndex: Number.isInteger(lastStepIndex) ? lastStepIndex : immediateSteps.length - 1,
+      onLeadDispatched: async ({ lead, phone, sentAt, lastStep, lastStepIndex }) => {
+        if (waitForReply) {
+          await markCampaignLeadWaitingReply({
+            clientId: claimedCampaign.client_id,
+            lead,
+            phone,
+            campaign: claimedCampaign,
+            step: lastStep,
+            stepIndex: Number.isInteger(lastStepIndex) ? lastStepIndex : immediateSteps.length - 1,
+            totalSteps: stepPlan.enabledSteps.length,
+            dispatchedAt: sentAt || new Date().toISOString(),
+            nextStepIndex: firstReplyStepIndex,
+            status: "aguardando_usuario",
+          });
+        } else {
+          // Campanha sem resposta: marcar como "em_atendimento" e depois "finalizado"
+          await updateLeadConversationState({
+            clientId: claimedCampaign.client_id,
+            phone,
+            statusConversa: "finalizado",
+            ultimaInteracaoBot: sentAt || new Date().toISOString(),
+          });
+          if (lead?.id) {
+            const progressPatch = {
+              campaignId: claimedCampaign.id,
+              campaignName: claimedCampaign.name || null,
+              leadName: normalizeString(lead?.nome) || null,
+              status: "finalizado",
+              leadStatus: "sequencia_concluida",
+              currentStepIndex: Number.isInteger(lastStepIndex) ? lastStepIndex : immediateSteps.length - 1,
+              nextStepIndex: null,
               totalSteps: stepPlan.enabledSteps.length,
-              dispatchedAt: sentAt || new Date().toISOString(),
-              nextStepIndex: firstReplyStepIndex,
-              status: "aguardando_usuario",
+              updatedAt: sentAt || new Date().toISOString(),
+              completedAt: sentAt || new Date().toISOString(),
+            };
+            await updateLeadImportItemCampaignProgress({
+              clientId: claimedCampaign.client_id,
+              leadImportItemId: lead.id,
+              campaignId: claimedCampaign.id,
+              progressPatch,
+              statusConversa: "finalizado",
+              ultimaInteracaoBot: sentAt || new Date().toISOString(),
             });
           }
-          : null,
+        }
+      },
     });
     dispatchSummary = summary;
 
