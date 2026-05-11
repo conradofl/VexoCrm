@@ -233,7 +233,6 @@ export function validateCampaignAnalyticsMeta(rawMeta = {}) {
   if (analyticsMeta.dispatchOptions.waitForReply === true) {
     const immediateSteps = enabledSteps.filter((step) => step.triggerMode !== "after_reply");
     const replySteps = enabledSteps.filter((step) => step.triggerMode === "after_reply");
-
     if (replySteps.length > 0 && immediateSteps.length === 0) {
       return {
         valid: false,
@@ -241,21 +240,6 @@ export function validateCampaignAnalyticsMeta(rawMeta = {}) {
         message:
           "Campanhas com resposta avancada precisam de pelo menos um passo imediato antes dos passos apos resposta.",
       };
-    }
-
-    // Verificar se há passos imediatos após passos "after_reply"
-    let foundReplyStep = false;
-    for (const step of enabledSteps) {
-      if (step.triggerMode === "after_reply") {
-        foundReplyStep = true;
-      } else if (foundReplyStep && step.triggerMode !== "after_reply") {
-        return {
-          valid: false,
-          analyticsMeta,
-          message:
-            "Nao podem haver passos imediatos apos passos que aguardam resposta. Todos os passos apos uma resposta devem aguardar resposta.",
-        };
-      }
     }
   }
 
