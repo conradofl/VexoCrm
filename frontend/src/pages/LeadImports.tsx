@@ -1199,13 +1199,25 @@ export default function LeadImports({
   async function handleTriggerCampaign(campaign: Campaign) {
     try {
       const result = await triggerCampaign.mutateAsync(campaign.id);
-      setDispatchStatus(
-        `Campanha ${campaign.name}: ${result.successCount} enviados completos, ${result.failureCount} falhas.`
-      );
+      if (result.failureCount > 0 && result.successCount > 0) {
+        setDispatchStatus(
+          `Campanha "${campaign.name}": ${result.successCount} enviado(s) com sucesso, ${result.failureCount} falha(s). Verifique os leads com erro.`
+        );
+      } else if (result.failureCount > 0) {
+        const firstReason = result.failures?.[0]?.reason || "Erro desconhecido";
+        setDispatchStatus(
+          `Campanha "${campaign.name}" falhou: ${firstReason}`
+        );
+      } else {
+        setDispatchStatus(
+          `Campanha "${campaign.name}": ${result.successCount} mensagem(ns) enviada(s) com sucesso!`
+        );
+      }
       void refetchCampaigns();
       void refetchPending();
     } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao disparar campanha.");
+      const message = error instanceof Error ? error.message : "Falha ao disparar campanha.";
+      setDispatchStatus(`Erro na campanha "${campaign.name}": ${message}`);
     }
   }
 

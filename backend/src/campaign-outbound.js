@@ -388,18 +388,34 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
     const responseText = await response.text();
 
     if (!response.ok) {
+      const isConnectionClosed =
+        responseText.includes("Connection Closed") || responseText.includes("connection closed");
+      const isUnauthorized = response.status === 401 || response.status === 403;
+
       console.warn("[campaign-outbound] whatsapp_step_failed", {
         type: payload?.type || null,
         stepId: payload?.stepId || null,
         phone: maskOutboundPhone(payload?.number),
         ...endpointInfo,
         status: response.status,
+        isConnectionClosed,
+        isUnauthorized,
+        webhookUrl: stepWebhookUrl ? stepWebhookUrl.replace(/\/[^/]+$/, "/***") : null,
+        responsePreview: responseText.slice(0, 300),
       });
-      throw new Error(
-        responseText
+
+      let userMessage;
+      if (isConnectionClosed) {
+        userMessage = `Sessao WhatsApp desconectada na Evolution API (HTTP ${response.status}). Verifique se a instancia esta conectada e reinicie se necessario.`;
+      } else if (isUnauthorized) {
+        userMessage = `Token de autenticacao invalido para a Evolution API (HTTP ${response.status}). Verifique o dispatch_webhook_token nas configuracoes da empresa.`;
+      } else {
+        userMessage = responseText
           ? `HTTP ${response.status}: ${responseText.slice(0, 500)}`
-          : `HTTP ${response.status}`
-      );
+          : `HTTP ${response.status}`;
+      }
+
+      throw new Error(userMessage);
     }
 
     console.info("[campaign-outbound] whatsapp_step_success", {
