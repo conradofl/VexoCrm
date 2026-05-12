@@ -30,6 +30,7 @@ import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
 import VexoSales from "./pages/VexoSales";
 import ChatbotKanban from "./pages/ChatbotKanban";
+import ChatbotConfig from "./pages/ChatbotConfig";
 
 const queryClient = new QueryClient();
 
@@ -163,6 +164,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
                     <ChatbotKanban />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="chatbot-config"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
+                    <ChatbotConfig />
                   </ProtectedRoute>
                 }
               />

@@ -10902,8 +10902,8 @@ app.post("/api/hardcoded-chat-webhook", async (req, res) => {
     timestamp: new Date().toISOString(),
   });
 
-  // Evolution pode enviar em diferentes formatos
-  const clientId = body.clientId || body.client_id || "outlier";
+  // clientId pode vir do body, query param (?clientId=empresa-teste) ou default "outlier"
+  const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id) || "outlier";
   const phone = sanitizePhone(
     body.phone ||
     body.telefone ||
