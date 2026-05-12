@@ -10898,6 +10898,10 @@ app.post("/api/hardcoded-chat", async (req, res) => {
  * Integração com chatbot hardcoded
  */
 app.post("/api/hardcoded-chat-webhook", async (req, res) => {
+  // KILL-SWITCH: chatbot desativado temporariamente (loop detectado)
+  res.json({ success: true, ignored: "chatbot_disabled_globally" });
+  return;
+
   const body = req.body && typeof req.body === "object" ? req.body : {};
 
   // Ignorar mensagens enviadas pelo próprio bot (fromMe) para evitar loop infinito
