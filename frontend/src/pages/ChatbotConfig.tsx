@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Bot, Copy, Check, ExternalLink, Settings2, Zap } from "lucide-react";
+import { Bot, Copy, Check, Settings2, Zap } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLeadClients } from "@/hooks/useLeadClients";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
@@ -103,24 +102,38 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
         {/* URL do Webhook */}
         <div className="space-y-1.5">
           <Label className="text-xs text-slate-500 dark:text-slate-400">URL do Webhook (cole na Evolution)</Label>
-          <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-slate-800/50">
-            <span className="flex-1 truncate font-mono text-xs text-slate-700 dark:text-slate-300">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex cursor-default items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-slate-800/50">
+                <span className="flex-1 truncate font-mono text-xs text-slate-700 dark:text-slate-300">
+                  {webhookUrl}
+                </span>
+                <CopyButton text={webhookUrl} />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-sm break-all font-mono text-xs">
               {webhookUrl}
-            </span>
-            <CopyButton text={webhookUrl} />
-          </div>
+            </TooltipContent>
+          </Tooltip>
         </div>
 
         {/* URL da Evolution configurada */}
         {evolutionUrl && (
           <div className="space-y-1.5">
             <Label className="text-xs text-slate-500 dark:text-slate-400">Instância Evolution (envio)</Label>
-            <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-slate-800/50">
-              <span className="flex-1 truncate font-mono text-xs text-slate-600 dark:text-slate-400">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex cursor-default items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-white/10 dark:bg-slate-800/50">
+                  <span className="flex-1 truncate font-mono text-xs text-slate-600 dark:text-slate-400">
+                    {evolutionUrl}
+                  </span>
+                  <CopyButton text={evolutionUrl} />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-sm break-all font-mono text-xs">
                 {evolutionUrl}
-              </span>
-              <CopyButton text={evolutionUrl} />
-            </div>
+              </TooltipContent>
+            </Tooltip>
           </div>
         )}
 
