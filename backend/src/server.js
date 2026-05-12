@@ -1577,6 +1577,7 @@ function maskN8nSettings(row) {
       has_dispatch_webhook_token: false,
       has_inbound_bearer_token: false,
       active: false,
+      chatbot_enabled: true,
       updated_at: null,
     };
   }
@@ -1587,6 +1588,7 @@ function maskN8nSettings(row) {
     has_dispatch_webhook_token: !!row.dispatch_webhook_token,
     has_inbound_bearer_token: !!row.inbound_bearer_token,
     active: row.active !== false,
+    chatbot_enabled: row.chatbot_enabled !== false,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
   };
@@ -1611,7 +1613,7 @@ async function getLeadClientN8nSettingsStatus(clientId) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, updated_at, updated_by_uid, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, updated_at, updated_by_uid, updated_by_email"
     )
     .eq("client_id", clientId)
     .maybeSingle();
@@ -1646,7 +1648,7 @@ async function getLeadClientN8nSettingsMap(clientIds) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, updated_at, updated_by_email"
     )
     .in("client_id", clientIds);
 
@@ -1664,9 +1666,11 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const dispatchWebhookTokenProvided = Object.prototype.hasOwnProperty.call(body, "dispatchWebhookToken");
   const inboundBearerTokenProvided = Object.prototype.hasOwnProperty.call(body, "inboundBearerToken");
   const activeProvided = Object.prototype.hasOwnProperty.call(body, "active");
+  const chatbotEnabledProvided = Object.prototype.hasOwnProperty.call(body, "chatbotEnabled");
 
   const payload = {
     active: activeProvided ? body.active !== false : existing?.active ?? true,
+    chatbot_enabled: chatbotEnabledProvided ? body.chatbotEnabled !== false : existing?.chatbot_enabled ?? true,
     updated_at: new Date().toISOString(),
     updated_by_uid: authAccess?.uid || null,
     updated_by_email: authAccess?.email || null,
@@ -1724,7 +1728,7 @@ async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing
     .from("lead_client_n8n_settings")
     .upsert(payload, { onConflict: "client_id" })
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, updated_at, updated_by_email"
     )
     .single();
 
@@ -10915,6 +10919,14 @@ app.post("/api/hardcoded-chat-webhook", async (req, res) => {
     event: body.event ?? null,
     timestamp: new Date().toISOString(),
   });
+
+  // Verificar se chatbot está habilitado para este tenant
+  const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
+  if (tenantSettings && tenantSettings.chatbot_enabled === false) {
+    console.log("[hardcoded-webhook] Chatbot disabled for clientId:", clientId);
+    res.json({ success: true, ignored: "chatbot_disabled" });
+    return;
+  }
 
   const phone = sanitizePhone(
     body.phone ||

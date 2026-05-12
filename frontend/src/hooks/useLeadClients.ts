@@ -21,6 +21,7 @@ export interface LeadClientN8nSettingsPayload {
   dispatchWebhookToken?: string | null;
   inboundBearerToken?: string | null;
   active?: boolean;
+  chatbotEnabled?: boolean;
 }
 
 export interface LeadClientN8nSettingsSummary {
@@ -29,6 +30,7 @@ export interface LeadClientN8nSettingsSummary {
   has_dispatch_webhook_token: boolean;
   has_inbound_bearer_token: boolean;
   active: boolean;
+  chatbot_enabled: boolean;
   updated_at: string | null;
   updated_by_email?: string | null;
 }

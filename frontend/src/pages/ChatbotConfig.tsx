@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { Bot, Copy, Check, Settings2, Zap } from "lucide-react";
+import { Bot, Copy, Check, Settings2, Zap, Power } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useLeadClients } from "@/hooks/useLeadClients";
+import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
@@ -43,13 +44,34 @@ interface ClientChatbotCardProps {
   clientName: string;
   hasEvolutionConfigured: boolean;
   evolutionUrl: string | null;
+  chatbotEnabled: boolean;
 }
 
-function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl }: ClientChatbotCardProps) {
+function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl, chatbotEnabled: initialEnabled }: ClientChatbotCardProps) {
   const webhookUrl = buildWebhookUrl(clientId);
   const { getIdToken, hasPermission } = useAuth();
   const [testing, setTesting] = useState(false);
+  const [enabled, setEnabled] = useState(initialEnabled);
   const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
+  const updateSettings = useUpdateLeadClientN8nSettings();
+
+  const handleToggleChatbot = async (value: boolean) => {
+    setEnabled(value);
+    try {
+      await updateSettings.mutateAsync({ tenantId: clientId, chatbotEnabled: value });
+      toast({
+        title: value ? "Chatbot ativado" : "Chatbot desativado",
+        description: `${clientName}: chatbot ${value ? "habilitado" : "desabilitado"} com sucesso.`,
+      });
+    } catch (e) {
+      setEnabled(!value);
+      toast({
+        title: "Erro ao salvar",
+        description: e instanceof Error ? e.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleTestWebhook = async () => {
     setTesting(true);
@@ -82,12 +104,12 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
   };
 
   return (
-    <Card className="border-slate-200 dark:border-white/10">
+    <Card className={`border-slate-200 dark:border-white/10 transition-opacity ${!enabled ? "opacity-60" : ""}`}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Bot className="h-4 w-4 text-indigo-500 shrink-0" />
+              <Bot className={`h-4 w-4 shrink-0 ${enabled ? "text-indigo-500" : "text-slate-400"}`} />
               <span className="truncate">{clientName}</span>
             </CardTitle>
             <CardDescription className="mt-0.5 font-mono text-xs">{clientId}</CardDescription>
@@ -99,6 +121,27 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {/* Toggle chatbot habilitado */}
+        {canEdit && (
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-white/10 dark:bg-slate-800/50">
+            <div className="flex items-center gap-2">
+              <Power className={`h-4 w-4 ${enabled ? "text-emerald-500" : "text-slate-400"}`} />
+              <div>
+                <p className="text-sm font-medium leading-none">{enabled ? "Chatbot ativo" : "Chatbot desativado"}</p>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {enabled ? "Responde automaticamente no WhatsApp" : "Mensagens ignoradas pelo bot"}
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={enabled}
+              onCheckedChange={handleToggleChatbot}
+              disabled={updateSettings.isPending}
+              aria-label={`Habilitar chatbot para ${clientName}`}
+            />
+          </div>
+        )}
+
         {/* URL do Webhook */}
         <div className="space-y-1.5">
           <Label className="text-xs text-slate-500 dark:text-slate-400">URL do Webhook (cole na Evolution)</Label>
@@ -154,7 +197,7 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
           size="sm"
           className="w-full gap-1.5"
           onClick={handleTestWebhook}
-          disabled={testing}
+          disabled={testing || !enabled}
         >
           <Zap className={`h-3.5 w-3.5 ${testing ? "animate-pulse" : ""}`} />
           {testing ? "Testando..." : "Testar chatbot"}
@@ -195,6 +238,7 @@ export default function ChatbotConfig() {
               </p>
               <p className="text-indigo-700 dark:text-indigo-400">
                 A URL de envio (instância Evolution) é configurada na aba <strong>Empresas</strong> do CRM.
+                Use o toggle para habilitar ou desabilitar o chatbot por empresa sem remover a configuração.
               </p>
             </div>
           </div>
@@ -219,6 +263,7 @@ export default function ChatbotConfig() {
               clientName={client.name}
               hasEvolutionConfigured={!!client.n8n_settings?.dispatch_webhook_url}
               evolutionUrl={client.n8n_settings?.dispatch_webhook_url ?? null}
+              chatbotEnabled={client.n8n_settings?.chatbot_enabled ?? true}
             />
           ))}
         </div>
