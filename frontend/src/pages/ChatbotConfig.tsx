@@ -263,7 +263,7 @@ export default function ChatbotConfig() {
               clientName={client.name}
               hasEvolutionConfigured={!!client.n8n_settings?.dispatch_webhook_url}
               evolutionUrl={client.n8n_settings?.dispatch_webhook_url ?? null}
-              chatbotEnabled={client.n8n_settings?.chatbot_enabled ?? true}
+              chatbotEnabled={client.n8n_settings?.chatbot_enabled ?? false}
             />
           ))}
         </div>

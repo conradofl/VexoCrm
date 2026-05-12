@@ -1577,7 +1577,7 @@ function maskN8nSettings(row) {
       has_dispatch_webhook_token: false,
       has_inbound_bearer_token: false,
       active: false,
-      chatbot_enabled: true,
+      chatbot_enabled: false,
       updated_at: null,
     };
   }
@@ -1588,7 +1588,7 @@ function maskN8nSettings(row) {
     has_dispatch_webhook_token: !!row.dispatch_webhook_token,
     has_inbound_bearer_token: !!row.inbound_bearer_token,
     active: row.active !== false,
-    chatbot_enabled: row.chatbot_enabled !== false,
+    chatbot_enabled: row.chatbot_enabled === true,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
   };
@@ -1670,7 +1670,7 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
 
   const payload = {
     active: activeProvided ? body.active !== false : existing?.active ?? true,
-    chatbot_enabled: chatbotEnabledProvided ? body.chatbotEnabled !== false : existing?.chatbot_enabled ?? true,
+    chatbot_enabled: chatbotEnabledProvided ? body.chatbotEnabled === true : existing?.chatbot_enabled ?? false,
     updated_at: new Date().toISOString(),
     updated_by_uid: authAccess?.uid || null,
     updated_by_email: authAccess?.email || null,
