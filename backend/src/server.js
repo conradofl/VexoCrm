@@ -42,6 +42,16 @@ import {
   hasUserPermission,
 } from "./userAccessScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
+import { OutlierQualificationBot } from "./hardcoded-chatbot-outlier.js";
+import { initializeRedisChat, getChatMemory, setSupabaseClient } from "./hardcoded-chatbot.js";
+import {
+  persistChatbotProgress,
+  determineSPINPhase,
+  qualifyLead,
+  generateConversationSummary,
+  trackInvalidResponse,
+} from "./hardcoded-chatbot-persistence.js";
+import { extractConversationBriefing } from "./hardcoded-chatbot-extractor.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -10764,6 +10774,400 @@ app.get("/api/leads-for-dispatch", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/hardcoded-chat
+ * Processa mensagens para o chatbot hardcoded (ex: Outlier Qualification)
+ * Body: { clientId, phone, message }
+ */
+app.post("/api/hardcoded-chat", async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const clientId = normalizeTenantKey(body.clientId ?? body.client_id);
+  const phone = sanitizePhone(body.phone ?? body.telefone ?? body.number);
+  const userMessage = normalizeString(body.message ?? body.text) || null;
+
+  console.log("[hardcoded-chat] Request:", { clientId, phone: maskPhoneForLog(phone), hasMessage: !!userMessage });
+
+  if (!clientId || !phone) {
+    sendError(res, 400, "INVALID_BODY", "Missing clientId or phone");
+    return;
+  }
+
+  try {
+    console.log("[hardcoded-chat] Initializing chatbot");
+    // Instanciar chatbot (atualmente suporta apenas Outlier)
+    const chatbot = new OutlierQualificationBot(clientId);
+
+    // Processar mensagem
+    let response;
+    if (!userMessage) {
+      // Iniciar conversa
+      console.log("[hardcoded-chat] Initializing conversation");
+      response = await chatbot.initializeChat(phone);
+    } else {
+      // Processar resposta
+      console.log("[hardcoded-chat] Processing response");
+      response = await chatbot.processResponse(phone, userMessage);
+    }
+
+    console.log("[hardcoded-chat] Response status:", response.status);
+
+    // Se houver erro na resposta, rastrear tentativa inválida
+    if (response.status === "invalid_response" && userMessage) {
+      await trackInvalidResponse({
+        supabase,
+        clientId,
+        phone,
+        stepId: response.retryStepId,
+        response: userMessage,
+        errorMessage: response.message,
+      });
+    }
+
+    // Salvar progresso incrementalmente se conversa está ativa
+    if (response.status !== "failed") {
+      console.log("[hardcoded-chat] Getting chat memory");
+      const memory = await getChatMemory(phone, clientId);
+      console.log("[hardcoded-chat] Memory found:", !!memory);
+
+      if (memory) {
+        const spinPhase = determineSPINPhase(memory.currentStepId);
+        const qualification = qualifyLead(memory.collectedData);
+        const metrics = chatbot.generateMetrics(memory);
+
+        console.log("[hardcoded-chat] Persisting progress");
+        const persistResult = await persistChatbotProgress({
+          supabase,
+          clientId,
+          phone,
+          telefone: phone,
+          currentStepId: memory.currentStepId,
+          collectedData: memory.collectedData,
+          conversationStatus: memory.status,
+          spinFase: spinPhase,
+          qualificationStatus: qualification,
+          mensagem: response.message,
+          isFinalized: response.status === "completed",
+        });
+
+        console.log("[hardcoded-chat] Persist result:", persistResult.success);
+
+        if (!persistResult.success) {
+          console.warn(
+            "[hardcoded-chat] Failed to persist progress:",
+            persistResult.error
+          );
+        }
+
+        // Adicionar métricas à resposta
+        response.metrics = metrics;
+        response.leadId = persistResult.leadId || null;
+      }
+    }
+
+    console.log("[hardcoded-chat] Sending response");
+    res.json({
+      success: response.status !== "failed",
+      clientId,
+      phone: maskPhoneForLog(phone),
+      ...response,
+    });
+  } catch (error) {
+    console.error("[hardcoded-chat] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+  }
+});
+
+/**
+ * POST /api/hardcoded-chat-webhook
+ * Webhook para receber mensagens do WhatsApp via Evolution API
+ * Integração com chatbot hardcoded
+ */
+app.post("/api/hardcoded-chat-webhook", async (req, res) => {
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+
+  console.log("[hardcoded-webhook] Received", {
+    hasMessage: !!body.message,
+    hasPhone: !!body.phone,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Evolution pode enviar em diferentes formatos
+  const clientId = body.clientId || body.client_id || "outlier";
+  const phone = sanitizePhone(
+    body.phone ||
+    body.telefone ||
+    body.remoteJid ||
+    body.data?.key?.remoteJid ||
+    body.senderJid
+  );
+  const messageText = normalizeString(
+    body.message ||
+    body.text ||
+    body.body ||
+    body.data?.message?.conversation ||
+    body.data?.message?.extendedTextMessage?.text
+  ) || null;
+  const senderName = body.senderName || body.pushName || null;
+
+  if (!phone) {
+    console.warn("[hardcoded-webhook] Missing phone");
+    res.json({ success: false, error: "Missing phone" });
+    return;
+  }
+
+  try {
+    // Processar através do chatbot
+    const response = await fetch("http://localhost:3001/api/hardcoded-chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId,
+        phone,
+        message: messageText,
+      }),
+    });
+
+    const chatbotResponse = await response.json();
+
+    console.log("[hardcoded-webhook] Chatbot response", {
+      status: chatbotResponse.status,
+      phone: maskPhoneForLog(phone),
+    });
+
+    // Se conversa finalizou, extrair briefing e notificar
+    if (chatbotResponse.status === "completed") {
+      const memory = await getChatMemory(phone, clientId);
+      if (memory) {
+        const briefing = extractConversationBriefing({
+          phone,
+          clientId,
+          ...memory,
+        });
+
+        console.log("[hardcoded-webhook] Conversation completed, briefing generated", {
+          leadId: chatbotResponse.leadId,
+          phone: maskPhoneForLog(phone),
+          temperature: briefing.briefing.temperatura,
+        });
+
+        // Aqui você poderia:
+        // - Enviar briefing por email
+        // - Notificar consultor via webhook/SMS
+        // - Salvar em CRM externo
+
+        res.json({
+          success: true,
+          chatbotResponse,
+          briefing: briefing.briefing,
+          nextAction: "Briefing ready for human consultant",
+        });
+        return;
+      }
+    }
+
+    // Enviar resposta do chatbot de volta ao WhatsApp via Evolution API
+    let evolutionSent = false;
+    let evolutionError = null;
+    if (chatbotResponse.message) {
+      try {
+        const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
+        const { webhookUrl: evolutionUrl, webhookToken: evolutionToken } = dispatchSettings;
+
+        if (evolutionUrl) {
+          const evolutionPayload = {
+            source: "vexocrm-chatbot",
+            provider: "evolution",
+            type: "text",
+            number: phone,
+            text: chatbotResponse.message,
+            message: chatbotResponse.message,
+            txt: chatbotResponse.message,
+          };
+
+          console.log("[hardcoded-webhook] Sending to Evolution API:", {
+            phone: maskPhoneForLog(phone),
+            message: chatbotResponse.message.substring(0, 50) + "...",
+            url: evolutionUrl.replace(/\/[^/]+$/, "/***"),
+          });
+
+          const evolutionHeaders = { "Content-Type": "application/json" };
+          if (evolutionToken) {
+            evolutionHeaders.apikey = evolutionToken;
+            evolutionHeaders.Authorization = `Bearer ${evolutionToken}`;
+          }
+
+          const evolutionResponse = await fetch(evolutionUrl, {
+            method: "POST",
+            headers: evolutionHeaders,
+            body: JSON.stringify(evolutionPayload),
+          });
+
+          if (!evolutionResponse.ok) {
+            const responseText = await evolutionResponse.text();
+            evolutionError = `Evolution HTTP ${evolutionResponse.status}: ${responseText.slice(0, 300)}`;
+            console.error("[hardcoded-webhook] Evolution send failed:", evolutionError);
+          } else {
+            evolutionSent = true;
+            console.log("[hardcoded-webhook] Evolution send OK:", { phone: maskPhoneForLog(phone) });
+          }
+        } else {
+          evolutionError = "No Evolution URL configured for clientId: " + clientId;
+          console.warn("[hardcoded-webhook]", evolutionError);
+        }
+      } catch (evolutionErr) {
+        evolutionError = evolutionErr.message;
+        console.error("[hardcoded-webhook] Evolution send error:", evolutionErr.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      chatbotResponse,
+      evolutionSent,
+      evolutionError,
+      webhookStatus: evolutionSent ? "Message sent to WhatsApp" : "Message processed (Evolution send failed or no URL)",
+    });
+  } catch (error) {
+    console.error("[hardcoded-webhook] Error:", error);
+    res.json({
+      success: false,
+      error: error.message,
+      webhookStatus: "Error processing message",
+    });
+  }
+});
+
+/**
+ * GET /api/hardcoded-chat-leads
+ * Lista leads do chatbot hardcoded para o Kanban
+ * Retorna por status_conversa e step atual
+ */
+app.get("/api/hardcoded-chat-leads", requireFirebaseAuth, async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  const clientId = normalizeTenantKey(req.query.clientId ?? req.query.client_id);
+  const statusFilter = req.query.status || null; // em_atendimento | finalizado | all
+  const limitRaw = Number.parseInt(String(req.query.limit || "100"), 10);
+  const limit = Math.min(Number.isNaN(limitRaw) ? 100 : limitRaw, 500);
+
+  if (!clientId) {
+    sendError(res, 400, "INVALID_QUERY", "Missing clientId");
+    return;
+  }
+
+  try {
+    let query = supabase
+      .from("leads_outlier")
+      .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at")
+      .eq("client_id", clientId)
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+
+    if (statusFilter && statusFilter !== "all") {
+      query = query.eq("status_conversa", statusFilter);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("[hardcoded-chat-leads] Query error:", error);
+      sendError(res, 500, "DB_ERROR", error.message);
+      return;
+    }
+
+    const leads = (data || []).map((row) => {
+      const dados = row.dados || {};
+      const { _currentStepId, ...collectedData } = dados;
+      return {
+        id: row.id,
+        telefone: row.telefone,
+        nome: row.nome || null,
+        statusConversa: row.status_conversa || "em_atendimento",
+        finalizado: row.finalizado || false,
+        currentStepId: _currentStepId || null,
+        collectedData,
+        mensagem: row.mensagem || null,
+        leadTemperature: row.lead_temperature || null,
+        spinFase: row.spin_fase || null,
+        qualificacao: row.qualificacao || null,
+        leadScore: row.lead_score || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
+
+    // Agrupar por status para facilitar o Kanban
+    const kanban = {
+      em_atendimento: leads.filter((l) => l.statusConversa === "em_atendimento"),
+      finalizado: leads.filter((l) => l.statusConversa === "finalizado"),
+      total: leads.length,
+    };
+
+    res.json({ success: true, leads, kanban });
+  } catch (err) {
+    console.error("[hardcoded-chat-leads] Error:", err);
+    sendError(res, 500, "SERVER_ERROR", err.message);
+  }
+});
+
+/**
+ * POST /api/hardcoded-chat-extract
+ * Extrai briefing de uma conversa finalizada
+ * Útil para recuperar briefing de leads antigos
+ */
+app.post("/api/hardcoded-chat-extract", async (req, res) => {
+  if (!ensureDb(res)) return;
+
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const clientId = normalizeTenantKey(body.clientId ?? body.client_id);
+  const phone = sanitizePhone(body.phone ?? body.telefone);
+
+  if (!clientId || !phone) {
+    sendError(res, 400, "INVALID_BODY", "Missing clientId or phone");
+    return;
+  }
+
+  try {
+    // Buscar conversa mais recente
+    const { data: conversation, error } = await supabase
+      .from("leads_outlier")
+      .select("*")
+      .eq("client_id", clientId)
+      .eq("telefone", phone)
+      .eq("finalizado", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !conversation) {
+      sendError(res, 404, "NOT_FOUND", "No completed conversation found");
+      return;
+    }
+
+    // Extrair briefing
+    const briefing = extractConversationBriefing({
+      phone,
+      clientId,
+      collectedData: conversation.dados,
+      conversationStatus: conversation.status_conversa,
+      qualificationStatus: conversation.status,
+      startedAt: conversation.created_at,
+      finishedAt: conversation.created_at, // leads_outlier não tem updated_at
+    });
+
+    res.json({
+      success: true,
+      conversationId: conversation.id,
+      briefing: briefing.briefing,
+    });
+  } catch (error) {
+    console.error("[hardcoded-extract] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+  }
+});
+
 app.use((error, req, res, _next) => {
   if (error?.type === "entity.too.large" || error?.status === 413) {
     sendError(res, 413, "PAYLOAD_TOO_LARGE", "Request payload exceeds 15MB limit");
@@ -10783,6 +11187,15 @@ const port = Number.parseInt(process.env.PORT || "3001", 10);
 app.listen(port, () => {
   console.log(`VexoApi listening on port ${port}`);
   startCampaignScheduler();
+
+  // Inicializar Supabase para hardcoded-chatbot (fallback PostgreSQL)
+  if (supabase) {
+    setSupabaseClient(supabase);
+  }
+
+  initializeRedisChat().catch((error) => {
+    console.error("hardcoded-chatbot redis init error:", error);
+  });
 
   whatsappSessionManager.restorePersistedSession().catch((error) => {
     console.error("whatsapp startup restore error:", error);

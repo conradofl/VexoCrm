@@ -14,6 +14,7 @@ import {
   PanelLeft,
   FileSpreadsheet,
   MessageCircle,
+  KanbanSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -27,6 +28,7 @@ const navItems = [
   { title: "Inteligencia Comercial", url: "/crm/inteligencia-comercial", icon: LineChart, page: "dashboard" as const },
   { title: "WhatsApp", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" as const },
   { title: "Agente", url: "/crm/agente", icon: Bot, page: "agente" as const },
+  { title: "Chatbot Kanban", url: "/crm/chatbot", icon: KanbanSquare, page: "agente" as const },
   { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
   { title: "Usuarios", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" as const },
 ] satisfies Array<{

@@ -29,6 +29,7 @@ import WhatsAppInbox from "./pages/WhatsAppInbox";
 import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
 import VexoSales from "./pages/VexoSales";
+import ChatbotKanban from "./pages/ChatbotKanban";
 
 const queryClient = new QueryClient();
 
@@ -154,6 +155,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
                     <Agente />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="chatbot"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
+                    <ChatbotKanban />
                   </ProtectedRoute>
                 }
               />
