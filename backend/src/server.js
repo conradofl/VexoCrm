@@ -10896,14 +10896,26 @@ app.post("/api/hardcoded-chat", async (req, res) => {
 app.post("/api/hardcoded-chat-webhook", async (req, res) => {
   const body = req.body && typeof req.body === "object" ? req.body : {};
 
+  // Ignorar mensagens enviadas pelo próprio bot (fromMe) para evitar loop infinito
+  const fromMe = body.data?.key?.fromMe === true || body.fromMe === true;
+  if (fromMe) {
+    console.log("[hardcoded-webhook] Ignored fromMe message");
+    res.json({ success: true, ignored: "fromMe" });
+    return;
+  }
+
+  // clientId pode vir do body, query param (?clientId=teste) ou default "outlier"
+  const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id) || "outlier";
+
   console.log("[hardcoded-webhook] Received", {
+    clientId,
+    queryClientId: req.query.clientId ?? null,
     hasMessage: !!body.message,
     hasPhone: !!body.phone,
+    event: body.event ?? null,
     timestamp: new Date().toISOString(),
   });
 
-  // clientId pode vir do body, query param (?clientId=empresa-teste) ou default "outlier"
-  const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id) || "outlier";
   const phone = sanitizePhone(
     body.phone ||
     body.telefone ||
