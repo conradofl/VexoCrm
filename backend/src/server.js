@@ -10600,6 +10600,25 @@ app.post("/api/campaigns/reply-webhook", async (req, res) => {
       processingWaitForReplyCampaignCount: campaignReplyContext.processingWaitForReplyMatches.length,
     });
 
+    // Verificar se há sessão ativa de chatbot para este telefone (paralelo ao fluxo de campanhas)
+    // Executa de forma assíncrona para não bloquear a resposta
+    const routeToChatbot = async () => {
+      try {
+        const chatMemory = await getChatMemory(phone, clientId);
+        if (chatMemory && chatMemory.status === "em_atendimento" && replyText) {
+          console.log("[reply-webhook] chatbot_session_found", { clientId, phone: maskPhoneForLog(phone), step: chatMemory.currentStepId });
+          await fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientId, phone, message: replyText }),
+          });
+        }
+      } catch (chatbotErr) {
+        console.warn("[reply-webhook] chatbot_route_failed:", chatbotErr.message);
+      }
+    };
+    routeToChatbot();
+
     if (activeWaitCampaign) {
       const progression = await continueCampaignLeadFromReply({
         clientId,
