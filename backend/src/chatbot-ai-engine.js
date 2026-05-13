@@ -452,6 +452,14 @@ function chatbotLeadsTable(clientId) {
   return `leads_${safe}`;
 }
 
+// Horas de inatividade para considerar lead "abandonado" e reengajar
+const REENGAGEMENT_HOURS = 4;
+
+function hoursSince(isoDate) {
+  if (!isoDate) return Infinity;
+  return (Date.now() - new Date(isoDate).getTime()) / 3_600_000;
+}
+
 export async function processBatch({ clientId, phone, messages, supabase, model = "outlier" }) {
   const modelConfig = getChatbotModel(model);
   const leadsTable = chatbotLeadsTable(clientId);
@@ -471,7 +479,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   // Carregar estado atual do banco
   const { data: existingArray } = await supabase
     .from(leadsTable)
-    .select("id, dados, status_conversa, finalizado")
+    .select("id, dados, status_conversa, finalizado, updated_at, lead_temperature")
     .eq("client_id", clientId)
     .eq("telefone", phone)
     .order("created_at", { ascending: false })
@@ -479,9 +487,26 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
 
   const existing = existingArray?.[0] || null;
 
+  // ── Cenário 1: lead já finalizado voltou a contatar ──────────────────────
   if (existing?.finalizado) {
-    console.log("[chatbot-ai] Conversation already finalized for", phone.slice(-4));
-    return null;
+    const dadosAntigos = existing.dados || {};
+    const horario = dadosAntigos.melhor_horario || null;
+    const interesse = dadosAntigos.interesse || null;
+
+    const msgRecontato = interesse
+      ? `Oi! Vi que já conversamos sobre ${interesse}. Nosso consultor vai entrar em contato com você${horario ? ` de ${horario}` : " em breve"}. Posso ajudar com mais alguma coisa?`
+      : "Oi! Vi que já passamos por uma conversa antes. Nosso consultor vai entrar em contato. Posso ajudar com mais alguma coisa?";
+
+    console.log("[chatbot-ai] Recontact from finalized lead", { phone: phone.slice(-4), clientId });
+
+    return {
+      mensagem: msgRecontato,
+      status_conversa: "finalizado",
+      dados: dadosAntigos,
+      classificacao: existing.lead_temperature || "QUENTE",
+      finalizado: true,
+      _recontato: true, // sinal para o webhook notificar SDR de recontato
+    };
   }
 
   const storedDados = existing?.dados || {};
@@ -491,9 +516,28 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
 
   const history = buildHistory(storedHistorico);
 
-  // Chamar IA
+  // ── Cenário 2: lead abandonou no meio — reengajamento após REENGAGEMENT_HOURS ──
+  let systemPromptOverride = null;
+  if (existing && history.length > 0) {
+    const horasInativo = hoursSince(existing.updated_at);
+    if (horasInativo >= REENGAGEMENT_HOURS) {
+      const ultimaPergunta = history.filter((m) => m.role === "assistant").at(-1)?.content || "";
+      systemPromptOverride = `${modelConfig.systemPrompt}
+
+CONTEXTO ESPECIAL — REENGAJAMENTO:
+Este lead ficou ${Math.round(horasInativo)}h sem responder. Retomou o contato agora.
+Não reinicie a conversa do zero. Retome de forma natural e leve, sem cobrar a ausência.
+Última pergunta feita: "${ultimaPergunta.slice(0, 120)}"
+Dados já coletados: ${JSON.stringify(storedData)}.
+Continue de onde parou, coletando apenas o que ainda falta.`;
+
+      console.log("[chatbot-ai] Reengagement after", Math.round(horasInativo), "hours", { phone: phone.slice(-4) });
+    }
+  }
+
+  // ── Cenário 3: lead novo ou em andamento — fluxo normal ──────────────────
   const aiResponse = await runChatbotAI({
-    systemPrompt: modelConfig.systemPrompt,
+    systemPrompt: systemPromptOverride || modelConfig.systemPrompt,
     history,
     newMessages: [combinedText],
     existingData: storedData,
@@ -511,14 +555,12 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   // Atualizar histórico
   const newHistory = appendToHistory(history, combinedText, aiResponse.mensagem);
 
-  // Dados a salvar: campos coletados pela IA + histórico
   const dadosToSave = {
     ...storedData,
     ...aiResponse.dados,
     historico: newHistory,
   };
 
-  // Salvar no banco
   const payload = {
     client_id: clientId,
     telefone: phone,

@@ -4973,9 +4973,38 @@ export function registerAllDomainRoutes(app) {
             console.error("[chatbot-webhook] Evolution send failed:", evolutionResponse.status, errText.slice(0, 200));
           }
   
-          // Se finalizado, gerar briefing e notificar SDR/closer
-          if (aiResponse.finalizado) {
-            const sdrNumber = tenantSettings?.sdr_whatsapp_number;
+          const sdrNumber = tenantSettings?.sdr_whatsapp_number;
+
+          // Recontato: lead finalizado voltou a falar — avisa SDR sem gerar novo briefing
+          if (aiResponse._recontato) {
+            if (sdrNumber && evolutionUrl) {
+              try {
+                const dados = aiResponse.dados || {};
+                const interesse = dados.interesse || "consórcio";
+                const horario = dados.melhor_horario ? ` (preferência: ${dados.melhor_horario})` : "";
+                const recontatoMsg = [
+                  `🔔 *Lead recontato — já qualificado anteriormente*`,
+                  `📱 Número: ${phone}`,
+                  `🏠 Interesse: ${interesse}`,
+                  `🌡️ Temperatura anterior: ${aiResponse.classificacao || "QUENTE"}${horario}`,
+                  `\nLead entrou em contato novamente após ter sido qualificado. Mensagem de reconhecimento enviada.`,
+                  `Recomendado: entrar em contato ativo agora.`,
+                ].join("\n");
+
+                await fetch(evolutionUrl, {
+                  method: "POST",
+                  headers: evolutionHeaders,
+                  body: JSON.stringify({ number: sdrNumber, text: recontatoMsg, message: recontatoMsg }),
+                });
+                console.log("[chatbot-webhook] SDR recontact alert sent", { sdrNumber, clientId, phone: maskPhoneForLog(phone) });
+              } catch (err) {
+                console.error("[chatbot-webhook] SDR recontact alert error:", err.message);
+              }
+            }
+          }
+
+          // Finalizado pela primeira vez: gerar briefing completo e notificar SDR
+          if (aiResponse.finalizado && !aiResponse._recontato) {
             if (sdrNumber && evolutionUrl) {
               try {
                 const briefingResult = extractConversationBriefing({
