@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { createDatabasePool, createPgSupabaseClient } from "./pgSupabaseCompat.js";
+import { runMigrations } from "./migrate.js";
 import { parseLeadQualificacaoBoolean } from "./leadQualificacaoBoolean.js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -11157,20 +11158,22 @@ app.use((error, req, res, _next) => {
 });
 
 const port = Number.parseInt(process.env.PORT || "3001", 10);
-app.listen(port, () => {
-  console.log(`VexoApi listening on port ${port}`);
-  startCampaignScheduler();
+// Rodar migrations antes de subir o servidor
+runMigrations(pgDatabasePool).finally(() => {
+  app.listen(port, () => {
+    console.log(`VexoApi listening on port ${port}`);
+    startCampaignScheduler();
 
-  // Inicializar Supabase para hardcoded-chatbot (fallback PostgreSQL)
-  if (supabase) {
-    setSupabaseClient(supabase);
-  }
+    if (supabase) {
+      setSupabaseClient(supabase);
+    }
 
-  initializeRedisChat().catch((error) => {
-    console.error("hardcoded-chatbot redis init error:", error);
-  });
+    initializeRedisChat().catch((error) => {
+      console.error("hardcoded-chatbot redis init error:", error);
+    });
 
-  whatsappSessionManager.restorePersistedSession().catch((error) => {
-    console.error("whatsapp startup restore error:", error);
+    whatsappSessionManager.restorePersistedSession().catch((error) => {
+      console.error("whatsapp startup restore error:", error);
+    });
   });
 });
