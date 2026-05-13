@@ -22,6 +22,7 @@ export interface LeadClientN8nSettingsPayload {
   inboundBearerToken?: string | null;
   active?: boolean;
   chatbotEnabled?: boolean;
+  chatbotModel?: string;
 }
 
 export interface LeadClientN8nSettingsSummary {
@@ -31,6 +32,7 @@ export interface LeadClientN8nSettingsSummary {
   has_inbound_bearer_token: boolean;
   active: boolean;
   chatbot_enabled: boolean;
+  chatbot_model: string;
   updated_at: string | null;
   updated_by_email?: string | null;
 }

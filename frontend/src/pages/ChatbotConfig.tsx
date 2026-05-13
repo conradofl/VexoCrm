@@ -6,11 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
+
+const CHATBOT_MODELS = [
+  { value: "outlier", label: "Áureo — Outlier Consórcios" },
+  { value: "infine", label: "Agente Infine" },
+];
 
 const BACKEND_URL = "https://crm.vexoia.com";
 
@@ -45,13 +51,15 @@ interface ClientChatbotCardProps {
   hasEvolutionConfigured: boolean;
   evolutionUrl: string | null;
   chatbotEnabled: boolean;
+  chatbotModel: string;
 }
 
-function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl, chatbotEnabled: initialEnabled }: ClientChatbotCardProps) {
+function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl, chatbotEnabled: initialEnabled, chatbotModel: initialModel }: ClientChatbotCardProps) {
   const webhookUrl = buildWebhookUrl(clientId);
   const { getIdToken, hasPermission } = useAuth();
   const [testing, setTesting] = useState(false);
   const [enabled, setEnabled] = useState(initialEnabled);
+  const [model, setModel] = useState(initialModel || "outlier");
   const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
   const updateSettings = useUpdateLeadClientN8nSettings();
 
@@ -67,6 +75,23 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
       setEnabled(!value);
       toast({
         title: "Erro ao salvar",
+        description: e instanceof Error ? e.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleModelChange = async (value: string) => {
+    const previous = model;
+    setModel(value);
+    try {
+      await updateSettings.mutateAsync({ tenantId: clientId, chatbotModel: value });
+      const label = CHATBOT_MODELS.find((m) => m.value === value)?.label || value;
+      toast({ title: "Modelo atualizado", description: `${clientName}: usando ${label}` });
+    } catch (e) {
+      setModel(previous);
+      toast({
+        title: "Erro ao salvar modelo",
         description: e instanceof Error ? e.message : "Erro desconhecido",
         variant: "destructive",
       });
@@ -139,6 +164,25 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
               disabled={updateSettings.isPending}
               aria-label={`Habilitar chatbot para ${clientName}`}
             />
+          </div>
+        )}
+
+        {/* Seleção de modelo */}
+        {canEdit && (
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500 dark:text-slate-400">Modelo de chatbot</Label>
+            <Select value={model} onValueChange={handleModelChange} disabled={updateSettings.isPending}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CHATBOT_MODELS.map((m) => (
+                  <SelectItem key={m.value} value={m.value} className="text-xs">
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 
@@ -264,6 +308,7 @@ export default function ChatbotConfig() {
               hasEvolutionConfigured={!!client.n8n_settings?.dispatch_webhook_url}
               evolutionUrl={client.n8n_settings?.dispatch_webhook_url ?? null}
               chatbotEnabled={client.n8n_settings?.chatbot_enabled ?? false}
+              chatbotModel={client.n8n_settings?.chatbot_model ?? "outlier"}
             />
           ))}
         </div>

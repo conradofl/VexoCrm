@@ -1576,6 +1576,7 @@ function maskN8nSettings(row) {
       has_inbound_bearer_token: false,
       active: false,
       chatbot_enabled: false,
+      chatbot_model: "outlier",
       updated_at: null,
     };
   }
@@ -1587,6 +1588,7 @@ function maskN8nSettings(row) {
     has_inbound_bearer_token: !!row.inbound_bearer_token,
     active: row.active !== false,
     chatbot_enabled: row.chatbot_enabled === true,
+    chatbot_model: row.chatbot_model || "outlier",
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
   };
@@ -1611,7 +1613,7 @@ async function getLeadClientN8nSettingsStatus(clientId) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, updated_at, updated_by_uid, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, updated_at, updated_by_uid, updated_by_email"
     )
     .eq("client_id", clientId)
     .maybeSingle();
@@ -1646,7 +1648,7 @@ async function getLeadClientN8nSettingsMap(clientIds) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, updated_at, updated_by_email"
     )
     .in("client_id", clientIds);
 
@@ -1665,10 +1667,12 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const inboundBearerTokenProvided = Object.prototype.hasOwnProperty.call(body, "inboundBearerToken");
   const activeProvided = Object.prototype.hasOwnProperty.call(body, "active");
   const chatbotEnabledProvided = Object.prototype.hasOwnProperty.call(body, "chatbotEnabled");
+  const chatbotModelProvided = Object.prototype.hasOwnProperty.call(body, "chatbotModel");
 
   const payload = {
     active: activeProvided ? body.active !== false : existing?.active ?? true,
     chatbot_enabled: chatbotEnabledProvided ? body.chatbotEnabled === true : existing?.chatbot_enabled ?? false,
+    chatbot_model: chatbotModelProvided ? (body.chatbotModel || "outlier") : existing?.chatbot_model ?? "outlier",
     updated_at: new Date().toISOString(),
     updated_by_uid: authAccess?.uid || null,
     updated_by_email: authAccess?.email || null,
@@ -1726,7 +1730,7 @@ async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing
     .from("lead_client_n8n_settings")
     .upsert(payload, { onConflict: "client_id" })
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, updated_at, updated_by_email"
     )
     .single();
 
