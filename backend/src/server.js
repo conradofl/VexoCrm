@@ -42,16 +42,14 @@ import {
   hasUserPermission,
 } from "./userAccessScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
-import { OutlierQualificationBot } from "./hardcoded-chatbot-outlier.js";
 import { initializeRedisChat, getChatMemory, setSupabaseClient } from "./hardcoded-chatbot.js";
-import {
-  persistChatbotProgress,
-  determineSPINPhase,
-  qualifyLead,
-  generateConversationSummary,
-  trackInvalidResponse,
-} from "./hardcoded-chatbot-persistence.js";
 import { extractConversationBriefing } from "./hardcoded-chatbot-extractor.js";
+import {
+  bufferMessage,
+  resolveMessageContent,
+  processBatch,
+  getChatbotModel,
+} from "./chatbot-ai-engine.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -10898,182 +10896,116 @@ app.post("/api/hardcoded-chat", async (req, res) => {
  * Integração com chatbot hardcoded
  */
 app.post("/api/hardcoded-chat-webhook", async (req, res) => {
-  // KILL-SWITCH: chatbot desativado temporariamente (loop detectado)
-  res.json({ success: true, ignored: "chatbot_disabled_globally" });
-  return;
-
   const body = req.body && typeof req.body === "object" ? req.body : {};
 
-  // Ignorar mensagens enviadas pelo próprio bot (fromMe) para evitar loop infinito
+  // Ignorar mensagens enviadas pelo próprio bot (fromMe) para evitar loop
   const fromMe = body.data?.key?.fromMe === true || body.fromMe === true;
   if (fromMe) {
-    console.log("[hardcoded-webhook] Ignored fromMe message");
     res.json({ success: true, ignored: "fromMe" });
     return;
   }
 
-  // clientId pode vir do body, query param (?clientId=teste) ou default "outlier"
-  const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id) || "outlier";
-
-  console.log("[hardcoded-webhook] Received", {
-    clientId,
-    queryClientId: req.query.clientId ?? null,
-    hasMessage: !!body.message,
-    hasPhone: !!body.phone,
-    event: body.event ?? null,
-    timestamp: new Date().toISOString(),
-  });
+  const clientId = normalizeTenantKey(
+    body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id
+  ) || "outlier";
 
   // Verificar se chatbot está habilitado para este tenant
   const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
   if (tenantSettings && tenantSettings.chatbot_enabled === false) {
-    console.log("[hardcoded-webhook] Chatbot disabled for clientId:", clientId);
     res.json({ success: true, ignored: "chatbot_disabled" });
     return;
   }
 
   const phone = sanitizePhone(
-    body.phone ||
-    body.telefone ||
-    body.remoteJid ||
-    body.data?.key?.remoteJid ||
-    body.senderJid
+    body.phone || body.telefone || body.remoteJid ||
+    body.data?.key?.remoteJid || body.senderJid
   );
-  const messageText = normalizeString(
-    body.message ||
-    body.text ||
-    body.body ||
-    body.data?.message?.conversation ||
-    body.data?.message?.extendedTextMessage?.text
-  ) || null;
-  const senderName = body.senderName || body.pushName || null;
 
   if (!phone) {
-    console.warn("[hardcoded-webhook] Missing phone");
     res.json({ success: false, error: "Missing phone" });
     return;
   }
 
-  try {
-    // Processar através do chatbot
-    const response = await fetch("http://localhost:3001/api/hardcoded-chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId,
-        phone,
-        message: messageText,
-      }),
-    });
+  // Responde imediatamente ao Evolution (evita timeout)
+  res.json({ success: true, status: "buffering" });
 
-    const chatbotResponse = await response.json();
-
-    console.log("[hardcoded-webhook] Chatbot response", {
-      status: chatbotResponse.status,
-      phone: maskPhoneForLog(phone),
-    });
-
-    // Se conversa finalizou, extrair briefing e notificar
-    if (chatbotResponse.status === "completed") {
-      const memory = await getChatMemory(phone, clientId);
-      if (memory) {
-        const briefing = extractConversationBriefing({
-          phone,
-          clientId,
-          ...memory,
-        });
-
-        console.log("[hardcoded-webhook] Conversation completed, briefing generated", {
-          leadId: chatbotResponse.leadId,
-          phone: maskPhoneForLog(phone),
-          temperature: briefing.briefing.temperatura,
-        });
-
-        // Aqui você poderia:
-        // - Enviar briefing por email
-        // - Notificar consultor via webhook/SMS
-        // - Salvar em CRM externo
-
-        res.json({
-          success: true,
-          chatbotResponse,
-          briefing: briefing.briefing,
-          nextAction: "Briefing ready for human consultant",
-        });
-        return;
-      }
+  // Detectar tipo e extrair conteúdo da mensagem (async, sem bloquear resposta)
+  resolveMessageContent(body).then((messageData) => {
+    if (!messageData.text) {
+      console.log("[chatbot-webhook] Empty message, skipping", { type: messageData.type, phone: maskPhoneForLog(phone) });
+      return;
     }
 
-    // Enviar resposta do chatbot de volta ao WhatsApp via Evolution API
-    let evolutionSent = false;
-    let evolutionError = null;
-    if (chatbotResponse.message) {
+    console.log("[chatbot-webhook] Buffering", {
+      clientId,
+      type: messageData.type,
+      phone: maskPhoneForLog(phone),
+      preview: messageData.text.slice(0, 60),
+    });
+
+    bufferMessage(clientId, phone, messageData, async (messages) => {
       try {
+        const chatbotModel = tenantSettings?.chatbot_model || "outlier";
+        const aiResponse = await processBatch({
+          clientId,
+          phone,
+          messages,
+          supabase,
+          model: chatbotModel,
+        });
+
+        if (!aiResponse?.mensagem) return;
+
+        // Enviar resposta via Evolution
         const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
         const { webhookUrl: evolutionUrl, webhookToken: evolutionToken } = dispatchSettings;
 
-        if (evolutionUrl) {
-          const evolutionPayload = {
-            source: "vexocrm-chatbot",
-            provider: "evolution",
-            type: "text",
-            number: phone,
-            text: chatbotResponse.message,
-            message: chatbotResponse.message,
-            txt: chatbotResponse.message,
-          };
-
-          console.log("[hardcoded-webhook] Sending to Evolution API:", {
-            phone: maskPhoneForLog(phone),
-            message: chatbotResponse.message.substring(0, 50) + "...",
-            url: evolutionUrl.replace(/\/[^/]+$/, "/***"),
-          });
-
-          const evolutionHeaders = { "Content-Type": "application/json" };
-          if (evolutionToken) {
-            evolutionHeaders.apikey = evolutionToken;
-            evolutionHeaders.Authorization = `Bearer ${evolutionToken}`;
-          }
-
-          const evolutionResponse = await fetch(evolutionUrl, {
-            method: "POST",
-            headers: evolutionHeaders,
-            body: JSON.stringify(evolutionPayload),
-          });
-
-          if (!evolutionResponse.ok) {
-            const responseText = await evolutionResponse.text();
-            evolutionError = `Evolution HTTP ${evolutionResponse.status}: ${responseText.slice(0, 300)}`;
-            console.error("[hardcoded-webhook] Evolution send failed:", evolutionError);
-          } else {
-            evolutionSent = true;
-            console.log("[hardcoded-webhook] Evolution send OK:", { phone: maskPhoneForLog(phone) });
-          }
-        } else {
-          evolutionError = "No Evolution URL configured for clientId: " + clientId;
-          console.warn("[hardcoded-webhook]", evolutionError);
+        if (!evolutionUrl) {
+          console.warn("[chatbot-webhook] No Evolution URL for clientId:", clientId);
+          return;
         }
-      } catch (evolutionErr) {
-        evolutionError = evolutionErr.message;
-        console.error("[hardcoded-webhook] Evolution send error:", evolutionErr.message);
-      }
-    }
 
-    res.json({
-      success: true,
-      chatbotResponse,
-      evolutionSent,
-      evolutionError,
-      webhookStatus: evolutionSent ? "Message sent to WhatsApp" : "Message processed (Evolution send failed or no URL)",
+        const evolutionHeaders = { "Content-Type": "application/json" };
+        if (evolutionToken) {
+          evolutionHeaders.apikey = evolutionToken;
+          evolutionHeaders.Authorization = `Bearer ${evolutionToken}`;
+        }
+
+        const evolutionResponse = await fetch(evolutionUrl, {
+          method: "POST",
+          headers: evolutionHeaders,
+          body: JSON.stringify({
+            number: phone,
+            text: aiResponse.mensagem,
+            message: aiResponse.mensagem,
+          }),
+        });
+
+        if (evolutionResponse.ok) {
+          console.log("[chatbot-webhook] Sent to WhatsApp", {
+            phone: maskPhoneForLog(phone),
+            status: aiResponse.status_conversa,
+            classificacao: aiResponse.classificacao,
+          });
+        } else {
+          const errText = await evolutionResponse.text();
+          console.error("[chatbot-webhook] Evolution send failed:", evolutionResponse.status, errText.slice(0, 200));
+        }
+
+        // Se finalizado, gerar briefing (TODO: notificar consultor)
+        if (aiResponse.finalizado) {
+          console.log("[chatbot-webhook] Conversation finalized — briefing ready", {
+            phone: maskPhoneForLog(phone),
+            clientId,
+          });
+        }
+      } catch (err) {
+        console.error("[chatbot-webhook] processBatch error:", err.message);
+      }
     });
-  } catch (error) {
-    console.error("[hardcoded-webhook] Error:", error);
-    res.json({
-      success: false,
-      error: error.message,
-      webhookStatus: "Error processing message",
-    });
-  }
+  }).catch((err) => {
+    console.error("[chatbot-webhook] resolveMessageContent error:", err.message);
+  });
 });
 
 /**
