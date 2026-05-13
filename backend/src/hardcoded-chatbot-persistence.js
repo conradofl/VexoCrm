@@ -6,6 +6,11 @@
  * Salva ou atualiza progresso da conversa em tempo real
  * Usa leads_outlier para armazenar dados coletados incrementalmente
  */
+function leadsTable(clientId) {
+  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
+  return `leads_${safe || "outlier"}`;
+}
+
 export async function persistChatbotProgress({
   supabase,
   clientId,
@@ -24,10 +29,12 @@ export async function persistChatbotProgress({
     return { error: "Missing parameters" };
   }
 
+  const table = leadsTable(clientId);
+
   try {
     // Buscar lead existente ou criar novo
     const { data: existingLeadArray, error: fetchError } = await supabase
-      .from("leads_outlier")
+      .from(table)
       .select("id")
       .eq("client_id", clientId)
       .eq("telefone", phone)
@@ -50,7 +57,7 @@ export async function persistChatbotProgress({
       };
 
       const { data: updated, error: updateError } = await supabase
-        .from("leads_outlier")
+        .from(table)
         .update(updatePayload)
         .eq("id", existingLead.id)
         .select()
@@ -72,7 +79,7 @@ export async function persistChatbotProgress({
       };
 
       const { data: inserted, error: insertError } = await supabase
-        .from("leads_outlier")
+        .from(table)
         .insert([insertPayload])
         .select()
         .single();

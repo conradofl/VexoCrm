@@ -41,11 +41,16 @@ export function setSupabaseClient(supabase) {
   supabaseClientRef = supabase;
 }
 
+function leadsTable(clientId) {
+  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
+  return `leads_${safe || "outlier"}`;
+}
+
 async function getChatMemoryFromPostgres(phone, clientId) {
   if (!supabaseClientRef) return null;
   try {
     const { data: dataArray, error } = await supabaseClientRef
-      .from("leads_outlier")
+      .from(leadsTable(clientId))
       .select("*")
       .eq("client_id", clientId)
       .eq("telefone", phone)
@@ -95,7 +100,7 @@ export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400)
   try {
     // Buscar registro existente
     const { data: existingArray, error: fetchErr } = await supabaseClientRef
-      .from("leads_outlier")
+      .from(leadsTable(clientId))
       .select("id, mensagem")
       .eq("client_id", clientId)
       .eq("telefone", phone)
@@ -125,7 +130,7 @@ export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400)
       // Atualizar
       console.log("[redis-chat] Updating record id:", existing.id);
       const { data: updated, error } = await supabaseClientRef
-        .from("leads_outlier")
+        .from(leadsTable(clientId))
         .update(payload)
         .eq("id", existing.id)
         .select();
@@ -138,7 +143,7 @@ export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400)
       // Inserir novo
       console.log("[redis-chat] Inserting new record");
       const { data: inserted, error } = await supabaseClientRef
-        .from("leads_outlier")
+        .from(leadsTable(clientId))
         .insert([{ ...payload, created_at: new Date().toISOString() }])
         .select();
       if (error) {

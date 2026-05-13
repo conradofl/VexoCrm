@@ -3136,14 +3136,14 @@ export function registerAllDomainRoutes(app) {
         rows.push({ client_id: clientId, ...parsed.row });
       }
   
-      const { data, error } = await supabase.from("leads_outlier").insert(rows).select("id");
-  
+      const { data, error } = await supabase.from(leadsTableName(clientId)).insert(rows).select("id");
+
       if (error) {
-        console.error("leads_outlier insert error:", error);
+        console.error("leads import insert error:", error);
         sendError(res, 500, "LEADS_OUTLIER_SAVE_FAILED", "Failed to save records", error.message);
         return;
       }
-  
+
       res.status(201).json({
         success: true,
         count: rows.length,
@@ -3199,14 +3199,14 @@ export function registerAllDomainRoutes(app) {
         rows.push({ client_id: clientId, ...parsed.row });
       }
   
-      const { data, error } = await supabase.from("leads_outlier").insert(rows).select("id");
-  
+      const { data, error } = await supabase.from(leadsTableName(clientId)).insert(rows).select("id");
+
       if (error) {
-        console.error("leads_outlier insert error:", error);
+        console.error("leads import n8n insert error:", error);
         sendError(res, 500, "LEADS_OUTLIER_SAVE_FAILED", "Failed to save records", error.message);
         return;
       }
-  
+
       res.json({ success: true, count: rows.length, ids: data?.map((item) => item.id) || [] });
     } catch (error) {
       console.error("import-lead-outlier-n8n error:", error);
@@ -5049,7 +5049,7 @@ export function registerAllDomainRoutes(app) {
   
     try {
       let query = supabase
-        .from("leads_outlier")
+        .from(leadsTableName(clientId))
         .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at")
         .eq("client_id", clientId)
         .order("updated_at", { ascending: false })
@@ -5122,7 +5122,7 @@ export function registerAllDomainRoutes(app) {
     try {
       // Buscar conversa mais recente
       const { data: conversation, error } = await supabase
-        .from("leads_outlier")
+        .from(leadsTableName(clientId))
         .select("*")
         .eq("client_id", clientId)
         .eq("telefone", phone)

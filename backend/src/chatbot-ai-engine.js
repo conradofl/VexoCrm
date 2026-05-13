@@ -446,8 +446,15 @@ export function appendToHistory(history, userText, assistantText) {
  * Processa um batch de mensagens do buffer para um phone+clientId.
  * Carrega histórico do banco, chama IA, salva resultado, retorna mensagem.
  */
+function chatbotLeadsTable(clientId) {
+  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
+  if (!safe || safe.length < 2) throw new Error(`Invalid clientId: "${clientId}"`);
+  return `leads_${safe}`;
+}
+
 export async function processBatch({ clientId, phone, messages, supabase, model = "outlier" }) {
   const modelConfig = getChatbotModel(model);
+  const leadsTable = chatbotLeadsTable(clientId);
 
   // Combinar textos do batch
   const combinedText = messages
@@ -463,7 +470,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
 
   // Carregar estado atual do banco
   const { data: existingArray } = await supabase
-    .from("leads_outlier")
+    .from(leadsTable)
     .select("id, dados, status_conversa, finalizado")
     .eq("client_id", clientId)
     .eq("telefone", phone)
@@ -493,6 +500,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   });
 
   console.log("[chatbot-ai] AI response:", {
+    table: leadsTable,
     status: aiResponse.status_conversa,
     classificacao: aiResponse.classificacao,
     finalizado: aiResponse.finalizado,
@@ -523,9 +531,9 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   };
 
   if (existing?.id) {
-    await supabase.from("leads_outlier").update(payload).eq("id", existing.id);
+    await supabase.from(leadsTable).update(payload).eq("id", existing.id);
   } else {
-    await supabase.from("leads_outlier").insert([{ ...payload, created_at: new Date().toISOString() }]);
+    await supabase.from(leadsTable).insert([{ ...payload, created_at: new Date().toISOString() }]);
   }
 
   return aiResponse;
