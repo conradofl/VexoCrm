@@ -148,11 +148,17 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
       <CardContent className="space-y-4">
         {/* Toggle chatbot habilitado */}
         {canEdit && (
-          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-white/10 dark:bg-slate-800/50">
+          <div className={`flex items-center justify-between rounded-lg border px-3 py-2.5 transition-colors ${
+            enabled
+              ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800/50 dark:bg-emerald-900/10"
+              : "border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-slate-800/50"
+          }`}>
             <div className="flex items-center gap-2">
               <Power className={`h-4 w-4 ${enabled ? "text-emerald-500" : "text-slate-400"}`} />
               <div>
-                <p className="text-sm font-medium leading-none">{enabled ? "Chatbot ativo" : "Chatbot desativado"}</p>
+                <p className={`text-sm font-medium leading-none ${enabled ? "text-emerald-700 dark:text-emerald-300" : ""}`}>
+                  {enabled ? "Chatbot ativo" : "Chatbot desativado"}
+                </p>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   {enabled ? "Responde automaticamente no WhatsApp" : "Mensagens ignoradas pelo bot"}
                 </p>
@@ -162,6 +168,7 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
               checked={enabled}
               onCheckedChange={handleToggleChatbot}
               disabled={updateSettings.isPending}
+              className={enabled ? "border-emerald-400" : "border-slate-300 dark:border-white/20"}
               aria-label={`Habilitar chatbot para ${clientName}`}
             />
           </div>

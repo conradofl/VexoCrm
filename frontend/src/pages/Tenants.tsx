@@ -395,28 +395,22 @@ export default function Tenants() {
                   <div className="flex items-start gap-3">
                     <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
                     <div>
-                      <p className="text-sm font-medium text-foreground">Disparo Evolution</p>
+                      <p className="text-sm font-medium text-foreground">Evolution API</p>
                       <p className="text-xs text-muted-foreground">
-                        Configure a URL de envio por empresa. O token inbound legado do n8n fica separado.
+                        URL e API Key da instância Evolution para envio de mensagens.
                       </p>
                     </div>
                   </div>
                   <Input
-                    placeholder="URL de disparo Evolution"
+                    placeholder="URL de disparo Evolution (ex: https://.../message/sendText/Instancia)"
                     value={dispatchWebhookUrl}
                     onChange={(event) => setDispatchWebhookUrl(event.target.value)}
                     disabled={!canManageTenants || createTenant.isPending}
                   />
                   <Input
-                    placeholder="Token opcional do disparo Evolution"
+                    placeholder="API Key Evolution (apikey do header)"
                     value={dispatchWebhookToken}
                     onChange={(event) => setDispatchWebhookToken(event.target.value)}
-                    disabled={!canManageTenants || createTenant.isPending}
-                  />
-                  <Input
-                    placeholder="Token inbound legado do n8n"
-                    value={inboundBearerToken}
-                    onChange={(event) => setInboundBearerToken(event.target.value)}
                     disabled={!canManageTenants || createTenant.isPending}
                   />
                 </div>
@@ -563,26 +557,13 @@ export default function Tenants() {
                             <Input
                               placeholder={
                                 tenant.n8n_settings?.has_dispatch_webhook_token
-                                  ? "Token Evolution definido"
-                                  : "Novo token Evolution"
+                                  ? "API Key Evolution definida"
+                                  : "API Key Evolution (apikey do header)"
                               }
                               value={getTenantN8nDraft(tenant).dispatchWebhookToken}
                               onChange={(event) =>
                                 updateTenantN8nDraft(tenant.id, {
                                   dispatchWebhookToken: event.target.value,
-                                })
-                              }
-                            />
-                            <Input
-                              placeholder={
-                                tenant.n8n_settings?.has_inbound_bearer_token
-                                  ? "Token inbound legado definido"
-                                  : "Novo token inbound legado"
-                              }
-                              value={getTenantN8nDraft(tenant).inboundBearerToken}
-                              onChange={(event) =>
-                                updateTenantN8nDraft(tenant.id, {
-                                  inboundBearerToken: event.target.value,
                                 })
                               }
                             />
@@ -596,18 +577,7 @@ export default function Tenants() {
                                 disabled={updateN8nSettings.isPending}
                                 onClick={() => void handleClearTenantToken(tenant, "dispatchWebhookToken")}
                               >
-                                Remover token Evolution
-                              </Button>
-                            ) : null}
-                            {tenant.n8n_settings?.has_inbound_bearer_token ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                disabled={updateN8nSettings.isPending}
-                                onClick={() => void handleClearTenantToken(tenant, "inboundBearerToken")}
-                              >
-                                Remover token inbound legado
+                                Remover API Key
                               </Button>
                             ) : null}
                             <Button
@@ -617,7 +587,7 @@ export default function Tenants() {
                               onClick={() => void handleSaveTenantN8n(tenant)}
                             >
                               <Save className="h-4 w-4" />
-                              {updateN8nSettings.isPending ? "Salvando..." : "Salvar Evolution"}
+                              {updateN8nSettings.isPending ? "Salvando..." : "Salvar"}
                             </Button>
                           </div>
                         </div>
