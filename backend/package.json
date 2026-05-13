@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/server.js",
+    "check": "node --check src/server.js && node --check src/domains/registerAllDomainRoutes.js",
     "predev": "node scripts/conditional-migrate.mjs",
     "dev": "node --watch src/server.js",
     "prestart": "node scripts/conditional-migrate.mjs",

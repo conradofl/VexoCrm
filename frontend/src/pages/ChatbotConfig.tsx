@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Bot, Copy, Check, Settings2, Zap, Power } from "lucide-react";
+import { Bot, Copy, Check, Settings2, Zap, Power, Phone } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -52,14 +53,17 @@ interface ClientChatbotCardProps {
   evolutionUrl: string | null;
   chatbotEnabled: boolean;
   chatbotModel: string;
+  sdrWhatsappNumber: string | null;
 }
 
-function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl, chatbotEnabled: initialEnabled, chatbotModel: initialModel }: ClientChatbotCardProps) {
+function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl, chatbotEnabled: initialEnabled, chatbotModel: initialModel, sdrWhatsappNumber: initialSdrNumber }: ClientChatbotCardProps) {
   const webhookUrl = buildWebhookUrl(clientId);
   const { getIdToken, hasPermission } = useAuth();
   const [testing, setTesting] = useState(false);
   const [enabled, setEnabled] = useState(initialEnabled);
   const [model, setModel] = useState(initialModel || "outlier");
+  const [sdrNumber, setSdrNumber] = useState(initialSdrNumber || "");
+  const [savingSdr, setSavingSdr] = useState(false);
   const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
   const updateSettings = useUpdateLeadClientN8nSettings();
 
@@ -95,6 +99,18 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
         description: e instanceof Error ? e.message : "Erro desconhecido",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleSaveSdrNumber = async () => {
+    setSavingSdr(true);
+    try {
+      await updateSettings.mutateAsync({ tenantId: clientId, sdrWhatsappNumber: sdrNumber || null });
+      toast({ title: "Número SDR salvo", description: `${clientName}: briefings enviados para ${sdrNumber || "nenhum"}` });
+    } catch (e) {
+      toast({ title: "Erro ao salvar", description: e instanceof Error ? e.message : "Erro desconhecido", variant: "destructive" });
+    } finally {
+      setSavingSdr(false);
     }
   };
 
@@ -190,6 +206,36 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        )}
+
+        {/* Número do SDR/Closer */}
+        {canEdit && (
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1"><Phone className="h-3 w-3" /> Número SDR/Closer (recebe briefing)</span>
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                value={sdrNumber}
+                onChange={(e) => setSdrNumber(e.target.value)}
+                placeholder="5511999999999"
+                className="h-8 text-xs font-mono"
+                disabled={savingSdr}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 h-8 text-xs"
+                onClick={handleSaveSdrNumber}
+                disabled={savingSdr}
+              >
+                {savingSdr ? "..." : "Salvar"}
+              </Button>
+            </div>
+            {sdrNumber && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Briefing enviado automaticamente ao finalizar conversa</p>
+            )}
           </div>
         )}
 
@@ -316,6 +362,7 @@ export default function ChatbotConfig() {
               evolutionUrl={client.n8n_settings?.dispatch_webhook_url ?? null}
               chatbotEnabled={client.n8n_settings?.chatbot_enabled ?? false}
               chatbotModel={client.n8n_settings?.chatbot_model ?? "outlier"}
+              sdrWhatsappNumber={client.n8n_settings?.sdr_whatsapp_number ?? null}
             />
           ))}
         </div>

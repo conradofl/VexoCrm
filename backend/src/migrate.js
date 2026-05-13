@@ -30,7 +30,7 @@ async function hasExistingSchema(pool) {
   const { rows } = await pool.query(`
     SELECT EXISTS (
       SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('leads', 'campaigns', 'leads_clients')
+      WHERE table_schema = 'public' AND table_name IN ('leads', 'leads_infinie', 'campaigns', 'leads_clients')
     ) AS has_schema
   `);
   return rows[0]?.has_schema === true;
@@ -62,6 +62,8 @@ async function isAlreadyApplied(pool, filename) {
     // Novas migrations — verificam se coluna já existe
     "20260512100000_add_chatbot_enabled_to_n8n_settings.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='chatbot_enabled') AS ok`,
     "20260512110000_add_chatbot_model_to_n8n_settings.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='chatbot_model') AS ok`,
+    "20260512120000_add_sdr_whatsapp_number_to_n8n_settings.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='sdr_whatsapp_number') AS ok`,
+    "20260512130000_rename_leads_to_leads_infinie_and_create_leads_teste.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='leads_infinie') AS ok`,
   };
 
   const query = checks[filename];

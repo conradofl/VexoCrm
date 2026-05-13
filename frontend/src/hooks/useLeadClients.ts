@@ -23,6 +23,7 @@ export interface LeadClientN8nSettingsPayload {
   active?: boolean;
   chatbotEnabled?: boolean;
   chatbotModel?: string;
+  sdrWhatsappNumber?: string | null;
 }
 
 export interface LeadClientN8nSettingsSummary {
@@ -33,6 +34,7 @@ export interface LeadClientN8nSettingsSummary {
   active: boolean;
   chatbot_enabled: boolean;
   chatbot_model: string;
+  sdr_whatsapp_number: string | null;
   updated_at: string | null;
   updated_by_email?: string | null;
 }
