@@ -166,6 +166,18 @@ async function migrationAlreadyRepresented(client, fileName) {
         where table_schema = 'public' and table_name = 'campaigns' and column_name = 'phones'
       ) as ok
     `,
+    "20260512100000_add_chatbot_enabled_to_n8n_settings.sql": `
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'lead_client_n8n_settings' and column_name = 'chatbot_enabled'
+      ) as ok
+    `,
+    "20260512110000_add_chatbot_model_to_n8n_settings.sql": `
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'lead_client_n8n_settings' and column_name = 'chatbot_model'
+      ) as ok
+    `,
   };
 
   const query = checks[fileName];
