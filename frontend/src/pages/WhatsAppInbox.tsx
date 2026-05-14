@@ -10,6 +10,8 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { useCampanhas } from "@/hooks/useCampanhas";
+import { useCrmClient } from "@/hooks/useCrmClient";
 import { toast } from "sonner";
 import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -67,6 +69,29 @@ interface WhatsAppInboxProps {
   allowSessionControls?: boolean;
 }
 
+function OriginBadge({ origin, campaignId, campaignNames }: { origin: string | null; campaignId: string | null; campaignNames: Map<string, string> }) {
+  if (!origin) return null;
+
+  if (origin === "campaign") {
+    const name = campaignId ? campaignNames.get(campaignId) : undefined;
+    return (
+      <span className="rounded-full border border-electric-indigo/30 bg-electric-indigo/10 px-2 py-0.5 text-[10px] font-semibold text-electric-indigo">
+        {name ? `Campanha: ${name}` : "Campanha"}
+      </span>
+    );
+  }
+
+  if (origin === "inbound") {
+    return (
+      <span className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+        Inbound
+      </span>
+    );
+  }
+
+  return null;
+}
+
 export default function WhatsAppInbox({
   title = "WhatsApp",
   subtitle = "Conecte a conta por QR Code e atenda conversas dentro do CRM.",
@@ -77,6 +102,16 @@ export default function WhatsAppInbox({
   const [draft, setDraft] = useState("");
   const chatsContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const { selectedClientId } = useCrmClient();
+  const campaignsQuery = useCampanhas(selectedClientId ?? undefined);
+  const campaignNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of campaignsQuery.data ?? []) {
+      map.set(c.id, c.name);
+    }
+    return map;
+  }, [campaignsQuery.data]);
 
   const {
     session,
@@ -409,7 +444,7 @@ export default function WhatsAppInbox({
                             </span>
                           </div>
                           <p className="truncate text-xs text-muted-foreground">{getPreview(chat)}</p>
-                          <div className="mt-2 flex items-center gap-2">
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             {chat.unreadCount > 0 && (
                               <span className="rounded-full bg-electric-indigo px-2 py-0.5 text-[10px] font-bold text-black">
                                 {chat.unreadCount} novas
@@ -420,6 +455,11 @@ export default function WhatsAppInbox({
                                 Grupo
                               </span>
                             )}
+                            <OriginBadge
+                              origin={chat.leadOrigin ?? null}
+                              campaignId={chat.sourceCampaignId ?? null}
+                              campaignNames={campaignNames}
+                            />
                           </div>
                         </button>
                       ))
@@ -436,9 +476,18 @@ export default function WhatsAppInbox({
 
                 <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background/30">
                   <div className="border-b border-border/70 px-4 py-3">
-                    <p className="text-sm font-semibold text-foreground">
-                      {selectedChat?.name || "Selecione uma conversa"}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground">
+                        {selectedChat?.name || "Selecione uma conversa"}
+                      </p>
+                      {selectedChat && (
+                        <OriginBadge
+                          origin={selectedChat.leadOrigin ?? null}
+                          campaignId={selectedChat.sourceCampaignId ?? null}
+                          campaignNames={campaignNames}
+                        />
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {selectedChat?.id || "Nenhuma conversa selecionada"}
                     </p>
