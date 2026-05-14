@@ -50,6 +50,7 @@ import {
   resolveMessageContent,
   processBatch,
   getChatbotModel,
+  isFirstCampaignReply,
 } from "../chatbot-ai-engine.js";
 import { OutlierQualificationBot } from "../hardcoded-chatbot-outlier.js";
 import {
@@ -4583,15 +4584,6 @@ export function registerAllDomainRoutes(app) {
         processingWaitForReplyCampaignCount: campaignReplyContext.processingWaitForReplyMatches.length,
       });
   
-      // Rotear para chatbot (nova sessão ou sessão ativa) — fire and forget
-      if (replyText) {
-        fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId, phone, message: replyText }),
-        }).catch((err) => console.warn("[reply-webhook] chatbot_route_failed:", err.message));
-      }
-  
       if (activeWaitCampaign) {
         const progression = await continueCampaignLeadFromReply({
           clientId,
@@ -4603,7 +4595,38 @@ export function registerAllDomainRoutes(app) {
             message: replyText,
           },
         });
-  
+
+        // Rotear para chatbot — roteamento de campanha (ENABLE_CAMPAIGN_ROUTING)
+        if (replyText) {
+          const campaignRoutingEnabled = process.env.ENABLE_CAMPAIGN_ROUTING === "true";
+          if (campaignRoutingEnabled) {
+            const tenantSettingsForRouting = await getLeadClientN8nSettings(clientId).catch(() => null);
+            const baseModel = tenantSettingsForRouting?.chatbot_model || "outlier";
+            const itemId = activeWaitCampaign.leadImportItem?.id;
+            const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
+            const validBases = new Set(["outlier", "infinie"]);
+            const modelOverride = isFirst && validBases.has(baseModel) ? `campanha_${baseModel}` : undefined;
+            if (isFirst) {
+              await supabase
+                .from(leadsTableName(clientId))
+                .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id })
+                .eq("client_id", clientId)
+                .eq("telefone", phone);
+            }
+            fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ clientId, phone, message: replyText, ...(modelOverride ? { modelOverride } : {}) }),
+            }).catch((err) => console.warn("[reply-webhook] chatbot_route_failed:", err.message));
+          } else {
+            fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ clientId, phone, message: replyText }),
+            }).catch((err) => console.warn("[reply-webhook] chatbot_route_failed:", err.message));
+          }
+        }
+
         res.json({
           success: true,
           clientId,
@@ -4627,7 +4650,16 @@ export function registerAllDomainRoutes(app) {
         });
         return;
       }
-  
+
+      // Rotear para chatbot — inbound (nova sessão ou sessão ativa) — fire and forget
+      if (replyText) {
+        fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId, phone, message: replyText }),
+        }).catch((err) => console.warn("[reply-webhook] chatbot_route_failed:", err.message));
+      }
+
       const importItemsUpdatePayload = {
         status_conversa: "em_atendimento",
         ultima_interacao_usuario: repliedAt,
@@ -4926,7 +4958,7 @@ export function registerAllDomainRoutes(app) {
   
       bufferMessage(clientId, phone, messageData, async (messages) => {
         try {
-          const chatbotModel = tenantSettings?.chatbot_model || "outlier";
+          const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model || "outlier";
           const aiResponse = await processBatch({
             clientId,
             phone,
@@ -5079,7 +5111,7 @@ export function registerAllDomainRoutes(app) {
     try {
       let query = supabase
         .from(leadsTableName(clientId))
-        .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at")
+        .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at, lead_origin, source_campaign_id")
         .eq("client_id", clientId)
         .order("updated_at", { ascending: false })
         .limit(limit);
@@ -5114,9 +5146,11 @@ export function registerAllDomainRoutes(app) {
           leadScore: row.lead_score || null,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
+          leadOrigin: row.lead_origin || null,
+          sourceCampaignId: row.source_campaign_id || null,
         };
       });
-  
+
       // Agrupar por status para facilitar o Kanban
       const kanban = {
         em_atendimento: leads.filter((l) => l.statusConversa === "em_atendimento"),
