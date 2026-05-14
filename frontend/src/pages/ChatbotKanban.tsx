@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { RefreshCw, Phone, Clock, CheckCircle2, MessageCircle, AlertCircle } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCrmClient } from "@/hooks/useCrmClient";
+import { useCampanhas } from "@/hooks/useCampanhas";
 import { fetchApi, readApiJson, readApiErrorMessage } from "@/lib/api";
 
 const SPIN_STEP_LABELS: Record<string, string> = {
@@ -33,8 +34,33 @@ interface ChatbotLead {
   mensagem: string | null;
   leadTemperature: string | null;
   leadScore: number | null;
+  leadOrigin: string | null;
+  sourceCampaignId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+function OriginBadge({ lead, campaignNames }: { lead: ChatbotLead; campaignNames: Map<string, string> }) {
+  if (!lead.leadOrigin) return null;
+
+  if (lead.leadOrigin === "campaign") {
+    const campaignName = lead.sourceCampaignId ? campaignNames.get(lead.sourceCampaignId) : undefined;
+    return (
+      <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-400">
+        {campaignName ? `Campanha: ${campaignName}` : "Campanha"}
+      </span>
+    );
+  }
+
+  if (lead.leadOrigin === "inbound") {
+    return (
+      <span className="inline-flex items-center rounded-full border border-slate-500/20 bg-slate-500/10 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
+        Inbound
+      </span>
+    );
+  }
+
+  return null;
 }
 
 function maskPhone(phone: string): string {
@@ -60,7 +86,7 @@ function stepProgress(stepId: string | null): number {
   return Math.round(((idx + 1) / SPIN_STEP_ORDER.length) * 100);
 }
 
-function LeadCard({ lead }: { lead: ChatbotLead }) {
+function LeadCard({ lead, campaignNames }: { lead: ChatbotLead; campaignNames: Map<string, string> }) {
   const stepLabel = lead.currentStepId ? (SPIN_STEP_LABELS[lead.currentStepId] || lead.currentStepId) : null;
   const progress = stepProgress(lead.currentStepId);
   const fieldsCount = Object.keys(lead.collectedData).length;
@@ -96,6 +122,8 @@ function LeadCard({ lead }: { lead: ChatbotLead }) {
         </div>
       )}
 
+      <OriginBadge lead={lead} campaignNames={campaignNames} />
+
       <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
         <span>{fieldsCount} campo{fieldsCount !== 1 ? "s" : ""} coletado{fieldsCount !== 1 ? "s" : ""}</span>
         <div className="flex items-center gap-1">
@@ -112,11 +140,13 @@ function KanbanColumn({
   icon,
   leads,
   accentClass,
+  campaignNames,
 }: {
   title: string;
   icon: React.ReactNode;
   leads: ChatbotLead[];
   accentClass: string;
+  campaignNames: Map<string, string>;
 }) {
   return (
     <div className="flex min-w-[280px] max-w-sm flex-1 flex-col rounded-xl border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-slate-800/40">
@@ -131,7 +161,7 @@ function KanbanColumn({
         {leads.length === 0 ? (
           <p className="py-8 text-center text-xs text-slate-400 dark:text-slate-500">Nenhum lead</p>
         ) : (
-          leads.map((lead) => <LeadCard key={lead.id} lead={lead} />)
+          leads.map((lead) => <LeadCard key={lead.id} lead={lead} campaignNames={campaignNames} />)
         )}
       </div>
     </div>
@@ -147,6 +177,15 @@ export default function ChatbotKanban() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const canAccess = canAccessInternalPage("agente");
+
+  const campaignsQuery = useCampanhas(selectedClientId ?? undefined);
+  const campaignNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of campaignsQuery.data ?? []) {
+      map.set(c.id, c.name);
+    }
+    return map;
+  }, [campaignsQuery.data]);
 
   const fetchLeads = useCallback(async () => {
     if (!canAccess || !selectedClientId) return;
@@ -223,12 +262,14 @@ export default function ChatbotKanban() {
           icon={<MessageCircle className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />}
           leads={emAtendimento}
           accentClass="bg-indigo-50 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+          campaignNames={campaignNames}
         />
         <KanbanColumn
           title="Finalizados"
           icon={<CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
           leads={finalizados}
           accentClass="bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
+          campaignNames={campaignNames}
         />
       </div>
     </PageShell>

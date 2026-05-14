@@ -19,6 +19,8 @@ export interface WhatsAppChat {
     timestamp: number | null;
     type: string | null;
   } | null;
+  leadOrigin: string | null;
+  sourceCampaignId: string | null;
 }
 
 export interface WhatsAppMessage {
