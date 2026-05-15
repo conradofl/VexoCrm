@@ -4861,8 +4861,7 @@ function resolveMatchedImportItemForCampaign(importItems, campaign) {
     return (
       p &&
       p.waitForReply === true &&
-      p.status === "aguardando_usuario" &&
-      normalizeCampaignPendingStepIndex(p.nextStepIndex) !== null
+      p.status === "aguardando_usuario"
     );
   });
   return withReplyProgress || importItems[0] || null;
@@ -4960,8 +4959,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       const hasPendingProgress =
         progress &&
         progress.waitForReply === true &&
-        progress.status === "aguardando_usuario" &&
-        normalizeCampaignPendingStepIndex(progress.nextStepIndex) !== null;
+        progress.status === "aguardando_usuario";
 
       return {
         id: campaign.id,
