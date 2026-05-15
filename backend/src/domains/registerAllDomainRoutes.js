@@ -4940,12 +4940,24 @@ export function registerAllDomainRoutes(app) {
 
     // ── Campaign routing (feature-flagged) ──────────────────────────────
     let campaignModelOverride;
+    let skipChatbotForCampaign = false;
     if (process.env.ENABLE_CAMPAIGN_ROUTING === "true") {
       try {
         const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
         const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+        const ACTIVE_STATUSES = new Set(["active", "processing"]);
+        const hasRunningCampaign = campaignReplyContext.matches.some(
+          (c) => ACTIVE_STATUSES.has(c.status)
+        );
+        // waitForReply configurado na campanha mas lead não está aguardando agora
+        // (expirou, já foi tratado, ou lead respondeu antes do timeout)
+        const waitForReplyExpired =
+          campaignReplyContext.waitForReplyMatches.length > 0 &&
+          campaignReplyContext.processingWaitForReplyMatches.length === 0;
 
         if (activeWaitCampaign) {
+          // Cenário 1: campanha active/processing + waitForReply=true + lead aguardando agora
+          // → agente campanha responde
           const itemId = activeWaitCampaign.leadImportItem?.id;
           const { isFirst } = await isFirstCampaignReply({
             itemId,
@@ -4958,6 +4970,15 @@ export function registerAllDomainRoutes(app) {
             const validBases = new Set(["outlier", "infinie"]);
             campaignModelOverride = validBases.has(baseModel) ? `campanha_${baseModel}` : undefined;
 
+            console.log("[campaign-routing] wait_for_reply_step", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              campaignId: activeWaitCampaign.id,
+              campaignName: activeWaitCampaign.name,
+              isFirst,
+              modelOverride: campaignModelOverride ?? "none",
+            });
+
             // Marca lead como originado de campanha
             supabase
               .from(leadsTableName(clientId))
@@ -4967,13 +4988,54 @@ export function registerAllDomainRoutes(app) {
               .then(({ error }) => {
                 if (error) console.warn("[chatbot-webhook] campaign lead_origin update failed:", error.message);
               });
+          } else {
+            console.log("[campaign-routing] wait_for_reply_step", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              campaignId: activeWaitCampaign.id,
+              campaignName: activeWaitCampaign.name,
+              isFirst,
+              modelOverride: "none (subsequent reply)",
+            });
           }
+        } else if (hasRunningCampaign && !waitForReplyExpired) {
+          // Cenário 2 REAL: campanha active/processing sem waitForReply (ou lead não aguardando
+          // E waitForReply nunca foi configurado / não há expiração pendente)
+          // → agente silencia, campanha continua mandando steps normalmente
+          skipChatbotForCampaign = true;
+          console.log("[campaign-routing] skip_no_wait", {
+            clientId,
+            phone: maskPhoneForLog(phone),
+            matchedCampaigns: campaignReplyContext.matches
+              .filter((c) => ACTIVE_STATUSES.has(c.status))
+              .map((c) => ({
+                id: c.id,
+                name: c.name,
+                status: c.status,
+                waitForReply: c.waitForReply,
+                hasPendingProgress: c.hasPendingProgress,
+              })),
+          });
+        } else {
+          // Cenário 3: sem campanha active/processing, ou waitForReply expirou
+          // → agente padrão responde normalmente
+          console.log("[campaign-routing] no_active_campaign", {
+            clientId,
+            phone: maskPhoneForLog(phone),
+            waitForReplyExpired,
+          });
         }
       } catch (err) {
         console.warn("[chatbot-webhook] campaign routing check failed, continuing normal flow:", err.message);
       }
     }
     // ─────────────────────────────────────────────────────────────────────
+
+    // Cenário 2: silencia o agente enquanto campanha active/processing está em andamento
+    if (skipChatbotForCampaign) {
+      res.json({ success: true, status: "skipped_active_campaign" });
+      return;
+    }
 
     // Responde imediatamente ao Evolution (evita timeout)
     res.json({ success: true, status: "buffering" });
