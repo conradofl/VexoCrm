@@ -48,6 +48,7 @@ import { extractConversationBriefing } from "../hardcoded-chatbot-extractor.js";
 import {
   bufferMessage,
   resolveMessageContent,
+  extractTextFromBody,
   processBatch,
   getChatbotModel,
   isFirstCampaignReply,
@@ -4550,9 +4551,7 @@ export function registerAllDomainRoutes(app) {
       body.remoteJid ??
       body.data?.key?.remoteJid
     );
-    const replyText =
-      normalizeString(body.message || body.text || body.body || body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text) ||
-      null;
+    const replyText = normalizeString(extractTextFromBody(body)) || null;
     const repliedAt =
       normalizeIsoDate(body.repliedAt ?? body.timestamp ?? body.created_at ?? body.data?.messageTimestamp) ||
       new Date().toISOString();
@@ -4938,7 +4937,44 @@ export function registerAllDomainRoutes(app) {
       res.json({ success: false, error: "Missing phone" });
       return;
     }
-  
+
+    // ── Campaign routing (feature-flagged) ──────────────────────────────
+    let campaignModelOverride;
+    if (process.env.ENABLE_CAMPAIGN_ROUTING === "true") {
+      try {
+        const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
+        const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+
+        if (activeWaitCampaign) {
+          const itemId = activeWaitCampaign.leadImportItem?.id;
+          const { isFirst } = await isFirstCampaignReply({
+            itemId,
+            campaignId: activeWaitCampaign.id,
+            supabase,
+          });
+
+          if (isFirst) {
+            const baseModel = tenantSettings?.chatbot_model || "outlier";
+            const validBases = new Set(["outlier", "infinie"]);
+            campaignModelOverride = validBases.has(baseModel) ? `campanha_${baseModel}` : undefined;
+
+            // Marca lead como originado de campanha
+            supabase
+              .from(leadsTableName(clientId))
+              .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id })
+              .eq("client_id", clientId)
+              .eq("telefone", phone)
+              .then(({ error }) => {
+                if (error) console.warn("[chatbot-webhook] campaign lead_origin update failed:", error.message);
+              });
+          }
+        }
+      } catch (err) {
+        console.warn("[chatbot-webhook] campaign routing check failed, continuing normal flow:", err.message);
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     // Responde imediatamente ao Evolution (evita timeout)
     res.json({ success: true, status: "buffering" });
   
@@ -4958,7 +4994,7 @@ export function registerAllDomainRoutes(app) {
   
       bufferMessage(clientId, phone, messageData, async (messages) => {
         try {
-          const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model || "outlier";
+          const chatbotModel = campaignModelOverride || body.modelOverride || tenantSettings?.chatbot_model || "outlier";
           const aiResponse = await processBatch({
             clientId,
             phone,
