@@ -5407,11 +5407,6 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     leads: leadsToDispatch,
     triggerSource,
   });
-  const evolutionAudit =
-    dispatchSummary && typeof dispatchSummary === "object"
-      ? JSON.stringify(dispatchSummary).slice(0, 8000)
-      : null;
-
   const completedAt = new Date().toISOString();
   const nextAnalyticsMeta = {
     ...analyticsMeta,
@@ -5424,7 +5419,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
       failureCount: dispatchSummary?.failureCount ?? null,
       webhookStatus,
       provider: "evolution",
-      evolutionSummary: evolutionAudit,
+      evolutionSummary: null,
       n8nResponse: null,
       sentAt: completedAt,
       updatedAt: completedAt,
@@ -5469,7 +5464,9 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
       ? "Campanha iniciou o fluxo com espera por resposta do lead."
       : "Campanha enviada via Evolution com sucesso.",
     payload: auditPayload,
-    n8nResponse: evolutionAudit,
+    n8nResponse: dispatchSummary && typeof dispatchSummary === "object"
+      ? JSON.stringify(dispatchSummary).slice(0, 8000)
+      : null,
     totalLeads: leadsToDispatch.length,
     webhookStatus,
   });
@@ -5482,7 +5479,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     total: leadsToDispatch.length,
     phones: auditPayload.phones,
     payload: auditPayload,
-    n8nResponse: evolutionAudit,
+    n8nResponse: null,
   };
 }
 
