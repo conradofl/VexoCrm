@@ -255,18 +255,18 @@ export default function FollowupQueue() {
   const { canAccessInternalPage } = useAuth();
   const { data: clients = [] } = useLeadClients();
 
-  const [clientId, setClientId] = useState("");
-  const [campaignId, setCampaignId] = useState("");
-  const [status, setStatus] = useState<FollowupStatus | "">("");
+  const [clientId, setClientId] = useState("_all");
+  const [campaignId, setCampaignId] = useState("_all");
+  const [status, setStatus] = useState<FollowupStatus | "_all">("_all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const { data: campaigns = [] } = useCampanhas(clientId || undefined);
+  const { data: campaigns = [] } = useCampanhas(clientId !== "_all" ? clientId : undefined);
 
   const filters: FollowupQueueFilters = {
-    clientId: clientId || undefined,
-    campaignId: campaignId || undefined,
-    status: status || undefined,
+    clientId: clientId !== "_all" ? clientId : undefined,
+    campaignId: campaignId !== "_all" ? campaignId : undefined,
+    status: status !== "_all" ? (status as FollowupStatus) : undefined,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
   };
@@ -328,12 +328,12 @@ export default function FollowupQueue() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1.5">
               <Label className="text-xs text-slate-500 dark:text-slate-400">Empresa</Label>
-              <Select value={clientId} onValueChange={(v) => { setClientId(v); setCampaignId(""); }}>
+              <Select value={clientId} onValueChange={(v) => { setClientId(v); setCampaignId("_all"); }}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Todas" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="" className="text-xs">Todas as empresas</SelectItem>
+                  <SelectItem value="_all" className="text-xs">Todas as empresas</SelectItem>
                   {clients.map((c) => (
                     <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
                   ))}
@@ -343,12 +343,12 @@ export default function FollowupQueue() {
 
             <div className="space-y-1.5">
               <Label className="text-xs text-slate-500 dark:text-slate-400">Campanha</Label>
-              <Select value={campaignId} onValueChange={setCampaignId} disabled={!clientId}>
+              <Select value={campaignId} onValueChange={setCampaignId} disabled={clientId === "_all"}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Todas" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="" className="text-xs">Todas as campanhas</SelectItem>
+                  <SelectItem value="_all" className="text-xs">Todas as campanhas</SelectItem>
                   {campaigns.map((c) => (
                     <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
                   ))}
@@ -358,12 +358,12 @@ export default function FollowupQueue() {
 
             <div className="space-y-1.5">
               <Label className="text-xs text-slate-500 dark:text-slate-400">Status</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as FollowupStatus | "")}>
+              <Select value={status} onValueChange={(v) => setStatus(v as FollowupStatus | "_all")}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Todos" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="" className="text-xs">Todos os status</SelectItem>
+                  <SelectItem value="_all" className="text-xs">Todos os status</SelectItem>
                   {(Object.keys(STATUS_LABELS) as FollowupStatus[]).map((s) => (
                     <SelectItem key={s} value={s} className="text-xs">{STATUS_LABELS[s]}</SelectItem>
                   ))}
