@@ -15,11 +15,25 @@ import {
   Table,
   ArrowRight,
   ArrowDown,
+  Megaphone,
+  Users,
+  TrendingUp,
+  FileText,
+  Image,
+  Timer,
+  Shuffle,
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { useLeadClients } from "@/hooks/useLeadClients";
+import { useCampanhas } from "@/hooks/useCampanhas";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
 
 // ─── Componentes de Diagrama ─────────────────────────────────────────────────
 
@@ -459,6 +473,377 @@ function BufferDiagram() {
   );
 }
 
+// ─── Campanhas: Fluxo de Roteamento ──────────────────────────────────────────
+
+function CampaignRoutingDiagram() {
+  return (
+    <div className="space-y-6">
+      {/* Dois caminhos de entrada */}
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <FlowNode label="Lead Inbound" sublabel="Contato espontâneo" variant="default" icon={MessageCircle} />
+            <Arrow label="lead_origin = inbound" />
+            <FlowNode label="Prompt Padrão" sublabel="Tom consultivo SPIN" variant="action" icon={Bot} />
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <FlowNode label="Lead de Campanha" sublabel="Recebeu disparo" variant="start" icon={Megaphone} />
+            <Arrow label="lead_origin = campaign" />
+            <FlowNode label="Prompt Campanha" sublabel="Contexto do produto" variant="start" icon={Bot} />
+          </div>
+        </div>
+
+        <div className="mt-2 flex flex-col items-center gap-2">
+          <Arrow label="Mesmo motor SPIN" />
+          <FlowNode label="9 Perguntas SPIN" sublabel="Qualificação unificada" variant="action" />
+          <Arrow />
+          <FlowNode label="Briefing SDR" sublabel="sdr_whatsapp_number" variant="end" icon={Phone} />
+        </div>
+      </div>
+
+      {/* Como o origin chega */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.02]">
+        <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
+          Como lead_origin chega ao chatbot
+        </p>
+        <div className="space-y-2">
+          {[
+            {
+              field: "lead_origin",
+              table: "leads_{clientId}",
+              values: "'inbound' | 'campaign' | NULL",
+              note: "Gravado pelo webhook de disparo da campanha",
+            },
+            {
+              field: "source_campaign_id",
+              table: "leads_{clientId}",
+              values: "UUID | NULL",
+              note: "FK para public.campaigns — permite buscar nome e sequência",
+            },
+          ].map(({ field, table, values, note }) => (
+            <div
+              key={field}
+              className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/8 dark:bg-white/[0.03]"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="font-mono text-[11px] font-bold text-cyan-700 dark:text-cyan-400">{field}</code>
+                <span className="font-mono text-[10px] text-slate-400">{table}</span>
+                <span className="font-mono text-[10px] text-indigo-500 dark:text-indigo-400">{values}</span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-500">{note}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Badge no CRM */}
+      <div className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-800/40 dark:bg-indigo-900/10">
+        <Shuffle className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+        <div className="text-sm text-indigo-800 dark:text-indigo-300">
+          <p className="font-medium">Badge visual no Kanban e WhatsApp</p>
+          <p className="mt-0.5 text-indigo-700 dark:text-indigo-400 text-xs">
+            Conversas com <code>lead_origin = campaign</code> exibem o badge roxo "Campanha: [nome]" na lista de chats e no cabeçalho da conversa. Leads inbound mostram o badge cinza "Inbound".
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Campanhas: Visualizador de Sequência ────────────────────────────────────
+
+const TRIGGER_MODE_LABELS: Record<string, string> = {
+  immediate: "Imediato",
+  after_reply: "Após resposta",
+};
+
+function StepTypeIcon({ type }: { type: string }) {
+  if (type === "image") return <Image className="h-3.5 w-3.5 text-violet-400" />;
+  return <FileText className="h-3.5 w-3.5 text-slate-400" />;
+}
+
+function CampaignSequenceViewer() {
+  const { data: clients = [], isLoading: loadingClients } = useLeadClients();
+  const [clientId, setClientId] = useState("");
+  const [campaignId, setCampaignId] = useState("");
+
+  const { data: campaigns = [], isLoading: loadingCampaigns } = useCampanhas(clientId || undefined);
+
+  const selectedCampaign = campaigns.find((c) => c.id === campaignId);
+  const sequence = selectedCampaign?.analytics_meta?.sequence ?? [];
+  const dispatchOptions = selectedCampaign?.analytics_meta?.dispatchOptions;
+
+  return (
+    <div className="space-y-4">
+      {/* Seletores */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-slate-500 dark:text-slate-400">Empresa</Label>
+          <Select
+            value={clientId}
+            onValueChange={(v) => { setClientId(v); setCampaignId(""); }}
+            disabled={loadingClients}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Selecione a empresa" />
+            </SelectTrigger>
+            <SelectContent>
+              {clients.map((c) => (
+                <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-slate-500 dark:text-slate-400">Campanha</Label>
+          <Select
+            value={campaignId}
+            onValueChange={setCampaignId}
+            disabled={!clientId || loadingCampaigns}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder={clientId ? "Selecione a campanha" : "— selecione empresa primeiro —"} />
+            </SelectTrigger>
+            <SelectContent>
+              {campaigns.map((c) => (
+                <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Sequência */}
+      {!campaignId ? (
+        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+          <p className="text-sm text-slate-400">Selecione uma campanha para visualizar a sequência.</p>
+        </div>
+      ) : sequence.length === 0 ? (
+        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+          <p className="text-sm text-slate-400">Esta campanha não tem sequência de mensagens configurada.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Opções de disparo */}
+          {dispatchOptions && (
+            <div className="flex flex-wrap gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3 dark:border-white/8 dark:bg-white/[0.03]">
+              <span className="text-xs text-slate-500">
+                <span className="font-medium text-slate-700 dark:text-slate-300">Delay entre leads:</span>{" "}
+                {dispatchOptions.leadDelaySeconds}s
+              </span>
+              {dispatchOptions.waitForReply && (
+                <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Aguarda resposta</span>
+              )}
+              {dispatchOptions.aiAssisted && (
+                <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">IA assistida</span>
+              )}
+            </div>
+          )}
+
+          {/* Steps */}
+          <div className="flex flex-col gap-0">
+            {sequence
+              .filter((s) => s.enabled !== false)
+              .sort((a, b) => a.order - b.order)
+              .map((step, i, arr) => (
+                <div key={step.id} className="flex items-stretch gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-slate-300 bg-white text-xs font-bold text-slate-500 dark:border-white/20 dark:bg-white/5 dark:text-slate-400">
+                      {i + 1}
+                    </div>
+                    {i < arr.length - 1 && (
+                      <div className="w-px flex-1 bg-slate-200 dark:bg-white/10" style={{ minHeight: 16 }} />
+                    )}
+                  </div>
+
+                  <div className="mb-2 flex-1 rounded-xl border border-slate-100 bg-white px-4 py-3 dark:border-white/8 dark:bg-white/[0.02]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StepTypeIcon type={step.type} />
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                        {step.type === "image" ? "Imagem" : "Texto"}
+                      </span>
+                      <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                        <Timer className="h-3 w-3" />
+                        {step.delayAfterSeconds}s
+                      </span>
+                      <span className="ml-auto text-[10px] font-medium text-indigo-500 dark:text-indigo-400">
+                        {TRIGGER_MODE_LABELS[step.triggerMode ?? "immediate"]}
+                      </span>
+                    </div>
+                    {step.text && (
+                      <p className="mt-1.5 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">
+                        {step.text}
+                      </p>
+                    )}
+                    {step.image && (
+                      <p className="mt-1 text-[10px] text-violet-500">[imagem: {step.image.name}]</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Campanhas: Métricas por Agente ──────────────────────────────────────────
+
+interface AgentMetric {
+  agentId: string;
+  agentName: string;
+  totalLeads: number;
+  converted: number;
+  conversionRate: number;
+  avgResponseMinutes: number | null;
+}
+
+function useAgentMetrics(clientId: string) {
+  const { isAuthenticated, getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["campaign-agent-metrics", clientId],
+    enabled: isAuthenticated && !!clientId,
+    queryFn: async (): Promise<AgentMetric[] | null> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const params = new URLSearchParams();
+      if (clientId) params.set("clientId", clientId);
+
+      const res = await fetchApi(`/api/campaigns/metrics/by-agent?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao carregar métricas"));
+
+      const data = await readApiJson<{ items?: AgentMetric[] }>(res, "agent_metrics");
+      return data.items ?? [];
+    },
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function CampaignAgentMetrics() {
+  const { data: clients = [] } = useLeadClients();
+  const [clientId, setClientId] = useState("");
+  const { data: metrics, isLoading, error } = useAgentMetrics(clientId);
+
+  const apiNotReady = metrics === null || (error instanceof Error && error.message.includes("404"));
+
+  return (
+    <div className="space-y-4">
+      <div className="max-w-xs space-y-1.5">
+        <Label className="text-xs text-slate-500 dark:text-slate-400">Empresa</Label>
+        <Select value={clientId} onValueChange={setClientId}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder="Selecione a empresa" />
+          </SelectTrigger>
+          <SelectContent>
+            {clients.map((c) => (
+              <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {!clientId ? (
+        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+          <p className="text-sm text-slate-400">Selecione uma empresa para ver as métricas.</p>
+        </div>
+      ) : apiNotReady ? (
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/50 p-8 text-center dark:border-amber-800/40 dark:bg-amber-900/10">
+          <AlertCircle className="h-7 w-7 text-amber-400" />
+          <p className="font-medium text-amber-800 dark:text-amber-300">Endpoint ainda não disponível</p>
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            O Conrado ainda não publicou{" "}
+            <code className="rounded bg-amber-100 px-1 dark:bg-amber-800">
+              GET /api/campaigns/metrics/by-agent
+            </code>
+            . As métricas aparecerão aqui assim que a rota estiver no ar.
+          </p>
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50/50 p-6 text-center dark:border-red-800/40 dark:bg-red-900/10">
+          <p className="text-sm font-medium text-red-700 dark:text-red-400">Erro: {error.message}</p>
+        </div>
+      ) : isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+          ))}
+        </div>
+      ) : metrics && metrics.length === 0 ? (
+        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+          <p className="text-sm text-slate-400">Nenhuma métrica encontrada para esta empresa.</p>
+        </div>
+      ) : metrics ? (
+        <div className="space-y-2">
+          {metrics
+            .sort((a, b) => b.conversionRate - a.conversionRate)
+            .map((agent, i) => (
+              <div
+                key={agent.agentId}
+                className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3 dark:border-white/8 dark:bg-white/[0.02]"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                    {i + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {agent.agentName}
+                    </p>
+                    <p className="text-[11px] text-slate-400 font-mono">{agent.agentId}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-4 text-center">
+                  <div>
+                    <p className="text-lg font-extrabold text-slate-800 dark:text-slate-100">{agent.totalLeads}</p>
+                    <p className="text-[10px] text-slate-400">Leads</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400">{agent.converted}</p>
+                    <p className="text-[10px] text-slate-400">Convertidos</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-extrabold text-indigo-600 dark:text-indigo-400">
+                      {(agent.conversionRate * 100).toFixed(1)}%
+                    </p>
+                    <p className="text-[10px] text-slate-400">Taxa</p>
+                  </div>
+                  {agent.avgResponseMinutes !== null && (
+                    <div>
+                      <p className="text-lg font-extrabold text-amber-600 dark:text-amber-400">
+                        {agent.avgResponseMinutes}min
+                      </p>
+                      <p className="text-[10px] text-slate-400">Resp. média</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Barra de progresso */}
+                <div className="hidden w-28 sm:block">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500"
+                      style={{ width: `${Math.min(100, agent.conversionRate * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── Página Principal ─────────────────────────────────────────────────────────
 
 export default function ChatbotDocs() {
@@ -482,6 +867,10 @@ export default function ChatbotDocs() {
           <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-400">
             <Phone className="mr-1 h-3 w-3" />
             SDR Alerts
+          </Badge>
+          <Badge variant="outline" className="border-indigo-300 text-indigo-700 dark:text-indigo-400">
+            <Megaphone className="mr-1 h-3 w-3" />
+            Campanhas
           </Badge>
         </div>
 
@@ -525,6 +914,10 @@ export default function ChatbotDocs() {
             <TabsTrigger value="sdr">
               <Phone className="mr-1.5 h-3.5 w-3.5" />
               Notificação SDR
+            </TabsTrigger>
+            <TabsTrigger value="campanhas">
+              <Megaphone className="mr-1.5 h-3.5 w-3.5" />
+              Campanhas
             </TabsTrigger>
           </TabsList>
 
@@ -584,6 +977,52 @@ export default function ChatbotDocs() {
                 <SdrFlowDiagram />
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="campanhas">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Shuffle className="h-4 w-4 text-indigo-500" />
+                    Roteamento Campanha vs Inbound
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CampaignRoutingDiagram />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4 text-slate-500" />
+                    Sequência de Mensagens por Campanha
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+                    Visualize os passos configurados para cada campanha, com tipo, texto, delay e modo de disparo.
+                  </p>
+                  <CampaignSequenceViewer />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    Métricas de Conversão por Agente
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+                    Taxa de conversão, volume de leads e tempo médio de resposta por consultor.
+                  </p>
+                  <CampaignAgentMetrics />
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
 

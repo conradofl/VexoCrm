@@ -28,7 +28,9 @@ import {
   useWhatsAppChats,
   useWhatsAppMessages,
   type WhatsAppChat,
+  type WhatsAppMessage,
 } from "@/hooks/useWhatsAppInbox";
+import { MediaMessage } from "@/components/MediaMessage";
 
 const STATUS_LABELS: Record<string, string> = {
   idle: "Parado",
@@ -60,6 +62,29 @@ function getPreview(chat: WhatsAppChat) {
   const body = chat.lastMessage?.body?.trim();
   if (!body) return "Sem mensagens recentes.";
   return body.length > 72 ? `${body.slice(0, 72)}...` : body;
+}
+
+function MessageBubble({ message }: { message: WhatsAppMessage }) {
+  return (
+    <div
+      className={cn(
+        "max-w-[78%] rounded-2xl px-4 py-3 text-sm",
+        message.fromMe
+          ? "ml-auto bg-electric-indigo/15 text-foreground"
+          : "bg-secondary text-foreground"
+      )}
+    >
+      <MediaMessage
+        messageId={message.id}
+        hasMedia={message.hasMedia}
+        fallbackBody={message.body}
+        fromMe={message.fromMe}
+      />
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        {formatTimestamp(message.timestamp)} {message.fromMe ? "• voce" : ""}
+      </p>
+    </div>
+  );
 }
 
 interface WhatsAppInboxProps {
@@ -511,20 +536,7 @@ export default function WhatsAppInbox({
                       />
                     ) : (
                       messages.map((message) => (
-                        <div
-                          key={message.id || `${message.timestamp}-${message.body}`}
-                          className={cn(
-                            "max-w-[78%] rounded-2xl px-4 py-3 text-sm",
-                            message.fromMe
-                              ? "ml-auto bg-electric-indigo/15 text-foreground"
-                              : "bg-secondary text-foreground"
-                          )}
-                        >
-                          <p className="whitespace-pre-wrap break-all">{message.body || "[mensagem sem texto]"}</p>
-                          <p className="mt-2 text-[11px] text-muted-foreground">
-                            {formatTimestamp(message.timestamp)} {message.fromMe ? "• voce" : ""}
-                          </p>
-                        </div>
+                        <MessageBubble key={message.id || `${message.timestamp}-${message.body}`} message={message} />
                       ))
                     )}
                   </div>

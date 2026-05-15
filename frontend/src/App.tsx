@@ -32,6 +32,8 @@ import VexoSales from "./pages/VexoSales";
 import ChatbotKanban from "./pages/ChatbotKanban";
 import ChatbotConfig from "./pages/ChatbotConfig";
 import ChatbotDocs from "./pages/ChatbotDocs";
+import PromptEditor from "./pages/PromptEditor";
+import FollowupQueue from "./pages/FollowupQueue";
 
 const queryClient = new QueryClient();
 
@@ -181,6 +183,22 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
                     <ChatbotDocs />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="prompt-editor"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
+                    <PromptEditor />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="followup"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="planilhas">
+                    <FollowupQueue />
                   </ProtectedRoute>
                 }
               />

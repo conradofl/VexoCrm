@@ -16,6 +16,8 @@ import {
   MessageCircle,
   KanbanSquare,
   BookOpen,
+  FileEdit,
+  ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -31,6 +33,8 @@ const navItems = [
   { title: "Agente", url: "/crm/agente", icon: Bot, page: "agente" as const },
   { title: "Chatbot Kanban", url: "/crm/chatbot", icon: KanbanSquare, page: "agente" as const },
   { title: "Chatbot Config", url: "/crm/chatbot-config", icon: Bot, page: "empresas" as const },
+  { title: "Editor de Prompts", url: "/crm/prompt-editor", icon: FileEdit, page: "empresas" as const },
+  { title: "Fila de Followup", url: "/crm/followup", icon: ListChecks, page: "planilhas" as const },
   { title: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen, page: "agente" as const },
   { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
   { title: "Usuarios", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" as const },
