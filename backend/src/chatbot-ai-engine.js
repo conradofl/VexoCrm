@@ -26,6 +26,29 @@ function groqKey() {
 }
 
 
+// ─── Campos individuais extraídos do JSONB `dados` ──────────────────────────
+// Chaves comuns a todos os tenants e chaves específicas por tipo.
+// Só inclui no payload se o valor existir, evitando sobrescrever dados válidos.
+const COMMON_INDIVIDUAL_FIELDS = ["interesse", "objetivo", "prazo", "melhor_horario", "nome", "cidade", "estado"];
+const TYPE_SPECIFIC_FIELDS = {
+  outlier: ["credito", "parcela", "lance_entrada_fgts"],
+  infinie: ["tipo_instalacao", "conta_luz_faixa"],
+};
+
+function extractIndividualColumns(dados) {
+  const result = {};
+  const allFields = [
+    ...COMMON_INDIVIDUAL_FIELDS,
+    ...Object.values(TYPE_SPECIFIC_FIELDS).flat(),
+  ];
+  for (const field of allFields) {
+    if (dados[field] != null && dados[field] !== "") {
+      result[field] = dados[field];
+    }
+  }
+  return result;
+}
+
 // ─── Modelos registrados ─────────────────────────────────────────────────────
 // systemPrompts removidos — carregados exclusivamente via fetchDynamicPrompt (tabela chatbot_prompts).
 export const CHATBOT_MODELS = {
@@ -614,6 +637,8 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     mensagem: aiResponse.mensagem,
     finalizado: aiResponse.finalizado,
     updated_at: new Date().toISOString(),
+    // Colunas individuais extraídas do JSONB para queries diretas
+    ...extractIndividualColumns(dadosToSave),
   };
 
   if (existing?.id) {
@@ -621,6 +646,16 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
   } else {
     await supabase.from(leadsTable).insert([{ ...payload, created_at: new Date().toISOString() }]);
   }
+
+  // Salvar turno em lead_messages (fire-and-forget — não bloqueia resposta)
+  const now = new Date().toISOString();
+  const leadMsgs = [
+    { client_id: clientId, lead_phone: phone, role: "user", content: combinedText, created_at: now },
+    { client_id: clientId, lead_phone: phone, role: "assistant", content: aiResponse.mensagem, created_at: now },
+  ];
+  supabase.from("lead_messages").insert(leadMsgs).then(({ error }) => {
+    if (error) console.warn("[chatbot-ai] lead_messages insert error:", error.message);
+  });
 
   return aiResponse;
 }

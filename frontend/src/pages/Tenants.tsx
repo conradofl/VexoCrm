@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -66,6 +67,7 @@ export default function Tenants() {
   const [inboundBearerToken, setInboundBearerToken] = useState("");
   const [search, setSearch] = useState("");
   const [formError, setFormError] = useState("");
+  const [chatbotModel, setChatbotModel] = useState<"outlier" | "infinie" | "generico">("outlier");
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
   const [n8nDrafts, setN8nDrafts] = useState<
@@ -141,6 +143,7 @@ export default function Tenants() {
 
       await createTenant.mutateAsync({
         ...payload,
+        chatbotModel,
         ...(hasN8nSettings
           ? {
               n8nSettings: {
@@ -163,6 +166,7 @@ export default function Tenants() {
       setDispatchWebhookUrl("");
       setDispatchWebhookToken("");
       setInboundBearerToken("");
+      setChatbotModel("outlier");
       setTenantIdEdited(false);
     } catch (submissionError) {
       if (submissionError instanceof ZodError) {
@@ -385,6 +389,29 @@ export default function Tenants() {
                   <span className="font-mono text-foreground">
                     /clientes/{tenantId || "tenant-id"}/dashboard
                   </span>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Tipo de schema do chatbot
+                </label>
+                <Select
+                  value={chatbotModel}
+                  onValueChange={(v) => setChatbotModel(v as "outlier" | "infinie" | "generico")}
+                  disabled={!canManageTenants || createTenant.isPending}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="outlier">Outlier — Consórcio (crédito, parcela, FGTS)</SelectItem>
+                    <SelectItem value="infinie">Infinie — Solar (instalação, conta de luz)</SelectItem>
+                    <SelectItem value="generico">Genérico — Campos padrão apenas</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Define quais colunas extras serão criadas na tabela de leads desta empresa.
                 </p>
               </div>
 

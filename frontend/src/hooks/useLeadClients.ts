@@ -13,6 +13,7 @@ export interface LeadClient {
 export interface CreateLeadClientPayload {
   id: string;
   name: string;
+  chatbotModel?: string;
   n8nSettings?: LeadClientN8nSettingsPayload;
 }
 
