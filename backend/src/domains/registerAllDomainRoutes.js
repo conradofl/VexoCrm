@@ -4890,7 +4890,7 @@ export function registerAllDomainRoutes(app) {
       if (error) throw error;
       return res.json({ template: data });
     } catch (err) {
-      sendError(res, 500, "TEMPLATE_SAVE_FAILED", err instanceof Error ? err.message : "Failed to save template");
+      sendError(res, 500, "TEMPLATE_SAVE_FAILED", err?.message || JSON.stringify(err) || "Failed to save template");
     }
   });
 
