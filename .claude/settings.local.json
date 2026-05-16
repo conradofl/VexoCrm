@@ -15,7 +15,21 @@
       "Bash(npm run:*)",
       "Bash(xargs grep:*)",
       "Bash(/tmp/security_fixes_summary.txt:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(psql \"postgresql://dbvexo:%40Vexo2026@187.77.52.167:5432/vexo-data\" -c \"\\\\dt\")",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3001)",
+      "Bash(timeout 15 npm start)",
+      "Bash(curl -X POST http://localhost:3001/api/hardcoded-chat -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl *)",
+      "Bash(netstat -tuln)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(npx tsc *)",
+      "Bash(gh pr *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\W11\\\\Desktop\\\\Vexo\\\\VexoCrm\\\\frontend\\\\src\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(sort -t_ -k1)",
+      "Bash(awk '{print $2}')"
     ]
   }
 }

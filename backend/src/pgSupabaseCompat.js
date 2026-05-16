@@ -137,6 +137,7 @@ class PgQueryBuilder {
     this.filters = [];
     this.orders = [];
     this.limitVal = null;
+    this.offsetVal = null;
     /** @type {Record<string, unknown>|Record<string, unknown>[]|null} */
     this.insertRows = null;
     /** @type {Record<string, unknown>|null} */
@@ -213,6 +214,16 @@ class PgQueryBuilder {
     return this;
   }
 
+  or(expression) {
+    this.filters.push({ type: "or", expression });
+    return this;
+  }
+
+  gte(column, value) {
+    this.filters.push({ type: "gte", column, value });
+    return this;
+  }
+
   lte(column, value) {
     this.filters.push({ type: "lte", column, value });
     return this;
@@ -229,6 +240,18 @@ class PgQueryBuilder {
 
   limit(n) {
     this.limitVal = n;
+    return this;
+  }
+
+  range(from, to) {
+    const start = Number(from);
+    const end = Number(to);
+    if (Number.isFinite(start) && start >= 0) {
+      this.offsetVal = Math.floor(start);
+    }
+    if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+      this.limitVal = Math.floor(end - start + 1);
+    }
     return this;
   }
 
@@ -292,6 +315,15 @@ class PgQueryBuilder {
         else parts.push(`${col} IS NOT NULL`);
       } else if (f.type === "not" && f.op === "is" && f.value === null) {
         parts.push(`${col} IS NOT NULL`);
+      } else if (f.type === "or") {
+        const parsed = this.buildOrFilter(f.expression, i);
+        parts.push(parsed.sql);
+        params.push(...parsed.params);
+        i = parsed.nextIndex;
+      } else if (f.type === "gte") {
+        i += 1;
+        parts.push(`${col} >= $${i}`);
+        params.push(f.value);
       } else if (f.type === "lte") {
         i += 1;
         parts.push(`${col} <= $${i}`);
@@ -302,6 +334,37 @@ class PgQueryBuilder {
     }
     const sql = parts.length ? ` WHERE ${parts.join(" AND ")}` : "";
     return { sql, params, nextIndex: i };
+  }
+
+  buildOrFilter(expression, startIndex) {
+    let i = startIndex;
+    const params = [];
+    const parts = String(expression || "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const pieces = entry.split(".");
+        if (pieces.length < 3) {
+          throw new Error(`Unsupported or filter: ${entry}`);
+        }
+        const [column, op, ...valueParts] = pieces;
+        const col = quoteIdent(column);
+        const rawValue = valueParts.join(".");
+        if (op === "is" && rawValue === "null") {
+          return `${col} IS NULL`;
+        }
+        if (op === "eq") {
+          i += 1;
+          params.push(rawValue);
+          return `${col} = $${i}`;
+        }
+        throw new Error(`Unsupported or filter: ${entry}`);
+      });
+    if (!parts.length) {
+      throw new Error("or() requires at least one filter");
+    }
+    return { sql: `(${parts.join(" OR ")})`, params, nextIndex: i };
   }
 
   buildOrderBy() {
@@ -322,6 +385,13 @@ class PgQueryBuilder {
     const n = Number(this.limitVal);
     if (!Number.isFinite(n) || n < 0) return "";
     return ` LIMIT ${Math.floor(n)}`;
+  }
+
+  buildOffset() {
+    if (this.offsetVal == null) return "";
+    const n = Number(this.offsetVal);
+    if (!Number.isFinite(n) || n < 0) return "";
+    return ` OFFSET ${Math.floor(n)}`;
   }
 
   async run() {
@@ -357,9 +427,17 @@ class PgQueryBuilder {
     const { sql: whereSql, params, nextIndex } = this.buildWhere(0);
     const orderSql = this.buildOrderBy();
     const limitSql = this.buildLimit();
-    const q = `SELECT ${cols} FROM ${quoteIdent(this.table)}${whereSql}${orderSql}${limitSql}`;
+    const offsetSql = this.buildOffset();
+    const q = `SELECT ${cols} FROM ${quoteIdent(this.table)}${whereSql}${orderSql}${limitSql}${offsetSql}`;
     const r = await this.pool.query(q, params);
     let rows = r.rows;
+    let count = null;
+
+    if (this.selectOptions?.count === "exact") {
+      const countQuery = `SELECT count(*)::int AS c FROM ${quoteIdent(this.table)}${whereSql}`;
+      const countResult = await this.pool.query(countQuery, params);
+      count = countResult.rows[0]?.c ?? 0;
+    }
 
     if (this.resultShape === "one") {
       if (rows.length === 0) {
@@ -397,7 +475,7 @@ class PgQueryBuilder {
       rows = rows[0] ?? null;
     }
 
-    return { data: rows, error: null, count: null };
+    return { data: rows, error: null, count };
   }
 
   async runInsert() {

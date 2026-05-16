@@ -3,6 +3,8 @@ import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
 const serverSource = readFileSync(resolve("src/server.js"), "utf8");
+const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
+const routeBundle = `${serverSource}\n${domainRoutesSource}`;
 const migrationSource = readFileSync(
   resolve("../frontend/supabase/migrations/20260506000001_create_vexo_sales_tables.sql"),
   "utf8"
@@ -10,7 +12,7 @@ const migrationSource = readFileSync(
 
 describe("Vexo Sales module backend guards", () => {
   it("protects every Vexo Sales endpoint with Firebase auth and admin access", () => {
-    const routeLines = serverSource
+    const routeLines = domainRoutesSource
       .split("\n")
       .filter((line) => line.includes('"/api/vexo-sales/'));
 
@@ -22,16 +24,16 @@ describe("Vexo Sales module backend guards", () => {
   });
 
   it("logs Vexo Sales access failures without logging request payloads", () => {
-    expect(serverSource).toContain("function requireVexoSalesAdminAccess");
-    expect(serverSource).toContain('logVexoSalesApi("warn", "access_denied"');
-    expect(serverSource).toContain('logger("[vexo-sales-api]", event');
-    expect(serverSource).not.toContain("req.body,");
+    expect(routeBundle).toContain("function requireVexoSalesAdminAccess");
+    expect(routeBundle).toContain('logVexoSalesApi("warn", "access_denied"');
+    expect(routeBundle).toContain('logger("[vexo-sales-api]", event');
+    expect(routeBundle).not.toContain("req.body,");
   });
 
   it("uses isolated Vexo Sales tables instead of client CRM lead or campaign tables", () => {
-    const vexoSalesBlock = serverSource.slice(
-      serverSource.indexOf('app.get("/api/vexo-sales/opportunities"'),
-      serverSource.indexOf('app.post("/api/client-signup"')
+    const vexoSalesBlock = domainRoutesSource.slice(
+      domainRoutesSource.indexOf('app.get("/api/vexo-sales/opportunities"'),
+      domainRoutesSource.indexOf('app.post("/api/client-signup"')
     );
 
     expect(vexoSalesBlock).toContain('from("vexo_sales_opportunities")');

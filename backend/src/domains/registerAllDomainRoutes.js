@@ -4503,7 +4503,7 @@ export function registerAllDomainRoutes(app) {
         if (isMissingSchemaError(error)) return sendError(res, 404, "NOT_FOUND", "Prompt not found");
         throw error;
       }
-      if (!data) return sendError(res, 404, "NOT_FOUND", "Prompt not found");
+      if (!data) return res.json({ success: true, item: null });
       return res.json({
         success: true,
         item: {
