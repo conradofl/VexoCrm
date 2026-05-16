@@ -97,56 +97,57 @@ function MainFlowDiagram() {
       <Arrow />
       <FlowNode label="Evolution API" sublabel="Webhook → /api/hardcoded-chat-webhook" variant="default" icon={Zap} />
       <Arrow />
-      <FlowNode label="Message Buffer" sublabel="Debounce 3s (agrupa msgs)" variant="action" icon={Clock} />
-      <Arrow />
-      <FlowNode label="processBatch()" sublabel="chatbot-ai-engine.js" variant="action" icon={Bot} />
-      <Arrow />
 
-      {/* Decisão: Lead existe? */}
-      <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 px-6 py-3 text-center text-sm font-semibold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
-        Lead existe no banco?
+      {/* Campaign routing */}
+      <div className="rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50 px-6 py-3 text-center text-sm font-semibold text-indigo-800 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-300">
+        Lead está em campanha com waitForReply?
+      </div>
+      <div className="flex gap-6 pt-1">
+        <div className="flex flex-col items-center gap-1 text-xs text-slate-400">
+          <span>Sim</span>
+          <FlowNode label="Avança campanha" sublabel="continueCampaignLeadFromReply()" variant="action" icon={Megaphone} />
+        </div>
+        <div className="flex flex-col items-center gap-1 text-xs text-slate-400">
+          <span>Não (campanha sem wait)</span>
+          <FlowNode label="Silencia chatbot" sublabel="campanha envia steps" variant="decision" />
+        </div>
       </div>
 
+      <Arrow />
+      <FlowNode label="Message Buffer" sublabel="Debounce 3s (agrupa msgs)" variant="action" icon={Clock} />
+      <Arrow />
+      <FlowNode label="processBatch()" sublabel="Busca prompt 'padrao' do banco → Groq" variant="action" icon={Bot} />
+      <Arrow />
+
       {/* 3 cenários */}
+      <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 px-6 py-3 text-center text-sm font-semibold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+        Estado do lead no banco?
+      </div>
       <div className="flex flex-wrap justify-center gap-6 pt-2">
         <div className="flex flex-col items-center gap-2">
-          <Badge variant="outline" className="border-violet-300 text-violet-700 dark:text-violet-300">
-            Cenário 1
-          </Badge>
-          <FlowNode label="Novo Lead" sublabel="Primeiro contato" variant="start" icon={MessageCircle} />
+          <Badge variant="outline" className="border-violet-300 text-violet-700 dark:text-violet-300">Novo</Badge>
+          <FlowNode label="Primeiro contato" variant="start" icon={MessageCircle} />
           <Arrow />
-          <FlowNode label="Fluxo SPIN" sublabel="Perguntas normais" variant="action" />
-          <Arrow />
-          <FlowNode label="Salva no DB" sublabel="leads_{clientId}" variant="action" icon={Database} />
+          <FlowNode label="Qualificação SPIN" variant="action" />
         </div>
-
         <div className="flex flex-col items-center gap-2">
-          <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-300">
-            Cenário 2
-          </Badge>
-          <FlowNode label="Lead Abandonado" sublabel="> 4h sem resposta" variant="decision" icon={Clock} />
+          <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-300">Abandonado</Badge>
+          <FlowNode label="> 4h sem resposta" variant="decision" icon={Clock} />
           <Arrow />
-          <FlowNode label="Reengajamento" sublabel="IA retoma com contexto" variant="action" icon={RotateCcw} />
-          <Arrow />
-          <FlowNode label="Continua Fluxo" variant="action" />
+          <FlowNode label="Reengajamento" sublabel="IA retoma contexto" variant="action" icon={RotateCcw} />
         </div>
-
         <div className="flex flex-col items-center gap-2">
-          <Badge variant="outline" className="border-emerald-300 text-emerald-700 dark:text-emerald-300">
-            Cenário 3
-          </Badge>
-          <FlowNode label="Lead Finalizado" sublabel="Recontato" variant="end" icon={CheckCircle2} />
+          <Badge variant="outline" className="border-emerald-300 text-emerald-700 dark:text-emerald-300">Finalizado</Badge>
+          <FlowNode label="Recontato" variant="end" icon={CheckCircle2} />
           <Arrow />
-          <FlowNode label="Msg. Quente" sublabel="Já qualificado" variant="end" />
-          <Arrow />
-          <FlowNode label="Alerta SDR" sublabel="WhatsApp do SDR" variant="action" icon={Phone} />
+          <FlowNode label="Alerta SDR" sublabel="Já qualificado" variant="end" icon={Phone} />
         </div>
       </div>
 
       {/* Finalização */}
       <div className="mt-4 flex flex-col items-center gap-2">
-        <Arrow label="Fluxo concluído" />
-        <FlowNode label="Briefing Gerado" sublabel="extractConversationBriefing()" variant="action" icon={Bot} />
+        <Arrow label="finalizado = true" />
+        <FlowNode label="Briefing via IA" sublabel="extractBriefingWithAI() — prompt 'extrato' do banco" variant="action" icon={Bot} />
         <Arrow />
         <FlowNode label="SDR notificado" sublabel="sdr_whatsapp_number" variant="end" icon={Phone} />
       </div>
@@ -346,8 +347,9 @@ function SdrFlowDiagram() {
             Quando <code>finalizado: true</code> e não é recontato
           </p>
           <div className="rounded-lg border border-emerald-200 bg-white p-3 font-mono text-[11px] text-slate-700 dark:border-emerald-500/20 dark:bg-white/5 dark:text-slate-300">
-            extractConversationBriefing()<br />
-            → Briefing completo<br />
+            extractBriefingWithAI()<br />
+            → prompt type='extrato' do banco<br />
+            → Groq gera briefing formatado<br />
             → Enviado via Evolution API<br />
             → Para: sdr_whatsapp_number
           </div>
@@ -447,7 +449,7 @@ function BufferDiagram() {
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xs dark:border-white/10 dark:bg-white/5">
             <Bot className="mx-auto h-4 w-4 text-slate-400" />
             <p className="mt-1 font-medium">IA processa</p>
-            <p className="text-slate-400">Claude / Gemini</p>
+            <p className="text-slate-400">Groq llama-3.3-70b</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xs dark:border-white/10 dark:bg-white/5">
             <MessageCircle className="mx-auto h-4 w-4 text-slate-400" />
@@ -484,20 +486,21 @@ function CampaignRoutingDiagram() {
           <div className="flex flex-col items-center gap-2">
             <FlowNode label="Lead Inbound" sublabel="Contato espontâneo" variant="default" icon={MessageCircle} />
             <Arrow label="lead_origin = inbound" />
-            <FlowNode label="Prompt Padrão" sublabel="Tom consultivo SPIN" variant="action" icon={Bot} />
           </div>
           <div className="flex flex-col items-center gap-2">
-            <FlowNode label="Lead de Campanha" sublabel="Recebeu disparo" variant="start" icon={Megaphone} />
+            <FlowNode label="Lead de Campanha" sublabel="Respondeu disparo" variant="start" icon={Megaphone} />
             <Arrow label="lead_origin = campaign" />
-            <FlowNode label="Prompt Campanha" sublabel="Contexto do produto" variant="start" icon={Bot} />
           </div>
         </div>
 
         <div className="mt-2 flex flex-col items-center gap-2">
-          <Arrow label="Mesmo motor SPIN" />
-          <FlowNode label="9 Perguntas SPIN" sublabel="Qualificação unificada" variant="action" />
+          <FlowNode label="Prompt Padrão (DB)" sublabel="chatbot_prompts type='padrao'" variant="action" icon={Bot} />
+          <Arrow label="mesmo prompt para ambos" />
+          <FlowNode label="Qualificação SPIN" sublabel="9 perguntas unificadas" variant="action" />
           <Arrow />
-          <FlowNode label="Briefing SDR" sublabel="sdr_whatsapp_number" variant="end" icon={Phone} />
+          <FlowNode label="Briefing via IA (DB)" sublabel="chatbot_prompts type='extrato'" variant="end" icon={Phone} />
+          <Arrow />
+          <FlowNode label="SDR notificado" sublabel="sdr_whatsapp_number" variant="end" icon={Phone} />
         </div>
       </div>
 
@@ -1037,7 +1040,7 @@ export default function ChatbotDocs() {
                 {
                   method: "POST",
                   path: "/api/hardcoded-chat-webhook",
-                  desc: "Webhook Evolution → processa mensagem do WhatsApp",
+                  desc: "Webhook Evolution → processa mensagem, roteamento de campanha, buffer 3s",
                   color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300",
                 },
                 {
@@ -1047,15 +1050,27 @@ export default function ChatbotDocs() {
                   color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-300",
                 },
                 {
-                  method: "GET",
-                  path: "/api/hardcoded-chat-briefing/:phone",
-                  desc: "Briefing completo de um lead específico",
-                  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-300",
+                  method: "POST",
+                  path: "/api/hardcoded-chat-extract",
+                  desc: "Gera briefing SDR de uma conversa finalizada (usa prompt 'extrato' do banco)",
+                  color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300",
                 },
                 {
                   method: "GET",
-                  path: "/api/chatbot-config",
-                  desc: "Configurações do chatbot por empresa",
+                  path: "/api/prompts",
+                  desc: "Busca prompt por clientId e type (padrao | extrato)",
+                  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-300",
+                },
+                {
+                  method: "PUT",
+                  path: "/api/prompts",
+                  desc: "Salva ou atualiza prompt via Editor de Prompts",
+                  color: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300",
+                },
+                {
+                  method: "GET",
+                  path: "/api/followup-queue",
+                  desc: "Fila de leads aguardando recontato pós-campanha",
                   color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-300",
                 },
                 {
