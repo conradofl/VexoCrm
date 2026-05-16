@@ -11,14 +11,10 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
+import { useBuiltinTemplates } from "@/hooks/useChatbotTemplates";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
-
-const CHATBOT_MODELS = [
-  { value: "outlier", label: "Áureo — Outlier Consórcios" },
-  { value: "infinie", label: "Lara — Infinie Energia Solar" },
-];
 
 const BACKEND_URL = "https://crm.vexoia.com";
 
@@ -67,6 +63,7 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
   const [savingSdr, setSavingSdr] = useState(false);
   const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
   const updateSettings = useUpdateLeadClientN8nSettings();
+  const { data: builtinModels = [] } = useBuiltinTemplates();
 
   const handleToggleChatbot = async (value: boolean) => {
     setEnabled(value);
@@ -91,7 +88,9 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
     setModel(value);
     try {
       await updateSettings.mutateAsync({ tenantId: clientId, chatbotModel: value });
-      const label = CHATBOT_MODELS.find((m) => m.value === value)?.label || value;
+      const label = builtinModels.find((m) => m.template_key === value)
+        ? `${builtinModels.find((m) => m.template_key === value)!.agent_name} — ${builtinModels.find((m) => m.template_key === value)!.display_name}`
+        : value;
       toast({ title: "Modelo atualizado", description: `${clientName}: usando ${label}` });
     } catch (e) {
       setModel(previous);
@@ -200,9 +199,9 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CHATBOT_MODELS.map((m) => (
-                  <SelectItem key={m.value} value={m.value} className="text-xs">
-                    {m.label}
+                {builtinModels.map((m) => (
+                  <SelectItem key={m.template_key} value={m.template_key} className="text-xs">
+                    {m.agent_name} — {m.display_name}
                   </SelectItem>
                 ))}
               </SelectContent>

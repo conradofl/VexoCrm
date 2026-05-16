@@ -4855,6 +4855,22 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
+  // GET /api/chatbot-templates/builtins — lista apenas templates built-in (client_id IS NULL)
+  app.get("/api/chatbot-templates/builtins", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    try {
+      const { data, error } = await supabase
+        .from("chatbot_templates")
+        .select("template_key, display_name, agent_name")
+        .is("client_id", null)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return res.json({ templates: data || [] });
+    } catch (err) {
+      sendError(res, 500, "TEMPLATES_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // GET /api/chatbot-templates — lista templates (built-ins globais + do cliente)
   app.get("/api/chatbot-templates", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
