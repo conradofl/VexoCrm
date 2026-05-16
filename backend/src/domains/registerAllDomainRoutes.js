@@ -4250,8 +4250,12 @@ export function registerAllDomainRoutes(app) {
           },
         });
 
-        // Rotear para chatbot — roteamento de campanha (ENABLE_CAMPAIGN_ROUTING)
-        if (replyText) {
+        // Campaign wait-for-reply already advances the sequence via Evolution (continueCampaignLeadFromReply).
+        // Do NOT forward the same inbound message to hardcoded-chat-webhook by default — that produced a
+        // second concurrent agent reply (e.g. qualification bot) alongside campaign media at the same timestamp.
+        // Opt back in: CAMPAIGN_REPLY_FORWARD_TO_CHATBOT=true (hybrid / ENABLE_CAMPAIGN_ROUTING experiments).
+        const forwardCampaignReplyToChatbot = process.env.CAMPAIGN_REPLY_FORWARD_TO_CHATBOT === "true";
+        if (replyText && forwardCampaignReplyToChatbot) {
           const campaignRoutingEnabled = process.env.ENABLE_CAMPAIGN_ROUTING === "true";
           if (campaignRoutingEnabled) {
             const tenantSettingsForRouting = await getLeadClientN8nSettings(clientId).catch(() => null);
@@ -4278,6 +4282,24 @@ export function registerAllDomainRoutes(app) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ clientId, phone, message: replyText }),
             }).catch((err) => console.warn("[reply-webhook] chatbot_route_failed:", err.message));
+          }
+        }
+
+        // Tag campaign attribution on first reply even when chatbot forwarding is off (no duplicate agent).
+        if (replyText && !forwardCampaignReplyToChatbot && process.env.ENABLE_CAMPAIGN_ROUTING === "true") {
+          const itemId = activeWaitCampaign.leadImportItem?.id;
+          const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
+          if (isFirst) {
+            await supabase
+              .from(leadsTableName(clientId))
+              .update({
+                lead_origin: "campaign",
+                source_campaign_id: activeWaitCampaign.id,
+                source_campaign_name: activeWaitCampaign.name || null,
+                lead_source: "campanha",
+              })
+              .eq("client_id", clientId)
+              .eq("telefone", phone);
           }
         }
 
