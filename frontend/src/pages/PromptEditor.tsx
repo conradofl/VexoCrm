@@ -24,6 +24,16 @@ const PROMPT_TYPES: { value: PromptType; label: string; description: string }[] 
     label: "Campanha (Outbound)",
     description: "Usado quando o lead veio de uma campanha de disparo.",
   },
+  {
+    value: "qualificar",
+    label: "Qualificação Aprofundada",
+    description: "Prompt especializado para aprofundar qualificação após o contato inicial.",
+  },
+  {
+    value: "extrato",
+    label: "Extrato / Briefing SDR",
+    description: "Prompt de extração e resumo dos dados coletados para o SDR humano.",
+  },
 ];
 
 function formatDate(iso: string | null): string {
@@ -219,7 +229,7 @@ export default function PromptEditor() {
             <div className="space-y-1 text-sm text-indigo-800 dark:text-indigo-300">
               <p className="font-medium">Como funciona</p>
               <p className="text-indigo-700 dark:text-indigo-400">
-                Cada empresa pode ter dois prompts: um para leads <strong>inbound</strong> (contato espontâneo) e outro para leads de <strong>campanha</strong> (disparo outbound). O chatbot escolhe automaticamente com base na origem do lead.
+                Cada empresa pode ter até 4 prompts: <strong>padrão</strong> (inbound), <strong>campanha</strong> (outbound), <strong>qualificação aprofundada</strong> e <strong>extrato SDR</strong>. O chatbot escolhe automaticamente com base na origem e fase do lead. Se não houver prompt salvo, usa o prompt padrão do código.
               </p>
             </div>
           </div>
