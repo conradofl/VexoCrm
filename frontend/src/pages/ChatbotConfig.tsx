@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Bot, Copy, Check, Settings2, Zap, Power, Phone } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bot, Copy, Check, Settings2, Zap, Power, Phone, FileEdit, Layers, Clock, ArrowRight } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,7 @@ import { toast } from "@/components/ui/use-toast";
 
 const CHATBOT_MODELS = [
   { value: "outlier", label: "Áureo — Outlier Consórcios" },
-  { value: "infine", label: "Agente Infine" },
+  { value: "infinie", label: "Lara — Infinie Energia Solar" },
 ];
 
 const BACKEND_URL = "https://crm.vexoia.com";
@@ -341,6 +342,54 @@ export default function ChatbotConfig() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Atalhos para páginas relacionadas */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Link to="/crm/prompt-editor" className="group">
+          <Card className="h-full border-slate-200 dark:border-white/10 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer">
+            <CardContent className="flex items-center gap-3 pt-4 pb-4">
+              <div className="rounded-lg bg-indigo-100 dark:bg-indigo-900/30 p-2 shrink-0">
+                <FileEdit className="h-4 w-4 text-indigo-500" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Editor de Prompts</p>
+                <p className="text-xs text-slate-400 truncate">Editar prompts por empresa e tipo</p>
+              </div>
+              <ArrowRight className="h-3.5 w-3.5 text-slate-300 group-hover:text-indigo-400 ml-auto shrink-0 transition-colors" />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to="/crm/chatbot-templates" className="group">
+          <Card className="h-full border-slate-200 dark:border-white/10 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer">
+            <CardContent className="flex items-center gap-3 pt-4 pb-4">
+              <div className="rounded-lg bg-violet-100 dark:bg-violet-900/30 p-2 shrink-0">
+                <Layers className="h-4 w-4 text-violet-500" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Templates de Chatbot</p>
+                <p className="text-xs text-slate-400 truncate">Campos de qualificação por empresa</p>
+              </div>
+              <ArrowRight className="h-3.5 w-3.5 text-slate-300 group-hover:text-violet-400 ml-auto shrink-0 transition-colors" />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to="/crm/followup-queue" className="group">
+          <Card className="h-full border-slate-200 dark:border-white/10 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer">
+            <CardContent className="flex items-center gap-3 pt-4 pb-4">
+              <div className="rounded-lg bg-amber-100 dark:bg-amber-900/30 p-2 shrink-0">
+                <Clock className="h-4 w-4 text-amber-500" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Fila de Followup</p>
+                <p className="text-xs text-slate-400 truncate">Leads aguardando recontato</p>
+              </div>
+              <ArrowRight className="h-3.5 w-3.5 text-slate-300 group-hover:text-amber-400 ml-auto shrink-0 transition-colors" />
+            </CardContent>
+          </Card>
+        </Link>
+      </div>
 
       {/* Lista de empresas */}
       {isLoading ? (
