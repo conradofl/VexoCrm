@@ -4548,15 +4548,19 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
  */
 function resolveCampaignPhonesForRow(leads, dispatchSummary) {
   const fromSummary = Array.isArray(dispatchSummary?.successPhones)
-    ? dispatchSummary.successPhones.filter(Boolean)
+    ? dispatchSummary.successPhones.filter((p) => typeof p === "string" && p.trim())
     : [];
   const fromLeads = Array.isArray(leads)
     ? leads
       .map((lead) => lead?.telefone || lead?.phone || lead?.number)
-      .filter(Boolean)
+      .filter((p) => typeof p === "string" && p.trim())
     : [];
 
-  return [...new Set([...fromLeads, ...fromSummary])];
+  return [...new Set(
+    [...fromLeads, ...fromSummary]
+      .map(String)
+      .filter((p) => /^\+?\d{8,15}$/.test(p.replace(/[\s\-().]/g, "")))
+  )];
 }
 
 async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = null }) {
