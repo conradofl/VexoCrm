@@ -9,7 +9,6 @@ import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { createDatabasePool, createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { runMigrations } from "../migrate.js";
-import { parseLeadQualificacaoBoolean } from "../leadQualificacaoBoolean.js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import {
@@ -90,7 +89,6 @@ export function registerAllDomainRoutes(app) {
     LEADS_OUTLIER_STATUS_CONVERSA,
     LEADS_OUTLIER_TEMPERATURE,
     MANAGED_CLAIM_KEYS,
-    MAX_CONVERSATION_BYTES,
     MAX_LEADS_OUTLIER_BATCH,
     SYSTEM_ACCESS_PROFILES,
     __dirname,
@@ -114,7 +112,6 @@ export function registerAllDomainRoutes(app) {
     callCampaignQualificationWebhook,
     campaignSchedulerRunning,
     canCampaignBeDispatched,
-    canManageGlobalNotifications,
     checkEvolutionInstanceHealth,
     claimCampaignForDispatch,
     continueCampaignLeadFromReply,
@@ -132,7 +129,6 @@ export function registerAllDomainRoutes(app) {
     extractCampaignProgress,
     extractEvolutionConnectionState,
     extractManagedAccessClaims,
-    filterNotificationsForAccess,
     findAccessProfileByKey,
     findCampaignReplyMatches,
     firebaseConfig,
@@ -155,14 +151,12 @@ export function registerAllDomainRoutes(app) {
     getLeadReferenceDate,
     getLeadWebhookBearerSecret,
     getN8nOnboardingStatus,
-    getN8nWebhookBearerSecret,
     getNormalizedField,
     getPresetFallbackKey,
     getRequestBearerToken,
     getRequestId,
     getSafeDispatchSettingsLog,
     getSafeEvolutionEndpointLog,
-    getVisibleNotificationIds,
     getZonedDateParts,
     hasCampaignLeadReplied,
     hasWildcard,
@@ -179,7 +173,6 @@ export function registerAllDomainRoutes(app) {
     isMaskedSecretPlaceholder,
     isMissingAccessProfilesTable,
     isMissingSchemaError,
-    isNotificationVisibleToAccess,
     isProduction,
     isQualifiedStatus,
     isValidBase64,
@@ -198,8 +191,6 @@ export function registerAllDomainRoutes(app) {
     markCampaignLeadWaitingReply,
     maskN8nSettings,
     maskPhoneForLog,
-    matchesNotificationClientScope,
-    matchesNotificationInternalScope,
     maybeFinalizeCampaignAfterReply,
     mergeCampaignProgress,
     mergeManagedClaims,
@@ -217,7 +208,6 @@ export function registerAllDomainRoutes(app) {
     normalizeIsoDate,
     normalizeLooseText,
     normalizeMetricValue,
-    normalizeNotificationScopeValues,
     normalizePermissions,
     normalizePhoneToWhatsAppChatId,
     normalizeRole,
@@ -249,7 +239,6 @@ export function registerAllDomainRoutes(app) {
     requireFirebaseAuth,
     requireInternalAccess,
     requireInternalPageAccess,
-    requireN8nWebhookSecret,
     requireUserManagementAccess,
     resolveAuthorizedClientId,
     resolveCampaignDispatchSettings,
@@ -283,11 +272,70 @@ export function registerAllDomainRoutes(app) {
     updateLeadImportItemCampaignProgress,
     upsertLeadClientN8nSettings,
     useDirectPostgres,
-    validateConversationMemoryPayload,
     validateLeadWebhookBearer,
     validateLeadsOutlierRecord,
     validateN8nInboundBearer,
   } = routeDeps;
+
+  async function appendLeadMessage({
+    clientId,
+    phone,
+    senderType,
+    direction,
+    messageText,
+    engagementSignal = null,
+    campaignId = null,
+    leadId = null,
+    deliveredAt = null,
+    meta = null,
+  }) {
+    if (!supabase || !clientId || !phone) return null;
+
+    const normalizedMessage = normalizeString(messageText);
+    if (!normalizedMessage) return null;
+
+    let resolvedLeadId = leadId || null;
+    let resolvedCampaignId = campaignId || null;
+
+    if (!resolvedLeadId || !resolvedCampaignId) {
+      try {
+        const { data: leadRow, error: leadLookupError } = await supabase
+          .from(leadsTableName(clientId))
+          .select("id, source_campaign_id")
+          .eq("client_id", clientId)
+          .eq("telefone", phone)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!leadLookupError && leadRow) {
+          resolvedLeadId = resolvedLeadId || leadRow.id || null;
+          resolvedCampaignId = resolvedCampaignId || leadRow.source_campaign_id || null;
+        }
+      } catch (error) {
+        console.warn("[lead-messages] lead lookup failed:", error?.message || error);
+      }
+    }
+
+    const { error } = await supabase.from("lead_messages").insert({
+      client_id: clientId,
+      lead_id: resolvedLeadId,
+      campaign_id: resolvedCampaignId,
+      phone,
+      sender_type: senderType,
+      direction,
+      engagement_signal: engagementSignal,
+      message_text: normalizedMessage,
+      delivered_at: deliveredAt || new Date().toISOString(),
+      meta: meta && typeof meta === "object" ? meta : {},
+    });
+
+    if (error && !isMissingSchemaError(error)) {
+      console.warn("[lead-messages] insert failed:", error.message || error);
+    }
+
+    return { leadId: resolvedLeadId, campaignId: resolvedCampaignId };
+  }
 
   app.get("/health", async (_req, res) => {
     let postgresPing = null;
@@ -523,6 +571,8 @@ export function registerAllDomainRoutes(app) {
               lead_temperature TEXT CHECK (lead_temperature IS NULL OR lead_temperature IN ('QUENTE', 'MORNO', 'FRIO')),
               status_conversa TEXT CHECK (status_conversa IS NULL OR status_conversa IN ('aguardando_usuario', 'em_atendimento', 'finalizado')),
               source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
+              source_campaign_name TEXT,
+              lead_source TEXT CHECK (lead_source IS NULL OR lead_source IN ('campanha', 'organico', 'trafego_pago', 'whatsapp_ads', 'indicacao', 'outro')),
               lead_score NUMERIC(8, 2),
               potential_contract_value NUMERIC(14, 2),
               first_contact_at TIMESTAMPTZ,
@@ -1526,21 +1576,6 @@ export function registerAllDomainRoutes(app) {
   
       await auth.setCustomUserClaims(user.uid, mergeManagedClaims({}, managedClaims));
   
-      if (supabase) {
-        const title = `Novo cadastro de cliente: ${companyName}`.slice(0, 100);
-        const description = `${name} (${email}) aguardando associacao de acessos.`.slice(0, 200);
-        const { error } = await supabase.from("notifications").insert({
-          type: "client_signup",
-          title,
-          description,
-          read: false,
-        });
-  
-        if (error) {
-          console.error("client signup notification insert error:", error);
-        }
-      }
-  
       res.status(201).json({
         success: true,
         message: "Conta criada. Aguarde a liberacao do acesso pela equipe Vexo.",
@@ -1647,13 +1682,8 @@ export function registerAllDomainRoutes(app) {
         throw leadsError;
       }
   
-      const leadPhones = Array.from(
-        new Set((leads || []).map((lead) => sanitizePhone(lead.telefone)).filter(Boolean))
-      );
-  
       const [
         campaignsQuery,
-        conversationsQuery,
         messagesQuery,
         assignmentsQuery,
         conversionsQuery,
@@ -1668,14 +1698,6 @@ export function registerAllDomainRoutes(app) {
             .select("id, name, client_id, import_id, limit_per_run, status, last_triggered_at, created_at")
             .eq("client_id", clientId)
         ),
-        leadPhones.length
-          ? optionalQuery(() =>
-              supabase
-                .from("lead_conversations")
-                .select("telefone, created_at")
-                .in("telefone", leadPhones)
-            )
-          : { data: [], available: true },
         optionalQuery(() =>
           supabase
             .from("lead_messages")
@@ -1729,7 +1751,7 @@ export function registerAllDomainRoutes(app) {
         leads: leads || [],
         campaigns: campaignsQuery.data,
         leadImportItems: importItemsQuery.data,
-        conversations: conversationsQuery.data,
+        conversations: [],
         messages: messagesQuery.data,
         assignments: assignmentsQuery.data,
         conversions: conversionsQuery.data,
@@ -1738,7 +1760,7 @@ export function registerAllDomainRoutes(app) {
         storedInsights: insightsQuery.data,
         availability: {
           campaigns: campaignsQuery.available,
-          conversations: conversationsQuery.available,
+          conversations: false,
           messages: messagesQuery.available,
           assignments: assignmentsQuery.available,
           conversions: conversionsQuery.available,
@@ -1780,7 +1802,6 @@ export function registerAllDomainRoutes(app) {
         leadsQuery,
         campaignsQuery,
         messagesQuery,
-        conversationsQuery,
         assignmentsQuery,
         conversionsQuery,
         consultantsQuery,
@@ -1824,11 +1845,6 @@ export function registerAllDomainRoutes(app) {
             .from("lead_messages")
             .select("id, client_id, lead_id, campaign_id, phone, sender_type, direction, engagement_signal, message_text, created_at")
             .eq("client_id", clientId)
-        ),
-        optionalQuery(() =>
-          supabase
-            .from("lead_conversations")
-            .select("telefone, created_at")
         ),
         optionalQuery(() =>
           supabase
@@ -1888,7 +1904,7 @@ export function registerAllDomainRoutes(app) {
         leads: leadsQuery.data || [],
         campaigns: campaignsQuery.data || [],
         leadImportItems: importItemsQuery.data || [],
-        conversations: conversationsQuery.data || [],
+        conversations: [],
         messages: messagesQuery.data || [],
         assignments: assignmentsQuery.data || [],
         conversions: conversionsQuery.data || [],
@@ -2712,134 +2728,6 @@ export function registerAllDomainRoutes(app) {
     }
   );
   
-  app.get("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("agente"), async (req, res) => {
-    if (!ensureDb(res)) return;
-  
-    try {
-      const parsedLimit = Number.parseInt(String(req.query.limit || "20"), 10);
-      const limit = Math.min(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 50);
-      const fetchLimit = canManageGlobalNotifications(req.authAccess)
-        ? limit
-        : Math.min(Math.max(limit * 5, 50), 250);
-      const onlyUnread = String(req.query.onlyUnread || "false") === "true";
-  
-      let query = supabase
-        .from("notifications")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(fetchLimit);
-  
-      if (onlyUnread) {
-        query = query.eq("read", false);
-      }
-  
-      const { data: items, error: listError } = await query;
-      if (listError) throw listError;
-  
-      const visibleItems = filterNotificationsForAccess(items || [], req.authAccess).slice(0, limit);
-      let unreadCount = 0;
-  
-      if (canManageGlobalNotifications(req.authAccess)) {
-        const { count, error: countError } = await supabase
-          .from("notifications")
-          .select("*", { count: "exact", head: true })
-          .eq("read", false);
-  
-        if (countError) throw countError;
-        unreadCount = count || 0;
-      } else {
-        const { data: unreadItems, error: unreadError } = await supabase
-          .from("notifications")
-          .select("*")
-          .eq("read", false)
-          .order("created_at", { ascending: false })
-          .limit(1000);
-  
-        if (unreadError) throw unreadError;
-        unreadCount = filterNotificationsForAccess(unreadItems || [], req.authAccess).length;
-      }
-  
-      res.json({ items: visibleItems, unreadCount });
-    } catch (error) {
-      console.error("notifications query error:", error);
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
-    }
-  });
-  
-  app.patch("/api/notifications", requireFirebaseAuth, requireInternalPageAccess("agente"), async (req, res) => {
-    if (!ensureDb(res)) return;
-  
-    try {
-      const { id, read, markAllRead } = req.body || {};
-  
-      if (markAllRead) {
-        if (canManageGlobalNotifications(req.authAccess)) {
-          const { error } = await supabase.from("notifications").update({ read: true }).eq("read", false);
-          if (error) throw error;
-          res.json({ success: true });
-          return;
-        }
-  
-        const { data: unreadItems, error: listError } = await supabase
-          .from("notifications")
-          .select("*")
-          .eq("read", false)
-          .limit(1000);
-  
-        if (listError) throw listError;
-  
-        const visibleIds = getVisibleNotificationIds(unreadItems || [], req.authAccess);
-        if (visibleIds.length === 0) {
-          res.json({ success: true, updated: 0 });
-          return;
-        }
-  
-        const { error } = await supabase
-          .from("notifications")
-          .update({ read: true })
-          .in("id", visibleIds);
-        if (error) throw error;
-        res.json({ success: true, updated: visibleIds.length });
-        return;
-      }
-  
-      if (!id) {
-        sendError(res, 400, "INVALID_BODY", "Missing id or markAllRead");
-        return;
-      }
-  
-      const { data: notification, error: findError } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-  
-      if (findError) throw findError;
-  
-      if (!notification) {
-        sendError(res, 404, "NOTIFICATION_NOT_FOUND", "Notification not found");
-        return;
-      }
-  
-      if (!isNotificationVisibleToAccess(notification, req.authAccess)) {
-        sendError(res, 403, "FORBIDDEN_NOTIFICATION_SCOPE", "You do not have access to this notification");
-        return;
-      }
-  
-      const { error } = await supabase
-        .from("notifications")
-        .update({ read: read ?? true })
-        .eq("id", id);
-  
-      if (error) throw error;
-  
-      res.json({ success: true });
-    } catch (error) {
-      console.error("notifications update error:", error);
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
-    }
-  });
-  
   // Supabase Edge `lead-webhook` parity: POST only, action create | finalize, same JSON bodies and responses.
   // Authorization: Bearer LEAD_WEBHOOK_BEARER_TOKEN or legacy default @Vexo2026 (matches Edge constant).
   app.post("/api/lead-webhook", async (req, res) => {
@@ -3212,241 +3100,6 @@ export function registerAllDomainRoutes(app) {
       res.json({ success: true, count: rows.length, ids: data?.map((item) => item.id) || [] });
     } catch (error) {
       console.error("import-lead-outlier-n8n error:", error);
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
-    }
-  });
-  
-  app.post("/api/n8n-error-webhook", async (req, res) => {
-    const authHeader = req.headers.authorization;
-    const expectedSecret = getN8nWebhookBearerSecret();
-  
-    if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
-      sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
-      return;
-    }
-  
-    if (!ensureDb(res)) return;
-  
-    try {
-      const body = req.body || {};
-  
-      const workflowName = normalizeString(body.workflow?.name);
-      const executionId = normalizeString(body.execution?.id);
-      const executionUrl = normalizeString(body.execution?.url);
-      const errorMessage = normalizeString(body.error?.message);
-      const lastNode = normalizeString(body.error?.lastNodeExecuted);
-  
-      if (!workflowName || !executionId || !errorMessage) {
-        sendError(
-          res,
-          400,
-          "INVALID_BODY",
-          "Missing required fields: workflow.name, execution.id, error.message"
-        );
-        return;
-      }
-  
-      const truncatedMessage = errorMessage.slice(0, 1000);
-      const truncatedNode = lastNode ? lastNode.slice(0, 200) : null;
-  
-      const { error: logError } = await supabase.from("n8n_error_logs").upsert(
-        {
-          execution_id: executionId,
-          workflow_name: workflowName,
-          message: truncatedMessage,
-          node: truncatedNode,
-          execution_url: executionUrl,
-        },
-        { onConflict: "execution_id" }
-      );
-  
-      if (logError) {
-        console.error("n8n log upsert error:", logError);
-        sendError(res, 500, "N8N_LOG_SAVE_FAILED", "Failed to save error log", logError.message);
-        return;
-      }
-  
-      const descriptionText = `[${workflowName}] ${truncatedMessage}`.slice(0, 200);
-  
-      const { error: notifError } = await supabase.from("notifications").insert({
-        type: "n8n_error",
-        title: `Erro no workflow: ${workflowName}`.slice(0, 100),
-        description: descriptionText,
-        link: executionUrl,
-        read: false,
-      });
-  
-      if (notifError) {
-        console.error("notification insert error:", notifError);
-      }
-  
-      res.json({ success: true });
-    } catch (error) {
-      console.error("n8n webhook error:", error);
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
-    }
-  });
-  
-  app.post(
-    "/api/conversation-memory",
-    requireN8nWebhookSecret,
-    validateConversationMemoryPayload,
-    async (req, res) => {
-      if (!ensureDb(res)) return;
-  
-      const { telefone, conversationCompressed, tamanhoOriginal, timestamp } = req.conversationMemory;
-      const memClientId = normalizeTenantKey(req.body?.clientId ?? req.query?.clientId) || "infinie";
-
-      try {
-        const { data: lead, error: leadError } = await supabase
-          .from(leadsTableName(memClientId))
-          .select("id")
-          .eq("telefone", telefone)
-          .limit(1)
-          .maybeSingle();
-  
-        if (leadError) {
-          throw leadError;
-        }
-  
-        const unknownLead = !lead;
-  
-        const { error } = await supabase.from("lead_conversations").insert({
-          telefone,
-          conversation_compressed: conversationCompressed,
-          tamanho_original: tamanhoOriginal,
-          unknown_lead: unknownLead,
-          created_at: timestamp,
-        });
-  
-        if (error) {
-          console.error("conversation memory insert error:", {
-            event: "conversation_memory_insert_error",
-            telefone,
-            unknownLead,
-            message: error.message,
-            code: error.code,
-          });
-          sendError(
-            res,
-            500,
-            "CONVERSATION_MEMORY_SAVE_FAILED",
-            "Failed to save conversation memory",
-            error.message
-          );
-          return;
-        }
-  
-        console.info("conversation memory stored:", {
-          event: "conversation_memory_stored",
-          telefone,
-          unknownLead,
-          tamanhoOriginal,
-          timestamp,
-        });
-  
-        res.json({
-          success: true,
-          message: "Conversation stored",
-          telefone,
-          // Match Edge `conversation-memory` POST success shape for n8n consumers.
-          created_at: req.conversationMemory.timestamp,
-        });
-      } catch (error) {
-        console.error("conversation memory route error:", {
-          event: "conversation_memory_route_error",
-          telefone,
-          message: error instanceof Error ? error.message : String(error),
-        });
-        sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
-      }
-    }
-  );
-  
-  // GET latest compressed conversation + lead qualification flag (replaces Edge `conversation-memory-latest`).
-  // Auth: same global bearer as POST /api/conversation-memory (N8N_WEBHOOK_SECRET or default @Vexo2026).
-  app.get("/api/conversation-memory/latest", requireN8nWebhookSecret, async (req, res) => {
-    if (!ensureDb(res)) return;
-  
-    const telefone = sanitizePhone(req.query?.telefone);
-    const latestClientId = normalizeTenantKey(req.query?.clientId) || "infinie";
-    if (!telefone) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing required query param: telefone",
-      });
-    }
-
-    try {
-      const [leadsResult, convResult] = await Promise.all([
-        supabase.from(leadsTableName(latestClientId)).select("telefone, qualificacao").eq("telefone", telefone).limit(1),
-        supabase
-          .from("lead_conversations")
-          .select("id, telefone, conversation_compressed, tamanho_original, unknown_lead, created_at")
-          .eq("telefone", telefone)
-          .order("created_at", { ascending: false })
-          .limit(1),
-      ]);
-  
-      if (leadsResult.error) {
-        console.error("conversation-memory-latest leads error:", {
-          telefone,
-          message: leadsResult.error.message,
-          code: leadsResult.error.code ?? null,
-        });
-        return res.status(500).json({
-          success: false,
-          error: "Failed to query leads table",
-          details: leadsResult.error.message,
-          code: leadsResult.error.code ?? null,
-        });
-      }
-  
-      if (convResult.error) {
-        console.error("conversation-memory-latest conversation error:", {
-          telefone,
-          message: convResult.error.message,
-          code: convResult.error.code ?? null,
-        });
-        return res.status(500).json({
-          success: false,
-          error: "Failed to load conversation",
-          details: convResult.error.message,
-          code: convResult.error.code ?? null,
-        });
-      }
-  
-      const leadExiste = (leadsResult.data?.length ?? 0) > 0;
-      const conversaMaisRecente = convResult.data?.[0] ?? null;
-      const leadQualificado = parseLeadQualificacaoBoolean(leadsResult.data?.[0]?.qualificacao);
-      const encontrado = leadExiste && conversaMaisRecente !== null;
-  
-      if (encontrado) {
-        return res.json({
-          success: true,
-          found: true,
-          telefone,
-          conversation: conversaMaisRecente,
-          latestConversation: conversaMaisRecente,
-          id: conversaMaisRecente.id,
-          conversation_compressed: conversaMaisRecente.conversation_compressed,
-          tamanho_original: conversaMaisRecente.tamanho_original,
-          unknown_lead: conversaMaisRecente.unknown_lead,
-          created_at: conversaMaisRecente.created_at,
-          qualificacao: leadQualificado,
-        });
-      }
-  
-      return res.json({
-        success: true,
-        found: false,
-        telefone,
-        conversation: null,
-        latestConversation: null,
-        qualificacao: leadQualificado,
-      });
-    } catch (error) {
-      console.error("conversation-memory-latest route error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
@@ -4608,7 +4261,7 @@ export function registerAllDomainRoutes(app) {
             if (isFirst) {
               await supabase
                 .from(leadsTableName(clientId))
-                .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id })
+                .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
                 .eq("client_id", clientId)
                 .eq("telefone", phone);
             }
@@ -4624,6 +4277,23 @@ export function registerAllDomainRoutes(app) {
               body: JSON.stringify({ clientId, phone, message: replyText }),
             }).catch((err) => console.warn("[reply-webhook] chatbot_route_failed:", err.message));
           }
+        }
+
+        if (replyText) {
+          await appendLeadMessage({
+            clientId,
+            phone,
+            senderType: "lead",
+            direction: "inbound",
+            messageText: replyText,
+            campaignId: activeWaitCampaign.id,
+            deliveredAt: repliedAt,
+            meta: {
+              source: "campaign-reply-webhook",
+              campaignName: activeWaitCampaign.name || null,
+              mode: "wait_for_reply",
+            },
+          });
         }
 
         res.json({
@@ -4695,6 +4365,22 @@ export function registerAllDomainRoutes(app) {
           clientId,
           phone: maskPhoneForLog(phone),
           error: leadsResult.error.message || leadsResult.error.code || "missing_schema",
+        });
+      }
+
+      if (replyText) {
+        await appendLeadMessage({
+          clientId,
+          phone,
+          senderType: "lead",
+          direction: "inbound",
+          messageText: replyText,
+          campaignId: activeWaitCampaign?.id || campaignReplyContext.matches[0]?.id || null,
+          deliveredAt: repliedAt,
+          meta: {
+            source: "campaign-reply-webhook",
+            matchedCampaignCount: campaignReplyContext.matches.length,
+          },
         });
       }
   
@@ -4797,6 +4483,439 @@ export function registerAllDomainRoutes(app) {
     }
   });
   
+  // GET /api/prompts — lê prompt customizado de uma empresa por tipo
+  app.get("/api/prompts", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = normalizeTenantKey(req.query?.clientId);
+    const type = normalizeString(req.query?.type);
+    if (!clientId) return sendError(res, 400, "INVALID_QUERY", "Missing clientId");
+    if (!type || !["padrao", "campanha", "qualificar", "extrato"].includes(type)) {
+      return sendError(res, 400, "INVALID_QUERY", "type must be padrao, campanha, qualificar or extrato");
+    }
+    try {
+      const { data, error } = await supabase
+        .from("chatbot_prompts")
+        .select("client_id, type, content, updated_at, updated_by_email")
+        .eq("client_id", clientId)
+        .eq("type", type)
+        .maybeSingle();
+      if (error) {
+        if (isMissingSchemaError(error)) return sendError(res, 404, "NOT_FOUND", "Prompt not found");
+        throw error;
+      }
+      if (!data) return sendError(res, 404, "NOT_FOUND", "Prompt not found");
+      return res.json({
+        success: true,
+        item: {
+          clientId: data.client_id,
+          type: data.type,
+          content: data.content,
+          updatedAt: data.updated_at,
+          updatedByEmail: data.updated_by_email,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, "PROMPT_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch prompt");
+    }
+  });
+
+  // PUT /api/prompts — salva/atualiza prompt customizado de uma empresa
+  app.put("/api/prompts", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = normalizeTenantKey(body.clientId);
+    const type = normalizeString(body.type);
+    const content = typeof body.content === "string" ? body.content.trim() : null;
+    if (!clientId) return sendError(res, 400, "INVALID_BODY", "Missing clientId");
+    if (!type || !["padrao", "campanha", "qualificar", "extrato"].includes(type)) {
+      return sendError(res, 400, "INVALID_BODY", "type must be padrao, campanha, qualificar or extrato");
+    }
+    if (!content) return sendError(res, 400, "INVALID_BODY", "Missing content");
+    try {
+      const userEmail = normalizeString(req.authAccess?.email || req.authUser?.email) || null;
+      const { data, error } = await supabase
+        .from("chatbot_prompts")
+        .upsert(
+          { client_id: clientId, type, content, updated_at: new Date().toISOString(), updated_by_email: userEmail },
+          { onConflict: "client_id,type" }
+        )
+        .select("client_id, type, content, updated_at, updated_by_email")
+        .maybeSingle();
+      if (error) throw error;
+      return res.json({
+        success: true,
+        item: {
+          clientId: data.client_id,
+          type: data.type,
+          content: data.content,
+          updatedAt: data.updated_at,
+          updatedByEmail: data.updated_by_email,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, "PROMPT_SAVE_FAILED", err instanceof Error ? err.message : "Failed to save prompt");
+    }
+  });
+
+  // POST /api/leads/hydrate — consolida lead_import_items → leads_{clientId}
+  // Garante que TODO lead que recebeu mensagem de campanha exista na tabela de leads do CRM,
+  // mesmo que nunca tenha respondido. Idempotente — pode rodar múltiplas vezes sem duplicar.
+  app.post("/api/leads/hydrate", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = normalizeTenantKey(body.clientId ?? req.query?.clientId);
+    if (!clientId) return sendError(res, 400, "INVALID_BODY", "Missing clientId");
+
+    try {
+      const leadsTable = leadsTableName(clientId);
+
+      // 1. Busca todos os itens de campanha que receberam mensagem do bot
+      const { data: items, error: itemsErr } = await supabase
+        .from("lead_import_items")
+        .select("id, import_id, telefone, nome, normalized_data, ultima_interacao_bot, ultima_interacao_usuario, created_at")
+        .eq("client_id", clientId)
+        .not("ultima_interacao_bot", "is", null)
+        .not("telefone", "is", null);
+
+      if (itemsErr) throw itemsErr;
+      if (!items || items.length === 0) return res.json({ success: true, created: 0, updated: 0, skipped: 0 });
+
+      // 2. Busca campanhas para mapear import_id → campanha
+      const importIds = [...new Set(items.map((i) => i.import_id).filter(Boolean))];
+      let campaignByImport = {};
+      if (importIds.length > 0) {
+        const { data: campaigns } = await supabase
+          .from("campaigns")
+          .select("id, name, import_id")
+          .in("import_id", importIds)
+          .eq("client_id", clientId);
+        for (const c of campaigns || []) {
+          if (c.import_id) campaignByImport[c.import_id] = c;
+        }
+      }
+
+      // 3. Busca leads existentes (por telefone) para evitar duplicatas
+      const phones = [...new Set(items.map((i) => i.telefone).filter(Boolean))];
+      const { data: existingLeads } = await supabase
+        .from(leadsTable)
+        .select("id, telefone, lead_source, source_campaign_id")
+        .eq("client_id", clientId)
+        .in("telefone", phones);
+
+      const existingByPhone = {};
+      for (const l of existingLeads || []) existingByPhone[l.telefone] = l;
+
+      let created = 0, updated = 0, skipped = 0;
+
+      for (const item of items) {
+        const phone = item.telefone;
+        const campaign = campaignByImport[item.import_id] || null;
+        const normalized = item.normalized_data || {};
+        const nome = normalizeString(item.nome || normalized.nome || normalized.name) || null;
+        const existing = existingByPhone[phone];
+
+        if (!existing) {
+          // Cria placeholder — lead que recebeu campanha mas ainda não respondeu
+          const { error: insErr } = await supabase.from(leadsTable).insert({
+            client_id: clientId,
+            telefone: phone,
+            nome,
+            status_conversa: item.ultima_interacao_usuario ? "em_atendimento" : "aguardando_usuario",
+            lead_origin: "campaign",
+            source_campaign_id: campaign?.id || null,
+            source_campaign_name: campaign?.name || null,
+            lead_source: "campanha",
+            finalizado: false,
+            dados: {},
+            created_at: item.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+          if (!insErr) created++;
+          else if (insErr.code !== "23505") console.warn("[hydrate] insert failed:", phone, insErr.message);
+          else skipped++; // conflict — já existe
+        } else if (!existing.lead_source && campaign) {
+          // Atualiza origem se ainda não estava preenchida
+          await supabase
+            .from(leadsTable)
+            .update({ lead_source: "campanha", source_campaign_id: existing.source_campaign_id || campaign.id, source_campaign_name: campaign.name })
+            .eq("client_id", clientId)
+            .eq("telefone", phone);
+          updated++;
+        } else {
+          skipped++;
+        }
+      }
+
+      console.log("[hydrate] done", { clientId, created, updated, skipped, total: items.length });
+      return res.json({ success: true, created, updated, skipped, total: items.length });
+    } catch (err) {
+      sendError(res, 500, "HYDRATE_FAILED", err instanceof Error ? err.message : "Failed to hydrate leads");
+    }
+  });
+
+  // GET /api/followup-queue — fila de followup de campanhas com métricas de resposta
+  app.get("/api/followup-queue", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = normalizeTenantKey(req.query?.clientId);
+    const campaignId = normalizeString(req.query?.campaignId) || null;
+    const status = normalizeString(req.query?.status) || null;
+    const dateFrom = normalizeString(req.query?.dateFrom) || null;
+    const dateTo = normalizeString(req.query?.dateTo) || null;
+    const rawPage = Number.parseInt(String(req.query?.page ?? "1"), 10);
+    const page = Number.isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
+    const rawLimit = Number.parseInt(String(req.query?.limit ?? "50"), 10);
+    const limit = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 200);
+
+    if (!clientId) return sendError(res, 400, "INVALID_QUERY", "Missing clientId");
+
+    const validStatuses = ["pending", "replied", "scheduled", "discarded", "converted"];
+    if (status && !validStatuses.includes(status)) {
+      return sendError(res, 400, "INVALID_QUERY", `status must be one of: ${validStatuses.join(", ")}`);
+    }
+
+    try {
+      let query = supabase
+        .from("lead_import_items")
+        .select("id, import_id, telefone, nome, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, followup_status, followup_scheduled_at, created_at, normalized_data", { count: "exact" })
+        .eq("client_id", clientId)
+        .not("ultima_interacao_bot", "is", null);
+
+      if (campaignId) {
+        const { data: importForCampaign } = await supabase
+          .from("campaigns")
+          .select("import_id")
+          .eq("id", campaignId)
+          .eq("client_id", clientId)
+          .maybeSingle();
+        if (importForCampaign?.import_id) {
+          query = query.eq("import_id", importForCampaign.import_id);
+        } else {
+          return res.json({ success: true, items: [], total: 0 });
+        }
+      }
+
+      if (status === "pending") {
+        query = query.or("followup_status.is.null,followup_status.eq.pending").is("ultima_interacao_usuario", null);
+      } else if (status === "replied") {
+        query = query.not("ultima_interacao_usuario", "is", null);
+      } else if (status && ["scheduled", "discarded", "converted"].includes(status)) {
+        query = query.eq("followup_status", status);
+      }
+
+      if (dateFrom) query = query.gte("created_at", dateFrom);
+      if (dateTo) query = query.lte("created_at", dateTo);
+
+      const { data, error, count } = await query
+        .order("ultima_interacao_bot", { ascending: false })
+        .range((page - 1) * limit, page * limit - 1);
+
+      if (error) {
+        if (isMissingSchemaError(error)) return sendError(res, 404, "NOT_FOUND", "Table not available");
+        throw error;
+      }
+
+      const campaignImportIds = [...new Set((data || []).map((i) => i.import_id).filter(Boolean))];
+      let campaignsByImport = {};
+      if (campaignImportIds.length > 0) {
+        const { data: campaigns } = await supabase
+          .from("campaigns")
+          .select("id, name, import_id")
+          .in("import_id", campaignImportIds)
+          .eq("client_id", clientId);
+        for (const c of campaigns || []) {
+          if (c.import_id) campaignsByImport[c.import_id] = c;
+        }
+      }
+
+      const items = (data || []).map((row) => {
+        const campaign = campaignsByImport[row.import_id] || null;
+        const hasReplied = Boolean(row.ultima_interacao_usuario);
+        const resolvedStatus =
+          row.followup_status === "converted" ? "converted" :
+          row.followup_status === "discarded" ? "discarded" :
+          row.followup_status === "scheduled" ? "scheduled" :
+          hasReplied ? "replied" : "pending";
+
+        return {
+          id: row.id,
+          campaignId: campaign?.id || null,
+          campaignName: campaign?.name || null,
+          leadId: row.id,
+          leadName: normalizeString(row.nome) || null,
+          phone: row.telefone,
+          clientId,
+          status: resolvedStatus,
+          scheduledAt: row.followup_scheduled_at || null,
+          lastContactAt: row.ultima_interacao_usuario || row.ultima_interacao_bot || null,
+          createdAt: row.created_at,
+        };
+      });
+
+      return res.json({ success: true, items, total: count || 0 });
+    } catch (err) {
+      sendError(res, 500, "FOLLOWUP_QUEUE_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch followup queue");
+    }
+  });
+
+  // PATCH /api/followup-queue/:id — reagendar ou descartar item da fila
+  app.patch("/api/followup-queue/:id", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const newStatus = normalizeString(body.status) || null;
+    const scheduledAt = normalizeString(body.scheduledAt) || null;
+
+    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
+
+    const patchable = ["scheduled", "discarded"];
+    if (newStatus && !patchable.includes(newStatus)) {
+      return sendError(res, 400, "INVALID_BODY", `status must be one of: ${patchable.join(", ")}`);
+    }
+
+    try {
+      const patch = {};
+      if (newStatus) patch.followup_status = newStatus;
+      if (scheduledAt) { patch.followup_status = "scheduled"; patch.followup_scheduled_at = scheduledAt; }
+
+      if (Object.keys(patch).length === 0) return sendError(res, 400, "INVALID_BODY", "Nothing to update");
+
+      const { data, error } = await supabase
+        .from("lead_import_items")
+        .update(patch)
+        .eq("id", id)
+        .select("id, telefone, nome, status_conversa, followup_status, followup_scheduled_at, ultima_interacao_bot, ultima_interacao_usuario, created_at, import_id")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return sendError(res, 404, "NOT_FOUND", "Item not found");
+
+      return res.json({ success: true, item: { id: data.id, status: data.followup_status, scheduledAt: data.followup_scheduled_at } });
+    } catch (err) {
+      sendError(res, 500, "FOLLOWUP_UPDATE_FAILED", err instanceof Error ? err.message : "Failed to update followup");
+    }
+  });
+
+  // POST /api/followup-queue/:id/convert-inbound — converte lead de campanha para inbound
+  app.post("/api/followup-queue/:id/convert-inbound", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
+    try {
+      const { data: item, error: fetchErr } = await supabase
+        .from("lead_import_items")
+        .select("id, telefone, client_id")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (fetchErr) throw fetchErr;
+      if (!item) return sendError(res, 404, "NOT_FOUND", "Item not found");
+
+      const leadsTable = leadsTableName(item.client_id);
+      const [updateItem, updateLead] = await Promise.all([
+        supabase
+          .from("lead_import_items")
+          .update({ followup_status: "converted", status_conversa: "em_atendimento" })
+          .eq("id", id),
+        supabase
+          .from(leadsTable)
+          .update({ lead_origin: "inbound", source_campaign_id: null })
+          .eq("client_id", item.client_id)
+          .eq("telefone", item.telefone),
+      ]);
+
+      if (updateItem.error) throw updateItem.error;
+
+      return res.json({ success: true, id });
+    } catch (err) {
+      sendError(res, 500, "CONVERT_INBOUND_FAILED", err instanceof Error ? err.message : "Failed to convert to inbound");
+    }
+  });
+
+  // GET /api/chatbot-templates — lista templates (built-ins globais + do cliente)
+  app.get("/api/chatbot-templates", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = normalizeTenantKey(req.query?.clientId);
+    if (!clientId) return sendError(res, 400, "MISSING_CLIENT_ID", "clientId is required");
+    try {
+      const { data, error } = await supabase
+        .from("chatbot_templates")
+        .select("*")
+        .or(`client_id.is.null,client_id.eq.${clientId}`)
+        .order("is_builtin", { ascending: false })
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return res.json({ templates: data || [] });
+    } catch (err) {
+      sendError(res, 500, "TEMPLATES_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch templates");
+    }
+  });
+
+  // PUT /api/chatbot-templates — cria ou atualiza template de cliente
+  app.put("/api/chatbot-templates", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = normalizeTenantKey(body.clientId ?? body.client_id);
+    const templateKey = normalizeString(body.templateKey ?? body.template_key);
+    const displayName = normalizeString(body.displayName ?? body.display_name);
+    const agentName = normalizeString(body.agentName ?? body.agent_name) ?? "";
+    const agentRole = normalizeString(body.agentRole ?? body.agent_role) ?? "";
+    const dataFields = Array.isArray(body.dataFields ?? body.data_fields) ? (body.dataFields ?? body.data_fields) : [];
+    const requiredFields = Array.isArray(body.requiredFields ?? body.required_fields) ? (body.requiredFields ?? body.required_fields) : [];
+    const classification = body.classification && typeof body.classification === "object" ? body.classification : { quente: "", morno: "", frio: "" };
+
+    if (!clientId || !templateKey || !displayName) {
+      return sendError(res, 400, "INVALID_BODY", "clientId, templateKey and displayName are required");
+    }
+    try {
+      const { data, error } = await supabase
+        .from("chatbot_templates")
+        .upsert(
+          {
+            template_key: templateKey,
+            client_id: clientId,
+            display_name: displayName,
+            agent_name: agentName,
+            agent_role: agentRole,
+            data_fields: dataFields,
+            required_fields: requiredFields,
+            classification,
+            is_builtin: false,
+            updated_at: new Date().toISOString(),
+            updated_by_email: req.authAccess?.email ?? null,
+          },
+          { onConflict: "template_key,client_id" }
+        )
+        .select()
+        .single();
+      if (error) throw error;
+      return res.json({ template: data });
+    } catch (err) {
+      sendError(res, 500, "TEMPLATE_SAVE_FAILED", err instanceof Error ? err.message : "Failed to save template");
+    }
+  });
+
+  // DELETE /api/chatbot-templates/:id — remove template (não permite deletar built-ins)
+  app.delete("/api/chatbot-templates/:id", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
+    try {
+      const { data: tmpl, error: fetchErr } = await supabase
+        .from("chatbot_templates")
+        .select("id, is_builtin")
+        .eq("id", id)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!tmpl) return sendError(res, 404, "NOT_FOUND", "Template not found");
+      if (tmpl.is_builtin) return sendError(res, 403, "FORBIDDEN", "Cannot delete built-in templates");
+      const { error } = await supabase.from("chatbot_templates").delete().eq("id", id);
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (err) {
+      sendError(res, 500, "TEMPLATE_DELETE_FAILED", err instanceof Error ? err.message : "Failed to delete template");
+    }
+  });
+
   /**
    * POST /api/hardcoded-chat
    * Processa mensagens para o chatbot hardcoded (ex: Outlier Qualification)
@@ -4832,6 +4951,17 @@ export function registerAllDomainRoutes(app) {
         // Processar resposta
         console.log("[hardcoded-chat] Processing response");
         response = await chatbot.processResponse(phone, userMessage);
+      }
+
+      if (userMessage) {
+        await appendLeadMessage({
+          clientId,
+          phone,
+          senderType: "lead",
+          direction: "inbound",
+          messageText: userMessage,
+          meta: { source: "hardcoded-chat-api" },
+        });
       }
   
       console.log("[hardcoded-chat] Response status:", response.status);
@@ -4886,6 +5016,23 @@ export function registerAllDomainRoutes(app) {
           // Adicionar métricas à resposta
           response.metrics = metrics;
           response.leadId = persistResult.leadId || null;
+
+          if (response.message) {
+            await appendLeadMessage({
+              clientId,
+              phone,
+              senderType: "bot",
+              direction: "outbound",
+              messageText: response.message,
+              leadId: persistResult.leadId || null,
+              engagementSignal: qualification,
+              meta: {
+                source: "hardcoded-chat-api",
+                conversationStatus: memory.status || null,
+                stepId: memory.currentStepId || null,
+              },
+            });
+          }
         }
       }
   
@@ -4979,10 +5126,10 @@ export function registerAllDomainRoutes(app) {
               modelOverride: campaignModelOverride ?? "none",
             });
 
-            // Marca lead como originado de campanha
+            // Marca lead como originado de campanha com nome desnormalizado
             supabase
               .from(leadsTableName(clientId))
-              .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id })
+              .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
               .eq("client_id", clientId)
               .eq("telefone", phone)
               .then(({ error }) => {
@@ -5056,6 +5203,24 @@ export function registerAllDomainRoutes(app) {
   
       bufferMessage(clientId, phone, messageData, async (messages) => {
         try {
+          for (const item of messages) {
+            if (item?.text) {
+              await appendLeadMessage({
+                clientId,
+                phone,
+                senderType: "lead",
+                direction: "inbound",
+                messageText: item.text,
+                meta: {
+                  source: "hardcoded-chat-webhook",
+                  messageType: item.type || null,
+                  transcribed: item.transcribed === true,
+                  described: item.described === true,
+                },
+              });
+            }
+          }
+
           const chatbotModel = campaignModelOverride || body.modelOverride || tenantSettings?.chatbot_model || "outlier";
           const aiResponse = await processBatch({
             clientId,
@@ -5097,6 +5262,22 @@ export function registerAllDomainRoutes(app) {
               phone: maskPhoneForLog(phone),
               status: aiResponse.status_conversa,
               classificacao: aiResponse.classificacao,
+            });
+
+            await appendLeadMessage({
+              clientId,
+              phone,
+              senderType: "bot",
+              direction: "outbound",
+              messageText: aiResponse.mensagem,
+              engagementSignal: aiResponse.classificacao || null,
+              meta: {
+                source: "hardcoded-chat-webhook",
+                model: chatbotModel,
+                conversationStatus: aiResponse.status_conversa || null,
+                finalized: aiResponse.finalizado === true,
+                recontact: aiResponse._recontato === true,
+              },
             });
           } else {
             const errText = await evolutionResponse.text();
@@ -5209,7 +5390,7 @@ export function registerAllDomainRoutes(app) {
     try {
       let query = supabase
         .from(leadsTableName(clientId))
-        .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at, lead_origin, source_campaign_id")
+        .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at, lead_origin, source_campaign_id, source_campaign_name, lead_source")
         .eq("client_id", clientId)
         .order("updated_at", { ascending: false })
         .limit(limit);
@@ -5246,6 +5427,8 @@ export function registerAllDomainRoutes(app) {
           updatedAt: row.updated_at,
           leadOrigin: row.lead_origin || null,
           sourceCampaignId: row.source_campaign_id || null,
+          sourceCampaignName: row.source_campaign_name || null,
+          leadSource: row.lead_source || null,
         };
       });
 
