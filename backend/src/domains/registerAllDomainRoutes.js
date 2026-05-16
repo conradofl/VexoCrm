@@ -5106,7 +5106,7 @@ export function registerAllDomainRoutes(app) {
 
         if (activeWaitCampaign) {
           // Cenário 1: campanha active/processing + waitForReply=true + lead aguardando agora
-          // → agente campanha responde
+          // → agente campanha responde + avança/finaliza sequência da campanha
           const itemId = activeWaitCampaign.leadImportItem?.id;
           const { isFirst } = await isFirstCampaignReply({
             itemId,
@@ -5128,7 +5128,7 @@ export function registerAllDomainRoutes(app) {
               modelOverride: campaignModelOverride ?? "none",
             });
 
-            // Marca lead como originado de campanha com nome desnormalizado
+            // Marca lead como originado de campanha
             supabase
               .from(leadsTableName(clientId))
               .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
@@ -5137,14 +5137,33 @@ export function registerAllDomainRoutes(app) {
               .then(({ error }) => {
                 if (error) console.warn("[chatbot-webhook] campaign lead_origin update failed:", error.message);
               });
+
+            // Avança/finaliza a sequência da campanha (atualiza progress e envia próximos steps se houver)
+            continueCampaignLeadFromReply({
+              clientId,
+              phone,
+              repliedAt: new Date().toISOString(),
+              campaignMatch: activeWaitCampaign,
+              replyPayload: {},
+            }).then((progression) => {
+              console.log("[campaign-routing] campaign_progression", {
+                clientId,
+                campaignId: activeWaitCampaign.id,
+                phone: maskPhoneForLog(phone),
+                continued: progression.continued,
+                finalized: progression.finalized,
+                campaignFinalized: progression.campaignFinalized,
+              });
+            }).catch((err) => {
+              console.warn("[campaign-routing] campaign_progression_failed:", err.message);
+            });
           } else {
-            console.log("[campaign-routing] wait_for_reply_step", {
+            console.log("[campaign-routing] wait_for_reply_step subsequent", {
               clientId,
               phone: maskPhoneForLog(phone),
               campaignId: activeWaitCampaign.id,
               campaignName: activeWaitCampaign.name,
               isFirst,
-              modelOverride: "none (subsequent reply)",
             });
           }
         } else if (hasRunningCampaign && !waitForReplyExpired) {
