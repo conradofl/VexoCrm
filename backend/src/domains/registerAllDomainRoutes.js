@@ -5128,7 +5128,8 @@ export function registerAllDomainRoutes(app) {
 
         if (activeWaitCampaign) {
           // Cenário 1: campanha active/processing + waitForReply=true + lead aguardando agora
-          // → agente campanha responde + avança/finaliza sequência da campanha
+          // → campanha avança a sequência; chatbot silenciado para evitar resposta duplicada
+          skipChatbotForCampaign = true;
           const itemId = activeWaitCampaign.leadImportItem?.id;
           const { isFirst } = await isFirstCampaignReply({
             itemId,
