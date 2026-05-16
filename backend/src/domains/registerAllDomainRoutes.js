@@ -500,6 +500,8 @@ export function registerAllDomainRoutes(app) {
       req.body?.id ?? req.body?.tenantId ?? req.body?.clientId ?? name
     );
     const n8nSettings = req.body?.n8nSettings;
+    const VALID_SCHEMA_TYPES = new Set(["outlier", "infinie", "generico"]);
+    const schemaType = VALID_SCHEMA_TYPES.has(req.body?.chatbotModel) ? req.body.chatbotModel : "outlier";
   
     if (!name || name.length < 3) {
       sendError(res, 400, "INVALID_BODY", "Tenant name must have at least 3 characters");
@@ -553,6 +555,29 @@ export function registerAllDomainRoutes(app) {
       // Auto-criar tabela de leads para o novo tenant
       if (pgDatabasePool) {
         const tableName = leadsTableName(tenantId);
+        const schemaExtraColumns = {
+          outlier: `
+              interesse TEXT,
+              objetivo TEXT,
+              prazo TEXT,
+              melhor_horario TEXT,
+              credito TEXT,
+              parcela TEXT,
+              lance_entrada_fgts TEXT,`,
+          infinie: `
+              interesse TEXT,
+              objetivo TEXT,
+              prazo TEXT,
+              melhor_horario TEXT,
+              tipo_instalacao TEXT,
+              conta_luz_faixa TEXT,`,
+          generico: `
+              interesse TEXT,
+              objetivo TEXT,
+              prazo TEXT,
+              melhor_horario TEXT,`,
+        };
+        const extraColumns = schemaExtraColumns[schemaType] ?? schemaExtraColumns.outlier;
         try {
           await pgDatabasePool.query(`
             CREATE TABLE IF NOT EXISTS public."${tableName}" (
@@ -587,27 +612,26 @@ export function registerAllDomainRoutes(app) {
               mensagem TEXT,
               finalizado BOOLEAN DEFAULT false,
               spin_fase TEXT CHECK (spin_fase IS NULL OR spin_fase IN ('situacao', 'problema', 'implicacao', 'necessidade')),
-              dados JSONB NOT NULL DEFAULT '{}'::jsonb,
+              dados JSONB NOT NULL DEFAULT '{}'::jsonb,${extraColumns}
               created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               updated_at TIMESTAMPTZ DEFAULT now(),
               UNIQUE (client_id, telefone)
             )
           `);
-          console.info(`[tenant-create] Created leads table: ${tableName}`);
+          console.info(`[tenant-create] Created leads table: ${tableName} (schema: ${schemaType})`);
         } catch (ddlErr) {
           console.error(`[tenant-create] Failed to create leads table ${tableName}:`, ddlErr.message);
         }
       }
 
       let savedSettings = null;
-      if (n8nSettings) {
-        savedSettings = await upsertLeadClientN8nSettings(
-          tenantId,
-          n8nSettings,
-          req.authAccess,
-          null
-        );
-      }
+      const settingsPayload = { ...(n8nSettings || {}), chatbotModel: schemaType };
+      savedSettings = await upsertLeadClientN8nSettings(
+        tenantId,
+        settingsPayload,
+        req.authAccess,
+        null
+      );
 
       res.status(201).json({
         item: {
