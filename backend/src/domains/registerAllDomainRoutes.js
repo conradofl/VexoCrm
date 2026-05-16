@@ -5362,8 +5362,8 @@ export function registerAllDomainRoutes(app) {
                   supabase,
                   clientId,
                   phone,
-                  history: [],
-                  collectedData: aiResponse.dados || {},
+                  history: aiResponse._history || [],
+                  collectedData: aiResponse._dados || aiResponse.dados || {},
                   classificacao: aiResponse.classificacao,
                 });
 
@@ -5371,31 +5371,28 @@ export function registerAllDomainRoutes(app) {
                 if (aiBriefing) {
                   briefingMsg = aiBriefing;
                 } else {
-                  const briefingResult = extractConversationBriefing({
-                    phone,
-                    clientId,
-                    collectedData: aiResponse.dados || {},
-                    conversationStatus: aiResponse.status_conversa,
-                    qualificationStatus: aiResponse.classificacao,
-                    startedAt: new Date().toISOString(),
-                    finishedAt: new Date().toISOString(),
-                  });
-                  if (briefingResult.success) {
-                    const b = briefingResult.briefing;
+                  // Fallback genérico — funciona para qualquer tenant
+                  // Exibe todos os campos coletados em dados, sem depender de campos Outlier-específicos
+                  const dados = aiResponse._dados || aiResponse.dados || {};
+                  const FIELD_LABELS = {
+                    nome: "Nome", interesse: "Interesse", objetivo: "Objetivo",
+                    cidade: "Cidade", estado: "Estado", credito: "Crédito",
+                    parcela: "Parcela", prazo: "Prazo", lance_entrada_fgts: "FGTS/Lance",
+                    melhor_horario: "Melhor horário", tipo: "Tipo", tipo_instalacao: "Local de instalação",
+                    conta_luz_faixa: "Conta de luz", credito_faixa: "Faixa de crédito",
+                  };
+                  const dadosLines = Object.entries(dados)
+                    .filter(([, v]) => v != null && v !== "")
+                    .map(([k, v]) => `• ${FIELD_LABELS[k] || k}: ${v}`)
+                    .join("\n");
+                  if (dadosLines) {
                     briefingMsg = [
-                      `🎯 *Lead qualificado*`,
-                      `📱 Contato: ${b.contato}`,
-                      `📍 ${b.localizacao}`,
-                      `🏠 Interesse: ${b.interesse}`,
-                      `💰 Crédito: ${b.creditoDesejado}`,
-                      `📅 Prazo: ${b.prazoIntencao}`,
-                      `💵 Parcela: ${b.parcelaConfortavel}`,
-                      `🔑 FGTS/Lance: ${b.lancoEntradaFgts}`,
-                      `🕐 Melhor horário: ${b.melhorHorario || aiResponse.dados?.melhor_horario || "Não informado"}`,
-                      `🌡️ Temperatura: ${b.temperatura}`,
-                      `\n📊 *Leitura:* ${b.leituraDoLead}`,
-                      `\n🎯 *Gancho:* ${b.ganhoParaConsultor}`,
-                      `\n✅ *Próximo passo:* ${b.proximoPassoSugerido}`,
+                      `🎯 *Lead qualificado — ${clientId}*`,
+                      `📱 Contato: ${phone}`,
+                      `🌡️ Temperatura: ${aiResponse.classificacao || "Não informado"}`,
+                      ``,
+                      `📋 *Dados coletados:*`,
+                      dadosLines,
                     ].join("\n");
                   }
                 }

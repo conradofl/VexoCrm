@@ -17,7 +17,17 @@ const PROMPT_TYPES: { value: PromptType; label: string; description: string }[] 
   {
     value: "padrao",
     label: "Qualificador (Padrão)",
-    description: "Prompt do chatbot qualificador SPIN — usado em todos os atendimentos.",
+    description: "Prompt do chatbot qualificador SPIN — usado em atendimentos inbound.",
+  },
+  {
+    value: "campanha",
+    label: "Qualificador (Campanha)",
+    description: "Prompt usado na primeira resposta de leads oriundos de campanhas outbound — tom mais leve.",
+  },
+  {
+    value: "qualificar",
+    label: "Qualificação Aprofundada",
+    description: "Prompt especializado para aprofundar a qualificação após o SPIN inicial.",
   },
   {
     value: "extrato",
