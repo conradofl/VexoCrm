@@ -39,8 +39,6 @@ O frontend consome principalmente o backend Node para:
 - `GET /api/lead-clients`
 - `GET /api/dashboard`
 - `GET /api/leads`
-- `GET /api/notifications`
-- `PATCH /api/notifications`
 
 Autenticacao:
 

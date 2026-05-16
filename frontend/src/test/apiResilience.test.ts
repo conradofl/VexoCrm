@@ -3,11 +3,9 @@ import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
 const apiSource = readFileSync(resolve("src/lib/api.ts"), "utf8");
-const notificationsSource = readFileSync(resolve("src/hooks/useNotifications.ts"), "utf8");
 const dashboardSource = readFileSync(resolve("src/hooks/useDashboard.ts"), "utf8");
 const leadClientsSource = readFileSync(resolve("src/hooks/useLeadClients.ts"), "utf8");
 const adminUsersSource = readFileSync(resolve("src/hooks/useAdminUsers.ts"), "utf8");
-const notificationBellSource = readFileSync(resolve("src/components/NotificationBell.tsx"), "utf8");
 const agenteSource = readFileSync(resolve("src/pages/Agente.tsx"), "utf8");
 const userAccessManagementSource = readFileSync(resolve("src/pages/UserAccessManagement.tsx"), "utf8");
 
@@ -23,10 +21,14 @@ describe("CRM API resilience", () => {
     expect(apiSource).toContain("Resposta HTML inesperada da API.");
   });
 
-  it("uses the resilient API wrapper for dashboard, lead clients and notifications", () => {
+  it("uses the resilient API wrapper for dashboard and lead clients", () => {
     expect(dashboardSource).toContain('fetchApi(`/api/dashboard?clientId=');
     expect(leadClientsSource).toContain('fetchApi("/api/lead-clients"');
-    expect(notificationsSource).toContain('fetchApi("/api/notifications?limit=20"');
+  });
+
+  it("renders a safe notification fallback instead of silent failures", () => {
+    expect(agenteSource).toContain("Modulo removido");
+    expect(agenteSource).toContain("n8n_error_logs");
   });
 
   it("uses the resilient API wrapper for user access management", () => {
@@ -35,19 +37,6 @@ describe("CRM API resilience", () => {
     expect(userAccessManagementSource).toContain('fetchApi("/api/admin/users"');
     expect(userAccessManagementSource).toContain("fetchApi(endpoint");
     expect(userAccessManagementSource).not.toContain("API_BASE_URL");
-  });
-
-  it("prevents notification request spam after failures", () => {
-    expect(notificationsSource).toContain("inFlightRef");
-    expect(notificationsSource).toContain("skipped_duplicate_request");
-    expect(notificationsSource).toContain("ERROR_POLL_INTERVAL");
-    expect(notificationsSource).toContain("skipped_error_cooldown");
-    expect(notificationsSource).toContain("[notifications-api] fetch_failed");
-  });
-
-  it("renders a safe notification fallback instead of silent failures", () => {
-    expect(notificationBellSource).toContain("Notificacoes indisponiveis");
-    expect(agenteSource).toContain("Notificacoes indisponiveis");
   });
 
   it("renders a safe user list fallback instead of infinite loading", () => {

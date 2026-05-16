@@ -39,10 +39,8 @@ async function hasExistingSchema(pool) {
 // Verifica se o efeito de cada migration antiga já existe no banco
 async function isAlreadyApplied(pool, filename) {
   const checks = {
-    "20260221031218_fc81ff5b-64c3-45e7-bba5-06ab383a6d75.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='n8n_error_logs') AS ok`,
     "20260304000001_create_leads_tables.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='leads') AS ok`,
     "20260304000002_seed_leads_infinie.sql": `SELECT EXISTS (SELECT 1 FROM public.leads_clients WHERE id='infinie') AS ok`,
-    "20260309000003_create_lead_conversations.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_conversations') AS ok`,
     "20260315000004_create_lead_import_tables.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_import_items') AS ok`,
     "20260315000005_normalize_brazilian_phones.sql": `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='normalize_brazilian_phone') AS ok`,
     "20260409000006_drop_legacy_assistant_tables.sql": `SELECT TRUE AS ok`,

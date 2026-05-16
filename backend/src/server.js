@@ -9,7 +9,11 @@ import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { createDatabasePool, createPgSupabaseClient } from "./pgSupabaseCompat.js";
 import { runMigrations } from "./migrate.js";
-import { parseLeadQualificacaoBoolean } from "./leadQualificacaoBoolean.js";
+import {
+  buildLeadsOutlierDataColumns,
+  normalizeLeadsOutlierDados,
+  validateLeadsOutlierDadosShape,
+} from "./leads-outlier-schema.js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import {
@@ -61,8 +65,6 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 const app = express();
 app.use(express.json({ limit: "15mb" }));
 const isProduction = process.env.NODE_ENV === "production";
-/** Max decompressed conversation size for POST /api/conversation-memory (after gzip decode). */
-const MAX_CONVERSATION_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS = 60 * 1000;
 const CAMPAIGN_SCHEDULER_MAX_BATCH = 25;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -1171,133 +1173,6 @@ function requireAppViewAccess(view) {
   };
 }
 
-function canManageGlobalNotifications(access) {
-  if (access?.role !== "internal") {
-    return false;
-  }
-
-  return (
-    access.isAdmin ||
-    hasAccessPermission(access, "users.manage") ||
-    hasAccessPermission(access, "tenants.manage")
-  );
-}
-
-function normalizeNotificationScopeValues(value) {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => normalizeString(item))
-      .filter(Boolean);
-  }
-
-  const singleValue = normalizeString(value);
-  return singleValue ? [singleValue] : [];
-}
-
-function matchesNotificationClientScope(notification, access) {
-  const notificationClientIds = Array.from(
-    new Set([
-      ...normalizeNotificationScopeValues(notification?.client_id),
-      ...normalizeNotificationScopeValues(notification?.clientId),
-      ...normalizeNotificationScopeValues(notification?.tenant_id),
-      ...normalizeNotificationScopeValues(notification?.tenantId),
-      ...normalizeNotificationScopeValues(notification?.client_ids),
-      ...normalizeNotificationScopeValues(notification?.clientIds),
-      ...normalizeNotificationScopeValues(notification?.tenant_ids),
-      ...normalizeNotificationScopeValues(notification?.tenantIds),
-    ])
-  );
-
-  if (notificationClientIds.length === 0) {
-    return true;
-  }
-
-  if (access?.role !== "internal") {
-    return false;
-  }
-
-  if (access.isAdmin || access.scopeMode === "all_clients") {
-    return true;
-  }
-
-  const accessClientIds = new Set(normalizeStringArray(access.clientIds || access.tenantIds || []));
-  if (accessClientIds.size === 0) {
-    return false;
-  }
-
-  return notificationClientIds.some((clientId) => accessClientIds.has(clientId));
-}
-
-function matchesNotificationInternalScope(notification, access) {
-  const requiredPages = Array.from(
-    new Set([
-      ...normalizeNotificationScopeValues(notification?.internal_page),
-      ...normalizeNotificationScopeValues(notification?.internalPage),
-      ...normalizeNotificationScopeValues(notification?.internal_pages),
-      ...normalizeNotificationScopeValues(notification?.internalPages),
-      ...normalizeNotificationScopeValues(notification?.target_page),
-      ...normalizeNotificationScopeValues(notification?.targetPage),
-      ...normalizeNotificationScopeValues(notification?.target_pages),
-      ...normalizeNotificationScopeValues(notification?.targetPages),
-    ])
-  );
-  const requiredPermissions = Array.from(
-    new Set([
-      ...normalizeNotificationScopeValues(notification?.permission),
-      ...normalizeNotificationScopeValues(notification?.permissions),
-      ...normalizeNotificationScopeValues(notification?.target_permission),
-      ...normalizeNotificationScopeValues(notification?.targetPermission),
-      ...normalizeNotificationScopeValues(notification?.target_permissions),
-      ...normalizeNotificationScopeValues(notification?.targetPermissions),
-    ])
-  );
-
-  if (requiredPages.length === 0 && requiredPermissions.length === 0) {
-    return true;
-  }
-
-  if (access?.role !== "internal") {
-    return false;
-  }
-
-  if (access.isAdmin) {
-    return true;
-  }
-
-  if (requiredPages.some((page) => hasInternalPageAccess(access, page))) {
-    return true;
-  }
-
-  if (requiredPermissions.some((permission) => hasAccessPermission(access, permission))) {
-    return true;
-  }
-
-  return false;
-}
-
-function isNotificationVisibleToAccess(notification, access) {
-  if (!notification || access?.role !== "internal") {
-    return false;
-  }
-
-  return (
-    matchesNotificationClientScope(notification, access) &&
-    matchesNotificationInternalScope(notification, access)
-  );
-}
-
-function filterNotificationsForAccess(items, access) {
-  return (Array.isArray(items) ? items : []).filter((item) =>
-    isNotificationVisibleToAccess(item, access)
-  );
-}
-
-function getVisibleNotificationIds(items, access) {
-  return filterNotificationsForAccess(items, access)
-    .map((item) => item?.id)
-    .filter(Boolean);
-}
-
 function ensureSharedRoutePageAccess(req, res, page) {
   const access = req.authAccess;
 
@@ -1844,33 +1719,7 @@ const MAX_LEADS_OUTLIER_BATCH = 2000;
 
 /** Garante que `dados` é um objeto só com chaves permitidas e valores string | number | null. */
 function sanitizeLeadsOutlierDados(raw) {
-  if (raw === undefined || raw === null) {
-    return { value: {} };
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    return { error: "dados tem de ser um objeto simples" };
-  }
-  const out = {};
-  for (const key of Object.keys(raw)) {
-    if (!LEADS_OUTLIER_DADOS_KEYS.has(key)) {
-      return { error: `dados tem chave desconhecida: ${key}` };
-    }
-    const v = raw[key];
-    if (v === null || v === undefined) {
-      out[key] = null;
-      continue;
-    }
-    if (typeof v === "string") {
-      out[key] = v;
-      continue;
-    }
-    if (typeof v === "number" && Number.isFinite(v)) {
-      out[key] = v;
-      continue;
-    }
-    return { error: `dados.${key} tem de ser string, número ou null` };
-  }
-  return { value: out };
+  return validateLeadsOutlierDadosShape(raw);
 }
 
 /** Metadados opcionais de comportamento do bot (objeto livre, sem validação de chaves). */
@@ -1969,10 +1818,12 @@ function validateLeadsOutlierRecord(record, indexLabel = "") {
     }
   }
 
-  const dadosResult = sanitizeLeadsOutlierDados(record.dados);
-  if (dadosResult.error) {
-    return { error: `${prefix}${dadosResult.error}` };
+  const dadosShapeResult = sanitizeLeadsOutlierDados(record.dados);
+  if (dadosShapeResult.error) {
+    return { error: `${prefix}${dadosShapeResult.error}` };
   }
+
+  const dadosResult = { value: normalizeLeadsOutlierDados(record) };
 
   const behaviorResult = sanitizeLeadsOutlierBehaviorMeta(record.behavior_meta);
   if (behaviorResult.error) {
@@ -2009,6 +1860,8 @@ function validateLeadsOutlierRecord(record, indexLabel = "") {
 
   // Linha normalizada para INSERT em `leads_outlier` (campos alinhados à tabela).
   /** @type {Record<string, unknown>} */
+  const dataColumns = buildLeadsOutlierDataColumns(record);
+
   const row = {
     telefone,
     mensagem: record.mensagem,
@@ -2035,6 +1888,7 @@ function validateLeadsOutlierRecord(record, indexLabel = "") {
     closed_at: normalizeIsoDate(record.closed_at),
     lead_origin: normalizeString(record.lead_origin),
     source_campaign_id: uuidResult.value,
+    ...dataColumns,
   };
 
   if (behaviorResult.value !== undefined) {
@@ -2458,106 +2312,6 @@ function isValidBase64(value) {
   if (!value || typeof value !== "string") return false;
   if (value.length % 4 !== 0) return false;
   return /^[A-Za-z0-9+/=]+$/.test(value);
-}
-
-/** Global bearer for n8n-facing routes (POST/GET conversation-memory*, POST n8n-error-webhook). Env overrides; default matches legacy Edge. */
-function getN8nWebhookBearerSecret() {
-  return normalizeString(process.env.N8N_WEBHOOK_SECRET) || "@Vexo2026";
-}
-
-function requireN8nWebhookSecret(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const expectedSecret = getN8nWebhookBearerSecret();
-
-  if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
-    sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
-    return;
-  }
-
-  next();
-}
-
-function validateConversationMemoryPayload(req, res, next) {
-  const body = req.body || {};
-  const telefone = sanitizePhone(body.telefone);
-  const conversationCompressed = normalizeString(body.conversation_compressed);
-  const tamanhoOriginal = body.tamanho_original;
-  const timestamp = normalizeString(body.timestamp);
-
-  if (!telefone || !conversationCompressed || tamanhoOriginal === undefined || !timestamp) {
-    sendError(
-      res,
-      400,
-      "INVALID_BODY",
-      "Missing required fields: telefone, conversation_compressed, tamanho_original, timestamp"
-    );
-    return;
-  }
-
-  if (!Number.isInteger(tamanhoOriginal) || tamanhoOriginal <= 0) {
-    sendError(res, 400, "INVALID_BODY", "tamanho_original must be a positive integer");
-    return;
-  }
-
-  if (!isValidBase64(conversationCompressed)) {
-    sendError(res, 400, "INVALID_BODY", "conversation_compressed must be valid base64");
-    return;
-  }
-
-  const parsedTimestamp = new Date(timestamp);
-  if (Number.isNaN(parsedTimestamp.getTime())) {
-    sendError(res, 400, "INVALID_BODY", "timestamp must be a valid ISO date");
-    return;
-  }
-
-  let compressedBuffer;
-  let decompressedBuffer;
-
-  try {
-    compressedBuffer = Buffer.from(conversationCompressed, "base64");
-    if (compressedBuffer.length === 0) {
-      sendError(res, 400, "INVALID_BODY", "conversation_compressed must decode to non-empty bytes");
-      return;
-    }
-    decompressedBuffer = gunzipSync(compressedBuffer);
-  } catch (error) {
-    console.error("conversation memory validation failed:", {
-      event: "conversation_memory_validation_failed",
-      reason: "invalid_gzip_or_base64",
-      message: error instanceof Error ? error.message : String(error),
-    });
-    sendError(res, 400, "INVALID_BODY", "conversation_compressed must be valid gzip+base64");
-    return;
-  }
-
-  if (decompressedBuffer.length > MAX_CONVERSATION_BYTES) {
-    sendError(
-      res,
-      413,
-      "PAYLOAD_TOO_LARGE",
-      "Decompressed conversation exceeds 5MB limit"
-    );
-    return;
-  }
-
-  if (decompressedBuffer.length !== tamanhoOriginal) {
-    sendError(
-      res,
-      400,
-      "INVALID_BODY",
-      "tamanho_original does not match decompressed conversation size"
-    );
-    return;
-  }
-
-  req.conversationMemory = {
-    telefone,
-    conversationCompressed,
-    tamanhoOriginal,
-    timestamp: parsedTimestamp.toISOString(),
-  };
-
-  next();
 }
 
 function getZonedDateParts(date, timeZone = "America/Sao_Paulo") {
@@ -3193,7 +2947,7 @@ function buildRevenueOpsPayload({
       key: "qualification_rate",
       name: "Taxa de Qualificacao",
       formula: "leads qualificados / leads abordados",
-      source: "public.leads.status, public.leads.qualificacao, public.lead_messages.direction ou public.lead_conversations.telefone",
+      source: "public.leads.status, public.leads.qualificacao, public.lead_messages.direction",
       frequency: "Tempo real",
       display: "Card principal + tendencia diaria",
       kind: "percent",
@@ -3217,7 +2971,7 @@ function buildRevenueOpsPayload({
       formula: "total de interacoes / leads qualificados",
       source: availability.messages
         ? "public.lead_messages"
-        : "public.lead_conversations (proxy parcial)",
+        : "proxy parcial indisponivel sem instrumentacao de mensagens",
       frequency: "Tempo real",
       display: "Card operacional + comparativo por campanha",
       kind: "ratio",
@@ -3282,7 +3036,7 @@ function buildRevenueOpsPayload({
       formula: "leads que responderam / leads abordados",
       source: availability.messages
         ? "public.lead_messages.direction, public.lead_messages.sender_type"
-        : "public.lead_conversations",
+        : "public.leads.status_conversa",
       frequency: "Tempo real",
       display: "Card + heatmap por campanha",
       kind: "percent",
@@ -3305,7 +3059,7 @@ function buildRevenueOpsPayload({
       key: "conversation_abandonment_rate",
       name: "Taxa de abandono da conversa",
       formula: "leads abordados sem resposta / leads abordados",
-      source: "public.lead_messages, public.lead_conversations",
+      source: "public.lead_messages, public.leads.status_conversa",
       frequency: "Tempo real",
       display: "Card de risco + alerta automatico",
       kind: "percent",
@@ -3316,7 +3070,7 @@ function buildRevenueOpsPayload({
       key: "base_quality_rate",
       name: "Qualidade da base",
       formula: "leads que respondem / leads abordados",
-      source: "public.lead_messages, public.lead_conversations, public.leads",
+      source: "public.lead_messages, public.leads",
       frequency: "Tempo real",
       display: "Card + ranking por campanha",
       kind: "percent",
@@ -3648,11 +3402,6 @@ function buildRevenueOpsPayload({
           name: "leads",
           purpose: "Base central do lead com origem, score, timestamps operacionais e status de conversao.",
           fields: ["client_id", "telefone", "status", "qualificacao", "source_campaign_id", "lead_score", "first_contact_at", "qualified_at", "closed_at", "potential_contract_value"],
-        },
-        {
-          name: "lead_conversations",
-          purpose: "Memoria comprimida da conversa para auditoria e replay do agente.",
-          fields: ["telefone", "conversation_compressed", "created_at"],
         },
         {
           name: "lead_messages",
@@ -6398,7 +6147,6 @@ Object.assign(routeDeps, {
   LEADS_OUTLIER_STATUS_CONVERSA,
   LEADS_OUTLIER_TEMPERATURE,
   MANAGED_CLAIM_KEYS,
-  MAX_CONVERSATION_BYTES,
   MAX_LEADS_OUTLIER_BATCH,
   SYSTEM_ACCESS_PROFILES,
   __dirname,
@@ -6422,7 +6170,6 @@ Object.assign(routeDeps, {
   callCampaignQualificationWebhook,
   campaignSchedulerRunning,
   canCampaignBeDispatched,
-  canManageGlobalNotifications,
   checkEvolutionInstanceHealth,
   claimCampaignForDispatch,
   continueCampaignLeadFromReply,
@@ -6440,7 +6187,6 @@ Object.assign(routeDeps, {
   extractCampaignProgress,
   extractEvolutionConnectionState,
   extractManagedAccessClaims,
-  filterNotificationsForAccess,
   findAccessProfileByKey,
   findCampaignReplyMatches,
   firebaseConfig,
@@ -6463,14 +6209,12 @@ Object.assign(routeDeps, {
   getLeadReferenceDate,
   getLeadWebhookBearerSecret,
   getN8nOnboardingStatus,
-  getN8nWebhookBearerSecret,
   getNormalizedField,
   getPresetFallbackKey,
   getRequestBearerToken,
   getRequestId,
   getSafeDispatchSettingsLog,
   getSafeEvolutionEndpointLog,
-  getVisibleNotificationIds,
   getZonedDateParts,
   hasCampaignLeadReplied,
   hasWildcard,
@@ -6487,7 +6231,6 @@ Object.assign(routeDeps, {
   isMaskedSecretPlaceholder,
   isMissingAccessProfilesTable,
   isMissingSchemaError,
-  isNotificationVisibleToAccess,
   isProduction,
   isQualifiedStatus,
   isValidBase64,
@@ -6506,8 +6249,6 @@ Object.assign(routeDeps, {
   markCampaignLeadWaitingReply,
   maskN8nSettings,
   maskPhoneForLog,
-  matchesNotificationClientScope,
-  matchesNotificationInternalScope,
   maybeFinalizeCampaignAfterReply,
   mergeCampaignProgress,
   mergeManagedClaims,
@@ -6525,7 +6266,6 @@ Object.assign(routeDeps, {
   normalizeIsoDate,
   normalizeLooseText,
   normalizeMetricValue,
-  normalizeNotificationScopeValues,
   normalizePermissions,
   normalizePhoneToWhatsAppChatId,
   normalizeRole,
@@ -6557,7 +6297,6 @@ Object.assign(routeDeps, {
   requireFirebaseAuth,
   requireInternalAccess,
   requireInternalPageAccess,
-  requireN8nWebhookSecret,
   requireUserManagementAccess,
   resolveAuthorizedClientId,
   resolveCampaignDispatchSettings,
@@ -6591,7 +6330,6 @@ Object.assign(routeDeps, {
   updateLeadImportItemCampaignProgress,
   upsertLeadClientN8nSettings,
   useDirectPostgres,
-  validateConversationMemoryPayload,
   validateLeadWebhookBearer,
   validateLeadsOutlierRecord,
   validateN8nInboundBearer,

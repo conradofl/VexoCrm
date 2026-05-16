@@ -43,7 +43,3 @@ SET telefone = public.normalize_br_phone(telefone)
 WHERE telefone IS NOT NULL
   AND telefone <> public.normalize_br_phone(telefone);
 
-UPDATE public.lead_conversations
-SET telefone = public.normalize_br_phone(telefone)
-WHERE telefone IS NOT NULL
-  AND telefone <> public.normalize_br_phone(telefone);

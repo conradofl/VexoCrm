@@ -1,11 +1,5 @@
 project_id = "yfhdzkjuhxsbxklfgdut"
 
-[functions.conversation-memory]
-verify_jwt = false
-
-[functions.conversation-memory-latest]
-verify_jwt = false
-
 [functions.get-leads-disparo]
 verify_jwt = false
 
@@ -15,11 +9,5 @@ verify_jwt = false
 [functions.mark-lead-dispatched]
 verify_jwt = false
 
-[functions.n8n-error-webhook]
-verify_jwt = false
-
 [functions.n8n-planilha-webhook]
-verify_jwt = false
-
-[functions.notifications-api]
 verify_jwt = false

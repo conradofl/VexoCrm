@@ -57,12 +57,6 @@ async function hasLegacySchema(client) {
 
 async function migrationAlreadyRepresented(client, fileName) {
   const checks = {
-    "20260221031218_fc81ff5b-64c3-45e7-bba5-06ab383a6d75.sql": `
-      select exists (
-        select 1 from information_schema.tables
-        where table_schema = 'public' and table_name = 'n8n_error_logs'
-      ) as ok
-    `,
     "20260304000001_create_leads_tables.sql": `
       select exists (
         select 1 from information_schema.tables
@@ -72,12 +66,6 @@ async function migrationAlreadyRepresented(client, fileName) {
     "20260304000002_seed_leads_infinie.sql": `
       select exists (
         select 1 from public.leads_clients where id = 'infinie'
-      ) as ok
-    `,
-    "20260309000003_create_lead_conversations.sql": `
-      select exists (
-        select 1 from information_schema.tables
-        where table_schema = 'public' and table_name = 'lead_conversations'
       ) as ok
     `,
     "20260315000004_create_lead_import_tables.sql": `

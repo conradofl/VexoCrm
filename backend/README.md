@@ -26,17 +26,12 @@ Hoje este backend nao e a origem principal da operacao de leads no n8n. O fluxo 
 | `GET` | `/api/dashboard` | dashboard do CRM |
 | `GET` | `/api/leads` | listagem de leads |
 | `POST` | `/api/n8n-dispatches` | envia numeros/leads para webhook de disparo no n8n |
-| `GET` | `/api/notifications` | feed de notificacoes |
-| `PATCH` | `/api/notifications` | marcar notificacoes como lidas |
 
 ## Endpoints de compatibilidade
 
 As rotas abaixo ainda existem no codigo, mas nao sao a interface principal do workflow atual porque o n8n esta usando Edge Functions do Supabase:
 
 - `POST /api/import-lead-infinie-n8n`
-- `POST /api/n8n-error-webhook`
-- `POST /api/conversation-memory`
-- `GET /api/conversation-memory/latest`
 
 ## Variaveis de ambiente
 
