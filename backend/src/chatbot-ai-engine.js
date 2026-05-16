@@ -337,6 +337,58 @@ async function fetchDynamicPrompt(supabase, clientId, type) {
   }
 }
 
+/**
+ * Gera briefing SDR usando o prompt "extrato" do banco (configurável por empresa).
+ * Recebe o histórico da conversa e os dados coletados, retorna texto formatado.
+ * Se não houver prompt extrato no banco, retorna null (caller usa fallback determinístico).
+ */
+export async function extractBriefingWithAI({ supabase, clientId, phone, history, collectedData, classificacao }) {
+  const extractPrompt = await fetchDynamicPrompt(supabase, clientId, "extrato");
+  if (!extractPrompt) return null;
+
+  if (!groqKey()) return null;
+
+  const dadosJson = JSON.stringify(collectedData || {}, null, 2);
+  const historicText = Array.isArray(history)
+    ? history.map((m) => `${m.role === "user" ? "Lead" : "Bot"}: ${m.content}`).join("\n")
+    : "";
+
+  const userContent = [
+    `=== DADOS COLETADOS ===`,
+    dadosJson,
+    ``,
+    `=== TEMPERATURA ===`,
+    classificacao || "Não informado",
+    ``,
+    `=== HISTÓRICO DA CONVERSA ===`,
+    historicText,
+    ``,
+    `=== CONTATO ===`,
+    phone,
+  ].join("\n");
+
+  try {
+    const resp = await fetch(`${GROQ_BASE}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey()}` },
+      body: JSON.stringify({
+        model: GROQ_CHAT_MODEL,
+        messages: [
+          { role: "system", content: extractPrompt },
+          { role: "user", content: userContent },
+        ],
+        temperature: 0.3,
+        max_tokens: 800,
+      }),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    return json.choices?.[0]?.message?.content?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runChatbotAI({ systemPrompt, history, newMessages, existingData }) {
   if (!groqKey()) throw new Error("GROQ_API_KEY não configurada");
 

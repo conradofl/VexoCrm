@@ -44,6 +44,7 @@ import {
 import { whatsappSessionManager } from "../whatsapp.js";
 import { initializeRedisChat, getChatMemory, setSupabaseClient } from "../hardcoded-chatbot.js";
 import { extractConversationBriefing } from "../hardcoded-chatbot-extractor.js";
+import { parseStoredHistorico } from "../leads-outlier-schema.js";
 import {
   bufferMessage,
   resolveMessageContent,
@@ -51,6 +52,7 @@ import {
   processBatch,
   getChatbotModel,
   isFirstCampaignReply,
+  extractBriefingWithAI,
 } from "../chatbot-ai-engine.js";
 import { OutlierQualificationBot } from "../hardcoded-chatbot-outlier.js";
 import {
@@ -5318,40 +5320,56 @@ export function registerAllDomainRoutes(app) {
           if (aiResponse.finalizado && !aiResponse._recontato) {
             if (sdrNumber && evolutionUrl) {
               try {
-                const briefingResult = extractConversationBriefing({
-                  phone,
+                // Tenta briefing via IA com prompt "extrato" do banco; fallback para determinístico
+                const aiBriefing = await extractBriefingWithAI({
+                  supabase,
                   clientId,
+                  phone,
+                  history: [],
                   collectedData: aiResponse.dados || {},
-                  conversationStatus: aiResponse.status_conversa,
-                  qualificationStatus: aiResponse.classificacao,
-                  startedAt: new Date().toISOString(),
-                  finishedAt: new Date().toISOString(),
+                  classificacao: aiResponse.classificacao,
                 });
 
-                if (briefingResult.success) {
-                  const b = briefingResult.briefing;
-                  const briefingMsg = [
-                    `🎯 *Lead qualificado pelo Áureo*`,
-                    `📱 Contato: ${b.contato}`,
-                    `📍 ${b.localizacao}`,
-                    `🏠 Interesse: ${b.interesse}`,
-                    `💰 Crédito: ${b.creditoDesejado}`,
-                    `📅 Prazo: ${b.prazoIntencao}`,
-                    `💵 Parcela: ${b.parcelaConfortavel}`,
-                    `🔑 FGTS/Lance: ${b.lancoEntradaFgts}`,
-                    `🕐 Melhor horário: ${b.melhorHorario || aiResponse.dados?.melhor_horario || "Não informado"}`,
-                    `🌡️ Temperatura: ${b.temperatura}`,
-                    `\n📊 *Leitura:* ${b.leituraDoLead}`,
-                    `\n🎯 *Gancho:* ${b.ganhoParaConsultor}`,
-                    `\n✅ *Próximo passo:* ${b.proximoPassoSugerido}`,
-                  ].join("\n");
+                let briefingMsg;
+                if (aiBriefing) {
+                  briefingMsg = aiBriefing;
+                } else {
+                  const briefingResult = extractConversationBriefing({
+                    phone,
+                    clientId,
+                    collectedData: aiResponse.dados || {},
+                    conversationStatus: aiResponse.status_conversa,
+                    qualificationStatus: aiResponse.classificacao,
+                    startedAt: new Date().toISOString(),
+                    finishedAt: new Date().toISOString(),
+                  });
+                  if (briefingResult.success) {
+                    const b = briefingResult.briefing;
+                    briefingMsg = [
+                      `🎯 *Lead qualificado*`,
+                      `📱 Contato: ${b.contato}`,
+                      `📍 ${b.localizacao}`,
+                      `🏠 Interesse: ${b.interesse}`,
+                      `💰 Crédito: ${b.creditoDesejado}`,
+                      `📅 Prazo: ${b.prazoIntencao}`,
+                      `💵 Parcela: ${b.parcelaConfortavel}`,
+                      `🔑 FGTS/Lance: ${b.lancoEntradaFgts}`,
+                      `🕐 Melhor horário: ${b.melhorHorario || aiResponse.dados?.melhor_horario || "Não informado"}`,
+                      `🌡️ Temperatura: ${b.temperatura}`,
+                      `\n📊 *Leitura:* ${b.leituraDoLead}`,
+                      `\n🎯 *Gancho:* ${b.ganhoParaConsultor}`,
+                      `\n✅ *Próximo passo:* ${b.proximoPassoSugerido}`,
+                    ].join("\n");
+                  }
+                }
 
+                if (briefingMsg) {
                   await fetch(evolutionUrl, {
                     method: "POST",
                     headers: evolutionHeaders,
                     body: JSON.stringify({ number: sdrNumber, text: briefingMsg, message: briefingMsg }),
                   });
-                  console.log("[chatbot-webhook] SDR briefing sent", { sdrNumber, clientId });
+                  console.log("[chatbot-webhook] SDR briefing sent", { sdrNumber, clientId, source: aiBriefing ? "ai" : "deterministic" });
                 }
               } catch (briefErr) {
                 console.error("[chatbot-webhook] SDR briefing send error:", briefErr.message);
@@ -5480,21 +5498,36 @@ export function registerAllDomainRoutes(app) {
         return;
       }
   
-      // Extrair briefing
-      const briefing = extractConversationBriefing({
+      // Tenta briefing via IA com prompt "extrato" do banco; fallback para determinístico
+      const parsedHistory = parseStoredHistorico(conversation.historico);
+      const aiBriefing = await extractBriefingWithAI({
+        supabase,
+        clientId,
+        phone,
+        history: parsedHistory || [],
+        collectedData: conversation.dados,
+        classificacao: conversation.status,
+      });
+
+      if (aiBriefing) {
+        return res.json({ success: true, conversationId: conversation.id, briefing: aiBriefing, source: "ai" });
+      }
+
+      const briefingResult = extractConversationBriefing({
         phone,
         clientId,
         collectedData: conversation.dados,
         conversationStatus: conversation.status_conversa,
         qualificationStatus: conversation.status,
         startedAt: conversation.created_at,
-        finishedAt: conversation.created_at, // leads_outlier não tem updated_at
+        finishedAt: conversation.created_at,
       });
-  
+
       res.json({
         success: true,
         conversationId: conversation.id,
-        briefing: briefing.briefing,
+        briefing: briefingResult.briefing,
+        source: "deterministic",
       });
     } catch (error) {
       console.error("[hardcoded-extract] Error:", error);
