@@ -74,6 +74,14 @@ export function createPgSupabaseClient(pool) {
     from(table) {
       return new PgQueryBuilder(pool, table);
     },
+    async query(sql, params = []) {
+      try {
+        const result = await pool.query(sql, params);
+        return { rows: result.rows, error: null };
+      } catch (err) {
+        return { rows: [], error: mapPgError(err) };
+      }
+    },
   };
 }
 

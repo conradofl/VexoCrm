@@ -26,22 +26,74 @@ function groqKey() {
 }
 
 
-// ─── Campos individuais extraídos do JSONB `dados` ──────────────────────────
-// Chaves comuns a todos os tenants e chaves específicas por tipo.
-// Só inclui no payload se o valor existir, evitando sobrescrever dados válidos.
+// ─── Campos individuais — fallback quando não há template ───────────────────
 const COMMON_INDIVIDUAL_FIELDS = ["interesse", "objetivo", "prazo", "melhor_horario", "nome", "cidade", "estado"];
 const TYPE_SPECIFIC_FIELDS = {
   outlier: ["credito", "parcela", "lance_entrada_fgts"],
   infinie: ["tipo_instalacao", "conta_luz_faixa"],
 };
+const KNOWN_DB_COLUMNS = new Set([
+  ...COMMON_INDIVIDUAL_FIELDS,
+  ...Object.values(TYPE_SPECIFIC_FIELDS).flat(),
+]);
 
-function extractIndividualColumns(dados) {
+// Regex para validar nomes de colunas antes de qualquer SQL dinâmico
+const SAFE_IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
+
+// ─── Cache de colunas por tabela (vive enquanto o processo está ativo) ───────
+const templateColumnCache = new Map();
+
+/**
+ * Garante que todas as colunas do template existam na tabela de leads.
+ * Usa ALTER TABLE ... ADD COLUMN IF NOT EXISTS para cada campo ausente.
+ * Cacheia o resultado em memória para não repetir queries a cada mensagem.
+ */
+async function ensureTemplateColumns(supabase, leadsTable, templateFields) {
+  if (!supabase?.query || !leadsTable || !Array.isArray(templateFields) || !templateFields.length) return;
+
+  const fields = templateFields.map((f) => f.key).filter((k) => k && SAFE_IDENT.test(k));
+  if (!fields.length) return;
+
+  // Carrega colunas existentes na primeira vez para esta tabela
+  if (!templateColumnCache.has(leadsTable)) {
+    const { rows } = await supabase.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+      [leadsTable]
+    );
+    templateColumnCache.set(leadsTable, new Set(rows.map((r) => r.column_name)));
+  }
+
+  const existing = templateColumnCache.get(leadsTable);
+  const missing = fields.filter((f) => !existing.has(f));
+  if (!missing.length) return;
+
+  for (const col of missing) {
+    const { error } = await supabase.query(
+      `ALTER TABLE public."${leadsTable}" ADD COLUMN IF NOT EXISTS "${col}" TEXT`
+    );
+    if (error) {
+      console.warn(`[chatbot-ai] Failed to add column ${col} to ${leadsTable}:`, error.message);
+    } else {
+      existing.add(col);
+      console.log(`[chatbot-ai] Added column "${col}" to ${leadsTable}`);
+    }
+  }
+}
+
+/**
+ * Extrai campos de `dados` para colunas individuais.
+ * Se templateFields fornecido (e colunas garantidas por ensureTemplateColumns),
+ * usa todos os campos do template. Caso contrário usa KNOWN_DB_COLUMNS como fallback.
+ */
+function extractIndividualColumns(dados, templateFields = null) {
   const result = {};
-  const allFields = [
-    ...COMMON_INDIVIDUAL_FIELDS,
-    ...Object.values(TYPE_SPECIFIC_FIELDS).flat(),
-  ];
-  for (const field of allFields) {
+
+  const fields =
+    templateFields && templateFields.length > 0
+      ? templateFields.map((f) => f.key).filter((k) => k && SAFE_IDENT.test(k))
+      : [...KNOWN_DB_COLUMNS];
+
+  for (const field of fields) {
     if (dados[field] != null && dados[field] !== "") {
       result[field] = dados[field];
     }
@@ -361,6 +413,74 @@ async function fetchDynamicPrompt(supabase, clientId, type) {
 }
 
 /**
+ * Busca template do banco por templateKey, com fallback para builtin (client_id IS NULL).
+ * Retorna { data_fields, required_fields, classification, agent_name, agent_role } ou null.
+ */
+async function fetchTemplate(supabase, clientId, templateKey) {
+  if (!supabase || !templateKey) return null;
+  try {
+    const cols = "template_key, display_name, agent_name, agent_role, data_fields, required_fields, classification";
+
+    if (clientId) {
+      const { data } = await supabase
+        .from("chatbot_templates")
+        .select(cols)
+        .eq("template_key", templateKey)
+        .eq("client_id", clientId)
+        .maybeSingle();
+      if (data) return data;
+    }
+
+    // Fallback para builtin (client_id IS NULL)
+    const { data } = await supabase
+      .from("chatbot_templates")
+      .select(cols)
+      .eq("template_key", templateKey)
+      .is("client_id", null)
+      .maybeSingle();
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Constrói bloco de contexto de campos a ser injetado no system prompt.
+ * Inclui lista de dados a coletar e critérios de classificação de temperatura.
+ */
+function buildFieldContext(template) {
+  if (!template) return null;
+
+  const fields = Array.isArray(template.data_fields) ? template.data_fields : [];
+  const required = Array.isArray(template.required_fields) ? template.required_fields : [];
+  const classification = template.classification && typeof template.classification === "object"
+    ? template.classification
+    : {};
+
+  if (!fields.length) return null;
+
+  const fieldLines = fields
+    .map((f) => {
+      const req = required.includes(f.key) ? " (obrigatório)" : " (opcional)";
+      return `- ${f.key}: ${f.label} — ${f.description}${req}`;
+    })
+    .join("\n");
+
+  const classLines = Object.entries(classification)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `- ${k.toUpperCase()}: ${v}`)
+    .join("\n");
+
+  return [
+    "DADOS A COLETAR (retorne dentro de \"dados\" no JSON de resposta):",
+    fieldLines,
+    classLines ? `\nCRITÉRIOS DE CLASSIFICAÇÃO DE TEMPERATURA:\n${classLines}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
  * Gera briefing SDR usando o prompt "extrato" do banco (configurável por empresa).
  * Recebe o histórico da conversa e os dados coletados, retorna texto formatado.
  * Se não houver prompt extrato no banco, retorna null (caller usa fallback determinístico).
@@ -452,6 +572,8 @@ export async function runChatbotAI({ systemPrompt, history, newMessages, existin
   return parseAIResponse(raw);
 }
 
+const VALID_SPIN_FASES = new Set(["situacao", "problema", "implicacao", "necessidade"]);
+
 function parseAIResponse(raw) {
   try {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -461,9 +583,9 @@ function parseAIResponse(raw) {
       dados: parsed.dados || {},
       classificacao: parsed.classificacao || "FRIO",
       finalizado: parsed.finalizado === true,
+      spin_fase: VALID_SPIN_FASES.has(parsed.spin_fase) ? parsed.spin_fase : null,
     };
   } catch {
-    // fallback: extrair JSON do texto se tiver markdown
     const match = raw.match(/\{[\s\S]+\}/);
     if (match) {
       try {
@@ -477,6 +599,7 @@ function parseAIResponse(raw) {
       dados: {},
       classificacao: "FRIO",
       finalizado: false,
+      spin_fase: null,
     };
   }
 }
@@ -573,13 +696,31 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
 
   const history = buildHistory(storedHistorico);
 
-  // Busca prompt do banco — fonte de verdade. Sem fallback para hardcoded.
+  // Busca prompt e template do banco em paralelo
   const promptType = model.startsWith("campanha_") ? "campanha" : "padrao";
-  const dynamicPrompt = await fetchDynamicPrompt(supabase, clientId, promptType);
+  const baseModelKey = model.startsWith("campanha_") ? model.replace("campanha_", "") : model;
+
+  const [dynamicPrompt, template] = await Promise.all([
+    fetchDynamicPrompt(supabase, clientId, promptType),
+    fetchTemplate(supabase, clientId, baseModelKey),
+  ]);
+
   if (!dynamicPrompt) {
     console.error("[chatbot-ai] PROMPT NOT FOUND in DB", { clientId, promptType });
   }
-  const baseSystemPrompt = dynamicPrompt || `Você é um assistente de qualificação de leads da ${clientId}. Colete as informações necessárias e responda sempre em JSON válido com os campos: mensagem, status_conversa, dados, classificacao, finalizado.`;
+  if (!template) {
+    console.warn("[chatbot-ai] TEMPLATE NOT FOUND in DB", { clientId, baseModelKey });
+  }
+
+  // Garante que todas as colunas do template existam na tabela (fire-and-forget nos erros)
+  await ensureTemplateColumns(supabase, leadsTable, template?.data_fields);
+
+  const basePromptText = dynamicPrompt || `Você é um assistente de qualificação de leads da ${clientId}. Colete as informações necessárias e responda sempre em JSON válido com os campos: mensagem, status_conversa, dados, classificacao, finalizado, spin_fase.`;
+
+  const fieldContext = buildFieldContext(template);
+  const baseSystemPrompt = fieldContext
+    ? `${basePromptText}\n\n${fieldContext}`
+    : basePromptText;
 
   // ── Cenário 2: lead abandonou no meio — reengajamento após REENGAGEMENT_HOURS ──
   let systemPromptOverride = null;
@@ -632,13 +773,14 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     telefone: phone,
     status_conversa: aiResponse.status_conversa,
     status: aiResponse.classificacao,
+    spin_fase: aiResponse.spin_fase || null,
     dados: dadosToSave,
     historico: serializeHistorico(newHistory),
     mensagem: aiResponse.mensagem,
     finalizado: aiResponse.finalizado,
     updated_at: new Date().toISOString(),
-    // Colunas individuais extraídas do JSONB para queries diretas
-    ...extractIndividualColumns(dadosToSave),
+    // Colunas individuais de todos os campos do template (existência garantida por ensureTemplateColumns)
+    ...extractIndividualColumns(dadosToSave, template?.data_fields),
   };
 
   if (existing?.id) {
@@ -657,5 +799,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     if (error) console.warn("[chatbot-ai] lead_messages insert error:", error.message);
   });
 
-  return aiResponse;
+  // Inclui histórico completo no retorno para o caller usar no briefing SDR
+  // sem precisar rebuscar no banco (evita round-trip extra na finalização)
+  return { ...aiResponse, _history: newHistory, _dados: dadosToSave };
 }

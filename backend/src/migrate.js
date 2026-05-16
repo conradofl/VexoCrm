@@ -64,6 +64,16 @@ async function isAlreadyApplied(pool, filename) {
     "20260512110000_add_chatbot_model_to_n8n_settings.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='chatbot_model') AS ok`,
     "20260512120000_add_sdr_whatsapp_number_to_n8n_settings.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='sdr_whatsapp_number') AS ok`,
     "20260512130000_rename_leads_to_leads_infinie_and_create_leads_teste.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='leads_infinie') AS ok`,
+    "20260514100443_add_missing_columns_to_leads_outlier.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads_outlier' AND column_name='interesse') AS ok`,
+    "20260514160916_add_missing_columns_to_leads_infinie.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads_infinie' AND column_name='interesse') AS ok`,
+    "20260515120000_add_chatbot_prompts.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='chatbot_prompts') AS ok`,
+    "20260515140000_add_chatbot_templates.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='chatbot_templates') AS ok`,
+    "20260516021000_add_campaign_source_columns_to_dynamic_tables.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads_outlier' AND column_name='lead_origin') AS ok`,
+    "20260516100000_normalize_leads_individual_columns.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads_outlier' AND column_name='credito') AS ok`,
+    "20260516200000_fix_chatbot_template_outlier_credito_field.sql": `SELECT NOT EXISTS (SELECT 1 FROM chatbot_templates, jsonb_array_elements(data_fields) AS f WHERE template_key='outlier' AND client_id IS NULL AND f->>'key' = 'credito_faixa') AS ok`,
+    "20260516210000_seed_chatbot_prompts_outlier_infinie.sql": `SELECT EXISTS (SELECT 1 FROM chatbot_prompts WHERE client_id='outlier' AND type='padrao') AS ok`,
+    "20260516220000_spin_fase_and_prompt_updates.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads_infinie' AND column_name='spin_fase') AS ok`,
+    "20260516230000_add_tenant_nexus_demo.sql": `SELECT EXISTS (SELECT 1 FROM public.leads_clients WHERE id='nexus') AS ok`,
   };
 
   const query = checks[filename];
