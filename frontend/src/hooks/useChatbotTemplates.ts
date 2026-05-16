@@ -49,6 +49,32 @@ export function useChatbotTemplates(clientId: string | null) {
   });
 }
 
+export interface BuiltinTemplateOption {
+  template_key: string;
+  display_name: string;
+  agent_name: string;
+}
+
+export function useBuiltinTemplates() {
+  const { isAuthenticated, getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["chatbot-templates-builtins"],
+    enabled: isAuthenticated,
+    staleTime: 10 * 60 * 1000,
+    queryFn: async (): Promise<BuiltinTemplateOption[]> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const res = await fetchApi("/api/chatbot-templates/builtins", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao carregar modelos"));
+      const data = await readApiJson<{ templates: BuiltinTemplateOption[] }>(res, "builtins_fetch");
+      return data.templates ?? [];
+    },
+  });
+}
+
 export function useSaveChatbotTemplate() {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();

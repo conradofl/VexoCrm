@@ -4879,6 +4879,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       matches: [],
       waitForReplyMatches: [],
       processingWaitForReplyMatches: [],
+      activePeriodCampaign: null,
     };
   }
 
@@ -4890,8 +4891,11 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       matches: [],
       waitForReplyMatches: [],
       processingWaitForReplyMatches: [],
+      activePeriodCampaign: null,
     };
   }
+
+  const now = new Date().toISOString();
 
   let [importItemsResult, campaignsResult] = await Promise.all([
     supabase
@@ -4902,7 +4906,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       .order("created_at", { ascending: false }),
     supabase
       .from("campaigns")
-      .select("id, name, client_id, import_id, status, scheduled_for, last_triggered_at, archived_at, phones, analytics_meta")
+      .select("id, name, client_id, import_id, status, scheduled_for, last_triggered_at, archived_at, phones, analytics_meta, starts_at, ends_at, chatbot_prompt_type")
       .eq("client_id", clientId)
       .is("archived_at", null),
   ]);
@@ -4965,6 +4969,14 @@ async function findCampaignReplyMatches({ clientId, phone }) {
         progress.waitForReply === true &&
         progress.status === "aguardando_usuario";
 
+      // Verifica se a campanha está no período ativo (starts_at <= now <= ends_at)
+      const startsAt = campaign.starts_at ? new Date(campaign.starts_at) : null;
+      const endsAt = campaign.ends_at ? new Date(campaign.ends_at) : null;
+      const nowDate = new Date(now);
+      const isInActivePeriod =
+        (!startsAt || nowDate >= startsAt) &&
+        (!endsAt || nowDate <= endsAt);
+
       return {
         id: campaign.id,
         name: campaign.name,
@@ -4976,6 +4988,10 @@ async function findCampaignReplyMatches({ clientId, phone }) {
         waitForReply: analyticsMeta.dispatchOptions?.waitForReply === true,
         hasPendingProgress,
         analyticsMeta,
+        isInActivePeriod,
+        chatbotPromptType: campaign.chatbot_prompt_type || "campanha",
+        startsAt: campaign.starts_at || null,
+        endsAt: campaign.ends_at || null,
         matchSource: matchedByStoredPhones && matchedByImportId ? "phones_and_import" : matchedByStoredPhones ? "phones" : "import",
         leadImportItem: matchedImportItem
           ? {
@@ -4992,6 +5008,8 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     })
     .filter(Boolean)
     .sort((left, right) => {
+      // Campanhas em período ativo têm prioridade
+      if (left.isInActivePeriod !== right.isInActivePeriod) return left.isInActivePeriod ? -1 : 1;
       const leftPending = left.hasPendingProgress ? 0 : 1;
       const rightPending = right.hasPendingProgress ? 0 : 1;
       if (leftPending !== rightPending) return leftPending - rightPending;
@@ -5004,9 +5022,10 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     });
 
   const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply);
-  // Only this phone's pending reply row qualifies — avoid picking another "processing" campaign
-  // where this lead has no progress (multi-campaign / stale rows).
   const processingWaitForReplyMatches = waitForReplyMatches.filter((campaign) => campaign.hasPendingProgress === true);
+
+  // Campanha com período ativo que contém este telefone — define qual prompt usar
+  const activePeriodCampaign = matches.find((c) => c.isInActivePeriod) || null;
 
   return {
     phone,
@@ -5014,6 +5033,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
     matches,
     waitForReplyMatches,
     processingWaitForReplyMatches,
+    activePeriodCampaign,
   };
 }
 

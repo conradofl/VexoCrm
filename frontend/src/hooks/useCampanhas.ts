@@ -21,6 +21,27 @@ export interface Campaign {
   created_by_email: string | null;
   created_at: string;
   analytics_meta?: CampaignAnalyticsMeta;
+  starts_at: string | null;
+  ends_at: string | null;
+  chatbot_prompt_type: string;
+}
+
+export interface CampaignDispatch {
+  id: string;
+  campaign_id: string;
+  client_id: string;
+  name: string;
+  steps: CampaignSequenceStep[];
+  trigger_type: "manual" | "scheduled";
+  scheduled_at: string | null;
+  status: "draft" | "scheduled" | "running" | "done" | "failed" | "cancelled";
+  sent_count: number;
+  failed_count: number;
+  triggered_at: string | null;
+  finished_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CampaignAnalyticsMeta {
@@ -116,8 +137,26 @@ export interface UpdateCampaignPayload {
   status?: CampaignStatus;
   limitPerRun?: number;
   scheduledFor?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  chatbotPromptType?: string;
   archived?: boolean;
   analyticsMeta?: CampaignAnalyticsMeta;
+}
+
+export interface CreateDispatchPayload {
+  name: string;
+  steps: CampaignSequenceStep[];
+  triggerType?: "manual" | "scheduled";
+  scheduledAt?: string | null;
+}
+
+export interface UpdateDispatchPayload {
+  name?: string;
+  steps?: CampaignSequenceStep[];
+  triggerType?: "manual" | "scheduled";
+  scheduledAt?: string | null;
+  status?: CampaignDispatch["status"];
 }
 
 export interface TriggerCampaignResponse {
@@ -605,4 +644,95 @@ export function useRewriteCampaignStep() {
     step: CampaignSequenceStep;
     rationale: string;
   }>("/api/campaigns/ai/rewrite-step", "Erro ao reescrever passo");
+}
+
+// ── Campaign Dispatches ───────────────────────────────────────────────────────
+
+export function useCampaignDispatches(campaignId: string | null) {
+  const { getIdToken } = useAuth();
+  return useQuery<CampaignDispatch[]>({
+    queryKey: ["campaign-dispatches", campaignId],
+    enabled: !!campaignId,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao buscar disparos"));
+      const data = await res.json();
+      return data.dispatches ?? [];
+    },
+  });
+}
+
+export function useCreateDispatch(campaignId: string) {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: CreateDispatchPayload) => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao criar disparo"));
+      const data = await res.json();
+      return data.dispatch as CampaignDispatch;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaign-dispatches", campaignId] }),
+  });
+}
+
+export function useUpdateDispatch(campaignId: string) {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ dispatchId, patch }: { dispatchId: string; patch: UpdateDispatchPayload }) => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao atualizar disparo"));
+      const data = await res.json();
+      return data.dispatch as CampaignDispatch;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaign-dispatches", campaignId] }),
+  });
+}
+
+export function useDeleteDispatch(campaignId: string) {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dispatchId: string) => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao excluir disparo"));
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaign-dispatches", campaignId] }),
+  });
+}
+
+export function useTriggerDispatch(campaignId: string) {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dispatchId: string) => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao disparar"));
+      return res.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaign-dispatches", campaignId] }),
+  });
 }

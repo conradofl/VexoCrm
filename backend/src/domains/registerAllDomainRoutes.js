@@ -3999,6 +3999,9 @@ export function registerAllDomainRoutes(app) {
       if (!Number.isNaN(v) && v > 0) updates.limit_per_run = Math.min(v, 500);
     }
     if ("scheduledFor" in req.body) updates.scheduled_for = normalizeString(req.body?.scheduledFor) || null;
+    if ("startsAt" in req.body) updates.starts_at = normalizeString(req.body?.startsAt) || null;
+    if ("endsAt" in req.body) updates.ends_at = normalizeString(req.body?.endsAt) || null;
+    if (req.body?.chatbotPromptType) updates.chatbot_prompt_type = normalizeString(req.body.chatbotPromptType);
     if (req.body?.archived === true) updates.archived_at = new Date().toISOString();
     if (req.body?.archived === false) updates.archived_at = null;
     if (req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object") {
@@ -4035,7 +4038,7 @@ export function registerAllDomainRoutes(app) {
         .update(updates)
         .eq("id", id)
         .eq("client_id", authorizedClientId)
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_at, analytics_meta")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, last_triggered_at, archived_at, created_at, analytics_meta")
         .single();
   
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {
@@ -4218,6 +4221,232 @@ export function registerAllDomainRoutes(app) {
     }
   });
   
+  // ── Campaign Dispatches ──────────────────────────────────────────────────────
+
+  async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
+    const dispatchId = dispatch.id;
+    const clientId = campaign.client_id;
+    const steps = Array.isArray(dispatch.steps) ? dispatch.steps : [];
+    const webhookUrl = campaign.webhook_url || null;
+    const webhookToken = campaign.webhook_token || null;
+
+    // Obtém lista de leads da campanha (phones direto ou via import_id)
+    let leads = [];
+    if (Array.isArray(campaign.phones) && campaign.phones.length > 0) {
+      leads = campaign.phones.map((p) => ({ telefone: String(p).trim() }));
+    } else if (campaign.import_id) {
+      const { data: importedLeads } = await db
+        .from(`leads_${clientId}`)
+        .select("nome, telefone")
+        .eq("import_id", campaign.import_id);
+      leads = importedLeads || [];
+    }
+
+    if (leads.length === 0) {
+      await db.from("campaign_dispatches").update({ status: "done", finished_at: new Date().toISOString(), updated_at: new Date().toISOString(), error_message: "Nenhum lead encontrado para o disparo." }).eq("id", dispatchId);
+      return;
+    }
+
+    // Constrói analyticsMeta compatível com dispatchCampaignSequence
+    const analyticsMeta = { sequence: steps };
+
+    let sentCount = 0;
+
+    const result = await dispatchCampaignSequence({
+      webhookUrl,
+      webhookToken,
+      leads,
+      analyticsMeta,
+      context: { campaignId: campaign.id, dispatchId },
+      onLeadDispatched: async ({ phone, sentAt }) => {
+        sentCount += 1;
+        await db.from("campaign_dispatch_runs").insert({
+          dispatch_id: dispatchId,
+          campaign_id: campaign.id,
+          client_id: clientId,
+          phone,
+          status: "sent",
+          sent_at: sentAt,
+        }).catch(() => {});
+        await db.from("campaign_dispatches").update({ sent_count: sentCount, updated_at: new Date().toISOString() }).eq("id", dispatchId).catch(() => {});
+      },
+    });
+
+    // Registra falhas por lead
+    const failures = result?.summary?.failures || [];
+    for (const f of failures) {
+      if (f.phone) {
+        await db.from("campaign_dispatch_runs").insert({
+          dispatch_id: dispatchId,
+          campaign_id: campaign.id,
+          client_id: clientId,
+          phone: f.phone,
+          status: "failed",
+          error_message: f.reason || null,
+        }).catch(() => {});
+      }
+    }
+
+    const failedCount = result?.summary?.failureCount ?? (leads.length - sentCount);
+
+    await db.from("campaign_dispatches").update({
+      status: "done",
+      sent_count: sentCount,
+      failed_count: failedCount,
+      finished_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", dispatchId);
+  }
+
+  // ── Campaign Dispatches CRUD ─────────────────────────────────────────────────
+
+  // GET /api/campaigns/:id/dispatches — lista disparos de uma campanha
+  app.get("/api/campaigns/:id/dispatches", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const campaignId = normalizeString(req.params.id);
+    if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
+    try {
+      const { data, error } = await supabase
+        .from("campaign_dispatches")
+        .select("*")
+        .eq("campaign_id", campaignId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      res.json({ dispatches: data || [] });
+    } catch (err) {
+      sendError(res, 500, "DISPATCHES_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // POST /api/campaigns/:id/dispatches — cria disparo
+  app.post("/api/campaigns/:id/dispatches", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const campaignId = normalizeString(req.params.id);
+    if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const name = normalizeString(body.name) || "Disparo";
+    const steps = Array.isArray(body.steps) ? body.steps : [];
+    const triggerType = body.triggerType === "scheduled" ? "scheduled" : "manual";
+    const scheduledAt = triggerType === "scheduled" ? (normalizeString(body.scheduledAt) || null) : null;
+
+    try {
+      // Verifica que a campanha pertence ao cliente autorizado
+      const { data: campaign, error: campaignErr } = await supabase
+        .from("campaigns")
+        .select("id, client_id")
+        .eq("id", campaignId)
+        .single();
+      if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
+      const { data, error } = await supabase
+        .from("campaign_dispatches")
+        .insert({
+          campaign_id: campaignId,
+          client_id: campaign.client_id,
+          name,
+          steps,
+          trigger_type: triggerType,
+          scheduled_at: scheduledAt,
+          status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+      res.status(201).json({ dispatch: data });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_CREATE_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // PATCH /api/campaigns/dispatches/:dispatchId — atualiza disparo
+  app.patch("/api/campaigns/dispatches/:dispatchId", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const dispatchId = normalizeString(req.params.dispatchId);
+    if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const patch = {};
+    if (body.name != null) patch.name = normalizeString(body.name) || "Disparo";
+    if (Array.isArray(body.steps)) patch.steps = body.steps;
+    if (body.triggerType != null) patch.trigger_type = body.triggerType === "scheduled" ? "scheduled" : "manual";
+    if (body.scheduledAt != null) patch.scheduled_at = normalizeString(body.scheduledAt) || null;
+    if (body.status != null && ["draft","scheduled","cancelled"].includes(body.status)) patch.status = body.status;
+    patch.updated_at = new Date().toISOString();
+
+    try {
+      const { data, error } = await supabase
+        .from("campaign_dispatches")
+        .update(patch)
+        .eq("id", dispatchId)
+        .select("*")
+        .single();
+      if (error) throw error;
+      if (!data) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      res.json({ dispatch: data });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_UPDATE_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // DELETE /api/campaigns/dispatches/:dispatchId — remove disparo (só draft)
+  app.delete("/api/campaigns/dispatches/:dispatchId", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const dispatchId = normalizeString(req.params.dispatchId);
+    if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+    try {
+      const { data: existing } = await supabase.from("campaign_dispatches").select("status").eq("id", dispatchId).single();
+      if (!existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      if (existing.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Cannot delete a running dispatch");
+      const { error } = await supabase.from("campaign_dispatches").delete().eq("id", dispatchId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_DELETE_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // POST /api/campaigns/dispatches/:dispatchId/trigger — executa disparo manualmente
+  app.post("/api/campaigns/dispatches/:dispatchId/trigger", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const dispatchId = normalizeString(req.params.dispatchId);
+    if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+    try {
+      const { data: dispatch, error: fetchErr } = await supabase
+        .from("campaign_dispatches")
+        .select("*, campaigns(id, name, client_id, phones, import_id, analytics_meta, webhook_url, webhook_token)")
+        .eq("id", dispatchId)
+        .single();
+      if (fetchErr || !dispatch) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      if (dispatch.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Dispatch is already running");
+      if (!["draft","scheduled","failed"].includes(dispatch.status)) {
+        return sendError(res, 409, "DISPATCH_DONE", "Dispatch already completed");
+      }
+
+      const campaign = dispatch.campaigns;
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
+      // Marca como running
+      await supabase.from("campaign_dispatches").update({ status: "running", triggered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
+
+      res.json({ success: true, status: "running", dispatchId });
+
+      // Executa o disparo em background (fire-and-forget da resposta HTTP)
+      runCampaignDispatch({ dispatch, campaign, supabase }).catch((err) => {
+        console.error("[campaign-dispatch] dispatch_run_failed", { dispatchId, error: err.message });
+        supabase.from("campaign_dispatches").update({ status: "failed", error_message: err.message, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
+      });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_TRIGGER_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   app.post("/api/campaigns/reply-webhook", async (req, res) => {
     if (!ensureDb(res)) return;
   
@@ -4879,6 +5108,22 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
+  // GET /api/chatbot-templates/builtins — lista apenas templates built-in (client_id IS NULL)
+  app.get("/api/chatbot-templates/builtins", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    try {
+      const { data, error } = await supabase
+        .from("chatbot_templates")
+        .select("template_key, display_name, agent_name")
+        .is("client_id", null)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return res.json({ templates: data || [] });
+    } catch (err) {
+      sendError(res, 500, "TEMPLATES_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // GET /api/chatbot-templates — lista templates (built-ins globais + do cliente)
   app.get("/api/chatbot-templates", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
@@ -5133,119 +5378,80 @@ export function registerAllDomainRoutes(app) {
       return;
     }
 
-    // ── Campaign routing (feature-flagged) ──────────────────────────────
-    let campaignModelOverride;
-    let skipChatbotForCampaign = false;
-    if (process.env.ENABLE_CAMPAIGN_ROUTING === "true") {
-      try {
-        const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
-        const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
-        const ACTIVE_STATUSES = new Set(["active", "processing"]);
-        const hasRunningCampaign = campaignReplyContext.matches.some(
-          (c) => ACTIVE_STATUSES.has(c.status)
-        );
-        // waitForReply configurado na campanha mas lead não está aguardando agora
-        // (expirou, já foi tratado, ou lead respondeu antes do timeout)
-        const waitForReplyExpired =
-          campaignReplyContext.waitForReplyMatches.length > 0 &&
-          campaignReplyContext.processingWaitForReplyMatches.length === 0;
+    // ── Campaign routing ─────────────────────────────────────────────────
+    let chatbotPromptTypeOverride = null; // "campanha" | "padrao" | null
+    let activeCampaignForLead = null;
 
-        if (activeWaitCampaign) {
-          // Cenário 1: campanha active/processing + waitForReply=true + lead aguardando agora
-          // → campanha avança a sequência; chatbot silenciado para evitar resposta duplicada
-          skipChatbotForCampaign = true;
-          const itemId = activeWaitCampaign.leadImportItem?.id;
-          const { isFirst } = await isFirstCampaignReply({
-            itemId,
-            campaignId: activeWaitCampaign.id,
-            supabase,
+    try {
+      const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
+      const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+      activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
+
+      if (activeWaitCampaign) {
+        // Lead aguardando resposta de disparo com waitForReply → avança sequência, silencia chatbot
+        const itemId = activeWaitCampaign.leadImportItem?.id;
+        const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
+
+        if (isFirst) {
+          console.log("[campaign-routing] wait_for_reply_step", {
+            clientId, phone: maskPhoneForLog(phone),
+            campaignId: activeWaitCampaign.id, campaignName: activeWaitCampaign.name,
           });
 
-          if (isFirst) {
-            console.log("[campaign-routing] wait_for_reply_step", {
-              clientId,
-              phone: maskPhoneForLog(phone),
-              campaignId: activeWaitCampaign.id,
-              campaignName: activeWaitCampaign.name,
-              isFirst,
-            });
+          supabase.from(leadsTableName(clientId))
+            .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
+            .eq("client_id", clientId).eq("telefone", phone)
+            .then(({ error }) => { if (error) console.warn("[chatbot-webhook] campaign lead_origin update failed:", error.message); });
 
-            // Marca lead como originado de campanha
-            supabase
-              .from(leadsTableName(clientId))
-              .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
-              .eq("client_id", clientId)
-              .eq("telefone", phone)
-              .then(({ error }) => {
-                if (error) console.warn("[chatbot-webhook] campaign lead_origin update failed:", error.message);
-              });
-
-            // Avança/finaliza a sequência da campanha (atualiza progress e envia próximos steps se houver)
-            continueCampaignLeadFromReply({
-              clientId,
-              phone,
-              repliedAt: new Date().toISOString(),
-              campaignMatch: activeWaitCampaign,
-              replyPayload: {},
-            }).then((progression) => {
-              console.log("[campaign-routing] campaign_progression", {
-                clientId,
-                campaignId: activeWaitCampaign.id,
-                phone: maskPhoneForLog(phone),
-                continued: progression.continued,
-                finalized: progression.finalized,
-                campaignFinalized: progression.campaignFinalized,
-              });
-            }).catch((err) => {
-              console.warn("[campaign-routing] campaign_progression_failed:", err.message);
+          continueCampaignLeadFromReply({
+            clientId, phone, repliedAt: new Date().toISOString(),
+            campaignMatch: activeWaitCampaign, replyPayload: {},
+          }).then((progression) => {
+            console.log("[campaign-routing] campaign_progression", {
+              clientId, campaignId: activeWaitCampaign.id, phone: maskPhoneForLog(phone),
+              continued: progression.continued, finalized: progression.finalized,
+              campaignFinalized: progression.campaignFinalized,
             });
-          } else {
-            console.log("[campaign-routing] wait_for_reply_step subsequent", {
-              clientId,
-              phone: maskPhoneForLog(phone),
-              campaignId: activeWaitCampaign.id,
-              campaignName: activeWaitCampaign.name,
-              isFirst,
-            });
-          }
-        } else if (hasRunningCampaign && !waitForReplyExpired) {
-          // Cenário 2 REAL: campanha active/processing sem waitForReply (ou lead não aguardando
-          // E waitForReply nunca foi configurado / não há expiração pendente)
-          // → agente silencia, campanha continua mandando steps normalmente
-          skipChatbotForCampaign = true;
-          console.log("[campaign-routing] skip_no_wait", {
-            clientId,
-            phone: maskPhoneForLog(phone),
-            matchedCampaigns: campaignReplyContext.matches
-              .filter((c) => ACTIVE_STATUSES.has(c.status))
-              .map((c) => ({
-                id: c.id,
-                name: c.name,
-                status: c.status,
-                waitForReply: c.waitForReply,
-                hasPendingProgress: c.hasPendingProgress,
-              })),
-          });
+          }).catch((err) => { console.warn("[campaign-routing] campaign_progression_failed:", err.message); });
         } else {
-          // Cenário 3: sem campanha active/processing, ou waitForReply expirou
-          // → agente padrão responde normalmente
-          console.log("[campaign-routing] no_active_campaign", {
-            clientId,
-            phone: maskPhoneForLog(phone),
-            waitForReplyExpired,
+          console.log("[campaign-routing] wait_for_reply_step subsequent", {
+            clientId, phone: maskPhoneForLog(phone),
+            campaignId: activeWaitCampaign.id, campaignName: activeWaitCampaign.name,
           });
         }
-      } catch (err) {
-        console.warn("[chatbot-webhook] campaign routing check failed, continuing normal flow:", err.message);
+
+        // Se a campanha tem período ativo, usa prompt de campanha após avançar sequência
+        // Se não tem período, silencia o chatbot (comportamento legado)
+        if (activeCampaignForLead) {
+          chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
+          console.log("[campaign-routing] period_campaign_prompt", {
+            clientId, phone: maskPhoneForLog(phone),
+            campaignId: activeCampaignForLead.id, promptType: chatbotPromptTypeOverride,
+          });
+        } else {
+          res.json({ success: true, status: "skipped_active_campaign" });
+          return;
+        }
+      } else if (activeCampaignForLead) {
+        // Lead dentro do período de uma campanha ativa → usa prompt de campanha
+        chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
+        console.log("[campaign-routing] active_period_campaign", {
+          clientId, phone: maskPhoneForLog(phone),
+          campaignId: activeCampaignForLead.id,
+          campaignName: activeCampaignForLead.name,
+          promptType: chatbotPromptTypeOverride,
+          endsAt: activeCampaignForLead.endsAt,
+        });
+      } else {
+        // Sem campanha ativa no período → prompt padrão
+        console.log("[campaign-routing] no_active_campaign", {
+          clientId, phone: maskPhoneForLog(phone),
+        });
       }
+    } catch (err) {
+      console.warn("[chatbot-webhook] campaign routing check failed, continuing normal flow:", err.message);
     }
     // ─────────────────────────────────────────────────────────────────────
-
-    // Cenário 2: silencia o agente enquanto campanha active/processing está em andamento
-    if (skipChatbotForCampaign) {
-      res.json({ success: true, status: "skipped_active_campaign" });
-      return;
-    }
 
     // Responde imediatamente ao Evolution (evita timeout)
     res.json({ success: true, status: "buffering" });
@@ -5284,13 +5490,15 @@ export function registerAllDomainRoutes(app) {
             }
           }
 
-          const chatbotModel = campaignModelOverride || body.modelOverride || tenantSettings?.chatbot_model || "outlier";
+          const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model || "outlier";
+          const promptType = chatbotPromptTypeOverride || "padrao";
           const aiResponse = await processBatch({
             clientId,
             phone,
             messages,
             supabase,
             model: chatbotModel,
+            promptType,
           });
   
           if (!aiResponse?.mensagem) return;

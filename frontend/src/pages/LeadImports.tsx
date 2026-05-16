@@ -59,7 +59,12 @@ import {
   useSuggestCampaignSequence,
   useTriggerCampaign,
   useUpdateCampaign,
+  useCampaignDispatches,
+  useCreateDispatch,
+  useDeleteDispatch,
+  useTriggerDispatch,
   type Campaign,
+  type CampaignDispatch,
   type CampaignStatus,
   type CampaignDispatchOptions,
   type CampaignImageAsset,
@@ -627,6 +632,79 @@ function Metric({
   );
 }
 
+const DISPATCH_STATUS_LABELS: Record<CampaignDispatch["status"], string> = {
+  draft: "Rascunho",
+  scheduled: "Agendado",
+  running: "Executando",
+  done: "Concluído",
+  failed: "Falhou",
+  cancelled: "Cancelado",
+};
+
+function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
+  const { data: dispatches = [], isLoading, refetch } = useCampaignDispatches(campaignId);
+  const createDispatch = useCreateDispatch(campaignId);
+  const deleteDispatch = useDeleteDispatch(campaignId);
+  const triggerDispatch = useTriggerDispatch(campaignId);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  async function handleCreate() {
+    if (!newName.trim()) return;
+    await createDispatch.mutateAsync({ name: newName.trim(), steps: [] });
+    setNewName("");
+    setCreating(false);
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-border/60 bg-black/20 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Disparos</p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
+            <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
+          </Button>
+          <Button size="sm" onClick={() => setCreating(true)}>+ Novo</Button>
+        </div>
+      </div>
+      {creating && (
+        <div className="flex gap-2">
+          <Input placeholder="Nome do disparo" value={newName} onChange={(e) => setNewName(e.target.value)} className="h-8 text-sm" autoFocus />
+          <Button size="sm" onClick={handleCreate} disabled={createDispatch.isPending}>Criar</Button>
+          <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancelar</Button>
+        </div>
+      )}
+      {dispatches.length === 0 && !isLoading && (
+        <p className="font-mono text-xs text-muted-foreground">Nenhum disparo criado.</p>
+      )}
+      <div className="space-y-2">
+        {dispatches.map((d) => (
+          <div key={d.id} className="flex items-center justify-between rounded-lg border border-border/50 bg-card/60 px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">{d.name}</p>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                {DISPATCH_STATUS_LABELS[d.status]} · {d.sent_count} enviados · {d.failed_count} falhas
+              </p>
+            </div>
+            <div className="flex gap-1">
+              {(d.status === "draft" || d.status === "scheduled") && (
+                <Button size="sm" variant="outline" onClick={() => triggerDispatch.mutate(d.id)} disabled={triggerDispatch.isPending}>
+                  Disparar
+                </Button>
+              )}
+              {d.status !== "running" && (
+                <Button size="sm" variant="ghost" onClick={() => deleteDispatch.mutate(d.id)} disabled={deleteDispatch.isPending}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function LeadImports({
   fixedClientId,
   fixedClientName,
@@ -656,6 +734,8 @@ export default function LeadImports({
   const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
   const [scheduledFor, setScheduledFor] = useState("");
+  const [campaignStartsAt, setCampaignStartsAt] = useState("");
+  const [campaignEndsAt, setCampaignEndsAt] = useState("");
   const [dispatchLimit, setDispatchLimit] = useState("");
   const [campaignMessage, setCampaignMessage] = useState("");
   const [campaignImage, setCampaignImage] = useState<CampaignImageAsset | null>(null);
@@ -676,6 +756,7 @@ export default function LeadImports({
   const [selectedImportId, setSelectedImportId] = useState(ALL_IMPORTS_VALUE);
   const [importsPage, setImportsPage] = useState(1);
   const [campaignActionDialog, setCampaignActionDialog] = useState<CampaignActionDialogState>(null);
+  const [expandedDispatchCampaignId, setExpandedDispatchCampaignId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const campaignImageInputRef = useRef<HTMLInputElement | null>(null);
   const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1154,6 +1235,8 @@ export default function LeadImports({
       importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
       limitPerRun: parsedLimit ?? 50,
       scheduledFor: scheduledDate?.toISOString() ?? null,
+      startsAt: campaignStartsAt ? campaignLocalDateTimeToUtcIso(campaignStartsAt) : null,
+      endsAt: campaignEndsAt ? campaignLocalDateTimeToUtcIso(campaignEndsAt) : null,
       analyticsMeta: {
         segmentation: toCampaignSegmentationPayload(segmentation),
         message: campaignMessage.trim(),
@@ -1906,6 +1989,16 @@ export default function LeadImports({
                   </p>
                 </div>
                 <div className="space-y-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Início do período ativo</p>
+                  <Input type="datetime-local" className={darkFieldClass} value={campaignStartsAt} onChange={(e) => setCampaignStartsAt(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">Chatbot usa prompt de campanha a partir desta data.</p>
+                </div>
+                <div className="space-y-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Fim do período ativo</p>
+                  <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
+                </div>
+                <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Leads pendentes</p>
                   <div className={cn("flex h-10 items-center rounded-md px-3 font-mono text-sm text-slate-500 dark:text-white/62", darkFieldClass)}>
                     {campaignPendingLabel}
@@ -2554,7 +2647,27 @@ export default function LeadImports({
                         <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Lote</p>
                       </div>
                     </div>
+                    {(campaign.starts_at || campaign.ends_at) && (
+                      <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+                        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-sky-400">Período ativo do chatbot</p>
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">
+                          {campaign.starts_at ? formatDate(campaign.starts_at) : "Sem início"} → {campaign.ends_at ? formatDate(campaign.ends_at) : "Sem fim"}
+                        </p>
+                        {(() => {
+                          const now = Date.now();
+                          const s = campaign.starts_at ? new Date(campaign.starts_at).getTime() : null;
+                          const e = campaign.ends_at ? new Date(campaign.ends_at).getTime() : null;
+                          const isActive = (!s || now >= s) && (!e || now <= e);
+                          return isActive ? (
+                            <span className="mt-1 inline-block rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-400">● Ativo agora</span>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2 border-t border-border/70 pt-4">
+                      <Button variant="outline" size="sm" onClick={() => setExpandedDispatchCampaignId(expandedDispatchCampaignId === campaign.id ? null : campaign.id)}>
+                        Disparos
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => setCampaignActionDialog({ action: "archive", campaign })}>
                         <Archive className="mr-2 h-4 w-4" />
                         Arquivar
@@ -2564,6 +2677,9 @@ export default function LeadImports({
                         Apagar
                       </Button>
                     </div>
+                    {expandedDispatchCampaignId === campaign.id && (
+                      <CampaignDispatchPanel campaignId={campaign.id} />
+                    )}
                   </CardContent>
                 </Card>
               ))}
