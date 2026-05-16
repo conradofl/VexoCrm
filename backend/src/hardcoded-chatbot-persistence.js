@@ -6,6 +6,11 @@
  * Salva ou atualiza progresso da conversa em tempo real
  * Usa leads_outlier para armazenar dados coletados incrementalmente
  */
+import {
+  buildLeadsOutlierDataColumns,
+  normalizeLeadsOutlierDados,
+} from "./leads-outlier-schema.js";
+
 function leadsTable(clientId) {
   const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
   return `leads_${safe || "outlier"}`;
@@ -24,7 +29,9 @@ export async function persistChatbotProgress({
   mensagem, // Última mensagem do bot
   isFinalized = false,
 }) {
-  if (!supabase || !clientId || !telefone) {
+  const normalizedPhone = phone || telefone;
+
+  if (!supabase || !clientId || !normalizedPhone) {
     console.error("[chatbot-persistence] Missing required parameters");
     return { error: "Missing parameters" };
   }
@@ -37,13 +44,15 @@ export async function persistChatbotProgress({
       .from(table)
       .select("id")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .eq("telefone", normalizedPhone)
       .order("created_at", { ascending: false })
       .limit(1);
 
     const existingLead = existingLeadArray?.[0] || null;
 
     let leadRecord;
+    const normalizedDados = normalizeLeadsOutlierDados({ dados: collectedData });
+    const dataColumns = buildLeadsOutlierDataColumns({ dados: normalizedDados });
 
     if (existingLead) {
       // Atualizar registro existente
@@ -53,7 +62,8 @@ export async function persistChatbotProgress({
         status: qualificationStatus,
         mensagem,
         finalizado: isFinalized,
-        dados: collectedData,
+        dados: normalizedDados,
+        ...dataColumns,
       };
 
       const { data: updated, error: updateError } = await supabase
@@ -69,13 +79,14 @@ export async function persistChatbotProgress({
       // Criar novo registro
       const insertPayload = {
         client_id: clientId,
-        telefone: phone,
+        telefone: normalizedPhone,
         status_conversa: conversationStatus,
         spin_fase: spinFase,
         status: qualificationStatus,
         mensagem,
         finalizado: isFinalized,
-        dados: collectedData,
+        dados: normalizedDados,
+        ...dataColumns,
       };
 
       const { data: inserted, error: insertError } = await supabase
@@ -93,9 +104,9 @@ export async function persistChatbotProgress({
     console.info("[chatbot-persistence] Progress saved", {
       leadId,
       clientId,
-      phone: phone.slice(-4),
+      phone: normalizedPhone.slice(-4),
       status: conversationStatus,
-      dataPoints: Object.keys(collectedData || {}).length,
+      dataPoints: Object.keys(normalizedDados || {}).filter((key) => normalizedDados[key] != null).length,
       isFinalized,
     });
 
@@ -129,7 +140,9 @@ export function qualifyLead(collectedData) {
   }
 
   const dataPoints = Object.keys(collectedData).length;
-  const credit = collectedData.crédito?.toLowerCase();
+  const credit = String(
+    collectedData?.credito ?? collectedData?.credito_faixa ?? collectedData?.crédito ?? ""
+  ).toLowerCase();
   const interest = collectedData.interesse?.toLowerCase();
 
   // QUENTE: Interesse explícito + bom crédito + maioria dos dados

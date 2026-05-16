@@ -1,4 +1,5 @@
 import {
+  buildLeadsOutlierDataColumns,
   normalizeLeadsOutlierDados,
   parseStoredHistorico,
   serializeHistorico,
@@ -926,6 +927,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     mensagem: aiResponse.mensagem,
     finalizado: aiResponse.finalizado,
     updated_at: new Date().toISOString(),
+    ...buildLeadsOutlierDataColumns({ dados: dadosToSave }),
   };
 
   if (existing?.id) {

@@ -6,6 +6,10 @@
 /**
  * Extrai e estrutura briefing da conversa qualificada
  */
+function getCollectedCredit(data = {}) {
+  return data.credito ?? data.credito_faixa ?? data.crédito ?? null;
+}
+
 export function extractConversationBriefing(conversationData) {
   if (!conversationData) {
     return { error: "No conversation data provided" };
@@ -26,7 +30,7 @@ export function extractConversationBriefing(conversationData) {
   const objective = collectedData.objetivo || "Não informado";
   const state = collectedData.estado || "Não informado";
   const city = collectedData.cidade || "Não informado";
-  const credit = collectedData.crédito || "Não informado";
+  const credit = getCollectedCredit(collectedData) || "Não informado";
   const installments = collectedData.parcela || "Não informado";
   const timeline = collectedData.prazo || "Não informado";
   const fgts = collectedData.lance_entrada_fgts || "Não informado";
@@ -61,7 +65,7 @@ export function extractConversationBriefing(conversationData) {
       contato: phone,
       localizacao: `${city} - ${state}`,
       interesse: interestCategory,
-      creditoDesejado: formatCreditAmount(collectedData.credito_valor),
+      creditoDesejado: formatCreditAmount(credit),
       prazoIntencao: mapTimeline(timeline),
       parcelaConfortavel: formatInstallment(installments),
       lancoEntradaFgts: fgts,
@@ -83,7 +87,7 @@ function generateLeadReading(data, status) {
   const interest = data.interesse?.toLowerCase() || "";
   const objective = data.objetivo?.toLowerCase() || "";
   const timeline = data.prazo?.toLowerCase() || "";
-  const credit = data.crédito?.toLowerCase() || "";
+  const credit = String(getCollectedCredit(data) || "").toLowerCase();
 
   let reading = "";
 
@@ -150,7 +154,7 @@ function generateAttentionPoints(data, temperature) {
   const points = [];
 
   const interest = data.interesse?.toLowerCase() || "";
-  const credit = data.crédito?.toLowerCase() || "";
+  const credit = String(getCollectedCredit(data) || "").toLowerCase();
   const fgts = data.lance_entrada_fgts?.toLowerCase() || "";
   const timeline = data.prazo?.toLowerCase() || "";
 
