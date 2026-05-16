@@ -641,7 +641,7 @@ function hoursSince(isoDate) {
   return (Date.now() - new Date(isoDate).getTime()) / 3_600_000;
 }
 
-export async function processBatch({ clientId, phone, messages, supabase, model = "outlier" }) {
+export async function processBatch({ clientId, phone, messages, supabase, model = "outlier", promptType: promptTypeOverride = null }) {
   const modelConfig = getChatbotModel(model);
   const leadsTable = chatbotLeadsTable(clientId);
 
@@ -697,7 +697,9 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   const history = buildHistory(storedHistorico);
 
   // Busca prompt e template do banco em paralelo
-  const promptType = model.startsWith("campanha_") ? "campanha" : "padrao";
+  // promptTypeOverride vem do roteamento de campanha (campanha | padrao)
+  // fallback legacy: se model começa com "campanha_" → campanha
+  const promptType = promptTypeOverride || (model.startsWith("campanha_") ? "campanha" : "padrao");
   const baseModelKey = model.startsWith("campanha_") ? model.replace("campanha_", "") : model;
 
   const [dynamicPrompt, template] = await Promise.all([
