@@ -289,6 +289,66 @@ export function registerAllDomainRoutes(app) {
     validateN8nInboundBearer,
   } = routeDeps;
 
+  async function appendLeadMessage({
+    clientId,
+    phone,
+    senderType,
+    direction,
+    messageText,
+    engagementSignal = null,
+    campaignId = null,
+    leadId = null,
+    deliveredAt = null,
+    meta = null,
+  }) {
+    if (!supabase || !clientId || !phone) return null;
+
+    const normalizedMessage = normalizeString(messageText);
+    if (!normalizedMessage) return null;
+
+    let resolvedLeadId = leadId || null;
+    let resolvedCampaignId = campaignId || null;
+
+    if (!resolvedLeadId || !resolvedCampaignId) {
+      try {
+        const { data: leadRow, error: leadLookupError } = await supabase
+          .from(leadsTableName(clientId))
+          .select("id, source_campaign_id")
+          .eq("client_id", clientId)
+          .eq("telefone", phone)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!leadLookupError && leadRow) {
+          resolvedLeadId = resolvedLeadId || leadRow.id || null;
+          resolvedCampaignId = resolvedCampaignId || leadRow.source_campaign_id || null;
+        }
+      } catch (error) {
+        console.warn("[lead-messages] lead lookup failed:", error?.message || error);
+      }
+    }
+
+    const { error } = await supabase.from("lead_messages").insert({
+      client_id: clientId,
+      lead_id: resolvedLeadId,
+      campaign_id: resolvedCampaignId,
+      phone,
+      sender_type: senderType,
+      direction,
+      engagement_signal: engagementSignal,
+      message_text: normalizedMessage,
+      delivered_at: deliveredAt || new Date().toISOString(),
+      meta: meta && typeof meta === "object" ? meta : {},
+    });
+
+    if (error && !isMissingSchemaError(error)) {
+      console.warn("[lead-messages] insert failed:", error.message || error);
+    }
+
+    return { leadId: resolvedLeadId, campaignId: resolvedCampaignId };
+  }
+
   app.get("/health", async (_req, res) => {
     let postgresPing = null;
     /** Short diagnostic when ping fails (no secrets; may include host from PG error text). */
@@ -4699,6 +4759,22 @@ export function registerAllDomainRoutes(app) {
           error: leadsResult.error.message || leadsResult.error.code || "missing_schema",
         });
       }
+
+      if (replyText) {
+        await appendLeadMessage({
+          clientId,
+          phone,
+          senderType: "lead",
+          direction: "inbound",
+          messageText: replyText,
+          campaignId: activeWaitCampaign?.id || campaignReplyContext.matches[0]?.id || null,
+          deliveredAt: repliedAt,
+          meta: {
+            source: "campaign-reply-webhook",
+            matchedCampaignCount: campaignReplyContext.matches.length,
+          },
+        });
+      }
   
       res.json({
         success: true,
@@ -4870,6 +4946,102 @@ export function registerAllDomainRoutes(app) {
       });
     } catch (err) {
       sendError(res, 500, "PROMPT_SAVE_FAILED", err instanceof Error ? err.message : "Failed to save prompt");
+    }
+  });
+
+  // POST /api/leads/hydrate — consolida lead_import_items → leads_{clientId}
+  // Garante que TODO lead que recebeu mensagem de campanha exista na tabela de leads do CRM,
+  // mesmo que nunca tenha respondido. Idempotente — pode rodar múltiplas vezes sem duplicar.
+  app.post("/api/leads/hydrate", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = normalizeTenantKey(body.clientId ?? req.query?.clientId);
+    if (!clientId) return sendError(res, 400, "INVALID_BODY", "Missing clientId");
+
+    try {
+      const leadsTable = leadsTableName(clientId);
+
+      // 1. Busca todos os itens de campanha que receberam mensagem do bot
+      const { data: items, error: itemsErr } = await supabase
+        .from("lead_import_items")
+        .select("id, import_id, telefone, nome, normalized_data, ultima_interacao_bot, ultima_interacao_usuario, created_at")
+        .eq("client_id", clientId)
+        .not("ultima_interacao_bot", "is", null)
+        .not("telefone", "is", null);
+
+      if (itemsErr) throw itemsErr;
+      if (!items || items.length === 0) return res.json({ success: true, created: 0, updated: 0, skipped: 0 });
+
+      // 2. Busca campanhas para mapear import_id → campanha
+      const importIds = [...new Set(items.map((i) => i.import_id).filter(Boolean))];
+      let campaignByImport = {};
+      if (importIds.length > 0) {
+        const { data: campaigns } = await supabase
+          .from("campaigns")
+          .select("id, name, import_id")
+          .in("import_id", importIds)
+          .eq("client_id", clientId);
+        for (const c of campaigns || []) {
+          if (c.import_id) campaignByImport[c.import_id] = c;
+        }
+      }
+
+      // 3. Busca leads existentes (por telefone) para evitar duplicatas
+      const phones = [...new Set(items.map((i) => i.telefone).filter(Boolean))];
+      const { data: existingLeads } = await supabase
+        .from(leadsTable)
+        .select("id, telefone, lead_source, source_campaign_id")
+        .eq("client_id", clientId)
+        .in("telefone", phones);
+
+      const existingByPhone = {};
+      for (const l of existingLeads || []) existingByPhone[l.telefone] = l;
+
+      let created = 0, updated = 0, skipped = 0;
+
+      for (const item of items) {
+        const phone = item.telefone;
+        const campaign = campaignByImport[item.import_id] || null;
+        const normalized = item.normalized_data || {};
+        const nome = normalizeString(item.nome || normalized.nome || normalized.name) || null;
+        const existing = existingByPhone[phone];
+
+        if (!existing) {
+          // Cria placeholder — lead que recebeu campanha mas ainda não respondeu
+          const { error: insErr } = await supabase.from(leadsTable).insert({
+            client_id: clientId,
+            telefone: phone,
+            nome,
+            status_conversa: item.ultima_interacao_usuario ? "em_atendimento" : "aguardando_usuario",
+            lead_origin: "campaign",
+            source_campaign_id: campaign?.id || null,
+            source_campaign_name: campaign?.name || null,
+            lead_source: "campanha",
+            finalizado: false,
+            dados: {},
+            created_at: item.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+          if (!insErr) created++;
+          else if (insErr.code !== "23505") console.warn("[hydrate] insert failed:", phone, insErr.message);
+          else skipped++; // conflict — já existe
+        } else if (!existing.lead_source && campaign) {
+          // Atualiza origem se ainda não estava preenchida
+          await supabase
+            .from(leadsTable)
+            .update({ lead_source: "campanha", source_campaign_id: existing.source_campaign_id || campaign.id, source_campaign_name: campaign.name })
+            .eq("client_id", clientId)
+            .eq("telefone", phone);
+          updated++;
+        } else {
+          skipped++;
+        }
+      }
+
+      console.log("[hydrate] done", { clientId, created, updated, skipped, total: items.length });
+      return res.json({ success: true, created, updated, skipped, total: items.length });
+    } catch (err) {
+      sendError(res, 500, "HYDRATE_FAILED", err instanceof Error ? err.message : "Failed to hydrate leads");
     }
   });
 
