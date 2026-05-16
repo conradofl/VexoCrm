@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS public.lead_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lead_messages_lookup
-  ON public.lead_messages (client_id, lead_phone, created_at);
+  ON public.lead_messages (client_id, phone, created_at);
 
 ALTER TABLE public.lead_messages ENABLE ROW LEVEL SECURITY;
 
