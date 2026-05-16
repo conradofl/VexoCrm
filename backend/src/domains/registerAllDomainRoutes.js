@@ -5115,17 +5115,12 @@ export function registerAllDomainRoutes(app) {
           });
 
           if (isFirst) {
-            const baseModel = tenantSettings?.chatbot_model || "outlier";
-            const validBases = new Set(["outlier", "infinie"]);
-            campaignModelOverride = validBases.has(baseModel) ? `campanha_${baseModel}` : undefined;
-
             console.log("[campaign-routing] wait_for_reply_step", {
               clientId,
               phone: maskPhoneForLog(phone),
               campaignId: activeWaitCampaign.id,
               campaignName: activeWaitCampaign.name,
               isFirst,
-              modelOverride: campaignModelOverride ?? "none",
             });
 
             // Marca lead como originado de campanha
