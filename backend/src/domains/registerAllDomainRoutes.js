@@ -523,6 +523,8 @@ export function registerAllDomainRoutes(app) {
               lead_temperature TEXT CHECK (lead_temperature IS NULL OR lead_temperature IN ('QUENTE', 'MORNO', 'FRIO')),
               status_conversa TEXT CHECK (status_conversa IS NULL OR status_conversa IN ('aguardando_usuario', 'em_atendimento', 'finalizado')),
               source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
+              source_campaign_name TEXT,
+              lead_source TEXT CHECK (lead_source IS NULL OR lead_source IN ('campanha', 'organico', 'trafego_pago', 'whatsapp_ads', 'indicacao', 'outro')),
               lead_score NUMERIC(8, 2),
               potential_contract_value NUMERIC(14, 2),
               first_contact_at TIMESTAMPTZ,
@@ -4608,7 +4610,7 @@ export function registerAllDomainRoutes(app) {
             if (isFirst) {
               await supabase
                 .from(leadsTableName(clientId))
-                .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id })
+                .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
                 .eq("client_id", clientId)
                 .eq("telefone", phone);
             }
@@ -4797,6 +4799,258 @@ export function registerAllDomainRoutes(app) {
     }
   });
   
+  // GET /api/prompts — lê prompt customizado de uma empresa por tipo
+  app.get("/api/prompts", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = normalizeTenantKey(req.query?.clientId);
+    const type = normalizeString(req.query?.type);
+    if (!clientId) return sendError(res, 400, "INVALID_QUERY", "Missing clientId");
+    if (!type || !["padrao", "campanha", "qualificar", "extrato"].includes(type)) {
+      return sendError(res, 400, "INVALID_QUERY", "type must be padrao, campanha, qualificar or extrato");
+    }
+    try {
+      const { data, error } = await supabase
+        .from("chatbot_prompts")
+        .select("client_id, type, content, updated_at, updated_by_email")
+        .eq("client_id", clientId)
+        .eq("type", type)
+        .maybeSingle();
+      if (error) {
+        if (isMissingSchemaError(error)) return sendError(res, 404, "NOT_FOUND", "Prompt not found");
+        throw error;
+      }
+      if (!data) return sendError(res, 404, "NOT_FOUND", "Prompt not found");
+      return res.json({
+        success: true,
+        item: {
+          clientId: data.client_id,
+          type: data.type,
+          content: data.content,
+          updatedAt: data.updated_at,
+          updatedByEmail: data.updated_by_email,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, "PROMPT_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch prompt");
+    }
+  });
+
+  // PUT /api/prompts — salva/atualiza prompt customizado de uma empresa
+  app.put("/api/prompts", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = normalizeTenantKey(body.clientId);
+    const type = normalizeString(body.type);
+    const content = typeof body.content === "string" ? body.content.trim() : null;
+    if (!clientId) return sendError(res, 400, "INVALID_BODY", "Missing clientId");
+    if (!type || !["padrao", "campanha", "qualificar", "extrato"].includes(type)) {
+      return sendError(res, 400, "INVALID_BODY", "type must be padrao, campanha, qualificar or extrato");
+    }
+    if (!content) return sendError(res, 400, "INVALID_BODY", "Missing content");
+    try {
+      const userEmail = normalizeString(req.authAccess?.email || req.authUser?.email) || null;
+      const { data, error } = await supabase
+        .from("chatbot_prompts")
+        .upsert(
+          { client_id: clientId, type, content, updated_at: new Date().toISOString(), updated_by_email: userEmail },
+          { onConflict: "client_id,type" }
+        )
+        .select("client_id, type, content, updated_at, updated_by_email")
+        .maybeSingle();
+      if (error) throw error;
+      return res.json({
+        success: true,
+        item: {
+          clientId: data.client_id,
+          type: data.type,
+          content: data.content,
+          updatedAt: data.updated_at,
+          updatedByEmail: data.updated_by_email,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, "PROMPT_SAVE_FAILED", err instanceof Error ? err.message : "Failed to save prompt");
+    }
+  });
+
+  // GET /api/followup-queue — fila de followup de campanhas com métricas de resposta
+  app.get("/api/followup-queue", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = normalizeTenantKey(req.query?.clientId);
+    const campaignId = normalizeString(req.query?.campaignId) || null;
+    const status = normalizeString(req.query?.status) || null;
+    const dateFrom = normalizeString(req.query?.dateFrom) || null;
+    const dateTo = normalizeString(req.query?.dateTo) || null;
+    const rawPage = Number.parseInt(String(req.query?.page ?? "1"), 10);
+    const page = Number.isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
+    const rawLimit = Number.parseInt(String(req.query?.limit ?? "50"), 10);
+    const limit = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 200);
+
+    if (!clientId) return sendError(res, 400, "INVALID_QUERY", "Missing clientId");
+
+    const validStatuses = ["pending", "replied", "scheduled", "discarded", "converted"];
+    if (status && !validStatuses.includes(status)) {
+      return sendError(res, 400, "INVALID_QUERY", `status must be one of: ${validStatuses.join(", ")}`);
+    }
+
+    try {
+      let query = supabase
+        .from("lead_import_items")
+        .select("id, import_id, telefone, nome, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, followup_status, followup_scheduled_at, created_at, normalized_data", { count: "exact" })
+        .eq("client_id", clientId)
+        .not("ultima_interacao_bot", "is", null);
+
+      if (campaignId) {
+        const { data: importForCampaign } = await supabase
+          .from("campaigns")
+          .select("import_id")
+          .eq("id", campaignId)
+          .eq("client_id", clientId)
+          .maybeSingle();
+        if (importForCampaign?.import_id) {
+          query = query.eq("import_id", importForCampaign.import_id);
+        } else {
+          return res.json({ success: true, items: [], total: 0 });
+        }
+      }
+
+      if (status === "pending") {
+        query = query.or("followup_status.is.null,followup_status.eq.pending").is("ultima_interacao_usuario", null);
+      } else if (status === "replied") {
+        query = query.not("ultima_interacao_usuario", "is", null);
+      } else if (status && ["scheduled", "discarded", "converted"].includes(status)) {
+        query = query.eq("followup_status", status);
+      }
+
+      if (dateFrom) query = query.gte("created_at", dateFrom);
+      if (dateTo) query = query.lte("created_at", dateTo);
+
+      const { data, error, count } = await query
+        .order("ultima_interacao_bot", { ascending: false })
+        .range((page - 1) * limit, page * limit - 1);
+
+      if (error) {
+        if (isMissingSchemaError(error)) return sendError(res, 404, "NOT_FOUND", "Table not available");
+        throw error;
+      }
+
+      const campaignImportIds = [...new Set((data || []).map((i) => i.import_id).filter(Boolean))];
+      let campaignsByImport = {};
+      if (campaignImportIds.length > 0) {
+        const { data: campaigns } = await supabase
+          .from("campaigns")
+          .select("id, name, import_id")
+          .in("import_id", campaignImportIds)
+          .eq("client_id", clientId);
+        for (const c of campaigns || []) {
+          if (c.import_id) campaignsByImport[c.import_id] = c;
+        }
+      }
+
+      const items = (data || []).map((row) => {
+        const campaign = campaignsByImport[row.import_id] || null;
+        const hasReplied = Boolean(row.ultima_interacao_usuario);
+        const resolvedStatus =
+          row.followup_status === "converted" ? "converted" :
+          row.followup_status === "discarded" ? "discarded" :
+          row.followup_status === "scheduled" ? "scheduled" :
+          hasReplied ? "replied" : "pending";
+
+        return {
+          id: row.id,
+          campaignId: campaign?.id || null,
+          campaignName: campaign?.name || null,
+          leadId: row.id,
+          leadName: normalizeString(row.nome) || null,
+          phone: row.telefone,
+          clientId,
+          status: resolvedStatus,
+          scheduledAt: row.followup_scheduled_at || null,
+          lastContactAt: row.ultima_interacao_usuario || row.ultima_interacao_bot || null,
+          createdAt: row.created_at,
+        };
+      });
+
+      return res.json({ success: true, items, total: count || 0 });
+    } catch (err) {
+      sendError(res, 500, "FOLLOWUP_QUEUE_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch followup queue");
+    }
+  });
+
+  // PATCH /api/followup-queue/:id — reagendar ou descartar item da fila
+  app.patch("/api/followup-queue/:id", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const newStatus = normalizeString(body.status) || null;
+    const scheduledAt = normalizeString(body.scheduledAt) || null;
+
+    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
+
+    const patchable = ["scheduled", "discarded"];
+    if (newStatus && !patchable.includes(newStatus)) {
+      return sendError(res, 400, "INVALID_BODY", `status must be one of: ${patchable.join(", ")}`);
+    }
+
+    try {
+      const patch = {};
+      if (newStatus) patch.followup_status = newStatus;
+      if (scheduledAt) { patch.followup_status = "scheduled"; patch.followup_scheduled_at = scheduledAt; }
+
+      if (Object.keys(patch).length === 0) return sendError(res, 400, "INVALID_BODY", "Nothing to update");
+
+      const { data, error } = await supabase
+        .from("lead_import_items")
+        .update(patch)
+        .eq("id", id)
+        .select("id, telefone, nome, status_conversa, followup_status, followup_scheduled_at, ultima_interacao_bot, ultima_interacao_usuario, created_at, import_id")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return sendError(res, 404, "NOT_FOUND", "Item not found");
+
+      return res.json({ success: true, item: { id: data.id, status: data.followup_status, scheduledAt: data.followup_scheduled_at } });
+    } catch (err) {
+      sendError(res, 500, "FOLLOWUP_UPDATE_FAILED", err instanceof Error ? err.message : "Failed to update followup");
+    }
+  });
+
+  // POST /api/followup-queue/:id/convert-inbound — converte lead de campanha para inbound
+  app.post("/api/followup-queue/:id/convert-inbound", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
+    try {
+      const { data: item, error: fetchErr } = await supabase
+        .from("lead_import_items")
+        .select("id, telefone, client_id")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (fetchErr) throw fetchErr;
+      if (!item) return sendError(res, 404, "NOT_FOUND", "Item not found");
+
+      const leadsTable = leadsTableName(item.client_id);
+      const [updateItem, updateLead] = await Promise.all([
+        supabase
+          .from("lead_import_items")
+          .update({ followup_status: "converted", status_conversa: "em_atendimento" })
+          .eq("id", id),
+        supabase
+          .from(leadsTable)
+          .update({ lead_origin: "inbound", source_campaign_id: null })
+          .eq("client_id", item.client_id)
+          .eq("telefone", item.telefone),
+      ]);
+
+      if (updateItem.error) throw updateItem.error;
+
+      return res.json({ success: true, id });
+    } catch (err) {
+      sendError(res, 500, "CONVERT_INBOUND_FAILED", err instanceof Error ? err.message : "Failed to convert to inbound");
+    }
+  });
+
   /**
    * POST /api/hardcoded-chat
    * Processa mensagens para o chatbot hardcoded (ex: Outlier Qualification)
@@ -4979,10 +5233,10 @@ export function registerAllDomainRoutes(app) {
               modelOverride: campaignModelOverride ?? "none",
             });
 
-            // Marca lead como originado de campanha
+            // Marca lead como originado de campanha com nome desnormalizado
             supabase
               .from(leadsTableName(clientId))
-              .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id })
+              .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
               .eq("client_id", clientId)
               .eq("telefone", phone)
               .then(({ error }) => {
@@ -5209,7 +5463,7 @@ export function registerAllDomainRoutes(app) {
     try {
       let query = supabase
         .from(leadsTableName(clientId))
-        .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at, lead_origin, source_campaign_id")
+        .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at, lead_origin, source_campaign_id, source_campaign_name, lead_source")
         .eq("client_id", clientId)
         .order("updated_at", { ascending: false })
         .limit(limit);
@@ -5246,6 +5500,8 @@ export function registerAllDomainRoutes(app) {
           updatedAt: row.updated_at,
           leadOrigin: row.lead_origin || null,
           sourceCampaignId: row.source_campaign_id || null,
+          sourceCampaignName: row.source_campaign_name || null,
+          leadSource: row.lead_source || null,
         };
       });
 

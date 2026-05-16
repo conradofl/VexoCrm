@@ -1,3 +1,9 @@
+import {
+  normalizeLeadsOutlierDados,
+  parseStoredHistorico,
+  serializeHistorico,
+} from "./leads-outlier-schema.js";
+
 /**
  * Chatbot AI Engine
  * Buffer de mensagens + transcrição de mídia + IA conversacional (Groq)
@@ -113,7 +119,7 @@ Retorne APENAS JSON válido, sem texto antes ou depois:
     "objetivo": null,
     "cidade": null,
     "estado": null,
-    "credito_faixa": null,
+    "credito": null,
     "parcela": null,
     "prazo": null,
     "lance_entrada_fgts": null,
@@ -300,7 +306,7 @@ Retorne APENAS JSON válido, sem texto antes ou depois:
     "objetivo": null,
     "cidade": null,
     "estado": null,
-    "credito_faixa": null,
+    "credito": null,
     "parcela": null,
     "prazo": null,
     "lance_entrada_fgts": null,
@@ -683,6 +689,21 @@ function buildJsonInstruction() {
   return `\nRetorne APENAS JSON válido no formato especificado. Sem markdown, sem texto fora do JSON.`;
 }
 
+async function fetchDynamicPrompt(supabase, clientId, type) {
+  if (!supabase || !clientId) return null;
+  try {
+    const { data } = await supabase
+      .from("chatbot_prompts")
+      .select("content")
+      .eq("client_id", clientId)
+      .eq("type", type)
+      .maybeSingle();
+    return data?.content || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runChatbotAI({ systemPrompt, history, newMessages, existingData }) {
   if (!groqKey()) throw new Error("GROQ_API_KEY não configurada");
 
@@ -808,7 +829,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   // Carregar estado atual do banco
   const { data: existingArray } = await supabase
     .from(leadsTable)
-    .select("id, dados, status_conversa, finalizado, updated_at, lead_temperature")
+    .select("id, dados, historico, status_conversa, finalizado, updated_at, lead_temperature")
     .eq("client_id", clientId)
     .eq("telefone", phone)
     .order("created_at", { ascending: false })
@@ -838,12 +859,16 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
     };
   }
 
-  const storedDados = existing?.dados || {};
-  const storedHistorico = storedDados.historico || [];
+  const storedDados = normalizeLeadsOutlierDados(existing?.dados || {});
+  const storedHistorico = parseStoredHistorico(existing?.historico) || parseStoredHistorico(existing?.dados?.historico);
   const storedData = { ...storedDados };
-  delete storedData.historico;
 
   const history = buildHistory(storedHistorico);
+
+  // Busca prompt customizado do banco (fallback para hardcoded se não existir)
+  const promptType = model.startsWith("campanha_") ? "campanha" : "padrao";
+  const dynamicPrompt = await fetchDynamicPrompt(supabase, clientId, promptType);
+  const baseSystemPrompt = dynamicPrompt || modelConfig.systemPrompt;
 
   // ── Cenário 2: lead abandonou no meio — reengajamento após REENGAGEMENT_HOURS ──
   let systemPromptOverride = null;
@@ -851,7 +876,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
     const horasInativo = hoursSince(existing.updated_at);
     if (horasInativo >= REENGAGEMENT_HOURS) {
       const ultimaPergunta = history.filter((m) => m.role === "assistant").at(-1)?.content || "";
-      systemPromptOverride = `${modelConfig.systemPrompt}
+      systemPromptOverride = `${baseSystemPrompt}
 
 CONTEXTO ESPECIAL — REENGAJAMENTO:
 Este lead ficou ${Math.round(horasInativo)}h sem responder. Retomou o contato agora.
@@ -866,7 +891,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
 
   // ── Cenário 3: lead novo ou em andamento — fluxo normal ──────────────────
   const aiResponse = await runChatbotAI({
-    systemPrompt: systemPromptOverride || modelConfig.systemPrompt,
+    systemPrompt: systemPromptOverride || baseSystemPrompt,
     history,
     newMessages: [combinedText],
     existingData: storedData,
@@ -884,11 +909,12 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
   // Atualizar histórico
   const newHistory = appendToHistory(history, combinedText, aiResponse.mensagem);
 
-  const dadosToSave = {
-    ...storedData,
-    ...aiResponse.dados,
-    historico: newHistory,
-  };
+  const dadosToSave = normalizeLeadsOutlierDados({
+    dados: {
+      ...storedData,
+      ...aiResponse.dados,
+    },
+  });
 
   const payload = {
     client_id: clientId,
@@ -896,6 +922,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     status_conversa: aiResponse.status_conversa,
     status: aiResponse.classificacao,
     dados: dadosToSave,
+    historico: serializeHistorico(newHistory),
     mensagem: aiResponse.mensagem,
     finalizado: aiResponse.finalizado,
     updated_at: new Date().toISOString(),
