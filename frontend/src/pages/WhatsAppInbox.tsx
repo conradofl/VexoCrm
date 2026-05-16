@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Clock3,
   LoaderCircle,
@@ -123,6 +124,9 @@ export default function WhatsAppInbox({
   headerRight,
   allowSessionControls = true,
 }: WhatsAppInboxProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialPhone = searchParams.get("phone") ?? null;
+
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const chatsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -172,17 +176,26 @@ export default function WhatsAppInbox({
     }
 
     if (!chats.length) {
-      if (selectedChatId) {
-        setSelectedChatId(null);
-      }
+      if (selectedChatId) setSelectedChatId(null);
       return;
+    }
+
+    // Se chegou via deep-link do Kanban com ?phone=, tenta abrir o chat desse número
+    if (initialPhone) {
+      const digits = initialPhone.replace(/\D/g, "");
+      const match = chats.find((chat) => chat.id.replace(/@.*/, "") === digits);
+      if (match) {
+        setSelectedChatId(match.id);
+        setSearchParams({}, { replace: true }); // limpa o param após selecionar
+        return;
+      }
     }
 
     const hasSelectedChat = chats.some((chat) => chat.id === selectedChatId);
     if (!selectedChatId || !hasSelectedChat) {
       setSelectedChatId(chats[0].id);
     }
-  }, [canLoadInbox, chats, selectedChatId]);
+  }, [canLoadInbox, chats, selectedChatId, initialPhone, setSearchParams]);
 
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) || null,
