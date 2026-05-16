@@ -286,6 +286,14 @@ class PgQueryBuilder {
     const parts = [];
     const params = [];
     for (const f of this.filters) {
+      if (f.type === "or") {
+        const parsed = this.buildOrFilter(f.expression, i);
+        parts.push(parsed.sql);
+        params.push(...parsed.params);
+        i = parsed.nextIndex;
+        continue;
+      }
+
       const col = quoteIdent(f.column);
       if (f.type === "eq") {
         if (f.value === null) {
@@ -315,11 +323,6 @@ class PgQueryBuilder {
         else parts.push(`${col} IS NOT NULL`);
       } else if (f.type === "not" && f.op === "is" && f.value === null) {
         parts.push(`${col} IS NOT NULL`);
-      } else if (f.type === "or") {
-        const parsed = this.buildOrFilter(f.expression, i);
-        parts.push(parsed.sql);
-        params.push(...parsed.params);
-        i = parsed.nextIndex;
       } else if (f.type === "gte") {
         i += 1;
         parts.push(`${col} >= $${i}`);

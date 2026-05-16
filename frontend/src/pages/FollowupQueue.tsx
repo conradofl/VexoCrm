@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CalendarClock,
@@ -255,16 +255,22 @@ export default function FollowupQueue() {
   const { canAccessInternalPage } = useAuth();
   const { data: clients = [] } = useLeadClients();
 
-  const [clientId, setClientId] = useState("_all");
+  const [clientId, setClientId] = useState("");
   const [campaignId, setCampaignId] = useState("_all");
   const [status, setStatus] = useState<FollowupStatus | "_all">("_all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const { data: campaigns = [] } = useCampanhas(clientId !== "_all" ? clientId : undefined);
+  useEffect(() => {
+    if (!clientId && clients.length > 0) {
+      setClientId(clients[0].id);
+    }
+  }, [clientId, clients]);
+
+  const { data: campaigns = [] } = useCampanhas(clientId || undefined);
 
   const filters: FollowupQueueFilters = {
-    clientId: clientId !== "_all" ? clientId : undefined,
+    clientId: clientId || undefined,
     campaignId: campaignId !== "_all" ? campaignId : undefined,
     status: status !== "_all" ? (status as FollowupStatus) : undefined,
     dateFrom: dateFrom || undefined,
@@ -330,10 +336,9 @@ export default function FollowupQueue() {
               <Label className="text-xs text-slate-500 dark:text-slate-400">Empresa</Label>
               <Select value={clientId} onValueChange={(v) => { setClientId(v); setCampaignId("_all"); }}>
                 <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Todas" />
+                  <SelectValue placeholder="Selecione" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="_all" className="text-xs">Todas as empresas</SelectItem>
                   {clients.map((c) => (
                     <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
                   ))}
@@ -343,7 +348,7 @@ export default function FollowupQueue() {
 
             <div className="space-y-1.5">
               <Label className="text-xs text-slate-500 dark:text-slate-400">Campanha</Label>
-              <Select value={campaignId} onValueChange={setCampaignId} disabled={clientId === "_all"}>
+              <Select value={campaignId} onValueChange={setCampaignId} disabled={!clientId}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Todas" />
                 </SelectTrigger>

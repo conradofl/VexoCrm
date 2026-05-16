@@ -36,17 +36,17 @@ export function useFollowupQueue(filters: FollowupQueueFilters) {
 
   return useQuery({
     queryKey: ["followup-queue", filters],
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !!filters.clientId,
     queryFn: async (): Promise<FollowupQueuePage | null> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
       const params = new URLSearchParams();
+      params.set("clientId", filters.clientId!);
       if (filters.campaignId) params.set("campaignId", filters.campaignId);
       if (filters.status) params.set("status", filters.status);
       if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
       if (filters.dateTo) params.set("dateTo", filters.dateTo);
-      if (filters.clientId) params.set("clientId", filters.clientId);
 
       const res = await fetchApi(`/api/followup-queue?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
