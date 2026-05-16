@@ -34,6 +34,7 @@ import ChatbotConfig from "./pages/ChatbotConfig";
 import ChatbotDocs from "./pages/ChatbotDocs";
 import PromptEditor from "./pages/PromptEditor";
 import FollowupQueue from "./pages/FollowupQueue";
+import ChatbotTemplates from "./pages/ChatbotTemplates";
 
 const queryClient = new QueryClient();
 
@@ -199,6 +200,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="planilhas">
                     <FollowupQueue />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="chatbot-templates"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
+                    <ChatbotTemplates />
                   </ProtectedRoute>
                 }
               />

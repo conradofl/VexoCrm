@@ -18,9 +18,9 @@ import {
   BookOpen,
   FileEdit,
   ListChecks,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/contexts/AuthContext";
 import { type InternalPage } from "@/lib/access";
 
@@ -30,10 +30,10 @@ const navItems = [
   { title: "Campanhas", url: "/crm/planilhas", icon: FileSpreadsheet, page: "planilhas" as const },
   { title: "Inteligencia Comercial", url: "/crm/inteligencia-comercial", icon: LineChart, page: "dashboard" as const },
   { title: "WhatsApp", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" as const },
-  { title: "Agente", url: "/crm/agente", icon: Bot, page: "agente" as const },
   { title: "Chatbot Kanban", url: "/crm/chatbot", icon: KanbanSquare, page: "agente" as const },
   { title: "Chatbot Config", url: "/crm/chatbot-config", icon: Bot, page: "empresas" as const },
   { title: "Editor de Prompts", url: "/crm/prompt-editor", icon: FileEdit, page: "empresas" as const },
+  { title: "Templates de Chatbot", url: "/crm/chatbot-templates", icon: Layers, page: "empresas" as const },
   { title: "Fila de Followup", url: "/crm/followup", icon: ListChecks, page: "planilhas" as const },
   { title: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen, page: "agente" as const },
   { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
@@ -59,7 +59,6 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const visibleNavItems = navItems.filter((item) => canAccessInternalPage(item.page));
-  const canSeeAgentNotifications = canAccessInternalPage("agente");
   const userEmail = user?.email || accessProfile?.email || "";
   const userLogin = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
   const userName = user?.displayName?.trim() || userLogin || "Usuario";
@@ -210,7 +209,6 @@ export function AppSidebar() {
         )}
 
         <div className="space-y-1">
-          {canSeeAgentNotifications ? <NotificationBell collapsed={collapsed} /> : null}
           <button
             onClick={() => setCollapsed(!collapsed)}
             className={cn(
