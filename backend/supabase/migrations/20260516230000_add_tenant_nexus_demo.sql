@@ -145,10 +145,12 @@ ON CONFLICT (client_id, type) DO NOTHING;
 INSERT INTO public.chatbot_templates (
   client_id,
   template_key,
-  label,
+  display_name,
+  agent_name,
+  agent_role,
   data_fields,
   required_fields,
-  classification_criteria,
+  classification,
   created_at,
   updated_at
 )
@@ -156,18 +158,20 @@ VALUES (
   'nexus',
   'nexus',
   'Nexus Investimentos',
+  'Vítor',
+  'SDR da Nexus Investimentos',
   '[
-    {"key": "interesse", "label": "Produto de interesse", "type": "text"},
-    {"key": "objetivo", "label": "Objetivo financeiro", "type": "text"},
-    {"key": "cidade", "label": "Cidade", "type": "text"},
-    {"key": "estado", "label": "Estado", "type": "text"},
-    {"key": "volume", "label": "Capital disponível", "type": "text"},
-    {"key": "prazo", "label": "Horizonte de investimento", "type": "text"},
-    {"key": "perfil_risco", "label": "Perfil de risco", "type": "text"},
-    {"key": "melhor_horario", "label": "Melhor horário", "type": "text"}
+    {"key": "interesse", "label": "Produto de interesse", "description": "Fundo de renda fixa, multimercado, ações, previdência, CDB", "required": true},
+    {"key": "objetivo", "label": "Objetivo financeiro", "description": "Aposentadoria, reserva de emergência, patrimônio, crescimento", "required": true},
+    {"key": "cidade", "label": "Cidade", "description": "Cidade do lead", "required": true},
+    {"key": "estado", "label": "Estado", "description": "Estado (UF)", "required": true},
+    {"key": "volume", "label": "Capital disponível", "description": "Ex: 50k-100k", "required": true},
+    {"key": "prazo", "label": "Horizonte de investimento", "description": "Curto, médio, longo prazo", "required": true},
+    {"key": "perfil_risco", "label": "Perfil de risco", "description": "Conservador, moderado, arrojado", "required": true},
+    {"key": "melhor_horario", "label": "Melhor horário", "description": "Manhã, tarde ou noite", "required": true}
   ]'::jsonb,
   '["interesse", "objetivo", "volume", "prazo", "perfil_risco", "melhor_horario"]'::jsonb,
-  '{"QUENTE": "volume alto, prazo definido, objetivo claro", "MORNO": "interesse real, sem volume ou sem urgência", "FRIO": "curiosidade sem capital definido"}'::jsonb,
+  '{"quente": "volume alto, prazo definido, objetivo claro", "morno": "interesse real, sem volume ou sem urgência", "frio": "curiosidade sem capital definido"}'::jsonb,
   now(),
   now()
 )
