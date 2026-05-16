@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 
-export type PromptType = "padrao" | "campanha" | "qualificar" | "extrato";
+export type PromptType = "padrao" | "extrato";
 
 export interface Prompt {
   clientId: string;

@@ -16,23 +16,13 @@ import { useAuth } from "@/contexts/AuthContext";
 const PROMPT_TYPES: { value: PromptType; label: string; description: string }[] = [
   {
     value: "padrao",
-    label: "Padrão (Inbound)",
-    description: "Usado para contatos que chegam organicamente pelo WhatsApp.",
-  },
-  {
-    value: "campanha",
-    label: "Campanha (Outbound)",
-    description: "Usado quando o lead veio de uma campanha de disparo.",
-  },
-  {
-    value: "qualificar",
-    label: "Qualificação Aprofundada",
-    description: "Prompt especializado para aprofundar qualificação após o contato inicial.",
+    label: "Qualificador (Padrão)",
+    description: "Prompt do chatbot qualificador SPIN — usado em todos os atendimentos.",
   },
   {
     value: "extrato",
     label: "Extrato / Briefing SDR",
-    description: "Prompt de extração e resumo dos dados coletados para o SDR humano.",
+    description: "Prompt de geração do briefing enviado ao SDR quando o lead finaliza.",
   },
 ];
 
