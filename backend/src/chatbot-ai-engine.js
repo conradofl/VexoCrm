@@ -386,7 +386,28 @@ export async function resolveMessageContent(evolutionBody) {
 // ─── IA conversacional (Groq) ────────────────────────────────────────────────
 
 function buildJsonInstruction() {
-  return `\nRetorne APENAS JSON válido no formato especificado. Sem markdown, sem texto fora do JSON.`;
+  return `
+
+═══════════════════════════════════════════════════════════════
+FORMATO DE RESPOSTA OBRIGATÓRIO — RETORNE APENAS JSON VÁLIDO
+═══════════════════════════════════════════════════════════════
+Sem markdown, sem texto fora do JSON. Schema obrigatório:
+
+{
+  "mensagem": "string — texto da resposta enviada ao lead no WhatsApp",
+  "status_conversa": "aguardando_usuario" | "finalizado",
+  "dados": { ... },   // campos coletados até agora (acumulado)
+  "classificacao": "QUENTE" | "MORNO" | "FRIO",
+  "spin_fase": "situacao" | "problema" | "implicacao" | "necessidade" | null,
+  "finalizado": true | false
+}
+
+REGRA CRÍTICA — quando setar "finalizado": true:
+• Sempre que você emitir a mensagem final de encerramento (ex.: "Fechado. Vou passar pro consultor...", "Vou repassar pro nosso time", ou qualquer despedida que sinalize que o consultor humano vai assumir).
+• Quando todos os dados obrigatórios já foram coletados E a conversa foi encerrada.
+• Se "finalizado": true, então "status_conversa" DEVE ser "finalizado".
+
+Se "finalizado" não for true, o briefing NÃO é enviado ao SDR. Não esqueça desse campo no encerramento.`;
 }
 
 async function fetchDynamicPrompt(supabase, clientId, type) {
