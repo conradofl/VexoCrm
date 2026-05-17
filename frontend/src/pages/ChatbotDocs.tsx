@@ -105,23 +105,23 @@ function MainFlowDiagram() {
 
       {/* Campaign routing */}
       <div className="rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50 px-6 py-3 text-center text-sm font-semibold text-indigo-800 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-300">
-        Lead está em campanha com waitForReply?
+        Lead dentro do período de campanha mode='agente'?
       </div>
       <div className="flex gap-6 pt-1">
         <div className="flex flex-col items-center gap-1 text-xs text-slate-400">
-          <span>Sim</span>
-          <FlowNode label="Avança campanha" sublabel="continueCampaignLeadFromReply()" variant="action" icon={Megaphone} />
+          <span className="font-bold text-emerald-600">Sim</span>
+          <FlowNode label="Prompt Campanha" sublabel="type='campanha' do banco" variant="action" icon={Megaphone} />
         </div>
         <div className="flex flex-col items-center gap-1 text-xs text-slate-400">
-          <span>Não (campanha sem wait)</span>
-          <FlowNode label="Silencia chatbot" sublabel="campanha envia steps" variant="decision" />
+          <span>Não</span>
+          <FlowNode label="Prompt Padrão" sublabel="type='padrao' do banco" variant="default" icon={Bot} />
         </div>
       </div>
 
       <Arrow />
       <FlowNode label="Message Buffer" sublabel="Debounce 3s (agrupa msgs)" variant="action" icon={Clock} />
       <Arrow />
-      <FlowNode label="processBatch()" sublabel="Busca prompt 'padrao' do banco → Groq" variant="action" icon={Bot} />
+      <FlowNode label="processBatch()" sublabel="Envia prompt selecionado → Groq" variant="action" icon={Bot} />
       <Arrow />
 
       {/* 3 cenários */}
@@ -485,57 +485,59 @@ function BufferDiagram() {
 function CampaignRoutingDiagram() {
   return (
     <div className="space-y-6">
-      {/* Dois caminhos de entrada */}
-      <div className="flex flex-col items-center gap-2">
-        <div className="flex gap-6">
+
+      {/* Modos de campanha */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {/* Só Disparo */}
+        <div className="rounded-xl border-2 border-slate-200 bg-slate-50/60 p-4 dark:border-white/10 dark:bg-white/[0.02]">
+          <p className="mb-3 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Modo: Só Disparo</p>
           <div className="flex flex-col items-center gap-2">
-            <FlowNode label="Lead Inbound" sublabel="Contato espontâneo" variant="default" icon={MessageCircle} />
-            <Arrow label="lead_origin = inbound" />
+            <FlowNode label="Disparo enviado" sublabel="campaign_dispatches" variant="start" icon={Megaphone} />
+            <Arrow label="lead responde" />
+            <FlowNode label="Chatbot Padrão" sublabel="prompt type='padrao'" variant="action" icon={Bot} />
+            <Arrow />
+            <FlowNode label="Qualificação SPIN" sublabel="fluxo normal" variant="end" />
           </div>
-          <div className="flex flex-col items-center gap-2">
-            <FlowNode label="Lead de Campanha" sublabel="Respondeu disparo" variant="start" icon={Megaphone} />
-            <Arrow label="lead_origin = campaign" />
-          </div>
+          <p className="mt-3 text-center text-[11px] text-slate-400">Agente IA não é ativado pela campanha.</p>
         </div>
 
-        <div className="mt-2 flex flex-col items-center gap-2">
-          <FlowNode label="Prompt Padrão (DB)" sublabel="chatbot_prompts type='padrao'" variant="action" icon={Bot} />
-          <Arrow label="mesmo prompt para ambos" />
-          <FlowNode label="Qualificação SPIN" sublabel="9 perguntas unificadas" variant="action" />
-          <Arrow />
-          <FlowNode label="Briefing via IA (DB)" sublabel="chatbot_prompts type='extrato'" variant="end" icon={Phone} />
-          <Arrow />
-          <FlowNode label="SDR notificado" sublabel="sdr_whatsapp_number" variant="end" icon={Phone} />
+        {/* Com Agente IA */}
+        <div className="rounded-xl border-2 border-sky-300 bg-sky-50/60 p-4 dark:border-sky-500/40 dark:bg-sky-500/5">
+          <p className="mb-3 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-sky-600 dark:text-sky-400">Modo: Com Agente IA</p>
+          <div className="flex flex-col items-center gap-2">
+            <FlowNode label="Disparo enviado" sublabel="campaign_dispatches" variant="start" icon={Megaphone} />
+            <Arrow label="lead responde" />
+            <div className="rounded-lg border border-sky-300 bg-sky-100/60 px-4 py-2 text-center text-[11px] font-semibold text-sky-800 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-300">
+              Dentro do período ativo? (starts_at → ends_at)
+            </div>
+            <div className="flex gap-6">
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-bold text-emerald-600">SIM</span>
+                <FlowNode label="Prompt Campanha" sublabel="type='campanha'" variant="action" icon={Bot} />
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-bold text-slate-400">NÃO</span>
+                <FlowNode label="Prompt Padrão" sublabel="type='padrao'" variant="default" icon={Bot} />
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-center text-[11px] text-sky-600 dark:text-sky-400">Ao término do período o lead volta ao fluxo padrão automaticamente.</p>
         </div>
       </div>
 
-      {/* Como o origin chega */}
+      {/* Campos relevantes */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.02]">
-        <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">
-          Como lead_origin chega ao chatbot
-        </p>
+        <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Campos da tabela campaigns</p>
         <div className="space-y-2">
           {[
-            {
-              field: "lead_origin",
-              table: "leads_{clientId}",
-              values: "'inbound' | 'campaign' | NULL",
-              note: "Gravado pelo webhook de disparo da campanha",
-            },
-            {
-              field: "source_campaign_id",
-              table: "leads_{clientId}",
-              values: "UUID | NULL",
-              note: "FK para public.campaigns — permite buscar nome e sequência",
-            },
-          ].map(({ field, table, values, note }) => (
-            <div
-              key={field}
-              className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/8 dark:bg-white/[0.03]"
-            >
+            { field: "mode", values: "'disparo' | 'agente'", note: "Define se o chatbot usa prompt de campanha na resposta do lead" },
+            { field: "starts_at", values: "TIMESTAMPTZ | NULL", note: "Início do período ativo do agente de campanha" },
+            { field: "ends_at", values: "TIMESTAMPTZ | NULL", note: "Fim do período — após essa data prompt volta ao padrão" },
+            { field: "chatbot_prompt_type", values: "'campanha'", note: "Tipo de prompt usado quando dentro do período (modo agente)" },
+          ].map(({ field, values, note }) => (
+            <div key={field} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/8 dark:bg-white/[0.03]">
               <div className="flex flex-wrap items-center gap-2">
                 <code className="font-mono text-[11px] font-bold text-cyan-700 dark:text-cyan-400">{field}</code>
-                <span className="font-mono text-[10px] text-slate-400">{table}</span>
                 <span className="font-mono text-[10px] text-indigo-500 dark:text-indigo-400">{values}</span>
               </div>
               <p className="mt-0.5 text-[11px] text-slate-500">{note}</p>
@@ -550,7 +552,7 @@ function CampaignRoutingDiagram() {
         <div className="text-sm text-indigo-800 dark:text-indigo-300">
           <p className="font-medium">Badge visual no Kanban e WhatsApp</p>
           <p className="mt-0.5 text-indigo-700 dark:text-indigo-400 text-xs">
-            Conversas com <code>lead_origin = campaign</code> exibem o badge roxo "Campanha: [nome]" na lista de chats e no cabeçalho da conversa. Leads inbound mostram o badge cinza "Inbound".
+            Conversas com <code>lead_origin = campaign</code> exibem o badge roxo "Campanha: [nome]". Leads inbound mostram o badge cinza "Inbound".
           </p>
         </div>
       </div>
