@@ -374,7 +374,7 @@ export default function ChatbotConfig() {
           </Card>
         </Link>
 
-        <Link to="/crm/followup-queue" className="group">
+        <Link to="/crm/followup" className="group">
           <Card className="h-full border-slate-200 dark:border-white/10 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer">
             <CardContent className="flex items-center gap-3 pt-4 pb-4">
               <div className="rounded-lg bg-amber-100 dark:bg-amber-900/30 p-2 shrink-0">
