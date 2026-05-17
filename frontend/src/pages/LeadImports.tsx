@@ -62,6 +62,7 @@ import {
   useUpdateCampaign,
   useCampaignDispatches,
   useCreateDispatch,
+  useUpdateDispatch,
   useDeleteDispatch,
   useTriggerDispatch,
   type Campaign,
@@ -112,13 +113,18 @@ type CampaignActionDialogState =
     }
   | null;
 
+type TriggerConfirmState = {
+  campaign: Campaign;
+  leadCount: number | null;
+} | null;
+
 const INTERNAL_TABS: Array<{ id: SheetTab; label: string }> = [
   { id: "dados", label: "Dados Gerais" },
   { id: "pendentes", label: "Leads Pendentes" },
   { id: "campanha", label: "Nova Campanha" },
   { id: "disparo-direto", label: "Disparo Direto" },
-  { id: "enviadas", label: "Campanhas Enviadas" },
-  { id: "agendamentos", label: "Agendamentos" },
+  { id: "enviadas", label: "Campanhas" },
+  { id: "agendamentos", label: "Disparos" },
 ];
 
 const CLIENT_TABS: Array<{ id: SheetTab; label: string }> = [
@@ -725,6 +731,375 @@ function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
   );
 }
 
+const DISPATCH_STATUS_COLORS: Record<CampaignDispatch["status"], string> = {
+  draft: "border-slate-400/20 bg-slate-400/10 text-slate-400",
+  scheduled: "border-sky-400/25 bg-sky-400/10 text-sky-300",
+  running: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300",
+  done: "border-emerald-400/25 bg-emerald-400/10 text-emerald-400",
+  failed: "border-red-400/25 bg-red-400/10 text-red-400",
+  cancelled: "border-slate-400/20 bg-slate-400/10 text-slate-500",
+};
+
+function DispatchManagerTab({
+  campaigns,
+  campaignsLoading,
+  selectedClientId,
+  onNavigateToCampaign,
+}: {
+  campaigns: Campaign[];
+  campaignsLoading: boolean;
+  selectedClientId: string;
+  onNavigateToCampaign: () => void;
+}) {
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
+  const [newScheduledAt, setNewScheduledAt] = useState("");
+  const [confirmDispatch, setConfirmDispatch] = useState<CampaignDispatch | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const visibleCampaigns = selectedClientId
+    ? campaigns.filter((c) => c.client_id === selectedClientId && !c.archived_at)
+    : campaigns.filter((c) => !c.archived_at);
+
+  const selectedCampaign = visibleCampaigns.find((c) => c.id === selectedCampaignId) || null;
+
+  const { data: dispatches = [], isLoading: dispatchesLoading, refetch: refetchDispatches } = useCampaignDispatches(selectedCampaignId || undefined);
+  const createDispatch = useCreateDispatch(selectedCampaignId);
+  const deleteDispatch = useDeleteDispatch(selectedCampaignId);
+  const triggerDispatch = useTriggerDispatch(selectedCampaignId);
+
+  async function handleCreate() {
+    if (!newName.trim()) { setStatusMsg({ type: "error", text: "Informe um nome para o disparo." }); return; }
+    if (newTriggerType === "scheduled" && !newScheduledAt) { setStatusMsg({ type: "error", text: "Selecione a data e hora do agendamento." }); return; }
+    try {
+      const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
+      await createDispatch.mutateAsync({ name: newName.trim(), steps: [], triggerType: newTriggerType, scheduledAt: scheduledIso });
+      setNewName("");
+      setNewTriggerType("manual");
+      setNewScheduledAt("");
+      setStatusMsg({ type: "success", text: "Disparo criado com sucesso." });
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao criar disparo." });
+    }
+  }
+
+  async function handleTrigger(dispatch: CampaignDispatch) {
+    setConfirmDispatch(null);
+    try {
+      await triggerDispatch.mutateAsync(dispatch.id);
+      setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" iniciado.` });
+      void refetchDispatches();
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao disparar." });
+    }
+  }
+
+  async function handleDelete(dispatch: CampaignDispatch) {
+    try {
+      await deleteDispatch.mutateAsync(dispatch.id);
+      setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" removido.` });
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao remover." });
+    }
+  }
+
+  return (
+    <>
+      <AlertDialog open={Boolean(confirmDispatch)} onOpenChange={(open) => (!open ? setConfirmDispatch(null) : null)}>
+        <AlertDialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-primary" />
+              Confirmar disparo
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <span className="block font-semibold text-foreground">{confirmDispatch?.name}</span>
+              <span className="block">Campanha: <strong className="text-foreground">{selectedCampaign?.name}</strong></span>
+              <span className="block text-amber-400">As mensagens serão enviadas imediatamente para os leads desta campanha. Esta ação não pode ser desfeita.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmDispatch && void handleTrigger(confirmDispatch)} disabled={triggerDispatch.isPending}>
+              <Zap className="mr-2 h-4 w-4" />
+              {triggerDispatch.isPending ? "Disparando..." : "Confirmar disparo"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Gerenciar Disparos</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Selecione uma campanha para criar, agendar e acompanhar os disparos.</p>
+          </div>
+          <Button variant="outline" onClick={onNavigateToCampaign}>
+            <Megaphone className="mr-2 h-4 w-4" />
+            Nova Campanha
+          </Button>
+        </div>
+
+        {statusMsg && (
+          <div className={cn("flex items-center gap-3 rounded-xl border p-4 text-sm font-medium", statusMsg.type === "success" ? "border-primary/25 bg-primary/8 text-primary" : "border-destructive/30 bg-destructive/10 text-destructive")}>
+            {statusMsg.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+            {statusMsg.text}
+            <button type="button" className="ml-auto opacity-60 hover:opacity-100" onClick={() => setStatusMsg(null)}>×</button>
+          </div>
+        )}
+
+        {/* Seletor de Campanha */}
+        <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+          <CardContent className="p-5 space-y-4">
+            <div className="space-y-2">
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Campanha</p>
+              {campaignsLoading ? (
+                <div className={cn("flex h-12 items-center rounded-xl px-4 text-sm text-muted-foreground", darkFieldClass)}>Carregando campanhas...</div>
+              ) : visibleCampaigns.length === 0 ? (
+                <div className={cn("flex h-12 items-center rounded-xl px-4 text-sm text-muted-foreground", darkFieldClass)}>
+                  Nenhuma campanha encontrada.{" "}
+                  <button type="button" className="ml-1 text-primary underline" onClick={onNavigateToCampaign}>Criar campanha</button>
+                </div>
+              ) : (
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                  <SelectTrigger className={cn("h-12 rounded-xl", darkFieldClass)}>
+                    <SelectValue placeholder="Selecione uma campanha..." />
+                  </SelectTrigger>
+                  <SelectContent className={darkSelectContentClass}>
+                    {visibleCampaigns.map((c) => (
+                      <SelectItem key={c.id} value={c.id} className={darkSelectItemClass}>
+                        <span className="flex items-center gap-2">
+                          <span>{c.name}</span>
+                          <span className="font-mono text-[10px] text-muted-foreground">· {c.client_name ?? c.client_id} · {getCampaignStatusView(c.status).label}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {selectedCampaign && (
+              <div className="grid gap-3 rounded-xl border border-border/60 bg-black/20 p-4 sm:grid-cols-3">
+                <div>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Status</p>
+                  <span className={cn("mt-1 inline-block rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(selectedCampaign.status).className)}>
+                    {getCampaignStatusView(selectedCampaign.status).label}
+                  </span>
+                </div>
+                <div>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Modo</p>
+                  <span className={cn("mt-1 inline-block rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", selectedCampaign.mode === "agente" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" : "border-border/50 text-muted-foreground")}>
+                    {selectedCampaign.mode === "agente" ? "Com Agente IA" : "Só Disparo"}
+                  </span>
+                </div>
+                <div>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Empresa</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedCampaign.client_name ?? selectedCampaign.client_id}</p>
+                </div>
+                {(selectedCampaign.starts_at || selectedCampaign.ends_at) && (
+                  <div className="col-span-full rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-sky-400">Período ativo do chatbot</p>
+                    <p className="mt-1 font-mono text-xs text-muted-foreground">
+                      {selectedCampaign.starts_at ? formatDate(selectedCampaign.starts_at) : "Sem início"} → {selectedCampaign.ends_at ? formatDate(selectedCampaign.ends_at) : "Sem fim"}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {selectedCampaignId && (
+          <>
+            {/* Novo Disparo */}
+            <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Zap className="h-4 w-4 text-primary" />
+                  Novo Disparo
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 p-5 pt-0">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Nome do disparo</p>
+                    <Input
+                      className={darkFieldClass}
+                      placeholder="Ex: Disparo Semana 1 — Oferta Principal"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tipo de acionamento</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNewTriggerType("manual")}
+                        className={cn(
+                          "flex flex-col items-center gap-1 rounded-xl border p-3 text-xs font-semibold transition-colors",
+                          newTriggerType === "manual"
+                            ? "border-primary/40 bg-primary/10 text-primary"
+                            : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
+                        )}
+                      >
+                        <Zap className="h-4 w-4" />
+                        Manual
+                        <span className="font-normal opacity-70">Você aciona</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewTriggerType("scheduled")}
+                        className={cn(
+                          "flex flex-col items-center gap-1 rounded-xl border p-3 text-xs font-semibold transition-colors",
+                          newTriggerType === "scheduled"
+                            ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
+                            : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
+                        )}
+                      >
+                        <Clock3 className="h-4 w-4" />
+                        Agendado
+                        <span className="font-normal opacity-70">Data e hora</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {newTriggerType === "scheduled" && (
+                  <div className="space-y-2">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                      Data e hora do disparo <span className="text-muted-foreground/60">(horário de Brasília)</span>
+                    </p>
+                    <Input
+                      type="datetime-local"
+                      className={darkFieldClass}
+                      value={newScheduledAt}
+                      onChange={(e) => setNewScheduledAt(e.target.value)}
+                      min={new Date().toISOString().slice(0, 16)}
+                    />
+                  </div>
+                )}
+
+                <div className="flex gap-2 border-t border-border/70 pt-4">
+                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim()}>
+                    <Zap className="mr-2 h-4 w-4" />
+                    {createDispatch.isPending ? "Criando..." : newTriggerType === "scheduled" ? "Agendar disparo" : "Criar disparo"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Lista de Disparos */}
+            <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <History className="h-4 w-4" />
+                    Disparos da campanha
+                    <span className="ml-1 rounded-full bg-primary/20 px-2 py-0.5 font-mono text-[10px] text-primary">{dispatches.length}</span>
+                  </CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => void refetchDispatches()} disabled={dispatchesLoading}>
+                    <RefreshCw className={cn("h-3 w-3", dispatchesLoading && "animate-spin")} />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-5 pt-0">
+                {dispatchesLoading && <EmptyState message="Carregando disparos..." />}
+                {!dispatchesLoading && dispatches.length === 0 && (
+                  <EmptyState
+                    title="Nenhum disparo criado"
+                    description="Crie o primeiro disparo acima para começar a enviar mensagens desta campanha."
+                  />
+                )}
+                {!dispatchesLoading && dispatches.length > 0 && (
+                  <div className="space-y-3">
+                    {dispatches.map((d) => (
+                      <div
+                        key={d.id}
+                        className="flex flex-wrap items-center gap-4 rounded-xl border border-border/60 bg-black/20 p-4"
+                      >
+                        {/* Status badge */}
+                        <span className={cn("shrink-0 rounded-md border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", DISPATCH_STATUS_COLORS[d.status])}>
+                          {DISPATCH_STATUS_LABELS[d.status]}
+                        </span>
+
+                        {/* Info */}
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-foreground truncate">{d.name}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-3 font-mono text-[10px] text-muted-foreground">
+                            {d.trigger_type === "scheduled" && d.scheduled_at && (
+                              <span className="flex items-center gap-1 text-sky-300">
+                                <Clock3 className="h-3 w-3" />
+                                {formatDate(d.scheduled_at)}
+                              </span>
+                            )}
+                            {d.trigger_type === "manual" && (
+                              <span className="flex items-center gap-1">
+                                <Zap className="h-3 w-3" />
+                                Manual
+                              </span>
+                            )}
+                            {d.triggered_at && (
+                              <span>Iniciado {formatDate(d.triggered_at)}</span>
+                            )}
+                            {(d.status === "done" || d.status === "running") && (
+                              <>
+                                <span className="text-emerald-400">{d.sent_count} enviados</span>
+                                {d.failed_count > 0 && <span className="text-red-400">{d.failed_count} falhas</span>}
+                              </>
+                            )}
+                            {d.finished_at && <span>Concluído {formatDate(d.finished_at)}</span>}
+                            {d.error_message && (
+                              <span className="text-red-400 truncate max-w-[240px]">{d.error_message}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Ações */}
+                        <div className="flex shrink-0 items-center gap-2">
+                          {(d.status === "draft" || d.status === "scheduled") && (
+                            <Button
+                              size="sm"
+                              onClick={() => setConfirmDispatch(d)}
+                              disabled={triggerDispatch.isPending}
+                            >
+                              <Zap className="mr-1.5 h-3 w-3" />
+                              Disparar
+                            </Button>
+                          )}
+                          {d.status === "running" && (
+                            <span className="flex items-center gap-1.5 rounded-md border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 font-mono text-[10px] text-cyan-300">
+                              <RefreshCw className="h-3 w-3 animate-spin" />
+                              Executando...
+                            </span>
+                          )}
+                          {d.status !== "running" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-muted-foreground hover:text-destructive"
+                              onClick={() => void handleDelete(d)}
+                              disabled={deleteDispatch.isPending}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function LeadImports({
   fixedClientId,
   fixedClientName,
@@ -775,7 +1150,9 @@ export default function LeadImports({
   const [selectedImportId, setSelectedImportId] = useState(ALL_IMPORTS_VALUE);
   const [importsPage, setImportsPage] = useState(1);
   const [campaignActionDialog, setCampaignActionDialog] = useState<CampaignActionDialogState>(null);
+  const [triggerConfirm, setTriggerConfirm] = useState<TriggerConfirmState>(null);
   const [expandedDispatchCampaignId, setExpandedDispatchCampaignId] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<{ imported: number; skipped: number; errors: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const campaignImageInputRef = useRef<HTMLInputElement | null>(null);
   const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1187,6 +1564,10 @@ export default function LeadImports({
       });
       setImportPreview(response.preview);
       setSelectedImportId(response.item.id);
+      const imported = response.preview.filter((r) => r.imported).length;
+      const skipped = response.preview.filter((r) => !r.imported && !r.skipReason?.toLowerCase().includes("erro")).length;
+      const errors = response.preview.filter((r) => !r.imported && r.skipReason?.toLowerCase().includes("erro")).length;
+      setImportSummary({ imported, skipped, errors });
       await Promise.allSettled([refetch(), refetchPending()]);
     } catch (error) {
       console.error("[lead-imports-ui] import_failed", {
@@ -1257,10 +1638,7 @@ export default function LeadImports({
     try {
       const createdCampaign = await createCampaign.mutateAsync(campaignPayload);
 
-      setDispatchStatus(`Campanha ${campaignName.trim()} criada com sucesso.`);
       setCampaignName("");
-      setScheduledFor("");
-      setDispatchLimit("");
       setCampaignMessage("");
       setCampaignImage(null);
       setCampaignImageCaption("");
@@ -1273,8 +1651,10 @@ export default function LeadImports({
       setAiStyle("");
       setSegmentation(defaultSegmentation);
       setSelectedImportId(ALL_IMPORTS_VALUE);
-      setActiveTab("agendamentos");
       await refetchCampaigns();
+      setExpandedDispatchCampaignId(createdCampaign.id);
+      setActiveTab("enviadas");
+      setDispatchStatus(`Campanha "${campaignName.trim()}" criada. Agora crie um Disparo abaixo para enviar.`);
       console.info("[campaigns-ui] create_campaign_success", {
         campaignId: createdCampaign.id,
         clientId: createdCampaign.client_id,
@@ -1292,7 +1672,8 @@ export default function LeadImports({
     }
   }
 
-  async function handleTriggerCampaign(campaign: Campaign) {
+  async function executeTriggerCampaign(campaign: Campaign) {
+    setTriggerConfirm(null);
     try {
       const result = await triggerCampaign.mutateAsync(campaign.id);
       if (result.failureCount > 0 && result.successCount > 0) {
@@ -1359,6 +1740,11 @@ export default function LeadImports({
     } catch (error) {
       setDirectDispatchStatus(error instanceof Error ? error.message : "Falha no disparo direto.");
     }
+  }
+
+  function handleTriggerCampaign(campaign: Campaign) {
+    const leadCount = pendingData?.pendingCount ?? null;
+    setTriggerConfirm({ campaign, leadCount });
   }
 
   async function handleToggleCampaignStatus(campaign: Campaign) {
@@ -1433,6 +1819,41 @@ export default function LeadImports({
               }
             >
               {campaignActionDialog?.action === "archive" ? "Arquivar" : "Apagar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(triggerConfirm)} onOpenChange={(open) => (!open ? setTriggerConfirm(null) : null)}>
+        <AlertDialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-primary" />
+              Confirmar disparo
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <span className="block font-semibold text-foreground">{triggerConfirm?.campaign.name}</span>
+              {triggerConfirm?.leadCount != null && triggerConfirm.leadCount > 0 ? (
+                <span className="block">
+                  Esta ação enviará mensagens para <strong className="text-foreground">{triggerConfirm.leadCount} lead{triggerConfirm.leadCount !== 1 ? "s" : ""} pendente{triggerConfirm.leadCount !== 1 ? "s" : ""}</strong> desta campanha.
+                </span>
+              ) : (
+                <span className="block">Esta ação enviará mensagens para os leads pendentes desta campanha.</span>
+              )}
+              <span className="block">
+                Modo: <strong className="text-foreground">{triggerConfirm?.campaign.mode === "agente" ? "Com Agente IA" : "Só Disparo"}</strong>
+              </span>
+              <span className="block text-amber-400">Esta ação não pode ser desfeita.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => triggerConfirm && void executeTriggerCampaign(triggerConfirm.campaign)}
+              disabled={triggerCampaign.isPending}
+            >
+              <Zap className="mr-2 h-4 w-4" />
+              {triggerCampaign.isPending ? "Disparando..." : "Confirmar disparo"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1519,7 +1940,22 @@ export default function LeadImports({
                     </div>
                   </div>
 
-                  {selectedFile && (
+                  {importSummary && (
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 p-4">
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />
+                      <div className="flex flex-wrap gap-4 font-mono text-sm">
+                        <span className="font-bold text-primary">{importSummary.imported} importados</span>
+                        {importSummary.skipped > 0 && (
+                          <span className="text-amber-400">{importSummary.skipped} duplicados ignorados</span>
+                        )}
+                        {importSummary.errors > 0 && (
+                          <span className="text-destructive">{importSummary.errors} erros</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedFile && !importSummary && (
                     <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/78 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                       <p>Arquivo: {selectedFile.name}</p>
                       <p>Linhas lidas: {parsedRows.length}</p>
@@ -2719,83 +3155,12 @@ export default function LeadImports({
         )}
 
         {activeTab === "agendamentos" && isInternalUser && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Fila de Campanhas</h2>
-                <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{queuedCampaigns.length} aguardando disparo</p>
-              </div>
-              <Button onClick={() => setActiveTab("campanha")}>+ Nova Campanha</Button>
-            </div>
-            <ErrorMessage message={campaignsError ? (campaignsError as Error).message : null} variant="banner" />
-            {!campaignsLoading && queuedCampaigns.length === 0 && (
-              <EmptyState
-                title="Nenhuma campanha na fila"
-                description="As campanhas criadas e ainda nao disparadas aparecem aqui."
-              />
-            )}
-            <div className="space-y-4">
-              {queuedCampaigns.map((campaign) => {
-                const scheduleDateParts = getScheduleDateParts(campaign);
-
-                return (
-                  <Card key={campaign.id} className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-                    <CardContent className="flex flex-wrap items-center gap-5 p-5">
-                      <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-xl border border-primary/20 bg-primary/5">
-                        <span className="font-mono text-3xl font-bold text-primary">{scheduleDateParts.day}</span>
-                        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">{scheduleDateParts.month}</span>
-                      </div>
-                      <div className="min-w-[220px] flex-1">
-                        <p className="text-xl font-extrabold tracking-tight text-foreground">{campaign.name}</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-4 font-mono text-[11px] text-muted-foreground">
-                          <span className="inline-flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" />{campaign.client_name ?? campaign.client_id}</span>
-                          <span className="inline-flex items-center gap-1.5"><FileSpreadsheet className="h-3.5 w-3.5" />{campaign.import_id || "todas as bases"}</span>
-                          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />lote {campaign.limit_per_run}</span>
-                          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{scheduleDateParts.label}</span>
-                        </div>
-                        {getCampaignPreviewSteps(campaign).length > 0 ? (
-                          <div className="mt-4 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
-                            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Conteudo do disparo</p>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              {getCampaignPreviewSteps(campaign).slice(0, 4).map((step) => (
-                                <div key={step.id} className="rounded-lg border border-slate-200/80 bg-white/70 p-2 text-sm dark:border-white/10 dark:bg-black/25">
-                                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                                    {step.order}. {step.type === "image" ? "imagem" : "texto"}
-                                  </p>
-                                  {step.text ? <p className="mt-1 line-clamp-2 text-foreground">{step.text}</p> : null}
-                                  {step.image ? (
-                                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                      <img src={step.image.dataUrl} alt={step.image.name} className="h-10 w-10 rounded-md object-cover" />
-                                      <span className="truncate">{step.image.name}</span>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
-                        {getCampaignStatusView(campaign.status).label}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} disabled={!canCampaignBeDispatched(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary disabled:cursor-not-allowed disabled:opacity-45">
-                          <Zap className="h-4 w-4" />
-                        </button>
-                        <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} disabled={!canPauseCampaign(campaign.status) && !canResumeCampaign(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-45">
-                          {canPauseCampaign(campaign.status) ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        </button>
-                        <button type="button" onClick={() => setCampaignActionDialog({ action: "delete", campaign })} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-[0px] text-pink-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-pink-300">
-                          <Trash2 className="h-4 w-4 text-pink-400" />
-                          ×
-                        </button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </div>
+          <DispatchManagerTab
+            campaigns={filteredCampaigns}
+            campaignsLoading={campaignsLoading}
+            selectedClientId={selectedClientId}
+            onNavigateToCampaign={() => setActiveTab("campanha")}
+          />
         )}
       </section>
     </PageShell>
