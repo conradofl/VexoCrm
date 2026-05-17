@@ -45,6 +45,16 @@ export async function persistChatbotProgress({
 
     let leadRecord;
 
+    const individualCols = {
+      interesse: collectedData?.interesse || null,
+      objetivo: collectedData?.objetivo || null,
+      prazo: collectedData?.prazo || null,
+      melhor_horario: collectedData?.melhor_horario || null,
+      credito: collectedData?.["crédito"] || collectedData?.credito || null,
+      parcela: collectedData?.parcela || null,
+      lance_entrada_fgts: collectedData?.lance_entrada_fgts || null,
+    };
+
     if (existingLead) {
       // Atualizar registro existente
       const updatePayload = {
@@ -54,6 +64,7 @@ export async function persistChatbotProgress({
         mensagem,
         finalizado: isFinalized,
         dados: collectedData,
+        ...individualCols,
       };
 
       const { data: updated, error: updateError } = await supabase
@@ -76,6 +87,7 @@ export async function persistChatbotProgress({
         mensagem,
         finalizado: isFinalized,
         dados: collectedData,
+        ...individualCols,
       };
 
       const { data: inserted, error: insertError } = await supabase

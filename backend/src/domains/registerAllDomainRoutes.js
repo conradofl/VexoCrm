@@ -4227,7 +4227,9 @@ export function registerAllDomainRoutes(app) {
   async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
-    const steps = Array.isArray(dispatch.steps) ? dispatch.steps : [];
+    const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
+    const campaignSteps = Array.isArray(campaign.analytics_meta?.sequence) ? campaign.analytics_meta.sequence : [];
+    const steps = dispatchSteps ?? campaignSteps;
     const webhookUrl = campaign.webhook_url || null;
     const webhookToken = campaign.webhook_token || null;
 
