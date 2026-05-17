@@ -28,10 +28,9 @@ function groqKey() {
 
 // ─── Campos individuais — fallback quando não há template ───────────────────
 const COMMON_INDIVIDUAL_FIELDS = ["interesse", "objetivo", "prazo", "melhor_horario", "nome", "cidade", "estado"];
-const TYPE_SPECIFIC_FIELDS = {
-  outlier: ["credito", "parcela", "lance_entrada_fgts"],
-  infinie: ["tipo_instalacao", "conta_luz_faixa"],
-};
+// Campos individuais conhecidos — usados como fallback quando template não está disponível.
+// Novos clientes devem configurar data_fields no template para ter colunas próprias.
+const TYPE_SPECIFIC_FIELDS = {};
 const KNOWN_DB_COLUMNS = new Set([
   ...COMMON_INDIVIDUAL_FIELDS,
   ...Object.values(TYPE_SPECIFIC_FIELDS).flat(),
@@ -103,15 +102,8 @@ function extractIndividualColumns(dados, templateFields = null) {
 
 // ─── Modelos registrados ─────────────────────────────────────────────────────
 // systemPrompts removidos — carregados exclusivamente via fetchDynamicPrompt (tabela chatbot_prompts).
-export const CHATBOT_MODELS = {
-  outlier:          { name: "Áureo — Outlier Consórcios" },
-  infinie:          { name: "Lara — Infinie Energia Solar" },
-  campanha_outlier: { name: "Áureo — Outlier Consórcios (Campanha)" },
-  campanha_infinie: { name: "Lara — Infinie Energia Solar (Campanha)" },
-};
-
 export function getChatbotModel(modelKey) {
-  return CHATBOT_MODELS[modelKey] || CHATBOT_MODELS.outlier;
+  return modelKey ? { name: modelKey } : null;
 }
 
 // ─── Buffer de mensagens ─────────────────────────────────────────────────────
@@ -655,7 +647,11 @@ function hoursSince(isoDate) {
   return (Date.now() - new Date(isoDate).getTime()) / 3_600_000;
 }
 
-export async function processBatch({ clientId, phone, messages, supabase, model = "outlier", promptType: promptTypeOverride = null, campaignPromptId = null }) {
+export async function processBatch({ clientId, phone, messages, supabase, model, promptType: promptTypeOverride = null, campaignPromptId = null }) {
+  if (!model) {
+    console.error("[chatbot-ai] model não configurado para cliente — chatbot silenciado", { clientId });
+    return null;
+  }
   const modelConfig = getChatbotModel(model);
   const leadsTable = chatbotLeadsTable(clientId);
 

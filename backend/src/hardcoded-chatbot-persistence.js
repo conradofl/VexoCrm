@@ -2,13 +2,10 @@
  * Persistência de Chatbot - Salva progresso incremental no Supabase
  */
 
-/**
- * Salva ou atualiza progresso da conversa em tempo real
- * Usa leads_outlier para armazenar dados coletados incrementalmente
- */
 function leadsTable(clientId) {
   const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
-  return `leads_${safe || "outlier"}`;
+  if (!safe || safe.length < 2) throw new Error(`[chatbot-persistence] clientId inválido: "${clientId}"`);
+  return `leads_${safe}`;
 }
 
 export async function persistChatbotProgress({
