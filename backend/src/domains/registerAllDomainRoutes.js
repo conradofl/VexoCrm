@@ -2509,17 +2509,13 @@ export function registerAllDomainRoutes(app) {
   
       const allItems = items || [];
   
-      const { data: dispatches } = await supabase
-        .from("campaigns")
-        .select("phones")
-        .eq("client_id", clientId);
-  
-      const dispatchedPhones = new Set();
-      for (const d of dispatches || []) {
-        if (Array.isArray(d.phones)) {
-          for (const phone of d.phones) dispatchedPhones.add(phone);
-        }
-      }
+      const { data: dispatchRuns } = await supabase
+        .from("campaign_dispatch_runs")
+        .select("phone")
+        .eq("client_id", clientId)
+        .eq("status", "sent");
+
+      const dispatchedPhones = new Set((dispatchRuns || []).map((r) => r.phone).filter(Boolean));
   
       const enriched = allItems.map((item) => ({
         ...item,

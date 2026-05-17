@@ -84,6 +84,7 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
+import { useChatbotTemplates } from "@/hooks/useChatbotTemplates";
 
 type SheetTab = "dados" | "campanha" | "disparo-direto" | "pendentes" | "enviadas" | "agendamentos";
 type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
@@ -1110,6 +1111,23 @@ export default function LeadImports({
   const { isInternalUser } = useAuth();
   const crmClient = useOptionalCrmClient();
   const selectedClientId = fixedClientId || crmClient?.selectedClientId || "";
+  const { data: chatbotTemplates = [] } = useChatbotTemplates(selectedClientId || null);
+
+  // Colunas dinâmicas para a tabela de Leads Pendentes
+  const pendingTableColumns = useMemo(() => {
+    const clientTemplate = chatbotTemplates.find((t) => t.client_id === selectedClientId);
+    const template = clientTemplate ?? chatbotTemplates.find((t) => t.is_builtin) ?? null;
+    const dynamicCols = template
+      ? template.data_fields
+          .filter((f) => !["nome", "telefone"].includes(f.key))
+          .map((f) => ({ key: f.key, label: f.label }))
+      : [
+          { key: "cidade", label: "Cidade" },
+          { key: "estado", label: "Estado" },
+          { key: "status", label: "Status" },
+        ];
+    return dynamicCols;
+  }, [chatbotTemplates, selectedClientId]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
@@ -2242,9 +2260,9 @@ export default function LeadImports({
                               <TableHead>#</TableHead>
                               <TableHead>Telefone</TableHead>
                               <TableHead>Nome</TableHead>
-                              <TableHead>Cidade</TableHead>
-                              <TableHead>Estado</TableHead>
-                              <TableHead>Status</TableHead>
+                              {pendingTableColumns.map((col) => (
+                                <TableHead key={col.key}>{col.label}</TableHead>
+                              ))}
                               <TableHead>Disparo</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -2260,9 +2278,9 @@ export default function LeadImports({
                                   <TableCell className="font-mono text-xs text-muted-foreground">{item.row_number}</TableCell>
                                   <TableCell className="font-mono text-sm">{item.telefone || "-"}</TableCell>
                                   <TableCell>{String(normalizedData.nome || "-")}</TableCell>
-                                  <TableCell>{String(normalizedData.cidade || "-")}</TableCell>
-                                  <TableCell>{String(normalizedData.estado || "-")}</TableCell>
-                                  <TableCell>{String(normalizedData.status || "-")}</TableCell>
+                                  {pendingTableColumns.map((col) => (
+                                    <TableCell key={col.key}>{String(normalizedData[col.key] ?? "-")}</TableCell>
+                                  ))}
                                   <TableCell>
                                     {item.dispatched ? (
                                       <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
