@@ -129,6 +129,10 @@ function prepareRowValues(row) {
   const out = { ...row };
   for (const k of Object.keys(out)) {
     assertIdent(k, "column");
+    // pg driver doesn't auto-cast JS objects/arrays to jsonb — serialize them
+    if (out[k] !== null && typeof out[k] === "object") {
+      out[k] = JSON.stringify(out[k]);
+    }
   }
   return out;
 }
