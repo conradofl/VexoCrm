@@ -733,6 +733,7 @@ export default function LeadImports({
   const [directImageError, setDirectImageError] = useState<string | null>(null);
   const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
+  const [campaignMode, setCampaignMode] = useState<"disparo" | "agente">("disparo");
   const [campaignStartsAt, setCampaignStartsAt] = useState("");
   const [campaignEndsAt, setCampaignEndsAt] = useState("");
   const [campaignMessage, setCampaignMessage] = useState("");
@@ -1214,6 +1215,7 @@ export default function LeadImports({
       name: campaignName.trim(),
       clientId: selectedClientId,
       importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
+      mode: campaignMode,
       startsAt: campaignStartsAt ? campaignLocalDateTimeToUtcIso(campaignStartsAt) : null,
       endsAt: campaignEndsAt ? campaignLocalDateTimeToUtcIso(campaignEndsAt) : null,
       analyticsMeta: {
@@ -1958,16 +1960,55 @@ export default function LeadImports({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Início do período ativo</p>
-                  <Input type="datetime-local" className={darkFieldClass} value={campaignStartsAt} onChange={(e) => setCampaignStartsAt(e.target.value)} />
-                  <p className="text-xs text-muted-foreground">Chatbot usa prompt de campanha a partir desta data.</p>
+
+                {/* Seletor de modo — ocupa linha inteira */}
+                <div className="space-y-2 md:col-span-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Modo da Campanha</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCampaignMode("disparo")}
+                      className={cn(
+                        "rounded-xl border-2 p-4 text-left transition-all",
+                        campaignMode === "disparo"
+                          ? "border-primary bg-primary/10"
+                          : "border-border/50 bg-card/40 hover:border-border"
+                      )}
+                    >
+                      <p className="font-semibold text-sm">Só Disparo</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Envia as mensagens. Lead responde → chatbot padrão de qualificação.</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCampaignMode("agente")}
+                      className={cn(
+                        "rounded-xl border-2 p-4 text-left transition-all",
+                        campaignMode === "agente"
+                          ? "border-sky-500 bg-sky-500/10"
+                          : "border-border/50 bg-card/40 hover:border-border"
+                      )}
+                    >
+                      <p className="font-semibold text-sm">Com Agente IA</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Lead responde durante o período → chatbot usa prompt de campanha.</p>
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Fim do período ativo</p>
-                  <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
-                  <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
-                </div>
+
+                {/* Período ativo — só aparece no modo agente */}
+                {campaignMode === "agente" && (
+                  <>
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Início do período ativo</p>
+                      <Input type="datetime-local" className={darkFieldClass} value={campaignStartsAt} onChange={(e) => setCampaignStartsAt(e.target.value)} />
+                      <p className="text-xs text-muted-foreground">Chatbot usa prompt de campanha a partir desta data.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Fim do período ativo</p>
+                      <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
+                      <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
+                    </div>
+                  </>
+                )}
                 <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Leads pendentes</p>
                   <div className={cn("flex h-10 items-center rounded-md px-3 font-mono text-sm text-slate-500 dark:text-white/62", darkFieldClass)}>
@@ -2554,9 +2595,14 @@ export default function LeadImports({
                           {campaign.last_triggered_at ? formatDate(campaign.last_triggered_at) : "Sem disparo"} · {campaign.client_name ?? campaign.client_id}
                         </p>
                       </div>
-                      <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
-                        {getCampaignStatusView(campaign.status).label}
-                      </span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
+                          {getCampaignStatusView(campaign.status).label}
+                        </span>
+                        <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.mode === "agente" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" : "border-border/50 text-muted-foreground")}>
+                          {campaign.mode === "agente" ? "Agente IA" : "Só Disparo"}
+                        </span>
+                      </div>
                     </div>
                     <div className="border-t border-border/70 pt-4">
                       <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">

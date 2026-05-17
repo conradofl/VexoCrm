@@ -3978,6 +3978,7 @@ export function registerAllDomainRoutes(app) {
     if ("startsAt" in req.body) updates.starts_at = normalizeString(req.body?.startsAt) || null;
     if ("endsAt" in req.body) updates.ends_at = normalizeString(req.body?.endsAt) || null;
     if (req.body?.chatbotPromptType) updates.chatbot_prompt_type = normalizeString(req.body.chatbotPromptType);
+    if (["disparo", "agente"].includes(req.body?.mode)) updates.mode = req.body.mode;
     if (req.body?.archived === true) updates.archived_at = new Date().toISOString();
     if (req.body?.archived === false) updates.archived_at = null;
     if (req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object") {
@@ -4014,7 +4015,7 @@ export function registerAllDomainRoutes(app) {
         .update(updates)
         .eq("id", id)
         .eq("client_id", authorizedClientId)
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, last_triggered_at, archived_at, created_at, analytics_meta")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, last_triggered_at, archived_at, created_at, analytics_meta")
         .single();
   
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {
@@ -5396,28 +5397,38 @@ export function registerAllDomainRoutes(app) {
           });
         }
 
-        // Se a campanha tem período ativo, usa prompt de campanha após avançar sequência
-        // Se não tem período, silencia o chatbot (comportamento legado)
-        if (activeCampaignForLead) {
+        // waitForReply: se a campanha for modo "agente" E tiver período ativo, usa prompt campanha
+        // caso contrário silencia o chatbot (comportamento legado / modo "disparo")
+        const waitCampaignIsAgente = activeWaitCampaign.mode === "agente";
+        if (waitCampaignIsAgente && activeCampaignForLead) {
           chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
-          console.log("[campaign-routing] period_campaign_prompt", {
+          console.log("[campaign-routing] wait_for_reply_agente_prompt", {
             clientId, phone: maskPhoneForLog(phone),
-            campaignId: activeCampaignForLead.id, promptType: chatbotPromptTypeOverride,
+            campaignId: activeWaitCampaign.id, promptType: chatbotPromptTypeOverride,
           });
         } else {
-          res.json({ success: true, status: "skipped_active_campaign" });
+          res.json({ success: true, status: "skipped_disparo_only" });
           return;
         }
       } else if (activeCampaignForLead) {
-        // Lead dentro do período de uma campanha ativa → usa prompt de campanha
-        chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
-        console.log("[campaign-routing] active_period_campaign", {
-          clientId, phone: maskPhoneForLog(phone),
-          campaignId: activeCampaignForLead.id,
-          campaignName: activeCampaignForLead.name,
-          promptType: chatbotPromptTypeOverride,
-          endsAt: activeCampaignForLead.endsAt,
-        });
+        // Lead dentro do período de uma campanha ativa
+        if (activeCampaignForLead.mode === "agente") {
+          // Modo agente → chatbot usa prompt de campanha
+          chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
+          console.log("[campaign-routing] active_period_agente", {
+            clientId, phone: maskPhoneForLog(phone),
+            campaignId: activeCampaignForLead.id,
+            campaignName: activeCampaignForLead.name,
+            promptType: chatbotPromptTypeOverride,
+            endsAt: activeCampaignForLead.endsAt,
+          });
+        } else {
+          // Modo disparo → chatbot usa prompt padrão, ignora campanha
+          console.log("[campaign-routing] active_period_disparo_only", {
+            clientId, phone: maskPhoneForLog(phone),
+            campaignId: activeCampaignForLead.id,
+          });
+        }
       } else {
         // Sem campanha ativa no período → prompt padrão
         console.log("[campaign-routing] no_active_campaign", {
