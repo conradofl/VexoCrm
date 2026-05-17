@@ -44,7 +44,6 @@ import {
 } from "./userAccessScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
 import { initializeRedisChat, getChatMemory, setSupabaseClient } from "./hardcoded-chatbot.js";
-import { extractConversationBriefing } from "./hardcoded-chatbot-extractor.js";
 import {
   bufferMessage,
   resolveMessageContent,

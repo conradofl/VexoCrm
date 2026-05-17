@@ -43,7 +43,6 @@ import {
 } from "../userAccessScope.js";
 import { whatsappSessionManager } from "../whatsapp.js";
 import { initializeRedisChat, getChatMemory, setSupabaseClient } from "../hardcoded-chatbot.js";
-import { extractConversationBriefing } from "../hardcoded-chatbot-extractor.js";
 import { parseStoredHistorico } from "../leads-outlier-schema.js";
 import {
   bufferMessage,
@@ -3873,7 +3872,10 @@ export function registerAllDomainRoutes(app) {
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
     const lifecycleStatus = scheduledFor ? "scheduled" : "active";
     const campaignPromptId = normalizeString(req.body?.campaignPromptId) || null;
-    const campaignMode = ["disparo", "agente"].includes(req.body?.mode) ? req.body.mode : "disparo";
+    if (!["disparo", "agente"].includes(req.body?.mode)) {
+      return sendError(res, 400, "INVALID_BODY", "mode é obrigatório e deve ser 'disparo' ou 'agente'");
+    }
+    const campaignMode = req.body.mode;
     const analyticsMetaWithDispatch = {
       ...analyticsMeta,
       message: campaignMessage,
@@ -5678,35 +5680,10 @@ export function registerAllDomainRoutes(app) {
                   classificacao: aiResponse.classificacao,
                 });
 
-                let briefingMsg;
-                if (aiBriefing) {
-                  briefingMsg = aiBriefing;
-                } else {
-                  // Fallback genérico — funciona para qualquer tenant
-                  // Exibe todos os campos coletados em dados, sem depender de campos Outlier-específicos
-                  const dados = aiResponse._dados || aiResponse.dados || {};
-                  const FIELD_LABELS = {
-                    nome: "Nome", interesse: "Interesse", objetivo: "Objetivo",
-                    cidade: "Cidade", estado: "Estado", credito: "Crédito",
-                    parcela: "Parcela", prazo: "Prazo", lance_entrada_fgts: "FGTS/Lance",
-                    melhor_horario: "Melhor horário", tipo: "Tipo", tipo_instalacao: "Local de instalação",
-                    conta_luz_faixa: "Conta de luz", credito_faixa: "Faixa de crédito",
-                  };
-                  const dadosLines = Object.entries(dados)
-                    .filter(([, v]) => v != null && v !== "")
-                    .map(([k, v]) => `• ${FIELD_LABELS[k] || k}: ${v}`)
-                    .join("\n");
-                  if (dadosLines) {
-                    briefingMsg = [
-                      `🎯 *Lead qualificado — ${clientId}*`,
-                      `📱 Contato: ${phone}`,
-                      `🌡️ Temperatura: ${aiResponse.classificacao || "Não informado"}`,
-                      ``,
-                      `📋 *Dados coletados:*`,
-                      dadosLines,
-                    ].join("\n");
-                  }
+                if (!aiBriefing) {
+                  console.error("[chatbot-webhook] Briefing IA falhou — prompt 'extrato' não configurado para clientId:", clientId);
                 }
+                const briefingMsg = aiBriefing;
 
                 if (briefingMsg) {
                   await fetch(evolutionUrl, {
@@ -5881,7 +5858,6 @@ export function registerAllDomainRoutes(app) {
         return;
       }
   
-      // Tenta briefing via IA com prompt "extrato" do banco; fallback para determinístico
       const parsedHistory = parseStoredHistorico(conversation.historico);
       const aiBriefing = await extractBriefingWithAI({
         supabase,
@@ -5892,26 +5868,11 @@ export function registerAllDomainRoutes(app) {
         classificacao: conversation.status,
       });
 
-      if (aiBriefing) {
-        return res.json({ success: true, conversationId: conversation.id, briefing: aiBriefing, source: "ai" });
+      if (!aiBriefing) {
+        return sendError(res, 500, "BRIEFING_UNAVAILABLE", "Prompt 'extrato' não configurado ou IA indisponível");
       }
 
-      const briefingResult = extractConversationBriefing({
-        phone,
-        clientId,
-        collectedData: conversation.dados,
-        conversationStatus: conversation.status_conversa,
-        qualificationStatus: conversation.status,
-        startedAt: conversation.created_at,
-        finishedAt: conversation.created_at,
-      });
-
-      res.json({
-        success: true,
-        conversationId: conversation.id,
-        briefing: briefingResult.briefing,
-        source: "deterministic",
-      });
+      res.json({ success: true, conversationId: conversation.id, briefing: aiBriefing, source: "ai" });
     } catch (error) {
       console.error("[hardcoded-extract] Error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
