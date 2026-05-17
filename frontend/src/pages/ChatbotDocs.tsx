@@ -697,45 +697,6 @@ function CampaignSequenceViewer() {
   );
 }
 
-// ─── Campanhas: Métricas por Agente ──────────────────────────────────────────
-
-interface AgentMetric {
-  agentId: string;
-  agentName: string;
-  totalLeads: number;
-  converted: number;
-  conversionRate: number;
-  avgResponseMinutes: number | null;
-}
-
-function useAgentMetrics(clientId: string) {
-  const { isAuthenticated, getIdToken } = useAuth();
-
-  return useQuery({
-    queryKey: ["campaign-agent-metrics", clientId],
-    enabled: isAuthenticated && !!clientId,
-    queryFn: async (): Promise<AgentMetric[] | null> => {
-      const token = await getIdToken();
-      if (!token) throw new Error("Usuário não autenticado.");
-
-      const params = new URLSearchParams();
-      if (clientId) params.set("clientId", clientId);
-
-      const res = await fetchApi(`/api/campaigns/metrics/by-agent?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao carregar métricas"));
-
-      const data = await readApiJson<{ items?: AgentMetric[] }>(res, "agent_metrics");
-      return data.items ?? [];
-    },
-    retry: false,
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
 // ─── Painel de Métricas ao Vivo ───────────────────────────────────────────────
 
 interface ChatbotLead {
@@ -915,122 +876,6 @@ function LiveStatsPanel() {
           )}
         </>
       )}
-    </div>
-  );
-}
-
-function CampaignAgentMetrics() {
-  const { data: clients = [] } = useLeadClients();
-  const [clientId, setClientId] = useState("");
-  const { data: metrics, isLoading, error } = useAgentMetrics(clientId);
-
-  const apiNotReady = metrics === null || (error instanceof Error && error.message.includes("404"));
-
-  return (
-    <div className="space-y-4">
-      <div className="max-w-xs space-y-1.5">
-        <Label className="text-xs text-slate-500 dark:text-slate-400">Empresa</Label>
-        <Select value={clientId} onValueChange={setClientId}>
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue placeholder="Selecione a empresa" />
-          </SelectTrigger>
-          <SelectContent>
-            {clients.map((c) => (
-              <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {!clientId ? (
-        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
-          <p className="text-sm text-slate-400">Selecione uma empresa para ver as métricas.</p>
-        </div>
-      ) : apiNotReady ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/50 p-8 text-center dark:border-amber-800/40 dark:bg-amber-900/10">
-          <AlertCircle className="h-7 w-7 text-amber-400" />
-          <p className="font-medium text-amber-800 dark:text-amber-300">Endpoint ainda não disponível</p>
-          <p className="text-sm text-amber-700 dark:text-amber-400">
-            O Conrado ainda não publicou{" "}
-            <code className="rounded bg-amber-100 px-1 dark:bg-amber-800">
-              GET /api/campaigns/metrics/by-agent
-            </code>
-            . As métricas aparecerão aqui assim que a rota estiver no ar.
-          </p>
-        </div>
-      ) : error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50/50 p-6 text-center dark:border-red-800/40 dark:bg-red-900/10">
-          <p className="text-sm font-medium text-red-700 dark:text-red-400">Erro: {error.message}</p>
-        </div>
-      ) : isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
-          ))}
-        </div>
-      ) : metrics && metrics.length === 0 ? (
-        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
-          <p className="text-sm text-slate-400">Nenhuma métrica encontrada para esta empresa.</p>
-        </div>
-      ) : metrics ? (
-        <div className="space-y-2">
-          {metrics
-            .sort((a, b) => b.conversionRate - a.conversionRate)
-            .map((agent, i) => (
-              <div
-                key={agent.agentId}
-                className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3 dark:border-white/8 dark:bg-white/[0.02]"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                    {i + 1}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                      {agent.agentName}
-                    </p>
-                    <p className="text-[11px] text-slate-400 font-mono">{agent.agentId}</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-4 text-center">
-                  <div>
-                    <p className="text-lg font-extrabold text-slate-800 dark:text-slate-100">{agent.totalLeads}</p>
-                    <p className="text-[10px] text-slate-400">Leads</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400">{agent.converted}</p>
-                    <p className="text-[10px] text-slate-400">Convertidos</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-extrabold text-indigo-600 dark:text-indigo-400">
-                      {(agent.conversionRate * 100).toFixed(1)}%
-                    </p>
-                    <p className="text-[10px] text-slate-400">Taxa</p>
-                  </div>
-                  {agent.avgResponseMinutes !== null && (
-                    <div>
-                      <p className="text-lg font-extrabold text-amber-600 dark:text-amber-400">
-                        {agent.avgResponseMinutes}min
-                      </p>
-                      <p className="text-[10px] text-slate-400">Resp. média</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Barra de progresso */}
-                <div className="hidden w-28 sm:block">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500"
-                      style={{ width: `${Math.min(100, agent.conversionRate * 100)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1215,20 +1060,6 @@ export default function ChatbotDocs() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <TrendingUp className="h-4 w-4 text-emerald-500" />
-                    Métricas de Conversão por Agente
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-                    Taxa de conversão, volume de leads e tempo médio de resposta por consultor.
-                  </p>
-                  <CampaignAgentMetrics />
-                </CardContent>
-              </Card>
             </div>
           </TabsContent>
         </Tabs>
