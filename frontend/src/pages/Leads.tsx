@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CalendarClock, Database, FileSpreadsheet, Filter, RefreshCw, SendHorizontal } from "lucide-react";
 import { useLeads, type LeadRow } from "@/hooks/useLeads";
 import { useCampaignLeads, useCampanhas } from "@/hooks/useCampanhas";
+import { useChatbotTemplates } from "@/hooks/useChatbotTemplates";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -20,19 +21,19 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 import { EmptyState } from "@/components/EmptyState";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 
-const COLUMNS = [
+const BASE_COLUMNS = [
   { key: "telefone", label: "Telefone" },
   { key: "nome", label: "Nome" },
-  { key: "tipo_cliente", label: "Perfil" },
-  { key: "faixa_consumo", label: "Consumo" },
-  { key: "cidade", label: "Cidade" },
-  { key: "estado", label: "Estado" },
+] as const;
+
+const META_COLUMNS = [
+  { key: "spin_fase", label: "Fase SPIN" },
   { key: "status", label: "Status" },
-  { key: "data_hora", label: "Data e Hora" },
-  { key: "qualificacao", label: "Qualificacao" },
+  { key: "qualificacao", label: "Qualificação" },
   { key: "created_at", label: "Criado em" },
 ] as const;
-const COLUMN_OPTIONS = COLUMNS.map((column) => ({ value: column.key, label: column.label }));
+
+type ColumnDef = { key: string; label: string };
 
 interface LeadsProps {
   fixedClientId?: string;
@@ -74,10 +75,10 @@ export default function Leads({
   const rows = useMemo(() => data ?? [], [data]);
   const selectedClient = crmClient?.selectedClient || null;
   const selectedClientName = fixedClientName || selectedClient?.name || effectiveClientId;
-  const [selectedColumn, setSelectedColumn] = useState<(typeof COLUMNS)[number]["key"]>("nome");
   const [filterTerm, setFilterTerm] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const { data: campaigns = [], error: campaignsError } = useCampanhas(effectiveClientId || undefined);
+  const { data: templates = [] } = useChatbotTemplates(effectiveClientId || null);
   const {
     data: campaignLeads = [],
     isLoading: campaignLeadsLoading,
@@ -85,6 +86,18 @@ export default function Leads({
   } = useCampaignLeads(
     selectedCampaignId || undefined,
   );
+
+  // Colunas dinâmicas: base + campos do template do cliente + meta
+  const columns = useMemo((): ColumnDef[] => {
+    const clientTemplate = templates.find((t) => t.client_id === effectiveClientId);
+    const template = clientTemplate ?? templates.find((t) => t.is_builtin) ?? null;
+    const dataFieldCols: ColumnDef[] = template
+      ? template.data_fields.map((f) => ({ key: f.key, label: f.label }))
+      : [];
+    return [...BASE_COLUMNS, ...dataFieldCols, ...META_COLUMNS];
+  }, [templates, effectiveClientId]);
+
+  const [selectedColumn, setSelectedColumn] = useState("nome");
 
   useEffect(() => {
     setSelectedCampaignId("");
@@ -101,29 +114,18 @@ export default function Leads({
     [campaigns, selectedCampaignId],
   );
   const sourceRows = useMemo(() => {
-    if (selectedCampaignId) {
-      return campaignLeads;
-    }
-
-    if (campaigns.length > 0) {
-      return [];
-    }
-
+    if (selectedCampaignId) return campaignLeads;
     return rows;
-  }, [campaignLeads, campaigns.length, rows, selectedCampaignId]);
+  }, [campaignLeads, rows, selectedCampaignId]);
 
   const filteredRows = useMemo(() => {
     const normalizedTerm = filterTerm.trim().toLowerCase();
-
-    return sourceRows.filter((row) => {
-      const matchesColumn =
-        !normalizedTerm ||
-        formatCell(row[selectedColumn as keyof LeadRow], selectedColumn)
-          .toLowerCase()
-          .includes(normalizedTerm);
-
-      return matchesColumn;
-    });
+    return sourceRows.filter((row) =>
+      !normalizedTerm ||
+      formatCell(row[selectedColumn as keyof LeadRow], selectedColumn)
+        .toLowerCase()
+        .includes(normalizedTerm)
+    );
   }, [filterTerm, selectedColumn, sourceRows]);
 
   return (
@@ -192,14 +194,14 @@ export default function Leads({
                       <Filter className="h-3.5 w-3.5" />
                       Filtrar por coluna
                     </p>
-                    <Select value={selectedColumn} onValueChange={(value) => setSelectedColumn(value as (typeof COLUMNS)[number]["key"])}>
+                    <Select value={selectedColumn} onValueChange={setSelectedColumn}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {COLUMN_OPTIONS.map((column) => (
-                          <SelectItem key={column.value} value={column.value}>
-                            {column.label}
+                        {columns.map((col) => (
+                          <SelectItem key={col.key} value={col.key}>
+                            {col.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -213,7 +215,7 @@ export default function Leads({
                     <Input
                       value={filterTerm}
                       onChange={(e) => setFilterTerm(e.target.value)}
-                      placeholder={`Buscar em ${COLUMN_OPTIONS.find((column) => column.value === selectedColumn)?.label || "leads"}`}
+                      placeholder={`Buscar em ${columns.find((c) => c.key === selectedColumn)?.label || "leads"}`}
                     />
                   </div>
                 </div>
@@ -285,20 +287,13 @@ export default function Leads({
                   </div>
                 )}
 
-                {campaigns.length > 0 && !selectedCampaignId ? (
-                  <EmptyState
-                    title="Selecione uma campanha"
-                    description="Os leads ficam organizados por campanha. Clique em uma das caixas acima para abrir a lista correta."
-                  />
-                ) : null}
-
                 {selectedCampaignId && !campaignLeadsLoading && campaignLeads.length === 0 ? (
                   <EmptyState
-                    message="Nenhum lead vinculado a essa campanha no momento. Se ela ainda nao disparou, os leads aparecerao depois do primeiro envio."
+                    message="Nenhum lead vinculado a essa campanha no momento."
                   />
                 ) : null}
 
-                {(!campaigns.length || selectedCampaignId) && (
+                {(
                   <div className="space-y-3">
                     {activeCampaign && (
                       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-slate-950">
@@ -313,17 +308,17 @@ export default function Leads({
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            {COLUMNS.map((column) => (
-                              <TableHead key={column.key}>{column.label}</TableHead>
+                            {columns.map((col) => (
+                              <TableHead key={col.key}>{col.label}</TableHead>
                             ))}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {filteredRows.map((row) => (
                             <TableRow key={row.id}>
-                              {COLUMNS.map((column) => (
-                                <TableCell key={column.key} className="max-w-[240px] truncate">
-                                  {formatCell(row[column.key as keyof LeadRow], column.key)}
+                              {columns.map((col) => (
+                                <TableCell key={col.key} className="max-w-[240px] truncate">
+                                  {formatCell(row[col.key as keyof LeadRow], col.key)}
                                 </TableCell>
                               ))}
                             </TableRow>
