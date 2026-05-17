@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Archive,
   Building2,
+  Info,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -73,6 +74,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -632,6 +634,21 @@ function Metric({
   );
 }
 
+function InfoTip({ text }: { text: string }) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Info className="inline h-3 w-3 cursor-help text-muted-foreground opacity-60 hover:opacity-100" />
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs text-xs">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 const DISPATCH_STATUS_LABELS: Record<CampaignDispatch["status"], string> = {
   draft: "Rascunho",
   scheduled: "Agendado",
@@ -659,7 +676,10 @@ function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
   return (
     <div className="mt-3 rounded-xl border border-border/60 bg-black/20 p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Disparos</p>
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+          Disparos
+          <InfoTip text="Cada disparo envia os passos configurados (textos/imagens) para os leads da campanha. Você pode criar vários disparos com conteúdos diferentes e acioná-los manualmente quando quiser." />
+        </p>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
             <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
@@ -1923,7 +1943,9 @@ export default function LeadImports({
             <CardContent className="space-y-6 p-6">
               <div>
                 <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Criar Nova Campanha</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Crie um registro real na base de campanhas usando uma empresa e uma importacao existente.</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Configure a campanha aqui. Após criada, vá até <strong>Campanhas Enviadas</strong> → card da campanha → botão <strong>Disparos</strong> para criar e acionar os envios.
+                </p>
               </div>
 
               {dispatchStatus && (
@@ -1963,7 +1985,10 @@ export default function LeadImports({
 
                 {/* Seletor de modo — ocupa linha inteira */}
                 <div className="space-y-2 md:col-span-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Modo da Campanha</p>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+                    Modo da Campanha
+                    <InfoTip text="Define o comportamento do chatbot quando o lead responder ao disparo. O disparo em si é configurado depois, no painel 'Disparos' do card da campanha." />
+                  </p>
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
@@ -1998,12 +2023,18 @@ export default function LeadImports({
                 {campaignMode === "agente" && (
                   <>
                     <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Início do período ativo</p>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+                        Início do período ativo
+                        <InfoTip text="A partir desta data/hora, leads que responderem terão o chatbot respondendo com o prompt de campanha em vez do padrão." />
+                      </p>
                       <Input type="datetime-local" className={darkFieldClass} value={campaignStartsAt} onChange={(e) => setCampaignStartsAt(e.target.value)} />
                       <p className="text-xs text-muted-foreground">Chatbot usa prompt de campanha a partir desta data.</p>
                     </div>
                     <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Fim do período ativo</p>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+                        Fim do período ativo
+                        <InfoTip text="Após esta data o lead volta automaticamente ao fluxo padrão de qualificação, sem precisar de nenhuma ação manual." />
+                      </p>
                       <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
                       <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
                     </div>
