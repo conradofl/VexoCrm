@@ -85,7 +85,7 @@ import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
 import { useChatbotTemplates } from "@/hooks/useChatbotTemplates";
-import { useCampaignPrompts } from "@/hooks/useCampaignPrompts";
+import { useCampaignPrompts, useSaveCampaignPrompt } from "@/hooks/useCampaignPrompts";
 
 type SheetTab = "dados" | "campanha" | "disparo-direto" | "pendentes" | "enviadas" | "agendamentos";
 type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
@@ -1099,6 +1099,91 @@ function DispatchManagerTab({
         )}
       </div>
     </>
+  );
+}
+
+interface CampaignPromptFieldProps {
+  clientId: string;
+  campaignPrompts: Array<{ id: string; name: string; content: string }>;
+  campaignPromptId: string;
+  setCampaignPromptId: (id: string) => void;
+  darkFieldClass: string;
+  darkSelectContentClass: string;
+  darkSelectItemClass: string;
+}
+
+function CampaignPromptField({
+  clientId,
+  campaignPrompts,
+  campaignPromptId,
+  setCampaignPromptId,
+  darkFieldClass,
+  darkSelectContentClass,
+  darkSelectItemClass,
+}: CampaignPromptFieldProps) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newContent, setNewContent] = useState("");
+  const savePrompt = useSaveCampaignPrompt(clientId);
+
+  const handleSave = async () => {
+    if (!newName.trim() || !newContent.trim()) return;
+    const saved = await savePrompt.mutateAsync({ name: newName.trim(), content: newContent.trim() });
+    if (saved?.id) setCampaignPromptId(saved.id);
+    setNewName("");
+    setNewContent("");
+    setCreating(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+        Prompt de campanha (IA)
+        <InfoTip text="Prompt usado pelo chatbot quando o lead responder durante o período ativo desta campanha." />
+      </p>
+      <Select value={campaignPromptId || "none"} onValueChange={(v) => setCampaignPromptId(v === "none" ? "" : v)}>
+        <SelectTrigger className={darkFieldClass}>
+          <SelectValue placeholder="Prompt padrão de campanha" />
+        </SelectTrigger>
+        <SelectContent className={darkSelectContentClass}>
+          <SelectItem value="none" className={darkSelectItemClass}>Prompt padrão de campanha</SelectItem>
+          {campaignPrompts.map((p) => (
+            <SelectItem key={p.id} value={p.id} className={darkSelectItemClass}>{p.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!creating ? (
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="text-xs text-cyan-600 hover:underline dark:text-cyan-400"
+        >
+          + Criar novo prompt
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-xl border border-slate-200/80 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+          <Input
+            placeholder="Nome do prompt (ex: Black Friday)"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            className={darkFieldClass}
+          />
+          <Textarea
+            placeholder="Conteúdo do prompt de campanha..."
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            rows={5}
+            className={darkFieldClass}
+          />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleSave} disabled={savePrompt.isPending || !newName.trim() || !newContent.trim()}>
+              {savePrompt.isPending ? "Salvando..." : "Salvar"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setCreating(false)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2494,26 +2579,15 @@ export default function LeadImports({
                       <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
                       <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
                     </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-                        Prompt de campanha
-                        <InfoTip text="Selecione o prompt de IA que o chatbot vai usar quando leads responderem nesta campanha. Crie e gerencie prompts no Editor de Prompts." />
-                      </p>
-                      <Select value={campaignPromptId} onValueChange={setCampaignPromptId}>
-                        <SelectTrigger className={darkFieldClass}>
-                          <SelectValue placeholder="Prompt padrão de campanha" />
-                        </SelectTrigger>
-                        <SelectContent className={darkSelectContentClass}>
-                          <SelectItem value="" className={darkSelectItemClass}>Prompt padrão de campanha</SelectItem>
-                          {campaignPrompts.map((p) => (
-                            <SelectItem key={p.id} value={p.id} className={darkSelectItemClass}>{p.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {campaignPrompts.length === 0 && (
-                        <p className="text-xs text-muted-foreground">Nenhum prompt criado. Acesse o Editor de Prompts para criar.</p>
-                      )}
-                    </div>
+                    <CampaignPromptField
+                      clientId={selectedClientId}
+                      campaignPrompts={campaignPrompts}
+                      campaignPromptId={campaignPromptId}
+                      setCampaignPromptId={setCampaignPromptId}
+                      darkFieldClass={darkFieldClass}
+                      darkSelectContentClass={darkSelectContentClass}
+                      darkSelectItemClass={darkSelectItemClass}
+                    />
                   </>
                 )}
                 <div className="space-y-2">
