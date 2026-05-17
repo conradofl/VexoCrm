@@ -4418,7 +4418,7 @@ export function registerAllDomainRoutes(app) {
     try {
       const { data: dispatch, error: fetchErr } = await supabase
         .from("campaign_dispatches")
-        .select("*, campaigns(id, name, client_id, import_id, analytics_meta, webhook_url, webhook_token)")
+        .select("*")
         .eq("id", dispatchId)
         .single();
       if (fetchErr || !dispatch) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
@@ -4427,7 +4427,13 @@ export function registerAllDomainRoutes(app) {
         return sendError(res, 409, "DISPATCH_DONE", "Dispatch already completed");
       }
 
-      const campaign = dispatch.campaigns;
+      const { data: campaign, error: campErr } = await supabase
+        .from("campaigns")
+        .select("id, name, client_id, import_id, analytics_meta, webhook_url, webhook_token")
+        .eq("id", dispatch.campaign_id)
+        .single();
+      if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
 
