@@ -733,10 +733,8 @@ export default function LeadImports({
   const [directImageError, setDirectImageError] = useState<string | null>(null);
   const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
-  const [scheduledFor, setScheduledFor] = useState("");
   const [campaignStartsAt, setCampaignStartsAt] = useState("");
   const [campaignEndsAt, setCampaignEndsAt] = useState("");
-  const [dispatchLimit, setDispatchLimit] = useState("");
   const [campaignMessage, setCampaignMessage] = useState("");
   const [campaignImage, setCampaignImage] = useState<CampaignImageAsset | null>(null);
   const [campaignImageCaption, setCampaignImageCaption] = useState("");
@@ -1202,23 +1200,6 @@ export default function LeadImports({
     // Text content is validated via validateSequenceForSubmit (simple + advanced).
     // Advanced mode uses step texts only; backend fills legacy message from the first text step.
 
-    const parsedLimit = dispatchLimit.trim() ? Number(dispatchLimit) : undefined;
-    if (parsedLimit !== undefined && (!Number.isFinite(parsedLimit) || parsedLimit <= 0 || !Number.isInteger(parsedLimit))) {
-      setDispatchStatus("Informe uma quantidade valida por lote usando apenas numeros inteiros.");
-      return;
-    }
-
-    const scheduledDate = getValidDate(scheduledFor);
-    if (scheduledFor && !scheduledDate) {
-      setDispatchStatus("Informe uma data e hora validas para o agendamento.");
-      return;
-    }
-
-    if (scheduledDate && scheduledDate.getTime() < Date.now() - 60_000) {
-      setDispatchStatus("Escolha uma data futura para agendar a campanha.");
-      return;
-    }
-
     const sequence = getCurrentSequenceForSubmit();
     const sequenceError = validateSequenceForSubmit(sequence);
     if (sequenceError) {
@@ -1233,8 +1214,6 @@ export default function LeadImports({
       name: campaignName.trim(),
       clientId: selectedClientId,
       importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
-      limitPerRun: parsedLimit ?? 50,
-      scheduledFor: scheduledDate?.toISOString() ?? null,
       startsAt: campaignStartsAt ? campaignLocalDateTimeToUtcIso(campaignStartsAt) : null,
       endsAt: campaignEndsAt ? campaignLocalDateTimeToUtcIso(campaignEndsAt) : null,
       analyticsMeta: {
@@ -1249,8 +1228,6 @@ export default function LeadImports({
     console.info("[campaigns-ui] create_campaign_start", {
       clientId: campaignPayload.clientId,
       importId: campaignPayload.importId,
-      scheduledFor: campaignPayload.scheduledFor,
-      limitPerRun: campaignPayload.limitPerRun,
       sequenceSteps: sequence.length,
       hasImage: Boolean(campaignImage),
     });
@@ -1982,13 +1959,6 @@ export default function LeadImports({
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Data e hora da campanha</p>
-                  <Input type="datetime-local" className={darkFieldClass} value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} />
-                  <p className="text-xs text-muted-foreground">
-                    Deixe em branco para manter a campanha na fila sem data definida.
-                  </p>
-                </div>
-                <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Início do período ativo</p>
                   <Input type="datetime-local" className={darkFieldClass} value={campaignStartsAt} onChange={(e) => setCampaignStartsAt(e.target.value)} />
                   <p className="text-xs text-muted-foreground">Chatbot usa prompt de campanha a partir desta data.</p>
@@ -2003,22 +1973,6 @@ export default function LeadImports({
                   <div className={cn("flex h-10 items-center rounded-md px-3 font-mono text-sm text-slate-500 dark:text-white/62", darkFieldClass)}>
                     {campaignPendingLabel}
                   </div>
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Limite por lote</p>
-                  <Input
-                    type="number"
-                    min="1"
-                    step="1"
-                    inputMode="numeric"
-                    placeholder="Ex: 100"
-                    className={darkFieldClass}
-                    value={dispatchLimit}
-                    onChange={(e) => setDispatchLimit(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Em branco, a campanha sera criada com o lote padrao de 50 leads por execucao.
-                  </p>
                 </div>
               </div>
 
