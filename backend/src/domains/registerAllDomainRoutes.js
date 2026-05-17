@@ -4418,7 +4418,7 @@ export function registerAllDomainRoutes(app) {
     try {
       const { data: dispatch, error: fetchErr } = await supabase
         .from("campaign_dispatches")
-        .select("*, campaigns(id, name, client_id, phones, import_id, analytics_meta, webhook_url, webhook_token)")
+        .select("*, campaigns(id, name, client_id, import_id, analytics_meta, webhook_url, webhook_token)")
         .eq("id", dispatchId)
         .single();
       if (fetchErr || !dispatch) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
