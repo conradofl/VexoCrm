@@ -112,12 +112,17 @@ type CampaignActionDialogState =
     }
   | null;
 
+type TriggerConfirmState = {
+  campaign: Campaign;
+  leadCount: number | null;
+} | null;
+
 const INTERNAL_TABS: Array<{ id: SheetTab; label: string }> = [
   { id: "dados", label: "Dados Gerais" },
   { id: "pendentes", label: "Leads Pendentes" },
   { id: "campanha", label: "Nova Campanha" },
   { id: "disparo-direto", label: "Disparo Direto" },
-  { id: "enviadas", label: "Campanhas Enviadas" },
+  { id: "enviadas", label: "Campanhas" },
   { id: "agendamentos", label: "Agendamentos" },
 ];
 
@@ -775,7 +780,9 @@ export default function LeadImports({
   const [selectedImportId, setSelectedImportId] = useState(ALL_IMPORTS_VALUE);
   const [importsPage, setImportsPage] = useState(1);
   const [campaignActionDialog, setCampaignActionDialog] = useState<CampaignActionDialogState>(null);
+  const [triggerConfirm, setTriggerConfirm] = useState<TriggerConfirmState>(null);
   const [expandedDispatchCampaignId, setExpandedDispatchCampaignId] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<{ imported: number; skipped: number; errors: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const campaignImageInputRef = useRef<HTMLInputElement | null>(null);
   const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1187,6 +1194,10 @@ export default function LeadImports({
       });
       setImportPreview(response.preview);
       setSelectedImportId(response.item.id);
+      const imported = response.preview.filter((r) => r.imported).length;
+      const skipped = response.preview.filter((r) => !r.imported && !r.skipReason?.toLowerCase().includes("erro")).length;
+      const errors = response.preview.filter((r) => !r.imported && r.skipReason?.toLowerCase().includes("erro")).length;
+      setImportSummary({ imported, skipped, errors });
       await Promise.allSettled([refetch(), refetchPending()]);
     } catch (error) {
       console.error("[lead-imports-ui] import_failed", {
@@ -1257,10 +1268,7 @@ export default function LeadImports({
     try {
       const createdCampaign = await createCampaign.mutateAsync(campaignPayload);
 
-      setDispatchStatus(`Campanha ${campaignName.trim()} criada com sucesso.`);
       setCampaignName("");
-      setScheduledFor("");
-      setDispatchLimit("");
       setCampaignMessage("");
       setCampaignImage(null);
       setCampaignImageCaption("");
@@ -1273,8 +1281,10 @@ export default function LeadImports({
       setAiStyle("");
       setSegmentation(defaultSegmentation);
       setSelectedImportId(ALL_IMPORTS_VALUE);
-      setActiveTab("agendamentos");
       await refetchCampaigns();
+      setExpandedDispatchCampaignId(createdCampaign.id);
+      setActiveTab("enviadas");
+      setDispatchStatus(`Campanha "${campaignName.trim()}" criada. Agora crie um Disparo abaixo para enviar.`);
       console.info("[campaigns-ui] create_campaign_success", {
         campaignId: createdCampaign.id,
         clientId: createdCampaign.client_id,
@@ -1292,7 +1302,8 @@ export default function LeadImports({
     }
   }
 
-  async function handleTriggerCampaign(campaign: Campaign) {
+  async function executeTriggerCampaign(campaign: Campaign) {
+    setTriggerConfirm(null);
     try {
       const result = await triggerCampaign.mutateAsync(campaign.id);
       if (result.failureCount > 0 && result.successCount > 0) {
@@ -1359,6 +1370,11 @@ export default function LeadImports({
     } catch (error) {
       setDirectDispatchStatus(error instanceof Error ? error.message : "Falha no disparo direto.");
     }
+  }
+
+  function handleTriggerCampaign(campaign: Campaign) {
+    const leadCount = pendingData?.pendingCount ?? null;
+    setTriggerConfirm({ campaign, leadCount });
   }
 
   async function handleToggleCampaignStatus(campaign: Campaign) {
@@ -1433,6 +1449,41 @@ export default function LeadImports({
               }
             >
               {campaignActionDialog?.action === "archive" ? "Arquivar" : "Apagar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(triggerConfirm)} onOpenChange={(open) => (!open ? setTriggerConfirm(null) : null)}>
+        <AlertDialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-primary" />
+              Confirmar disparo
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <span className="block font-semibold text-foreground">{triggerConfirm?.campaign.name}</span>
+              {triggerConfirm?.leadCount != null && triggerConfirm.leadCount > 0 ? (
+                <span className="block">
+                  Esta ação enviará mensagens para <strong className="text-foreground">{triggerConfirm.leadCount} lead{triggerConfirm.leadCount !== 1 ? "s" : ""} pendente{triggerConfirm.leadCount !== 1 ? "s" : ""}</strong> desta campanha.
+                </span>
+              ) : (
+                <span className="block">Esta ação enviará mensagens para os leads pendentes desta campanha.</span>
+              )}
+              <span className="block">
+                Modo: <strong className="text-foreground">{triggerConfirm?.campaign.mode === "agente" ? "Com Agente IA" : "Só Disparo"}</strong>
+              </span>
+              <span className="block text-amber-400">Esta ação não pode ser desfeita.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => triggerConfirm && void executeTriggerCampaign(triggerConfirm.campaign)}
+              disabled={triggerCampaign.isPending}
+            >
+              <Zap className="mr-2 h-4 w-4" />
+              {triggerCampaign.isPending ? "Disparando..." : "Confirmar disparo"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1519,7 +1570,22 @@ export default function LeadImports({
                     </div>
                   </div>
 
-                  {selectedFile && (
+                  {importSummary && (
+                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 p-4">
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />
+                      <div className="flex flex-wrap gap-4 font-mono text-sm">
+                        <span className="font-bold text-primary">{importSummary.imported} importados</span>
+                        {importSummary.skipped > 0 && (
+                          <span className="text-amber-400">{importSummary.skipped} duplicados ignorados</span>
+                        )}
+                        {importSummary.errors > 0 && (
+                          <span className="text-destructive">{importSummary.errors} erros</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedFile && !importSummary && (
                     <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/78 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                       <p>Arquivo: {selectedFile.name}</p>
                       <p>Linhas lidas: {parsedRows.length}</p>
@@ -2775,11 +2841,16 @@ export default function LeadImports({
                           </div>
                         ) : null}
                       </div>
-                      <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
-                        {getCampaignStatusView(campaign.status).label}
-                      </span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={cn("rounded-md border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
+                          {getCampaignStatusView(campaign.status).label}
+                        </span>
+                        <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.mode === "agente" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" : "border-border/50 text-muted-foreground")}>
+                          {campaign.mode === "agente" ? "Agente IA" : "Só Disparo"}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => void handleTriggerCampaign(campaign)} disabled={!canCampaignBeDispatched(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary disabled:cursor-not-allowed disabled:opacity-45">
+                        <button type="button" onClick={() => handleTriggerCampaign(campaign)} disabled={!canCampaignBeDispatched(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-primary disabled:cursor-not-allowed disabled:opacity-45">
                           <Zap className="h-4 w-4" />
                         </button>
                         <button type="button" onClick={() => void handleToggleCampaignStatus(campaign)} disabled={!canPauseCampaign(campaign.status) && !canResumeCampaign(campaign.status)} className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/40 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:bg-white/[0.05] hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-45">
