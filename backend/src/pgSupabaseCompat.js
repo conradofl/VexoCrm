@@ -167,7 +167,7 @@ class PgQueryBuilder {
 
   select(columns, options) {
     if (this.mode === "insert" || this.mode === "update" || this.mode === "upsert") {
-      this.returningColumns = columns;
+      this.returningColumns = columns ?? "*";
       return this;
     }
     this.mode = "select";
