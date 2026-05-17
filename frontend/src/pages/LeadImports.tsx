@@ -1124,11 +1124,11 @@ function CampaignPromptField({
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newContent, setNewContent] = useState("");
-  const savePrompt = useSaveCampaignPrompt(clientId);
+  const savePrompt = useSaveCampaignPrompt();
 
   const handleSave = async () => {
-    if (!newName.trim() || !newContent.trim()) return;
-    const saved = await savePrompt.mutateAsync({ name: newName.trim(), content: newContent.trim() });
+    if (!newName.trim() || !newContent.trim() || !clientId) return;
+    const saved = await savePrompt.mutateAsync({ clientId, name: newName.trim(), content: newContent.trim() });
     if (saved?.id) setCampaignPromptId(saved.id);
     setNewName("");
     setNewContent("");
