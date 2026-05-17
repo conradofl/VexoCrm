@@ -4231,16 +4231,17 @@ export function registerAllDomainRoutes(app) {
     const webhookUrl = campaign.webhook_url || null;
     const webhookToken = campaign.webhook_token || null;
 
-    // Obtém lista de leads da campanha (phones direto ou via import_id)
+    // Obtém lista de leads da campanha via lead_import_items
     let leads = [];
-    if (Array.isArray(campaign.phones) && campaign.phones.length > 0) {
-      leads = campaign.phones.map((p) => ({ telefone: String(p).trim() }));
-    } else if (campaign.import_id) {
-      const { data: importedLeads } = await db
-        .from(`leads_${clientId}`)
+    {
+      let query = db
+        .from("lead_import_items")
         .select("nome, telefone")
-        .eq("import_id", campaign.import_id);
-      leads = importedLeads || [];
+        .eq("client_id", clientId)
+        .eq("imported", true);
+      if (campaign.import_id) query = query.eq("import_id", campaign.import_id);
+      const { data: importedLeads } = await query;
+      leads = (importedLeads || []).filter((r) => r.telefone);
     }
 
     if (leads.length === 0) {
