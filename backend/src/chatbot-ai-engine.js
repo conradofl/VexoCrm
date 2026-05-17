@@ -724,7 +724,8 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   ]);
 
   if (!dynamicPrompt) {
-    console.error("[chatbot-ai] PROMPT NOT FOUND in DB", { clientId, promptType });
+    console.error("[chatbot-ai] PROMPT NOT FOUND in DB — chatbot silenciado", { clientId, promptType });
+    return null;
   }
   if (!template) {
     console.warn("[chatbot-ai] TEMPLATE NOT FOUND in DB", { clientId, baseModelKey });
@@ -733,7 +734,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   // Garante que todas as colunas do template existam na tabela (fire-and-forget nos erros)
   await ensureTemplateColumns(supabase, leadsTable, template?.data_fields);
 
-  const basePromptText = dynamicPrompt || `Você é um assistente de qualificação de leads da ${clientId}. Colete as informações necessárias e responda sempre em JSON válido com os campos: mensagem, status_conversa, dados, classificacao, finalizado, spin_fase.`;
+  const basePromptText = dynamicPrompt;
 
   const fieldContext = buildFieldContext(template);
   const baseSystemPrompt = fieldContext
