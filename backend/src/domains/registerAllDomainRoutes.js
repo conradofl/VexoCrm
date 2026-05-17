@@ -5730,6 +5730,44 @@ export function registerAllDomainRoutes(app) {
   });
   
   /**
+   * POST /api/chatbot-test — endpoint síncrono para simulador de conversa no painel
+   * Processa a mensagem diretamente (sem buffer, sem Evolution) e retorna a resposta da IA.
+   */
+  app.post("/api/chatbot-test", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = normalizeTenantKey(body.clientId ?? body.client_id);
+    const phone = sanitizePhone(body.phone) || "5500000000000";
+    const message = normalizeString(body.message);
+
+    if (!clientId) return sendError(res, 400, "MISSING_CLIENT_ID", "clientId obrigatório");
+    if (!message) return sendError(res, 400, "MISSING_MESSAGE", "message obrigatório");
+
+    try {
+      const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
+      const chatbotModel = tenantSettings?.chatbot_model;
+
+      const aiResponse = await processBatch({
+        clientId,
+        phone,
+        messages: [{ text: message, type: "text" }],
+        supabase,
+        model: chatbotModel,
+        promptType: "padrao",
+        campaignPromptId: null,
+      });
+
+      if (!aiResponse?.mensagem) {
+        return res.json({ success: true, response: null, reason: "Prompt não configurado ou chatbot silenciado para este cliente." });
+      }
+
+      res.json({ success: true, response: aiResponse.mensagem, meta: { classificacao: aiResponse.classificacao, spin_fase: aiResponse.spin_fase, finalizado: aiResponse.finalizado } });
+    } catch (err) {
+      sendError(res, 500, "CHATBOT_TEST_FAILED", err instanceof Error ? err.message : "Erro interno");
+    }
+  });
+
+  /**
    * GET /api/hardcoded-chat-leads
    * Lista leads do chatbot hardcoded para o Kanban
    * Retorna por status_conversa e step atual

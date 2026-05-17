@@ -721,16 +721,16 @@ function TabTeste({ clientId }: { clientId: string }) {
     setLoading(true);
     try {
       const token = await getIdToken();
-      const res = await fetchApi(`/api/hardcoded-chat-webhook?clientId=${encodeURIComponent(clientId)}`, {
+      const res = await fetchApi("/api/chatbot-test", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ phone, message: userMsg }),
+        body: JSON.stringify({ clientId, phone, message: userMsg }),
       });
       if (res.ok) {
-        const data = await readApiJson<{ chatbotResponse?: { message?: string } }>(res, "chatbot_test");
-        const botMsg = data?.chatbotResponse?.message;
+        const data = await readApiJson<{ response?: string | null; reason?: string }>(res, "chatbot_test");
+        const botMsg = data?.response;
         if (botMsg) setConversation((c) => [...c, { role: "bot", text: botMsg }]);
-        else setConversation((c) => [...c, { role: "bot", text: "(sem resposta — verifique se o chatbot está ativo e com prompt configurado)" }]);
+        else setConversation((c) => [...c, { role: "bot", text: `⚠️ ${data?.reason ?? "Sem resposta — verifique se o prompt padrão está configurado."}` }]);
       } else {
         const err = await readApiErrorMessage(res, "Erro");
         setConversation((c) => [...c, { role: "bot", text: `Erro: ${err}` }]);
