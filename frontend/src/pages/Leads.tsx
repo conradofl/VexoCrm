@@ -77,6 +77,7 @@ export default function Leads({
   const selectedClientName = fixedClientName || selectedClient?.name || effectiveClientId;
   const [filterTerm, setFilterTerm] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [originFilter, setOriginFilter] = useState<string>("all"); // "all" | "campanha" | "organico" | "trafego_pago" | "whatsapp_ads" | "indicacao"
   const { data: campaigns = [], error: campaignsError } = useCampanhas(effectiveClientId || undefined);
   const { data: templates = [] } = useChatbotTemplates(effectiveClientId || null);
   const {
@@ -120,13 +121,17 @@ export default function Leads({
 
   const filteredRows = useMemo(() => {
     const normalizedTerm = filterTerm.trim().toLowerCase();
-    return sourceRows.filter((row) =>
-      !normalizedTerm ||
-      formatCell(row[selectedColumn as keyof LeadRow], selectedColumn)
-        .toLowerCase()
-        .includes(normalizedTerm)
-    );
-  }, [filterTerm, selectedColumn, sourceRows]);
+    return sourceRows.filter((row) => {
+      const matchesText = !normalizedTerm ||
+        formatCell(row[selectedColumn as keyof LeadRow], selectedColumn)
+          .toLowerCase()
+          .includes(normalizedTerm);
+      const matchesOrigin = originFilter === "all" ||
+        (row as Record<string, unknown>).lead_source === originFilter ||
+        (originFilter === "campanha" && !!(row as Record<string, unknown>).source_campaign_id);
+      return matchesText && matchesOrigin;
+    });
+  }, [filterTerm, selectedColumn, sourceRows, originFilter]);
 
   return (
     <PageShell
@@ -188,7 +193,7 @@ export default function Leads({
 
             {effectiveClientId && !isLoading && !error && rows.length > 0 && (
               <div className="space-y-4">
-                <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-slate-950 lg:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-slate-950 lg:grid-cols-[220px_minmax(0,1fr)_200px]">
                   <div className="space-y-2">
                     <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                       <Filter className="h-3.5 w-3.5" />
@@ -217,6 +222,25 @@ export default function Leads({
                       onChange={(e) => setFilterTerm(e.target.value)}
                       placeholder={`Buscar em ${columns.find((c) => c.key === selectedColumn)?.label || "leads"}`}
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Origem do lead
+                    </p>
+                    <Select value={originFilter} onValueChange={setOriginFilter}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas as origens</SelectItem>
+                        <SelectItem value="campanha">Campanha</SelectItem>
+                        <SelectItem value="organico">Orgânico</SelectItem>
+                        <SelectItem value="trafego_pago">Tráfego pago</SelectItem>
+                        <SelectItem value="whatsapp_ads">WhatsApp Ads</SelectItem>
+                        <SelectItem value="indicacao">Indicação</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

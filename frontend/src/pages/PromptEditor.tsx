@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FileEdit, Save, Eye, Code2, Clock, AlertTriangle } from "lucide-react";
+import { FileEdit, Save, Eye, Code2, Clock, AlertTriangle, Plus, Trash2, Megaphone } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/use-toast";
 import { useLeadClients } from "@/hooks/useLeadClients";
 import { usePrompt, useSavePrompt, type PromptType } from "@/hooks/usePrompts";
+import { useCampaignPrompts, useSaveCampaignPrompt, useDeleteCampaignPrompt } from "@/hooks/useCampaignPrompts";
 import { useAuth } from "@/contexts/AuthContext";
 
 const PROMPT_TYPES: { value: PromptType; label: string; description: string }[] = [
@@ -192,6 +193,128 @@ function PromptEditorCard({ clientId, type }: PromptEditorCardProps) {
   );
 }
 
+function CampaignPromptsSection({ clientId }: { clientId: string }) {
+  const { data: prompts = [], isLoading } = useCampaignPrompts(clientId);
+  const save = useSaveCampaignPrompt();
+  const del = useDeleteCampaignPrompt();
+  const [editing, setEditing] = useState<{ id?: string; name: string; content: string } | null>(null);
+
+  const handleSave = async () => {
+    if (!editing?.name.trim()) return;
+    try {
+      await save.mutateAsync({ clientId, name: editing.name.trim(), content: editing.content });
+      setEditing(null);
+      toast({ title: "Prompt salvo" });
+    } catch (e) {
+      toast({ title: "Erro ao salvar", description: e instanceof Error ? e.message : "Erro", variant: "destructive" });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await del.mutateAsync({ id, clientId });
+      toast({ title: "Prompt removido" });
+    } catch (e) {
+      toast({ title: "Erro ao remover", description: e instanceof Error ? e.message : "Erro", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Megaphone className="h-4 w-4 text-indigo-500" />
+            <CardTitle className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Prompts de Campanha
+            </CardTitle>
+          </div>
+          <Button size="sm" variant="outline" className="gap-1.5 h-7 text-xs" onClick={() => setEditing({ name: "", content: "" })}>
+            <Plus className="h-3.5 w-3.5" /> Novo prompt
+          </Button>
+        </div>
+        <p className="text-xs text-slate-400 mt-1">Crie prompts nomeados para usar em campanhas específicas.</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading && <p className="text-sm text-slate-400">Carregando...</p>}
+
+        {!isLoading && prompts.length === 0 && !editing && (
+          <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-slate-200 dark:border-white/10">
+            <p className="text-sm text-slate-400">Nenhum prompt de campanha criado.</p>
+          </div>
+        )}
+
+        {prompts.map((p) => (
+          <div key={p.id} className="rounded-lg border border-slate-200 dark:border-white/10 p-3 space-y-2">
+            {editing?.id === p.id ? (
+              <>
+                <input
+                  className="w-full rounded border border-slate-200 dark:border-white/10 bg-transparent px-2 py-1 text-sm font-medium outline-none"
+                  value={editing.name}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="Nome do prompt"
+                />
+                <Textarea
+                  value={editing.content}
+                  onChange={(e) => setEditing({ ...editing, content: e.target.value })}
+                  className="min-h-[200px] font-mono text-xs"
+                  placeholder="Conteúdo do prompt..."
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(null)}>Cancelar</Button>
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={handleSave} disabled={save.isPending}>
+                    <Save className="h-3 w-3" />{save.isPending ? "Salvando..." : "Salvar"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">{p.name}</p>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditing({ id: p.id, name: p.name, content: p.content })}>
+                      <Code2 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs text-red-500" onClick={() => handleDelete(p.id)} disabled={del.isPending}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 font-mono line-clamp-2">{p.content || "Sem conteúdo"}</p>
+                <p className="text-[10px] text-slate-300 dark:text-slate-600">Atualizado: {formatDate(p.updated_at)}</p>
+              </>
+            )}
+          </div>
+        ))}
+
+        {editing && !editing.id && (
+          <div className="rounded-lg border border-indigo-200 dark:border-indigo-800 p-3 space-y-2">
+            <input
+              className="w-full rounded border border-slate-200 dark:border-white/10 bg-transparent px-2 py-1 text-sm font-medium outline-none"
+              value={editing.name}
+              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              placeholder="Nome do prompt (ex: Consórcio Imóvel, Solar Residencial...)"
+              autoFocus
+            />
+            <Textarea
+              value={editing.content}
+              onChange={(e) => setEditing({ ...editing, content: e.target.value })}
+              className="min-h-[200px] font-mono text-xs"
+              placeholder="Conteúdo do prompt..."
+            />
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(null)}>Cancelar</Button>
+              <Button size="sm" className="h-7 text-xs gap-1" onClick={handleSave} disabled={save.isPending}>
+                <Save className="h-3 w-3" />{save.isPending ? "Salvando..." : "Criar prompt"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function PromptEditor() {
   const { canAccessInternalPage } = useAuth();
   const { data: clients = [], isLoading: loadingClients } = useLeadClients();
@@ -307,6 +430,8 @@ export default function PromptEditor() {
           <p className="text-sm text-slate-400">Selecione uma empresa para editar o prompt.</p>
         </div>
       )}
+
+      {selectedClientId && <CampaignPromptsSection clientId={selectedClientId} />}
     </PageShell>
   );
 }
