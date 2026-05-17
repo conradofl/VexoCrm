@@ -1277,13 +1277,11 @@ export default function LeadImports({
   );
   const sentCampaigns = useMemo(
     () =>
-      [...filteredCampaigns.filter((campaign) => Boolean(campaign.last_triggered_at))].sort(
-        (a, b) => {
-          const left = getValidDate(b.last_triggered_at) || getValidDate(b.created_at) || new Date(0);
-          const right = getValidDate(a.last_triggered_at) || getValidDate(a.created_at) || new Date(0);
-          return left.getTime() - right.getTime();
-        },
-      ),
+      [...filteredCampaigns].sort((a, b) => {
+        const left = getValidDate(b.last_triggered_at) || getValidDate(b.created_at) || new Date(0);
+        const right = getValidDate(a.last_triggered_at) || getValidDate(a.created_at) || new Date(0);
+        return left.getTime() - right.getTime();
+      }),
     [filteredCampaigns],
   );
 
@@ -3047,8 +3045,8 @@ export default function LeadImports({
             <ErrorMessage message={campaignsError ? (campaignsError as Error).message : null} variant="banner" />
             {!campaignsLoading && sentCampaigns.length === 0 ? (
               <EmptyState
-                title="Nenhuma campanha enviada"
-                description="As campanhas com disparo realizado aparecem aqui."
+                title="Nenhuma campanha encontrada"
+                description="Crie uma campanha na aba Nova Campanha para começar."
               />
             ) : null}
             <div className="grid gap-4 xl:grid-cols-3">
