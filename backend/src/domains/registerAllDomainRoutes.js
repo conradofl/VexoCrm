@@ -3873,6 +3873,7 @@ export function registerAllDomainRoutes(app) {
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
     const lifecycleStatus = scheduledFor ? "scheduled" : "active";
+    const campaignPromptId = normalizeString(req.body?.campaignPromptId) || null;
     const analyticsMetaWithDispatch = {
       ...analyticsMeta,
       message: campaignMessage,
@@ -3936,8 +3937,9 @@ export function registerAllDomainRoutes(app) {
           created_by_uid: req.authAccess?.uid || null,
           created_by_email: req.authAccess?.email || null,
           analytics_meta: analyticsMetaWithDispatch,
+          campaign_prompt_id: campaignPromptId,
         })
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id")
         .single();
   
       if (error) {
@@ -3998,6 +4000,7 @@ export function registerAllDomainRoutes(app) {
     if ("startsAt" in req.body) updates.starts_at = normalizeString(req.body?.startsAt) || null;
     if ("endsAt" in req.body) updates.ends_at = normalizeString(req.body?.endsAt) || null;
     if (req.body?.chatbotPromptType) updates.chatbot_prompt_type = normalizeString(req.body.chatbotPromptType);
+    if ("campaignPromptId" in req.body) updates.campaign_prompt_id = normalizeString(req.body.campaignPromptId) || null;
     if (["disparo", "agente"].includes(req.body?.mode)) updates.mode = req.body.mode;
     if (req.body?.archived === true) updates.archived_at = new Date().toISOString();
     if (req.body?.archived === false) updates.archived_at = null;
@@ -4840,6 +4843,61 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
+  // ── Campaign Prompts ──────────────────────────────────────────────────────
+  // GET /api/campaign-prompts — lista prompts de campanha do cliente
+  app.get("/api/campaign-prompts", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.query?.clientId));
+    if (!clientId) return;
+    try {
+      const { data, error } = await supabase
+        .from("campaign_prompts")
+        .select("id, client_id, name, content, updated_at, updated_by_email")
+        .eq("client_id", clientId)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      res.json({ prompts: data || [] });
+    } catch (err) {
+      sendError(res, 500, "CAMPAIGN_PROMPTS_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // PUT /api/campaign-prompts — cria ou atualiza prompt de campanha por nome
+  app.put("/api/campaign-prompts", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = resolveAuthorizedClientId(req, res, normalizeTenantKey(body.clientId ?? body.client_id));
+    if (!clientId) return;
+    const name = normalizeString(body.name);
+    const content = typeof body.content === "string" ? body.content : "";
+    if (!name) return sendError(res, 400, "INVALID_BODY", "name is required");
+    try {
+      const { data, error } = await supabase
+        .from("campaign_prompts")
+        .upsert({ client_id: clientId, name, content, updated_at: new Date().toISOString(), updated_by_email: req.authAccess?.email ?? null }, { onConflict: "client_id,name" })
+        .select("id, client_id, name, content, updated_at, updated_by_email")
+        .single();
+      if (error) throw error;
+      res.json({ prompt: data });
+    } catch (err) {
+      sendError(res, 500, "CAMPAIGN_PROMPT_SAVE_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // DELETE /api/campaign-prompts/:id — remove prompt de campanha
+  app.delete("/api/campaign-prompts/:id", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params.id);
+    if (!id) return sendError(res, 400, "MISSING_ID", "Missing prompt id");
+    try {
+      const { error } = await supabase.from("campaign_prompts").delete().eq("id", id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err) {
+      sendError(res, 500, "CAMPAIGN_PROMPT_DELETE_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // POST /api/leads/hydrate — consolida lead_import_items → leads_{clientId}
   // Garante que TODO lead que recebeu mensagem de campanha exista na tabela de leads do CRM,
   // mesmo que nunca tenha respondido. Idempotente — pode rodar múltiplas vezes sem duplicar.
@@ -5387,6 +5445,7 @@ export function registerAllDomainRoutes(app) {
     // ── Campaign routing ─────────────────────────────────────────────────
     let chatbotPromptTypeOverride = null; // "campanha" | "padrao" | null
     let activeCampaignForLead = null;
+    let campaignPromptIdOverride = null;
 
     try {
       const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
@@ -5442,12 +5501,14 @@ export function registerAllDomainRoutes(app) {
       } else if (activeCampaignForLead) {
         // Lead dentro do período de uma campanha ativa
         if (activeCampaignForLead.mode === "agente") {
-          // Modo agente → chatbot usa prompt de campanha
-          chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
+          // Modo agente → usa prompt específico da campanha (campaign_prompts) ou fallback tipo
+          campaignPromptIdOverride = activeCampaignForLead.campaignPromptId || null;
+          chatbotPromptTypeOverride = campaignPromptIdOverride ? null : (activeCampaignForLead.chatbotPromptType || "campanha");
           console.log("[campaign-routing] active_period_agente", {
             clientId, phone: maskPhoneForLog(phone),
             campaignId: activeCampaignForLead.id,
             campaignName: activeCampaignForLead.name,
+            campaignPromptId: campaignPromptIdOverride,
             promptType: chatbotPromptTypeOverride,
             endsAt: activeCampaignForLead.endsAt,
           });
@@ -5515,6 +5576,7 @@ export function registerAllDomainRoutes(app) {
             supabase,
             model: chatbotModel,
             promptType,
+            campaignPromptId: campaignPromptIdOverride,
           });
   
           if (!aiResponse?.mensagem) return;

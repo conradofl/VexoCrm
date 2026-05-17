@@ -412,6 +412,20 @@ async function fetchDynamicPrompt(supabase, clientId, type) {
   }
 }
 
+async function fetchCampaignPromptById(supabase, id) {
+  if (!supabase || !id) return null;
+  try {
+    const { data } = await supabase
+      .from("campaign_prompts")
+      .select("content")
+      .eq("id", id)
+      .maybeSingle();
+    return data?.content || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Busca template do banco por templateKey, com fallback para builtin (client_id IS NULL).
  * Retorna { data_fields, required_fields, classification, agent_name, agent_role } ou null.
@@ -641,7 +655,7 @@ function hoursSince(isoDate) {
   return (Date.now() - new Date(isoDate).getTime()) / 3_600_000;
 }
 
-export async function processBatch({ clientId, phone, messages, supabase, model = "outlier", promptType: promptTypeOverride = null }) {
+export async function processBatch({ clientId, phone, messages, supabase, model = "outlier", promptType: promptTypeOverride = null, campaignPromptId = null }) {
   const modelConfig = getChatbotModel(model);
   const leadsTable = chatbotLeadsTable(clientId);
 
@@ -703,7 +717,9 @@ export async function processBatch({ clientId, phone, messages, supabase, model 
   const baseModelKey = model.startsWith("campanha_") ? model.replace("campanha_", "") : model;
 
   const [dynamicPrompt, template] = await Promise.all([
-    fetchDynamicPrompt(supabase, clientId, promptType),
+    campaignPromptId
+      ? fetchCampaignPromptById(supabase, campaignPromptId)
+      : fetchDynamicPrompt(supabase, clientId, promptType),
     fetchTemplate(supabase, clientId, baseModelKey),
   ]);
 

@@ -121,6 +121,10 @@ export interface CreateCampaignPayload {
   importId?: string | null;
   limitPerRun?: number;
   scheduledFor?: string | null;
+  mode?: "disparo" | "agente";
+  campaignPromptId?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
   analyticsMeta?: CampaignAnalyticsMeta;
 }
 

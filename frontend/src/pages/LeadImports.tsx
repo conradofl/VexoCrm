@@ -85,6 +85,7 @@ import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
 import { useChatbotTemplates } from "@/hooks/useChatbotTemplates";
+import { useCampaignPrompts } from "@/hooks/useCampaignPrompts";
 
 type SheetTab = "dados" | "campanha" | "disparo-direto" | "pendentes" | "enviadas" | "agendamentos";
 type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
@@ -1112,6 +1113,7 @@ export default function LeadImports({
   const crmClient = useOptionalCrmClient();
   const selectedClientId = fixedClientId || crmClient?.selectedClientId || "";
   const { data: chatbotTemplates = [] } = useChatbotTemplates(selectedClientId || null);
+  const { data: campaignPrompts = [] } = useCampaignPrompts(selectedClientId || null);
 
   // Colunas dinâmicas para a tabela de Leads Pendentes
   const pendingTableColumns = useMemo(() => {
@@ -1147,6 +1149,7 @@ export default function LeadImports({
   const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
   const [campaignMode, setCampaignMode] = useState<"disparo" | "agente">("disparo");
+  const [campaignPromptId, setCampaignPromptId] = useState("");
   const [campaignStartsAt, setCampaignStartsAt] = useState("");
   const [campaignEndsAt, setCampaignEndsAt] = useState("");
   const [campaignMessage, setCampaignMessage] = useState("");
@@ -1633,6 +1636,7 @@ export default function LeadImports({
       clientId: selectedClientId,
       importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
       mode: campaignMode,
+      campaignPromptId: campaignPromptId || null,
       startsAt: campaignStartsAt ? campaignLocalDateTimeToUtcIso(campaignStartsAt) : null,
       endsAt: campaignEndsAt ? campaignLocalDateTimeToUtcIso(campaignEndsAt) : null,
       analyticsMeta: {
@@ -2471,7 +2475,7 @@ export default function LeadImports({
                   </div>
                 </div>
 
-                {/* Período ativo — só aparece no modo agente */}
+                {/* Período ativo e prompt — só aparecem no modo agente */}
                 {campaignMode === "agente" && (
                   <>
                     <div className="space-y-2">
@@ -2489,6 +2493,26 @@ export default function LeadImports({
                       </p>
                       <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
                       <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+                        Prompt de campanha
+                        <InfoTip text="Selecione o prompt de IA que o chatbot vai usar quando leads responderem nesta campanha. Crie e gerencie prompts no Editor de Prompts." />
+                      </p>
+                      <Select value={campaignPromptId} onValueChange={setCampaignPromptId}>
+                        <SelectTrigger className={darkFieldClass}>
+                          <SelectValue placeholder="Prompt padrão de campanha" />
+                        </SelectTrigger>
+                        <SelectContent className={darkSelectContentClass}>
+                          <SelectItem value="" className={darkSelectItemClass}>Prompt padrão de campanha</SelectItem>
+                          {campaignPrompts.map((p) => (
+                            <SelectItem key={p.id} value={p.id} className={darkSelectItemClass}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {campaignPrompts.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Nenhum prompt criado. Acesse o Editor de Prompts para criar.</p>
+                      )}
                     </div>
                   </>
                 )}
