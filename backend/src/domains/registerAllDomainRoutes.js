@@ -3873,6 +3873,7 @@ export function registerAllDomainRoutes(app) {
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
     const lifecycleStatus = scheduledFor ? "scheduled" : "active";
     const campaignPromptId = normalizeString(req.body?.campaignPromptId) || null;
+    const campaignMode = ["disparo", "agente"].includes(req.body?.mode) ? req.body.mode : "disparo";
     const analyticsMetaWithDispatch = {
       ...analyticsMeta,
       message: campaignMessage,
@@ -3937,8 +3938,9 @@ export function registerAllDomainRoutes(app) {
           created_by_email: req.authAccess?.email || null,
           analytics_meta: analyticsMetaWithDispatch,
           campaign_prompt_id: campaignPromptId,
+          mode: campaignMode,
         })
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id, mode")
         .single();
   
       if (error) {
@@ -3955,8 +3957,9 @@ export function registerAllDomainRoutes(app) {
             status: lifecycleStatus,
             created_by_uid: req.authAccess?.uid || null,
             created_by_email: req.authAccess?.email || null,
+            mode: campaignMode,
           })
-            .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at")
+            .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, mode")
           .single();
         data = fallback.data;
         error = fallback.error;
