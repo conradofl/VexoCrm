@@ -7,11 +7,28 @@ export interface LeadRow {
   client_id: string;
   telefone: string | null;
   nome: string | null;
+  // colunas legadas (Infinie)
   tipo_cliente: string | null;
   faixa_consumo: string | null;
+  // colunas individuais do chatbot (normalizadas)
+  interesse: string | null;
+  objetivo: string | null;
   cidade: string | null;
   estado: string | null;
+  credito: string | null;
+  parcela: string | null;
+  prazo: string | null;
+  lance_entrada_fgts: string | null;
+  melhor_horario: string | null;
+  // Infinie-specific
+  conta_luz_faixa: string | null;
+  tipo: string | null;
+  // meta
+  spin_fase: string | null;
   status: string | null;
+  status_conversa: string | null;
+  finalizado: boolean | null;
+  dados: Record<string, unknown> | null;
   data_hora: string | null;
   qualificacao: string | null;
   created_at: string;
