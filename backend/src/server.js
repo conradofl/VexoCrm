@@ -4906,7 +4906,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       .order("created_at", { ascending: false }),
     supabase
       .from("campaigns")
-      .select("id, name, client_id, import_id, status, scheduled_for, last_triggered_at, archived_at, phones, analytics_meta, starts_at, ends_at, chatbot_prompt_type")
+      .select("id, name, client_id, import_id, status, scheduled_for, last_triggered_at, archived_at, phones, analytics_meta, starts_at, ends_at, chatbot_prompt_type, mode")
       .eq("client_id", clientId)
       .is("archived_at", null),
   ]);

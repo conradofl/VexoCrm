@@ -24,6 +24,7 @@ export interface Campaign {
   starts_at: string | null;
   ends_at: string | null;
   chatbot_prompt_type: string;
+  mode: "disparo" | "agente";
 }
 
 export interface CampaignDispatch {
@@ -140,6 +141,7 @@ export interface UpdateCampaignPayload {
   startsAt?: string | null;
   endsAt?: string | null;
   chatbotPromptType?: string;
+  mode?: "disparo" | "agente";
   archived?: boolean;
   analyticsMeta?: CampaignAnalyticsMeta;
 }
