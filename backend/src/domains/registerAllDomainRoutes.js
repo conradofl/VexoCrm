@@ -500,8 +500,7 @@ export function registerAllDomainRoutes(app) {
       req.body?.id ?? req.body?.tenantId ?? req.body?.clientId ?? name
     );
     const n8nSettings = req.body?.n8nSettings;
-    const VALID_SCHEMA_TYPES = new Set(["outlier", "infinie", "generico"]);
-    const schemaType = VALID_SCHEMA_TYPES.has(req.body?.chatbotModel) ? req.body.chatbotModel : "outlier";
+    const schemaType = normalizeTenantKey(req.body?.chatbotModel) || "generico";
   
     if (!name || name.length < 3) {
       sendError(res, 400, "INVALID_BODY", "Tenant name must have at least 3 characters");
@@ -4521,11 +4520,10 @@ export function registerAllDomainRoutes(app) {
           const campaignRoutingEnabled = process.env.ENABLE_CAMPAIGN_ROUTING === "true";
           if (campaignRoutingEnabled) {
             const tenantSettingsForRouting = await getLeadClientN8nSettings(clientId).catch(() => null);
-            const baseModel = tenantSettingsForRouting?.chatbot_model || "outlier";
+            const baseModel = tenantSettingsForRouting?.chatbot_model;
             const itemId = activeWaitCampaign.leadImportItem?.id;
             const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
-            const validBases = new Set(["outlier", "infinie"]);
-            const modelOverride = isFirst && validBases.has(baseModel) ? `campanha_${baseModel}` : undefined;
+            const modelOverride = isFirst && baseModel ? `campanha_${baseModel}` : undefined;
             if (isFirst) {
               await supabase
                 .from(leadsTableName(clientId))
@@ -5567,7 +5565,7 @@ export function registerAllDomainRoutes(app) {
             }
           }
 
-          const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model || "outlier";
+          const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model;
           const promptType = chatbotPromptTypeOverride || "padrao";
           const aiResponse = await processBatch({
             clientId,

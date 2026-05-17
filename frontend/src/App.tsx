@@ -30,11 +30,9 @@ import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
 import VexoSales from "./pages/VexoSales";
 import ChatbotKanban from "./pages/ChatbotKanban";
-import ChatbotConfig from "./pages/ChatbotConfig";
 import ChatbotDocs from "./pages/ChatbotDocs";
-import PromptEditor from "./pages/PromptEditor";
+import ChatbotSettings from "./pages/ChatbotSettings";
 import FollowupQueue from "./pages/FollowupQueue";
-import ChatbotTemplates from "./pages/ChatbotTemplates";
 
 const queryClient = new QueryClient();
 
@@ -172,13 +170,14 @@ const App = () => (
                 }
               />
               <Route
-                path="chatbot-config"
+                path="chatbot-settings"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
-                    <ChatbotConfig />
+                    <ChatbotSettings />
                   </ProtectedRoute>
                 }
               />
+              <Route path="chatbot-config" element={<Navigate to="/crm/chatbot-settings" replace />} />
               <Route
                 path="chatbot-docs"
                 element={
@@ -187,14 +186,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="prompt-editor"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
-                    <PromptEditor />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="prompt-editor" element={<Navigate to="/crm/chatbot-settings?tab=prompts" replace />} />
               <Route
                 path="followup"
                 element={
@@ -203,14 +195,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="chatbot-templates"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
-                    <ChatbotTemplates />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="chatbot-templates" element={<Navigate to="/crm/chatbot-settings?tab=template" replace />} />
               <Route
                 path="usuarios"
                 element={

@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
-import { useBuiltinTemplates } from "@/hooks/useChatbotTemplates";
+import { useBuiltinTemplates, useChatbotTemplates } from "@/hooks/useChatbotTemplates";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
@@ -64,6 +64,8 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
   const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
   const updateSettings = useUpdateLeadClientN8nSettings();
   const { data: builtinModels = [] } = useBuiltinTemplates();
+  const { data: clientTemplates = [] } = useChatbotTemplates(clientId);
+  const customModels = clientTemplates.filter((t) => !t.is_builtin);
 
   const handleToggleChatbot = async (value: boolean) => {
     setEnabled(value);
@@ -88,9 +90,12 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
     setModel(value);
     try {
       await updateSettings.mutateAsync({ tenantId: clientId, chatbotModel: value });
-      const label = builtinModels.find((m) => m.template_key === value)
-        ? `${builtinModels.find((m) => m.template_key === value)!.agent_name} — ${builtinModels.find((m) => m.template_key === value)!.display_name}`
-        : value;
+      const allModels = [
+        ...builtinModels,
+        ...customModels.map((m) => ({ template_key: m.template_key, agent_name: m.agent_name, display_name: m.display_name })),
+      ];
+      const found = allModels.find((m) => m.template_key === value);
+      const label = found ? `${found.agent_name} — ${found.display_name}` : value;
       toast({ title: "Modelo atualizado", description: `${clientName}: usando ${label}` });
     } catch (e) {
       setModel(previous);
@@ -204,6 +209,18 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
                     {m.agent_name} — {m.display_name}
                   </SelectItem>
                 ))}
+                {customModels.length > 0 && (
+                  <>
+                    <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Personalizados
+                    </div>
+                    {customModels.map((m) => (
+                      <SelectItem key={m.template_key} value={m.template_key} className="text-xs">
+                        {m.agent_name} — {m.display_name}
+                      </SelectItem>
+                    ))}
+                  </>
+                )}
               </SelectContent>
             </Select>
           </div>
