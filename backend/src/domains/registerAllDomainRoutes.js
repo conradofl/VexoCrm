@@ -3876,7 +3876,7 @@ export function registerAllDomainRoutes(app) {
         : {};
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
-    const lifecycleStatus = scheduledFor ? "scheduled" : "draft";
+    const lifecycleStatus = scheduledFor ? "scheduled" : "active";
     const analyticsMetaWithDispatch = {
       ...analyticsMeta,
       message: campaignMessage,
