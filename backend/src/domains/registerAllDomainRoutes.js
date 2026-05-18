@@ -4778,8 +4778,8 @@ export function registerAllDomainRoutes(app) {
     const clientId = normalizeTenantKey(req.query?.clientId);
     const type = normalizeString(req.query?.type);
     if (!clientId) return sendError(res, 400, "INVALID_QUERY", "Missing clientId");
-    if (!type || !["padrao", "campanha", "qualificar", "extrato"].includes(type)) {
-      return sendError(res, 400, "INVALID_QUERY", "type must be padrao, campanha, qualificar or extrato");
+    if (!type || !["padrao", "extrato"].includes(type)) {
+      return sendError(res, 400, "INVALID_QUERY", "type must be padrao or extrato");
     }
     try {
       const { data, error } = await supabase
@@ -4816,8 +4816,8 @@ export function registerAllDomainRoutes(app) {
     const type = normalizeString(body.type);
     const content = typeof body.content === "string" ? body.content.trim() : null;
     if (!clientId) return sendError(res, 400, "INVALID_BODY", "Missing clientId");
-    if (!type || !["padrao", "campanha", "qualificar", "extrato"].includes(type)) {
-      return sendError(res, 400, "INVALID_BODY", "type must be padrao, campanha, qualificar or extrato");
+    if (!type || !["padrao", "extrato"].includes(type)) {
+      return sendError(res, 400, "INVALID_BODY", "type must be padrao or extrato");
     }
     if (!content) return sendError(res, 400, "INVALID_BODY", "Missing content");
     try {
@@ -5492,10 +5492,17 @@ export function registerAllDomainRoutes(app) {
         // caso contrário silencia o chatbot (comportamento legado / modo "disparo")
         const waitCampaignIsAgente = activeWaitCampaign.mode === "agente";
         if (waitCampaignIsAgente && activeCampaignForLead) {
-          chatbotPromptTypeOverride = activeCampaignForLead.chatbotPromptType || "campanha";
+          campaignPromptIdOverride = activeCampaignForLead.campaignPromptId || null;
+          if (!campaignPromptIdOverride) {
+            console.error("[campaign-routing] campanha agente sem campaignPromptId — silenciando", {
+              clientId, campaignId: activeWaitCampaign.id,
+            });
+            res.json({ success: true, status: "skipped_no_campaign_prompt" });
+            return;
+          }
           console.log("[campaign-routing] wait_for_reply_agente_prompt", {
             clientId, phone: maskPhoneForLog(phone),
-            campaignId: activeWaitCampaign.id, promptType: chatbotPromptTypeOverride,
+            campaignId: activeWaitCampaign.id, campaignPromptId: campaignPromptIdOverride,
           });
         } else {
           res.json({ success: true, status: "skipped_disparo_only" });
@@ -5504,15 +5511,17 @@ export function registerAllDomainRoutes(app) {
       } else if (activeCampaignForLead) {
         // Lead dentro do período de uma campanha ativa
         if (activeCampaignForLead.mode === "agente") {
-          // Modo agente → usa prompt específico da campanha (campaign_prompts) ou fallback tipo
           campaignPromptIdOverride = activeCampaignForLead.campaignPromptId || null;
-          chatbotPromptTypeOverride = campaignPromptIdOverride ? null : (activeCampaignForLead.chatbotPromptType || "campanha");
+          if (!campaignPromptIdOverride) {
+            console.error("[campaign-routing] campanha agente sem campaignPromptId — usando prompt padrão", {
+              clientId, campaignId: activeCampaignForLead.id,
+            });
+          }
           console.log("[campaign-routing] active_period_agente", {
             clientId, phone: maskPhoneForLog(phone),
             campaignId: activeCampaignForLead.id,
             campaignName: activeCampaignForLead.name,
             campaignPromptId: campaignPromptIdOverride,
-            promptType: chatbotPromptTypeOverride,
             endsAt: activeCampaignForLead.endsAt,
           });
         } else {
