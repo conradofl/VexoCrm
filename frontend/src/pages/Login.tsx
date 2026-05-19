@@ -206,15 +206,6 @@ export default function Login() {
         {submitting ? "Entrando..." : "Entrar"}
       </Button>
 
-      <p className="text-center text-sm text-muted-foreground">
-        Ainda nao tem acesso?{" "}
-        <Link
-          to="/cadastro-cliente"
-          className="font-medium text-primary underline-offset-4 hover:underline"
-        >
-          Criar conta
-        </Link>
-      </p>
     </AuthLayout>
   );
 }
