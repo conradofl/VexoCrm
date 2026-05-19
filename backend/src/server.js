@@ -341,6 +341,11 @@ const INTERNAL_PAGE_KEYS = [
   "usuarios",
   "empresas",
   "campanhas",
+  "inteligencia-comercial",
+  "chatbot-kanban",
+  "chatbot-config",
+  "fila-de-followup",
+  "chatbot-docs",
 ];
 const ACCESS_SCOPE_KEYS = ["all_clients", "assigned_clients", "no_client_access"];
 const APPROVAL_LEVEL_KEYS = ["none", "operator", "supervisor", "manager", "director"];

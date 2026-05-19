@@ -7,6 +7,11 @@ export const INTERNAL_PAGE_ORDER = [
   "usuarios",
   "empresas",
   "campanhas",
+  "inteligencia-comercial",
+  "chatbot-kanban",
+  "chatbot-config",
+  "fila-de-followup",
+  "chatbot-docs",
 ] as const;
 
 export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];

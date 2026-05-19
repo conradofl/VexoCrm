@@ -156,6 +156,11 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   usuarios: "Usuarios",
   empresas: "Empresas",
   campanhas: "Campanhas",
+  "inteligencia-comercial": "Inteligencia Comercial",
+  "chatbot-kanban": "Chatbot Kanban",
+  "chatbot-config": "Configuracao do Chatbot",
+  "fila-de-followup": "Fila de Followup",
+  "chatbot-docs": "Chatbot Docs",
 };
 
 const CLIENT_PAGE_TABS = [
