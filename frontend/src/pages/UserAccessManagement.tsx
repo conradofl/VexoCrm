@@ -275,13 +275,9 @@ function buildAccessProfileDraft(profile?: AccessProfileRecord | null): AccessPr
 }
 
 const FALLBACK_ACCESS_PROFILE_DESCRIPTIONS: Record<string, string> = {
-  internal_admin: "Acesso total ao CRM e administracao do ambiente.",
-  internal_manager: "Gestao operacional com acesso ampliado aos modulos internos.",
-  internal_operator: "Operacao padrao do CRM para times internos.",
-  consultor: "Atende leads, acompanha conversas e opera a rotina comercial.",
-  gerente: "Gerencia operacao, acessos de usuarios e performance comercial.",
-  sdr: "Qualifica leads, conversa com contatos e alimenta a operacao.",
+  admin_vexo: "Acesso total ao CRM. Reservado aos administradores da Vexo.",
   gestor: "Libera usuarios, organiza empresas e conduz a operacao do CRM.",
+  operador: "Operacao padrao do CRM vinculada a um tenant.",
   parceiro: "Acompanha a operacao com leitura e conversa limitada no ambiente do cliente.",
   client_manager: "Tipo de cliente com acesso expandido ao portal.",
   client_operator: "Tipo de cliente operacional para uso diario.",
@@ -291,13 +287,9 @@ const FALLBACK_ACCESS_PROFILE_DESCRIPTIONS: Record<string, string> = {
 
 function buildFallbackAccessProfiles(): AccessProfileRecord[] {
   const fallbackKeys: AccessPreset[] = [
-    "internal_admin",
-    "internal_manager",
-    "internal_operator",
-    "consultor",
-    "gerente",
-    "sdr",
+    "admin_vexo",
     "gestor",
+    "operador",
     "parceiro",
     "client_manager",
     "client_operator",
@@ -320,7 +312,7 @@ function buildFallbackAccessProfiles(): AccessProfileRecord[] {
       internalPages: [...defaults.internalPages],
       allowedViews: [...defaults.allowedViews],
       isSystem: true,
-      isLocked: key === "internal_admin",
+      isLocked: key === "admin_vexo",
       createdAt: null,
       updatedAt: null,
     };
@@ -2124,7 +2116,7 @@ export default function UserAccessManagement() {
     >
       {!canEditUsers && (
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
-          Seu acesso esta em modo leitura. Apenas gestor, gerente ou admin interno podem criar usuarios, liberar cadastros e alterar permissoes.
+          Seu acesso esta em modo leitura. Apenas gestores podem criar usuarios, liberar cadastros e alterar permissoes.
         </div>
       )}
       <Dialog open={Boolean(actionFeedback)} onOpenChange={(open) => (!open ? clearActionFeedback() : null)}>
@@ -2429,11 +2421,18 @@ export default function UserAccessManagement() {
                       <SelectValue placeholder="Tipo de usuario" />
                     </SelectTrigger>
                     <SelectContent>
-                      {resolvedAccessProfiles.map((profile) => (
-                        <SelectItem key={profile.key} value={profile.key}>
-                          {profile.label}
-                        </SelectItem>
-                      ))}
+                      {resolvedAccessProfiles
+                        .filter((profile) => {
+                          if (profile.key === "pending" || profile.role !== "internal") return false;
+                          if (profile.key === "admin_vexo") return false;
+                          if (isAdminUser) return true;
+                          return profile.key === "operador";
+                        })
+                        .map((profile) => (
+                          <SelectItem key={profile.key} value={profile.key}>
+                            {profile.label}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                   <Select

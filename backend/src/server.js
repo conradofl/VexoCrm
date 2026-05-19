@@ -363,13 +363,9 @@ const ACCESS_PERMISSION_KEYS = [
   "users.manage",
 ];
 const ACCESS_PRESET_KEYS = [
-  "internal_admin",
-  "internal_manager",
-  "internal_operator",
-  "consultor",
-  "gerente",
-  "sdr",
+  "admin_vexo",
   "gestor",
+  "operador",
   "parceiro",
   "client_manager",
   "client_operator",
@@ -377,13 +373,9 @@ const ACCESS_PRESET_KEYS = [
   "pending",
 ];
 const ACCESS_PRESET_LABELS = {
-  internal_admin: "Admin interno",
-  internal_manager: "Gestor interno",
-  internal_operator: "Operacao interna",
-  consultor: "Consultor",
-  gerente: "Gerente",
-  sdr: "SDR",
+  admin_vexo: "Admin Vexo",
   gestor: "Gestor",
+  operador: "Operador",
   parceiro: "Parceiro",
   client_manager: "Gestor do cliente",
   client_operator: "Operador do cliente",
@@ -407,74 +399,12 @@ function isFixedAdminIdentity(identity = {}) {
 }
 
 const ACCESS_PRESET_DEFAULTS = {
-  internal_admin: {
+  admin_vexo: {
     role: "internal",
     scopeMode: "all_clients",
     approvalLevel: "director",
     permissions: [...ACCESS_PERMISSION_KEYS],
     internalPages: [...INTERNAL_PAGE_KEYS],
-    allowedViews: [],
-  },
-  internal_manager: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "manager",
-    permissions: [
-      "dashboard.view",
-      "leads.view",
-      "leads.export",
-      "imports.manage",
-      "whatsapp.view",
-      "whatsapp.reply",
-      "campaigns.manage",
-      "agente.view",
-      "users.view",
-      "users.manage",
-    ],
-    internalPages: [...INTERNAL_PAGE_KEYS],
-    allowedViews: [],
-  },
-  internal_operator: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: ["dashboard.view", "leads.view", "imports.manage", "whatsapp.view", "whatsapp.reply"],
-    internalPages: ["dashboard", "leads", "planilhas", "whatsapp"],
-    allowedViews: [],
-  },
-  consultor: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: ["dashboard.view", "leads.view", "whatsapp.view", "whatsapp.reply"],
-    internalPages: ["dashboard", "leads", "whatsapp"],
-    allowedViews: [],
-  },
-  gerente: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "manager",
-    permissions: [
-      "dashboard.view",
-      "leads.view",
-      "leads.export",
-      "imports.manage",
-      "whatsapp.view",
-      "whatsapp.reply",
-      "campaigns.manage",
-      "agente.view",
-      "users.view",
-      "users.manage",
-    ],
-    internalPages: ["dashboard", "leads", "planilhas", "whatsapp", "agente", "usuarios", "campanhas"],
-    allowedViews: [],
-  },
-  sdr: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: ["dashboard.view", "leads.view", "imports.manage", "whatsapp.view", "whatsapp.reply"],
-    internalPages: ["dashboard", "leads", "planilhas", "whatsapp"],
     allowedViews: [],
   },
   gestor: {
@@ -495,6 +425,14 @@ const ACCESS_PRESET_DEFAULTS = {
       "users.manage",
     ],
     internalPages: [...INTERNAL_PAGE_KEYS],
+    allowedViews: [],
+  },
+  operador: {
+    role: "internal",
+    scopeMode: "assigned_clients",
+    approvalLevel: "operator",
+    permissions: ["dashboard.view", "leads.view", "imports.manage", "whatsapp.view", "whatsapp.reply"],
+    internalPages: ["dashboard", "leads", "whatsapp"],
     allowedViews: [],
   },
   parceiro: {
@@ -548,9 +486,9 @@ const ACCESS_PRESET_DEFAULTS = {
 
 const SYSTEM_ACCESS_PROFILES = [
   {
-    key: "internal_admin",
-    label: ACCESS_PRESET_LABELS.internal_admin,
-    description: "Acesso total ao CRM e administracao do ambiente.",
+    key: "admin_vexo",
+    label: ACCESS_PRESET_LABELS.admin_vexo,
+    description: "Acesso total ao CRM. Reservado aos administradores da Vexo.",
     role: "internal",
     scopeMode: "all_clients",
     approvalLevel: "director",
@@ -561,71 +499,6 @@ const SYSTEM_ACCESS_PROFILES = [
     isLocked: true,
   },
   {
-    key: "internal_manager",
-    label: ACCESS_PRESET_LABELS.internal_manager,
-    description: "Gestao operacional com acesso ampliado aos modulos internos.",
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "manager",
-    permissions: [...ACCESS_PRESET_DEFAULTS.internal_manager.permissions],
-    internalPages: [...ACCESS_PRESET_DEFAULTS.internal_manager.internalPages],
-    allowedViews: [],
-    isSystem: true,
-    isLocked: false,
-  },
-  {
-    key: "internal_operator",
-    label: ACCESS_PRESET_LABELS.internal_operator,
-    description: "Operacao padrao do CRM para times internos.",
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: [...ACCESS_PRESET_DEFAULTS.internal_operator.permissions],
-    internalPages: [...ACCESS_PRESET_DEFAULTS.internal_operator.internalPages],
-    allowedViews: [],
-    isSystem: true,
-    isLocked: false,
-  },
-  {
-    key: "consultor",
-    label: ACCESS_PRESET_LABELS.consultor,
-    description: "Atende leads, acompanha conversas e opera a rotina comercial.",
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: [...ACCESS_PRESET_DEFAULTS.consultor.permissions],
-    internalPages: [...ACCESS_PRESET_DEFAULTS.consultor.internalPages],
-    allowedViews: [],
-    isSystem: true,
-    isLocked: false,
-  },
-  {
-    key: "gerente",
-    label: ACCESS_PRESET_LABELS.gerente,
-    description: "Gerencia operacao, acessos de usuarios e performance comercial.",
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "manager",
-    permissions: [...ACCESS_PRESET_DEFAULTS.gerente.permissions],
-    internalPages: [...ACCESS_PRESET_DEFAULTS.gerente.internalPages],
-    allowedViews: [],
-    isSystem: true,
-    isLocked: false,
-  },
-  {
-    key: "sdr",
-    label: ACCESS_PRESET_LABELS.sdr,
-    description: "Qualifica leads, conversa com contatos e alimenta a operacao.",
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: [...ACCESS_PRESET_DEFAULTS.sdr.permissions],
-    internalPages: [...ACCESS_PRESET_DEFAULTS.sdr.internalPages],
-    allowedViews: [],
-    isSystem: true,
-    isLocked: false,
-  },
-  {
     key: "gestor",
     label: ACCESS_PRESET_LABELS.gestor,
     description: "Libera usuarios, organiza empresas e conduz a operacao do CRM.",
@@ -634,6 +507,19 @@ const SYSTEM_ACCESS_PROFILES = [
     approvalLevel: "manager",
     permissions: [...ACCESS_PRESET_DEFAULTS.gestor.permissions],
     internalPages: [...ACCESS_PRESET_DEFAULTS.gestor.internalPages],
+    allowedViews: [],
+    isSystem: true,
+    isLocked: false,
+  },
+  {
+    key: "operador",
+    label: ACCESS_PRESET_LABELS.operador,
+    description: "Operacao padrao do CRM vinculada a um tenant.",
+    role: "internal",
+    scopeMode: "assigned_clients",
+    approvalLevel: "operator",
+    permissions: [...ACCESS_PRESET_DEFAULTS.operador.permissions],
+    internalPages: [...ACCESS_PRESET_DEFAULTS.operador.internalPages],
     allowedViews: [],
     isSystem: true,
     isLocked: false,
@@ -716,7 +602,7 @@ function getPresetFallbackKey(preset) {
     return "client_operator";
   }
 
-  return "internal_operator";
+  return "operador";
 }
 
 function normalizeRole(value) {
@@ -775,7 +661,7 @@ function isValidManagedApprovalLevelInput(value) {
 function getDefaultPresetForRole(role) {
   if (role === "client") return "client_operator";
   if (role === "pending") return "pending";
-  return "internal_operator";
+  return "operador";
 }
 
 function normalizeAccessPreset(value, role = "internal") {
@@ -798,13 +684,9 @@ function getAccessPresetLabel(preset) {
   if (!normalized) return "Tipo sem nome";
 
   const labels = {
-    internal_admin: "Admin interno",
-    internal_manager: "Gestor interno",
-    internal_operator: "Operacao interna",
-    consultor: "Consultor",
-    gerente: "Gerente",
-    sdr: "SDR",
+    admin_vexo: "Admin Vexo",
     gestor: "Gestor",
+    operador: "Operador",
     parceiro: "Parceiro",
     client_manager: "Gestor do cliente",
     client_operator: "Operador do cliente",
@@ -958,11 +840,11 @@ function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
     rawClaims.isAdmin ||
     rawClaims.admin ||
     rawClaims.is_admin ||
-    accessPreset === "internal_admin" ||
+    accessPreset === "admin_vexo" ||
     isFixedAdminIdentity(identity)
   );
   const role = isAdmin ? "internal" : requestedRole;
-  const normalizedPreset = isAdmin ? "internal_admin" : normalizeAccessPreset(accessPreset, role);
+  const normalizedPreset = isAdmin ? "admin_vexo" : normalizeAccessPreset(accessPreset, role);
   const scopeMode = isAdmin
     ? "all_clients"
     : normalizeScopeMode(rawClaims.scopeMode ?? rawClaims.tenantScope, role);
@@ -996,7 +878,7 @@ function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
     ? normalizeInternalPages(rawClaims.internalPages, role, isAdmin, normalizedPreset)
     : [];
   const permissions = isAdmin
-    ? [...buildPresetDefaults("internal_admin").permissions]
+    ? [...buildPresetDefaults("admin_vexo").permissions]
     : normalizePermissions(rawClaims.permissions, role, normalizedPreset);
 
   return {
@@ -3948,7 +3830,7 @@ function buildManagedClaims({
     };
   }
 
-  const isAdmin = normalizedPreset === "internal_admin";
+  const isAdmin = normalizedPreset === "admin_vexo";
   const resolvedScopeMode = isAdmin ? "all_clients" : normalizeScopeMode(scopeMode, normalizedRole);
   const normalizedPermissions = isAdmin
     ? [...ACCESS_PERMISSION_KEYS]
@@ -4064,7 +3946,7 @@ function normalizeAccessProfileRecord(input = {}) {
     };
   }
 
-  const isAdmin = key === "internal_admin";
+  const isAdmin = key === "admin_vexo";
 
   return {
     key,

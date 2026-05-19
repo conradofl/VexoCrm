@@ -134,11 +134,11 @@ function buildAccessProfile(user: User, claims: Record<string, unknown> = {}): A
     claims.isAdmin ||
       claims.admin ||
       claims.is_admin ||
-      accessPreset === "internal_admin" ||
+      accessPreset === "admin_vexo" ||
       isFixedAdminAccount(user.uid, user.email || claims.email || null)
   );
   const role = isAdmin ? "internal" : requestedRole;
-  const normalizedPreset = role === requestedRole ? accessPreset : normalizeAccessPreset("internal_admin", role);
+  const normalizedPreset = role === requestedRole ? accessPreset : normalizeAccessPreset("admin_vexo", role);
   const scopeMode = normalizeAccessScope(
     claims.scopeMode ?? claims.tenantScope ?? claims.clientScope,
     role
@@ -172,14 +172,14 @@ function buildAccessProfile(user: User, claims: Record<string, unknown> = {}): A
     email: user.email,
     role,
     isAdmin,
-    accessPreset: isAdmin ? "internal_admin" : normalizedPreset,
+    accessPreset: isAdmin ? "admin_vexo" : normalizedPreset,
     scopeMode: isAdmin ? "all_clients" : scopeMode,
     approvalLevel: isAdmin ? "director" : approvalLevel,
     clientId,
     clientIds: role === "pending" || scopeMode === "no_client_access" ? [] : clientIds,
     allowedViews,
     internalPages,
-    permissions: isAdmin ? [...buildPresetDefaults("internal_admin").permissions] : permissions,
+    permissions: isAdmin ? [...buildPresetDefaults("admin_vexo").permissions] : permissions,
     companyName,
   };
 }
@@ -311,7 +311,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
   const hasPermission = useCallback(
     (permission: AccessPermission) =>
-      isAdminUser || (permission !== "tenants.manage" && permissions.includes(permission)),
+      isAdminUser || permissions.includes(permission),
     [isAdminUser, permissions]
   );
   const defaultRoute = isPendingUser

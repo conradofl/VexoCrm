@@ -51,7 +51,7 @@ export function canManageTargetAccess(requesterAccess = {}, targetAccess = {}) {
     return false;
   }
 
-  if (targetAccess.isAdmin || targetAccess.accessPreset === "internal_admin") {
+  if (targetAccess.isAdmin || targetAccess.accessPreset === "admin_vexo") {
     return false;
   }
 
@@ -74,7 +74,7 @@ export function canAssignManagedAccess(requesterAccess = {}, managedAccess = {})
     return false;
   }
 
-  if (managedAccess.isAdmin || managedAccess.accessPreset === "internal_admin") {
+  if (managedAccess.isAdmin || managedAccess.accessPreset === "admin_vexo") {
     return false;
   }
 

@@ -32,13 +32,9 @@ export type AccessPermission =
   | "users.view"
   | "users.manage";
 export type SystemAccessPreset =
-  | "internal_admin"
-  | "internal_manager"
-  | "internal_operator"
-  | "consultor"
-  | "gerente"
-  | "sdr"
+  | "admin_vexo"
   | "gestor"
+  | "operador"
   | "parceiro"
   | "client_manager"
   | "client_operator"
@@ -73,13 +69,9 @@ export const ACCESS_PERMISSION_ORDER: AccessPermission[] = [
   "users.manage",
 ];
 export const ACCESS_PRESET_ORDER: AccessPreset[] = [
-  "internal_admin",
-  "internal_manager",
-  "internal_operator",
+  "admin_vexo",
   "gestor",
-  "gerente",
-  "consultor",
-  "sdr",
+  "operador",
   "parceiro",
   "client_manager",
   "client_operator",
@@ -88,10 +80,7 @@ export const ACCESS_PRESET_ORDER: AccessPreset[] = [
 ];
 
 export const USER_MANAGEMENT_PRESETS: AccessPreset[] = [
-  "internal_admin",
-  "internal_manager",
   "gestor",
-  "gerente",
 ];
 
 export const FIXED_ADMIN_ACCOUNTS = [
@@ -120,13 +109,9 @@ export const APPROVAL_LEVEL_LABELS: Record<ApprovalLevel, string> = {
 };
 
 export const ACCESS_PRESET_LABELS: Record<string, string> = {
-  internal_admin: "Admin interno",
-  internal_manager: "Gestor interno",
-  internal_operator: "Operacao interna",
-  consultor: "Consultor",
-  gerente: "Gerente",
-  sdr: "SDR",
+  admin_vexo: "Admin Vexo",
   gestor: "Gestor",
+  operador: "Operador",
   parceiro: "Parceiro",
   client_manager: "Gestor do cliente",
   client_operator: "Operador do cliente",
@@ -194,94 +179,12 @@ type PresetDefaults = {
 };
 
 const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
-  internal_admin: {
+  admin_vexo: {
     role: "internal",
     scopeMode: "all_clients",
     approvalLevel: "director",
     permissions: [...ACCESS_PERMISSION_ORDER],
     internalPages: [...INTERNAL_PAGE_ORDER],
-    allowedViews: [],
-  },
-  internal_manager: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "manager",
-    permissions: [
-      "dashboard.view",
-      "leads.view",
-      "leads.export",
-      "imports.manage",
-      "whatsapp.view",
-      "whatsapp.reply",
-      "campaigns.manage",
-      "agente.view",
-      "users.view",
-      "users.manage",
-    ],
-    internalPages: [
-      "dashboard",
-      "leads",
-      "planilhas",
-      "whatsapp",
-      "agente",
-      "usuarios",
-      "campanhas",
-    ],
-    allowedViews: [],
-  },
-  internal_operator: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: [
-      "dashboard.view",
-      "leads.view",
-      "imports.manage",
-      "whatsapp.view",
-      "whatsapp.reply",
-    ],
-    internalPages: ["dashboard", "leads", "planilhas", "whatsapp"],
-    allowedViews: [],
-  },
-  consultor: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: ["dashboard.view", "leads.view", "whatsapp.view", "whatsapp.reply"],
-    internalPages: ["dashboard", "leads", "whatsapp"],
-    allowedViews: [],
-  },
-  gerente: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "manager",
-    permissions: [
-      "dashboard.view",
-      "leads.view",
-      "leads.export",
-      "imports.manage",
-      "whatsapp.view",
-      "whatsapp.reply",
-      "campaigns.manage",
-      "agente.view",
-      "users.view",
-      "users.manage",
-    ],
-    internalPages: ["dashboard", "leads", "planilhas", "whatsapp", "agente", "usuarios", "campanhas"],
-    allowedViews: [],
-  },
-  sdr: {
-    role: "internal",
-    scopeMode: "assigned_clients",
-    approvalLevel: "operator",
-    permissions: [
-      "dashboard.view",
-      "leads.view",
-      "imports.manage",
-      "whatsapp.view",
-      "whatsapp.reply",
-    ],
-    internalPages: ["dashboard", "leads", "planilhas", "whatsapp"],
     allowedViews: [],
   },
   gestor: {
@@ -311,6 +214,20 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "empresas",
       "campanhas",
     ],
+    allowedViews: [],
+  },
+  operador: {
+    role: "internal",
+    scopeMode: "assigned_clients",
+    approvalLevel: "operator",
+    permissions: [
+      "dashboard.view",
+      "leads.view",
+      "imports.manage",
+      "whatsapp.view",
+      "whatsapp.reply",
+    ],
+    internalPages: ["dashboard", "leads", "whatsapp"],
     allowedViews: [],
   },
   parceiro: {
@@ -406,7 +323,7 @@ export function normalizeAccessRole(value: unknown): AccessRole {
 export function getDefaultPresetForRole(role: AccessRole): AccessPreset {
   if (role === "client") return "client_operator";
   if (role === "pending") return "pending";
-  return "internal_operator";
+  return "operador";
 }
 
 function getPresetFallbackKey(preset: string | null | undefined): SystemAccessPreset {
@@ -420,7 +337,7 @@ function getPresetFallbackKey(preset: string | null | undefined): SystemAccessPr
     return "client_operator";
   }
 
-  return "internal_operator";
+  return "operador";
 }
 
 export function normalizeAccessPreset(value: unknown, role: AccessRole = "internal"): AccessPreset {
