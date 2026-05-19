@@ -95,7 +95,7 @@ export const FIXED_ADMIN_ACCOUNTS = [
     uid: "IozfnQTmWHQAxopr3FyNb1SdYs52",
   },
   {
-    email: "econradofl@gmail.com",
+    email: "conradofl@gmail.com",
     uid: "pKpOKg3Fttf6AnYsTzZD7xjJLaN2",
   },
 ] as const;
