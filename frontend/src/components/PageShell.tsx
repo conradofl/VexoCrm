@@ -46,7 +46,7 @@ export function PageShell({
   const shouldShowGlobalClientSelector =
     showGlobalClientSelector &&
     crmClient &&
-    (crmClient.clients.length > 0 || crmClient.isLoading || Boolean(crmClient.selectedClientId));
+    (crmClient.clients.length > 1 || crmClient.isLoading || Boolean(crmClient.selectedClientId));
   const selectedClientFallback = crmClient?.selectedClientId
     ? {
         id: crmClient.selectedClientId,
