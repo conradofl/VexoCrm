@@ -306,7 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const canAccessInternalPage = useCallback(
     (page: InternalPage) =>
       isInternalUser &&
-      (isAdminUser || (page !== "empresas" && internalPages.includes(page))),
+      (isAdminUser || internalPages.includes(page)),
     [internalPages, isAdminUser, isInternalUser]
   );
   const hasPermission = useCallback(

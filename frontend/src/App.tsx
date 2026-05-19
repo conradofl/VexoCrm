@@ -172,7 +172,7 @@ const App = () => (
               <Route
                 path="chatbot-settings"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="chatbot-config">
                     <ChatbotSettings />
                   </ProtectedRoute>
                 }
