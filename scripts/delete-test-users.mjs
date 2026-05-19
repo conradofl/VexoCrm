@@ -2,7 +2,8 @@
  * Script para listar (e opcionalmente deletar) usuarios de teste do Firebase.
  *
  * USO:
- *   FIREBASE_SERVICE_ACCOUNT='<json>' node scripts/delete-test-users.mjs
+ *   FIREBASE_PROJECT_ID=... FIREBASE_CLIENT_EMAIL=... FIREBASE_PRIVATE_KEY="..." \
+ *     node scripts/delete-test-users.mjs
  *
  * Por padrao, apenas lista os usuarios a serem deletados.
  * Para deletar de fato, descomente o bloco marcado com "DESCOMENTE" abaixo.
@@ -11,7 +12,23 @@
 import { initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
-initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) });
+const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+
+if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
+  console.error(
+    "Erro: defina FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY antes de rodar."
+  );
+  process.exit(1);
+}
+
+initializeApp({
+  credential: cert({
+    projectId: FIREBASE_PROJECT_ID,
+    clientEmail: FIREBASE_CLIENT_EMAIL,
+    privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
+});
+
 const auth = getAuth();
 
 const PROTECTED_EMAILS = new Set([
