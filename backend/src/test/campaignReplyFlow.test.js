@@ -49,4 +49,11 @@ describe("campaign reply flow safeguards", () => {
     expect(outboundSource).toContain("[campaign-outbound] whatsapp_step_failed");
     expect(outboundSource).toContain("hasMedia");
   });
+
+  it("stores and validates per-dispatch templates instead of sending empty dispatch steps", () => {
+    expect(routeBundle).toContain("INVALID_DISPATCH_TEMPLATE");
+    expect(routeBundle).toContain("steps: validation.analyticsMeta.sequence");
+    expect(routeBundle).toContain("const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null");
+    expect(routeBundle).toContain("analyticsMeta: validation.analyticsMeta");
+  });
 });

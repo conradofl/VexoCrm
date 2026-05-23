@@ -3722,7 +3722,7 @@ export function registerAllDomainRoutes(app) {
   
     try {
       const campaignSelect =
-        "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta";
+        "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta";
       const fallbackCampaignSelect =
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at";
       let query = supabase
@@ -4231,23 +4231,28 @@ export function registerAllDomainRoutes(app) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
     const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
-    const campaignSteps = Array.isArray(campaign.analytics_meta?.sequence) ? campaign.analytics_meta.sequence : [];
-    const steps = dispatchSteps ?? campaignSteps;
-    const webhookUrl = campaign.webhook_url || null;
-    const webhookToken = campaign.webhook_token || null;
+    const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+    const steps = dispatchSteps ?? campaignMeta.sequence;
+    const validation = validateCampaignAnalyticsMeta({
+      ...campaignMeta,
+      sequence: steps,
+    });
+    if (!validation.valid) {
+      throw new Error(validation.message || "Disparo sem template valido.");
+    }
+    const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaign);
+    const { webhookUrl, webhookToken } = dispatchSettings;
+    if (!webhookUrl) {
+      throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
+    }
 
     // Obtém lista de leads da campanha via lead_import_items
-    let leads = [];
-    {
-      let query = db
-        .from("lead_import_items")
-        .select("nome, telefone")
-        .eq("client_id", clientId)
-        .eq("imported", true);
-      if (campaign.import_id) query = query.eq("import_id", campaign.import_id);
-      const { data: importedLeads } = await query;
-      leads = (importedLeads || []).filter((r) => r.telefone);
-    }
+    const leads = await buildDispatchLeads({
+      clientId,
+      importId: campaign.import_id || null,
+      limit: campaign.limit_per_run,
+      segmentation: validation.analyticsMeta.segmentation || null,
+    });
 
     if (leads.length === 0) {
       await db.from("campaign_dispatches").update({ status: "done", finished_at: new Date().toISOString(), updated_at: new Date().toISOString(), error_message: "Nenhum lead encontrado para o disparo." }).eq("id", dispatchId);
@@ -4255,7 +4260,7 @@ export function registerAllDomainRoutes(app) {
     }
 
     // Constrói analyticsMeta compatível com dispatchCampaignSequence
-    const analyticsMeta = { sequence: steps };
+    const analyticsMeta = validation.analyticsMeta;
 
     let sentCount = 0;
 
@@ -4264,7 +4269,16 @@ export function registerAllDomainRoutes(app) {
       webhookToken,
       leads,
       analyticsMeta,
-      context: { campaignId: campaign.id, dispatchId },
+      context: {
+        campaign: {
+          id: campaign.id,
+          name: campaign.name,
+          mode: "campaign_dispatch_template",
+          dispatchId,
+          dispatchName: dispatch.name,
+        },
+        client: { id: clientId, name: await getClientName(clientId) },
+      },
       onLeadDispatched: async ({ phone, sentAt }) => {
         sentCount += 1;
         await db.from("campaign_dispatch_runs").insert({
@@ -4313,10 +4327,20 @@ export function registerAllDomainRoutes(app) {
     const campaignId = normalizeString(req.params.id);
     if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
     try {
+      const { data: campaign, error: campaignErr } = await supabase
+        .from("campaigns")
+        .select("id, client_id")
+        .eq("id", campaignId)
+        .single();
+      if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
       const { data, error } = await supabase
         .from("campaign_dispatches")
         .select("*")
         .eq("campaign_id", campaignId)
+        .eq("client_id", authorizedClientId)
         .order("created_at", { ascending: true });
       if (error) throw error;
       res.json({ dispatches: data || [] });
@@ -4333,7 +4357,7 @@ export function registerAllDomainRoutes(app) {
 
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const name = normalizeString(body.name) || "Disparo";
-    const steps = Array.isArray(body.steps) ? body.steps : [];
+    const requestedSteps = Array.isArray(body.steps) ? body.steps : [];
     const triggerType = body.triggerType === "scheduled" ? "scheduled" : "manual";
     const scheduledAt = triggerType === "scheduled" ? (normalizeString(body.scheduledAt) || null) : null;
 
@@ -4341,21 +4365,30 @@ export function registerAllDomainRoutes(app) {
       // Verifica que a campanha pertence ao cliente autorizado
       const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
-        .select("id, client_id")
+        .select("id, client_id, analytics_meta")
         .eq("id", campaignId)
         .single();
       if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
+      const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+      const steps = requestedSteps.length > 0 ? requestedSteps : campaignMeta.sequence;
+      const validation = validateCampaignAnalyticsMeta({
+        ...campaignMeta,
+        sequence: steps,
+      });
+      if (!validation.valid) {
+        return sendError(res, 400, "INVALID_DISPATCH_TEMPLATE", validation.message);
+      }
 
       const { data, error } = await supabase
         .from("campaign_dispatches")
         .insert({
           campaign_id: campaignId,
-          client_id: campaign.client_id,
+          client_id: authorizedClientId,
           name,
-          steps,
+          steps: validation.analyticsMeta.sequence,
           trigger_type: triggerType,
           scheduled_at: scheduledAt,
           status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
@@ -4378,17 +4411,45 @@ export function registerAllDomainRoutes(app) {
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const patch = {};
     if (body.name != null) patch.name = normalizeString(body.name) || "Disparo";
-    if (Array.isArray(body.steps)) patch.steps = body.steps;
     if (body.triggerType != null) patch.trigger_type = body.triggerType === "scheduled" ? "scheduled" : "manual";
     if (body.scheduledAt != null) patch.scheduled_at = normalizeString(body.scheduledAt) || null;
     if (body.status != null && ["draft","scheduled","cancelled"].includes(body.status)) patch.status = body.status;
     patch.updated_at = new Date().toISOString();
 
     try {
+      const { data: existing, error: existingErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, campaign_id, client_id, status")
+        .eq("id", dispatchId)
+        .single();
+      if (existingErr || !existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
+      if (!authorizedClientId) return;
+      if (existing.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
+
+      if (Array.isArray(body.steps)) {
+        const { data: campaign, error: campaignErr } = await supabase
+          .from("campaigns")
+          .select("id, analytics_meta")
+          .eq("id", existing.campaign_id)
+          .single();
+        if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+        const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+        const validation = validateCampaignAnalyticsMeta({
+          ...campaignMeta,
+          sequence: body.steps,
+        });
+        if (!validation.valid) {
+          return sendError(res, 400, "INVALID_DISPATCH_TEMPLATE", validation.message);
+        }
+        patch.steps = validation.analyticsMeta.sequence;
+      }
+
       const { data, error } = await supabase
         .from("campaign_dispatches")
         .update(patch)
         .eq("id", dispatchId)
+        .eq("client_id", authorizedClientId)
         .select("*")
         .single();
       if (error) throw error;
@@ -4405,10 +4466,12 @@ export function registerAllDomainRoutes(app) {
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
     try {
-      const { data: existing } = await supabase.from("campaign_dispatches").select("status").eq("id", dispatchId).single();
+      const { data: existing } = await supabase.from("campaign_dispatches").select("status, client_id").eq("id", dispatchId).single();
       if (!existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
+      if (!authorizedClientId) return;
       if (existing.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Cannot delete a running dispatch");
-      const { error } = await supabase.from("campaign_dispatches").delete().eq("id", dispatchId);
+      const { error } = await supabase.from("campaign_dispatches").delete().eq("id", dispatchId).eq("client_id", authorizedClientId);
       if (error) throw error;
       res.json({ success: true });
     } catch (err) {
@@ -4435,7 +4498,7 @@ export function registerAllDomainRoutes(app) {
 
       const { data: campaign, error: campErr } = await supabase
         .from("campaigns")
-        .select("id, name, client_id, import_id, analytics_meta, webhook_url, webhook_token")
+        .select("id, name, client_id, import_id, limit_per_run, analytics_meta, webhook_url, webhook_token")
         .eq("id", dispatch.campaign_id)
         .single();
       if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");

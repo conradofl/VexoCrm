@@ -62,7 +62,6 @@ import {
   useUpdateCampaign,
   useCampaignDispatches,
   useCreateDispatch,
-  useUpdateDispatch,
   useDeleteDispatch,
   useTriggerDispatch,
   type Campaign,
@@ -569,6 +568,13 @@ function getCampaignPreviewSteps(campaign: Campaign) {
   return normalizeCampaignSequence(campaign.analytics_meta).filter((step) => step.enabled);
 }
 
+function getDispatchTemplatePreview(steps: CampaignSequenceStep[]) {
+  const firstText = steps.find((step) => step.enabled !== false && step.text.trim());
+  if (firstText) return firstText.text.trim();
+  const firstImage = steps.find((step) => step.enabled !== false && step.type === "image");
+  return firstImage ? "Disparo com imagem" : "Sem template";
+}
+
 function PaginationControls({
   currentPage,
   totalPages,
@@ -757,6 +763,8 @@ function DispatchManagerTab({
   const [newName, setNewName] = useState("");
   const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
   const [newScheduledAt, setNewScheduledAt] = useState("");
+  const [newTemplateMode, setNewTemplateMode] = useState<"campaign" | "custom">("campaign");
+  const [newTemplateText, setNewTemplateText] = useState("");
   const [confirmDispatch, setConfirmDispatch] = useState<CampaignDispatch | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -771,15 +779,32 @@ function DispatchManagerTab({
   const deleteDispatch = useDeleteDispatch(selectedCampaignId);
   const triggerDispatch = useTriggerDispatch(selectedCampaignId);
 
+  useEffect(() => {
+    setNewName("");
+    setNewTriggerType("manual");
+    setNewScheduledAt("");
+    setNewTemplateMode("campaign");
+    setNewTemplateText("");
+    setStatusMsg(null);
+  }, [selectedCampaignId]);
+
   async function handleCreate() {
     if (!newName.trim()) { setStatusMsg({ type: "error", text: "Informe um nome para o disparo." }); return; }
     if (newTriggerType === "scheduled" && !newScheduledAt) { setStatusMsg({ type: "error", text: "Selecione a data e hora do agendamento." }); return; }
+    if (newTemplateMode === "custom" && !newTemplateText.trim()) { setStatusMsg({ type: "error", text: "Informe o template deste disparo." }); return; }
+    const campaignSteps = selectedCampaign ? normalizeCampaignSequence(selectedCampaign.analytics_meta) : [];
+    const steps =
+      newTemplateMode === "custom"
+        ? [createCampaignStep("text", 1, { text: newTemplateText.trim(), delayAfterSeconds: 0 })]
+        : campaignSteps;
     try {
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
-      await createDispatch.mutateAsync({ name: newName.trim(), steps: [], triggerType: newTriggerType, scheduledAt: scheduledIso });
+      await createDispatch.mutateAsync({ name: newName.trim(), steps, triggerType: newTriggerType, scheduledAt: scheduledIso });
       setNewName("");
       setNewTriggerType("manual");
       setNewScheduledAt("");
+      setNewTemplateMode("campaign");
+      setNewTemplateText("");
       setStatusMsg({ type: "success", text: "Disparo criado com sucesso." });
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao criar disparo." });
@@ -804,6 +829,14 @@ function DispatchManagerTab({
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao remover." });
     }
+  }
+
+  function handleUseDispatchAsTemplate(dispatch: CampaignDispatch) {
+    const preview = getDispatchTemplatePreview(dispatch.steps || []);
+    setNewName(`${dispatch.name} - variacao`);
+    setNewTemplateMode("custom");
+    setNewTemplateText(preview === "Sem template" || preview === "Disparo com imagem" ? "" : preview);
+    setStatusMsg({ type: "success", text: "Template carregado para um novo disparo." });
   }
 
   return (
@@ -984,8 +1017,52 @@ function DispatchManagerTab({
                   </div>
                 )}
 
+                <div className="space-y-3 rounded-xl border border-border/70 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Template de mensagem</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Cada disparo pode usar um texto diferente sem alterar o template principal da campanha.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={newTemplateMode === "campaign" ? "secondary" : "outline"}
+                        onClick={() => setNewTemplateMode("campaign")}
+                      >
+                        Usar campanha
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={newTemplateMode === "custom" ? "secondary" : "outline"}
+                        onClick={() => setNewTemplateMode("custom")}
+                      >
+                        Template proprio
+                      </Button>
+                    </div>
+                  </div>
+
+                  {newTemplateMode === "campaign" ? (
+                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+                      {selectedCampaign
+                        ? getDispatchTemplatePreview(normalizeCampaignSequence(selectedCampaign.analytics_meta))
+                        : "Selecione uma campanha para usar o template principal."}
+                    </div>
+                  ) : (
+                    <Textarea
+                      className={cn("min-h-[120px]", darkFieldClass)}
+                      placeholder="Digite o template que sera enviado neste disparo. Use {{nome}} para personalizar pelo nome do lead."
+                      value={newTemplateText}
+                      onChange={(e) => setNewTemplateText(e.target.value)}
+                    />
+                  )}
+                </div>
+
                 <div className="flex gap-2 border-t border-border/70 pt-4">
-                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim()}>
+                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim() || (newTemplateMode === "custom" && !newTemplateText.trim())}>
                     <Zap className="mr-2 h-4 w-4" />
                     {createDispatch.isPending ? "Criando..." : newTriggerType === "scheduled" ? "Agendar disparo" : "Criar disparo"}
                   </Button>
@@ -1057,10 +1134,21 @@ function DispatchManagerTab({
                               <span className="text-red-400 truncate max-w-[240px]">{d.error_message}</span>
                             )}
                           </div>
+                          <p className="mt-2 line-clamp-2 max-w-3xl text-xs text-muted-foreground">
+                            Template: {getDispatchTemplatePreview(d.steps || [])}
+                          </p>
                         </div>
 
                         {/* Ações */}
                         <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleUseDispatchAsTemplate(d)}
+                            disabled={d.status === "running"}
+                          >
+                            Usar template
+                          </Button>
                           {(d.status === "draft" || d.status === "scheduled") && (
                             <Button
                               size="sm"
