@@ -29,6 +29,7 @@ import {
 } from "../campaign-outbound.js";
 import {
   generateCampaignCopySuggestion,
+  generateCampaignTemplateVariants,
   getGroqCampaignAiStatus,
   rewriteCampaignStep,
   suggestCampaignDelays,
@@ -3402,7 +3403,31 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 502, "GROQ_REQUEST_FAILED", error instanceof Error ? error.message : "Falha ao consultar a Groq");
     }
   });
-  
+
+  app.post("/api/campaigns/ai/generate-template-variants", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    try {
+      if (!getGroqCampaignAiStatus().enabled) {
+        sendError(res, 404, "GROQ_DISABLED", "Groq assistivo nao esta configurado neste ambiente");
+        return;
+      }
+
+      const suggestion = await generateCampaignTemplateVariants({
+        campaignName: req.body?.campaignName,
+        goal: req.body?.goal,
+        style: req.body?.style,
+        baseText: req.body?.baseText,
+        count: req.body?.count,
+        segmentation: req.body?.segmentation,
+        sequence: req.body?.sequence,
+      });
+
+      res.json({ item: suggestion });
+    } catch (error) {
+      console.error("campaign ai generate template variants error:", error);
+      sendError(res, 502, "GROQ_REQUEST_FAILED", error instanceof Error ? error.message : "Falha ao consultar a Groq");
+    }
+  });
+
   app.post("/api/campaigns/ai/suggest-delays", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
       if (!getGroqCampaignAiStatus().enabled) {

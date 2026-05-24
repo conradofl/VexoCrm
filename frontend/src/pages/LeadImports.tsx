@@ -55,6 +55,7 @@ import {
   useDeleteCampaign,
   useDirectDispatch,
   useGenerateCampaignCopy,
+  useGenerateCampaignTemplateVariants,
   useRewriteCampaignStep,
   useSuggestCampaignDelays,
   useSuggestCampaignSequence,
@@ -494,6 +495,7 @@ function createCampaignStep(type: "text" | "image", order: number, patch: Partia
     type,
     order,
     text: patch.text || "",
+    textVariants: patch.textVariants || [],
     image: patch.image || null,
     enabled: patch.enabled ?? true,
     delayAfterSeconds: patch.delayAfterSeconds ?? 5,
@@ -511,6 +513,7 @@ function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): CampaignS
       .map((step, index) => ({
         ...step,
         order: index + 1,
+        textVariants: Array.isArray(step.textVariants) ? step.textVariants.filter((value) => value.trim()) : [],
         image: step.image || null,
         enabled: step.enabled !== false,
         delayAfterSeconds: Number.isFinite(step.delayAfterSeconds) ? step.delayAfterSeconds : 5,
@@ -571,6 +574,8 @@ function getCampaignPreviewSteps(campaign: Campaign) {
 function getDispatchTemplatePreview(steps: CampaignSequenceStep[]) {
   const firstText = steps.find((step) => step.enabled !== false && step.text.trim());
   if (firstText) return firstText.text.trim();
+  const firstVariantStep = steps.find((step) => step.enabled !== false && (step.textVariants?.length || 0) > 0);
+  if (firstVariantStep?.textVariants?.length) return `${firstVariantStep.textVariants.length} variacoes IA`;
   const firstImage = steps.find((step) => step.enabled !== false && step.type === "image");
   return firstImage ? "Disparo com imagem" : "Sem template";
 }
@@ -765,6 +770,7 @@ function DispatchManagerTab({
   const [newScheduledAt, setNewScheduledAt] = useState("");
   const [newTemplateMode, setNewTemplateMode] = useState<"campaign" | "custom">("campaign");
   const [newTemplateText, setNewTemplateText] = useState("");
+  const [newTemplateVariants, setNewTemplateVariants] = useState<string[]>([]);
   const [confirmDispatch, setConfirmDispatch] = useState<CampaignDispatch | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -778,6 +784,7 @@ function DispatchManagerTab({
   const createDispatch = useCreateDispatch(selectedCampaignId);
   const deleteDispatch = useDeleteDispatch(selectedCampaignId);
   const triggerDispatch = useTriggerDispatch(selectedCampaignId);
+  const generateTemplateVariants = useGenerateCampaignTemplateVariants();
 
   useEffect(() => {
     setNewName("");
@@ -785,17 +792,18 @@ function DispatchManagerTab({
     setNewScheduledAt("");
     setNewTemplateMode("campaign");
     setNewTemplateText("");
+    setNewTemplateVariants([]);
     setStatusMsg(null);
   }, [selectedCampaignId]);
 
   async function handleCreate() {
     if (!newName.trim()) { setStatusMsg({ type: "error", text: "Informe um nome para o disparo." }); return; }
     if (newTriggerType === "scheduled" && !newScheduledAt) { setStatusMsg({ type: "error", text: "Selecione a data e hora do agendamento." }); return; }
-    if (newTemplateMode === "custom" && !newTemplateText.trim()) { setStatusMsg({ type: "error", text: "Informe o template deste disparo." }); return; }
+    if (newTemplateMode === "custom" && !newTemplateText.trim() && newTemplateVariants.length === 0) { setStatusMsg({ type: "error", text: "Informe ou gere variacoes para o template deste disparo." }); return; }
     const campaignSteps = selectedCampaign ? normalizeCampaignSequence(selectedCampaign.analytics_meta) : [];
     const steps =
       newTemplateMode === "custom"
-        ? [createCampaignStep("text", 1, { text: newTemplateText.trim(), delayAfterSeconds: 0 })]
+        ? [createCampaignStep("text", 1, { text: newTemplateText.trim() || newTemplateVariants[0] || "", textVariants: newTemplateVariants, delayAfterSeconds: 0 })]
         : campaignSteps;
     try {
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
@@ -805,6 +813,7 @@ function DispatchManagerTab({
       setNewScheduledAt("");
       setNewTemplateMode("campaign");
       setNewTemplateText("");
+      setNewTemplateVariants([]);
       setStatusMsg({ type: "success", text: "Disparo criado com sucesso." });
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao criar disparo." });
@@ -835,8 +844,42 @@ function DispatchManagerTab({
     const preview = getDispatchTemplatePreview(dispatch.steps || []);
     setNewName(`${dispatch.name} - variacao`);
     setNewTemplateMode("custom");
-    setNewTemplateText(preview === "Sem template" || preview === "Disparo com imagem" ? "" : preview);
+    const firstTextStep = (dispatch.steps || []).find((step) => step.type === "text");
+    setNewTemplateText(firstTextStep?.text || "");
+    setNewTemplateVariants(firstTextStep?.textVariants || []);
     setStatusMsg({ type: "success", text: "Template carregado para um novo disparo." });
+  }
+
+  async function handleGenerateTemplateVariants() {
+    if (!selectedCampaign) return;
+    const campaignSteps = normalizeCampaignSequence(selectedCampaign.analytics_meta);
+    const baseText =
+      newTemplateText.trim() ||
+      campaignSteps.find((step) => step.type === "text" && step.text.trim())?.text ||
+      "";
+    if (!baseText) {
+      setStatusMsg({ type: "error", text: "Informe um texto base ou configure um texto na campanha para gerar variacoes." });
+      return;
+    }
+
+    try {
+      const result = await generateTemplateVariants.mutateAsync({
+        campaignName: selectedCampaign.name,
+        goal: selectedCampaign.name,
+        style: "variacoes naturais para WhatsApp dentro do mesmo tema",
+        baseText,
+        count: 8,
+        segmentation: selectedCampaign.analytics_meta?.segmentation,
+        sequence: campaignSteps,
+      });
+      const variants = Array.from(new Set((result.variants || []).map((value) => value.trim()).filter(Boolean)));
+      setNewTemplateMode("custom");
+      setNewTemplateText(baseText);
+      setNewTemplateVariants(variants);
+      setStatusMsg({ type: "success", text: result.rationale || `${variants.length} variacoes geradas pela IA.` });
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao gerar variacoes com IA." });
+    }
   }
 
   return (
@@ -1022,10 +1065,10 @@ function DispatchManagerTab({
                     <div>
                       <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Template de mensagem</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Cada disparo pode usar um texto diferente sem alterar o template principal da campanha.
+                        Gere variacoes IA para alternar a mensagem por lead dentro do mesmo tema da campanha.
                       </p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
@@ -1042,6 +1085,16 @@ function DispatchManagerTab({
                       >
                         Template proprio
                       </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleGenerateTemplateVariants()}
+                        disabled={!selectedCampaign || generateTemplateVariants.isPending}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        {generateTemplateVariants.isPending ? "Gerando..." : "Gerar IA"}
+                      </Button>
                     </div>
                   </div>
 
@@ -1054,15 +1107,35 @@ function DispatchManagerTab({
                   ) : (
                     <Textarea
                       className={cn("min-h-[120px]", darkFieldClass)}
-                      placeholder="Digite o template que sera enviado neste disparo. Use {{nome}} para personalizar pelo nome do lead."
+                      placeholder="Texto base do disparo. Use {{nome}} para personalizar pelo nome do lead."
                       value={newTemplateText}
                       onChange={(e) => setNewTemplateText(e.target.value)}
                     />
                   )}
+                  {newTemplateVariants.length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+                          {newTemplateVariants.length} variacoes IA salvas neste disparo
+                        </p>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setNewTemplateVariants([])}>
+                          Limpar
+                        </Button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {newTemplateVariants.map((variant, index) => (
+                          <div key={`${variant}-${index}`} className="rounded-md border border-border/60 bg-card/70 p-2 text-xs text-muted-foreground">
+                            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Variação {index + 1}</span>
+                            {variant}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2 border-t border-border/70 pt-4">
-                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim() || (newTemplateMode === "custom" && !newTemplateText.trim())}>
+                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim() || (newTemplateMode === "custom" && !newTemplateText.trim() && newTemplateVariants.length === 0)}>
                     <Zap className="mr-2 h-4 w-4" />
                     {createDispatch.isPending ? "Criando..." : newTriggerType === "scheduled" ? "Agendar disparo" : "Criar disparo"}
                   </Button>
@@ -1643,7 +1716,7 @@ export default function LeadImports({
     }
 
     const invalidStep = enabledSteps.find((step) =>
-      step.type === "text" ? !step.text.trim() : !step.image,
+      step.type === "text" ? !step.text.trim() && (step.textVariants?.length || 0) === 0 : !step.image,
     );
 
     if (invalidStep) {

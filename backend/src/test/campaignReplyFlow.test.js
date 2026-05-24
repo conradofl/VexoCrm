@@ -56,4 +56,10 @@ describe("campaign reply flow safeguards", () => {
     expect(routeBundle).toContain("const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null");
     expect(routeBundle).toContain("analyticsMeta: validation.analyticsMeta");
   });
+
+  it("supports rotating AI text variants per lead", () => {
+    expect(outboundSource).toContain("textVariants");
+    expect(outboundSource).toContain("leadIndex % variants.length");
+    expect(routeBundle).toContain("/api/campaigns/ai/generate-template-variants");
+  });
 });

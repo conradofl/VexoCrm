@@ -65,6 +65,7 @@ export interface CampaignSequenceStep {
   type: "text" | "image";
   order: number;
   text: string;
+  textVariants?: string[];
   image: CampaignImageAsset | null;
   enabled: boolean;
   delayAfterSeconds: number;
@@ -204,6 +205,8 @@ export interface CampaignAiSuggestionContext {
   campaignName?: string;
   goal?: string;
   style?: string;
+  baseText?: string;
+  count?: number;
   segmentation?: CampaignSegmentation;
   sequence?: CampaignSequenceStep[];
   dispatchOptions?: CampaignDispatchOptions;
@@ -627,6 +630,13 @@ export function useGenerateCampaignCopy() {
     "/api/campaigns/ai/generate-copy",
     "Erro ao gerar copy",
   );
+}
+
+export function useGenerateCampaignTemplateVariants() {
+  return useCampaignAiMutation<{
+    variants: string[];
+    rationale: string;
+  }>("/api/campaigns/ai/generate-template-variants", "Erro ao gerar variacoes");
 }
 
 export function useSuggestCampaignSequence() {

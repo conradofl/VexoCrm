@@ -215,6 +215,51 @@ Regras:
   });
 }
 
+export async function generateCampaignTemplateVariants(input = {}) {
+  const count = Math.min(Math.max(Number.parseInt(String(input.count ?? "8"), 10) || 8, 2), 12);
+  const baseText = normalizeString(input.baseText);
+  const context = {
+    campaignName: normalizeString(input.campaignName),
+    goal: normalizeString(input.goal),
+    style: normalizeString(input.style),
+    baseText,
+    count,
+    segmentation: sanitizeSegmentContext(input.segmentation),
+    sequence: sanitizeSequence(input.sequence),
+    technique: buildTechniqueContext(input.style),
+  };
+
+  return callGroqJson({
+    schemaName: "campaign_template_variants",
+    schema: {
+      type: "object",
+      properties: {
+        variants: {
+          type: "array",
+          minItems: count,
+          maxItems: count,
+          items: { type: "string" },
+        },
+        rationale: { type: "string" },
+      },
+      required: ["variants", "rationale"],
+      additionalProperties: false,
+    },
+    taskPrompt: `Gere ${count} variacoes de mensagem para WhatsApp em pt-BR dentro do mesmo tema da campanha.
+Contexto:
+${JSON.stringify(context, null, 2)}
+
+Regras:
+- Cada variacao deve comunicar a mesma oferta/tema, mas com estrutura, abertura e palavras diferentes.
+- Objetivo: reduzir repeticao textual em disparos de WhatsApp sem mudar a promessa principal.
+- Use {{nome}} em algumas variacoes quando natural, sem inventar nomes reais.
+- Nao cite telefones, listas, automacao, anti-spam ou bloqueio.
+- Nao use markdown, numeracao, emojis excessivos ou frases agressivas.
+- Evite promessas exageradas, urgencia falsa e linguagem que pareca massa/spam.
+- Cada variacao deve ser pronta para envio direto.`,
+  });
+}
+
 export async function suggestCampaignSequence(input = {}) {
   const context = {
     campaignName: normalizeString(input.campaignName),

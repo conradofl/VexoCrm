@@ -31,6 +31,13 @@ function normalizeNonNegativeInteger(value, fallback) {
   return parsed;
 }
 
+function normalizeTextVariants(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(value.map(normalizeString).filter(Boolean))
+  ).slice(0, 20);
+}
+
 /**
  * Replace per-lead placeholders in outbound copy (Evolution text/caption).
  * Supports {{nome}} and {{telefone}} with optional spaces inside braces (case-insensitive tokens).
@@ -43,6 +50,12 @@ function applyMessagePlaceholders(text, lead, phone) {
   return raw
     .replace(/\{\{\s*nome\s*\}\}/gi, nome)
     .replace(/\{\{\s*telefone\s*\}\}/gi, tel || "");
+}
+
+function resolveStepTextForLead(step, leadIndex) {
+  const variants = normalizeTextVariants(step?.textVariants);
+  if (variants.length === 0) return normalizeString(step?.text);
+  return variants[leadIndex % variants.length];
 }
 
 function clampPositiveSize(value) {
@@ -109,6 +122,7 @@ function normalizeSequenceStep(step, index) {
     type,
     order: normalizeNonNegativeInteger(step?.order, index + 1) || index + 1,
     text: normalizeString(step?.text),
+    textVariants: normalizeTextVariants(step?.textVariants),
     image: normalizeImageAsset(step?.image),
     enabled: step?.enabled === undefined ? true : normalizeBoolean(step.enabled, true),
     delayAfterSeconds: normalizeNonNegativeInteger(
@@ -213,11 +227,11 @@ export function validateCampaignAnalyticsMeta(rawMeta = {}) {
   }
 
   for (const step of enabledSteps) {
-    if (step.type === "text" && !step.text) {
+    if (step.type === "text" && !step.text && step.textVariants.length === 0) {
       return {
         valid: false,
         analyticsMeta,
-        message: `O passo ${step.order} precisa de texto para envio.`,
+        message: `O passo ${step.order} precisa de texto ou variacoes para envio.`,
       };
     }
 
@@ -481,7 +495,7 @@ export async function dispatchCampaignSequence({
       const step = enabledSteps[stepIndex];
       const stepForPayload = {
         ...step,
-        text: applyMessagePlaceholders(step.text, lead, phone),
+        text: applyMessagePlaceholders(resolveStepTextForLead(step, leadIndex), lead, phone),
       };
       const extendedContext = {
         ...context,
