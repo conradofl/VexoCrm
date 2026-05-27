@@ -157,6 +157,12 @@ function normalizeDispatchOptions(rawOptions = {}) {
         ? DEFAULT_STEP_FAILURE_MODE
         : normalizeBoolean(rawOptions.stopOnStepFailure, DEFAULT_STEP_FAILURE_MODE),
     aiAssisted: normalizeBoolean(rawOptions.aiAssisted, false),
+    templateStrategy:
+      normalizeString(rawOptions.templateStrategy) === "ai_variations" ? "ai_variations" : "single",
+    templateVariantCount: Math.min(
+      Math.max(normalizeNonNegativeInteger(rawOptions.templateVariantCount, 0), 0),
+      20
+    ),
     waitForReply,
     replyTimeoutSeconds,
     replyPollIntervalSeconds,

@@ -77,6 +77,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/EmptyState";
@@ -186,6 +187,8 @@ const defaultDispatchOptions: CampaignDispatchOptions = {
   leadDelaySeconds: 2,
   stopOnStepFailure: true,
   aiAssisted: false,
+  templateStrategy: "single",
+  templateVariantCount: 0,
   waitForReply: false,
   replyTimeoutSeconds: 60,
   replyPollIntervalSeconds: 5,
@@ -768,9 +771,6 @@ function DispatchManagerTab({
   const [newName, setNewName] = useState("");
   const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
   const [newScheduledAt, setNewScheduledAt] = useState("");
-  const [newTemplateMode, setNewTemplateMode] = useState<"campaign" | "custom">("campaign");
-  const [newTemplateText, setNewTemplateText] = useState("");
-  const [newTemplateVariants, setNewTemplateVariants] = useState<string[]>([]);
   const [confirmDispatch, setConfirmDispatch] = useState<CampaignDispatch | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -784,36 +784,24 @@ function DispatchManagerTab({
   const createDispatch = useCreateDispatch(selectedCampaignId);
   const deleteDispatch = useDeleteDispatch(selectedCampaignId);
   const triggerDispatch = useTriggerDispatch(selectedCampaignId);
-  const generateTemplateVariants = useGenerateCampaignTemplateVariants();
 
   useEffect(() => {
     setNewName("");
     setNewTriggerType("manual");
     setNewScheduledAt("");
-    setNewTemplateMode("campaign");
-    setNewTemplateText("");
-    setNewTemplateVariants([]);
     setStatusMsg(null);
   }, [selectedCampaignId]);
 
   async function handleCreate() {
     if (!newName.trim()) { setStatusMsg({ type: "error", text: "Informe um nome para o disparo." }); return; }
     if (newTriggerType === "scheduled" && !newScheduledAt) { setStatusMsg({ type: "error", text: "Selecione a data e hora do agendamento." }); return; }
-    if (newTemplateMode === "custom" && !newTemplateText.trim() && newTemplateVariants.length === 0) { setStatusMsg({ type: "error", text: "Informe ou gere variacoes para o template deste disparo." }); return; }
     const campaignSteps = selectedCampaign ? normalizeCampaignSequence(selectedCampaign.analytics_meta) : [];
-    const steps =
-      newTemplateMode === "custom"
-        ? [createCampaignStep("text", 1, { text: newTemplateText.trim() || newTemplateVariants[0] || "", textVariants: newTemplateVariants, delayAfterSeconds: 0 })]
-        : campaignSteps;
     try {
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
-      await createDispatch.mutateAsync({ name: newName.trim(), steps, triggerType: newTriggerType, scheduledAt: scheduledIso });
+      await createDispatch.mutateAsync({ name: newName.trim(), steps: campaignSteps, triggerType: newTriggerType, scheduledAt: scheduledIso });
       setNewName("");
       setNewTriggerType("manual");
       setNewScheduledAt("");
-      setNewTemplateMode("campaign");
-      setNewTemplateText("");
-      setNewTemplateVariants([]);
       setStatusMsg({ type: "success", text: "Disparo criado com sucesso." });
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao criar disparo." });
@@ -837,48 +825,6 @@ function DispatchManagerTab({
       setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" removido.` });
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao remover." });
-    }
-  }
-
-  function handleUseDispatchAsTemplate(dispatch: CampaignDispatch) {
-    const preview = getDispatchTemplatePreview(dispatch.steps || []);
-    setNewName(`${dispatch.name} - variacao`);
-    setNewTemplateMode("custom");
-    const firstTextStep = (dispatch.steps || []).find((step) => step.type === "text");
-    setNewTemplateText(firstTextStep?.text || "");
-    setNewTemplateVariants(firstTextStep?.textVariants || []);
-    setStatusMsg({ type: "success", text: "Template carregado para um novo disparo." });
-  }
-
-  async function handleGenerateTemplateVariants() {
-    if (!selectedCampaign) return;
-    const campaignSteps = normalizeCampaignSequence(selectedCampaign.analytics_meta);
-    const baseText =
-      newTemplateText.trim() ||
-      campaignSteps.find((step) => step.type === "text" && step.text.trim())?.text ||
-      "";
-    if (!baseText) {
-      setStatusMsg({ type: "error", text: "Informe um texto base ou configure um texto na campanha para gerar variacoes." });
-      return;
-    }
-
-    try {
-      const result = await generateTemplateVariants.mutateAsync({
-        campaignName: selectedCampaign.name,
-        goal: selectedCampaign.name,
-        style: "variacoes naturais para WhatsApp dentro do mesmo tema",
-        baseText,
-        count: 8,
-        segmentation: selectedCampaign.analytics_meta?.segmentation,
-        sequence: campaignSteps,
-      });
-      const variants = Array.from(new Set((result.variants || []).map((value) => value.trim()).filter(Boolean)));
-      setNewTemplateMode("custom");
-      setNewTemplateText(baseText);
-      setNewTemplateVariants(variants);
-      setStatusMsg({ type: "success", text: result.rationale || `${variants.length} variacoes geradas pela IA.` });
-    } catch (err) {
-      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao gerar variacoes com IA." });
     }
   }
 
@@ -1061,81 +1007,19 @@ function DispatchManagerTab({
                 )}
 
                 <div className="space-y-3 rounded-xl border border-border/70 bg-black/20 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Template de mensagem</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Gere variacoes IA para alternar a mensagem por lead dentro do mesmo tema da campanha.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={newTemplateMode === "campaign" ? "secondary" : "outline"}
-                        onClick={() => setNewTemplateMode("campaign")}
-                      >
-                        Usar campanha
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={newTemplateMode === "custom" ? "secondary" : "outline"}
-                        onClick={() => setNewTemplateMode("custom")}
-                      >
-                        Template proprio
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void handleGenerateTemplateVariants()}
-                        disabled={!selectedCampaign || generateTemplateVariants.isPending}
-                      >
-                        <Sparkles className="h-4 w-4" />
-                        {generateTemplateVariants.isPending ? "Gerando..." : "Gerar IA"}
-                      </Button>
-                    </div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Template da campanha</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    O disparo usa o tipo de template definido na criacao da campanha. Para mudar entre template unico e variacoes IA, edite ou recrie a campanha.
+                  </p>
+                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+                    {selectedCampaign
+                      ? getDispatchTemplatePreview(normalizeCampaignSequence(selectedCampaign.analytics_meta))
+                      : "Selecione uma campanha para ver o template."}
                   </div>
-
-                  {newTemplateMode === "campaign" ? (
-                    <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
-                      {selectedCampaign
-                        ? getDispatchTemplatePreview(normalizeCampaignSequence(selectedCampaign.analytics_meta))
-                        : "Selecione uma campanha para usar o template principal."}
-                    </div>
-                  ) : (
-                    <Textarea
-                      className={cn("min-h-[120px]", darkFieldClass)}
-                      placeholder="Texto base do disparo. Use {{nome}} para personalizar pelo nome do lead."
-                      value={newTemplateText}
-                      onChange={(e) => setNewTemplateText(e.target.value)}
-                    />
-                  )}
-                  {newTemplateVariants.length > 0 && (
-                    <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
-                          {newTemplateVariants.length} variacoes IA salvas neste disparo
-                        </p>
-                        <Button type="button" size="sm" variant="ghost" onClick={() => setNewTemplateVariants([])}>
-                          Limpar
-                        </Button>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {newTemplateVariants.map((variant, index) => (
-                          <div key={`${variant}-${index}`} className="rounded-md border border-border/60 bg-card/70 p-2 text-xs text-muted-foreground">
-                            <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Variação {index + 1}</span>
-                            {variant}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex gap-2 border-t border-border/70 pt-4">
-                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim() || (newTemplateMode === "custom" && !newTemplateText.trim() && newTemplateVariants.length === 0)}>
+                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim()}>
                     <Zap className="mr-2 h-4 w-4" />
                     {createDispatch.isPending ? "Criando..." : newTriggerType === "scheduled" ? "Agendar disparo" : "Criar disparo"}
                   </Button>
@@ -1214,14 +1098,6 @@ function DispatchManagerTab({
 
                         {/* Ações */}
                         <div className="flex shrink-0 items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleUseDispatchAsTemplate(d)}
-                            disabled={d.status === "running"}
-                          >
-                            Usar template
-                          </Button>
                           {(d.status === "draft" || d.status === "scheduled") && (
                             <Button
                               size="sm"
@@ -1404,6 +1280,8 @@ export default function LeadImports({
   const [campaignImageFirst, setCampaignImageFirst] = useState(false);
   const [campaignImageError, setCampaignImageError] = useState<string | null>(null);
   const [campaignComposerMode, setCampaignComposerMode] = useState<CampaignComposerMode>("simple");
+  const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useState<"single" | "ai_variations">("single");
+  const [campaignTemplateVariants, setCampaignTemplateVariants] = useState<string[]>([]);
   const [campaignSequence, setCampaignSequence] = useState<CampaignSequenceStep[]>([
     createCampaignStep("text", 1),
   ]);
@@ -1436,6 +1314,7 @@ export default function LeadImports({
   const directDispatch = useDirectDispatch();
   const { data: campaignAiStatus } = useCampaignAiStatus();
   const generateCampaignCopy = useGenerateCampaignCopy();
+  const generateCampaignTemplateVariants = useGenerateCampaignTemplateVariants();
   const suggestCampaignSequence = useSuggestCampaignSequence();
   const suggestCampaignDelays = useSuggestCampaignDelays();
   const rewriteCampaignStep = useRewriteCampaignStep();
@@ -1698,9 +1577,23 @@ export default function LeadImports({
   }
 
   function getCurrentSequenceForSubmit() {
-    return campaignComposerMode === "simple"
+    const sequence = campaignComposerMode === "simple"
       ? buildSimpleCampaignSequence(campaignMessage, campaignImage, campaignImageCaption, campaignImageFirst)
       : normalizeStepOrder(campaignSequence);
+    if (campaignTemplateStrategy !== "ai_variations") {
+      return sequence.map((step) => ({ ...step, textVariants: [] }));
+    }
+
+    const variants = Array.from(new Set(campaignTemplateVariants.map((value) => value.trim()).filter(Boolean)));
+    let applied = false;
+    return sequence.map((step) => {
+      if (applied || step.type !== "text") return step;
+      applied = true;
+      return {
+        ...step,
+        textVariants: variants,
+      };
+    });
   }
 
   function validateSequenceForSubmit(sequence: CampaignSequenceStep[]) {
@@ -1749,6 +1642,36 @@ export default function LeadImports({
       setDispatchStatus(result.rationale || "Copy sugerida pela IA.");
     } catch (error) {
       setDispatchStatus(error instanceof Error ? error.message : "Falha ao gerar copy com IA.");
+    }
+  }
+
+  async function handleGenerateCampaignTemplateVariants() {
+    const sequence = campaignComposerMode === "simple"
+      ? buildSimpleCampaignSequence(campaignMessage, campaignImage, campaignImageCaption, campaignImageFirst)
+      : normalizeStepOrder(campaignSequence);
+    const baseText = sequence.find((step) => step.type === "text" && step.text.trim())?.text || campaignMessage.trim();
+
+    if (!baseText) {
+      setDispatchStatus("Informe um texto base antes de gerar variacoes IA.");
+      return;
+    }
+
+    try {
+      const result = await generateCampaignTemplateVariants.mutateAsync({
+        campaignName,
+        goal: aiGoal || campaignName,
+        style: aiStyle || "variacoes naturais para WhatsApp dentro do mesmo tema",
+        baseText,
+        count: 8,
+        segmentation: toCampaignSegmentationPayload(segmentation),
+        sequence,
+      });
+      const variants = Array.from(new Set((result.variants || []).map((value) => value.trim()).filter(Boolean)));
+      setCampaignTemplateStrategy("ai_variations");
+      setCampaignTemplateVariants(variants);
+      setDispatchStatus(result.rationale || `${variants.length} variacoes IA geradas para esta campanha.`);
+    } catch (error) {
+      setDispatchStatus(error instanceof Error ? error.message : "Falha ao gerar variacoes IA.");
     }
   }
 
@@ -1868,6 +1791,10 @@ export default function LeadImports({
     // Advanced mode uses step texts only; backend fills legacy message from the first text step.
 
     const sequence = getCurrentSequenceForSubmit();
+    if (campaignTemplateStrategy === "ai_variations" && campaignTemplateVariants.length < 2) {
+      setDispatchStatus("Gere pelo menos 2 variacoes IA para usar este tipo de campanha.");
+      return;
+    }
     const sequenceError = validateSequenceForSubmit(sequence);
     if (sequenceError) {
       setDispatchStatus(sequenceError);
@@ -1890,7 +1817,12 @@ export default function LeadImports({
         message: campaignMessage.trim(),
         image: campaignImage,
         sequence,
-        dispatchOptions,
+        dispatchOptions: {
+          ...dispatchOptions,
+          aiAssisted: dispatchOptions.aiAssisted || campaignTemplateStrategy === "ai_variations",
+          templateStrategy: campaignTemplateStrategy,
+          templateVariantCount: campaignTemplateStrategy === "ai_variations" ? campaignTemplateVariants.length : 0,
+        },
       },
     };
 
@@ -1911,6 +1843,8 @@ export default function LeadImports({
       setCampaignImageFirst(false);
       setCampaignImageError(null);
       setCampaignComposerMode("simple");
+      setCampaignTemplateStrategy("single");
+      setCampaignTemplateVariants([]);
       setCampaignSequence([createCampaignStep("text", 1)]);
       setDispatchOptions(defaultDispatchOptions);
       setAiGoal("");
@@ -2722,6 +2656,61 @@ export default function LeadImports({
                 </div>
 
                 {/* Período ativo e prompt — só aparecem no modo agente */}
+                <div className="space-y-3 rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03] md:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tipo de template</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">
+                        {campaignTemplateStrategy === "ai_variations" ? "Variações IA para WhatsApp" : "Template único"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Ative variações IA quando a campanha for disparar para muitos leads e precisar alternar o texto dentro do mesmo tema.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-muted-foreground">Único</span>
+                      <Switch
+                        checked={campaignTemplateStrategy === "ai_variations"}
+                        onCheckedChange={(checked) => {
+                          setCampaignTemplateStrategy(checked ? "ai_variations" : "single");
+                          if (!checked) setCampaignTemplateVariants([]);
+                        }}
+                      />
+                      <span className="text-xs font-medium text-primary">Variações IA</span>
+                    </div>
+                  </div>
+
+                  {campaignTemplateStrategy === "ai_variations" && (
+                    <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          As variações ficam salvas na campanha e todo disparo criado depois usa essa rotação automaticamente.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleGenerateCampaignTemplateVariants()}
+                          disabled={generateCampaignTemplateVariants.isPending}
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          {generateCampaignTemplateVariants.isPending ? "Gerando..." : "Gerar 8 variações"}
+                        </Button>
+                      </div>
+                      {campaignTemplateVariants.length > 0 && (
+                        <div className="grid gap-2 md:grid-cols-2">
+                          {campaignTemplateVariants.map((variant, index) => (
+                            <div key={`${variant}-${index}`} className="rounded-md border border-border/60 bg-card/70 p-2 text-xs text-muted-foreground">
+                              <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Variação {index + 1}</span>
+                              {variant}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {campaignMode === "agente" && (
                   <>
                     <div className="space-y-2">

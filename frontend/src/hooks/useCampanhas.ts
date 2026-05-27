@@ -76,6 +76,8 @@ export interface CampaignDispatchOptions {
   leadDelaySeconds: number;
   stopOnStepFailure: boolean;
   aiAssisted: boolean;
+  templateStrategy?: "single" | "ai_variations";
+  templateVariantCount?: number;
   waitForReply?: boolean;
   replyTimeoutSeconds?: number;
   replyPollIntervalSeconds?: number;
