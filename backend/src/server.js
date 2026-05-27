@@ -54,6 +54,7 @@ import {
 import { routeDeps } from "./http/routeDeps.js";
 import { registerAllDomainRoutes } from "./domains/registerAllDomainRoutes.js";
 import { startFollowupWorker } from "./followup/worker.js";
+import { startAutomationEngine } from "./followup/automationEngine.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -6551,5 +6552,8 @@ runMigrations(pgDatabasePool).finally(() => {
     } else {
       console.warn("[followup/worker] REDIS_URL/REDIS_HOST não configurado — worker não iniciado.");
     }
+
+    // Motor proativo de sugestões (node-cron, a cada 6h)
+    startAutomationEngine();
   });
 });

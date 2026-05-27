@@ -14,6 +14,7 @@ export const INTERNAL_PAGE_ORDER = [
   "followup-empresas",
   "followup-campanhas",
   "followup-analytics",
+  "followup-sugestoes",
   "chatbot-docs",
 ] as const;
 
