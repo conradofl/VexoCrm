@@ -92,20 +92,20 @@ export default function FollowupAnalytics() {
   const { isAdminUser } = useAuth();
   const { data: companies = [] } = useFupCompanies();
 
-  const [companyId, setCompanyId] = useState("");
+  const [companyId, setCompanyId] = useState("all");
   const [campaignId, setCampaignId] = useState("_all");
   const [period, setPeriod] = useState("30d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  const { data: campaigns = [] } = useFupCampaigns(companyId || undefined);
+  const { data: campaigns = [] } = useFupCampaigns(companyId !== "all" ? companyId : undefined);
 
   const { from, to } = period === "custom"
     ? { from: customFrom, to: customTo }
     : periodDates(period);
 
   const filters: AnalyticsFilters = {
-    companyId: companyId || undefined,
+    companyId: companyId !== "all" ? companyId : undefined,
     campaignId: campaignId !== "_all" ? campaignId : undefined,
     from: from || undefined,
     to: to || undefined,
@@ -148,7 +148,7 @@ export default function FollowupAnalytics() {
                     <SelectValue placeholder="Todas" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="" className="text-xs">Todas as empresas</SelectItem>
+                    <SelectItem value="all" className="text-xs">Todas as empresas</SelectItem>
                     {companies.map((c) => (
                       <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
                     ))}
