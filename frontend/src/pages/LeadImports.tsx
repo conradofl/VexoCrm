@@ -2667,16 +2667,31 @@ export default function LeadImports({
                         Ative variações IA quando a campanha for disparar para muitos leads e precisar alternar o texto dentro do mesmo tema.
                       </p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-medium text-muted-foreground">Único</span>
+                    <div className="flex items-center gap-3 rounded-full border border-primary/45 bg-background/85 px-3 py-2 shadow-sm dark:border-primary/50 dark:bg-black/35">
+                      <span
+                        className={cn(
+                          "text-xs font-medium",
+                          campaignTemplateStrategy === "single" ? "text-foreground" : "text-muted-foreground"
+                        )}
+                      >
+                        Único
+                      </span>
                       <Switch
                         checked={campaignTemplateStrategy === "ai_variations"}
                         onCheckedChange={(checked) => {
                           setCampaignTemplateStrategy(checked ? "ai_variations" : "single");
                           if (!checked) setCampaignTemplateVariants([]);
                         }}
+                        className="border-2 border-primary/50 bg-white shadow-[0_0_0_3px_rgba(37,99,235,0.10)] data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=unchecked]:border-slate-400 data-[state=unchecked]:bg-slate-100 dark:bg-black/40 dark:data-[state=unchecked]:border-white/35 dark:data-[state=unchecked]:bg-white/10"
                       />
-                      <span className="text-xs font-medium text-primary">Variações IA</span>
+                      <span
+                        className={cn(
+                          "text-xs font-medium",
+                          campaignTemplateStrategy === "ai_variations" ? "text-primary" : "text-muted-foreground"
+                        )}
+                      >
+                        Variações IA
+                      </span>
                     </div>
                   </div>
 
