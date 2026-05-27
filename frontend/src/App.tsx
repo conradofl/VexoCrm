@@ -37,6 +37,7 @@ import FollowupCompanies from "./pages/FollowupCompanies";
 import FollowupCampaigns from "./pages/FollowupCampaigns";
 import FollowupTemplates from "./pages/FollowupTemplates";
 import FollowupAnalytics from "./pages/FollowupAnalytics";
+import FollowupSuggestions from "./pages/FollowupSuggestions";
 
 const queryClient = new QueryClient();
 
@@ -228,6 +229,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-analytics">
                     <FollowupAnalytics />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="followup-sugestoes"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-sugestoes">
+                    <FollowupSuggestions />
                   </ProtectedRoute>
                 }
               />

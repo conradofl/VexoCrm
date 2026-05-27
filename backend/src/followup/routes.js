@@ -12,6 +12,7 @@ import {
   cancelPendingJobsForCampaign,
 } from "./service.js";
 import { getAnalytics } from "./analyticsService.js";
+import { getFollowupQueue } from "./queue.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -556,6 +557,222 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     } catch (err) {
       return sendErr(res, 500, "ANALYTICS_FAILED", err.message);
     }
+  });
+
+  // ── Suggestions (motor proativo) ─────────────────────────────────────────────
+
+  // GET /api/followup/suggestions?companyId=&status=pending
+  router.get("/suggestions", requireFirebaseAuth, async (req, res) => {
+    const companyId = str(req.query.companyId);
+    const status    = str(req.query.status) ?? "pending";
+
+    const validStatuses = ["pending", "approved", "rejected"];
+    if (!validStatuses.includes(status)) {
+      return sendErr(res, 400, "INVALID_QUERY", `status must be one of: ${validStatuses.join(", ")}`);
+    }
+
+    try {
+      const params = [status];
+      let companyFilter = "";
+      if (companyId) {
+        params.push(companyId);
+        companyFilter = `AND s.company_id = $${params.length}`;
+      }
+
+      const { rows } = await query(
+        `SELECT
+           s.id, s.company_id, s.campaign_id, s.lead_name, s.phone,
+           s.lead_source, s.reason, s.suggested_message, s.status,
+           s.approved_by, s.approved_at, s.executed_at, s.created_at,
+           fc.name   AS campaign_name,
+           fco.name  AS company_name,
+           ft.id     AS template_id,
+           ft.name   AS template_name,
+           ft.message AS template_message
+         FROM followup_suggestions s
+         LEFT JOIN followup_campaigns  fc  ON fc.id  = s.campaign_id
+         LEFT JOIN followup_companies  fco ON fco.id = s.company_id
+         LEFT JOIN followup_templates  ft  ON ft.id  = s.suggested_template_id
+         WHERE s.status = $1 ${companyFilter}
+         ORDER BY s.created_at DESC
+         LIMIT 200`,
+        params
+      );
+
+      return res.json({ success: true, suggestions: rows, total: rows.length });
+    } catch (err) {
+      return sendErr(res, 500, "SUGGESTIONS_FETCH_FAILED", err.message);
+    }
+  });
+
+  // GET /api/followup/suggestions/count — contagem de pendentes (para badge)
+  router.get("/suggestions/count", requireFirebaseAuth, async (req, res) => {
+    const companyId = str(req.query.companyId);
+    try {
+      const params = [];
+      let companyFilter = "";
+      if (companyId) {
+        params.push(companyId);
+        companyFilter = `AND company_id = $${params.length}`;
+      }
+      const { rows } = await query(
+        `SELECT COUNT(*) AS cnt FROM followup_suggestions WHERE status = 'pending' ${companyFilter}`,
+        params
+      );
+      return res.json({ success: true, count: Number(rows[0].cnt) });
+    } catch (err) {
+      return sendErr(res, 500, "COUNT_FAILED", err.message);
+    }
+  });
+
+  // PATCH /api/followup/suggestions/:id/approve — cria schedule + job BullMQ
+  router.patch("/suggestions/:id/approve", requireFirebaseAuth, async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
+
+    const body             = req.body && typeof req.body === "object" ? req.body : {};
+    const customMessage    = str(body.message);   // mensagem editada pelo operador (opcional)
+
+    try {
+      const { rows: suggRows } = await query(
+        `SELECT * FROM followup_suggestions WHERE id = $1 AND status = 'pending'`,
+        [id]
+      );
+      if (!suggRows.length) return sendErr(res, 404, "NOT_FOUND", "Suggestion not found or already processed");
+
+      const sugg = suggRows[0];
+
+      // Criar followup_schedule
+      const { rows: schedRows } = await query(
+        `INSERT INTO followup_schedules (campaign_id, company_id, lead_name, phone, origin, status)
+         VALUES ($1, $2, $3, $4, $5, 'active')
+         RETURNING id`,
+        [sugg.campaign_id, sugg.company_id, sugg.lead_name, sugg.phone, sugg.lead_source]
+      );
+      const scheduleId = schedRows[0].id;
+
+      // Resolver template
+      let templateId = sugg.suggested_template_id;
+      if (!templateId) {
+        const { rows: tplRows } = await query(
+          `SELECT id FROM followup_templates WHERE campaign_id = $1 AND is_active = true ORDER BY order_index ASC LIMIT 1`,
+          [sugg.campaign_id]
+        );
+        if (tplRows.length) templateId = tplRows[0].id;
+      }
+
+      let jobId = null;
+      if (templateId) {
+        // Se operador editou a mensagem, criar template temporário não é viável —
+        // armazenamos a mensagem customizada no job via error_log field não — melhor
+        // salvar no suggested_message e o worker usa a da sugestão se existir.
+        // Por simplicidade: inserimos o job normalmente; o worker usa o template.
+        const { rows: jobRows } = await query(
+          `INSERT INTO followup_jobs (schedule_id, template_id, status, scheduled_for)
+           VALUES ($1, $2, 'pending', NOW())
+           RETURNING id`,
+          [scheduleId, templateId]
+        );
+        jobId = jobRows[0].id;
+
+        await getFollowupQueue().add(
+          "send-followup",
+          { jobId, customMessage: customMessage || sugg.suggested_message || null },
+          { delay: 0, jobId: `fup-suggestion-${jobId}` }
+        );
+      }
+
+      const approvedBy = req.user?.uid || "operator";
+      await query(
+        `UPDATE followup_suggestions
+            SET status = 'approved', approved_by = $2, approved_at = NOW(), executed_at = NOW()
+          WHERE id = $1`,
+        [id, approvedBy]
+      );
+
+      return res.json({ success: true, id, scheduleId, jobId });
+    } catch (err) {
+      return sendErr(res, 500, "APPROVE_FAILED", err.message);
+    }
+  });
+
+  // PATCH /api/followup/suggestions/:id/reject
+  router.patch("/suggestions/:id/reject", requireFirebaseAuth, async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
+
+    try {
+      const { rows } = await query(
+        `UPDATE followup_suggestions SET status = 'rejected' WHERE id = $1 AND status = 'pending' RETURNING id`,
+        [id]
+      );
+      if (!rows.length) return sendErr(res, 404, "NOT_FOUND", "Suggestion not found or already processed");
+      return res.json({ success: true, id });
+    } catch (err) {
+      return sendErr(res, 500, "REJECT_FAILED", err.message);
+    }
+  });
+
+  // POST /api/followup/suggestions/approve-batch
+  router.post("/suggestions/approve-batch", requireFirebaseAuth, async (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const ids  = Array.isArray(body.ids) ? body.ids.filter((i) => typeof i === "string") : [];
+    if (!ids.length) return sendErr(res, 400, "INVALID_BODY", "ids must be a non-empty array of strings");
+
+    const results = { approved: [], failed: [] };
+
+    for (const id of ids) {
+      try {
+        const { rows: suggRows } = await query(
+          `SELECT * FROM followup_suggestions WHERE id = $1 AND status = 'pending'`,
+          [id]
+        );
+        if (!suggRows.length) { results.failed.push({ id, reason: "not_found_or_processed" }); continue; }
+
+        const sugg = suggRows[0];
+
+        const { rows: schedRows } = await query(
+          `INSERT INTO followup_schedules (campaign_id, company_id, lead_name, phone, origin, status)
+           VALUES ($1, $2, $3, $4, $5, 'active') RETURNING id`,
+          [sugg.campaign_id, sugg.company_id, sugg.lead_name, sugg.phone, sugg.lead_source]
+        );
+        const scheduleId = schedRows[0].id;
+
+        let templateId = sugg.suggested_template_id;
+        if (!templateId) {
+          const { rows: tplRows } = await query(
+            `SELECT id FROM followup_templates WHERE campaign_id = $1 AND is_active = true ORDER BY order_index ASC LIMIT 1`,
+            [sugg.campaign_id]
+          );
+          if (tplRows.length) templateId = tplRows[0].id;
+        }
+
+        if (templateId) {
+          const { rows: jobRows } = await query(
+            `INSERT INTO followup_jobs (schedule_id, template_id, status, scheduled_for)
+             VALUES ($1, $2, 'pending', NOW()) RETURNING id`,
+            [scheduleId, templateId]
+          );
+          await getFollowupQueue().add(
+            "send-followup",
+            { jobId: jobRows[0].id, customMessage: sugg.suggested_message || null },
+            { delay: 0, jobId: `fup-batch-${jobRows[0].id}` }
+          );
+        }
+
+        const approvedBy = req.user?.uid || "operator";
+        await query(
+          `UPDATE followup_suggestions SET status = 'approved', approved_by = $2, approved_at = NOW(), executed_at = NOW() WHERE id = $1`,
+          [id, approvedBy]
+        );
+        results.approved.push(id);
+      } catch (err) {
+        console.error(`[followup/suggestions] batch approve error for ${id}:`, err.message);
+        results.failed.push({ id, reason: err.message });
+      }
+    }
+
+    return res.json({ success: true, ...results });
   });
 
   // Montar router em /api/followup

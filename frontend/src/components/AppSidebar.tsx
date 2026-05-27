@@ -22,7 +22,9 @@ import {
   Megaphone,
   Landmark,
   ChevronDown,
+  Sparkles,
 } from "lucide-react";
+import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { type InternalPage } from "@/lib/access";
@@ -47,6 +49,7 @@ const followupSubItems = [
   { title: "Fila", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" as const },
   { title: "Campanhas", url: "/crm/followup-campanhas", icon: Megaphone, page: "followup-campanhas" as const },
   { title: "Analytics", url: "/crm/followup-analytics", icon: BarChart3, page: "followup-analytics" as const },
+  { title: "Sugestões IA", url: "/crm/followup-sugestoes", icon: Sparkles, page: "followup-sugestoes" as const },
   { title: "Empresas", url: "/crm/followup-empresas", icon: Landmark, page: "followup-empresas" as const },
 ] satisfies Array<{
   title: string;
@@ -145,6 +148,8 @@ export function AppSidebar() {
   const visibleBottom = navItemsBottom.filter((item) => canAccessInternalPage(item.page));
   const visibleFupItems = followupSubItems.filter((item) => canAccessInternalPage(item.page));
   const showFupGroup = visibleFupItems.length > 0;
+
+  const { data: suggestionCount = 0 } = useFollowupSuggestionCount();
 
   const userEmail = user?.email || accessProfile?.email || "";
   const userLogin = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
@@ -266,6 +271,11 @@ export function AppSidebar() {
                             )}
                           />
                           <span className="truncate">{item.title}</span>
+                          {item.page === "followup-sugestoes" && suggestionCount > 0 && (
+                            <span className="ml-auto rounded-full bg-violet-500 px-1.5 py-0.5 font-mono text-[9px] font-bold text-white">
+                              {suggestionCount > 99 ? "99+" : suggestionCount}
+                            </span>
+                          )}
                           {isActive && (
                             <span className="absolute left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]" />
                           )}
