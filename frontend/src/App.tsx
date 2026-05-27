@@ -33,6 +33,10 @@ import ChatbotKanban from "./pages/ChatbotKanban";
 import ChatbotDocs from "./pages/ChatbotDocs";
 import ChatbotSettings from "./pages/ChatbotSettings";
 import FollowupQueue from "./pages/FollowupQueue";
+import FollowupCompanies from "./pages/FollowupCompanies";
+import FollowupCampaigns from "./pages/FollowupCampaigns";
+import FollowupTemplates from "./pages/FollowupTemplates";
+import FollowupAnalytics from "./pages/FollowupAnalytics";
 
 const queryClient = new QueryClient();
 
@@ -192,6 +196,38 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="planilhas">
                     <FollowupQueue />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="followup-empresas"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-empresas">
+                    <FollowupCompanies />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="followup-campanhas"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-campanhas">
+                    <FollowupCampaigns />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="followup-templates"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-campanhas">
+                    <FollowupTemplates />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="followup-analytics"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-analytics">
+                    <FollowupAnalytics />
                   </ProtectedRoute>
                 }
               />

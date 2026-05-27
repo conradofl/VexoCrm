@@ -18,6 +18,9 @@ import {
   BookOpen,
   ListChecks,
   Settings2,
+  BarChart3,
+  Megaphone,
+  Landmark,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +35,9 @@ const navItems = [
   { title: "Chatbot Kanban", url: "/crm/chatbot", icon: KanbanSquare, page: "chatbot-kanban" as const },
   { title: "Chatbot", url: "/crm/chatbot-settings", icon: Settings2, page: "chatbot-config" as const },
   { title: "Fila de Followup", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" as const },
+  { title: "FUP — Empresas", url: "/crm/followup-empresas", icon: Landmark, page: "followup-empresas" as const },
+  { title: "FUP — Campanhas", url: "/crm/followup-campanhas", icon: Megaphone, page: "followup-campanhas" as const },
+  { title: "FUP — Analytics", url: "/crm/followup-analytics", icon: BarChart3, page: "followup-analytics" as const },
   { title: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen, page: "chatbot-docs" as const },
   { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
   { title: "Usuarios", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" as const },

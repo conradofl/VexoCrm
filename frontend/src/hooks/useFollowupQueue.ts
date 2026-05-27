@@ -16,6 +16,8 @@ export interface FollowupItem {
   scheduledAt: string | null;
   lastContactAt: string | null;
   createdAt: string;
+  /** Origem do lead (campo opcional — preenchido pelo novo módulo de follow-up) */
+  origin?: string | null;
 }
 
 export interface FollowupQueueFilters {

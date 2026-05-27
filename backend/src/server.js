@@ -53,6 +53,7 @@ import {
 
 import { routeDeps } from "./http/routeDeps.js";
 import { registerAllDomainRoutes } from "./domains/registerAllDomainRoutes.js";
+import { startFollowupWorker } from "./followup/worker.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -6543,5 +6544,12 @@ runMigrations(pgDatabasePool).finally(() => {
     whatsappSessionManager.restorePersistedSession().catch((error) => {
       console.error("whatsapp startup restore error:", error);
     });
+
+    // BullMQ worker do módulo de follow-up
+    if (process.env.REDIS_URL || process.env.REDIS_HOST) {
+      startFollowupWorker();
+    } else {
+      console.warn("[followup/worker] REDIS_URL/REDIS_HOST não configurado — worker não iniciado.");
+    }
   });
 });

@@ -9,14 +9,14 @@ import {
 
 describe("access model helpers", () => {
   it("returns the expected preset per role", () => {
-    expect(getDefaultPresetForRole("internal")).toBe("internal_operator");
+    expect(getDefaultPresetForRole("internal")).toBe("operador");
     expect(getDefaultPresetForRole("client")).toBe("client_operator");
     expect(getDefaultPresetForRole("pending")).toBe("pending");
   });
 
   it("normalizes presets without crossing role boundaries", () => {
-    expect(normalizeAccessPreset("internal_manager", "internal")).toBe("internal_manager");
-    expect(normalizeAccessPreset("internal_admin", "client")).toBe("client_operator");
+    expect(normalizeAccessPreset("gestor", "internal")).toBe("gestor");
+    expect(normalizeAccessPreset("admin_vexo", "client")).toBe("client_operator");
   });
 
   it("forces client and pending scope rules", () => {
