@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
-import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   Building2,
   LayoutDashboard,
@@ -21,12 +21,13 @@ import {
   BarChart3,
   Megaphone,
   Landmark,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { type InternalPage } from "@/lib/access";
 
-const navItems = [
+const navItemsTop = [
   { title: "Dashboard", url: "/crm/dashboard", icon: LayoutDashboard, page: "dashboard" as const },
   { title: "Leads", url: "/crm/leads", icon: Users, badge: "CRM", page: "leads" as const },
   { title: "Campanhas", url: "/crm/planilhas", icon: FileSpreadsheet, page: "planilhas" as const },
@@ -34,10 +35,27 @@ const navItems = [
   { title: "WhatsApp", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" as const },
   { title: "Chatbot Kanban", url: "/crm/chatbot", icon: KanbanSquare, page: "chatbot-kanban" as const },
   { title: "Chatbot", url: "/crm/chatbot-settings", icon: Settings2, page: "chatbot-config" as const },
-  { title: "Fila de Followup", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" as const },
-  { title: "FUP — Empresas", url: "/crm/followup-empresas", icon: Landmark, page: "followup-empresas" as const },
-  { title: "FUP — Campanhas", url: "/crm/followup-campanhas", icon: Megaphone, page: "followup-campanhas" as const },
-  { title: "FUP — Analytics", url: "/crm/followup-analytics", icon: BarChart3, page: "followup-analytics" as const },
+] satisfies Array<{
+  title: string;
+  url: string;
+  icon: ComponentType<{ className?: string }>;
+  badge?: string;
+  page: InternalPage;
+}>;
+
+const followupSubItems = [
+  { title: "Fila", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" as const },
+  { title: "Campanhas", url: "/crm/followup-campanhas", icon: Megaphone, page: "followup-campanhas" as const },
+  { title: "Analytics", url: "/crm/followup-analytics", icon: BarChart3, page: "followup-analytics" as const },
+  { title: "Empresas", url: "/crm/followup-empresas", icon: Landmark, page: "followup-empresas" as const },
+] satisfies Array<{
+  title: string;
+  url: string;
+  icon: ComponentType<{ className?: string }>;
+  page: InternalPage;
+}>;
+
+const navItemsBottom = [
   { title: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen, page: "chatbot-docs" as const },
   { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
   { title: "Usuarios", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" as const },
@@ -45,7 +63,6 @@ const navItems = [
   title: string;
   url: string;
   icon: ComponentType<{ className?: string }>;
-  badge?: string;
   page: InternalPage;
 }>;
 
@@ -57,11 +74,78 @@ const adminNavItems = [
   icon: ComponentType<{ className?: string }>;
 }>;
 
+function NavItem({
+  item,
+  collapsed,
+}: {
+  item: { title: string; url: string; icon: ComponentType<{ className?: string }>; badge?: string };
+  collapsed: boolean;
+}) {
+  return (
+    <NavLink
+      to={item.url}
+      className={({ isActive }) =>
+        cn(
+          "group relative flex font-medium transition-all",
+          collapsed
+            ? "h-9 items-center justify-center rounded-xl px-0"
+            : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
+          isActive
+            ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24),0_14px_28px_rgba(15,23,42,0.08)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34),0_16px_28px_rgba(15,23,42,0.26)]"
+            : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <item.icon
+            className={cn(
+              "h-4 w-4 shrink-0",
+              isActive
+                ? "text-cyan-600 dark:text-cyan-200"
+                : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
+            )}
+          />
+          {!collapsed && <span className="truncate">{item.title}</span>}
+          {!collapsed && item.badge && (
+            <span className="ml-auto rounded-full border border-cyan-400/20 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-cyan-700 dark:text-cyan-200">
+              {item.badge}
+            </span>
+          )}
+          {isActive && (
+            <span
+              className={cn(
+                "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
+                collapsed
+                  ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
+                  : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
+              )}
+            />
+          )}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
 export function AppSidebar() {
   const { logout, canAccessInternalPage, isAdminUser, user, accessProfile } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const visibleNavItems = navItems.filter((item) => canAccessInternalPage(item.page));
+  const location = useLocation();
+
+  const isFupActive = location.pathname.startsWith("/crm/followup");
+  const [fupOpen, setFupOpen] = useState(isFupActive);
+
+  useEffect(() => {
+    if (isFupActive) setFupOpen(true);
+  }, [isFupActive]);
+
+  const visibleTop = navItemsTop.filter((item) => canAccessInternalPage(item.page));
+  const visibleBottom = navItemsBottom.filter((item) => canAccessInternalPage(item.page));
+  const visibleFupItems = followupSubItems.filter((item) => canAccessInternalPage(item.page));
+  const showFupGroup = visibleFupItems.length > 0;
+
   const userEmail = user?.email || accessProfile?.email || "";
   const userLogin = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
   const userName = user?.displayName?.trim() || userLogin || "Usuario";
@@ -82,6 +166,7 @@ export function AppSidebar() {
         collapsed ? "w-[74px]" : "w-[204px]"
       )}
     >
+      {/* Logo / título */}
       <div
         className={cn(
           "relative shrink-0 border-b border-slate-200/80 dark:border-white/10",
@@ -97,7 +182,7 @@ export function AppSidebar() {
           </div>
           {!collapsed && (
             <div className="overflow-hidden">
-              <p className="text-[17px] font-extrabold tracking-tight text-foreground">Vexo CRM</p>
+              <p className="text-[17px] font-extrabold tracking-tight text-foreground">Vexo OS</p>
               <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-slate-500 dark:text-white/45">
                 Control hub
               </p>
@@ -114,50 +199,91 @@ export function AppSidebar() {
         )}
 
         <div className="space-y-1">
-          {visibleNavItems.map((item) => (
-            <NavLink
-              key={item.url}
-              to={item.url}
-              className={({ isActive }) =>
-                cn(
-                  "group relative flex font-medium transition-all",
+          {/* Itens do topo */}
+          {visibleTop.map((item) => (
+            <NavItem key={item.url} item={item} collapsed={collapsed} />
+          ))}
+
+          {/* Grupo colapsável Follow-up */}
+          {showFupGroup && (
+            <>
+              <button
+                onClick={() => setFupOpen((o) => !o)}
+                className={cn(
+                  "group relative flex w-full font-medium transition-all",
                   collapsed
                     ? "h-9 items-center justify-center rounded-xl px-0"
                     : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
-                  isActive
-                    ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24),0_14px_28px_rgba(15,23,42,0.08)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34),0_16px_28px_rgba(15,23,42,0.26)]"
+                  isFupActive
+                    ? "text-slate-900 dark:text-white"
                     : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <item.icon
-                    className={cn(
-                      "h-4 w-4 shrink-0",
-                      isActive ? "text-cyan-600 dark:text-cyan-200" : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
-                    )}
-                  />
-                  {!collapsed && <span className="truncate">{item.title}</span>}
-                  {!collapsed && item.badge && (
-                    <span className="ml-auto rounded-full border border-cyan-400/20 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-cyan-700 dark:text-cyan-200">
-                      {item.badge}
-                    </span>
+                )}
+              >
+                <ListChecks
+                  className={cn(
+                    "h-4 w-4 shrink-0",
+                    isFupActive
+                      ? "text-cyan-600 dark:text-cyan-200"
+                      : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
                   )}
-                  {isActive && (
-                    <span
+                />
+                {!collapsed && (
+                  <>
+                    <span className="truncate">Follow-up</span>
+                    <ChevronDown
                       className={cn(
-                        "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
-                        collapsed
-                          ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
-                          : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
+                        "ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200",
+                        fupOpen ? "rotate-0" : "-rotate-90"
                       )}
                     />
-                  )}
-                </>
+                  </>
+                )}
+              </button>
+
+              {fupOpen && !collapsed && (
+                <div className="ml-3 space-y-0.5 border-l border-slate-200/80 pl-2.5 dark:border-white/10">
+                  {visibleFupItems.map((item) => (
+                    <NavLink
+                      key={item.url}
+                      to={item.url}
+                      className={({ isActive }) =>
+                        cn(
+                          "group relative flex items-center gap-2 rounded-xl px-2.5 py-2 text-[12px] font-medium transition-all",
+                          isActive
+                            ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34)]"
+                            : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
+                        )
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          <item.icon
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0",
+                              isActive
+                                ? "text-cyan-600 dark:text-cyan-200"
+                                : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
+                            )}
+                          />
+                          <span className="truncate">{item.title}</span>
+                          {isActive && (
+                            <span className="absolute left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]" />
+                          )}
+                        </>
+                      )}
+                    </NavLink>
+                  ))}
+                </div>
               )}
-            </NavLink>
+            </>
+          )}
+
+          {/* Itens do rodapé da nav */}
+          {visibleBottom.map((item) => (
+            <NavItem key={item.url} item={item} collapsed={collapsed} />
           ))}
+
+          {/* Vendas Vexo (admin only) */}
           {isAdminUser &&
             adminNavItems.map((item) => (
               <NavLink
@@ -180,7 +306,9 @@ export function AppSidebar() {
                     <item.icon
                       className={cn(
                         "h-4 w-4 shrink-0",
-                        isActive ? "text-cyan-600 dark:text-cyan-200" : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
+                        isActive
+                          ? "text-cyan-600 dark:text-cyan-200"
+                          : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
                       )}
                     />
                     {!collapsed && <span className="truncate">{item.title}</span>}
