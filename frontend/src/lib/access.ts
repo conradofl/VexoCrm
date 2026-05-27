@@ -11,6 +11,9 @@ export const INTERNAL_PAGE_ORDER = [
   "chatbot-kanban",
   "chatbot-config",
   "fila-de-followup",
+  "followup-empresas",
+  "followup-campanhas",
+  "followup-analytics",
   "chatbot-docs",
 ] as const;
 

@@ -65,6 +65,7 @@ import {
 
 
 import { routeDeps } from "../http/routeDeps.js";
+import { registerFollowupRoutes } from "../followup/routes.js";
 
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
@@ -5975,6 +5976,7 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
 
+  // ─── Módulo de Follow-up (BullMQ + campanhas independentes) ───────────────
+  registerFollowupRoutes(app, requireFirebaseAuth);
 }

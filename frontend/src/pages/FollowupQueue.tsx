@@ -10,6 +10,7 @@ import {
   Phone,
   Megaphone,
   Clock,
+  MapPin,
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -180,6 +181,12 @@ function FollowupRow({ item }: FollowupRowProps) {
             {item.lastContactAt && (
               <span className="text-slate-400 dark:text-slate-500">
                 Último contato: {formatDate(item.lastContactAt)}
+              </span>
+            )}
+            {item.origin && (
+              <span className="flex items-center gap-1 text-indigo-500 dark:text-indigo-400">
+                <MapPin className="h-3 w-3" />
+                {item.origin}
               </span>
             )}
           </div>
