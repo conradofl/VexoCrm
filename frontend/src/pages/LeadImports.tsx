@@ -169,7 +169,7 @@ const AI_STYLE_PRESETS = [
 const darkFieldClass =
   "border-slate-200/90 bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all placeholder:text-slate-400 focus-visible:border-primary/35 focus-visible:ring-2 focus-visible:ring-primary/15 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-black/45 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.18)] dark:placeholder:text-white/30 dark:focus-visible:bg-black/60 dark:focus-visible:ring-1 dark:focus-visible:ring-primary/20";
 const darkSelectContentClass =
-  "border-slate-200/90 bg-white text-slate-900 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#090b17]/98 dark:text-white dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)]";
+  "border-slate-200/90 bg-white text-slate-900 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#090b17] dark:text-white dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)]";
 const darkSelectItemClass =
   "rounded-md text-slate-700 focus:bg-slate-100 focus:text-slate-950 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary dark:text-white/78 dark:focus:bg-white/[0.06] dark:focus:text-white dark:data-[state=checked]:bg-primary/12 dark:data-[state=checked]:text-white";
 const CAMPAIGN_TIME_ZONE = "America/Sao_Paulo";
@@ -3089,9 +3089,9 @@ export default function LeadImports({
                                 <SelectTrigger className={darkFieldClass}>
                                   <SelectValue />
                                 </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="immediate">No disparo da campanha</SelectItem>
-                                  <SelectItem value="after_reply">Quando o lead responder</SelectItem>
+                                <SelectContent className={darkSelectContentClass}>
+                                  <SelectItem value="immediate" className={darkSelectItemClass}>No disparo da campanha</SelectItem>
+                                  <SelectItem value="after_reply" className={darkSelectItemClass}>Quando o lead responder</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
