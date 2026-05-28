@@ -7,12 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { useOnboarding, type OnboardingPayload, type OnboardingResult, type OnboardingTemplate } from "@/hooks/useOnboarding";
 import { TRIGGER_OPTIONS, getTriggerLabel, replaceVariables } from "./OnboardingWizard";
-
-const SYSTEM_PROMPT = `Você é um assistente de onboarding do Vexo OS. Analise a descrição do usuário e extraia as informações necessárias para criar um cliente no sistema. Retorne APENAS um JSON válido com a estrutura do endpoint POST /api/onboarding, sem texto adicional, sem markdown, sem blocos de código. Estrutura: { "company_name": string, "evolution_instance": string, "webhook_url": string | null, "campaign_name": string, "campaign_description": string | null, "default_origin": string | null, "templates": [{"name": string, "message": string, "trigger_type": string, "trigger_value": number, "trigger_unit": string, "trigger_direction": string | null, "order_index": number}] }. Para trigger_type use: on_schedule (imediato), before_meeting (antes da reunião), after_meeting (depois da reunião), no_reply (sem resposta). Para trigger_unit use: minutes, hours, days. Para trigger_direction: null para on_schedule e no_reply, "before" para before_meeting, "after" para after_meeting. Nas mensagens use {{lead_name}}, {{meeting_date}}, {{meeting_time}} onde apropriado.`;
-
-const REQUIRED_FIELDS = ["company_name", "evolution_instance", "campaign_name", "templates"] as const;
 
 function getTriggerLabelFromTemplate(t: OnboardingTemplate) {
   const match = TRIGGER_OPTIONS.find(
@@ -176,6 +173,7 @@ function PreviewCard({ payload }: { payload: Partial<OnboardingPayload> }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function OnboardingAgent() {
+  const { user } = useAuth();
   const { submitOnboarding, isLoading, result, reset } = useOnboarding();
   const [description, setDescription] = useState("");
   const [parsedPayload, setParsedPayload] = useState<Partial<OnboardingPayload> | null>(null);
@@ -190,57 +188,41 @@ export default function OnboardingAgent() {
     setIsAnalyzing(true);
 
     try {
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        setParseError("VITE_ANTHROPIC_API_KEY não configurado no ambiente.");
-        return;
-      }
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const token = await user?.getIdToken();
+      const response = await fetch("/api/onboarding/interpret", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 2048,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: "user", content: description }],
-        }),
+        body: JSON.stringify({ prompt: description }),
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error((errData as { error?: { message?: string } }).error?.message || `Erro da API: ${response.status}`);
+      const data = await response.json() as {
+        success?: boolean;
+        data?: Partial<OnboardingPayload>;
+        error?: string | { message?: string };
+        fields?: string[];
+        raw?: string;
+      };
+
+      if (!response.ok || !data.success) {
+        if (data.error === "parse_error") {
+          setParseError("Não consegui interpretar. Tente ser mais específico sobre os gatilhos das mensagens.");
+          return;
+        }
+        if (data.error === "missing_fields" && data.fields) {
+          setMissingFields(data.fields);
+          if (data.data) setParsedPayload(data.data);
+          return;
+        }
+        const msg = typeof data.error === "object" ? data.error?.message : data.error;
+        throw new Error(msg || `Erro do servidor: ${response.status}`);
       }
 
-      const data = await response.json() as { content?: Array<{ text?: string }> };
-      const rawText = data.content?.[0]?.text?.trim() || "";
-
-      let parsed: Partial<OnboardingPayload>;
-      try {
-        parsed = JSON.parse(rawText) as Partial<OnboardingPayload>;
-      } catch {
-        setParseError("Não consegui interpretar. Tente ser mais específico sobre os gatilhos das mensagens.");
-        return;
-      }
-
-      const missing = REQUIRED_FIELDS.filter((f) => {
-        if (f === "templates") return !Array.isArray(parsed.templates) || parsed.templates.length === 0;
-        return !parsed[f as keyof typeof parsed];
-      });
-
-      if (missing.length > 0) {
-        setMissingFields(missing);
-        setParsedPayload(parsed);
-        return;
-      }
-
-      setParsedPayload(parsed);
+      setParsedPayload(data.data || null);
     } catch (err: unknown) {
-      setParseError(err instanceof Error ? err.message : "Erro ao chamar a IA");
+      setParseError(err instanceof Error ? err.message : "Erro ao chamar o servidor");
     } finally {
       setIsAnalyzing(false);
     }
