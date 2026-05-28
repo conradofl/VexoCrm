@@ -68,8 +68,10 @@ describe("campaign reply flow safeguards", () => {
     expect(routeBundle).toContain('status_conversa: "campanha_enviada"');
     expect(routeBundle).toContain('ultima_interacao_bot: sentAt || new Date().toISOString()');
     expect(routeBundle).toContain('onLeadDispatched: async ({ lead, phone, sentAt })');
-    expect(routeBundle).toContain("backfillFollowupQueueFromDispatchRuns");
-    expect(routeBundle).toContain(".from(\"campaign_dispatch_runs\")");
-    expect(routeBundle).toContain('await backfillFollowupQueueFromDispatchRuns({ clientId, campaignId })');
+  });
+
+  it("allows the followup queue to load all companies", () => {
+    expect(routeBundle).not.toContain('return sendError(res, 400, "INVALID_QUERY", "Missing companyId")');
+    expect(routeBundle).toContain('const baseWhere = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : ""');
   });
 });

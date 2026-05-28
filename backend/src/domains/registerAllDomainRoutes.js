@@ -65,6 +65,10 @@ import {
 
 
 import { routeDeps } from "../http/routeDeps.js";
+import { registerFollowupRoutes } from "../followup/routes.js";
+import { registerOnboardingRoutes } from "../onboarding/routes.js";
+import { query as fupQuery } from "../followup/db.js";
+import { getFollowupQueue } from "../followup/queue.js";
 
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
@@ -2489,7 +2493,7 @@ export function registerAllDomainRoutes(app) {
   
     const importId = normalizeString(req.query.importId);
     const dispatched = req.query.dispatched;
-
+  
     try {
       let query = supabase
         .from("lead_import_items")
@@ -4004,11 +4008,17 @@ export function registerAllDomainRoutes(app) {
         },
       });
     } catch (error) {
-      console.error("campaign create error:", error);
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+      console.error("[campaigns] Erro ao criar campanha:", error);
+      // Erros de checkEvolutionInstanceHealth carregam statusCode e code customizados
+      const httpStatus = typeof error?.statusCode === "number" && error.statusCode >= 400 && error.statusCode < 600
+        ? error.statusCode
+        : 500;
+      const errorCode = error?.code || "INTERNAL_ERROR";
+      const errorMessage = httpStatus < 500 ? error.message : "Internal server error";
+      sendError(res, httpStatus, errorCode, errorMessage, internalErrorPayloadDetails(error));
     }
   });
-  
+
   // PATCH /api/campaigns/:id — atualiza campanha
   app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
@@ -5106,75 +5116,11 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
-  // GET /api/followup-queue — fila de followup de campanhas com métricas de resposta
-  async function backfillFollowupQueueFromDispatchRuns({ clientId, campaignId = null }) {
-    if (!clientId) return;
+  // ── Followup Queue (novo módulo) ─────────────────────────────────────────────
 
-    let campaignsQuery = supabase
-      .from("campaigns")
-      .select("id, import_id")
-      .eq("client_id", clientId)
-      .not("import_id", "is", null);
-
-    if (campaignId) {
-      campaignsQuery = campaignsQuery.eq("id", campaignId);
-    }
-
-    const { data: campaigns, error: campaignsError } = await campaignsQuery;
-    if (campaignsError || !campaigns?.length) {
-      if (campaignsError) console.warn("[followup-queue] campaign backfill lookup failed:", campaignsError.message || campaignsError);
-      return;
-    }
-
-    const campaignById = {};
-    for (const campaign of campaigns) {
-      if (campaign?.id && campaign?.import_id) campaignById[campaign.id] = campaign;
-    }
-
-    const campaignIds = Object.keys(campaignById);
-    if (campaignIds.length === 0) return;
-
-    const { data: runs, error: runsError } = await supabase
-      .from("campaign_dispatch_runs")
-      .select("campaign_id, phone, sent_at")
-      .eq("client_id", clientId)
-      .eq("status", "sent")
-      .in("campaign_id", campaignIds)
-      .not("phone", "is", null)
-      .order("sent_at", { ascending: false })
-      .limit(1000);
-
-    if (runsError || !runs?.length) {
-      if (runsError) console.warn("[followup-queue] dispatch run backfill lookup failed:", runsError.message || runsError);
-      return;
-    }
-
-    for (const run of runs) {
-      const campaign = campaignById[run.campaign_id];
-      if (!campaign?.import_id || !run.phone) continue;
-
-      const { error: updateError } = await supabase
-        .from("lead_import_items")
-        .update({
-          status_conversa: "campanha_enviada",
-          ultima_interacao_bot: run.sent_at || new Date().toISOString(),
-          followup_status: "pending",
-          followup_scheduled_at: null,
-        })
-        .eq("client_id", clientId)
-        .eq("import_id", campaign.import_id)
-        .eq("telefone", run.phone)
-        .is("ultima_interacao_bot", null);
-
-      if (updateError) {
-        console.warn("[followup-queue] item backfill failed:", updateError.message || updateError);
-      }
-    }
-  }
-
+  // GET /api/followup-queue — lê followup_schedules + joins + status derivado
   app.get("/api/followup-queue", requireFirebaseAuth, async (req, res) => {
-    if (!ensureDb(res)) return;
-    const clientId = normalizeTenantKey(req.query?.clientId);
+    const companyId = normalizeString(req.query?.companyId) || null;
     const campaignId = normalizeString(req.query?.campaignId) || null;
     const status = normalizeString(req.query?.status) || null;
     const dateFrom = normalizeString(req.query?.dateFrom) || null;
@@ -5184,170 +5130,212 @@ export function registerAllDomainRoutes(app) {
     const rawLimit = Number.parseInt(String(req.query?.limit ?? "50"), 10);
     const limit = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 200);
 
-    if (!clientId) return sendError(res, 400, "INVALID_QUERY", "Missing clientId");
-
-    const validStatuses = ["pending", "replied", "scheduled", "discarded", "converted"];
+    const validStatuses = ["active", "awaiting_reply", "replied", "failed", "cancelled", "converted"];
     if (status && !validStatuses.includes(status)) {
       return sendError(res, 400, "INVALID_QUERY", `status must be one of: ${validStatuses.join(", ")}`);
     }
 
     try {
-      await backfillFollowupQueueFromDispatchRuns({ clientId, campaignId });
+      const params = [];
+      const filters = [];
+      let idx = 1;
+      if (companyId) { params.push(companyId); filters.push(`fco.id = $${idx++}`); }
+      if (campaignId) { params.push(campaignId); filters.push(`fc.id = $${idx++}`); }
+      if (dateFrom)   { params.push(dateFrom);   filters.push(`fs.created_at >= $${idx++}`); }
+      if (dateTo)     { params.push(dateTo);     filters.push(`fs.created_at <= $${idx++}`); }
+      const baseWhere = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
 
-      let query = supabase
-        .from("lead_import_items")
-        .select("id, import_id, telefone, nome, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, followup_status, followup_scheduled_at, created_at, normalized_data", { count: "exact" })
-        .eq("client_id", clientId)
-        .not("ultima_interacao_bot", "is", null);
+      let statusWhere = "";
+      if (status) { params.push(status); statusWhere = `WHERE derived_status = $${idx++}`; }
 
-      if (campaignId) {
-        const { data: importForCampaign } = await supabase
-          .from("campaigns")
-          .select("import_id")
-          .eq("id", campaignId)
-          .eq("client_id", clientId)
-          .maybeSingle();
-        if (importForCampaign?.import_id) {
-          query = query.eq("import_id", importForCampaign.import_id);
-        } else {
-          return res.json({ success: true, items: [], total: 0 });
-        }
-      }
+      params.push(limit, (page - 1) * limit);
+      const limitIdx = idx++, offsetIdx = idx++;
 
-      if (status === "pending") {
-        query = query.or("followup_status.is.null,followup_status.eq.pending").is("ultima_interacao_usuario", null);
-      } else if (status === "replied") {
-        query = query.not("ultima_interacao_usuario", "is", null);
-      } else if (status && ["scheduled", "discarded", "converted"].includes(status)) {
-        query = query.eq("followup_status", status);
-      }
+      const sql = `
+        WITH base AS (
+          SELECT
+            fs.id,
+            fs.lead_name,
+            fs.phone,
+            fs.origin,
+            fs.meeting_datetime,
+            fs.created_at,
+            fs.campaign_id,
+            fc.name       AS campaign_name,
+            fc.company_id,
+            fco.name      AS company_name,
+            COUNT(fj.id) FILTER (WHERE fj.status = 'sent')    AS jobs_sent,
+            COUNT(fj.id) FILTER (WHERE fj.status = 'failed')  AS jobs_failed,
+            COUNT(fj.id) FILTER (WHERE fj.status = 'pending') AS jobs_pending,
+            MAX(fj.sent_at)                                    AS last_sent_at,
+            CASE
+              WHEN fs.status = 'cancelled' THEN 'cancelled'
+              WHEN fs.status = 'converted' THEN 'converted'
+              WHEN EXISTS (
+                SELECT 1 FROM followup_replies r
+                WHERE r.company_id = fc.company_id AND r.phone = fs.phone
+              ) THEN 'replied'
+              WHEN COUNT(fj.id) FILTER (WHERE fj.status = 'failed') > 0
+               AND COUNT(fj.id) FILTER (WHERE fj.status = 'pending') = 0 THEN 'failed'
+              WHEN COUNT(fj.id) FILTER (WHERE fj.status = 'sent') > 0
+               AND COUNT(fj.id) FILTER (WHERE fj.status = 'pending') = 0 THEN 'awaiting_reply'
+              ELSE 'active'
+            END AS derived_status
+          FROM followup_schedules fs
+          JOIN followup_campaigns fc  ON fc.id  = fs.campaign_id
+          JOIN followup_companies fco ON fco.id = fc.company_id
+          LEFT JOIN followup_jobs fj  ON fj.schedule_id = fs.id
+          ${baseWhere}
+          GROUP BY fs.id, fc.id, fco.id, fc.name, fco.name
+        )
+        SELECT *, COUNT(*) OVER() AS total_count
+        FROM base
+        ${statusWhere}
+        ORDER BY created_at DESC
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}
+      `;
 
-      if (dateFrom) query = query.gte("created_at", dateFrom);
-      if (dateTo) query = query.lte("created_at", dateTo);
+      const { rows } = await fupQuery(sql, params);
+      const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
 
-      const { data, error, count } = await query
-        .order("ultima_interacao_bot", { ascending: false })
-        .range((page - 1) * limit, page * limit - 1);
+      const items = rows.map((r) => ({
+        id:              r.id,
+        leadName:        r.lead_name,
+        phone:           r.phone,
+        origin:          r.origin,
+        companyId:       r.company_id,
+        companyName:     r.company_name,
+        campaignId:      r.campaign_id,
+        campaignName:    r.campaign_name,
+        status:          r.derived_status,
+        jobsSent:        Number(r.jobs_sent),
+        jobsFailed:      Number(r.jobs_failed),
+        jobsPending:     Number(r.jobs_pending),
+        lastSentAt:      r.last_sent_at || null,
+        meetingDatetime: r.meeting_datetime || null,
+        createdAt:       r.created_at,
+      }));
 
-      if (error) {
-        if (isMissingSchemaError(error)) return sendError(res, 404, "NOT_FOUND", "Table not available");
-        throw error;
-      }
-
-      const campaignImportIds = [...new Set((data || []).map((i) => i.import_id).filter(Boolean))];
-      let campaignsByImport = {};
-      if (campaignImportIds.length > 0) {
-        const { data: campaigns } = await supabase
-          .from("campaigns")
-          .select("id, name, import_id")
-          .in("import_id", campaignImportIds)
-          .eq("client_id", clientId);
-        for (const c of campaigns || []) {
-          if (c.import_id) campaignsByImport[c.import_id] = c;
-        }
-      }
-
-      const items = (data || []).map((row) => {
-        const campaign = campaignsByImport[row.import_id] || null;
-        const hasReplied = Boolean(row.ultima_interacao_usuario);
-        const resolvedStatus =
-          row.followup_status === "converted" ? "converted" :
-          row.followup_status === "discarded" ? "discarded" :
-          row.followup_status === "scheduled" ? "scheduled" :
-          hasReplied ? "replied" : "pending";
-
-        return {
-          id: row.id,
-          campaignId: campaign?.id || null,
-          campaignName: campaign?.name || null,
-          leadId: row.id,
-          leadName: normalizeString(row.nome) || null,
-          phone: row.telefone,
-          clientId,
-          status: resolvedStatus,
-          scheduledAt: row.followup_scheduled_at || null,
-          lastContactAt: row.ultima_interacao_usuario || row.ultima_interacao_bot || null,
-          createdAt: row.created_at,
-        };
-      });
-
-      return res.json({ success: true, items, total: count || 0 });
+      return res.json({ success: true, items, total });
     } catch (err) {
       sendError(res, 500, "FOLLOWUP_QUEUE_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch followup queue");
     }
   });
 
-  // PATCH /api/followup-queue/:id — reagendar ou descartar item da fila
-  app.patch("/api/followup-queue/:id", requireFirebaseAuth, async (req, res) => {
-    if (!ensureDb(res)) return;
-    const id = normalizeString(req.params?.id);
+  // PATCH /api/followup-queue/:scheduleId/reschedule — cria novo job BullMQ com delay
+  app.patch("/api/followup-queue/:scheduleId/reschedule", requireFirebaseAuth, async (req, res) => {
+    const scheduleId = normalizeString(req.params?.scheduleId);
+    if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
-    const newStatus = normalizeString(body.status) || null;
-    const scheduledAt = normalizeString(body.scheduledAt) || null;
+    const delayMinutes = Number(body.delayMinutes);
+    const templateId = normalizeString(body.templateId) || null;
 
-    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
-
-    const patchable = ["scheduled", "discarded"];
-    if (newStatus && !patchable.includes(newStatus)) {
-      return sendError(res, 400, "INVALID_BODY", `status must be one of: ${patchable.join(", ")}`);
+    if (!Number.isFinite(delayMinutes) || delayMinutes < 0) {
+      return sendError(res, 400, "INVALID_BODY", "delayMinutes must be a non-negative number");
     }
 
     try {
-      const patch = {};
-      if (newStatus) patch.followup_status = newStatus;
-      if (scheduledAt) { patch.followup_status = "scheduled"; patch.followup_scheduled_at = scheduledAt; }
+      const { rows: schedRows } = await fupQuery(
+        `SELECT fs.id, fs.campaign_id FROM followup_schedules fs WHERE fs.id = $1`,
+        [scheduleId]
+      );
+      if (!schedRows.length) return sendError(res, 404, "NOT_FOUND", "Schedule not found");
 
-      if (Object.keys(patch).length === 0) return sendError(res, 400, "INVALID_BODY", "Nothing to update");
+      const { campaign_id } = schedRows[0];
 
-      const { data, error } = await supabase
-        .from("lead_import_items")
-        .update(patch)
-        .eq("id", id)
-        .select("id, telefone, nome, status_conversa, followup_status, followup_scheduled_at, ultima_interacao_bot, ultima_interacao_usuario, created_at, import_id")
-        .maybeSingle();
+      let resolvedTemplateId = templateId;
+      if (!resolvedTemplateId) {
+        const { rows: tplRows } = await fupQuery(
+          `SELECT id FROM followup_templates WHERE campaign_id = $1 AND is_active = true ORDER BY order_index ASC LIMIT 1`,
+          [campaign_id]
+        );
+        if (!tplRows.length) return sendError(res, 400, "NO_TEMPLATE", "No active template found for this campaign");
+        resolvedTemplateId = tplRows[0].id;
+      }
 
-      if (error) throw error;
-      if (!data) return sendError(res, 404, "NOT_FOUND", "Item not found");
+      const { rows: jobRows } = await fupQuery(
+        `INSERT INTO followup_jobs (schedule_id, template_id, status) VALUES ($1, $2, 'pending') RETURNING id`,
+        [scheduleId, resolvedTemplateId]
+      );
+      const newJobId = jobRows[0].id;
 
-      return res.json({ success: true, item: { id: data.id, status: data.followup_status, scheduledAt: data.followup_scheduled_at } });
+      await getFollowupQueue().add(
+        "send-followup",
+        { jobId: newJobId },
+        { delay: delayMinutes * 60 * 1000, jobId: `fup-reschedule-${newJobId}` }
+      );
+
+      return res.json({ success: true, jobId: newJobId, delayMinutes });
     } catch (err) {
-      sendError(res, 500, "FOLLOWUP_UPDATE_FAILED", err instanceof Error ? err.message : "Failed to update followup");
+      sendError(res, 500, "RESCHEDULE_FAILED", err instanceof Error ? err.message : "Failed to reschedule");
     }
   });
 
-  // POST /api/followup-queue/:id/convert-inbound — converte lead de campanha para inbound
-  app.post("/api/followup-queue/:id/convert-inbound", requireFirebaseAuth, async (req, res) => {
-    if (!ensureDb(res)) return;
-    const id = normalizeString(req.params?.id);
-    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
+  // PATCH /api/followup-queue/:scheduleId/discard — cancela schedule e jobs pendentes
+  app.patch("/api/followup-queue/:scheduleId/discard", requireFirebaseAuth, async (req, res) => {
+    const scheduleId = normalizeString(req.params?.scheduleId);
+    if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
+
     try {
-      const { data: item, error: fetchErr } = await supabase
-        .from("lead_import_items")
-        .select("id, telefone, client_id")
-        .eq("id", id)
-        .maybeSingle();
+      const { rows } = await fupQuery(
+        `UPDATE followup_schedules SET status = 'cancelled' WHERE id = $1 RETURNING id`,
+        [scheduleId]
+      );
+      if (!rows.length) return sendError(res, 404, "NOT_FOUND", "Schedule not found");
 
-      if (fetchErr) throw fetchErr;
-      if (!item) return sendError(res, 404, "NOT_FOUND", "Item not found");
+      await fupQuery(
+        `UPDATE followup_jobs SET status = 'cancelled' WHERE schedule_id = $1 AND status = 'pending'`,
+        [scheduleId]
+      );
 
-      const leadsTable = leadsTableName(item.client_id);
-      const [updateItem, updateLead] = await Promise.all([
-        supabase
-          .from("lead_import_items")
-          .update({ followup_status: "converted", status_conversa: "em_atendimento" })
-          .eq("id", id),
-        supabase
-          .from(leadsTable)
-          .update({ lead_origin: "inbound", source_campaign_id: null })
-          .eq("client_id", item.client_id)
-          .eq("telefone", item.telefone),
-      ]);
-
-      if (updateItem.error) throw updateItem.error;
-
-      return res.json({ success: true, id });
+      return res.json({ success: true, id: scheduleId });
     } catch (err) {
-      sendError(res, 500, "CONVERT_INBOUND_FAILED", err instanceof Error ? err.message : "Failed to convert to inbound");
+      sendError(res, 500, "DISCARD_FAILED", err instanceof Error ? err.message : "Failed to discard schedule");
+    }
+  });
+
+  // POST /api/followup-queue/:scheduleId/convert — converte para inbound e dispara webhook
+  app.post("/api/followup-queue/:scheduleId/convert", requireFirebaseAuth, async (req, res) => {
+    const scheduleId = normalizeString(req.params?.scheduleId);
+    if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
+
+    try {
+      const { rows } = await fupQuery(
+        `UPDATE followup_schedules SET status = 'converted' WHERE id = $1 RETURNING id`,
+        [scheduleId]
+      );
+      if (!rows.length) return sendError(res, 404, "NOT_FOUND", "Schedule not found");
+
+      const { rows: infoRows } = await fupQuery(
+        `SELECT fs.lead_name, fs.phone, fs.origin,
+                fc.name AS campaign_name,
+                fco.name AS company_name, fco.webhook_url
+           FROM followup_schedules fs
+           JOIN followup_campaigns fc  ON fc.id  = fs.campaign_id
+           JOIN followup_companies fco ON fco.id = fc.company_id
+          WHERE fs.id = $1`,
+        [scheduleId]
+      );
+
+      if (infoRows.length && infoRows[0].webhook_url) {
+        const info = infoRows[0];
+        fetch(info.webhook_url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lead_name:     info.lead_name,
+            phone:         info.phone,
+            origin:        info.origin,
+            campaign_name: info.campaign_name,
+            company_name:  info.company_name,
+          }),
+        }).catch((e) => console.error("[followup-queue/convert] webhook error:", e.message));
+      }
+
+      return res.json({ success: true, id: scheduleId });
+    } catch (err) {
+      sendError(res, 500, "CONVERT_FAILED", err instanceof Error ? err.message : "Failed to convert schedule");
     }
   });
 
@@ -6063,6 +6051,10 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
 
+  // ─── Módulo de Follow-up (BullMQ + campanhas independentes) ───────────────
+  registerFollowupRoutes(app, requireFirebaseAuth);
+
+  // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
+  registerOnboardingRoutes(app, requireFirebaseAuth);
 }
