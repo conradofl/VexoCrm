@@ -729,7 +729,7 @@ function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
               </p>
             </div>
             <div className="flex gap-1">
-              {(d.status === "draft" || d.status === "scheduled") && (
+              {d.trigger_type === "manual" && d.status === "draft" && (
                 <Button size="sm" variant="outline" onClick={() => triggerDispatch.mutate(d.id)} disabled={triggerDispatch.isPending}>
                   Disparar
                 </Button>
@@ -1098,7 +1098,7 @@ function DispatchManagerTab({
 
                         {/* Ações */}
                         <div className="flex shrink-0 items-center gap-2">
-                          {(d.status === "draft" || d.status === "scheduled") && (
+                          {d.trigger_type === "manual" && d.status === "draft" && (
                             <Button
                               size="sm"
                               onClick={() => setConfirmDispatch(d)}

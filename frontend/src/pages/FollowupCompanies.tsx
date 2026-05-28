@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Building2, Plus, Pencil, ToggleLeft, ToggleRight } from "lucide-react";
+import { Building2, Plus, Pencil, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,9 +16,20 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/use-toast";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useFupCompanies,
   useCreateFupCompany,
   useUpdateFupCompany,
+  useArchiveFupCompany,
   type FupCompany,
 } from "@/hooks/useFollowupAdmin";
 
@@ -115,9 +126,11 @@ export default function FollowupCompanies() {
   const { data: companies = [], isLoading } = useFupCompanies();
   const createMut = useCreateFupCompany();
   const updateMut = useUpdateFupCompany();
+  const archiveMut = useArchiveFupCompany();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<FupCompany | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<FupCompany | null>(null);
 
   const openCreate = () => {
     setEditing(null);
@@ -145,6 +158,18 @@ export default function FollowupCompanies() {
         description: e instanceof Error ? e.message : "Erro desconhecido",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
+    try {
+      await archiveMut.mutateAsync(archiveTarget.id);
+      toast({ title: "Empresa arquivada", description: `"${archiveTarget.name}" foi removida das listagens.` });
+    } catch (e) {
+      toast({ title: "Erro ao arquivar", description: e instanceof Error ? e.message : "Erro desconhecido", variant: "destructive" });
+    } finally {
+      setArchiveTarget(null);
     }
   };
 
@@ -231,6 +256,15 @@ export default function FollowupCompanies() {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-slate-400 hover:text-red-500 dark:hover:text-red-400"
+                      onClick={() => setArchiveTarget(c)}
+                      title="Arquivar empresa"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -262,6 +296,29 @@ export default function FollowupCompanies() {
           />
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!archiveTarget} onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Arquivar empresa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A empresa <strong>"{archiveTarget?.name}"</strong> será removida de todos os dropdowns e filtros do sistema.
+              Os dados de campanhas, leads e disparos associados são preservados mas ficam inacessíveis pela interface.
+              Esta ação não pode ser desfeita pela interface.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleArchive}
+              disabled={archiveMut.isPending}
+            >
+              {archiveMut.isPending ? "Arquivando..." : "Arquivar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageShell>
   );
 }

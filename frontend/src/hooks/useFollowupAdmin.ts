@@ -144,6 +144,18 @@ export function useUpdateFupCompany() {
   });
 }
 
+export function useArchiveFupCompany() {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiCall<{ success: boolean }>(`/api/followup/companies/${id}`, getIdToken, {
+        method: "DELETE",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fup-companies"] }),
+  });
+}
+
 // ─── Campanhas ────────────────────────────────────────────────────────────────
 
 export function useFupCampaigns(companyId?: string) {
