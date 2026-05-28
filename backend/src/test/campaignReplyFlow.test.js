@@ -73,5 +73,7 @@ describe("campaign reply flow safeguards", () => {
   it("allows the followup queue to load all companies", () => {
     expect(routeBundle).not.toContain('return sendError(res, 400, "INVALID_QUERY", "Missing companyId")');
     expect(routeBundle).toContain('const baseWhere = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : ""');
+    expect(routeBundle).toContain("crm_campaign_dispatch_");
+    expect(routeBundle).toContain('origin: "crm_campaign"');
   });
 });

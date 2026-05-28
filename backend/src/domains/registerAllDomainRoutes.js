@@ -5196,7 +5196,7 @@ export function registerAllDomainRoutes(app) {
       `;
 
       const { rows } = await fupQuery(sql, params);
-      const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+      let total = rows.length > 0 ? Number(rows[0].total_count) : 0;
 
       const items = rows.map((r) => ({
         id:              r.id,
@@ -5215,6 +5215,76 @@ export function registerAllDomainRoutes(app) {
         meetingDatetime: r.meeting_datetime || null,
         createdAt:       r.created_at,
       }));
+
+      if (!companyId) {
+        const { data: crmRows, error: crmRowsError } = await supabase
+          .from("lead_import_items")
+          .select("id, import_id, client_id, telefone, nome, normalized_data, ultima_interacao_bot, created_at")
+          .not("ultima_interacao_bot", "is", null)
+          .is("ultima_interacao_usuario", null)
+          .or("followup_status.is.null,followup_status.eq.pending")
+          .order("ultima_interacao_bot", { ascending: false })
+          .limit(limit);
+
+        if (crmRowsError) {
+          console.warn("[followup-queue] crm campaign dispatch lookup failed:", crmRowsError.message || crmRowsError);
+        } else if (crmRows?.length) {
+          const clientIds = [...new Set(crmRows.map((row) => row.client_id).filter(Boolean))];
+          const importIds = [...new Set(crmRows.map((row) => row.import_id).filter(Boolean))];
+
+          const [{ data: crmClients }, { data: crmCampaigns }] = await Promise.all([
+            clientIds.length
+              ? supabase.from("leads_clients").select("id, name").in("id", clientIds)
+              : Promise.resolve({ data: [] }),
+            importIds.length
+              ? supabase.from("campaigns").select("id, name, import_id, client_id").in("import_id", importIds)
+              : Promise.resolve({ data: [] }),
+          ]);
+
+          const clientNameById = {};
+          for (const client of crmClients || []) {
+            if (client?.id) clientNameById[client.id] = client.name || client.id;
+          }
+
+          const campaignByImport = {};
+          for (const campaign of crmCampaigns || []) {
+            if (campaign?.import_id && campaign?.client_id) {
+              campaignByImport[`${campaign.client_id}:${campaign.import_id}`] = campaign;
+            }
+          }
+
+          const existingPhones = new Set(items.map((item) => `${item.companyId}:${item.phone}`));
+          for (const row of crmRows) {
+            const phone = normalizeString(row.telefone);
+            const client = normalizeString(row.client_id);
+            if (!phone || !client || existingPhones.has(`${client}:${phone}`)) continue;
+
+            const campaign = campaignByImport[`${client}:${row.import_id}`] || null;
+            const normalized = row.normalized_data && typeof row.normalized_data === "object" ? row.normalized_data : {};
+
+            items.push({
+              id: `crm_campaign_dispatch_${row.id}`,
+              leadName: normalizeString(row.nome || normalized.nome || normalized.name) || null,
+              phone,
+              origin: "crm_campaign",
+              companyId: client,
+              companyName: clientNameById[client] || client,
+              campaignId: campaign?.id || null,
+              campaignName: campaign?.name || "Campanha CRM",
+              status: "awaiting_reply",
+              jobsSent: 1,
+              jobsFailed: 0,
+              jobsPending: 0,
+              lastSentAt: row.ultima_interacao_bot || null,
+              meetingDatetime: null,
+              createdAt: row.created_at,
+            });
+            existingPhones.add(`${client}:${phone}`);
+          }
+
+          total += crmRows.length;
+        }
+      }
 
       return res.json({ success: true, items, total });
     } catch (err) {
