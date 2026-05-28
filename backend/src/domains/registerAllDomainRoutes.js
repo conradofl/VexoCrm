@@ -4008,11 +4008,17 @@ export function registerAllDomainRoutes(app) {
         },
       });
     } catch (error) {
-      console.error("campaign create error:", error);
-      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+      console.error("[campaigns] Erro ao criar campanha:", error);
+      // Erros de checkEvolutionInstanceHealth carregam statusCode e code customizados
+      const httpStatus = typeof error?.statusCode === "number" && error.statusCode >= 400 && error.statusCode < 600
+        ? error.statusCode
+        : 500;
+      const errorCode = error?.code || "INTERNAL_ERROR";
+      const errorMessage = httpStatus < 500 ? error.message : "Internal server error";
+      sendError(res, httpStatus, errorCode, errorMessage, internalErrorPayloadDetails(error));
     }
   });
-  
+
   // PATCH /api/campaigns/:id — atualiza campanha
   app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
