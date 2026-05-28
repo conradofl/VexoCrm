@@ -137,6 +137,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       const { data, error } = await supabase
         .from("followup_companies")
         .select("id, name, evolution_instance, webhook_url, panel_access, created_at")
+        .is("archived_at", null)
         .order("name", { ascending: true });
       if (error) throw error;
 
@@ -219,6 +220,27 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       return res.json({ success: true, company: data });
     } catch (err) {
       return sendErr(res, 500, "COMPANY_UPDATE_FAILED", err.message);
+    }
+  });
+
+  // DELETE /api/followup/companies/:id — soft-delete (archived_at)
+  router.delete("/companies/:id", requireFirebaseAuth, async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from("followup_companies")
+        .update({ archived_at: new Date().toISOString() })
+        .eq("id", id)
+        .is("archived_at", null) // só arquiva se ainda não estiver arquivada
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada ou já arquivada");
+      return res.json({ success: true });
+    } catch (err) {
+      return sendErr(res, 500, "COMPANY_ARCHIVE_FAILED", err.message);
     }
   });
 
