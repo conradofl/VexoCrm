@@ -2489,7 +2489,7 @@ export function registerAllDomainRoutes(app) {
   
     const importId = normalizeString(req.query.importId);
     const dispatched = req.query.dispatched;
-  
+
     try {
       let query = supabase
         .from("lead_import_items")
@@ -4304,7 +4304,7 @@ export function registerAllDomainRoutes(app) {
         },
         client: { id: clientId, name: await getClientName(clientId) },
       },
-      onLeadDispatched: async ({ phone, sentAt }) => {
+      onLeadDispatched: async ({ lead, phone, sentAt }) => {
         sentCount += 1;
         await db.from("campaign_dispatch_runs").insert({
           dispatch_id: dispatchId,
@@ -4314,6 +4314,27 @@ export function registerAllDomainRoutes(app) {
           status: "sent",
           sent_at: sentAt,
         }).catch(() => {});
+        const leadPatch = {
+          status_conversa: "campanha_enviada",
+          ultima_interacao_bot: sentAt || new Date().toISOString(),
+          followup_status: "pending",
+          followup_scheduled_at: null,
+        };
+        const leadUpdate = lead?.id
+          ? db
+            .from("lead_import_items")
+            .update(leadPatch)
+            .eq("id", lead.id)
+            .eq("client_id", clientId)
+          : db
+            .from("lead_import_items")
+            .update(leadPatch)
+            .eq("client_id", clientId)
+            .eq("telefone", phone);
+        const { error: leadUpdateError } = await leadUpdate;
+        if (leadUpdateError) {
+          console.warn("[campaign-dispatch] followup queue marker failed:", leadUpdateError.message || leadUpdateError);
+        }
         await db.from("campaign_dispatches").update({ sent_count: sentCount, updated_at: new Date().toISOString() }).eq("id", dispatchId).catch(() => {});
       },
     });
@@ -5086,6 +5107,71 @@ export function registerAllDomainRoutes(app) {
   });
 
   // GET /api/followup-queue — fila de followup de campanhas com métricas de resposta
+  async function backfillFollowupQueueFromDispatchRuns({ clientId, campaignId = null }) {
+    if (!clientId) return;
+
+    let campaignsQuery = supabase
+      .from("campaigns")
+      .select("id, import_id")
+      .eq("client_id", clientId)
+      .not("import_id", "is", null);
+
+    if (campaignId) {
+      campaignsQuery = campaignsQuery.eq("id", campaignId);
+    }
+
+    const { data: campaigns, error: campaignsError } = await campaignsQuery;
+    if (campaignsError || !campaigns?.length) {
+      if (campaignsError) console.warn("[followup-queue] campaign backfill lookup failed:", campaignsError.message || campaignsError);
+      return;
+    }
+
+    const campaignById = {};
+    for (const campaign of campaigns) {
+      if (campaign?.id && campaign?.import_id) campaignById[campaign.id] = campaign;
+    }
+
+    const campaignIds = Object.keys(campaignById);
+    if (campaignIds.length === 0) return;
+
+    const { data: runs, error: runsError } = await supabase
+      .from("campaign_dispatch_runs")
+      .select("campaign_id, phone, sent_at")
+      .eq("client_id", clientId)
+      .eq("status", "sent")
+      .in("campaign_id", campaignIds)
+      .not("phone", "is", null)
+      .order("sent_at", { ascending: false })
+      .limit(1000);
+
+    if (runsError || !runs?.length) {
+      if (runsError) console.warn("[followup-queue] dispatch run backfill lookup failed:", runsError.message || runsError);
+      return;
+    }
+
+    for (const run of runs) {
+      const campaign = campaignById[run.campaign_id];
+      if (!campaign?.import_id || !run.phone) continue;
+
+      const { error: updateError } = await supabase
+        .from("lead_import_items")
+        .update({
+          status_conversa: "campanha_enviada",
+          ultima_interacao_bot: run.sent_at || new Date().toISOString(),
+          followup_status: "pending",
+          followup_scheduled_at: null,
+        })
+        .eq("client_id", clientId)
+        .eq("import_id", campaign.import_id)
+        .eq("telefone", run.phone)
+        .is("ultima_interacao_bot", null);
+
+      if (updateError) {
+        console.warn("[followup-queue] item backfill failed:", updateError.message || updateError);
+      }
+    }
+  }
+
   app.get("/api/followup-queue", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     const clientId = normalizeTenantKey(req.query?.clientId);
@@ -5106,6 +5192,8 @@ export function registerAllDomainRoutes(app) {
     }
 
     try {
+      await backfillFollowupQueueFromDispatchRuns({ clientId, campaignId });
+
       let query = supabase
         .from("lead_import_items")
         .select("id, import_id, telefone, nome, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, followup_status, followup_scheduled_at, created_at, normalized_data", { count: "exact" })

@@ -62,4 +62,14 @@ describe("campaign reply flow safeguards", () => {
     expect(outboundSource).toContain("leadIndex % variants.length");
     expect(routeBundle).toContain("/api/campaigns/ai/generate-template-variants");
   });
+
+  it("marks successful campaign dispatch leads for the followup queue", () => {
+    expect(routeBundle).toContain('followup_status: "pending"');
+    expect(routeBundle).toContain('status_conversa: "campanha_enviada"');
+    expect(routeBundle).toContain('ultima_interacao_bot: sentAt || new Date().toISOString()');
+    expect(routeBundle).toContain('onLeadDispatched: async ({ lead, phone, sentAt })');
+    expect(routeBundle).toContain("backfillFollowupQueueFromDispatchRuns");
+    expect(routeBundle).toContain(".from(\"campaign_dispatch_runs\")");
+    expect(routeBundle).toContain('await backfillFollowupQueueFromDispatchRuns({ clientId, campaignId })');
+  });
 });
