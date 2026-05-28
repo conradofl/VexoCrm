@@ -1,6 +1,36 @@
 import crypto from "crypto";
+import Groq from "groq-sdk";
 import { getPool } from "./db.js";
 import { getAuth } from "firebase-admin/auth";
+
+// ─── Groq helpers ─────────────────────────────────────────────────────────────
+
+const INTERPRET_SYSTEM_PROMPT =
+  'Você é um assistente de onboarding do Vexo OS. Analise a descrição do usuário e extraia as informações necessárias para criar um cliente no sistema. Retorne APENAS um JSON válido sem texto adicional, sem markdown, sem blocos de código. Estrutura exata: { "company_name": string, "evolution_instance": string, "webhook_url": string ou null, "campaign_name": string, "campaign_description": string ou null, "default_origin": string ou null, "templates": [ { "name": string, "message": string, "trigger_type": "on_schedule" | "before_meeting" | "after_meeting" | "no_reply", "trigger_value": number, "trigger_unit": "minutes" | "hours" | "days", "trigger_direction": string ou null, "order_index": number } ] }. Nas mensagens use {{lead_name}}, {{meeting_date}}, {{meeting_time}} onde apropriado. Campos obrigatórios: company_name, evolution_instance, campaign_name, templates (mínimo 1).';
+
+const REQUIRED_INTERPRET_FIELDS = ["company_name", "evolution_instance", "campaign_name", "templates"];
+
+export function parseInterpretResponse(rawText) {
+  try {
+    const data = JSON.parse(rawText.trim());
+    return { success: true, data };
+  } catch {
+    return { success: false, error: "parse_error", raw: rawText };
+  }
+}
+
+export function checkInterpretFields(parsed) {
+  return REQUIRED_INTERPRET_FIELDS.filter((f) => {
+    if (f === "templates") return !Array.isArray(parsed.templates) || parsed.templates.length === 0;
+    return !parsed[f];
+  });
+}
+
+let _groq = null;
+function getGroq() {
+  if (!_groq) _groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  return _groq;
+}
 
 function generateSecret() {
   return crypto.randomBytes(24).toString("hex");
@@ -46,6 +76,49 @@ export function validateOnboardingPayload(body) {
 }
 
 export function registerOnboardingRoutes(app, requireFirebaseAuth) {
+  // ── POST /api/onboarding/interpret — interpreta descrição em linguagem natural via Groq ──
+  app.post("/api/onboarding/interpret", requireFirebaseAuth, async (req, res) => {
+    const { prompt } = req.body || {};
+    if (!str(prompt)) {
+      return res.status(400).json({ success: false, error: { code: "MISSING_PROMPT", message: "prompt não pode estar vazio" } });
+    }
+
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(503).json({ success: false, error: { code: "GROQ_DISABLED", message: "Groq não configurado no servidor" } });
+    }
+
+    try {
+      const model = process.env.GROQ_CAMPAIGN_AI_MODEL || "llama-3.1-8b-instant";
+      const completion = await getGroq().chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: INTERPRET_SYSTEM_PROMPT },
+          { role: "user", content: str(prompt) },
+        ],
+        temperature: 0.2,
+        max_tokens: 2048,
+      });
+
+      const rawText = completion.choices?.[0]?.message?.content || "";
+      const parsed = parseInterpretResponse(rawText);
+
+      if (!parsed.success) {
+        return res.status(422).json({ success: false, error: "parse_error", raw: parsed.raw });
+      }
+
+      const missing = checkInterpretFields(parsed.data);
+      if (missing.length > 0) {
+        return res.status(422).json({ success: false, error: "missing_fields", fields: missing, data: parsed.data });
+      }
+
+      return res.json({ success: true, data: parsed.data });
+    } catch (err) {
+      console.error("[onboarding/interpret]", err.message);
+      return res.status(500).json({ success: false, error: { code: "GROQ_ERROR", message: err.message } });
+    }
+  });
+
+  // ── POST /api/onboarding — cria empresa + campanha + templates em transação ──
   app.post("/api/onboarding", requireFirebaseAuth, async (req, res) => {
     const body = req.body || {};
     const errors = validateOnboardingPayload(body);

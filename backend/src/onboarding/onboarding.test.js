@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateOnboardingPayload } from "./routes.js";
+import { validateOnboardingPayload, parseInterpretResponse, checkInterpretFields } from "./routes.js";
 
 const VALID_PAYLOAD = {
   company_name: "Solar Prime",
@@ -112,5 +112,94 @@ describe("validateOnboardingPayload", () => {
   it("retorna erro quando body é null", () => {
     const errors = validateOnboardingPayload(null);
     expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── parseInterpretResponse ───────────────────────────────────────────────────
+
+describe("parseInterpretResponse", () => {
+  const VALID_JSON = JSON.stringify({
+    company_name: "Solar Prime",
+    evolution_instance: "solar-evo",
+    campaign_name: "Pós-agendamento",
+    templates: [{ name: "T1", message: "Olá", trigger_type: "on_schedule", trigger_value: 0, trigger_unit: "minutes", trigger_direction: null, order_index: 0 }],
+  });
+
+  it("retorna success:true e data para JSON válido", () => {
+    const result = parseInterpretResponse(VALID_JSON);
+    expect(result.success).toBe(true);
+    expect(result.data).toBeDefined();
+    expect(result.data.company_name).toBe("Solar Prime");
+  });
+
+  it("retorna success:false e error:parse_error para texto não-JSON", () => {
+    const result = parseInterpretResponse("Não consigo entender o prompt.");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("parse_error");
+    expect(result.raw).toBe("Não consigo entender o prompt.");
+  });
+
+  it("retorna success:false para JSON com markdown envolvendo (```json ... ```)", () => {
+    const result = parseInterpretResponse("```json\n{\"x\": 1}\n```");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("parse_error");
+  });
+
+  it("retorna success:false para string vazia", () => {
+    const result = parseInterpretResponse("");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("parse_error");
+  });
+
+  it("lida com espaços em branco extras ao redor do JSON", () => {
+    const result = parseInterpretResponse(`  ${VALID_JSON}  `);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ─── checkInterpretFields ─────────────────────────────────────────────────────
+
+describe("checkInterpretFields", () => {
+  const FULL = {
+    company_name: "Solar Prime",
+    evolution_instance: "solar-evo",
+    campaign_name: "Pós-agendamento",
+    templates: [{ name: "T1", message: "msg", trigger_type: "on_schedule", trigger_value: 0, trigger_unit: "minutes", order_index: 0 }],
+  };
+
+  it("retorna array vazio quando todos os campos obrigatórios estão presentes", () => {
+    expect(checkInterpretFields(FULL)).toEqual([]);
+  });
+
+  it("retorna ['company_name'] quando company_name está ausente", () => {
+    const { company_name: _, ...rest } = FULL;
+    expect(checkInterpretFields(rest)).toContain("company_name");
+  });
+
+  it("retorna ['evolution_instance'] quando evolution_instance está ausente", () => {
+    const { evolution_instance: _, ...rest } = FULL;
+    expect(checkInterpretFields(rest)).toContain("evolution_instance");
+  });
+
+  it("retorna ['campaign_name'] quando campaign_name está ausente", () => {
+    const { campaign_name: _, ...rest } = FULL;
+    expect(checkInterpretFields(rest)).toContain("campaign_name");
+  });
+
+  it("retorna ['templates'] quando templates é array vazio", () => {
+    expect(checkInterpretFields({ ...FULL, templates: [] })).toContain("templates");
+  });
+
+  it("retorna ['templates'] quando templates está ausente", () => {
+    const { templates: _, ...rest } = FULL;
+    expect(checkInterpretFields(rest)).toContain("templates");
+  });
+
+  it("acumula múltiplos campos faltando", () => {
+    const missing = checkInterpretFields({ company_name: "X" });
+    expect(missing.length).toBeGreaterThan(1);
+    expect(missing).toContain("evolution_instance");
+    expect(missing).toContain("campaign_name");
+    expect(missing).toContain("templates");
   });
 });
