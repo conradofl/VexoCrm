@@ -23,6 +23,7 @@ import {
   Landmark,
   ChevronDown,
   Sparkles,
+  UserPlus,
 } from "lucide-react";
 import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
@@ -342,6 +343,63 @@ export function AppSidebar() {
               </NavLink>
             ))}
         </div>
+
+        {/* Seção CONFIGURAÇÃO — admin only */}
+        {isAdminUser && (
+          <>
+            {!collapsed && (
+              <p className="px-2.5 pb-2.5 pt-5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Configuração
+              </p>
+            )}
+            <div className="space-y-1">
+              {[
+                { title: "Onboarding Wizard", url: "/crm/onboarding", icon: UserPlus },
+                { title: "Criar com IA", url: "/crm/onboarding-agent", icon: Sparkles },
+              ].map((item) => (
+                <NavLink
+                  key={item.url}
+                  to={item.url}
+                  className={({ isActive }) =>
+                    cn(
+                      "group relative flex font-medium transition-all",
+                      collapsed
+                        ? "h-9 items-center justify-center rounded-xl px-0"
+                        : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
+                      isActive
+                        ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24),0_14px_28px_rgba(15,23,42,0.08)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34),0_16px_28px_rgba(15,23,42,0.26)]"
+                        : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon
+                        className={cn(
+                          "h-4 w-4 shrink-0",
+                          isActive
+                            ? "text-cyan-600 dark:text-cyan-200"
+                            : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
+                        )}
+                      />
+                      {!collapsed && <span className="truncate">{item.title}</span>}
+                      {isActive && (
+                        <span
+                          className={cn(
+                            "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
+                            collapsed
+                              ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
+                              : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
+                          )}
+                        />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </>
+        )}
 
         {!collapsed && (
           <p className="px-2.5 pb-2.5 pt-5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">

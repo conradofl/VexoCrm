@@ -38,6 +38,8 @@ import FollowupCampaigns from "./pages/FollowupCampaigns";
 import FollowupTemplates from "./pages/FollowupTemplates";
 import FollowupAnalytics from "./pages/FollowupAnalytics";
 import FollowupSuggestions from "./pages/FollowupSuggestions";
+import OnboardingWizard from "./pages/OnboardingWizard";
+import OnboardingAgent from "./pages/OnboardingAgent";
 
 const queryClient = new QueryClient();
 
@@ -264,6 +266,22 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
                     <VexoSales />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="onboarding"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
+                    <OnboardingWizard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="onboarding-agent"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
+                    <OnboardingAgent />
                   </ProtectedRoute>
                 }
               />
