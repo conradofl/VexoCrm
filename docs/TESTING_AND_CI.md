@@ -90,6 +90,6 @@ Toda PR de correcao deve:
 ## Proximos passos recomendados
 
 1. Incorporar os testes de campanhas e notificacoes na base comum de estabilizacao.
-2. Criar smoke tests para rotas HTTP com mocks de Postgres/Firebase sem subir servidor real.
+2. Criar smoke tests para rotas HTTP com mocks de Supabase/Firebase sem subir servidor real.
 3. Limpar problemas legados de lint e promover `frontend npm run lint` a check obrigatorio.
-4. Adicionar teste de migration em ambiente ephemeral Postgres/Postgres quando o schema estiver mais consolidado.
+4. Adicionar teste de migration em ambiente ephemeral Supabase/Postgres quando o schema estiver mais consolidado.

@@ -51,10 +51,10 @@ Melhorias de produto depois de seguranca minima fechada.
 
 | Integracao | Proximo passo |
 | --- | --- |
-| Postgres | Consolidar migrations e RLS por responsabilidade do backend |
+| Supabase | Consolidar migrations e RLS por responsabilidade do backend |
 | Redis | Documentar chaves oficiais e TTL por tipo de memoria |
 | WhatsApp/Evolution/Z-API | Definir provider canonico e payload unico |
-| rotas Express | Decidir ownership: backend canonico ou Edge por fluxo |
+| Edge Functions | Decidir ownership: backend canonico ou Edge por fluxo |
 | Webhooks externos | Padronizar bearer, CORS, retries e idempotencia |
 
 ---
@@ -68,7 +68,7 @@ Somente depois dos ciclos criticos.
 | `server.js` | Extrair middlewares e rotas por grupo, uma PR por grupo |
 | Erros | Criar modulo unico de `sendError` e codigos |
 | Tenant helpers | Separar helpers puros de helpers com `req/res` |
-| Testes HTTP | Adicionar mocks de Firebase/Postgres e smoke tests de rota |
+| Testes HTTP | Adicionar mocks de Firebase/Supabase e smoke tests de rota |
 | Lint | Corrigir backlog e tornar lint obrigatorio no CI |
 | ADRs | Criar decisoes formais para webhooks, tenant, notificacoes e conversas |
 

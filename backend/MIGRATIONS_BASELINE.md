@@ -2,8 +2,8 @@
 
 Estado atual:
 
-- O banco local/direto ja tem as 18 migrations de `backend/postgres/migrations` aplicadas ou marcadas em `public.app_schema_migrations`.
-- O runner local agora usa `backend/scripts/conditional-migrate.mjs` via `pg`, sem depender de `Postgres db push`.
+- O banco local/direto ja tem as 18 migrations de `backend/supabase/migrations` aplicadas ou marcadas em `public.app_schema_migrations`.
+- O runner local agora usa `backend/scripts/conditional-migrate.mjs` via `pg`, sem depender de `supabase db push`.
 
 ## Regra daqui pra frente
 
@@ -20,7 +20,7 @@ Estado atual:
 3. Salvar esse schema como uma nova migration baseline, por exemplo:
    - `20260515_baseline_schema.sql`
 4. Mover as 18 migrations antigas para uma pasta de arquivo historico, por exemplo:
-   - `backend/postgres/migrations-archive/`
+   - `backend/supabase/migrations-archive/`
 5. Manter no diretório ativo:
    - a nova baseline
    - apenas migrations criadas depois da baseline
@@ -43,4 +43,4 @@ Estado atual:
 
 ## Observacao
 
-Enquanto a baseline unica nao for criada, a pasta atual `backend/postgres/migrations` continua sendo a fonte da verdade.
+Enquanto a baseline unica nao for criada, a pasta atual `backend/supabase/migrations` continua sendo a fonte da verdade.

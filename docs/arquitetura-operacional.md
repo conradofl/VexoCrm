@@ -13,12 +13,12 @@ Documentar a arquitetura real atualmente usada pela operacao.
 
 ### 2. Orquestracao
 
-- `n8n` conduz a conversa, decide ramificacoes e chama as rotas Express
+- `n8n` conduz a conversa, decide ramificacoes e chama as Edge Functions
 
 ### 3. Persistencia e integracao
 
-- `Postgres PostgreSQL`
-- `rotas Express com Postgres direto`
+- `Supabase PostgreSQL`
+- `Supabase Edge Functions`
 
 ### 4. Camada de aplicacao
 
@@ -67,7 +67,7 @@ Documentar a arquitetura real atualmente usada pela operacao.
 - usuarios autenticados com Firebase;
 - backend valida token antes de liberar rotas protegidas.
 
-### rotas Express do workflow
+### Edge Functions do workflow
 
 - acesso por bearer interno usado pelo n8n.
 
@@ -79,6 +79,6 @@ Documentar a arquitetura real atualmente usada pela operacao.
 
 O banco e as automacoes centrais estao no eixo:
 
-- `n8n + Postgres + rotas Express`
+- `n8n + Supabase + Edge Functions`
 
 O backend permanece importante, mas como camada de produto e consolidacao de servicos, nao como origem principal do fluxo de leads.

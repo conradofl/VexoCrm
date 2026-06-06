@@ -6,7 +6,7 @@ Esta pasta concentra a documentacao que pode ser usada tanto internamente quanto
 
 - [arquitetura-operacional.md](./arquitetura-operacional.md)
 - [workflow-n8n.md](./workflow-n8n.md)
-- [postgres-functions.md](./postgres-functions.md)
+- [supabase-functions.md](./supabase-functions.md)
 
 ## Documento executivo
 
@@ -25,4 +25,4 @@ Arquivos gerados em HTML e PDF:
 1. `apresentacao-executiva`
 2. `arquitetura-operacional`
 3. `workflow-n8n`
-4. `postgres-functions`
+4. `supabase-functions`

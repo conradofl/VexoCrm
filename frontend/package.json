@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "postgres:sync-backend": "node ../scripts/sync-postgres-assets.mjs",
+    "supabase:sync-backend": "node ../scripts/sync-supabase-assets.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -42,6 +42,7 @@
     "@radix-ui/react-toggle": "^1.1.9",
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
+    "@supabase/supabase-js": "^2.97.0",
     "@tanstack/react-query": "^5.83.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

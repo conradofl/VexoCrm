@@ -8,7 +8,7 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 
 ## 1. Tabelas usadas em runtime
 
-| Tabela | Usada por backend | Usada por rota Express | Migration versionada | Chave de tenant | Campos criticos | Status |
+| Tabela | Usada por backend | Usada por Edge Function | Migration versionada | Chave de tenant | Campos criticos | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | `leads_clients` | Sim | Nao | Sim (`20260304000001`) | `id` | `id`, `name` | Ok, mas usada como slug textual e nao UUID |
 | `leads` | Sim | Sim | Sim (`20260304000001`) | `client_id` | `id`, `client_id`, `telefone`, `status`, `qualificacao` | Drift de colunas e semantica |
@@ -118,11 +118,11 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 | Campo | Inconsistencia | Evidencia | Gravidade |
 | --- | --- | --- | --- |
 | `telefone` | `validators.js` aceita `10-11` digitos em algumas validacoes, outros contratos aceitam ate `13`, runtime normaliza para `55...` | `backend/src/validators.js`, `backend/src/server.js`, docs do workflow | Critico |
-| `qualificacao` | ora e resumo textual do lead, ora e usada como sinal de status/qualificacao | `docs/workflow-n8n.md`, `docs/postgres-functions.md`, `backend/src/server.js` | Alto |
+| `qualificacao` | ora e resumo textual do lead, ora e usada como sinal de status/qualificacao | `docs/workflow-n8n.md`, `docs/supabase-functions.md`, `backend/src/server.js` | Alto |
 | `client_id` | contrato oficial passa a ser slug textual de `leads_clients.id`; aliases sao aceitos apenas na borda | `backend/src/validators.js`, `docs/API_CONTRACTS.md`, `20260304000001_create_leads_tables.sql` | Corrigido nesta PR |
 | `company_id` | aparece em claims, nao como padrao de persistencia | `backend/src/server.js` | Medio |
 | `tenant_id` | aparece em claims e params, nao no schema principal | `backend/src/server.js`, hooks do frontend | Medio |
-| `notifications` | docs apontam `notifications-api` na edge; frontend atual consome backend `/api/notifications` | `docs/postgres-functions.md`, `frontend/src/hooks/useNotifications.ts`, `backend/src/server.js` | Alto; duplicidade operacional ainda pendente |
+| `notifications` | docs apontam `notifications-api` na edge; frontend atual consome backend `/api/notifications` | `docs/supabase-functions.md`, `frontend/src/hooks/useNotifications.ts`, `backend/src/server.js` | Alto; duplicidade operacional ainda pendente |
 | `password/senha` | contratos de mensagem divergem entre frontend e testes; backend so aplica regra minima de tamanho | `frontend/src/lib/validationSchemas.ts`, `frontend/src/test/security.test.ts`, `backend/src/server.js` | Medio |
 
 ---
@@ -149,6 +149,6 @@ Mapear as tabelas reais usadas pelo CRM, comparar com as migrations versionadas 
 
 1. fechar a verdade do schema de `campaigns`
 2. decidir se `lead_conversations` continua sem `client_id` ou se precisa migration
-3. propagar o contrato oficial de `client_id` para workflows n8n e rotas Express
-4. reduzir duplicidade entre backend `/api/notifications` e rota Express `notifications-api`
+3. propagar o contrato oficial de `client_id` para workflows n8n e Edge Functions
+4. reduzir duplicidade entre backend `/api/notifications` e Edge Function `notifications-api`
 5. remover docs que indiquem flows ou contratos divergentes do runtime

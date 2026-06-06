@@ -89,7 +89,7 @@ Legenda de risco:
 ### Observacao da PR `codex/tenant-scope-notifications`
 
 - O backend atual do CRM consome `GET/PATCH /api/notifications`; por isso a correcao funcional ficou nesse caminho.
-- A Edge Function `frontend/postgres/functions/notifications-api` continua duplicando leitura/update com service role, JWT Postgres e CORS `*`. Ela nao foi removida nem reescrita nesta PR para evitar refactor amplo.
+- A Edge Function `frontend/supabase/functions/notifications-api` continua duplicando leitura/update com service role, JWT Supabase e CORS `*`. Ela nao foi removida nem reescrita nesta PR para evitar refactor amplo.
 - Proxima PR recomendada: decidir se `notifications-api` sera desativada, alinhada ao Firebase Auth do backend ou mantida apenas como endpoint legado bloqueado por tenant.
 
 ---

@@ -6,7 +6,8 @@ import { gunzipSync } from "zlib";
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import { createDatabasePool, createPostgresCompatClient } from "./pgPostgresCompat.js";
+import { createClient } from "@supabase/supabase-js";
+import { createDatabasePool, createPgSupabaseClient } from "./pgSupabaseCompat.js";
 import { runMigrations } from "./migrate.js";
 import { parseLeadQualificacaoBoolean } from "./leadQualificacaoBoolean.js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
@@ -42,7 +43,7 @@ import {
   hasUserPermission,
 } from "./userAccessScope.js";
 import { whatsappSessionManager } from "./whatsapp.js";
-import { initializeRedisChat, getChatMemory, setDatabaseClient } from "./hardcoded-chatbot.js";
+import { initializeRedisChat, getChatMemory, setSupabaseClient } from "./hardcoded-chatbot.js";
 import {
   bufferMessage,
   resolveMessageContent,
@@ -185,6 +186,11 @@ app.use(
 );
 
 const databaseUrl = (process.env.DATABASE_URL || "").trim();
+const dataSource = (process.env.DATA_SOURCE || "").trim().toLowerCase();
+const dbDriverEnv = (process.env.DB_DRIVER || "").trim().toLowerCase();
+const supabaseUrl = process.env.SUPABASE_URL || process.env.URL;
+const supabaseServiceRoleKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
 
 function getDatabaseHostForLogging(connectionString) {
   if (!connectionString) return null;
@@ -199,28 +205,43 @@ function isLikelyIpv4Host(hostname) {
   return /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(String(hostname || ""));
 }
 
-const useDirectPostgres = true;
+/**
+ * postgres: pg pool + query shim (VPS or any Postgres).
+ * supabase: official Supabase JS client (PostgREST).
+ * Legacy: DATABASE_URL without DATA_SOURCE=supabase still selects postgres unless DB_DRIVER=supabase.
+ */
+const useDirectPostgres =
+  dbDriverEnv === "postgres" ||
+  (dbDriverEnv !== "supabase" && Boolean(databaseUrl) && dataSource !== "supabase");
 
 let pgDatabasePool = null;
-let db = null;
+let supabase = null;
 
-if (!databaseUrl) {
-  console.error("[database] DATABASE_URL is required for direct Postgres.");
-  process.exit(1);
-}
-
-const databaseHost = getDatabaseHostForLogging(databaseUrl);
-pgDatabasePool = createDatabasePool(databaseUrl);
-pgDatabasePool.on("error", (err) => {
-  console.error("[database] pg pool error (idle client):", err?.message || err);
-});
-db = createPostgresCompatClient(pgDatabasePool);
-console.info("[database] Using direct PostgreSQL (pg via DATABASE_URL)");
-if (isProduction && isLikelyIpv4Host(databaseHost)) {
+if (useDirectPostgres) {
+  if (!databaseUrl) {
+    console.error("[database] Postgres selected but DATABASE_URL is empty (set DB_DRIVER=supabase to use Supabase only)");
+    process.exit(1);
+  }
+  const databaseHost = getDatabaseHostForLogging(databaseUrl);
+  pgDatabasePool = createDatabasePool(databaseUrl);
+  pgDatabasePool.on("error", (err) => {
+    console.error("[database] pg pool error (idle client):", err?.message || err);
+  });
+  supabase = createPgSupabaseClient(pgDatabasePool);
+  console.info("[database] Using direct PostgreSQL (pg)", dbDriverEnv ? `(DB_DRIVER=${dbDriverEnv})` : "(DATABASE_URL)");
+  if (isProduction && isLikelyIpv4Host(databaseHost)) {
+    console.warn(
+      `[database] DATABASE_URL is using public host ${databaseHost}. ` +
+        "If API and Postgres run on the same EasyPanel/VPS, prefer the internal service host " +
+        "(for example apps_db-vexo:5432) to avoid NAT/firewall latency and intermittent timeouts."
+    );
+  }
+} else if (supabaseUrl && supabaseServiceRoleKey) {
+  supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+  console.info("[database] Using Supabase JS client");
+} else {
   console.warn(
-    `[database] DATABASE_URL is using public host ${databaseHost}. ` +
-      "If API and Postgres run on the same EasyPanel/VPS, prefer the internal service host " +
-      "(for example apps_db-vexo:5432) to avoid NAT/firewall latency and intermittent timeouts."
+    "[database] No database client configured. Set DATABASE_URL for VPS Postgres, or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for Supabase."
   );
 }
 
@@ -271,13 +292,15 @@ if (firebaseReady && getApps().length === 0) {
 }
 
 function ensureDb(res) {
-  if (!db) {
+  if (!supabase) {
     sendError(
       res,
       500,
       "DATABASE_NOT_CONFIGURED",
       "Missing database configuration",
-      "Set DATABASE_URL for Postgres"
+      useDirectPostgres
+        ? "Set DATABASE_URL for Postgres (DB_DRIVER=postgres or unset DATA_SOURCE=supabase)"
+        : "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or use DATABASE_URL with DB_DRIVER=postgres"
     );
     return false;
   }
@@ -816,8 +839,6 @@ function hasManagedAccessClaims(rawClaims = {}) {
 
 function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
   if (!hasManagedAccessClaims(rawClaims) && !isFixedAdminIdentity(identity)) {
-    const companyName = normalizeString(rawClaims.companyName);
-
     return {
       role: "pending",
       isAdmin: false,
@@ -831,7 +852,7 @@ function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
       allowedViews: [],
       internalPages: [],
       permissions: [],
-      companyName,
+      companyName: normalizeString(rawClaims.companyName),
     };
   }
 
@@ -1512,7 +1533,7 @@ function getN8nOnboardingStatus(settings) {
 }
 
 async function getLeadClientN8nSettingsStatus(clientId) {
-  if (!db || !clientId) {
+  if (!supabase || !clientId) {
     return {
       settings: null,
       schemaAvailable: false,
@@ -1520,7 +1541,7 @@ async function getLeadClientN8nSettingsStatus(clientId) {
     };
   }
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
       "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, sdr_whatsapp_number, updated_at, updated_by_uid, updated_by_email"
@@ -1553,9 +1574,9 @@ async function getLeadClientN8nSettings(clientId) {
 }
 
 async function getLeadClientN8nSettingsMap(clientIds) {
-  if (!db || clientIds.length === 0) return {};
+  if (!supabase || clientIds.length === 0) return {};
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
       "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, sdr_whatsapp_number, updated_at, updated_by_email"
@@ -1638,7 +1659,7 @@ async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing
     ...buildN8nSettingsPayload(input, authAccess, existing),
   };
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .upsert(payload, { onConflict: "client_id" })
     .select(
@@ -2260,7 +2281,7 @@ function normalizeWhatsAppChatId(value) {
 }
 
 async function getAuthorizedClientWhatsAppChatIds(clientIds = []) {
-  if (!db) {
+  if (!supabase) {
     throw new Error("Database is not configured");
   }
 
@@ -2271,7 +2292,7 @@ async function getAuthorizedClientWhatsAppChatIds(clientIds = []) {
   const results = await Promise.all(
     clientIds.map(async (id) => {
       try {
-        const { data } = await db.from(leadsTableName(id)).select("telefone");
+        const { data } = await supabase.from(leadsTableName(id)).select("telefone");
         return data || [];
       } catch {
         return [];
@@ -4029,11 +4050,11 @@ function isMissingAccessProfilesTable(error) {
 async function listAccessProfiles() {
   const systemProfiles = buildSystemAccessProfiles();
 
-  if (!db) {
+  if (!supabase) {
     return systemProfiles;
   }
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("access_profiles")
     .select("key, label, description, role, scope_mode, approval_level, permissions, internal_pages, allowed_views, is_system, is_locked, created_at, updated_at")
     .order("is_system", { ascending: false })
@@ -4390,9 +4411,9 @@ function buildImportPreview(items) {
 }
 
 async function getClientName(clientId) {
-  if (!db) return clientId;
+  if (!supabase) return clientId;
 
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("leads_clients")
     .select("id, name")
     .eq("id", clientId)
@@ -4406,9 +4427,9 @@ async function getClientName(clientId) {
 }
 
 async function buildDispatchLeads({ clientId, importId = null, limit = null, segmentation = null }) {
-  if (!db) return [];
+  if (!supabase) return [];
 
-  let query = db
+  let query = supabase
     .from("lead_import_items")
     .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
     .eq("client_id", clientId)
@@ -4492,7 +4513,7 @@ function resolveCampaignPhonesForRow(leads, dispatchSummary) {
 }
 
 async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = null }) {
-  if (!db || !campaign?.id || !clientId) {
+  if (!supabase || !campaign?.id || !clientId) {
     return { started: false, reason: "missing_context" };
   }
 
@@ -4509,7 +4530,7 @@ async function startNextCampaignLeadInQueue({ campaign, clientId, repliedAt = nu
     segmentation: analyticsMeta.segmentation || null,
   });
 
-  const { data: importItems, error: importItemsError } = await db
+  const { data: importItems, error: importItemsError } = await supabase
     .from("lead_import_items")
     .select("id, telefone, normalized_data")
     .eq("client_id", clientId)
@@ -4655,9 +4676,9 @@ async function updateLeadImportItemCampaignProgress({
   ultimaInteracaoBot = undefined,
   ultimaInteracaoUsuario = undefined,
 }) {
-  if (!db || !clientId || !leadImportItemId || !campaignId) return null;
+  if (!supabase || !clientId || !leadImportItemId || !campaignId) return null;
 
-  const { data: item, error: fetchError } = await db
+  const { data: item, error: fetchError } = await supabase
     .from("lead_import_items")
     .select("id, normalized_data")
     .eq("client_id", clientId)
@@ -4674,7 +4695,7 @@ async function updateLeadImportItemCampaignProgress({
   if (ultimaInteracaoBot !== undefined) updatePayload.ultima_interacao_bot = ultimaInteracaoBot;
   if (ultimaInteracaoUsuario !== undefined) updatePayload.ultima_interacao_usuario = ultimaInteracaoUsuario;
 
-  const { data: updated, error: updateError } = await db
+  const { data: updated, error: updateError } = await supabase
     .from("lead_import_items")
     .update(updatePayload)
     .eq("client_id", clientId)
@@ -4689,7 +4710,7 @@ async function updateLeadImportItemCampaignProgress({
       campaignId,
       error: updateError.message || updateError.code || "missing_schema",
     });
-    const fallback = await db
+    const fallback = await supabase
       .from("lead_import_items")
       .update({ normalized_data: updatePayload.normalized_data })
       .eq("client_id", clientId)
@@ -4719,13 +4740,13 @@ async function updateLeadConversationState({
   ultimaInteracaoBot = undefined,
   ultimaInteracaoUsuario = undefined,
 }) {
-  if (!db || !clientId || !phone || !statusConversa) return;
+  if (!supabase || !clientId || !phone || !statusConversa) return;
 
   const leadUpdatePayload = { status_conversa: statusConversa };
   if (ultimaInteracaoBot !== undefined) leadUpdatePayload.ultima_interacao_bot = ultimaInteracaoBot;
   if (ultimaInteracaoUsuario !== undefined) leadUpdatePayload.ultima_interacao_usuario = ultimaInteracaoUsuario;
 
-  const { error } = await db
+  const { error } = await supabase
     .from(leadsTableName(clientId))
     .update(leadUpdatePayload)
     .eq("client_id", clientId)
@@ -4800,7 +4821,7 @@ function resolveMatchedImportItemForCampaign(importItems, campaign) {
 }
 
 async function findCampaignReplyMatches({ clientId, phone }) {
-  if (!db || !clientId || !phone) {
+  if (!supabase || !clientId || !phone) {
     return {
       phone,
       importIds: [],
@@ -4826,13 +4847,13 @@ async function findCampaignReplyMatches({ clientId, phone }) {
   const now = new Date().toISOString();
 
   let [importItemsResult, campaignsResult] = await Promise.all([
-    db
+    supabase
       .from("lead_import_items")
       .select("id, import_id, normalized_data, status_conversa, ultima_interacao_bot, ultima_interacao_usuario, created_at")
       .eq("client_id", clientId)
       .in("telefone", phoneVariants)
       .order("created_at", { ascending: false }),
-    db
+    supabase
       .from("campaigns")
       .select("id, name, client_id, import_id, status, scheduled_for, last_triggered_at, archived_at, phones, analytics_meta, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id")
       .eq("client_id", clientId)
@@ -4845,7 +4866,7 @@ async function findCampaignReplyMatches({ clientId, phone }) {
       phone: maskPhoneForLog(phone),
       error: importItemsResult.error.message || importItemsResult.error.code || "missing_schema",
     });
-    const fallback = await db
+    const fallback = await supabase
       .from("lead_import_items")
       .select("id, import_id, normalized_data, created_at")
       .eq("client_id", clientId)
@@ -5029,9 +5050,9 @@ async function insertCampaignDispatchLog({
   totalLeads = null,
   webhookStatus = null,
 }) {
-  if (!db || !campaign?.id) return;
+  if (!supabase || !campaign?.id) return;
 
-  const { error: insertError } = await db.from("campaign_dispatch_logs").insert({
+  const { error: insertError } = await supabase.from("campaign_dispatch_logs").insert({
     campaign_id: campaign.id,
     client_id: campaign.client_id,
     status,
@@ -5068,7 +5089,7 @@ async function claimCampaignForDispatch(campaign, triggerSource) {
     },
   };
 
-  let { data, error } = await db
+  let { data, error } = await supabase
     .from("campaigns")
     .update({
       status: "processing",
@@ -5081,7 +5102,7 @@ async function claimCampaignForDispatch(campaign, triggerSource) {
     .maybeSingle();
 
   if (error && isMissingSchemaError(error)) {
-    const fallback = await db
+    const fallback = await supabase
       .from("campaigns")
       .update({ status: "processing" })
       .eq("id", campaign.id)
@@ -5131,7 +5152,7 @@ async function markCampaignDispatchFailed(campaign, { triggerSource, error, webh
     },
   };
 
-  let { error: updateError } = await db
+  let { error: updateError } = await supabase
     .from("campaigns")
     .update({
       status: "failed",
@@ -5140,7 +5161,7 @@ async function markCampaignDispatchFailed(campaign, { triggerSource, error, webh
     .eq("id", campaign.id);
 
   if (updateError && isMissingSchemaError(updateError)) {
-    const fallback = await db
+    const fallback = await supabase
       .from("campaigns")
       .update({ status: "failed" })
       .eq("id", campaign.id);
@@ -5162,7 +5183,7 @@ async function markCampaignDispatchFailed(campaign, { triggerSource, error, webh
 }
 
 async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = {}) {
-  if (!db) {
+  if (!supabase) {
     throw new Error("Database is not configured");
   }
 
@@ -5380,7 +5401,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
 
   const phonesForRow = resolveCampaignPhonesForRow(leadsToDispatch, dispatchSummary);
 
-  let { error: updateError } = await db
+  let { error: updateError } = await supabase
     .from("campaigns")
     .update({
       status: keepCampaignProcessing ? "processing" : "sent",
@@ -5392,7 +5413,7 @@ async function executeCampaignDispatch(campaign, { triggerSource = "manual" } = 
     .eq("id", campaign.id);
 
   if (updateError && isMissingSchemaError(updateError)) {
-    const fallback = await db
+    const fallback = await supabase
       .from("campaigns")
       .update({
         status: keepCampaignProcessing ? "processing" : "sent",
@@ -5448,7 +5469,7 @@ function shouldStartCampaignScheduler() {
 let campaignSchedulerRunning = false;
 
 async function runDueCampaignDispatches({ limit = 10, triggerSource = "scheduler" } = {}) {
-  if (!db) {
+  if (!supabase) {
     return { success: false, processed: 0, sent: 0, failed: 0, items: [], reason: "DATABASE_NOT_CONFIGURED" };
   }
 
@@ -5458,7 +5479,7 @@ async function runDueCampaignDispatches({ limit = 10, triggerSource = "scheduler
   const fallbackCampaignSelect =
     "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email";
 
-  let { data: campaigns, error } = await db
+  let { data: campaigns, error } = await supabase
     .from("campaigns")
     .select(campaignSelect)
     .in("status", ["active", "scheduled"])
@@ -5470,7 +5491,7 @@ async function runDueCampaignDispatches({ limit = 10, triggerSource = "scheduler
     .limit(limit);
 
   if (error && isMissingSchemaError(error)) {
-    const fallback = await db
+    const fallback = await supabase
       .from("campaigns")
       .select(fallbackCampaignSelect)
       .in("status", ["active", "scheduled"])
@@ -5568,7 +5589,7 @@ async function markCampaignLeadWaitingReply({
   status = undefined,
   userRepliedAt = undefined,
 }) {
-  if (!db || !clientId || !phone) return;
+  if (!supabase || !clientId || !phone) return;
 
   const hasNextStep =
     nextStepIndex !== undefined
@@ -5617,7 +5638,7 @@ async function markCampaignLeadWaitingReply({
     if (storedUserTimestamp !== undefined) {
       updatePayload.ultima_interacao_usuario = storedUserTimestamp;
     }
-    const { error } = await db
+    const { error } = await supabase
       .from("lead_import_items")
       .update(updatePayload)
       .eq("client_id", clientId)
@@ -5760,18 +5781,18 @@ async function callCampaignQualificationWebhook({
 }
 
 async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch, replyPayload = {} }) {
-  if (!db || !clientId || !phone || !campaignMatch?.id) {
+  if (!supabase || !clientId || !phone || !campaignMatch?.id) {
     return { continued: false, reason: "missing_context" };
   }
 
-  let { data: campaign, error: fetchError } = await db
+  let { data: campaign, error: fetchError } = await supabase
     .from("campaigns")
     .select("id, name, client_id, import_id, webhook_url, webhook_token, status, analytics_meta")
     .eq("id", campaignMatch.id)
     .maybeSingle();
 
   if (fetchError && isMissingSchemaError(fetchError)) {
-    const fallback = await db
+    const fallback = await supabase
       .from("campaigns")
       .select("id, name, client_id, import_id, webhook_url, webhook_token, status")
       .eq("id", campaignMatch.id)
@@ -6157,9 +6178,9 @@ async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campa
 }
 
 async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSource = "reply_webhook" }) {
-  if (!db || !campaignId || !clientId) return { finalized: false, reason: "missing_context" };
+  if (!supabase || !campaignId || !clientId) return { finalized: false, reason: "missing_context" };
 
-  const { data: campaign, error: campaignError } = await db
+  const { data: campaign, error: campaignError } = await supabase
     .from("campaigns")
     .select("id, name, client_id, import_id, status, phones, analytics_meta")
     .eq("id", campaignId)
@@ -6170,7 +6191,7 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
   if (!campaign) return { finalized: false, reason: "campaign_not_found" };
   if (campaign.status !== "processing") return { finalized: false, reason: "campaign_not_processing" };
 
-  let query = db
+  let query = supabase
     .from("lead_import_items")
     .select("id, telefone, normalized_data")
     .eq("client_id", clientId)
@@ -6222,7 +6243,7 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
     },
   };
 
-  let { error: updateError } = await db
+  let { error: updateError } = await supabase
     .from("campaigns")
     .update({
       status: "sent",
@@ -6234,7 +6255,7 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
     .eq("client_id", clientId);
 
   if (updateError && isMissingSchemaError(updateError)) {
-    const fallback = await db
+    const fallback = await supabase
       .from("campaigns")
       .update({
         status: "sent",
@@ -6260,18 +6281,18 @@ async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSo
 }
 
 async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
-  if (!db || !clientId || !phone) return false;
+  if (!supabase || !clientId || !phone) return false;
 
   const dispatchedDate = new Date(dispatchedAt);
   const repliedStatuses = ["em_atendimento", "finalizado"];
   const queries = [
-    db
+    supabase
       .from("lead_import_items")
       .select("id, status_conversa, ultima_interacao_usuario")
       .eq("client_id", clientId)
       .eq("telefone", phone)
       .limit(1),
-    db
+    supabase
       .from(leadsTableName(clientId))
       .select("id, status_conversa, ultima_interacao_usuario")
       .eq("client_id", clientId)
@@ -6281,7 +6302,7 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
 
   if (lead?.id) {
     queries.push(
-      db
+      supabase
         .from("lead_import_items")
         .select("id, status_conversa, ultima_interacao_usuario")
         .eq("id", lead.id)
@@ -6382,14 +6403,16 @@ Object.assign(routeDeps, {
   continueCampaignLeadFromReply,
   corsAllowAnyOriginBecauseListEmpty,
   corsOrigins,
+  dataSource,
   databaseUrl,
+  dbDriverEnv,
   detectTemperature,
   ensureAuthorizedWhatsAppChat,
   ensureAuthorizedWhatsAppPhone,
   ensureDb,
+  ensureFirebaseUserAccessClaims,
   ensureSharedRoutePageAccess,
   executeCampaignDispatch,
-  ensureFirebaseUserAccessClaims,
   extractCampaignProgress,
   extractEvolutionConnectionState,
   extractManagedAccessClaims,
@@ -6535,7 +6558,9 @@ Object.assign(routeDeps, {
   shutdownPgPool,
   startCampaignScheduler,
   startNextCampaignLeadInQueue,
-  db,
+  supabase,
+  supabaseServiceRoleKey,
+  supabaseUrl,
   syncUsersWithAccessProfile,
   tickCampaignScheduler,
   toComparableCampaignTimestamp,
@@ -6572,8 +6597,8 @@ runMigrations(pgDatabasePool).finally(() => {
     console.log(`VexoApi listening on port ${port}`);
     startCampaignScheduler();
 
-    if (db) {
-      setDatabaseClient(db);
+    if (supabase) {
+      setSupabaseClient(supabase);
     }
 
     initializeRedisChat().catch((error) => {

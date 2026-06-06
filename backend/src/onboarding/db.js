@@ -1,4 +1,4 @@
-import { createDatabasePool } from "../pgPostgresCompat.js";
+import { createDatabasePool } from "../pgSupabaseCompat.js";
 
 let _pool = null;
 

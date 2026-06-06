@@ -1,7 +1,7 @@
 // Lógica de negócio do módulo de follow-up.
 // Processa webhooks, calcula scheduled_for, enfileira jobs no BullMQ.
 import crypto from "crypto";
-import { query, getDbClient } from "./db.js";
+import { query, getSupabase } from "./db.js";
 import { getFollowupQueue } from "./queue.js";
 
 // ─── Utilitários ─────────────────────────────────────────────────────────────
@@ -133,9 +133,9 @@ export function parseWebhookPayload(body) {
 // ─── Processamento principal do webhook de entrada ───────────────────────────
 
 export async function processInboundWebhook(campaignId, parsedPayload) {
-  const db = getDbClient();
+  const supabase = getSupabase();
 
-  const { data: campaign, error: campErr } = await db
+  const { data: campaign, error: campErr } = await supabase
     .from("followup_campaigns")
     .select(
       "id, company_id, status, default_origin, webhook_secret"
@@ -192,7 +192,7 @@ export async function processInboundWebhook(campaignId, parsedPayload) {
   }
 
   // Buscar templates ativos
-  const { data: templates } = await db
+  const { data: templates } = await supabase
     .from("followup_templates")
     .select("id, trigger_type, trigger_value, trigger_unit, trigger_direction, order_index")
     .eq("campaign_id", campaignId)

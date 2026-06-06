@@ -1,6 +1,6 @@
 # Smoke checklist: backend with Postgres (VPS)
 
-Prereq: `DATABASE_URL` reachable from the machine.
+Prereqs: `DATABASE_URL` reachable from the machine; `DB_DRIVER=postgres` **or** `DATABASE_URL` with `DATA_SOURCE` not set to `supabase`.
 
 1. `GET /health` — expect `services.databaseDriver: "postgres"`, `services.postgresPing: true`.
 2. `GET /api/lead-clients` (Firebase auth) — list tenants.

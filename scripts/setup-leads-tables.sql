@@ -1,5 +1,5 @@
--- VexoCrm: Create leads tables (run in Postgres SQL Editor)
--- Project: https://Postgres.com/dashboard/project/yfhdzkjuhxsbxklfgdut/sql
+-- VexoCrm: Create leads tables (run in Supabase SQL Editor)
+-- Project: https://supabase.com/dashboard/project/yfhdzkjuhxsbxklfgdut/sql
 
 -- Tables
 CREATE TABLE IF NOT EXISTS public.leads_clients (

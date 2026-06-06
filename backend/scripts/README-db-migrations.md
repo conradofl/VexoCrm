@@ -1,14 +1,31 @@
-# Database migrations with direct Postgres
+# Database migrations (Supabase CLI vs VPS Postgres)
 
-From `VexoCrm/backend`, run `npm run migrate` when you explicitly want to apply SQL migrations. The script reads SQL files from `backend/postgres/migrations` and applies pending files through the `pg` driver using `DATABASE_URL`.
+## Local development (`npm run dev` / `npm start`)
 
-Plain `npm start` and `npm run dev` do not apply migrations.
+From `VexoCrm/backend`, npm runs `predev` / `prestart`, which execute `scripts/conditional-migrate.mjs`. That script runs `npx supabase db push --db-url` using `SUPABASE_DB_URL` or `DATABASE_URL` from `backend/.env`. Set `SKIP_DB_MIGRATE=1` to skip. This path is independent of `RUN_SUPABASE_MIGRATIONS_ON_START` (that variable is only read by Docker `start.sh`).
 
-For Docker startup, `start.sh` can run the same migration path before the API:
+## Supabase-hosted project
+
+`start.sh` runs [apply-supabase-migrations.sh](./apply-supabase-migrations.sh) when `RUN_SUPABASE_MIGRATIONS_ON_START=1`.
+
+- Prefer `SUPABASE_DB_URL` for `supabase db push --db-url` inside CI/container.
+- Or `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD` with a linked project.
+
+## Self-hosted Postgres (VPS)
+
+When the schema is already applied (dump/restore or manual apply), **disable** auto-migrate on boot to avoid the CLI hitting the wrong target:
 
 ```bash
-RUN_POSTGRES_MIGRATIONS_ON_START=1
-DATABASE_URL=postgresql://user:password@host:5432/database
+RUN_SUPABASE_MIGRATIONS_ON_START=0
 ```
 
-The runner records applied files in `public.app_schema_migrations`.
+To apply the same SQL migration files in `backend/supabase/migrations` against the VPS, set:
+
+```bash
+export SUPABASE_DB_URL="$DATABASE_URL"
+RUN_SUPABASE_MIGRATIONS_ON_START=1
+```
+
+so `apply-supabase-migrations.sh` uses `supabase db push --db-url` against your VPS connection string (requires `npx supabase` network access from the container).
+
+Alternatively, run `psql "$DATABASE_URL" -f path/to/migration.sql` manually for each file when you do not want the Supabase CLI.

@@ -6,7 +6,8 @@ import { gunzipSync } from "zlib";
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import { createDatabasePool, createPostgresCompatClient } from "../pgPostgresCompat.js";
+import { createClient } from "@supabase/supabase-js";
+import { createDatabasePool, createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { runMigrations } from "../migrate.js";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -42,7 +43,7 @@ import {
   hasUserPermission,
 } from "../userAccessScope.js";
 import { whatsappSessionManager } from "../whatsapp.js";
-import { initializeRedisChat, getChatMemory, setDatabaseClient } from "../hardcoded-chatbot.js";
+import { initializeRedisChat, getChatMemory, setSupabaseClient } from "../hardcoded-chatbot.js";
 import { parseStoredHistorico } from "../leads-outlier-schema.js";
 import {
   bufferMessage,
@@ -122,7 +123,9 @@ export function registerAllDomainRoutes(app) {
     continueCampaignLeadFromReply,
     corsAllowAnyOriginBecauseListEmpty,
     corsOrigins,
+    dataSource,
     databaseUrl,
+    dbDriverEnv,
     detectTemperature,
     ensureAuthorizedWhatsAppChat,
     ensureAuthorizedWhatsAppPhone,
@@ -267,7 +270,9 @@ export function registerAllDomainRoutes(app) {
     shutdownPgPool,
     startCampaignScheduler,
     startNextCampaignLeadInQueue,
-    db,
+    supabase,
+    supabaseServiceRoleKey,
+    supabaseUrl,
     syncUsersWithAccessProfile,
     tickCampaignScheduler,
     toComparableCampaignTimestamp,
@@ -292,7 +297,7 @@ export function registerAllDomainRoutes(app) {
     deliveredAt = null,
     meta = null,
   }) {
-    if (!db || !clientId || !phone) return null;
+    if (!supabase || !clientId || !phone) return null;
 
     const normalizedMessage = normalizeString(messageText);
     if (!normalizedMessage) return null;
@@ -302,7 +307,7 @@ export function registerAllDomainRoutes(app) {
 
     if (!resolvedLeadId || !resolvedCampaignId) {
       try {
-        const { data: leadRow, error: leadLookupError } = await db
+        const { data: leadRow, error: leadLookupError } = await supabase
           .from(leadsTableName(clientId))
           .select("id, source_campaign_id")
           .eq("client_id", clientId)
@@ -320,7 +325,7 @@ export function registerAllDomainRoutes(app) {
       }
     }
 
-    const { error } = await db.from("lead_messages").insert({
+    const { error } = await supabase.from("lead_messages").insert({
       client_id: clientId,
       lead_id: resolvedLeadId,
       campaign_id: resolvedCampaignId,
@@ -360,8 +365,8 @@ export function registerAllDomainRoutes(app) {
       }
     }
     const services = {
-      databaseClient: !!db,
-      databaseDriver: useDirectPostgres ? "postgres" : db ? "db" : "none",
+      databaseClient: !!supabase,
+      databaseDriver: useDirectPostgres ? "postgres" : supabase ? "supabase" : "none",
       postgresPing,
       firebaseAuth: firebaseReady,
     };
@@ -442,7 +447,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      let query = db.from("leads_clients").select("id, name, created_at");
+      let query = supabase.from("leads_clients").select("id, name, created_at");
       const scopeMode =
         req.authAccess?.scopeMode || (req.authAccess?.role === "client" ? "assigned_clients" : "all_clients");
   
@@ -524,7 +529,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: existingTenant, error: existingTenantError } = await db
+      const { data: existingTenant, error: existingTenantError } = await supabase
         .from("leads_clients")
         .select("id")
         .eq("id", tenantId)
@@ -539,7 +544,7 @@ export function registerAllDomainRoutes(app) {
         return;
       }
   
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("leads_clients")
         .insert({
           id: tenantId,
@@ -672,7 +677,7 @@ export function registerAllDomainRoutes(app) {
   ];
 
   async function deleteLeadClientRowsFromTable(tableName, tenantId) {
-    const { count, error } = await db
+    const { count, error } = await supabase
       .from(tableName)
       .delete({ count: "exact" })
       .eq("client_id", tenantId);
@@ -746,7 +751,7 @@ export function registerAllDomainRoutes(app) {
       }
   
       try {
-        const { data: tenant, error: tenantError } = await db
+        const { data: tenant, error: tenantError } = await supabase
           .from("leads_clients")
           .select("id")
           .eq("id", tenantId)
@@ -806,7 +811,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: tenant, error: tenantError } = await db
+      const { data: tenant, error: tenantError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", tenantId)
@@ -848,7 +853,7 @@ export function registerAllDomainRoutes(app) {
   
       const purge = await purgeLeadClientOperationalData(tenantId);
   
-      const { error: deleteError } = await db
+      const { error: deleteError } = await supabase
         .from("leads_clients")
         .delete()
         .eq("id", tenantId);
@@ -1429,7 +1434,7 @@ export function registerAllDomainRoutes(app) {
     if (!ensureDb(res)) return;
   
     try {
-      let query = db
+      let query = supabase
         .from("vexo_sales_opportunities")
         .select("*")
         .eq("owner_company", "vexo")
@@ -1478,7 +1483,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("vexo_sales_opportunities")
         .insert(payload)
         .select("*")
@@ -1511,7 +1516,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("vexo_sales_opportunities")
         .update(payload)
         .eq("id", id)
@@ -1540,7 +1545,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { error } = await db
+      const { error } = await supabase
         .from("vexo_sales_opportunities")
         .delete()
         .eq("id", id)
@@ -1567,7 +1572,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("vexo_sales_interactions")
         .select("*")
         .eq("opportunity_id", id)
@@ -1613,7 +1618,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: opportunity, error: opportunityError } = await db
+      const { data: opportunity, error: opportunityError } = await supabase
         .from("vexo_sales_opportunities")
         .select("id")
         .eq("id", opportunityId)
@@ -1627,7 +1632,7 @@ export function registerAllDomainRoutes(app) {
         return;
       }
   
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("vexo_sales_interactions")
         .insert(payload)
         .select("*")
@@ -1635,7 +1640,7 @@ export function registerAllDomainRoutes(app) {
   
       if (error) throw error;
   
-      await db
+      await supabase
         .from("vexo_sales_opportunities")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", opportunityId)
@@ -1716,7 +1721,7 @@ export function registerAllDomainRoutes(app) {
     if (!clientId) return;
   
     try {
-      const { data: client, error: clientError } = await db
+      const { data: client, error: clientError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", clientId)
@@ -1726,7 +1731,7 @@ export function registerAllDomainRoutes(app) {
         throw clientError;
       }
   
-      const { data: leads, error } = await db
+      const { data: leads, error } = await supabase
         .from(leadsTableName(clientId))
         .select("id, nome, tipo_cliente, status, qualificacao, data_hora, cidade, created_at")
         .eq("client_id", clientId)
@@ -1739,7 +1744,7 @@ export function registerAllDomainRoutes(app) {
   
       let conversions = [];
       try {
-        const { data: conversionRows, error: conversionsError } = await db
+        const { data: conversionRows, error: conversionsError } = await supabase
           .from("lead_conversions")
           .select("id, conversion_status, contract_value, revenue_amount, closed_at, created_at")
           .eq("client_id", clientId);
@@ -1776,7 +1781,7 @@ export function registerAllDomainRoutes(app) {
     if (!clientId) return;
   
     try {
-      const { data: client, error: clientError } = await db
+      const { data: client, error: clientError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", clientId)
@@ -1786,7 +1791,7 @@ export function registerAllDomainRoutes(app) {
         throw clientError;
       }
   
-      const { data: leads, error: leadsError } = await db
+      const { data: leads, error: leadsError } = await supabase
         .from(leadsTableName(clientId))
         .select("id, client_id, telefone, nome, tipo_cliente, faixa_consumo, cidade, estado, status, bot_ativo, historico, data_hora, qualificacao, created_at, updated_at")
         .eq("client_id", clientId)
@@ -1808,44 +1813,44 @@ export function registerAllDomainRoutes(app) {
         importItemsQuery,
       ] = await Promise.all([
         optionalQuery(() =>
-          db
+          supabase
             .from("campaigns")
             .select("id, name, client_id, import_id, limit_per_run, status, last_triggered_at, created_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_messages")
             .select("id, lead_id, campaign_id, phone, sender_type, direction, engagement_signal, created_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_assignments")
             .select("id, lead_id, campaign_id, consultant_id, assignment_status, assigned_at, first_response_at, reassigned_at, closed_at, response_due_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_conversions")
             .select("id, lead_id, campaign_id, consultant_id, conversion_status, contract_value, revenue_amount, first_contact_at, qualified_at, closed_at, created_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("crm_consultants")
             .select("id, name, city, state, available, active, daily_capacity, open_lead_limit, assignment_weight, priority_rank")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_distribution_rules")
             .select("id, name, distribution_mode, prioritize_region, prioritize_contract_value, prioritize_lead_type, max_open_leads_per_consultant, reassign_after_minutes, fairness_floor, active, config")
             .eq("client_id", clientId)
             .order("updated_at", { ascending: false })
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("analytics_insights")
             .select("title, message, severity, insight_scope, generated_at")
             .eq("client_id", clientId)
@@ -1853,7 +1858,7 @@ export function registerAllDomainRoutes(app) {
             .limit(8)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_import_items")
             .select("import_id, telefone")
             .eq("client_id", clientId)
@@ -1905,7 +1910,7 @@ export function registerAllDomainRoutes(app) {
     const filters = parseCommercialIntelligenceFilters(req.query, defaultSettings.defaultPeriod);
   
     try {
-      const { data: client, error: clientError } = await db
+      const { data: client, error: clientError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", clientId)
@@ -1927,21 +1932,21 @@ export function registerAllDomainRoutes(app) {
       ] = await Promise.all([
         queryWithSchemaFallback([
           () =>
-            db
+            supabase
               .from(leadsTableName(clientId))
               .select("id, client_id, telefone, nome, tipo_cliente, faixa_consumo, cidade, estado, status, bot_ativo, historico, data_hora, qualificacao, created_at, updated_at, source_campaign_id, lead_score, potential_contract_value, first_contact_at, qualified_at, closed_at, lead_temperature, lead_origin, behavior_meta")
               .eq("client_id", clientId)
               .order("data_hora", { ascending: false, nullsFirst: false })
               .order("created_at", { ascending: false }),
           () =>
-            db
+            supabase
               .from(leadsTableName(clientId))
               .select("id, client_id, telefone, nome, tipo_cliente, faixa_consumo, cidade, estado, status, bot_ativo, historico, data_hora, qualificacao, created_at, updated_at, source_campaign_id, lead_score, potential_contract_value, first_contact_at, qualified_at, closed_at")
               .eq("client_id", clientId)
               .order("data_hora", { ascending: false, nullsFirst: false })
               .order("created_at", { ascending: false }),
           () =>
-            db
+            supabase
               .from(leadsTableName(clientId))
               .select("id, client_id, telefone, nome, tipo_cliente, faixa_consumo, cidade, estado, status, bot_ativo, historico, data_hora, qualificacao, created_at, updated_at")
               .eq("client_id", clientId)
@@ -1949,60 +1954,60 @@ export function registerAllDomainRoutes(app) {
               .order("created_at", { ascending: false }),
         ]),
         optionalQuery(() =>
-          db
+          supabase
             .from("campaigns")
             .select("id, name, client_id, import_id, limit_per_run, status, scheduled_for, last_triggered_at, created_at, phones")
             .eq("client_id", clientId)
             .is("archived_at", null)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_messages")
             .select("id, client_id, lead_id, campaign_id, phone, sender_type, direction, engagement_signal, message_text, created_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_assignments")
             .select("id, client_id, lead_id, campaign_id, consultant_id, assignment_mode, assignment_status, assignment_reason, assigned_at, acknowledged_at, first_response_at, reassigned_at, closed_at, response_due_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_conversions")
             .select("id, client_id, lead_id, campaign_id, consultant_id, conversion_status, contract_value, revenue_amount, first_contact_at, qualified_at, closed_at, created_at")
             .eq("client_id", clientId)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("crm_consultants")
             .select("id, client_id, name, email, phone, city, state, territory_cities, territory_states, lead_types, contract_value_min, contract_value_max, daily_capacity, open_lead_limit, assignment_weight, priority_rank, available, active, performance_meta, created_at, updated_at")
             .eq("client_id", clientId)
             .order("created_at", { ascending: false })
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_distribution_rules")
             .select("id, client_id, name, distribution_mode, prioritize_region, prioritize_contract_value, prioritize_lead_type, max_open_leads_per_consultant, reassign_after_minutes, fairness_floor, active, config, created_at, updated_at")
             .eq("client_id", clientId)
             .order("updated_at", { ascending: false })
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("analytics_insights")
             .select("id, related_id, title, message, severity, insight_scope, generated_at, meta")
             .eq("client_id", clientId)
             .order("generated_at", { ascending: false })
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("lead_import_items")
             .select("import_id, telefone")
             .eq("client_id", clientId)
             .not("import_id", "is", null)
         ),
         optionalQuery(() =>
-          db
+          supabase
             .from("commercial_intelligence_settings")
             .select("*")
             .eq("client_id", clientId)
@@ -2057,7 +2062,7 @@ export function registerAllDomainRoutes(app) {
     };
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("crm_consultants")
         .insert({
           client_id: authorizedClientId,
@@ -2104,7 +2109,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: current, error: currentError } = await db
+      const { data: current, error: currentError } = await supabase
         .from("crm_consultants")
         .select("id, client_id, performance_meta")
         .eq("id", id)
@@ -2148,7 +2153,7 @@ export function registerAllDomainRoutes(app) {
   
       const sanitizedUpdates = Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined));
   
-      const { error } = await db
+      const { error } = await supabase
         .from("crm_consultants")
         .update(sanitizedUpdates)
         .eq("id", id)
@@ -2176,7 +2181,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: current, error: currentError } = await db
+      const { data: current, error: currentError } = await supabase
         .from("crm_consultants")
         .select("id, client_id")
         .eq("id", id)
@@ -2190,7 +2195,7 @@ export function registerAllDomainRoutes(app) {
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
   
-      const { error } = await db
+      const { error } = await supabase
         .from("crm_consultants")
         .delete()
         .eq("id", id)
@@ -2221,7 +2226,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("lead_distribution_rules")
         .insert({
           client_id: authorizedClientId,
@@ -2261,7 +2266,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: current, error: currentError } = await db
+      const { data: current, error: currentError } = await supabase
         .from("lead_distribution_rules")
         .select("id, client_id, config")
         .eq("id", id)
@@ -2292,7 +2297,7 @@ export function registerAllDomainRoutes(app) {
   
       const sanitizedUpdates = Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined));
   
-      const { error } = await db
+      const { error } = await supabase
         .from("lead_distribution_rules")
         .update(sanitizedUpdates)
         .eq("id", id)
@@ -2321,7 +2326,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: assignment, error: assignmentError } = await db
+      const { data: assignment, error: assignmentError } = await supabase
         .from("lead_assignments")
         .select("id, client_id, consultant_id, assignment_reason")
         .eq("id", id)
@@ -2369,7 +2374,7 @@ export function registerAllDomainRoutes(app) {
         return;
       }
   
-      const { error } = await db
+      const { error } = await supabase
         .from("lead_assignments")
         .update(updates)
         .eq("id", id)
@@ -2409,7 +2414,7 @@ export function registerAllDomainRoutes(app) {
         updated_at: new Date().toISOString(),
       };
   
-      const { error } = await db
+      const { error } = await supabase
         .from("commercial_intelligence_settings")
         .upsert(payload, { onConflict: "client_id" });
   
@@ -2436,7 +2441,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: current, error: currentError } = await db
+      const { data: current, error: currentError } = await supabase
         .from("analytics_insights")
         .select("id, client_id")
         .eq("id", id)
@@ -2455,7 +2460,7 @@ export function registerAllDomainRoutes(app) {
         resolved_at: status === "resolved" ? new Date().toISOString() : null,
       };
   
-      const { error } = await db
+      const { error } = await supabase
         .from("analytics_insights")
         .update(updates)
         .eq("id", id)
@@ -2482,7 +2487,7 @@ export function registerAllDomainRoutes(app) {
     if (!clientId) return;
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from(leadsTableName(clientId))
         .select("*")
         .eq("client_id", clientId)
@@ -2508,7 +2513,7 @@ export function registerAllDomainRoutes(app) {
     if (!clientId) return;
   
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("lead_imports")
         .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at")
         .eq("client_id", clientId)
@@ -2536,7 +2541,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: record, error: fetchError } = await db
+      const { data: record, error: fetchError } = await supabase
         .from("lead_imports")
         .select("id, client_id")
         .eq("id", importId)
@@ -2551,13 +2556,13 @@ export function registerAllDomainRoutes(app) {
       const clientId = resolveAuthorizedClientId(req, res, record.client_id);
       if (!clientId) return;
   
-      const { error: itemsDeleteError } = await db
+      const { error: itemsDeleteError } = await supabase
         .from("lead_import_items")
         .delete()
         .eq("import_id", importId);
       if (itemsDeleteError) throw itemsDeleteError;
   
-      const { error: importDeleteError } = await db
+      const { error: importDeleteError } = await supabase
         .from("lead_imports")
         .delete()
         .eq("id", importId);
@@ -2581,7 +2586,7 @@ export function registerAllDomainRoutes(app) {
     const dispatched = req.query.dispatched;
   
     try {
-      let query = db
+      let query = supabase
         .from("lead_import_items")
         .select("id, import_id, client_id, row_number, telefone, normalized_data, imported, skip_reason, created_at")
         .eq("client_id", clientId)
@@ -2598,7 +2603,7 @@ export function registerAllDomainRoutes(app) {
   
       const allItems = items || [];
   
-      const { data: dispatchRuns } = await db
+      const { data: dispatchRuns } = await supabase
         .from("campaign_dispatch_runs")
         .select("phone")
         .eq("client_id", clientId)
@@ -2675,7 +2680,7 @@ export function registerAllDomainRoutes(app) {
       const validRows = Array.from(validRowsMap.values());
       const skippedRows = parsedItems.length - validRows.length;
   
-      const { data: importRecord, error: importError } = await db
+      const { data: importRecord, error: importError } = await supabase
         .from("lead_imports")
         .insert({
           client_id: clientId,
@@ -2706,7 +2711,7 @@ export function registerAllDomainRoutes(app) {
         normalized_data: item.normalized,
       }));
   
-      const { error: itemsError } = await db.from("lead_import_items").insert(importItems);
+      const { error: itemsError } = await supabase.from("lead_import_items").insert(importItems);
       if (itemsError) {
         throw itemsError;
       }
@@ -2839,7 +2844,7 @@ export function registerAllDomainRoutes(app) {
     }
   );
   
-  // db Edge `lead-webhook` parity: POST only, action create | finalize, same JSON bodies and responses.
+  // Supabase Edge `lead-webhook` parity: POST only, action create | finalize, same JSON bodies and responses.
   // Authorization: Bearer LEAD_WEBHOOK_BEARER_TOKEN or legacy default @Vexo2026 (matches Edge constant).
   app.post("/api/lead-webhook", async (req, res) => {
     if (!ensureDb(res)) return;
@@ -2872,7 +2877,7 @@ export function registerAllDomainRoutes(app) {
       }
   
       if (action === "create") {
-        const { data: existingLead, error: lookupError } = await db
+        const { data: existingLead, error: lookupError } = await supabase
           .from(leadsTableName(clientId))
           .select("id, nome")
           .eq("client_id", clientId)
@@ -2912,7 +2917,7 @@ export function registerAllDomainRoutes(app) {
           updated_at: now,
         };
   
-        const { data: insertedLead, error: insertError } = await db
+        const { data: insertedLead, error: insertError } = await supabase
           .from(leadsTableName(clientId))
           .insert(createPayload)
           .select("id")
@@ -2920,7 +2925,7 @@ export function registerAllDomainRoutes(app) {
 
         if (insertError) {
           if (insertError.code === "23505") {
-            const { data: duplicateLead, error: duplicateLookupError } = await db
+            const { data: duplicateLead, error: duplicateLookupError } = await supabase
               .from(leadsTableName(clientId))
               .select("id, nome")
               .eq("client_id", clientId)
@@ -2984,7 +2989,7 @@ export function registerAllDomainRoutes(app) {
         updated_at: now,
       };
   
-      const { data: finalizedLead, error: finalizeError } = await db
+      const { data: finalizedLead, error: finalizeError } = await supabase
         .from(leadsTableName(clientId))
         .upsert(finalizePayload, {
           onConflict: "client_id,telefone",
@@ -3066,7 +3071,7 @@ export function registerAllDomainRoutes(app) {
         })
         .filter(Boolean);
   
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from(leadsTableName(clientId))
         .upsert(rows, {
           onConflict: "client_id,telefone",
@@ -3137,7 +3142,7 @@ export function registerAllDomainRoutes(app) {
         rows.push({ client_id: clientId, ...parsed.row });
       }
   
-      const { data, error } = await db.from(leadsTableName(clientId)).insert(rows).select("id");
+      const { data, error } = await supabase.from(leadsTableName(clientId)).insert(rows).select("id");
 
       if (error) {
         console.error("leads import insert error:", error);
@@ -3200,7 +3205,7 @@ export function registerAllDomainRoutes(app) {
         rows.push({ client_id: clientId, ...parsed.row });
       }
   
-      const { data, error } = await db.from(leadsTableName(clientId)).insert(rows).select("id");
+      const { data, error } = await supabase.from(leadsTableName(clientId)).insert(rows).select("id");
 
       if (error) {
         console.error("leads import n8n insert error:", error);
@@ -3840,7 +3845,7 @@ export function registerAllDomainRoutes(app) {
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta";
       const fallbackCampaignSelect =
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at";
-      let query = db
+      let query = supabase
         .from("campaigns")
         .select(campaignSelect)
         .is("archived_at", null)
@@ -3853,7 +3858,7 @@ export function registerAllDomainRoutes(app) {
       let { data, error } = await query;
   
       if (error) {
-        let fallbackQuery = db
+        let fallbackQuery = supabase
           .from("campaigns")
           .select(fallbackCampaignSelect)
           .is("archived_at", null)
@@ -3874,7 +3879,7 @@ export function registerAllDomainRoutes(app) {
       const clientIds = [...new Set((data || []).map((r) => r.client_id).filter(Boolean))];
       let clientNameMap = {};
       if (clientIds.length > 0) {
-        const { data: clients } = await db
+        const { data: clients } = await supabase
           .from("leads_clients")
           .select("id, name")
           .in("id", clientIds);
@@ -3905,14 +3910,14 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      let { data: campaign, error: fetchError } = await db
+      let { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
         .select("id, client_id, import_id, limit_per_run, phones, analytics_meta")
         .eq("id", id)
         .single();
   
       if (fetchError && isMissingSchemaError(fetchError)) {
-        const fallback = await db
+        const fallback = await supabase
           .from("campaigns")
           .select("id, client_id, import_id, limit_per_run, phones")
           .eq("id", id)
@@ -3935,7 +3940,7 @@ export function registerAllDomainRoutes(app) {
         : [];
   
       if (storedPhones.length > 0) {
-        const { data: leads, error: leadsError } = await db
+        const { data: leads, error: leadsError } = await supabase
           .from(leadsTableName(authorizedClientId))
           .select("*")
           .eq("client_id", authorizedClientId)
@@ -4040,7 +4045,7 @@ export function registerAllDomainRoutes(app) {
         },
       });
   
-      let { data, error } = await db
+      let { data, error } = await supabase
         .from("campaigns")
         .insert({
           name,
@@ -4061,7 +4066,7 @@ export function registerAllDomainRoutes(app) {
         .single();
   
       if (error) {
-        const fallback = await db
+        const fallback = await supabase
           .from("campaigns")
           .insert({
             name,
@@ -4144,7 +4149,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      const { data: current, error: currentError } = await db
+      const { data: current, error: currentError } = await supabase
         .from("campaigns")
         .select("id, client_id")
         .eq("id", id)
@@ -4158,7 +4163,7 @@ export function registerAllDomainRoutes(app) {
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
   
-      let { data, error } = await db
+      let { data, error } = await supabase
         .from("campaigns")
         .update(updates)
         .eq("id", id)
@@ -4169,7 +4174,7 @@ export function registerAllDomainRoutes(app) {
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {
         const fallbackUpdates = { ...updates };
         delete fallbackUpdates.analytics_meta;
-        const fallback = await db
+        const fallback = await supabase
           .from("campaigns")
           .update(fallbackUpdates)
           .eq("id", id)
@@ -4206,7 +4211,7 @@ export function registerAllDomainRoutes(app) {
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
   
     try {
-      const { data: campaign, error: fetchError } = await db
+      const { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
         .select("id, client_id")
         .eq("id", id)
@@ -4220,7 +4225,7 @@ export function registerAllDomainRoutes(app) {
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
   
-      const { error } = await db
+      const { error } = await supabase
         .from("campaigns")
         .delete()
         .eq("id", id)
@@ -4296,14 +4301,14 @@ export function registerAllDomainRoutes(app) {
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
   
     try {
-      let { data: campaign, error: fetchError } = await db
+      let { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, created_by_uid, created_by_email, analytics_meta")
         .eq("id", id)
         .single();
   
       if (fetchError && isMissingSchemaError(fetchError)) {
-        const fallback = await db
+        const fallback = await supabase
           .from("campaigns")
           .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, created_by_uid, created_by_email")
           .eq("id", id)
@@ -4348,7 +4353,7 @@ export function registerAllDomainRoutes(app) {
   
   // ── Campaign Dispatches ──────────────────────────────────────────────────────
 
-  async function runCampaignDispatch({ dispatch, campaign, db: db }) {
+  async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
     const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
@@ -4469,7 +4474,7 @@ export function registerAllDomainRoutes(app) {
     const campaignId = normalizeString(req.params.id);
     if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
     try {
-      const { data: campaign, error: campaignErr } = await db
+      const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
         .select("id, client_id")
         .eq("id", campaignId)
@@ -4478,7 +4483,7 @@ export function registerAllDomainRoutes(app) {
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
 
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("campaign_dispatches")
         .select("*")
         .eq("campaign_id", campaignId)
@@ -4505,7 +4510,7 @@ export function registerAllDomainRoutes(app) {
 
     try {
       // Verifica que a campanha pertence ao cliente autorizado
-      const { data: campaign, error: campaignErr } = await db
+      const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
         .select("id, client_id, analytics_meta")
         .eq("id", campaignId)
@@ -4524,7 +4529,7 @@ export function registerAllDomainRoutes(app) {
         return sendError(res, 400, "INVALID_DISPATCH_TEMPLATE", validation.message);
       }
 
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("campaign_dispatches")
         .insert({
           campaign_id: campaignId,
@@ -4559,7 +4564,7 @@ export function registerAllDomainRoutes(app) {
     patch.updated_at = new Date().toISOString();
 
     try {
-      const { data: existing, error: existingErr } = await db
+      const { data: existing, error: existingErr } = await supabase
         .from("campaign_dispatches")
         .select("id, campaign_id, client_id, status")
         .eq("id", dispatchId)
@@ -4570,7 +4575,7 @@ export function registerAllDomainRoutes(app) {
       if (existing.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
 
       if (Array.isArray(body.steps)) {
-        const { data: campaign, error: campaignErr } = await db
+        const { data: campaign, error: campaignErr } = await supabase
           .from("campaigns")
           .select("id, analytics_meta")
           .eq("id", existing.campaign_id)
@@ -4587,7 +4592,7 @@ export function registerAllDomainRoutes(app) {
         patch.steps = validation.analyticsMeta.sequence;
       }
 
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("campaign_dispatches")
         .update(patch)
         .eq("id", dispatchId)
@@ -4608,12 +4613,12 @@ export function registerAllDomainRoutes(app) {
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
     try {
-      const { data: existing } = await db.from("campaign_dispatches").select("status, client_id").eq("id", dispatchId).single();
+      const { data: existing } = await supabase.from("campaign_dispatches").select("status, client_id").eq("id", dispatchId).single();
       if (!existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
       const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
       if (!authorizedClientId) return;
       if (existing.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Cannot delete a running dispatch");
-      const { error } = await db.from("campaign_dispatches").delete().eq("id", dispatchId).eq("client_id", authorizedClientId);
+      const { error } = await supabase.from("campaign_dispatches").delete().eq("id", dispatchId).eq("client_id", authorizedClientId);
       if (error) throw error;
       res.json({ success: true });
     } catch (err) {
@@ -4627,7 +4632,7 @@ export function registerAllDomainRoutes(app) {
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
     try {
-      const { data: dispatch, error: fetchErr } = await db
+      const { data: dispatch, error: fetchErr } = await supabase
         .from("campaign_dispatches")
         .select("*")
         .eq("id", dispatchId)
@@ -4638,7 +4643,7 @@ export function registerAllDomainRoutes(app) {
         return sendError(res, 409, "DISPATCH_DONE", "Dispatch already completed");
       }
 
-      const { data: campaign, error: campErr } = await db
+      const { data: campaign, error: campErr } = await supabase
         .from("campaigns")
         .select("id, name, client_id, import_id, limit_per_run, analytics_meta, webhook_url, webhook_token")
         .eq("id", dispatch.campaign_id)
@@ -4649,14 +4654,14 @@ export function registerAllDomainRoutes(app) {
       if (!authorizedClientId) return;
 
       // Marca como running
-      await db.from("campaign_dispatches").update({ status: "running", triggered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
+      await supabase.from("campaign_dispatches").update({ status: "running", triggered_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
 
       res.json({ success: true, status: "running", dispatchId });
 
       // Executa o disparo em background (fire-and-forget da resposta HTTP)
-      runCampaignDispatch({ dispatch, campaign, db }).catch((err) => {
+      runCampaignDispatch({ dispatch, campaign, supabase }).catch((err) => {
         console.error("[campaign-dispatch] dispatch_run_failed", { dispatchId, error: err.message });
-        db.from("campaign_dispatches").update({ status: "failed", error_message: err.message, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
+        supabase.from("campaign_dispatches").update({ status: "failed", error_message: err.message, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
       });
     } catch (err) {
       sendError(res, 500, "DISPATCH_TRIGGER_FAILED", err instanceof Error ? err.message : "Failed");
@@ -4732,10 +4737,10 @@ export function registerAllDomainRoutes(app) {
             const tenantSettingsForRouting = await getLeadClientN8nSettings(clientId).catch(() => null);
             const baseModel = tenantSettingsForRouting?.chatbot_model;
             const itemId = activeWaitCampaign.leadImportItem?.id;
-            const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, db });
+            const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
             const modelOverride = isFirst && baseModel ? `campanha_${baseModel}` : undefined;
             if (isFirst) {
-              await db
+              await supabase
                 .from(leadsTableName(clientId))
                 .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
                 .eq("client_id", clientId)
@@ -4758,9 +4763,9 @@ export function registerAllDomainRoutes(app) {
         // Tag campaign attribution on first reply even when chatbot forwarding is off (no duplicate agent).
         if (replyText && !forwardCampaignReplyToChatbot && process.env.ENABLE_CAMPAIGN_ROUTING === "true") {
           const itemId = activeWaitCampaign.leadImportItem?.id;
-          const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, db });
+          const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
           if (isFirst) {
-            await db
+            await supabase
               .from(leadsTableName(clientId))
               .update({
                 lead_origin: "campaign",
@@ -4831,13 +4836,13 @@ export function registerAllDomainRoutes(app) {
         status_conversa: "em_atendimento",
       };
       const [importItemsResult, leadsResult] = await Promise.all([
-        db
+        supabase
           .from("lead_import_items")
           .update(importItemsUpdatePayload)
           .eq("client_id", clientId)
           .eq("telefone", phone)
           .select("id"),
-        db
+        supabase
           .from(leadsTableName(clientId))
           .update(leadsUpdatePayload)
           .eq("client_id", clientId)
@@ -4926,7 +4931,7 @@ export function registerAllDomainRoutes(app) {
         return;
       }
   
-      let query = db
+      let query = supabase
         .from(leadsTableName(clientId))
         .select("id, telefone, nome, cidade, estado, status, tipo_cliente, faixa_consumo, qualificacao, created_at")
         .eq("client_id", clientId)
@@ -4936,7 +4941,7 @@ export function registerAllDomainRoutes(app) {
         .limit(limit);
   
       if (importId) {
-        const { data: importItems } = await db
+        const { data: importItems } = await supabase
           .from("lead_import_items")
           .select("telefone")
           .eq("import_id", importId)
@@ -4987,7 +4992,7 @@ export function registerAllDomainRoutes(app) {
       return sendError(res, 400, "INVALID_QUERY", "type must be padrao or extrato");
     }
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("chatbot_prompts")
         .select("client_id, type, content, updated_at, updated_by_email")
         .eq("client_id", clientId)
@@ -5027,7 +5032,7 @@ export function registerAllDomainRoutes(app) {
     if (!content) return sendError(res, 400, "INVALID_BODY", "Missing content");
     try {
       const userEmail = normalizeString(req.authAccess?.email || req.authUser?.email) || null;
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("chatbot_prompts")
         .upsert(
           { client_id: clientId, type, content, updated_at: new Date().toISOString(), updated_by_email: userEmail },
@@ -5058,7 +5063,7 @@ export function registerAllDomainRoutes(app) {
     const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.query?.clientId));
     if (!clientId) return;
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("campaign_prompts")
         .select("id, client_id, name, content, updated_at, updated_by_email")
         .eq("client_id", clientId)
@@ -5080,7 +5085,7 @@ export function registerAllDomainRoutes(app) {
     const content = typeof body.content === "string" ? body.content : "";
     if (!name) return sendError(res, 400, "INVALID_BODY", "name is required");
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("campaign_prompts")
         .upsert({ client_id: clientId, name, content, updated_at: new Date().toISOString(), updated_by_email: req.authAccess?.email ?? null }, { onConflict: "client_id,name" })
         .select("id, client_id, name, content, updated_at, updated_by_email")
@@ -5098,7 +5103,7 @@ export function registerAllDomainRoutes(app) {
     const id = normalizeString(req.params.id);
     if (!id) return sendError(res, 400, "MISSING_ID", "Missing prompt id");
     try {
-      const { error } = await db.from("campaign_prompts").delete().eq("id", id);
+      const { error } = await supabase.from("campaign_prompts").delete().eq("id", id);
       if (error) throw error;
       res.json({ success: true });
     } catch (err) {
@@ -5119,7 +5124,7 @@ export function registerAllDomainRoutes(app) {
       const leadsTable = leadsTableName(clientId);
 
       // 1. Busca todos os itens de campanha que receberam mensagem do bot
-      const { data: items, error: itemsErr } = await db
+      const { data: items, error: itemsErr } = await supabase
         .from("lead_import_items")
         .select("id, import_id, telefone, nome, normalized_data, ultima_interacao_bot, ultima_interacao_usuario, created_at")
         .eq("client_id", clientId)
@@ -5133,7 +5138,7 @@ export function registerAllDomainRoutes(app) {
       const importIds = [...new Set(items.map((i) => i.import_id).filter(Boolean))];
       let campaignByImport = {};
       if (importIds.length > 0) {
-        const { data: campaigns } = await db
+        const { data: campaigns } = await supabase
           .from("campaigns")
           .select("id, name, import_id")
           .in("import_id", importIds)
@@ -5145,7 +5150,7 @@ export function registerAllDomainRoutes(app) {
 
       // 3. Busca leads existentes (por telefone) para evitar duplicatas
       const phones = [...new Set(items.map((i) => i.telefone).filter(Boolean))];
-      const { data: existingLeads } = await db
+      const { data: existingLeads } = await supabase
         .from(leadsTable)
         .select("id, telefone, lead_source, source_campaign_id")
         .eq("client_id", clientId)
@@ -5165,7 +5170,7 @@ export function registerAllDomainRoutes(app) {
 
         if (!existing) {
           // Cria placeholder — lead que recebeu campanha mas ainda não respondeu
-          const { error: insErr } = await db.from(leadsTable).insert({
+          const { error: insErr } = await supabase.from(leadsTable).insert({
             client_id: clientId,
             telefone: phone,
             nome,
@@ -5184,7 +5189,7 @@ export function registerAllDomainRoutes(app) {
           else skipped++; // conflict — já existe
         } else if (!existing.lead_source && campaign) {
           // Atualiza origem se ainda não estava preenchida
-          await db
+          await supabase
             .from(leadsTable)
             .update({ lead_source: "campanha", source_campaign_id: existing.source_campaign_id || campaign.id, source_campaign_name: campaign.name })
             .eq("client_id", clientId)
@@ -5303,7 +5308,7 @@ export function registerAllDomainRoutes(app) {
       }));
 
       if (!companyId) {
-        const { data: crmRows, error: crmRowsError } = await db
+        const { data: crmRows, error: crmRowsError } = await supabase
           .from("lead_import_items")
           .select("id, import_id, client_id, telefone, nome, normalized_data, ultima_interacao_bot, created_at")
           .not("ultima_interacao_bot", "is", null)
@@ -5320,10 +5325,10 @@ export function registerAllDomainRoutes(app) {
 
           const [{ data: crmClients }, { data: crmCampaigns }] = await Promise.all([
             clientIds.length
-              ? db.from("leads_clients").select("id, name").in("id", clientIds)
+              ? supabase.from("leads_clients").select("id, name").in("id", clientIds)
               : Promise.resolve({ data: [] }),
             importIds.length
-              ? db.from("campaigns").select("id, name, import_id, client_id").in("import_id", importIds)
+              ? supabase.from("campaigns").select("id, name, import_id, client_id").in("import_id", importIds)
               : Promise.resolve({ data: [] }),
           ]);
 
@@ -5499,7 +5504,7 @@ export function registerAllDomainRoutes(app) {
   app.get("/api/chatbot-templates/builtins", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("chatbot_templates")
         .select("template_key, display_name, agent_name")
         .is("client_id", null)
@@ -5517,7 +5522,7 @@ export function registerAllDomainRoutes(app) {
     const clientId = normalizeTenantKey(req.query?.clientId);
     if (!clientId) return sendError(res, 400, "MISSING_CLIENT_ID", "clientId is required");
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("chatbot_templates")
         .select("*")
         .or(`client_id.is.null,client_id.eq.${clientId}`)
@@ -5547,7 +5552,7 @@ export function registerAllDomainRoutes(app) {
       return sendError(res, 400, "INVALID_BODY", "clientId, templateKey and displayName are required");
     }
     try {
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("chatbot_templates")
         .upsert(
           {
@@ -5580,7 +5585,7 @@ export function registerAllDomainRoutes(app) {
     const id = normalizeString(req.params?.id);
     if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing id");
     try {
-      const { data: tmpl, error: fetchErr } = await db
+      const { data: tmpl, error: fetchErr } = await supabase
         .from("chatbot_templates")
         .select("id, is_builtin")
         .eq("id", id)
@@ -5588,7 +5593,7 @@ export function registerAllDomainRoutes(app) {
       if (fetchErr) throw fetchErr;
       if (!tmpl) return sendError(res, 404, "NOT_FOUND", "Template not found");
       if (tmpl.is_builtin) return sendError(res, 403, "FORBIDDEN", "Cannot delete built-in templates");
-      const { error } = await db.from("chatbot_templates").delete().eq("id", id);
+      const { error } = await supabase.from("chatbot_templates").delete().eq("id", id);
       if (error) throw error;
       return res.json({ success: true });
     } catch (err) {
@@ -5649,7 +5654,7 @@ export function registerAllDomainRoutes(app) {
       // Se houver erro na resposta, rastrear tentativa inválida
       if (response.status === "invalid_response" && userMessage) {
         await trackInvalidResponse({
-          db,
+          supabase,
           clientId,
           phone,
           stepId: response.retryStepId,
@@ -5671,7 +5676,7 @@ export function registerAllDomainRoutes(app) {
   
           console.log("[hardcoded-chat] Persisting progress");
           const persistResult = await persistChatbotProgress({
-            db,
+            supabase,
             clientId,
             phone,
             telefone: phone,
@@ -5778,7 +5783,7 @@ export function registerAllDomainRoutes(app) {
       if (activeWaitCampaign) {
         // Lead aguardando resposta de disparo com waitForReply → avança sequência, silencia chatbot
         const itemId = activeWaitCampaign.leadImportItem?.id;
-        const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, db });
+        const { isFirst } = await isFirstCampaignReply({ itemId, campaignId: activeWaitCampaign.id, supabase });
 
         if (isFirst) {
           console.log("[campaign-routing] wait_for_reply_step", {
@@ -5786,7 +5791,7 @@ export function registerAllDomainRoutes(app) {
             campaignId: activeWaitCampaign.id, campaignName: activeWaitCampaign.name,
           });
 
-          db.from(leadsTableName(clientId))
+          supabase.from(leadsTableName(clientId))
             .update({ lead_origin: "campaign", source_campaign_id: activeWaitCampaign.id, source_campaign_name: activeWaitCampaign.name || null, lead_source: "campanha" })
             .eq("client_id", clientId).eq("telefone", phone)
             .then(({ error }) => { if (error) console.warn("[chatbot-webhook] campaign lead_origin update failed:", error.message); });
@@ -5905,7 +5910,7 @@ export function registerAllDomainRoutes(app) {
             clientId,
             phone,
             messages,
-            db,
+            supabase,
             model: chatbotModel,
             promptType,
             campaignPromptId: campaignPromptIdOverride,
@@ -6001,7 +6006,7 @@ export function registerAllDomainRoutes(app) {
               try {
                 // Tenta briefing via IA com prompt "extrato" do banco; fallback para determinístico
                 const aiBriefing = await extractBriefingWithAI({
-                  db,
+                  supabase,
                   clientId,
                   phone,
                   history: aiResponse._history || [],
@@ -6060,7 +6065,7 @@ export function registerAllDomainRoutes(app) {
         clientId,
         phone,
         messages: [{ text: message, type: "text" }],
-        db,
+        supabase,
         model: chatbotModel,
         promptType: "padrao",
         campaignPromptId: null,
@@ -6095,7 +6100,7 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
-      let query = db
+      let query = supabase
         .from(leadsTableName(clientId))
         .select("id, telefone, nome, status_conversa, finalizado, dados, mensagem, lead_temperature, spin_fase, qualificacao, lead_score, created_at, updated_at, lead_origin, source_campaign_id, source_campaign_name, lead_source")
         .eq("client_id", clientId)
@@ -6172,7 +6177,7 @@ export function registerAllDomainRoutes(app) {
   
     try {
       // Buscar conversa mais recente
-      const { data: conversation, error } = await db
+      const { data: conversation, error } = await supabase
         .from(leadsTableName(clientId))
         .select("*")
         .eq("client_id", clientId)
@@ -6189,7 +6194,7 @@ export function registerAllDomainRoutes(app) {
   
       const parsedHistory = parseStoredHistorico(conversation.historico);
       const aiBriefing = await extractBriefingWithAI({
-        db,
+        supabase,
         clientId,
         phone,
         history: parsedHistory || [],

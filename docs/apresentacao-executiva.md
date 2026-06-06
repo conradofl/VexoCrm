@@ -7,8 +7,8 @@ O VexoCrm e o ecossistema de CRM e automacao da operacao Vexo/Infinie.
 Hoje o projeto funciona sobre quatro pilares:
 
 - atendimento e qualificacao automatizada no `n8n`;
-- persistencia centralizada no `Postgres`;
-- rotas Express como interface operacional do workflow;
+- persistencia centralizada no `Supabase`;
+- Edge Functions como interface operacional do workflow;
 - CRM web para time interno e clientes.
 
 ## O que mudou
@@ -17,8 +17,8 @@ O projeto deixou de depender de planilhas.
 
 A arquitetura atual concentra o fluxo em:
 
-- `Postgres PostgreSQL`
-- `rotas Express com Postgres direto`
+- `Supabase PostgreSQL`
+- `Supabase Edge Functions`
 - `n8n`
 
 Isso reduziu dispersao de dados e simplificou o processo de captura, memoria de conversa, qualificacao e notificacao operacional.
@@ -33,7 +33,7 @@ Isso reduziu dispersao de dados e simplificou o processo de captura, memoria de 
 - `notifications`
 - `n8n_error_logs`
 
-### rotas Express
+### Edge Functions
 
 - `conversation-memory`
 - `conversation-memory-latest`
@@ -58,11 +58,11 @@ Isso reduziu dispersao de dados e simplificou o processo de captura, memoria de 
 
 1. O WhatsApp entra no `n8n`.
 2. O fluxo identifica texto ou audio.
-3. O n8n consulta memoria anterior no Postgres.
+3. O n8n consulta memoria anterior no Supabase.
 4. O lead e criado no inicio e finalizado ao fim da qualificacao.
 5. O CRM consulta o resultado consolidado.
 6. Falhas tecnicas viram notificacoes operacionais.
 
 ## Mensagem principal para apresentacao
 
-O VexoCrm ja nao e mais um processo apoiado por planilhas. Hoje ele opera como uma stack integrada de automacao, banco e CRM, com persistencia centralizada no Postgres e orquestracao no n8n.
+O VexoCrm ja nao e mais um processo apoiado por planilhas. Hoje ele opera como uma stack integrada de automacao, banco e CRM, com persistencia centralizada no Supabase e orquestracao no n8n.

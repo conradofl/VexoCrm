@@ -195,7 +195,7 @@ FIXED_ADMIN_EMAILS=luizz.felipe.santos17@gmail.com,econradofl@gmail.com
 // Usar Firebase Custom Roles ou Firestore dynamic admin list
 async function isFixedAdmin(uid, email) {
   try {
-    const adminListDoc = await Postgres
+    const adminListDoc = await supabase
       .from("admin_users")
       .select("uid")
       .eq("uid", uid)
@@ -208,7 +208,7 @@ async function isFixedAdmin(uid, email) {
 }
 ```
 
-**Criar tabela no Postgres:**
+**Criar tabela no Supabase:**
 ```sql
 CREATE TABLE admin_users (
   uid TEXT PRIMARY KEY,

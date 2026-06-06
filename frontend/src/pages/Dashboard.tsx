@@ -38,7 +38,7 @@ const Dashboard = ({
   fixedClientId,
   fixedClientName,
   title = "Dashboard",
-  subtitle = "Dados reais do Postgres filtrados pela empresa selecionada",
+  subtitle = "Dados reais do Supabase filtrados pela empresa selecionada",
   headerRight,
 }: DashboardProps) => {
   const crmClient = useOptionalCrmClient();

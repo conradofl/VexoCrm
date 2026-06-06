@@ -1,5 +1,5 @@
-// backend/src/pgPostgresCompat.js
-// Minimal PostgreSQL-backed client compatible with Postgres query-chain patterns used in server.js.
+// backend/src/pgSupabaseCompat.js
+// Minimal PostgreSQL-backed client compatible with supabase-js patterns used in server.js.
 // Errors are returned as { data, error } objects (never thrown from the query chain).
 
 import pg from "pg";
@@ -69,7 +69,7 @@ export function createDatabasePool(connectionString) {
  * @param {import("pg").Pool} pool
  * @returns {{ from: (table: string) => PgQueryBuilder }}
  */
-export function createPostgresCompatClient(pool) {
+export function createPgSupabaseClient(pool) {
   return {
     from(table) {
       return new PgQueryBuilder(pool, table);

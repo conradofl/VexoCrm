@@ -4,7 +4,7 @@ Este documento descreve o schema operacional atual do projeto.
 
 ## Premissa
 
-O banco oficial do sistema esta no `Postgres PostgreSQL`.
+O banco oficial do sistema esta no `Supabase PostgreSQL`.
 
 Hoje o fluxo principal nao depende de planilhas. As tabelas abaixo sustentam:
 
@@ -166,7 +166,7 @@ Tabela de auditoria tecnica dos workflows.
 
 ## Como cada camada usa o banco
 
-### n8n + rotas Express
+### n8n + Edge Functions
 
 - cria e finaliza leads;
 - salva memoria de conversa;
@@ -188,4 +188,4 @@ Tabela de auditoria tecnica dos workflows.
 
 ## Conclusao
 
-Para documentar o banco corretamente hoje, use este arquivo e [docs/postgres-functions.md](docs/postgres-functions.md). O CRM voltou a aceitar planilhas, mas agora elas entram como importacao auditada e viram registros persistidos no PostgreSQL.
+Para documentar o banco corretamente hoje, use este arquivo e [docs/supabase-functions.md](docs/supabase-functions.md). O CRM voltou a aceitar planilhas, mas agora elas entram como importacao auditada e viram registros persistidos no PostgreSQL.

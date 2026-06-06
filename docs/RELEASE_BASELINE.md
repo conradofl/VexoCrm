@@ -64,7 +64,7 @@ Resultado esperado:
 
 - [ ] Confirmar que as PRs #44 a #50 estao na mesma linha de base final.
 - [ ] Rodar `npm run check` em checkout limpo.
-- [ ] Conferir variaveis de ambiente de backend, frontend e Postgres.
+- [ ] Conferir variaveis de ambiente de backend, frontend e Supabase.
 - [ ] Validar login como admin Vexo.
 - [ ] Validar login como usuario interno escopado.
 - [ ] Validar login como usuario cliente.
@@ -73,7 +73,7 @@ Resultado esperado:
 - [ ] Criar lead/campanha de teste em tenant A e confirmar que tenant B nao enxerga.
 - [ ] Confirmar notificacoes globais apenas para admin real.
 - [ ] Testar fluxo de importacao/disparo em ambiente controlado antes de usar base real.
-- [ ] Confirmar backup/export do Postgres antes de qualquer migration nova.
+- [ ] Confirmar backup/export do Supabase antes de qualquer migration nova.
 
 ---
 

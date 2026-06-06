@@ -57,7 +57,7 @@ frontend/
 |   |-- hooks/
 |   |-- lib/
 |   `-- pages/
-`-- Postgres/
+`-- supabase/
     `-- functions/
 ```
 
@@ -95,21 +95,21 @@ Mostra a base no schema atual:
 
 ### Agente
 
-Tela operacional para notificacoes e erros do ecossistema n8n/Postgres.
+Tela operacional para notificacoes e erros do ecossistema n8n/Supabase.
 
 ### Portal do cliente
 
 Rotas `/clientes/:clientId/*` para visao segmentada por cliente.
 
-## Relacao com rotas Express com Postgres direto
+## Relacao com Supabase Edge Functions
 
-A pasta `frontend/postgres/functions/` esta no mesmo modulo por conveniencia de repositorio, mas:
+A pasta `frontend/supabase/functions/` esta no mesmo modulo por conveniencia de repositorio, mas:
 
 - nao entra no bundle do React;
-- pertence ao runtime de automacao com Postgres;
+- pertence ao runtime de automacao com Supabase;
 - e consumida principalmente pelo `n8n`.
 
-As funcoes ativas estao documentadas em [../docs/postgres-functions.md](../docs/postgres-functions.md).
+As funcoes ativas estao documentadas em [../docs/supabase-functions.md](../docs/supabase-functions.md).
 
 ## O que nao faz mais parte do fluxo
 

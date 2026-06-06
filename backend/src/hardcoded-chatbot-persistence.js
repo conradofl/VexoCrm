@@ -1,5 +1,5 @@
 /**
- * Persistência de Chatbot - Salva progresso incremental no db
+ * Persistência de Chatbot - Salva progresso incremental no Supabase
  */
 
 function leadsTable(clientId) {
@@ -9,7 +9,7 @@ function leadsTable(clientId) {
 }
 
 export async function persistChatbotProgress({
-  db,
+  supabase,
   clientId,
   phone,
   telefone,
@@ -21,7 +21,7 @@ export async function persistChatbotProgress({
   mensagem, // Última mensagem do bot
   isFinalized = false,
 }) {
-  if (!db || !clientId || !telefone) {
+  if (!supabase || !clientId || !telefone) {
     console.error("[chatbot-persistence] Missing required parameters");
     return { error: "Missing parameters" };
   }
@@ -30,7 +30,7 @@ export async function persistChatbotProgress({
 
   try {
     // Buscar lead existente ou criar novo
-    const { data: existingLeadArray, error: fetchError } = await db
+    const { data: existingLeadArray, error: fetchError } = await supabase
       .from(table)
       .select("id")
       .eq("client_id", clientId)
@@ -64,7 +64,7 @@ export async function persistChatbotProgress({
         ...individualCols,
       };
 
-      const { data: updated, error: updateError } = await db
+      const { data: updated, error: updateError } = await supabase
         .from(table)
         .update(updatePayload)
         .eq("id", existingLead.id)
@@ -87,7 +87,7 @@ export async function persistChatbotProgress({
         ...individualCols,
       };
 
-      const { data: inserted, error: insertError } = await db
+      const { data: inserted, error: insertError } = await supabase
         .from(table)
         .insert([insertPayload])
         .select()
@@ -187,18 +187,18 @@ export function generateConversationSummary(memory, metrics) {
  * Rastreia tentativas de resposta inválida
  */
 export async function trackInvalidResponse({
-  db,
+  supabase,
   clientId,
   phone,
   stepId,
   response,
   errorMessage,
 }) {
-  if (!db) return;
+  if (!supabase) return;
 
   try {
     // Salvar tentativa inválida para análise posterior
-    const { error } = await db.from("lead_import_items").insert([
+    const { error } = await supabase.from("lead_import_items").insert([
       {
         client_id: clientId,
         telefone: phone,

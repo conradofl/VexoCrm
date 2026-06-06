@@ -244,7 +244,7 @@ Short
 Sign
 Status
 String
-Postgres
+Supabase
 TENANT_ALREADY_EXISTS
 TENANT_HAS_LINKED_USERS
 TENANT_NOT_FOUND

@@ -2,7 +2,7 @@
 // Importar e chamar registerFollowupRoutes(app) no final de registerAllDomainRoutes.js
 import { Router } from "express";
 import crypto from "crypto";
-import { getDbClient, query } from "./db.js";
+import { getSupabase, query } from "./db.js";
 import {
   generateSecret,
   generateWebhookUrl,
@@ -44,8 +44,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     if (!campaignId) return sendErr(res, 400, "MISSING_CAMPAIGN_ID", "campaignId inválido");
 
     try {
-      const db = getDbClient();
-      const { data: campaign } = await db
+      const supabase = getSupabase();
+      const { data: campaign } = await supabase
         .from("followup_campaigns")
         .select("id, webhook_secret, status")
         .eq("id", campaignId)
@@ -77,8 +77,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     const companyId = str(req.params.companyId);
 
     try {
-      const db = getDbClient();
-      const { data: company } = await db
+      const supabase = getSupabase();
+      const { data: company } = await supabase
         .from("followup_companies")
         .select("id, webhook_url")
         .eq("id", companyId || "")
@@ -133,8 +133,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // GET /api/followup/companies
   router.get("/companies", requireFirebaseAuth, async (req, res) => {
     try {
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_companies")
         .select("id, name, evolution_instance, webhook_url, panel_access, created_at")
         .is("archived_at", null)
@@ -174,8 +174,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       return sendErr(res, 400, "MISSING_FIELDS", "name e evolution_instance são obrigatórios");
     }
     try {
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_companies")
         .insert({
           name: str(name),
@@ -208,8 +208,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
         patch.calendly_webhook_secret = str(calendly_webhook_secret);
       if ("panel_access" in req.body) patch.panel_access = Boolean(panel_access);
 
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_companies")
         .update(patch)
         .eq("id", id)
@@ -228,8 +228,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_companies")
         .update({ archived_at: new Date().toISOString() })
         .eq("id", id)
@@ -251,8 +251,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     const companyId = str(req.query.companyId);
     if (!companyId) return sendErr(res, 400, "MISSING_COMPANY_ID", "companyId é obrigatório");
     try {
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_campaigns")
         .select("id, company_id, name, description, status, default_origin, webhook_trigger_url, webhook_secret, created_at")
         .eq("company_id", companyId)
@@ -303,10 +303,10 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     }
     try {
       const secret = generateSecret();
-      const db = getDbClient();
+      const supabase = getSupabase();
 
       // Inserir sem webhook_trigger_url primeiro para obter o id
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from("followup_campaigns")
         .insert({
           company_id: str(company_id),
@@ -322,7 +322,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
 
       // Atualizar com URL gerada
       const url = generateWebhookUrl(data.id);
-      const { data: updated } = await db
+      const { data: updated } = await supabase
         .from("followup_campaigns")
         .update({ webhook_trigger_url: url })
         .eq("id", data.id)
@@ -355,8 +355,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       if ("default_origin" in req.body) patch.default_origin = str(default_origin);
       if (regenerate_secret) patch.webhook_secret = generateSecret();
 
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_campaigns")
         .update(patch)
         .eq("id", id)
@@ -381,8 +381,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
-      const db = getDbClient();
-      const { data: camp } = await db
+      const supabase = getSupabase();
+      const { data: camp } = await supabase
         .from("followup_campaigns")
         .select("id, status")
         .eq("id", id)
@@ -391,7 +391,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       if (!["draft", "archived"].includes(camp.status)) {
         return sendErr(res, 400, "INVALID_STATE", "Só é possível excluir campanhas em rascunho ou arquivadas");
       }
-      const { error } = await db.from("followup_campaigns").delete().eq("id", id);
+      const { error } = await supabase.from("followup_campaigns").delete().eq("id", id);
       if (error) throw error;
       return res.json({ success: true });
     } catch (err) {
@@ -406,8 +406,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     const campaignId = str(req.query.campaignId);
     if (!campaignId) return sendErr(res, 400, "MISSING_CAMPAIGN_ID", "campaignId é obrigatório");
     try {
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_templates")
         .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, created_at")
         .eq("campaign_id", campaignId)
@@ -430,8 +430,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       return sendErr(res, 400, "MISSING_FIELDS", "Campos obrigatórios faltando");
     }
     try {
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_templates")
         .insert({
           campaign_id: str(campaign_id),
@@ -487,8 +487,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
           patch[k] = req.body[k] === null ? null : req.body[k];
         }
       }
-      const db = getDbClient();
-      const { data, error } = await db
+      const supabase = getSupabase();
+      const { data, error } = await supabase
         .from("followup_templates")
         .update(patch)
         .eq("id", id)
@@ -507,8 +507,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
-      const db = getDbClient();
-      const { error } = await db.from("followup_templates").delete().eq("id", id);
+      const supabase = getSupabase();
+      const { error } = await supabase.from("followup_templates").delete().eq("id", id);
       if (error) throw error;
       return res.json({ success: true });
     } catch (err) {

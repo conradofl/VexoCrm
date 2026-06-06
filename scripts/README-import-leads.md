@@ -7,8 +7,8 @@ Este diretorio nao faz parte do fluxo operacional atual.
 O projeto nao usa mais planilhas como fonte principal de leads. A operacao atual roda com:
 
 - `n8n`
-- `Postgres`
-- `rotas Express com Postgres direto`
+- `Supabase`
+- `Supabase Edge Functions`
 
 Por isso, os scripts desta pasta devem ser tratados apenas como material historico ou de contingencia.
 
