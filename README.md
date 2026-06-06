@@ -4,8 +4,8 @@ Monorepo do CRM e da operacao automatizada da Vexo/Infinie.
  
 Hoje a arquitetura real do projeto e:
 
-- `Supabase` como banco principal e camada de persistencia.
-- `Supabase Edge Functions` como interface operacional do workflow.
+- `Postgres` como banco principal e camada de persistencia.
+- `rotas Express com Postgres direto` como interface operacional do workflow.
 - `n8n` como orquestrador do atendimento e da qualificacao.
 - `frontend/` como CRM web para time interno e portal de clientes.
 - `backend/` como API de apoio do CRM.
@@ -14,7 +14,7 @@ Nao existe mais fluxo operacional baseado em planilhas.
 
 ## Estado atual
 
-As sete Edge Functions ativas do projeto sao:
+As sete rotas Express ativas do projeto sao:
  
 - `conversation-memory`
 - `conversation-memory-latest`
@@ -31,8 +31,8 @@ Funcoes antigas como `sheets-proxy` e `lead-exists-by-phone` foram removidas do 
 ```mermaid
 flowchart LR
     wa["API de WhatsApp"] --> n8n["n8n"]
-    n8n --> edge["Supabase Edge Functions"]
-    edge --> db["Supabase PostgreSQL"]
+    n8n --> edge["rotas Express com Postgres direto"]
+    edge --> db["Postgres PostgreSQL"]
 
     app["Frontend CRM / Portal"] --> api["Backend Node.js"]
     api --> db
@@ -46,7 +46,7 @@ VexoCrm/
 |-- backend/
 |-- docs/
 |-- frontend/
-|   `-- supabase/
+|   `-- Postgres/
 |       `-- functions/
 |-- scripts/
 `-- database.md
@@ -58,9 +58,9 @@ VexoCrm/
 
 Aplicacao React/Vite usada pelo time operacional e pelo portal de clientes.
 
-### `frontend/supabase/functions/`
+### `frontend/postgres/functions/`
 
-Codigo-fonte das Edge Functions que suportam o workflow do n8n e os pontos de integracao com o Supabase.
+Codigo-fonte das rotas Express que suportam o workflow do n8n e os pontos de integracao com o Postgres.
 
 ### `backend/`
 
@@ -85,7 +85,7 @@ Documentacao tecnica, executiva e artefatos prontos para apresentacao.
 - [docs/apresentacao-executiva.md](docs/apresentacao-executiva.md)
 - [docs/arquitetura-operacional.md](docs/arquitetura-operacional.md)
 - [docs/workflow-n8n.md](docs/workflow-n8n.md)
-- [docs/supabase-functions.md](docs/supabase-functions.md)
+- [docs/postgres-functions.md](docs/postgres-functions.md)
 - [database.md](database.md)
 - [backend/README.md](backend/README.md)
 - [frontend/README.md](frontend/README.md)
@@ -112,19 +112,18 @@ npm run dev
 
 O auto deploy do backend no EasyPanel agora pode aplicar migrations automaticamente no startup do container.
 
-Como o service do backend builda a imagem a partir de `backend/`, a copia usada no deploy automatico fica em `backend/supabase/migrations`.
+Como o service do backend builda a imagem a partir de `backend/`, a copia usada no deploy automatico fica em `backend/postgres/migrations`.
 
-Quando surgir migration nova em `frontend/supabase`, sincronize antes do commit:
+Quando surgir migration nova em `frontend/postgres`, sincronize antes do commit:
 
 ```bash
-node scripts/sync-supabase-assets.mjs
+node scripts/sync-postgres-assets.mjs
 ```
 
 No EasyPanel, deixe configurado no service do backend:
 
-- `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD`
-- ou `SUPABASE_DB_URL`
-- `RUN_SUPABASE_MIGRATIONS_ON_START=1`
+- ou `DATABASE_URL`
+- `RUN_POSTGRES_MIGRATIONS_ON_START=1`
 
 ## Observacao importante
 

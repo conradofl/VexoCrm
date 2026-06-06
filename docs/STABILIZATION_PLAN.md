@@ -91,7 +91,7 @@ Controles aplicados:
 
 Risco remanescente:
 
-- `frontend/supabase/functions/notifications-api` ainda duplica a rota usando JWT Supabase, service role e CORS `*`. Nao foi reescrita nesta PR porque isso pertence a uma etapa propria de consolidacao Edge/backend.
+- `frontend/postgres/functions/notifications-api` ainda duplica a rota usando Firebase JWT, service role e CORS `*`. Nao foi reescrita nesta PR porque isso pertence a uma etapa propria de consolidacao Edge/backend.
 
 ### Backend
 
@@ -124,9 +124,9 @@ Podem ficar para depois do primeiro teste controlado, desde que clientes reais a
 | --- | --- |
 | Tornar `access_profiles` tenant-aware ou documentar formalmente que e global | Hoje a elevacao real esta bloqueada nas mutacoes, mas a tabela segue global |
 | Padronizar semantica final de `status` e `qualificacao` | Ainda ha uso misto entre resumo, etapa e qualificacao |
-| Adicionar smoke tests HTTP com mocks de Firebase/Supabase | A cobertura atual e majoritariamente de helpers/contratos |
+| Adicionar smoke tests HTTP com mocks de Firebase/Postgres | A cobertura atual e majoritariamente de helpers/contratos |
 | Melhorar observabilidade de erros backend/n8n | Hoje logs existem, mas ainda nao ha padrao unico de evento |
-| Revisar CORS/Auth das Edge Functions | CORS e tokens ainda precisam politica operacional unica |
+| Revisar CORS/Auth das rotas Express | CORS e tokens ainda precisam politica operacional unica |
 
 ---
 
@@ -239,7 +239,7 @@ Criar ADRs simples em `docs/adr/` com:
 
 Temas recomendados para as proximas ADRs:
 
-1. ownership de webhooks (`backend` vs `edge functions`)
+1. ownership de webhooks (`backend` vs `rotas Express`)
 2. estrategia de notificacoes (`backend` canonico vs Edge legado)
 3. ciclo de vida de `lead_conversations` com tenant
 4. status canonico de lead/campanha

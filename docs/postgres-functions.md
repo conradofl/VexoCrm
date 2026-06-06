@@ -1,6 +1,6 @@
-# Supabase Edge Functions ativas
+# rotas Express com Postgres direto ativas
 
-Este documento registra somente as Edge Functions que fazem parte da operacao atual.
+Este documento registra somente as rotas Express que fazem parte da operacao atual.
 
 ## Funcoes em uso
 
@@ -31,14 +31,14 @@ Tambem foi normalizado o nome da function de leads:
 Use o padrao:
 
 ```text
-https://<projeto>.supabase.co/functions/v1/<nome-da-function>
+https://<projeto>.Postgres.co/functions/v1/<nome-da-function>
 ```
 
 ## 1. `conversation-memory`
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/conversation-memory/index.ts](../frontend/supabase/functions/conversation-memory/index.ts)
+- [frontend/postgres/functions/conversation-memory/index.ts](../frontend/postgres/functions/conversation-memory/index.ts)
 
 ### Metodos
 
@@ -80,7 +80,7 @@ Tabela impactada:
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/conversation-memory-latest/index.ts](../frontend/supabase/functions/conversation-memory-latest/index.ts)
+- [frontend/postgres/functions/conversation-memory-latest/index.ts](../frontend/postgres/functions/conversation-memory-latest/index.ts)
 
 ### Metodo
 
@@ -105,7 +105,7 @@ E a consulta usada logo apos a normalizacao do telefone para decidir se o n8n de
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/lead-webhook/index.ts](../frontend/supabase/functions/lead-webhook/index.ts)
+- [frontend/postgres/functions/lead-webhook/index.ts](../frontend/postgres/functions/lead-webhook/index.ts)
 
 ### Metodo
 
@@ -169,7 +169,7 @@ Observacao:
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/n8n-planilha-webhook/index.ts](../frontend/supabase/functions/n8n-planilha-webhook/index.ts)
+- [frontend/postgres/functions/n8n-planilha-webhook/index.ts](../frontend/postgres/functions/n8n-planilha-webhook/index.ts)
 
 ### Metodos
 
@@ -237,7 +237,7 @@ Regra no fallback:
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/n8n-error-webhook/index.ts](../frontend/supabase/functions/n8n-error-webhook/index.ts)
+- [frontend/postgres/functions/n8n-error-webhook/index.ts](../frontend/postgres/functions/n8n-error-webhook/index.ts)
 
 ### Metodo
 
@@ -253,10 +253,9 @@ Arquivo fonte:
 - header `Authorization: Bearer <N8N_WEBHOOK_SECRET>`
 - valores iniciados com `=` nos campos de texto sao normalizados (strip do prefixo), alinhado ao comportamento do n8n em alguns payloads
 
-### Secrets do Supabase (runtime)
+### Secrets do Postgres (runtime)
 
-- `SUPABASE_URL` com fallback legado `URL`
-- `SUPABASE_SERVICE_ROLE_KEY` com fallback legado `SERVICE_ROLE_KEY`
+- `DATABASE_URL` com fallback legado `URL`
 
 ### Payload esperado
 
@@ -272,7 +271,7 @@ Estrutura disparada pelo error workflow do n8n, incluindo:
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/mark-lead-dispatched/index.ts](../frontend/supabase/functions/mark-lead-dispatched/index.ts)
+- [frontend/postgres/functions/mark-lead-dispatched/index.ts](../frontend/postgres/functions/mark-lead-dispatched/index.ts)
 
 ### Metodo
 
@@ -304,7 +303,7 @@ O telefone e normalizado removendo caracteres nao numericos antes do match.
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/notifications-api/index.ts](../frontend/supabase/functions/notifications-api/index.ts)
+- [frontend/postgres/functions/notifications-api/index.ts](../frontend/postgres/functions/notifications-api/index.ts)
 
 ### Metodos
 
@@ -313,7 +312,7 @@ Arquivo fonte:
 
 ### Autenticacao
 
-- JWT do usuario autenticado no Supabase
+- JWT do usuario autenticado no Postgres
 
 ### Papel
 
@@ -325,7 +324,7 @@ Arquivo fonte:
 
 Arquivo fonte:
 
-- [frontend/supabase/functions/get-leads-disparo/index.ts](../frontend/supabase/functions/get-leads-disparo/index.ts)
+- [frontend/postgres/functions/get-leads-disparo/index.ts](../frontend/postgres/functions/get-leads-disparo/index.ts)
 
 ### Metodo
 
@@ -339,7 +338,7 @@ Arquivo fonte:
 
 - `clientId` (opcional): filtra `lead_import_items.client_id`
 - `importId` (opcional): filtra `lead_import_items.import_id`
-- `limit` (opcional): inteiro positivo; se ausente ou invalido, nenhum `.limit()` e aplicado na query do Supabase
+- `limit` (opcional): inteiro positivo; se ausente ou invalido, nenhum `.limit()` e aplicado na query do Postgres
 - `campaignId` (opcional): **ecoado** no JSON de resposta como `campaignId`; **nao** filtra registros (comportamento alinhado ao deploy online)
 
 ### Comportamento

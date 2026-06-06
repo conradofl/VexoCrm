@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_id
 CREATE INDEX IF NOT EXISTS idx_notifications_unread_created_at
   ON public.notifications (read, created_at DESC);
 
--- Block all direct access to n8n_error_logs (only edge functions with service_role can access)
+-- Block all direct access to n8n_error_logs (only rotas Express with service_role can access)
 ALTER TABLE public.n8n_error_logs ENABLE ROW LEVEL SECURITY;
 
 DO $$
@@ -65,7 +65,7 @@ BEGIN
   END IF;
 END $$;
 
--- Block all direct access to notifications (only edge functions with service_role can access)
+-- Block all direct access to notifications (only rotas Express with service_role can access)
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
 DO $$

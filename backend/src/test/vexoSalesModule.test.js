@@ -6,7 +6,7 @@ const serverSource = readFileSync(resolve("src/server.js"), "utf8");
 const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
 const routeBundle = `${serverSource}\n${domainRoutesSource}`;
 const migrationSource = readFileSync(
-  resolve("../frontend/supabase/migrations/20260506000001_create_vexo_sales_tables.sql"),
+  resolve("../frontend/postgres/migrations/20260506000001_create_vexo_sales_tables.sql"),
   "utf8"
 );
 
@@ -44,7 +44,7 @@ describe("Vexo Sales module backend guards", () => {
   });
 });
 
-describe("Vexo Sales module Supabase isolation", () => {
+describe("Vexo Sales module db isolation", () => {
   it("creates isolated tables with direct RLS access denied", () => {
     expect(migrationSource).toContain("CREATE TABLE IF NOT EXISTS public.vexo_sales_opportunities");
     expect(migrationSource).toContain("CREATE TABLE IF NOT EXISTS public.vexo_sales_interactions");

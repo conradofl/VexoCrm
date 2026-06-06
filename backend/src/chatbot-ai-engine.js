@@ -1,4 +1,4 @@
-﻿import {
+import {
   normalizeLeadsOutlierDados,
   parseStoredHistorico,
   serializeHistorico,
@@ -6,16 +6,16 @@
 
 /**
  * Chatbot AI Engine
- * Buffer de mensagens + transcrição de mídia + IA conversacional (Groq)
- * Modelo base para todos os tenants — cada empresa tem seu próprio system prompt
+ * Buffer de mensagens + transcri��o de m�dia + IA conversacional (Groq)
+ * Modelo base para todos os tenants � cada empresa tem seu pr�prio system prompt
  */
 
-// ─── Buffer in-memory ──────────────────────────────────────────────────────
-// Map: `${clientId}:${phone}` → { messages: [], timer, token }
+// --- Buffer in-memory ------------------------------------------------------
+// Map: `${clientId}:${phone}` ? { messages: [], timer, token }
 const messageBuffers = new Map();
 const BUFFER_DELAY_MS = 3000;
 
-// ─── Groq config ────────────────────────────────────────────────────────────
+// --- Groq config ------------------------------------------------------------
 const GROQ_BASE = "https://api.groq.com/openai/v1";
 const GROQ_CHAT_MODEL = "llama-3.3-70b-versatile";
 const GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview";
@@ -26,36 +26,36 @@ function groqKey() {
 }
 
 
-// ─── Campos individuais — fallback quando não há template ───────────────────
+// --- Campos individuais � fallback quando n�o h� template -------------------
 const COMMON_INDIVIDUAL_FIELDS = ["interesse", "objetivo", "prazo", "melhor_horario", "nome", "cidade", "estado"];
-// Campos individuais conhecidos — usados como fallback quando template não está disponível.
-// Novos clientes devem configurar data_fields no template para ter colunas próprias.
+// Campos individuais conhecidos � usados como fallback quando template n�o est� dispon�vel.
+// Novos clientes devem configurar data_fields no template para ter colunas pr�prias.
 const TYPE_SPECIFIC_FIELDS = {};
 const KNOWN_DB_COLUMNS = new Set([
   ...COMMON_INDIVIDUAL_FIELDS,
   ...Object.values(TYPE_SPECIFIC_FIELDS).flat(),
 ]);
 
-// Regex para validar nomes de colunas antes de qualquer SQL dinâmico
+// Regex para validar nomes de colunas antes de qualquer SQL din�mico
 const SAFE_IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
 
-// ─── Cache de colunas por tabela (vive enquanto o processo está ativo) ───────
+// --- Cache de colunas por tabela (vive enquanto o processo est� ativo) -------
 const templateColumnCache = new Map();
 
 /**
  * Garante que todas as colunas do template existam na tabela de leads.
  * Usa ALTER TABLE ... ADD COLUMN IF NOT EXISTS para cada campo ausente.
- * Cacheia o resultado em memória para não repetir queries a cada mensagem.
+ * Cacheia o resultado em mem�ria para n�o repetir queries a cada mensagem.
  */
-async function ensureTemplateColumns(supabase, leadsTable, templateFields) {
-  if (!supabase?.query || !leadsTable || !Array.isArray(templateFields) || !templateFields.length) return;
+async function ensureTemplateColumns(db, leadsTable, templateFields) {
+  if (!db?.query || !leadsTable || !Array.isArray(templateFields) || !templateFields.length) return;
 
   const fields = templateFields.map((f) => f.key).filter((k) => k && SAFE_IDENT.test(k));
   if (!fields.length) return;
 
   // Carrega colunas existentes na primeira vez para esta tabela
   if (!templateColumnCache.has(leadsTable)) {
-    const { rows } = await supabase.query(
+    const { rows } = await db.query(
       `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
       [leadsTable]
     );
@@ -67,7 +67,7 @@ async function ensureTemplateColumns(supabase, leadsTable, templateFields) {
   if (!missing.length) return;
 
   for (const col of missing) {
-    const { error } = await supabase.query(
+    const { error } = await db.query(
       `ALTER TABLE public."${leadsTable}" ADD COLUMN IF NOT EXISTS "${col}" TEXT`
     );
     if (error) {
@@ -82,7 +82,7 @@ async function ensureTemplateColumns(supabase, leadsTable, templateFields) {
 /**
  * Extrai campos de `dados` para colunas individuais.
  * Se templateFields fornecido (e colunas garantidas por ensureTemplateColumns),
- * usa todos os campos do template. Caso contrário usa KNOWN_DB_COLUMNS como fallback.
+ * usa todos os campos do template. Caso contr�rio usa KNOWN_DB_COLUMNS como fallback.
  */
 function extractIndividualColumns(dados, templateFields = null) {
   const result = {};
@@ -100,26 +100,26 @@ function extractIndividualColumns(dados, templateFields = null) {
   return result;
 }
 
-// ─── Modelos registrados ─────────────────────────────────────────────────────
-// systemPrompts removidos — carregados exclusivamente via fetchDynamicPrompt (tabela chatbot_prompts).
+// --- Modelos registrados -----------------------------------------------------
+// systemPrompts removidos � carregados exclusivamente via fetchDynamicPrompt (tabela chatbot_prompts).
 export function getChatbotModel(modelKey) {
   return modelKey ? { name: modelKey } : null;
 }
 
-// ─── Buffer de mensagens ─────────────────────────────────────────────────────
+// --- Buffer de mensagens -----------------------------------------------------
 
-// ─── Roteamento de campanha ──────────────────────────────────────────────────
+// --- Roteamento de campanha --------------------------------------------------
 
 /**
- * Verifica se esta é a primeira reply de campanha do lead e marca atomicamente.
- * Lê normalized_data, checa campaign_progress[campaignId].first_campaign_reply_handled,
- * e faz UPDATE se ainda não marcado. Janela de corrida mínima na prática.
- * Retorna { isFirst: true } na primeira execução, { isFirst: false } nas seguintes.
+ * Verifica se esta � a primeira reply de campanha do lead e marca atomicamente.
+ * L� normalized_data, checa campaign_progress[campaignId].first_campaign_reply_handled,
+ * e faz UPDATE se ainda n�o marcado. Janela de corrida m�nima na pr�tica.
+ * Retorna { isFirst: true } na primeira execu��o, { isFirst: false } nas seguintes.
  */
-export async function isFirstCampaignReply({ itemId, campaignId, supabase }) {
-  if (!itemId || !campaignId || !supabase) return { isFirst: false };
+export async function isFirstCampaignReply({ itemId, campaignId, db }) {
+  if (!itemId || !campaignId || !db) return { isFirst: false };
 
-  const { data: item, error } = await supabase
+  const { data: item, error } = await db
     .from("lead_import_items")
     .select("id, normalized_data")
     .eq("id", itemId)
@@ -151,7 +151,7 @@ export async function isFirstCampaignReply({ itemId, campaignId, supabase }) {
   };
   const updatedNormalizedData = { ...normalizedData, campaign_progress: updatedProgress };
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await db
     .from("lead_import_items")
     .update({ normalized_data: updatedNormalizedData })
     .eq("id", itemId);
@@ -168,8 +168,8 @@ export async function isFirstCampaignReply({ itemId, campaignId, supabase }) {
 }
 
 /**
- * Adiciona mensagem ao buffer e agenda processamento após BUFFER_DELAY_MS.
- * Se chegar nova mensagem antes do timer, o timer anterior é cancelado.
+ * Adiciona mensagem ao buffer e agenda processamento ap�s BUFFER_DELAY_MS.
+ * Se chegar nova mensagem antes do timer, o timer anterior � cancelado.
  * Retorna uma Promise que resolve quando o buffer for processado (ou null se descartado).
  */
 export function bufferMessage(clientId, phone, messageData, onProcess) {
@@ -199,7 +199,7 @@ export function bufferMessage(clientId, phone, messageData, onProcess) {
   messageBuffers.set(key, existing);
 }
 
-// ─── Detecção e extração de mídia ────────────────────────────────────────────
+// --- Detec��o e extra��o de m�dia --------------------------------------------
 
 export function detectMessageType(evolutionBody) {
   const msg = evolutionBody?.data?.message || evolutionBody?.message || {};
@@ -251,7 +251,7 @@ export function extractMediaMimetype(evolutionBody) {
   );
 }
 
-// ─── Transcrição de áudio via Groq Whisper ───────────────────────────────────
+// --- Transcri��o de �udio via Groq Whisper -----------------------------------
 
 export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
   if (!groqKey()) {
@@ -290,7 +290,7 @@ export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
   }
 }
 
-// ─── Descrição de imagem via Groq Vision ─────────────────────────────────────
+// --- Descri��o de imagem via Groq Vision -------------------------------------
 
 export async function describeImage(base64Data, mimetype = "image/jpeg", caption = "") {
   if (!groqKey()) return null;
@@ -305,8 +305,8 @@ export async function describeImage(base64Data, mimetype = "image/jpeg", caption
       {
         type: "text",
         text: caption
-          ? `O lead enviou esta imagem com a legenda: "${caption}". Descreva brevemente o que está na imagem para contexto de uma conversa de vendas.`
-          : "O lead enviou esta imagem. Descreva brevemente o que está na imagem para contexto de uma conversa de vendas.",
+          ? `O lead enviou esta imagem com a legenda: "${caption}". Descreva brevemente o que est� na imagem para contexto de uma conversa de vendas.`
+          : "O lead enviou esta imagem. Descreva brevemente o que est� na imagem para contexto de uma conversa de vendas.",
       },
     ];
 
@@ -336,7 +336,7 @@ export async function describeImage(base64Data, mimetype = "image/jpeg", caption
   }
 }
 
-// ─── Processamento de mensagem recebida (tipo + conteúdo) ────────────────────
+// --- Processamento de mensagem recebida (tipo + conte�do) --------------------
 
 export async function resolveMessageContent(evolutionBody) {
   const type = detectMessageType(evolutionBody);
@@ -356,7 +356,7 @@ export async function resolveMessageContent(evolutionBody) {
         return { type, text: transcription, transcribed: true };
       }
     }
-    return { type, text: "[áudio]", transcribed: false };
+    return { type, text: "[�udio]", transcribed: false };
   }
 
   if (type === "image") {
@@ -366,15 +366,15 @@ export async function resolveMessageContent(evolutionBody) {
       const description = await describeImage(base64, mimetype, caption);
       if (description) {
         console.log("[chatbot-ai] Image described:", description.slice(0, 80));
-        return { type, text: `[imagem: ${description}]${caption ? ` — legenda: "${caption}"` : ""}`, described: true };
+        return { type, text: `[imagem: ${description}]${caption ? ` � legenda: "${caption}"` : ""}`, described: true };
       }
     }
     return { type, text: caption ? `[imagem] ${caption}` : "[imagem]", described: false };
   }
 
   if (type === "sticker") return { type, text: "[sticker]" };
-  if (type === "reaction") return { type, text: "[reação]" };
-  if (type === "video") return { type, text: caption ? `[vídeo] ${caption}` : "[vídeo]" };
+  if (type === "reaction") return { type, text: "[rea��o]" };
+  if (type === "video") return { type, text: caption ? `[v�deo] ${caption}` : "[v�deo]" };
   if (type === "document") {
     const name = evolutionBody?.data?.message?.documentMessage?.fileName || "documento";
     return { type, text: `[documento: ${name}]` };
@@ -383,37 +383,37 @@ export async function resolveMessageContent(evolutionBody) {
   return { type: "unknown", text: "" };
 }
 
-// ─── IA conversacional (Groq) ────────────────────────────────────────────────
+// --- IA conversacional (Groq) ------------------------------------------------
 
 function buildJsonInstruction() {
   return `
 
-═══════════════════════════════════════════════════════════════
-FORMATO DE RESPOSTA OBRIGATÓRIO — RETORNE APENAS JSON VÁLIDO
-═══════════════════════════════════════════════════════════════
-Sem markdown, sem texto fora do JSON. Schema obrigatório:
+---------------------------------------------------------------
+FORMATO DE RESPOSTA OBRIGAT�RIO � RETORNE APENAS JSON V�LIDO
+---------------------------------------------------------------
+Sem markdown, sem texto fora do JSON. Schema obrigat�rio:
 
 {
-  "mensagem": "string — texto da resposta enviada ao lead no WhatsApp",
+  "mensagem": "string � texto da resposta enviada ao lead no WhatsApp",
   "status_conversa": "aguardando_usuario" | "finalizado",
-  "dados": { ... },   // campos coletados até agora (acumulado)
+  "dados": { ... },   // campos coletados at� agora (acumulado)
   "classificacao": "QUENTE" | "MORNO" | "FRIO",
   "spin_fase": "situacao" | "problema" | "implicacao" | "necessidade" | null,
   "finalizado": true | false
 }
 
-REGRA CRÍTICA — quando setar "finalizado": true:
-• Sempre que você emitir a mensagem final de encerramento (ex.: "Fechado. Vou passar pro consultor...", "Vou repassar pro nosso time", ou qualquer despedida que sinalize que o consultor humano vai assumir).
-• Quando todos os dados obrigatórios já foram coletados E a conversa foi encerrada.
-• Se "finalizado": true, então "status_conversa" DEVE ser "finalizado".
+REGRA CR�TICA � quando setar "finalizado": true:
+� Sempre que voc� emitir a mensagem final de encerramento (ex.: "Fechado. Vou passar pro consultor...", "Vou repassar pro nosso time", ou qualquer despedida que sinalize que o consultor humano vai assumir).
+� Quando todos os dados obrigat�rios j� foram coletados E a conversa foi encerrada.
+� Se "finalizado": true, ent�o "status_conversa" DEVE ser "finalizado".
 
-Se "finalizado" não for true, o briefing NÃO é enviado ao SDR. Não esqueça desse campo no encerramento.`;
+Se "finalizado" n�o for true, o briefing N�O � enviado ao SDR. N�o esque�a desse campo no encerramento.`;
 }
 
-async function fetchDynamicPrompt(supabase, clientId, type) {
-  if (!supabase || !clientId) return null;
+async function fetchDynamicPrompt(db, clientId, type) {
+  if (!db || !clientId) return null;
   try {
-    const { data } = await supabase
+    const { data } = await db
       .from("chatbot_prompts")
       .select("content")
       .eq("client_id", clientId)
@@ -425,10 +425,10 @@ async function fetchDynamicPrompt(supabase, clientId, type) {
   }
 }
 
-async function fetchCampaignPromptById(supabase, id) {
-  if (!supabase || !id) return null;
+async function fetchCampaignPromptById(db, id) {
+  if (!db || !id) return null;
   try {
-    const { data } = await supabase
+    const { data } = await db
       .from("campaign_prompts")
       .select("content")
       .eq("id", id)
@@ -443,13 +443,13 @@ async function fetchCampaignPromptById(supabase, id) {
  * Busca template do banco por templateKey, com fallback para builtin (client_id IS NULL).
  * Retorna { data_fields, required_fields, classification, agent_name, agent_role } ou null.
  */
-async function fetchTemplate(supabase, clientId, templateKey) {
-  if (!supabase || !templateKey) return null;
+async function fetchTemplate(db, clientId, templateKey) {
+  if (!db || !templateKey) return null;
   try {
     const cols = "template_key, display_name, agent_name, agent_role, data_fields, required_fields, classification";
 
     if (clientId) {
-      const { data } = await supabase
+      const { data } = await db
         .from("chatbot_templates")
         .select(cols)
         .eq("template_key", templateKey)
@@ -459,7 +459,7 @@ async function fetchTemplate(supabase, clientId, templateKey) {
     }
 
     // Fallback para builtin (client_id IS NULL)
-    const { data } = await supabase
+    const { data } = await db
       .from("chatbot_templates")
       .select(cols)
       .eq("template_key", templateKey)
@@ -472,8 +472,8 @@ async function fetchTemplate(supabase, clientId, templateKey) {
 }
 
 /**
- * Constrói bloco de contexto de campos a ser injetado no system prompt.
- * Inclui lista de dados a coletar e critérios de classificação de temperatura.
+ * Constr�i bloco de contexto de campos a ser injetado no system prompt.
+ * Inclui lista de dados a coletar e crit�rios de classifica��o de temperatura.
  */
 function buildFieldContext(template) {
   if (!template) return null;
@@ -488,8 +488,8 @@ function buildFieldContext(template) {
 
   const fieldLines = fields
     .map((f) => {
-      const req = required.includes(f.key) ? " (obrigatório)" : " (opcional)";
-      return `- ${f.key}: ${f.label} — ${f.description}${req}`;
+      const req = required.includes(f.key) ? " (obrigat�rio)" : " (opcional)";
+      return `- ${f.key}: ${f.label} � ${f.description}${req}`;
     })
     .join("\n");
 
@@ -501,19 +501,19 @@ function buildFieldContext(template) {
   return [
     "DADOS A COLETAR (retorne dentro de \"dados\" no JSON de resposta):",
     fieldLines,
-    classLines ? `\nCRITÉRIOS DE CLASSIFICAÇÃO DE TEMPERATURA:\n${classLines}` : "",
+    classLines ? `\nCRIT�RIOS DE CLASSIFICA��O DE TEMPERATURA:\n${classLines}` : "",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 /**
- * Gera briefing SDR usando o prompt "extrato" do banco (configurável por empresa).
- * Recebe o histórico da conversa e os dados coletados, retorna texto formatado.
- * Se não houver prompt extrato no banco, retorna null (caller usa fallback determinístico).
+ * Gera briefing SDR usando o prompt "extrato" do banco (configur�vel por empresa).
+ * Recebe o hist�rico da conversa e os dados coletados, retorna texto formatado.
+ * Se n�o houver prompt extrato no banco, retorna null (caller usa fallback determin�stico).
  */
-export async function extractBriefingWithAI({ supabase, clientId, phone, history, collectedData, classificacao }) {
-  const extractPrompt = await fetchDynamicPrompt(supabase, clientId, "extrato");
+export async function extractBriefingWithAI({ db, clientId, phone, history, collectedData, classificacao }) {
+  const extractPrompt = await fetchDynamicPrompt(db, clientId, "extrato");
   if (!extractPrompt) return null;
 
   if (!groqKey()) return null;
@@ -528,9 +528,9 @@ export async function extractBriefingWithAI({ supabase, clientId, phone, history
     dadosJson,
     ``,
     `=== TEMPERATURA ===`,
-    classificacao || "Não informado",
+    classificacao || "N�o informado",
     ``,
-    `=== HISTÓRICO DA CONVERSA ===`,
+    `=== HIST�RICO DA CONVERSA ===`,
     historicText,
     ``,
     `=== CONTATO ===`,
@@ -560,11 +560,11 @@ export async function extractBriefingWithAI({ supabase, clientId, phone, history
 }
 
 export async function runChatbotAI({ systemPrompt, history, newMessages, existingData }) {
-  if (!groqKey()) throw new Error("GROQ_API_KEY não configurada");
+  if (!groqKey()) throw new Error("GROQ_API_KEY n�o configurada");
 
   // Mesclar dados existentes no contexto do sistema
   const dataContext = existingData && Object.keys(existingData).length > 0
-    ? `\n\nDADOS JÁ COLETADOS ATÉ AGORA:\n${JSON.stringify(existingData, null, 2)}`
+    ? `\n\nDADOS J� COLETADOS AT� AGORA:\n${JSON.stringify(existingData, null, 2)}`
     : "";
 
   const messages = [
@@ -621,7 +621,7 @@ function parseAIResponse(raw) {
     }
     console.error("[chatbot-ai] Failed to parse AI response:", raw.slice(0, 200));
     return {
-      mensagem: "Desculpe, tive um problema técnico. Pode repetir?",
+      mensagem: "Desculpe, tive um problema t�cnico. Pode repetir?",
       status_conversa: "aguardando_usuario",
       dados: {},
       classificacao: "FRIO",
@@ -631,7 +631,7 @@ function parseAIResponse(raw) {
   }
 }
 
-// ─── Histórico de conversa ───────────────────────────────────────────────────
+// --- Hist�rico de conversa ---------------------------------------------------
 
 export function buildHistory(storedHistorico = []) {
   if (!Array.isArray(storedHistorico)) return [];
@@ -648,11 +648,11 @@ export function appendToHistory(history, userText, assistantText) {
   ];
 }
 
-// ─── Engine completo: processar batch de mensagens ───────────────────────────
+// --- Engine completo: processar batch de mensagens ---------------------------
 
 /**
  * Processa um batch de mensagens do buffer para um phone+clientId.
- * Carrega histórico do banco, chama IA, salva resultado, retorna mensagem.
+ * Carrega hist�rico do banco, chama IA, salva resultado, retorna mensagem.
  */
 function chatbotLeadsTable(clientId) {
   const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
@@ -668,9 +668,9 @@ function hoursSince(isoDate) {
   return (Date.now() - new Date(isoDate).getTime()) / 3_600_000;
 }
 
-export async function processBatch({ clientId, phone, messages, supabase, model, promptType: promptTypeOverride = null, campaignPromptId = null }) {
+export async function processBatch({ clientId, phone, messages, db, model, promptType: promptTypeOverride = null, campaignPromptId = null }) {
   if (!model) {
-    console.error("[chatbot-ai] model não configurado para cliente — chatbot silenciado", { clientId });
+    console.error("[chatbot-ai] model n�o configurado para cliente � chatbot silenciado", { clientId });
     return null;
   }
   const modelConfig = getChatbotModel(model);
@@ -689,7 +689,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model,
   }
 
   // Carregar estado atual do banco
-  const { data: existingArray } = await supabase
+  const { data: existingArray } = await db
     .from(leadsTable)
     .select("id, dados, historico, status_conversa, finalizado, updated_at, lead_temperature")
     .eq("client_id", clientId)
@@ -699,15 +699,15 @@ export async function processBatch({ clientId, phone, messages, supabase, model,
 
   const existing = existingArray?.[0] || null;
 
-  // ── Cenário 1: lead já finalizado voltou a contatar ──────────────────────
+  // -- Cen�rio 1: lead j� finalizado voltou a contatar ----------------------
   if (existing?.finalizado) {
     const dadosAntigos = existing.dados || {};
     const horario = dadosAntigos.melhor_horario || null;
     const interesse = dadosAntigos.interesse || null;
 
     const msgRecontato = interesse
-      ? `Oi! Vi que já conversamos sobre ${interesse}. Nosso consultor vai entrar em contato com você${horario ? ` de ${horario}` : " em breve"}. Posso ajudar com mais alguma coisa?`
-      : "Oi! Vi que já passamos por uma conversa antes. Nosso consultor vai entrar em contato. Posso ajudar com mais alguma coisa?";
+      ? `Oi! Vi que j� conversamos sobre ${interesse}. Nosso consultor vai entrar em contato com voc�${horario ? ` de ${horario}` : " em breve"}. Posso ajudar com mais alguma coisa?`
+      : "Oi! Vi que j� passamos por uma conversa antes. Nosso consultor vai entrar em contato. Posso ajudar com mais alguma coisa?";
 
     console.log("[chatbot-ai] Recontact from finalized lead", { phone: phone.slice(-4), clientId });
 
@@ -729,19 +729,19 @@ export async function processBatch({ clientId, phone, messages, supabase, model,
 
   // Busca prompt e template do banco em paralelo
   // promptTypeOverride vem do roteamento de campanha (campanha | padrao)
-  // fallback legacy: se model começa com "campanha_" → campanha
+  // fallback legacy: se model come�a com "campanha_" ? campanha
   const promptType = promptTypeOverride || (model.startsWith("campanha_") ? "campanha" : "padrao");
   const baseModelKey = model.startsWith("campanha_") ? model.replace("campanha_", "") : model;
 
   const [dynamicPrompt, template] = await Promise.all([
     campaignPromptId
-      ? fetchCampaignPromptById(supabase, campaignPromptId)
-      : fetchDynamicPrompt(supabase, clientId, promptType),
-    fetchTemplate(supabase, clientId, baseModelKey),
+      ? fetchCampaignPromptById(db, campaignPromptId)
+      : fetchDynamicPrompt(db, clientId, promptType),
+    fetchTemplate(db, clientId, baseModelKey),
   ]);
 
   if (!dynamicPrompt) {
-    console.error("[chatbot-ai] PROMPT NOT FOUND in DB — chatbot silenciado", { clientId, promptType });
+    console.error("[chatbot-ai] PROMPT NOT FOUND in DB � chatbot silenciado", { clientId, promptType });
     return null;
   }
   if (!template) {
@@ -749,7 +749,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model,
   }
 
   // Garante que todas as colunas do template existam na tabela (fire-and-forget nos erros)
-  await ensureTemplateColumns(supabase, leadsTable, template?.data_fields);
+  await ensureTemplateColumns(db, leadsTable, template?.data_fields);
 
   const basePromptText = dynamicPrompt;
 
@@ -758,7 +758,7 @@ export async function processBatch({ clientId, phone, messages, supabase, model,
     ? `${basePromptText}\n\n${fieldContext}`
     : basePromptText;
 
-  // ── Cenário 2: lead abandonou no meio — reengajamento após REENGAGEMENT_HOURS ──
+  // -- Cen�rio 2: lead abandonou no meio � reengajamento ap�s REENGAGEMENT_HOURS --
   let systemPromptOverride = null;
   if (existing && history.length > 0) {
     const horasInativo = hoursSince(existing.updated_at);
@@ -766,18 +766,18 @@ export async function processBatch({ clientId, phone, messages, supabase, model,
       const ultimaPergunta = history.filter((m) => m.role === "assistant").at(-1)?.content || "";
       systemPromptOverride = `${baseSystemPrompt}
 
-CONTEXTO ESPECIAL — REENGAJAMENTO:
+CONTEXTO ESPECIAL � REENGAJAMENTO:
 Este lead ficou ${Math.round(horasInativo)}h sem responder. Retomou o contato agora.
-Não reinicie a conversa do zero. Retome de forma natural e leve, sem cobrar a ausência.
-Última pergunta feita: "${ultimaPergunta.slice(0, 120)}"
-Dados já coletados: ${JSON.stringify(storedData)}.
+N�o reinicie a conversa do zero. Retome de forma natural e leve, sem cobrar a aus�ncia.
+�ltima pergunta feita: "${ultimaPergunta.slice(0, 120)}"
+Dados j� coletados: ${JSON.stringify(storedData)}.
 Continue de onde parou, coletando apenas o que ainda falta.`;
 
       console.log("[chatbot-ai] Reengagement after", Math.round(horasInativo), "hours", { phone: phone.slice(-4) });
     }
   }
 
-  // ── Cenário 3: lead novo ou em andamento — fluxo normal ──────────────────
+  // -- Cen�rio 3: lead novo ou em andamento � fluxo normal ------------------
   const aiResponse = await runChatbotAI({
     systemPrompt: systemPromptOverride || baseSystemPrompt,
     history,
@@ -794,7 +794,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     phone: phone.slice(-4),
   });
 
-  // Atualizar histórico
+  // Atualizar hist�rico
   const newHistory = appendToHistory(history, combinedText, aiResponse.mensagem);
 
   const dadosToSave = normalizeLeadsOutlierDados({
@@ -815,27 +815,27 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     mensagem: aiResponse.mensagem,
     finalizado: aiResponse.finalizado,
     updated_at: new Date().toISOString(),
-    // Colunas individuais de todos os campos do template (existência garantida por ensureTemplateColumns)
+    // Colunas individuais de todos os campos do template (exist�ncia garantida por ensureTemplateColumns)
     ...extractIndividualColumns(dadosToSave, template?.data_fields),
   };
 
   if (existing?.id) {
-    await supabase.from(leadsTable).update(payload).eq("id", existing.id);
+    await db.from(leadsTable).update(payload).eq("id", existing.id);
   } else {
-    await supabase.from(leadsTable).insert([{ ...payload, created_at: new Date().toISOString() }]);
+    await db.from(leadsTable).insert([{ ...payload, created_at: new Date().toISOString() }]);
   }
 
-  // Salvar turno em lead_messages (fire-and-forget — não bloqueia resposta)
+  // Salvar turno em lead_messages (fire-and-forget � n�o bloqueia resposta)
   const now = new Date().toISOString();
   const leadMsgs = [
     { client_id: clientId, lead_phone: phone, role: "user", content: combinedText, created_at: now },
     { client_id: clientId, lead_phone: phone, role: "assistant", content: aiResponse.mensagem, created_at: now },
   ];
-  supabase.from("lead_messages").insert(leadMsgs).then(({ error }) => {
+  db.from("lead_messages").insert(leadMsgs).then(({ error }) => {
     if (error) console.warn("[chatbot-ai] lead_messages insert error:", error.message);
   });
 
-  // Inclui histórico completo no retorno para o caller usar no briefing SDR
-  // sem precisar rebuscar no banco (evita round-trip extra na finalização)
+  // Inclui hist�rico completo no retorno para o caller usar no briefing SDR
+  // sem precisar rebuscar no banco (evita round-trip extra na finaliza��o)
   return { ...aiResponse, _history: newHistory, _dados: dadosToSave };
 }

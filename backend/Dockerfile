@@ -44,7 +44,7 @@ RUN npm ci --omit=dev
 
 COPY src ./src
 COPY scripts ./scripts
-COPY supabase ./supabase
+COPY postgres ./postgres
 COPY start.sh ./start.sh
 
 RUN groupadd --gid 1001 appgroup && \

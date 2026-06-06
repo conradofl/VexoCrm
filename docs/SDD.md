@@ -19,7 +19,7 @@ Angular sera iniciado como sidecar incremental, nao como substituicao imediata d
 
 ### Contexto
 
-O repositorio atual possui um frontend operacional em `React + Vite`, integrado ao backend Node/Express, Firebase Auth, Supabase, Edge Functions e n8n.
+O repositorio atual possui um frontend operacional em `React + Vite`, integrado ao backend Node/Express, Firebase Auth, Postgres, rotas Express e n8n.
 
 O CRM ja esta em operacao e nao pode sofrer uma reescrita abrupta com risco de regressao funcional.
 
@@ -34,7 +34,7 @@ Isso significa:
 1. O frontend React/Vite atual permanece ativo e sem substituicao imediata
 2. O Angular sera criado como novo frontend/modulo separado
 3. O rollout inicial sera restrito a dominios menos criticos e mais controlados
-4. O backend, auth, Supabase, Edge Functions e integracoes atuais serao reaproveitados
+4. O backend, auth, Postgres, rotas Express e integracoes atuais serao reaproveitados
 5. Nenhuma area critica do CRM sera migrada antes de validacao de estabilidade
 
 ### Escopo inicial aprovado para Angular
@@ -95,11 +95,11 @@ O documento foi elaborado com base em:
 
 ### Reaproveitado do projeto atual
 
-- Arquitetura operacional centrada em `n8n + Supabase + Edge Functions`
+- Arquitetura operacional centrada em `n8n + Postgres + rotas Express`
 - Frontend atual em `React + Vite`
 - Backend atual em `Node.js + Express`
 - Autenticacao atual via `Firebase Auth`
-- Persistencia principal via `Supabase PostgreSQL`
+- Persistencia principal via `Postgres PostgreSQL`
 
 ### Novo padrao candidato
 
@@ -144,7 +144,7 @@ New project/
 
 - Stack: `Node.js + Express`
 - Integracoes:
-  - `Supabase`
+  - `Postgres`
   - `Firebase Admin`
   - `whatsapp-web.js`
 
@@ -154,8 +154,8 @@ Segundo `README.md` e `docs/arquitetura-operacional.md`, o eixo real do produto 
 
 - entrada via WhatsApp
 - orquestracao via `n8n`
-- persistencia via `Supabase`
-- Edge Functions para pontos operacionais
+- persistencia via `Postgres`
+- rotas Express para pontos operacionais
 - frontend React/Vite como CRM
 - backend Node/Express como API de apoio
 
@@ -197,7 +197,7 @@ Buscas executadas:
 - `project structure`
 - `best practices`
 - `previous SDD`
-- `React Vite CRM architecture patterns supabase firebase n8n redis whatsapp previous design decision`
+- `React Vite CRM architecture patterns Postgres firebase n8n redis whatsapp previous design decision`
 
 ## 2.2 Resultado real do RAG
 
@@ -251,7 +251,7 @@ Projetar uma evolucao do CRM da Vexo para uma plataforma multiagente robusta, ra
 ### Metas centrais
 
 1. Centralizar operacao comercial multiagente
-2. Manter integracao com Supabase, Redis, n8n, WhatsApp e Google Calendar
+2. Manter integracao com Postgres, Redis, n8n, WhatsApp e Google Calendar
 3. Tornar funil, follow-up, handoff e solicitacoes totalmente rastreaveis
 4. Reduzir perda de contexto entre agentes e humano
 5. Estruturar frontend futuro de forma modular
@@ -272,7 +272,7 @@ Projetar uma evolucao do CRM da Vexo para uma plataforma multiagente robusta, ra
 ## 4.2 Fora do escopo imediato
 
 - Reescrever todo o backend existente
-- Trocar Supabase
+- Trocar Postgres
 - Trocar Firebase Auth sem motivo forte
 - Substituir n8n
 - Migrar todo o frontend de uma vez
@@ -300,7 +300,7 @@ Conforme `ADR-001`, Angular entra apenas como **sidecar incremental**.
 - migrar `WhatsApp`
 - migrar portal do cliente
 - remover ou refatorar o frontend React atual
-- alterar backend, Supabase, Edge Functions, n8n ou auth sem necessidade documentada
+- alterar backend, Postgres, rotas Express, n8n ou auth sem necessidade documentada
 
 ---
 
@@ -311,8 +311,8 @@ Conforme `ADR-001`, Angular entra apenas como **sidecar incremental**.
 ```mermaid
 flowchart LR
     wa["WhatsApp / canais"] --> n8n["n8n"]
-    n8n --> edge["Supabase Edge Functions"]
-    edge --> db["Supabase PostgreSQL"]
+    n8n --> edge["rotas Express com Postgres direto"]
+    edge --> db["Postgres PostgreSQL"]
     n8n --> redis["Redis"]
 
     angular["Angular Frontend (novo candidato)"] --> api["Backend Node/Express"]
@@ -338,7 +338,7 @@ flowchart LR
 ### Reaproveitado do projeto atual
 
 - backend continua sendo gateway de produto
-- fluxo operacional segue em `n8n + Supabase + Edge Functions`
+- fluxo operacional segue em `n8n + Postgres + rotas Express`
 - auth segue em Firebase
 
 ### Reaproveitado do Obsidian
@@ -468,7 +468,7 @@ O frontend Angular deve consumir o backend atual por contratos HTTP claros.
 
 - o Angular sidecar deve apenas consumir contratos existentes ou contratos novos explicitamente documentados
 - qualquer mudanca necessaria de backend deve ser registrada antes de implementacao
-- nenhum ajuste em Edge Functions, n8n ou auth deve ocorrer como efeito colateral do scaffold
+- nenhum ajuste em rotas Express, n8n ou auth deve ocorrer como efeito colateral do scaffold
 
 ### Endpoints a manter/reaproveitar
 
@@ -550,7 +550,7 @@ Criar `Error Handling Strategy Angular` com:
 - logs de agente
 - logs de n8n
 - logs de erro de OpenAI
-- logs de Redis e Supabase
+- logs de Redis e Postgres
 
 ## 5.11 Testes
 
@@ -801,7 +801,7 @@ Criar no Obsidian estas notas novas:
 
 ## Aprendizado
 
-O repositorio atual tem arquitetura operacional madura em React/Vite + Node + Supabase + n8n, mas ainda nao possui base consolidada para Angular.
+O repositorio atual tem arquitetura operacional madura em React/Vite + Node + Postgres + n8n, mas ainda nao possui base consolidada para Angular.
 
 ## Contexto
 

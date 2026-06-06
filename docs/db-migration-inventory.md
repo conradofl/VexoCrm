@@ -1,6 +1,6 @@
 # Database migration inventory (VexoCrm backend)
 
-Generated for the Postgres cutover. All SQL traffic from [backend/src/server.js](backend/src/server.js) goes through the `supabase` handle (either `@supabase/supabase-js` or [backend/src/pgSupabaseCompat.js](backend/src/pgSupabaseCompat.js)).
+Generated for the Postgres cutover. All SQL traffic from [backend/src/server.js](backend/src/server.js) goes through the `Postgres` handle (either `pg` or [backend/src/pgPostgresCompat.js](backend/src/pgPostgresCompat.js)).
 
 ## Tables touched via `.from("...")`
 
@@ -26,7 +26,7 @@ Generated for the Postgres cutover. All SQL traffic from [backend/src/server.js]
 | `n8n_error_logs` | upsert |
 | `notifications` | select (incl. head count), insert, update |
 
-## Supabase chain features used (compat layer must support)
+## Postgres chain features used (compat layer must support)
 
 - `select`, `insert`, `update`, `upsert`, `delete` (with `{ count: "exact" }` for bulk deletes)
 - Filters: `eq`, `neq`, `in`, `is`, `not(..., "is", null)`, `lte`

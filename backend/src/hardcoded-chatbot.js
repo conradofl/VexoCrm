@@ -36,9 +36,9 @@ export async function initializeRedisChat() {
 }
 
 // Função para recuperar memória do PostgreSQL (fallback quando Redis não está disponível)
-let supabaseClientRef = null;
-export function setSupabaseClient(supabase) {
-  supabaseClientRef = supabase;
+let databaseClientRef = null;
+export function setDatabaseClient(db) {
+  databaseClientRef = db;
 }
 
 function leadsTable(clientId) {
@@ -47,9 +47,9 @@ function leadsTable(clientId) {
 }
 
 async function getChatMemoryFromPostgres(phone, clientId) {
-  if (!supabaseClientRef) return null;
+  if (!databaseClientRef) return null;
   try {
-    const { data: dataArray, error } = await supabaseClientRef
+    const { data: dataArray, error } = await databaseClientRef
       .from(leadsTable(clientId))
       .select("*")
       .eq("client_id", clientId)
@@ -95,11 +95,11 @@ export async function getChatMemory(phone, clientId) {
 }
 
 export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400) {
-  if (!supabaseClientRef || !memory) return;
+  if (!databaseClientRef || !memory) return;
 
   try {
     // Buscar registro existente
-    const { data: existingArray, error: fetchErr } = await supabaseClientRef
+    const { data: existingArray, error: fetchErr } = await databaseClientRef
       .from(leadsTable(clientId))
       .select("id, mensagem")
       .eq("client_id", clientId)
@@ -129,7 +129,7 @@ export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400)
     if (existing?.id) {
       // Atualizar
       console.log("[redis-chat] Updating record id:", existing.id);
-      const { data: updated, error } = await supabaseClientRef
+      const { data: updated, error } = await databaseClientRef
         .from(leadsTable(clientId))
         .update(payload)
         .eq("id", existing.id)
@@ -142,7 +142,7 @@ export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400)
     } else {
       // Inserir novo
       console.log("[redis-chat] Inserting new record");
-      const { data: inserted, error } = await supabaseClientRef
+      const { data: inserted, error } = await databaseClientRef
         .from(leadsTable(clientId))
         .insert([{ ...payload, created_at: new Date().toISOString() }])
         .select();

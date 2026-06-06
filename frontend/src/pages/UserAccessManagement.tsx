@@ -1535,6 +1535,7 @@ export default function UserAccessManagement() {
   const [savingUid, setSavingUid] = useState<string | null>(null);
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [syncingUsers, setSyncingUsers] = useState(false);
   const [selectedProfileKey, setSelectedProfileKey] = useState<string | null>(null);
   const [profileDraft, setProfileDraft] = useState<AccessProfileDraft>(() => buildAccessProfileDraft());
   const [savingProfile, setSavingProfile] = useState(false);
@@ -1876,12 +1877,18 @@ export default function UserAccessManagement() {
         throw new Error(await readApiErrorMessage(res, "Nao foi possivel criar este usuario"));
       }
 
-      const body = await readApiJson<{ item?: AdminUserRecord; passwordResetLink?: string }>(res, "admin-user-create");
+      const body = await readApiJson<{
+        item?: AdminUserRecord;
+        passwordResetLink?: string;
+        syncedExisting?: boolean;
+      }>(res, "admin-user-create");
 
       showActionFeedback({
         tone: "success",
-        title: "Usuario criado",
-        message: `O usuario ${body.item?.email || payload.email} foi criado com sucesso.`,
+        title: body.syncedExisting ? "Usuario sincronizado" : "Usuario criado",
+        message: body.syncedExisting
+          ? `O usuario ${body.item?.email || payload.email} ja existia no Firebase Auth e teve o acesso sincronizado.`
+          : `O usuario ${body.item?.email || payload.email} foi criado com sucesso.`,
         details: body.passwordResetLink ? `Link de redefinicao: ${body.passwordResetLink}` : null,
       });
       setCreateDraft(buildCreateDraft());
@@ -1894,6 +1901,48 @@ export default function UserAccessManagement() {
       });
     } finally {
       setCreating(false);
+    }
+  };
+
+  const syncFirebaseUsers = async () => {
+    if (!canEditUsers) return;
+
+    setSyncingUsers(true);
+    clearActionFeedback();
+
+    try {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuario nao autenticado.");
+      }
+
+      const res = await fetchApi("/api/admin/users/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel sincronizar usuarios"));
+      }
+
+      const body = await readApiJson<{ syncedCount?: number; skippedCount?: number }>(res, "admin-users-sync");
+      await refetch();
+
+      showActionFeedback({
+        tone: "success",
+        title: "Usuarios sincronizados",
+        message: `${body.syncedCount || 0} usuarios foram normalizados com claims de acesso. ${body.skippedCount || 0} ja estavam sincronizados.`,
+      });
+    } catch (err) {
+      showActionFeedback({
+        tone: "error",
+        title: "Nao foi possivel sincronizar",
+        message: err instanceof Error ? err.message : "Nao foi possivel sincronizar os usuarios do Firebase Auth.",
+      });
+    } finally {
+      setSyncingUsers(false);
     }
   };
 
@@ -2158,6 +2207,18 @@ export default function UserAccessManagement() {
                 </div>
 
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  {canEditUsers ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={syncFirebaseUsers}
+                      disabled={syncingUsers}
+                    >
+                      <RefreshCw className={cn("h-4 w-4", syncingUsers && "animate-spin")} />
+                      {syncingUsers ? "Sincronizando..." : "Sincronizar Auth"}
+                    </Button>
+                  ) : null}
+
                   <div className="relative min-w-[260px]">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input

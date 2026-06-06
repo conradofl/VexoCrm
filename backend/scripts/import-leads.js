@@ -1,30 +1,60 @@
 // VexoCrm/backend/scripts/import-leads.js
-// Imports leads from scripts/leads.json into Supabase.
-// Requires: backend/.env with SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+// Imports leads from scripts/leads.json into direct Postgres.
+// Requires: backend/.env with DATABASE_URL
 // Run from backend/: node scripts/import-leads.js
 
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import { createClient } from "@supabase/supabase-js";
+import pg from "pg";
 
+const { Client } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const backendDir = join(__dirname, "..");
 
 dotenv.config({ path: join(backendDir, ".env") });
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const databaseUrl = process.env.DATABASE_URL;
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in backend/.env");
+if (!databaseUrl) {
+  console.error("Missing DATABASE_URL in backend/.env");
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
-
 const leadsPath = join(backendDir, "..", "scripts", "leads.json");
+
+function quoteIdent(name) {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(String(name || ""))) {
+    throw new Error(`Invalid identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+async function upsertRows(client, table, rows, conflictColumns) {
+  if (!rows.length) return;
+
+  const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const values = [];
+  const placeholders = rows.map((row) => {
+    const rowPlaceholders = columns.map((column) => {
+      values.push(row[column] ?? null);
+      return `$${values.length}`;
+    });
+    return `(${rowPlaceholders.join(", ")})`;
+  });
+
+  const updateColumns = columns.filter((column) => !conflictColumns.includes(column));
+  const updates = updateColumns.map((column) => `${quoteIdent(column)} = excluded.${quoteIdent(column)}`);
+  const sql = `
+    insert into ${quoteIdent(table)} (${columns.map(quoteIdent).join(", ")})
+    values ${placeholders.join(", ")}
+    on conflict (${conflictColumns.map(quoteIdent).join(", ")})
+    do update set ${updates.join(", ")}
+  `;
+
+  await client.query(sql, values);
+}
 
 async function main() {
   let leads;
@@ -41,25 +71,31 @@ async function main() {
     process.exit(1);
   }
 
-  // Ensure leads_clients has 'infinie'
-  const clientId = leads[0]?.client_id || "infinie";
-  await supabase.from("leads_clients").upsert(
-    { id: clientId, name: "Infinie" },
-    { onConflict: "id", ignoreDuplicates: true }
-  );
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
 
-  // Upsert by (client_id, telefone)
-  const { data, error } = await supabase.from("leads").upsert(leads, {
-    onConflict: "client_id,telefone",
-    ignoreDuplicates: false,
-  });
-
-  if (error) {
-    console.error("Supabase error:", error.message);
+  try {
+    await client.query("begin");
+    const clientId = leads[0]?.client_id || "infinie";
+    await client.query(
+      `
+        insert into public.leads_clients (id, name)
+        values ($1, $2)
+        on conflict (id) do update set name = excluded.name
+      `,
+      [clientId, "Infinie"]
+    );
+    await upsertRows(client, "leads", leads, ["client_id", "telefone"]);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    console.error("Postgres import error:", error.message);
     if (error.code === "42P01") {
       console.error("Table 'leads' may not exist. Run migrations first.");
     }
     process.exit(1);
+  } finally {
+    await client.end();
   }
 
   console.log(`Imported ${leads.length} leads successfully.`);

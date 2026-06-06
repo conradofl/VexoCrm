@@ -1,9 +1,9 @@
 // Conexão com o banco de dados para o módulo de follow-up.
-// Reutiliza createDatabasePool de pgSupabaseCompat para manter consistência.
-import { createDatabasePool, createPgSupabaseClient } from "../pgSupabaseCompat.js";
+// Reutiliza createDatabasePool de pgPostgresCompat para manter consistência.
+import { createDatabasePool, createPostgresCompatClient } from "../pgPostgresCompat.js";
 
 let _pool = null;
-let _supabase = null;
+let _db = null;
 
 function getPool() {
   if (!_pool) {
@@ -14,11 +14,11 @@ function getPool() {
   return _pool;
 }
 
-export function getSupabase() {
-  if (!_supabase) {
-    _supabase = createPgSupabaseClient(getPool());
+export function getDbClient() {
+  if (!_db) {
+    _db = createPostgresCompatClient(getPool());
   }
-  return _supabase;
+  return _db;
 }
 
 /**
