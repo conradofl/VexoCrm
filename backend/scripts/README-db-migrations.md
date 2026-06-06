@@ -1,8 +1,8 @@
 # Database migrations with direct Postgres
 
-From `VexoCrm/backend`, `npm run dev` and `npm start` execute `scripts/conditional-migrate.mjs` before starting the API. The script reads SQL files from `backend/postgres/migrations` and applies pending files through the `pg` driver using `DATABASE_URL`.
+From `VexoCrm/backend`, run `npm run migrate` when you explicitly want to apply SQL migrations. The script reads SQL files from `backend/postgres/migrations` and applies pending files through the `pg` driver using `DATABASE_URL`.
 
-Set `SKIP_DB_MIGRATE=1` to skip the prestart/predev migration step.
+Plain `npm start` and `npm run dev` do not apply migrations.
 
 For Docker startup, `start.sh` can run the same migration path before the API:
 

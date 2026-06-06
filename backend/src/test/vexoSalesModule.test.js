@@ -6,7 +6,7 @@ const serverSource = readFileSync(resolve("src/server.js"), "utf8");
 const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
 const routeBundle = `${serverSource}\n${domainRoutesSource}`;
 const migrationSource = readFileSync(
-  resolve("../frontend/postgres/migrations/20260506000001_create_vexo_sales_tables.sql"),
+  resolve("../frontend/supabase/migrations/20260506000001_create_vexo_sales_tables.sql"),
   "utf8"
 );
 
