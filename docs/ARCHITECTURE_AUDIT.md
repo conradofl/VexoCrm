@@ -13,8 +13,8 @@ Esta auditoria foi feita a partir de:
 
 1. leitura da estrutura real do repositorio
 2. inspecao das rotas principais em `backend/src/server.js`
-3. comparacao entre runtime, `frontend/supabase/migrations/` e `docs/*.md`
-4. leitura das Edge Functions em `frontend/supabase/functions/`
+3. comparacao entre runtime, `frontend/postgres/migrations/` e `docs/*.md`
+4. leitura das rotas Express em `frontend/postgres/functions/`
 5. validacao rapida dos trilhos de teste
 6. consulta ao Segundo Cerebro para confirmar a prioridade operacional
 
@@ -40,8 +40,8 @@ Arquitetura atual:
 
 - `frontend/`: React + Vite
 - `backend/`: Node + Express
-- `Supabase`: persistencia principal
-- `Supabase Edge Functions`: partes do fluxo operacional
+- `Postgres`: persistencia principal
+- `rotas Express com Postgres direto`: partes do fluxo operacional
 - `n8n`: orquestracao de conversa, disparo e qualificacao
 - `Firebase Auth`: autenticacao principal
 
@@ -49,7 +49,7 @@ O principal problema nao e falta de tecnologia. O principal problema e falta de 
 
 1. o backend acumula logica demais em um unico arquivo
 2. o schema versionado nao representa com confianca tudo o que o runtime usa
-3. ha duplicidade entre backend e Edge Functions
+3. ha duplicidade entre backend e rotas Express
 4. o controle multi-tenant depende mais de convencao do que de defesa em profundidade
 5. contratos de dados mudam de significado conforme a camada
 
@@ -67,11 +67,11 @@ O principal problema nao e falta de tecnologia. O principal problema e falta de 
 | # | Severidade | Problema | Evidencia |
 | --- | --- | --- | --- |
 | 1 | Critico | `backend/src/server.js` concentra auth, permissao, rotas, dashboard, campanhas, webhooks, WhatsApp e normalizacao num unico modulo | `backend/src/server.js` |
-| 2 | Critico | Schema real e migrations ainda divergem em pontos sensiveis, especialmente em torno de `campaigns`, `notifications`, `n8n_error_logs` e campos legados de `leads` | `frontend/supabase/migrations/`, `backend/src/server.js`, `docs/supabase-functions.md` |
-| 3 | Critico | Existem fluxos duplicados entre backend e Edge Functions para leads, memoria e erro operacional | `/api/import-lead-infinie-n8n`, `/api/n8n-error-webhook`, `/api/conversation-memory` vs `lead-webhook`, `n8n-error-webhook`, `conversation-memory*` |
+| 2 | Critico | Schema real e migrations ainda divergem em pontos sensiveis, especialmente em torno de `campaigns`, `notifications`, `n8n_error_logs` e campos legados de `leads` | `frontend/postgres/migrations/`, `backend/src/server.js`, `docs/postgres-functions.md` |
+| 3 | Critico | Existem fluxos duplicados entre backend e rotas Express para leads, memoria e erro operacional | `/api/import-lead-infinie-n8n`, `/api/n8n-error-webhook`, `/api/conversation-memory` vs `lead-webhook`, `n8n-error-webhook`, `conversation-memory*` |
 | 4 | Critico | Ha rotas sem filtro consistente por `client_id`, inclusive notificacoes e campanhas, com risco real de tenant leak | `backend/src/server.js` |
 | 5 | Alto | Auth e permissoes sao reconstruidos em mais de uma camada, com regras especiais e escalacoes implicitas | `backend/src/server.js`, `frontend/src/lib/access.ts`, `frontend/src/contexts/AuthContext.tsx` |
-| 6 | Alto | Edge Functions usam `Access-Control-Allow-Origin: *` e ainda dependem de bearer interno, aumentando superficie operacional | `frontend/supabase/functions/*` |
+| 6 | Alto | rotas Express usam `Access-Control-Allow-Origin: *` e ainda dependem de bearer interno, aumentando superficie operacional | `frontend/postgres/functions/*` |
 | 7 | Alto | Contratos criticos (`telefone`, `qualificacao`, `client_id`, `tenant_id`, `company_id`, `notifications`) nao estao totalmente normalizados | `backend/src/validators.js`, `backend/src/server.js`, `docs/*.md`, hooks do frontend |
 | 8 | Alto | CRUD de campanhas confia demais em permissao de tela e nao bloqueia por tenant em todos os endpoints mutaveis | `backend/src/server.js` |
 | 9 | Medio | Trilho de testes nao esta confiavel: frontend depende de instalacao local; backend aborta antes de executar os testes | `frontend/package.json`, `backend/package.json`, `backend/src/test/security.test.js` |
@@ -115,11 +115,11 @@ O backend entrega muito, mas hoje funciona como um modulo procedural grande, com
 - tenant leak por esquecimento de filtro
 - dificuldade de instrumentar e testar
 
-### 2. Supabase
+### 2. Postgres
 
 #### Diagnostico
 
-O Supabase continua sendo a escolha certa, mas o repositorio ainda nao representa com clareza o banco real esperado pelo runtime.
+O Postgres continua sendo a escolha certa, mas o repositorio ainda nao representa com clareza o banco real esperado pelo runtime.
 
 #### Achados
 
@@ -194,23 +194,16 @@ O frontend React deve ser mantido. O problema principal hoje nao e o framework, 
 - fragilidade quando backend muda contrato
 - custo alto para debugar bugs de tenant e permissao
 
-### 5. Edge Functions e integracoes
+### 5. rotas Express e integracoes
 
 #### Diagnostico
 
-As Edge Functions existem com papel operacional valido, mas hoje competem em parte com o backend e ainda expõem padroes de seguranca e CORS mais amplos do que o ideal.
+As rotas Express existem com papel operacional valido, mas hoje competem em parte com o backend e ainda expõem padroes de seguranca e CORS mais amplos do que o ideal.
 
 #### Mapa objetivo das functions atuais
 
 | Function | Finalidade | Variaveis sensiveis | Bearer/token | CORS | Duplicidade com backend | Risco operacional |
 | --- | --- | --- | --- | --- | --- | --- |
-| `lead-webhook` | criar/finalizar leads a partir do n8n | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | `/api/import-lead-infinie-n8n` | Alto |
-| `conversation-memory` | salvar e ler memoria comprimida de conversa | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | `/api/conversation-memory` | Alto |
-| `conversation-memory-latest` | recuperar memoria mais recente por telefone | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | backend tem endpoint de persistencia e runtime paralelo | Alto |
-| `n8n-error-webhook` | registrar falha e criar notificacao | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `N8N_WEBHOOK_SECRET` | Sim | `*` | `/api/n8n-error-webhook` | Alto |
-| `notifications-api` | listar e marcar notificacoes via JWT Supabase | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | JWT Supabase | `*` | `/api/notifications` | Alto |
-| `get-leads-disparo` | entregar leads para disparo | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | `/api/leads-for-dispatch` | Alto |
-| `mark-lead-dispatched` | marcar lead importado como processado | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EDGE_FUNCTION_BEARER_TOKEN` | Sim | `*` | parcialmente coberto por backend/campaign trigger | Medio |
 
 #### Achados
 
@@ -218,7 +211,6 @@ As Edge Functions existem com papel operacional valido, mas hoje competem em par
    - todas as functions inspecionadas usam `Access-Control-Allow-Origin: *`.
 
 2. **Bearer interno e service role**
-   - `lead-webhook`, `conversation-memory`, `conversation-memory-latest`, `get-leads-disparo`, `mark-lead-dispatched` dependem de bearer interno e `SUPABASE_SERVICE_ROLE_KEY`.
 
 3. **Duplicidade com backend**
    - `lead-webhook` x `/api/import-lead-infinie-n8n`
@@ -226,7 +218,7 @@ As Edge Functions existem com papel operacional valido, mas hoje competem em par
    - `conversation-memory*` x `/api/conversation-memory`
 
 4. **Auth heterogenea**
-   - `notifications-api` usa JWT do Supabase, enquanto o produto principal usa Firebase Auth.
+   - `notifications-api` usa JWT do Postgres, enquanto o produto principal usa Firebase Auth.
 
 #### Impacto
 
@@ -312,7 +304,7 @@ O risco aqui e organizacional e tecnico ao mesmo tempo: duas pessoas alterando a
 1. mapa real do schema
 2. mapa das rotas com risco de tenant leak
 3. lista de contratos inconsistentes
-4. decisao por fluxo duplicado: backend ou Edge Function
+4. decisao por fluxo duplicado: backend ou rota Express
 
 ### Etapa 2 - Padronizacao
 
@@ -336,7 +328,7 @@ O risco aqui e organizacional e tecnico ao mesmo tempo: duas pessoas alterando a
 
 1. modularizar backend
 2. fortalecer observabilidade
-3. revisar Edge Functions e convergir ownership
+3. revisar rotas Express e convergir ownership
 4. abrir backlog de evolucao de produto
 
 ---

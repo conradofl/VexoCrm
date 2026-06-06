@@ -5,7 +5,7 @@ App Angular isolado criado como **sidecar incremental** do CRM da Vexo.
 Esta aplicacao:
 
 - nao substitui o frontend atual em `frontend/`
-- nao altera backend, auth, Supabase, Edge Functions ou n8n
+- nao altera backend, auth, Postgres, rotas Express ou n8n
 - serve como base controlada para rollout futuro de:
   - `Vexo Labs`
   - `Dashboard`

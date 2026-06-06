@@ -6,7 +6,7 @@ import pg from "pg";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const backendRoot = join(__dirname, "..");
-const migrationsDir = join(backendRoot, "supabase", "migrations");
+const migrationsDir = join(backendRoot, "postgres", "migrations");
 
 dotenv.config({ path: join(backendRoot, ".env") });
 
@@ -15,9 +15,9 @@ if (process.env.SKIP_DB_MIGRATE === "1") {
   process.exit(0);
 }
 
-const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {
-  console.warn("[migrate] Skipping: set DATABASE_URL or SUPABASE_DB_URL in backend/.env.");
+  console.warn("[migrate] Skipping: set DATABASE_URL in backend/.env.");
   process.exit(0);
 }
 

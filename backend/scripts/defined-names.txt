@@ -200,9 +200,9 @@ shouldStartCampaignScheduler
 shutdownPgPool
 startCampaignScheduler
 startNextCampaignLeadInQueue
-supabase
-supabaseServiceRoleKey
-supabaseUrl
+Postgres
+PostgresServiceRoleKey
+PostgresUrl
 syncUsersWithAccessProfile
 tickCampaignScheduler
 toComparableCampaignTimestamp

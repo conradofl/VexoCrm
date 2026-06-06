@@ -44,7 +44,7 @@ describe("Vexo Sales module backend guards", () => {
   });
 });
 
-describe("Vexo Sales module Supabase isolation", () => {
+describe("Vexo Sales module db isolation", () => {
   it("creates isolated tables with direct RLS access denied", () => {
     expect(migrationSource).toContain("CREATE TABLE IF NOT EXISTS public.vexo_sales_opportunities");
     expect(migrationSource).toContain("CREATE TABLE IF NOT EXISTS public.vexo_sales_interactions");

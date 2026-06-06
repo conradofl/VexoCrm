@@ -1,16 +1,16 @@
-# Status da Migracao do Supabase
+# Status da Migracao do Postgres
 
 Data de referencia: 2026-05-06
 
 ## Objetivo
 
-Migrar o projeto para rodar com o PostgreSQL da VPS no lugar do banco remoto do Supabase, sem perder os dados operacionais e sem reescrever toda a regra de negocio de uma vez.
+Migrar o projeto para rodar com o PostgreSQL da VPS no lugar do banco remoto do Postgres, sem perder os dados operacionais e sem reescrever toda a regra de negocio de uma vez.
 
 ## Estado atual
 
 ### Banco de dados
 
-- O banco remoto do Supabase e o banco novo da VPS foram comparados no schema `public`.
+- O banco remoto do Postgres e o banco novo da VPS foram comparados no schema `public`.
 - A comparacao final validou:
   - mesmas tabelas
   - mesmas colunas
@@ -24,7 +24,7 @@ Migrar o projeto para rodar com o PostgreSQL da VPS no lugar do banco remoto do 
 
 #### Origem
 
-- Plataforma: Supabase
+- Plataforma: Postgres
 - Projeto: `yfhdzkjuhxsbxklfgdut`
 - Base usada na migracao: PostgreSQL remoto do projeto
 
@@ -75,28 +75,26 @@ Tabelas vazias preservadas:
 
 ### Situacao atual do backend
 
-- O backend ainda esta acoplado ao `@supabase/supabase-js`.
+- O backend ainda esta acoplado ao `pg`.
 - O ponto principal de uso fica em [backend/src/server.js](</C:/Users/W11/Desktop/Vexo/VexoCrm/backend/src/server.js>).
 - O backend ja recebeu `DATABASE_URL` para a VPS no arquivo [backend/.env](</C:/Users/W11/Desktop/Vexo/VexoCrm/backend/.env>).
 - Porem, o codigo ainda nao foi trocado para priorizar Postgres direto em runtime.
 
-### Situacao das Edge Functions
+### Situacao das rotas Express
 
-- As Edge Functions ainda fazem parte da arquitetura operacional atual.
+- As rotas Express ainda fazem parte da arquitetura operacional atual.
 - O destino final e portar essas funcoes para:
   - rotas Express no backend, ou
   - workers/jobs separados
 - Conceito da troca:
-  - antes: `n8n -> Edge Function Supabase -> banco Supabase`
+  - antes: `n8n -> rota Express Postgres -> banco Postgres`
   - depois: `n8n -> backend -> PostgreSQL VPS`
 
 ## Deploy em producao (EasyPanel / VPS)
 
-Para o container em producao usar o Postgres da VPS (nao o projeto Supabase via JS):
+Para o container em producao usar o Postgres da VPS (nao o projeto Postgres via JS):
 
 1. No painel do app, defina `DATABASE_URL` com a connection string do Postgres na VPS.
-2. Defina `DB_DRIVER=postgres` (recomendado; deixa explicito).
-3. Remova `DATA_SOURCE=supabase` se existir (essa flag forca o cliente Supabase).
 4. Salve e faca **redeploy** ou **restart** do servico.
 5. Confira os logs de boot: `[database] Using direct PostgreSQL (pg)`.
 6. Confira `GET /health`: `services.postgresPing` deve ser `true`.
@@ -109,26 +107,22 @@ Fazer o backend local rodar com o banco da VPS primeiro, mantendo a regra de neg
 
 ### Estrategia
 
-- `DB_DRIVER=postgres` com `DATABASE_URL` usa o pool `pg` e [backend/src/pgSupabaseCompat.js](backend/src/pgSupabaseCompat.js) (mesma superficie encadeada que `supabase.from(...)`).
-- Alternativa legada: `DATABASE_URL` definido e `DATA_SOURCE` diferente de `supabase` continua selecionando Postgres automaticamente.
-- `DATA_SOURCE=supabase` forca o cliente Supabase mesmo se `DATABASE_URL` existir (comparacao de stacks).
 - Evitar reescrever todas as rotas agora; validar localmente os endpoints principais contra a VPS.
 
 ## Riscos ainda em aberto
 
-- O backend usa `supabase-js` em muitos pontos do `server.js`.
+- O backend usa `Postgres-js` em muitos pontos do `server.js`.
 - A troca nao e so de string de conexao; e tambem de camada de acesso.
-- Edge Functions, secrets e runtime do Supabase ainda nao foram aposentados.
-- O banco `public` esta validado; o ecossistema completo do Supabase ainda nao foi migrado.
+- rotas Express, secrets e runtime do Postgres ainda nao foram aposentados.
+- O banco `public` esta validado; o ecossistema completo do Postgres ainda nao foi migrado.
 
 ## Log de implementacao (backend)
 
-- 2026-05-07: Backend supports direct Postgres via `DATABASE_URL` and [backend/src/pgSupabaseCompat.js](backend/src/pgSupabaseCompat.js) (chain compatible with existing `supabase.from()` usage). Prefer `DB_DRIVER=postgres` or leave legacy auto-wiring (`DATABASE_URL` without `DATA_SOURCE=supabase`). See [docs/backend-postgres-smoke.md](docs/backend-postgres-smoke.md).
 
 ## Resumo executivo
 
 - Dados: migrados e conferidos
 - Schema `public`: igual entre remoto e VPS
-- Backend: pode usar a VPS em runtime com `DATABASE_URL` + driver Postgres (camada de compatibilidade em `pgSupabaseCompat.js`)
-- Edge Functions: ainda precisam virar rotas ou workers
+- Backend: pode usar a VPS em runtime com `DATABASE_URL` + driver Postgres (camada de compatibilidade em `pgPostgresCompat.js`)
+- rotas Express: ainda precisam virar rotas ou workers
 - Proximo foco: smoke local contra a VPS e cutover de URLs no n8n

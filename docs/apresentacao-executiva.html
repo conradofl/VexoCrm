@@ -13,7 +13,7 @@
         <h1>Apresentacao Executiva</h1>
         <p>
           Documento executivo para apresentar o estado atual do CRM, da automacao em n8n
-          e da arquitetura baseada em Supabase.
+          e da arquitetura baseada em Postgres.
         </p>
         <div class="meta">
           <span>Versao 2026.03</span>
@@ -27,16 +27,16 @@
         <p class="lead">
           O projeto deixou de operar com planilhas e passou a trabalhar com banco centralizado,
           automacao estruturada e trilha de auditoria. Hoje a espinha dorsal do sistema e
-          formada por n8n, Supabase e Edge Functions.
+          formada por n8n, Postgres e rotas Express.
         </p>
         <div class="grid grid-3">
           <article class="card kpi">
             <span class="value">5</span>
-            <span class="label">Edge Functions ativas</span>
+            <span class="label">rotas Express ativas</span>
           </article>
           <article class="card kpi">
             <span class="value">1</span>
-            <span class="label">Base central de dados no Supabase</span>
+            <span class="label">Base central de dados no Postgres</span>
           </article>
           <article class="card kpi">
             <span class="value">38</span>
@@ -50,7 +50,7 @@
         <div class="banner">
           <strong>Mensagem principal</strong>
           O VexoCrm ja nao e um processo apoiado por planilhas. Ele opera como uma stack integrada
-          de automacao, banco e CRM, com persistencia centralizada no Supabase e orquestracao no n8n.
+          de automacao, banco e CRM, com persistencia centralizada no Postgres e orquestracao no n8n.
         </div>
       </section>
 
@@ -68,7 +68,7 @@
           <article class="card">
             <strong>Persistencia</strong>
             <ul>
-              <li>Supabase PostgreSQL como base principal</li>
+              <li>Postgres PostgreSQL como base principal</li>
               <li>leads, memoria de conversa, notificacoes e logs</li>
               <li>sem dependencia operacional de planilhas</li>
             </ul>
@@ -107,7 +107,7 @@
             <div class="timeline-index">2</div>
             <div class="timeline-body">
               <h3>Contexto</h3>
-              <p>O workflow consulta a memoria mais recente da conversa no Supabase.</p>
+              <p>O workflow consulta a memoria mais recente da conversa no Postgres.</p>
             </div>
           </div>
           <div class="timeline-item">
@@ -121,7 +121,7 @@
             <div class="timeline-index">4</div>
             <div class="timeline-body">
               <h3>Persistencia</h3>
-              <p>Qualificacao, memoria e rastros de erro sao gravados no Supabase.</p>
+              <p>Qualificacao, memoria e rastros de erro sao gravados no Postgres.</p>
             </div>
           </div>
           <div class="timeline-item">

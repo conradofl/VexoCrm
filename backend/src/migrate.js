@@ -9,7 +9,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = join(__dirname, "..", "supabase", "migrations");
+const MIGRATIONS_DIR = join(__dirname, "..", "postgres", "migrations");
 const MIGRATIONS_TABLE = "public.app_schema_migrations";
 
 async function ensureMigrationsTable(pool) {

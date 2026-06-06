@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Definir os nomes oficiais de campos usados entre frontend, backend, Supabase e Edge Functions, reduzindo drift sem fazer renomeacao global ampla.
+Definir os nomes oficiais de campos usados entre frontend, backend, Postgres e rotas Express, reduzindo drift sem fazer renomeacao global ampla.
 
 Regra desta fase: codigo novo deve usar o campo oficial. Aliases legados podem ser aceitos apenas na borda da API e devem ser normalizados antes de persistir ou consultar.
 

@@ -7,9 +7,9 @@
 
 ## 📋 Sumário Executivo
 
-VexoCRM é um **CRM integrado com automação de leads** via n8n e Supabase Edge Functions. O sistema captura, qualifica e gerencia leads através de WhatsApp, com dashboard operacional e portal por cliente.
+VexoCRM é um **CRM integrado com automação de leads** via n8n e rotas Express com Postgres direto. O sistema captura, qualifica e gerencia leads através de WhatsApp, com dashboard operacional e portal por cliente.
 
-**Arquitetura:** n8n + Supabase + React/Node.js  
+**Arquitetura:** n8n + Postgres + React/Node.js  
 **Deploy:** Backend em EasyPanel (VPS), Frontend em Vercel  
 **Status:** Em produção com múltiplos tenants
 
@@ -20,11 +20,11 @@ VexoCRM é um **CRM integrado com automação de leads** via n8n e Supabase Edge
 ```
 VexoCrm/
 ├── backend/              # API Node.js/Express
-├── frontend/             # App React/Vite + Edge Functions
+├── frontend/             # App React/Vite + rotas Express
 ├── docs/                 # Documentação técnica e executiva
 ├── database.md           # Schema do banco
 ├── SECURITY_*.md         # Documentos de segurança (P0 fixes)
-└── MIGRACAO_SUPABASE_STATUS.md  # Status de migração
+└── MIGRACAO_Postgres_STATUS.md  # Status de migração
 
 ```
 
@@ -33,7 +33,7 @@ VexoCrm/
 ## 🔧 BACKEND
 
 **Localização:** `backend/`  
-**Stack:** Node.js 20+, Express, Supabase JS, Firebase Admin, Docker  
+**Stack:** Node.js 20+, Express, pg, Firebase Admin, Docker  
 **Porta padrão:** 3001  
 **Deploy:** Docker no EasyPanel com auto-deploy
 
@@ -43,7 +43,7 @@ VexoCrm/
 - Autenticar usuários via Firebase
 - Expor consultas de dashboard e leads
 - Centralizar notificações operacionais
-- Integração com Supabase (opcional Postgres direto)
+- Integração com Postgres (opcional Postgres direto)
 
 ### Arquivos críticos
 
@@ -60,13 +60,13 @@ VexoCrm/
 | `src/notificationScope.js` | Contexto de notificações |
 | `src/securityConfig.js` | Configurações de segurança |
 | `src/validators.js` | Validadores de entrada |
-| `src/pgSupabaseCompat.js` | Camada de compatibilidade Postgres/Supabase |
+| `src/pgPostgresCompat.js` | Camada de compatibilidade Postgres/Postgres |
 | `src/repos/` | Repository pattern (abstração de dados) |
 | `.env.example` | Template de variáveis de ambiente |
 | `deploy.sh` | Script de deploy para EasyPanel |
 | `start.sh` | Entrada do container Docker |
-| `scripts/apply-supabase-migrations.sh` | Aplicação de migrations |
-| `supabase/migrations/` | Migrations de schema |
+| `scripts/apply-postgres-migrations.sh` | Aplicação de migrations |
+| `Postgres/migrations/` | Migrations de schema |
 
 ### Endpoints em uso
 
@@ -93,18 +93,13 @@ Existem mas não são primários:
 
 **Banco de dados:**
 - `DATABASE_URL` — Connection string Postgres (ativa driver pg)
-- `DATA_SOURCE=supabase` — Force Supabase JS mesmo com DATABASE_URL
-- `DB_DRIVER` — Força `postgres` ou `supabase` explicitamente
 - `PG_POOL_MAX` — Max conexões no pool (padrão 10)
 - `PG_CONNECTION_TIMEOUT_MS` — Timeout de pool em ms
 
-**Supabase:**
-- `SUPABASE_URL` — URL do projeto
-- `SUPABASE_SERVICE_ROLE_KEY` — Service role key
-- `SUPABASE_ACCESS_TOKEN` — Token CLI para migrations
-- `SUPABASE_DB_PASSWORD` — Senha do banco remoto
-- `SUPABASE_DB_URL` — String de conexão alternativa
-- `RUN_SUPABASE_MIGRATIONS_ON_START` — Habilita auto-migrations no boot
+**Postgres:**
+- `DATABASE_URL` — URL do projeto
+- `DATABASE_URL` — String de conexão alternativa
+- `RUN_POSTGRES_MIGRATIONS_ON_START` — Habilita auto-migrations no boot
 
 **Server:**
 - `PORT` — Porta da API (padrão 3001)
@@ -137,10 +132,10 @@ Ordem de resolução de URL Evolution/n8n:
 ### Migrations no deploy
 
 - Auto deploy EasyPanel usa contexto `backend/` apenas
-- Migrations ficam em `backend/supabase/migrations`
-- Se criar migrations em `frontend/supabase`, sincronize:
+- Migrations ficam em `backend/postgres/migrations`
+- Se criar migrations em `frontend/postgres`, sincronize:
   ```bash
-  node scripts/sync-supabase-assets.mjs
+  node scripts/sync-postgres-assets.mjs
   ```
 
 ### Execução local
@@ -213,8 +208,8 @@ frontend/src/
 │   └── api.ts      # Client HTTP (TanStack Query)
 └── App.tsx         # Router e layout principal
 
-frontend/supabase/
-└── functions/      # Edge Functions (n8n utiliza)
+frontend/postgres/
+└── functions/      # rotas Express (n8n utiliza)
 ```
 
 ### Páginas implementadas
@@ -271,12 +266,12 @@ frontend/supabase/
 - Firebase Auth no login
 - Token validado pelo backend em rotas protegidas
 
-### Supabase Edge Functions
+### rotas Express com Postgres direto
 
-Pasta `frontend/supabase/functions/` está no repositório frontend por conveniência, mas:
+Pasta `frontend/postgres/functions/` está no repositório frontend por conveniência, mas:
 - Não entra no bundle React
 - Pertence ao runtime de automação n8n
-- Documentadas em `docs/supabase-functions.md`
+- Documentadas em `docs/postgres-functions.md`
 
 ### Variáveis de ambiente
 
@@ -310,7 +305,7 @@ Output em `frontend/dist/`
 
 ## 🗄️ BANCO DE DADOS
 
-**Localização:** `database.md` + `backend/supabase/migrations/`
+**Localização:** `database.md` + `backend/postgres/migrations/`
 
 ### Tabelas operacionais
 
@@ -345,7 +340,7 @@ Não mais usadas no schema:
 
 ---
 
-## 🔄 AUTOMAÇÃO (n8n + Supabase)
+## 🔄 AUTOMAÇÃO (n8n + Postgres)
 
 **Localização:** `docs/workflow-n8n.md`
 
@@ -354,7 +349,7 @@ Não mais usadas no schema:
 | Componente | Responsabilidade |
 | --- | --- |
 | `n8n` | Orquestração de workflow, qualificação, envio de respostas |
-| `Supabase Edge Functions` | Funções serverless chamadas pelo n8n |
+| `rotas Express com Postgres direto` | Funções serverless chamadas pelo n8n |
 | `conversation-memory` | Compactação de histórico de conversa |
 | `conversation-memory-latest` | Busca do contexto mais recente |
 | `lead-webhook` | Criar/finalizar leads |
@@ -390,7 +385,7 @@ Não mais usadas no schema:
 | `README.md` | Índice de documentação |
 | `arquitetura-operacional.md` | Arquitetura real em uso |
 | `workflow-n8n.md` | Fluxo de automação n8n |
-| `supabase-functions.md` | Edge Functions disponíveis |
+| `postgres-functions.md` | rotas Express disponíveis |
 | `apresentacao-executiva.md` | Overview executivo do produto |
 
 ### Formatos disponíveis
@@ -439,7 +434,6 @@ Documentos principais geram versões em:
 
 **Setup recomendado:**
 - 1 replica se aplicar migrations no boot
-- Variáveis `RUN_SUPABASE_MIGRATIONS_ON_START`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`
 
 ### Frontend (Vercel)
 
@@ -456,7 +450,7 @@ Documentos principais geram versões em:
 
 ### Backend principais
 - **express** — Framework web
-- **supabase** — Cliente JS (dados + auth)
+- **Postgres** — Cliente JS (dados + auth)
 - **firebase-admin** — Autenticação backend
 - **pg** — Driver Postgres (opcional)
 - **node-fetch** — HTTP client
@@ -475,7 +469,7 @@ Documentos principais geram versões em:
 ## 🔗 Fluxo de integração
 
 ```
-WhatsApp → n8n webhook → Supabase Edge Functions
+WhatsApp → n8n webhook → rotas Express com Postgres direto
                           ↓
                        leads table
                           ↓
@@ -485,7 +479,7 @@ WhatsApp → n8n webhook → Supabase Edge Functions
 ```
 
 ```
-Frontend → Backend (node) → Supabase
+Frontend → Backend (node) → Postgres
                               ↓
                     lead_clients, leads, 
                     notifications, n8n_error_logs
@@ -495,10 +489,10 @@ Frontend → Backend (node) → Supabase
 
 ## 📝 Notas operacionais
 
-- **Origem principal de fluxo:** n8n + Supabase + Edge Functions
+- **Origem principal de fluxo:** n8n + Postgres + rotas Express
 - **Backend não é origin:** Funciona como consolidação e produto
 - **Multi-tenant:** Validação por empresa em cada request
-- **Migrations:** Sincronize se editar em `frontend/supabase`
+- **Migrations:** Sincronize se editar em `frontend/postgres`
 - **Health check:** Sempre valide deploy com `GET /health`
 
 ---

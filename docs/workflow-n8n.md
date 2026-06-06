@@ -9,7 +9,7 @@ Documento baseado no export `Versão Nova (1).json`.
 | Nome do workflow | `Versao Nova` |
 | Total de nos | `38` |
 | Entrada | webhook HTTP |
-| Objetivo | qualificar leads WhatsApp, consolidar memoria e registrar no Supabase |
+| Objetivo | qualificar leads WhatsApp, consolidar memoria e registrar no Postgres |
 
 ## Blocos do workflow
 
@@ -43,7 +43,7 @@ Os grupos visuais do arquivo exportado estao organizados assim:
 14. `Salva Lead` chama `lead-webhook` com `action=finalize`.
 15. `Compactar Conversa` e `Salvar Memoria no Backend` persistem contexto.
 
-## Edge Functions chamadas no workflow
+## rotas Express chamadas no workflow
 
 ### `conversation-memory-latest`
 
@@ -127,13 +127,13 @@ O export tambem mostra nos de Redis para:
 - compactar conversa;
 - limpar estado transitorio.
 
-Esses nos continuam relevantes, mas o armazenamento persistente de longo prazo esta no Supabase.
+Esses nos continuam relevantes, mas o armazenamento persistente de longo prazo esta no Postgres.
 
 ## Conclusao
 
 O workflow `Versao Nova` confirma a arquitetura atual do projeto:
 
 - entrada pelo `n8n`;
-- persistencia via `Supabase Edge Functions`;
+- persistencia via `rotas Express com Postgres direto`;
 - CRM consultando dados consolidados;
 - audio tratado dentro do proprio fluxo operacional.

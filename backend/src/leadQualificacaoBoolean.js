@@ -1,5 +1,5 @@
 // backend/src/leadQualificacaoBoolean.js
-// Coerces lead.qualificacao like Supabase Edge `conversation-memory-latest` (obterQualificacaoComoBooleano).
+// Coerces lead.qualificacao like db Edge `conversation-memory-latest` (obterQualificacaoComoBooleano).
 
 export function parseLeadQualificacaoBoolean(value) {
   if (typeof value === "boolean") return value;
