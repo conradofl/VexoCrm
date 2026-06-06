@@ -35,6 +35,10 @@ import {
   suggestCampaignDelays,
   suggestCampaignSequence,
 } from "../campaign-ai.js";
+import {
+  answerHelpDeskQuestion,
+  getHelpDeskAiStatus,
+} from "../helpdesk-ai.js";
 import { resolveRequiredAuthorizedClientId } from "../tenantScope.js";
 import {
   canAssignManagedAccess,
@@ -285,6 +289,126 @@ export function registerAllDomainRoutes(app) {
     validateN8nInboundBearer,
   } = routeDeps;
 
+  async function checkLeadClientTableStatus(tenantId) {
+    const tableName = leadsTableName(tenantId);
+
+    if (!pgDatabasePool) {
+      return {
+        tableName,
+        exists: false,
+        unavailable: true,
+      };
+    }
+
+    const { rows } = await pgDatabasePool.query(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+        ORDER BY ordinal_position
+      `,
+      [tableName]
+    );
+
+    return {
+      tableName,
+      exists: rows.length > 0,
+      columns: rows.map((row) => row.column_name),
+    };
+  }
+
+  function buildLeadClientIndexName(tableName, suffix) {
+    let hash = 0;
+    for (const char of tableName) {
+      hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    }
+
+    return `idx_${tableName.slice(0, 34)}_${hash.toString(36)}_${suffix}`;
+  }
+
+  async function ensureLeadClientTable(tenantId, schemaType) {
+    if (!pgDatabasePool) {
+      throw new Error("POSTGRES_POOL_UNAVAILABLE");
+    }
+
+    const tableName = leadsTableName(tenantId);
+    const schemaExtraColumns = {
+      outlier: `
+          interesse TEXT,
+          objetivo TEXT,
+          prazo TEXT,
+          melhor_horario TEXT,
+          credito TEXT,
+          parcela TEXT,
+          lance_entrada_fgts TEXT,`,
+      infinie: `
+          interesse TEXT,
+          objetivo TEXT,
+          prazo TEXT,
+          melhor_horario TEXT,
+          tipo_instalacao TEXT,
+          conta_luz_faixa TEXT,`,
+      generico: `
+          interesse TEXT,
+          objetivo TEXT,
+          prazo TEXT,
+          melhor_horario TEXT,`,
+    };
+    const extraColumns = schemaExtraColumns[schemaType] ?? schemaExtraColumns.generico;
+
+    await pgDatabasePool.query(`
+      CREATE TABLE IF NOT EXISTS public."${tableName}" (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
+        telefone TEXT NOT NULL,
+        nome TEXT,
+        tipo_cliente TEXT,
+        faixa_consumo TEXT,
+        cidade TEXT,
+        estado TEXT,
+        conta_energia TEXT,
+        status TEXT,
+        bot_ativo BOOLEAN DEFAULT false,
+        historico TEXT,
+        data_hora TIMESTAMPTZ,
+        qualificacao TEXT,
+        lead_temperature TEXT CHECK (lead_temperature IS NULL OR lead_temperature IN ('QUENTE', 'MORNO', 'FRIO')),
+        status_conversa TEXT CHECK (status_conversa IS NULL OR status_conversa IN ('aguardando_usuario', 'em_atendimento', 'finalizado')),
+        source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
+        source_campaign_name TEXT,
+        lead_source TEXT CHECK (lead_source IS NULL OR lead_source IN ('campanha', 'organico', 'trafego_pago', 'whatsapp_ads', 'indicacao', 'outro')),
+        lead_score NUMERIC(8, 2),
+        potential_contract_value NUMERIC(14, 2),
+        first_contact_at TIMESTAMPTZ,
+        qualified_at TIMESTAMPTZ,
+        closed_at TIMESTAMPTZ,
+        lead_origin TEXT,
+        behavior_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ultima_interacao_bot TIMESTAMPTZ,
+        ultima_interacao_usuario TIMESTAMPTZ,
+        mensagem TEXT,
+        finalizado BOOLEAN DEFAULT false,
+        spin_fase TEXT CHECK (spin_fase IS NULL OR spin_fase IN ('situacao', 'problema', 'implicacao', 'necessidade')),
+        dados JSONB NOT NULL DEFAULT '{}'::jsonb,${extraColumns}
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now(),
+        UNIQUE (client_id, telefone)
+      )
+    `);
+
+    await pgDatabasePool.query(`CREATE INDEX IF NOT EXISTS "${buildLeadClientIndexName(tableName, "cid")}" ON public."${tableName}" (client_id)`);
+    await pgDatabasePool.query(`CREATE INDEX IF NOT EXISTS "${buildLeadClientIndexName(tableName, "phone")}" ON public."${tableName}" (telefone)`);
+    await pgDatabasePool.query(`CREATE INDEX IF NOT EXISTS "${buildLeadClientIndexName(tableName, "created")}" ON public."${tableName}" (created_at DESC)`);
+
+    const status = await checkLeadClientTableStatus(tenantId);
+    if (!status.exists) {
+      throw new Error("LEAD_CLIENT_TABLE_NOT_CREATED");
+    }
+
+    return status;
+  }
+
   async function appendLeadMessage({
     clientId,
     phone,
@@ -492,6 +616,90 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "LEAD_CLIENTS_QUERY_FAILED", "Failed to query lead clients");
     }
   });
+
+  app.get("/api/helpdesk/status", requireFirebaseAuth, (_req, res) => {
+    res.json(getHelpDeskAiStatus());
+  });
+
+  app.post("/api/helpdesk/chat", requireFirebaseAuth, async (req, res) => {
+    const message = normalizeString(req.body?.message);
+
+    if (!message) {
+      sendError(res, 400, "INVALID_BODY", "Help desk message is required");
+      return;
+    }
+
+    try {
+      const result = await answerHelpDeskQuestion({
+        message,
+        history: req.body?.history,
+        context: {
+          pageTitle: normalizeString(req.body?.context?.pageTitle),
+          currentPath: normalizeString(req.body?.context?.currentPath),
+          selectedClientId: normalizeString(req.body?.context?.selectedClientId),
+          selectedClientName: normalizeString(req.body?.context?.selectedClientName),
+          access: {
+            role: req.authAccess?.role || null,
+            preset: req.authAccess?.accessPreset || null,
+            scopeMode: req.authAccess?.scopeMode || null,
+            internalPages: req.authAccess?.internalPages || [],
+            allowedViews: req.authAccess?.allowedViews || [],
+            permissions: req.authAccess?.permissions || [],
+          },
+        },
+      });
+
+      res.json({ item: result });
+    } catch (error) {
+      if (error instanceof Error && error.message === "EMPTY_HELPDESK_MESSAGE") {
+        sendError(res, 400, "INVALID_BODY", "Help desk message is required");
+        return;
+      }
+
+      if (error instanceof Error && error.message === "GROQ_DISABLED") {
+        sendError(res, 503, "HELPDESK_AI_DISABLED", "Help desk AI is not configured");
+        return;
+      }
+
+      console.error("helpdesk chat error:", error);
+      sendError(res, 500, "HELPDESK_CHAT_FAILED", "Failed to answer help desk question");
+    }
+  });
+
+  app.get("/api/lead-clients/:tenantId/table-status", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const tenantId = normalizeTenantKey(req.params.tenantId);
+    if (!tenantId) {
+      sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+      return;
+    }
+
+    try {
+      const { data: tenant, error: tenantError } = await supabase
+        .from("leads_clients")
+        .select("id, name")
+        .eq("id", tenantId)
+        .maybeSingle();
+
+      if (tenantError) throw tenantError;
+      if (!tenant) {
+        sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
+        return;
+      }
+
+      const tableStatus = await checkLeadClientTableStatus(tenantId);
+      res.json({
+        item: {
+          tenant,
+          table: tableStatus,
+        },
+      });
+    } catch (error) {
+      console.error("lead client table status error:", error);
+      sendError(res, 500, "LEAD_CLIENT_TABLE_STATUS_FAILED", "Failed to verify tenant leads table");
+    }
+  });
   
   app.post("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
     if (!ensureDb(res)) return;
@@ -557,76 +765,14 @@ export function registerAllDomainRoutes(app) {
         throw error;
       }
 
-      // Auto-criar tabela de leads para o novo tenant
-      if (pgDatabasePool) {
-        const tableName = leadsTableName(tenantId);
-        const schemaExtraColumns = {
-          outlier: `
-              interesse TEXT,
-              objetivo TEXT,
-              prazo TEXT,
-              melhor_horario TEXT,
-              credito TEXT,
-              parcela TEXT,
-              lance_entrada_fgts TEXT,`,
-          infinie: `
-              interesse TEXT,
-              objetivo TEXT,
-              prazo TEXT,
-              melhor_horario TEXT,
-              tipo_instalacao TEXT,
-              conta_luz_faixa TEXT,`,
-          generico: `
-              interesse TEXT,
-              objetivo TEXT,
-              prazo TEXT,
-              melhor_horario TEXT,`,
-        };
-        const extraColumns = schemaExtraColumns[schemaType] ?? schemaExtraColumns.outlier;
-        try {
-          await pgDatabasePool.query(`
-            CREATE TABLE IF NOT EXISTS public."${tableName}" (
-              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-              client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
-              telefone TEXT NOT NULL,
-              nome TEXT,
-              tipo_cliente TEXT,
-              faixa_consumo TEXT,
-              cidade TEXT,
-              estado TEXT,
-              conta_energia TEXT,
-              status TEXT,
-              bot_ativo BOOLEAN DEFAULT false,
-              historico TEXT,
-              data_hora TIMESTAMPTZ,
-              qualificacao TEXT,
-              lead_temperature TEXT CHECK (lead_temperature IS NULL OR lead_temperature IN ('QUENTE', 'MORNO', 'FRIO')),
-              status_conversa TEXT CHECK (status_conversa IS NULL OR status_conversa IN ('aguardando_usuario', 'em_atendimento', 'finalizado')),
-              source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
-              source_campaign_name TEXT,
-              lead_source TEXT CHECK (lead_source IS NULL OR lead_source IN ('campanha', 'organico', 'trafego_pago', 'whatsapp_ads', 'indicacao', 'outro')),
-              lead_score NUMERIC(8, 2),
-              potential_contract_value NUMERIC(14, 2),
-              first_contact_at TIMESTAMPTZ,
-              qualified_at TIMESTAMPTZ,
-              closed_at TIMESTAMPTZ,
-              lead_origin TEXT,
-              behavior_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
-              ultima_interacao_bot TIMESTAMPTZ,
-              ultima_interacao_usuario TIMESTAMPTZ,
-              mensagem TEXT,
-              finalizado BOOLEAN DEFAULT false,
-              spin_fase TEXT CHECK (spin_fase IS NULL OR spin_fase IN ('situacao', 'problema', 'implicacao', 'necessidade')),
-              dados JSONB NOT NULL DEFAULT '{}'::jsonb,${extraColumns}
-              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-              updated_at TIMESTAMPTZ DEFAULT now(),
-              UNIQUE (client_id, telefone)
-            )
-          `);
-          console.info(`[tenant-create] Created leads table: ${tableName} (schema: ${schemaType})`);
-        } catch (ddlErr) {
-          console.error(`[tenant-create] Failed to create leads table ${tableName}:`, ddlErr.message);
-        }
+      let tableStatus;
+      try {
+        tableStatus = await ensureLeadClientTable(tenantId, schemaType);
+        console.info(`[tenant-create] Created leads table: ${tableStatus.tableName} (schema: ${schemaType})`);
+      } catch (ddlErr) {
+        await supabase.from("leads_clients").delete().eq("id", tenantId);
+        console.error(`[tenant-create] Failed to create leads table for ${tenantId}:`, ddlErr);
+        throw ddlErr;
       }
 
       let savedSettings = null;
@@ -641,6 +787,7 @@ export function registerAllDomainRoutes(app) {
       res.status(201).json({
         item: {
           ...data,
+          leads_table: tableStatus,
           n8n_settings: maskN8nSettings(savedSettings),
           n8n_onboarding_status: getN8nOnboardingStatus(savedSettings),
         },

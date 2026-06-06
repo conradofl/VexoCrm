@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -28,6 +28,8 @@ import {
   useDeleteLeadClient,
   useLeadClients,
   useUpdateLeadClientN8nSettings,
+  useVerifyLeadClientTable,
+  type LeadClientTableStatus,
 } from "@/hooks/useLeadClients";
 import { createTenantSchema } from "@/lib/validationSchemas";
 
@@ -59,6 +61,7 @@ export default function Tenants() {
   const createTenant = useCreateLeadClient();
   const deleteTenant = useDeleteLeadClient();
   const updateN8nSettings = useUpdateLeadClientN8nSettings();
+  const verifyTenantTable = useVerifyLeadClientTable();
   const { hasPermission, isAdminUser } = useAuth();
   const [name, setName] = useState("");
   const [tenantId, setTenantId] = useState("");
@@ -70,6 +73,7 @@ export default function Tenants() {
   const [chatbotModel, setChatbotModel] = useState<"outlier" | "infinie" | "generico">("outlier");
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
+  const [tableStatuses, setTableStatuses] = useState<Record<string, LeadClientTableStatus>>({});
   const [n8nDrafts, setN8nDrafts] = useState<
     Record<
       string,
@@ -141,7 +145,7 @@ export default function Tenants() {
             inboundBearerToken.trim()
         );
 
-      await createTenant.mutateAsync({
+      const createdTenant = await createTenant.mutateAsync({
         ...payload,
         chatbotModel,
         ...(hasN8nSettings
@@ -156,9 +160,18 @@ export default function Tenants() {
           : {}),
       });
 
+      if (createdTenant.leads_table) {
+        setTableStatuses((current) => ({
+          ...current,
+          [createdTenant.id]: createdTenant.leads_table!,
+        }));
+      }
+
       toast({
         title: "Tenant criado",
-        description: `A empresa ${payload.name} ja pode ser vinculada aos usuarios do CRM.`,
+        description: createdTenant.leads_table?.exists
+          ? `Tabela ${createdTenant.leads_table.tableName} criada e empresa pronta para uso.`
+          : `A empresa ${payload.name} ja pode ser vinculada aos usuarios do CRM.`,
       });
 
       setName("");
@@ -290,6 +303,32 @@ export default function Tenants() {
           deleteError instanceof Error
             ? deleteError.message
             : "O tenant nao pode ser removido agora.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleVerifyTenantTable = async (tenant: LeadClient) => {
+    try {
+      const status = await verifyTenantTable.mutateAsync(tenant.id);
+      setTableStatuses((current) => ({
+        ...current,
+        [tenant.id]: status,
+      }));
+      toast({
+        title: status.exists ? "Tabela encontrada" : "Tabela nao encontrada",
+        description: status.exists
+          ? `${status.tableName} existe com ${status.columns?.length || 0} colunas.`
+          : `A tabela ${status.tableName} nao existe no banco.`,
+        variant: status.exists ? "default" : "destructive",
+      });
+    } catch (statusError) {
+      toast({
+        title: "Falha ao verificar tabela",
+        description:
+          statusError instanceof Error
+            ? statusError.message
+            : "Nao foi possivel consultar o status da tabela.",
         variant: "destructive",
       });
     }
@@ -526,7 +565,11 @@ export default function Tenants() {
                 />
               ) : (
                 <div className="grid gap-3">
-                  {filteredTenants.map((tenant) => (
+                  {filteredTenants.map((tenant) => {
+                    const tableStatus = tableStatuses[tenant.id] || tenant.leads_table;
+                    const expectedTableName = tableStatus?.tableName || `leads_${tenant.id.replace(/-/g, "_")}`;
+
+                    return (
                     <div
                       key={tenant.id}
                       className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_18px_40px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03]"
@@ -549,6 +592,40 @@ export default function Tenants() {
                         <div className="rounded-2xl border border-slate-200/80 bg-slate-50/90 px-3 py-2 text-right text-xs text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
                           <p className="font-medium text-foreground">Rota base</p>
                           <p className="mt-1 font-mono">/clientes/{tenant.id}/dashboard</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <Database className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground">Tabela dinamica de leads</p>
+                            <p className="truncate font-mono text-xs text-muted-foreground">{expectedTableName}</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            className={
+                              tableStatus?.exists
+                                ? "border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                                : "border border-amber-400/25 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                            }
+                          >
+                            {tableStatus?.exists ? "Tabela OK" : "Nao verificada"}
+                          </Badge>
+                          {tableStatus?.exists ? (
+                            <Badge className="border border-slate-300/80 bg-white/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
+                              {tableStatus.columns?.length || 0} colunas
+                            </Badge>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={verifyTenantTable.isPending}
+                            onClick={() => void handleVerifyTenantTable(tenant)}
+                          >
+                            {verifyTenantTable.isPending ? "Verificando..." : "Verificar"}
+                          </Button>
                         </div>
                       </div>
                       {canManageN8n ? (
@@ -670,7 +747,8 @@ export default function Tenants() {
                         </div>
                       ) : null}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Building2, ChevronDown, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAuth } from "@/contexts/AuthContext";
+import { HelpDeskWidget } from "@/components/HelpDeskWidget";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -104,6 +105,7 @@ export function PageShell({
 
           <div className="flex items-center gap-3">
             {globalClientSelector}
+            <HelpDeskWidget pageTitle={title} />
             <button
               type="button"
               onClick={() => mounted && setTheme(isDark ? "light" : "dark")}

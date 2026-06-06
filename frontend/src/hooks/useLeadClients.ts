@@ -6,8 +6,16 @@ export interface LeadClient {
   id: string;
   name: string;
   created_at?: string;
+  leads_table?: LeadClientTableStatus;
   n8n_settings?: LeadClientN8nSettingsSummary;
   n8n_onboarding_status?: string;
+}
+
+export interface LeadClientTableStatus {
+  tableName: string;
+  exists: boolean;
+  unavailable?: boolean;
+  columns?: string[];
 }
 
 export interface CreateLeadClientPayload {
@@ -190,6 +198,37 @@ export function useUpdateLeadClientN8nSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lead-clients"] });
+    },
+  });
+}
+
+export function useVerifyLeadClientTable() {
+  const { getIdToken } = useAuth();
+
+  return useMutation({
+    mutationFn: async (tenantId: string): Promise<LeadClientTableStatus> => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuario nao autenticado.");
+      }
+
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}/table-status`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Nao foi possivel verificar a tabela"));
+      }
+
+      const payload = await readApiJson<{ item?: { table?: LeadClientTableStatus } }>(res, "lead_client_table_status");
+      if (!payload.item?.table) {
+        throw new Error("Resposta sem status da tabela.");
+      }
+
+      return payload.item.table;
     },
   });
 }
