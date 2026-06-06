@@ -40,6 +40,12 @@ function SuccessView({ result, onReset }: { result: OnboardingResult; onReset: (
           <p className="text-sm text-muted-foreground">
             {result.templates_created} template{result.templates_created !== 1 ? "s" : ""} criado{result.templates_created !== 1 ? "s" : ""}
           </p>
+          {result.client_id && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Tenant {result.client_id}
+              {result.leads_table?.tableName ? ` · ${result.leads_table.tableName}` : ""}
+            </p>
+          )}
         </CardContent>
       </Card>
 

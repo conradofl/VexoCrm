@@ -28,6 +28,14 @@ export interface OnboardingPayload {
 export interface OnboardingResult {
   success: true;
   company_id: string;
+  client_id?: string;
+  client_name?: string;
+  chatbot_model?: string;
+  leads_table?: {
+    tableName: string;
+    exists: boolean;
+    columns?: string[];
+  };
   campaign_id: string;
   webhook_url: string;
   webhook_secret: string;

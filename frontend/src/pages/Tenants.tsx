@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -32,6 +32,30 @@ import {
   type LeadClientTableStatus,
 } from "@/hooks/useLeadClients";
 import { createTenantSchema } from "@/lib/validationSchemas";
+
+const CHATBOT_MODEL_OPTIONS = [
+  {
+    value: "outlier",
+    title: "Consorcio / credito",
+    description: "Campos para credito, parcela, FGTS, lance e objetivo de compra.",
+  },
+  {
+    value: "infinie",
+    title: "Energia solar",
+    description: "Campos para instalacao, conta de luz, localidade e prazo.",
+  },
+  {
+    value: "generico",
+    title: "Modelo generico",
+    description: "Campos comuns para operacoes que ainda serao modeladas.",
+  },
+] as const;
+
+const CREATION_STEPS = [
+  "Cria o tenant em leads_clients",
+  "Cria a tabela dinamica de leads",
+  "Libera dashboard, planilhas e portal",
+];
 
 function buildTenantKey(value: string) {
   return value
@@ -87,6 +111,9 @@ export default function Tenants() {
   >({});
   const canManageTenants = hasPermission("tenants.manage");
   const canManageN8n = isAdminUser;
+  const tablePreviewName = tenantId ? `leads_${tenantId.replace(/-/g, "_")}` : "leads_tenant_id";
+  const selectedModel = CHATBOT_MODEL_OPTIONS.find((option) => option.value === chatbotModel) || CHATBOT_MODEL_OPTIONS[0];
+  const canSubmitTenant = canManageTenants && Boolean(name.trim()) && Boolean(tenantId.trim()) && !createTenant.isPending;
 
   useEffect(() => {
     if (!tenantIdEdited) {
@@ -359,25 +386,49 @@ export default function Tenants() {
           <CardHeader className="space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1.5">
-                <CardTitle className="text-xl">Novo tenant</CardTitle>
+                <CardTitle className="text-xl">Criar empresa</CardTitle>
                 <CardDescription>
-                  Cada empresa criada aqui vira um `clientId` valido para dashboard, leads,
-                  planilhas, WhatsApp e portal do cliente.
+                  Cadastre o cliente uma vez. O CRM cria o tenant, a tabela de leads e a rota do portal automaticamente.
                 </CardDescription>
               </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
-                <Building2 className="h-5 w-5" />
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
+                <Wand2 className="h-5 w-5" />
               </div>
             </div>
-            <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-200" />
-                <div className="space-y-1">
-                  <p className="font-medium text-foreground">Fluxo recomendado</p>
-                  <p>
-                    1. Crie o tenant. 2. Vincule usuarios em Usuarios. 3. Importe planilhas e
-                    inicie a operacao.
-                  </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {CREATION_STEPS.map((step, index) => (
+                <div
+                  key={step}
+                  className="rounded-xl border border-slate-200/80 bg-white/78 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
+                >
+                  <span className="mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/10 text-[11px] font-bold text-cyan-700 dark:text-cyan-200">
+                    {index + 1}
+                  </span>
+                  {step}
+                </div>
+              ))}
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="mb-3 flex items-center gap-2">
+                <Database className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
+                <p className="text-sm font-medium text-foreground">Preview da criacao</p>
+              </div>
+              <div className="grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <p className="text-muted-foreground">Tenant ID</p>
+                  <p className="truncate font-mono text-foreground">{tenantId || "tenant-id"}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Tabela de leads</p>
+                  <p className="truncate font-mono text-foreground">{tablePreviewName}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <p className="text-muted-foreground">Portal</p>
+                  <p className="truncate font-mono text-foreground">/clientes/{tenantId || "tenant-id"}/dashboard</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <p className="text-muted-foreground">Modelo inicial</p>
+                  <p className="truncate text-foreground">{selectedModel.title}</p>
                 </div>
               </div>
             </div>
@@ -492,10 +543,10 @@ export default function Tenants() {
               <Button
                 type="submit"
                 className="w-full justify-center"
-                disabled={!canManageTenants || createTenant.isPending}
+                disabled={!canSubmitTenant}
               >
                 <Plus className="h-4 w-4" />
-                {createTenant.isPending ? "Criando tenant..." : "Criar empresa"}
+                {createTenant.isPending ? "Criando tenant e tabela..." : "Criar empresa e tabela"}
               </Button>
             </form>
           </CardContent>
