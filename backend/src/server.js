@@ -1525,6 +1525,116 @@ function maskN8nSettings(row) {
   };
 }
 
+function maskEvolutionInstance(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    client_id: row.client_id,
+    name: row.name || "Evolution",
+    dispatch_webhook_url: row.dispatch_webhook_url || null,
+    has_dispatch_webhook_token: !!row.dispatch_webhook_token,
+    inbound_bearer_token_label: row.inbound_bearer_token ? "definido" : null,
+    active: row.active !== false,
+    is_default: row.is_default === true,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    updated_by_email: row.updated_by_email || null,
+  };
+}
+
+function mergeEvolutionInstanceIntoSettings(settings, instance) {
+  if (!instance) return settings || null;
+  return {
+    ...(settings || {}),
+    client_id: instance.client_id,
+    dispatch_webhook_url: instance.dispatch_webhook_url || null,
+    dispatch_webhook_token: instance.dispatch_webhook_token || null,
+    inbound_bearer_token: instance.inbound_bearer_token || settings?.inbound_bearer_token || null,
+    active: instance.active !== false,
+    updated_at: instance.updated_at || settings?.updated_at || null,
+    updated_by_email: instance.updated_by_email || settings?.updated_by_email || null,
+    evolution_instance_id: instance.id,
+    evolution_instance_name: instance.name || "Evolution",
+  };
+}
+
+async function ensureLeadClientEvolutionInstancesTable() {
+  if (!pgDatabasePool) return false;
+
+  await pgDatabasePool.query(`
+    CREATE TABLE IF NOT EXISTS public.lead_client_evolution_instances (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT 'Evolution',
+      dispatch_webhook_url TEXT NOT NULL,
+      dispatch_webhook_token TEXT,
+      inbound_bearer_token TEXT,
+      active BOOLEAN NOT NULL DEFAULT true,
+      is_default BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by_uid TEXT,
+      updated_by_email TEXT
+    )
+  `);
+  await pgDatabasePool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_client_evolution_default
+      ON public.lead_client_evolution_instances (client_id)
+      WHERE is_default = true
+  `);
+  await pgDatabasePool.query(`
+    CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_client
+      ON public.lead_client_evolution_instances (client_id, active)
+  `);
+
+  return true;
+}
+
+async function getLeadClientEvolutionInstances(clientId) {
+  if (!clientId || !(await ensureLeadClientEvolutionInstancesTable())) return [];
+
+  const { rows } = await pgDatabasePool.query(
+    `
+      SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
+             inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+      FROM public.lead_client_evolution_instances
+      WHERE client_id = $1
+      ORDER BY is_default DESC, active DESC, created_at ASC
+    `,
+    [clientId]
+  );
+
+  return rows;
+}
+
+async function getLeadClientEvolutionInstancesMap(clientIds) {
+  if (!clientIds?.length || !(await ensureLeadClientEvolutionInstancesTable())) return {};
+
+  const { rows } = await pgDatabasePool.query(
+    `
+      SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
+             inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+      FROM public.lead_client_evolution_instances
+      WHERE client_id = ANY($1::text[])
+      ORDER BY is_default DESC, active DESC, created_at ASC
+    `,
+    [clientIds]
+  );
+
+  return rows.reduce((acc, row) => {
+    if (!acc[row.client_id]) acc[row.client_id] = [];
+    acc[row.client_id].push(row);
+    return acc;
+  }, {});
+}
+
+async function getDefaultLeadClientEvolutionInstance(clientId) {
+  const instances = await getLeadClientEvolutionInstances(clientId);
+  return instances.find((instance) => instance.active !== false && instance.is_default) ||
+    instances.find((instance) => instance.active !== false) ||
+    null;
+}
+
 function getN8nOnboardingStatus(settings) {
   if (!settings || settings.active === false) return "pendente";
   if (!settings.dispatch_webhook_url) return "sem url evolution";
@@ -1561,10 +1671,12 @@ async function getLeadClientN8nSettingsStatus(clientId) {
     throw error;
   }
 
+  const defaultEvolutionInstance = await getDefaultLeadClientEvolutionInstance(clientId);
+
   return {
-    settings: data || null,
+    settings: mergeEvolutionInstanceIntoSettings(data || null, defaultEvolutionInstance),
     schemaAvailable: true,
-    source: data ? "client_settings" : "missing",
+    source: defaultEvolutionInstance ? "evolution_instance_default" : data ? "client_settings" : "missing",
   };
 }
 
@@ -1588,7 +1700,26 @@ async function getLeadClientN8nSettingsMap(clientIds) {
     throw error;
   }
 
-  return Object.fromEntries((data || []).map((row) => [row.client_id, row]));
+  const settingsMap = Object.fromEntries((data || []).map((row) => [row.client_id, row]));
+  const evolutionInstancesMap = await getLeadClientEvolutionInstancesMap(clientIds);
+
+  for (const clientId of clientIds) {
+    const instances = evolutionInstancesMap[clientId] || [];
+    const defaultInstance =
+      instances.find((instance) => instance.active !== false && instance.is_default) ||
+      instances.find((instance) => instance.active !== false) ||
+      null;
+    const mergedSettings = mergeEvolutionInstanceIntoSettings(settingsMap[clientId] || null, defaultInstance);
+
+    if (mergedSettings || settingsMap[clientId] || instances.length) {
+      settingsMap[clientId] = {
+        ...(mergedSettings || settingsMap[clientId] || {}),
+        evolution_instances: instances.map(maskEvolutionInstance),
+      };
+    }
+  }
+
+  return settingsMap;
 }
 
 function buildN8nSettingsPayload(input, authAccess, existing = null) {
@@ -1669,6 +1800,303 @@ async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing
 
   if (error) throw error;
   return data;
+}
+
+async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, existing = null) {
+  if (!(await ensureLeadClientEvolutionInstancesTable())) {
+    throw new Error("EVOLUTION_INSTANCES_UNAVAILABLE");
+  }
+
+  const body = input && typeof input === "object" ? input : {};
+  const name = normalizeString(body.name) || existing?.name || "Evolution";
+  const rawUrl = Object.prototype.hasOwnProperty.call(body, "dispatchWebhookUrl")
+    ? body.dispatchWebhookUrl
+    : existing?.dispatch_webhook_url;
+  const dispatchWebhookUrl = normalizeHttpUrl(rawUrl);
+
+  if (!dispatchWebhookUrl) {
+    throw new Error("INVALID_DISPATCH_WEBHOOK_URL");
+  }
+
+  const dispatchTokenInput = normalizeString(body.dispatchWebhookToken);
+  const inboundTokenInput = normalizeString(body.inboundBearerToken);
+  const isDefault = body.isDefault === true || existing?.is_default === true;
+  const active = Object.prototype.hasOwnProperty.call(body, "active")
+    ? body.active !== false
+    : existing?.active !== false;
+
+  const payload = {
+    client_id: clientId,
+    name,
+    dispatch_webhook_url: dispatchWebhookUrl,
+    dispatch_webhook_token:
+      Object.prototype.hasOwnProperty.call(body, "dispatchWebhookToken")
+        ? body.dispatchWebhookToken === null
+          ? null
+          : isMaskedSecretPlaceholder(dispatchTokenInput)
+            ? existing?.dispatch_webhook_token || null
+            : dispatchTokenInput || existing?.dispatch_webhook_token || null
+        : existing?.dispatch_webhook_token || null,
+    inbound_bearer_token:
+      Object.prototype.hasOwnProperty.call(body, "inboundBearerToken")
+        ? body.inboundBearerToken === null
+          ? null
+          : isMaskedSecretPlaceholder(inboundTokenInput)
+            ? existing?.inbound_bearer_token || null
+            : inboundTokenInput || existing?.inbound_bearer_token || null
+        : existing?.inbound_bearer_token || null,
+    active,
+    is_default: isDefault,
+    updated_by_uid: authAccess?.uid || null,
+    updated_by_email: authAccess?.email || null,
+  };
+
+  const client = await pgDatabasePool.connect();
+  try {
+    await client.query("BEGIN");
+
+    if (payload.is_default) {
+      await client.query(
+        `UPDATE public.lead_client_evolution_instances SET is_default = false, updated_at = now() WHERE client_id = $1`,
+        [clientId]
+      );
+    }
+
+    let result;
+    if (existing?.id) {
+      result = await client.query(
+        `
+          UPDATE public.lead_client_evolution_instances
+          SET name = $1,
+              dispatch_webhook_url = $2,
+              dispatch_webhook_token = $3,
+              inbound_bearer_token = $4,
+              active = $5,
+              is_default = $6,
+              updated_at = now(),
+              updated_by_uid = $7,
+              updated_by_email = $8
+          WHERE id = $9 AND client_id = $10
+          RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
+                    inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+        `,
+        [
+          payload.name,
+          payload.dispatch_webhook_url,
+          payload.dispatch_webhook_token,
+          payload.inbound_bearer_token,
+          payload.active,
+          payload.is_default,
+          payload.updated_by_uid,
+          payload.updated_by_email,
+          existing.id,
+          clientId,
+        ]
+      );
+    } else {
+      const existingInstances = await client.query(
+        `SELECT 1 FROM public.lead_client_evolution_instances WHERE client_id = $1 LIMIT 1`,
+        [clientId]
+      );
+      const shouldDefault = payload.is_default || existingInstances.rowCount === 0;
+
+      if (shouldDefault && !payload.is_default) {
+        await client.query(
+          `UPDATE public.lead_client_evolution_instances SET is_default = false, updated_at = now() WHERE client_id = $1`,
+          [clientId]
+        );
+      }
+
+      result = await client.query(
+        `
+          INSERT INTO public.lead_client_evolution_instances
+            (client_id, name, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token,
+             active, is_default, updated_by_uid, updated_by_email)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
+                    inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+        `,
+        [
+          clientId,
+          payload.name,
+          payload.dispatch_webhook_url,
+          payload.dispatch_webhook_token,
+          payload.inbound_bearer_token,
+          payload.active,
+          shouldDefault,
+          payload.updated_by_uid,
+          payload.updated_by_email,
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+    return result.rows[0] || null;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function getEvolutionAdminConfig() {
+  const baseUrl = normalizeString(process.env.EVOLUTION_API_URL).replace(/\/+$/, "");
+  const apiKey = normalizeString(process.env.EVOLUTION_API_KEY);
+
+  return {
+    baseUrl,
+    apiKey,
+    configured: Boolean(baseUrl && apiKey),
+  };
+}
+
+function buildEvolutionManagedInstanceName(clientId, inputName) {
+  const source = normalizeString(inputName) || clientId || "vexo";
+  const normalized = normalizeTenantKey(source) || normalizeTenantKey(clientId) || `vexo-${randomUUID().slice(0, 8)}`;
+  const withClientPrefix = normalized.startsWith(`${clientId}-`) ? normalized : `${clientId}-${normalized}`;
+  return withClientPrefix.slice(0, 64).replace(/-+$/g, "");
+}
+
+function buildEvolutionDispatchWebhookUrl(baseUrl, instanceName) {
+  return `${baseUrl}/message/sendText/${encodeURIComponent(instanceName)}`;
+}
+
+function maskEvolutionProvisionResponse(data) {
+  if (!data || typeof data !== "object") return null;
+
+  const instance = data.instance && typeof data.instance === "object" ? data.instance : {};
+  const qrcode = data.qrcode && typeof data.qrcode === "object" ? data.qrcode : null;
+
+  return {
+    instanceName:
+      normalizeString(data.instanceName) ||
+      normalizeString(data.instance?.instanceName) ||
+      normalizeString(instance.instanceName) ||
+      null,
+    status: normalizeString(data.status) || normalizeString(instance.status) || null,
+    qrcode: qrcode
+      ? {
+          code: normalizeString(qrcode.code) || null,
+          base64: normalizeString(qrcode.base64) || null,
+        }
+      : null,
+  };
+}
+
+async function provisionLeadClientEvolutionInstance(clientId, input, authAccess) {
+  const config = getEvolutionAdminConfig();
+  if (!config.configured) {
+    const error = new Error("EVOLUTION_ADMIN_UNCONFIGURED");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const body = input && typeof input === "object" ? input : {};
+  const displayName = normalizeString(body.name) || "Evolution";
+  const instanceName = buildEvolutionManagedInstanceName(clientId, body.instanceName || displayName);
+  const instanceToken =
+    normalizeString(body.dispatchWebhookToken) ||
+    `vexo_${randomUUID().replace(/-/g, "")}`;
+  const createPayload = {
+    instanceName,
+    integration: normalizeString(body.integration) || "WHATSAPP-BAILEYS",
+    token: instanceToken,
+    qrcode: body.qrcode !== false,
+  };
+
+  const response = await fetch(`${config.baseUrl}/instance/create`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: config.apiKey,
+    },
+    body: JSON.stringify(createPayload),
+  });
+
+  let responsePayload = null;
+  const responseText = await response.text();
+  if (responseText) {
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch {
+      responsePayload = { message: responseText.slice(0, 500) };
+    }
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      normalizeString(responsePayload?.message) ||
+      normalizeString(responsePayload?.error) ||
+      `Evolution API HTTP ${response.status}`
+    );
+    error.statusCode = response.status;
+    error.code = "EVOLUTION_INSTANCE_PROVISION_FAILED";
+    throw error;
+  }
+
+  const saved = await upsertLeadClientEvolutionInstance(
+    clientId,
+    {
+      name: displayName,
+      dispatchWebhookUrl: buildEvolutionDispatchWebhookUrl(config.baseUrl, instanceName),
+      dispatchWebhookToken: instanceToken,
+      active: body.active !== false,
+      isDefault: body.isDefault === true,
+    },
+    authAccess,
+    null
+  );
+
+  return {
+    instance: saved,
+    evolution: {
+      ...maskEvolutionProvisionResponse(responsePayload),
+      instanceName,
+    },
+  };
+}
+
+async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
+  if (!(await ensureLeadClientEvolutionInstancesTable())) return null;
+
+  const client = await pgDatabasePool.connect();
+  try {
+    await client.query("BEGIN");
+    const removed = await client.query(
+      `
+        DELETE FROM public.lead_client_evolution_instances
+        WHERE id = $1 AND client_id = $2
+        RETURNING id, client_id, is_default
+      `,
+      [instanceId, clientId]
+    );
+
+    if (removed.rows[0]?.is_default) {
+      await client.query(
+        `
+          UPDATE public.lead_client_evolution_instances
+          SET is_default = true, updated_at = now()
+          WHERE id = (
+            SELECT id
+            FROM public.lead_client_evolution_instances
+            WHERE client_id = $1 AND active = true
+            ORDER BY created_at ASC
+            LIMIT 1
+          )
+        `,
+        [clientId]
+      );
+    }
+
+    await client.query("COMMIT");
+    return removed.rows[0] || null;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function getRequestBearerToken(req) {
@@ -2170,6 +2598,50 @@ async function checkEvolutionInstanceHealth({ webhookUrl, webhookToken, context 
 }
 
 async function resolveCampaignDispatchSettings(clientId, campaign = {}) {
+  const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+  const selectedEvolutionInstanceId = normalizeString(analyticsMeta.dispatchOptions?.evolutionInstanceId);
+
+  if (selectedEvolutionInstanceId) {
+    const instances = await getLeadClientEvolutionInstances(clientId);
+    const selectedInstance = instances.find((instance) => instance.id === selectedEvolutionInstanceId) || null;
+
+    if (!selectedInstance) {
+      return {
+        webhookUrl: null,
+        webhookToken: null,
+        source: "evolution_instance_not_found",
+        schemaAvailable: true,
+        selectedEvolutionInstanceId,
+        usingCachedCampaignSettings: false,
+        tenantSettingsSource: "evolution_instance_not_found",
+      };
+    }
+
+    if (selectedInstance.active === false) {
+      return {
+        webhookUrl: null,
+        webhookToken: null,
+        source: "evolution_instance_inactive",
+        schemaAvailable: true,
+        selectedEvolutionInstanceId,
+        selectedEvolutionInstanceName: selectedInstance.name || "Evolution",
+        usingCachedCampaignSettings: false,
+        tenantSettingsSource: "evolution_instance_inactive",
+      };
+    }
+
+    return {
+      webhookUrl: normalizeString(selectedInstance.dispatch_webhook_url),
+      webhookToken: normalizeString(selectedInstance.dispatch_webhook_token) || null,
+      source: "campaign_evolution_instance",
+      schemaAvailable: true,
+      selectedEvolutionInstanceId,
+      selectedEvolutionInstanceName: selectedInstance.name || "Evolution",
+      usingCachedCampaignSettings: false,
+      tenantSettingsSource: "campaign_evolution_instance",
+    };
+  }
+
   const tenantDispatch = await resolveDispatchWebhookSettings(clientId);
   const tenantWebhookUrl = normalizeString(tenantDispatch.webhookUrl);
   const tenantWebhookToken = normalizeString(tenantDispatch.webhookToken) || null;
@@ -6436,6 +6908,7 @@ Object.assign(routeDeps, {
   getLeadClientN8nSettings,
   getLeadClientN8nSettingsMap,
   getLeadClientN8nSettingsStatus,
+  getLeadClientEvolutionInstances,
   getLeadReferenceDate,
   getLeadWebhookBearerSecret,
   getN8nOnboardingStatus,
@@ -6482,6 +6955,7 @@ Object.assign(routeDeps, {
   markCampaignDispatchFailed,
   markCampaignLeadWaitingReply,
   maskN8nSettings,
+  maskEvolutionInstance,
   maskPhoneForLog,
   matchesNotificationClientScope,
   matchesNotificationInternalScope,
@@ -6567,6 +7041,9 @@ Object.assign(routeDeps, {
   updateLeadConversationState,
   updateLeadImportItemCampaignProgress,
   upsertLeadClientN8nSettings,
+  upsertLeadClientEvolutionInstance,
+  provisionLeadClientEvolutionInstance,
+  deleteLeadClientEvolutionInstance,
   useDirectPostgres,
   validateConversationMemoryPayload,
   validateLeadWebhookBearer,

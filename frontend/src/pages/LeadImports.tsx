@@ -65,6 +65,7 @@ import {
   useCreateDispatch,
   useDeleteDispatch,
   useTriggerDispatch,
+  useUpdateDispatch,
   type Campaign,
   type CampaignDispatch,
   type CampaignStatus,
@@ -187,6 +188,7 @@ const defaultDispatchOptions: CampaignDispatchOptions = {
   leadDelaySeconds: 2,
   stopOnStepFailure: true,
   aiAssisted: false,
+  evolutionInstanceId: null,
   templateStrategy: "single",
   templateVariantCount: 0,
   waitForReply: false,
@@ -675,6 +677,7 @@ const DISPATCH_STATUS_LABELS: Record<CampaignDispatch["status"], string> = {
   draft: "Rascunho",
   scheduled: "Agendado",
   running: "Executando",
+  paused: "Pausado",
   done: "Concluído",
   failed: "Falhou",
   cancelled: "Cancelado",
@@ -685,6 +688,7 @@ function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
   const createDispatch = useCreateDispatch(campaignId);
   const deleteDispatch = useDeleteDispatch(campaignId);
   const triggerDispatch = useTriggerDispatch(campaignId);
+  const updateDispatch = useUpdateDispatch(campaignId);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -734,6 +738,17 @@ function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
                   Disparar
                 </Button>
               )}
+              {d.status === "running" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => updateDispatch.mutate({ dispatchId: d.id, patch: { status: "paused" } })}
+                  disabled={updateDispatch.isPending}
+                >
+                  <Pause className="h-3 w-3" />
+                  Pausar
+                </Button>
+              )}
               {d.status !== "running" && (
                 <Button size="sm" variant="ghost" onClick={() => deleteDispatch.mutate(d.id)} disabled={deleteDispatch.isPending}>
                   <Trash2 className="h-3 w-3" />
@@ -751,6 +766,7 @@ const DISPATCH_STATUS_COLORS: Record<CampaignDispatch["status"], string> = {
   draft: "border-slate-400/20 bg-slate-400/10 text-slate-400",
   scheduled: "border-sky-400/25 bg-sky-400/10 text-sky-300",
   running: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300",
+  paused: "border-amber-400/25 bg-amber-400/10 text-amber-300",
   done: "border-emerald-400/25 bg-emerald-400/10 text-emerald-400",
   failed: "border-red-400/25 bg-red-400/10 text-red-400",
   cancelled: "border-slate-400/20 bg-slate-400/10 text-slate-500",
@@ -760,17 +776,20 @@ function DispatchManagerTab({
   campaigns,
   campaignsLoading,
   selectedClientId,
+  evolutionInstanceOptions,
   onNavigateToCampaign,
 }: {
   campaigns: Campaign[];
   campaignsLoading: boolean;
   selectedClientId: string;
+  evolutionInstanceOptions: Array<{ id: string; name: string; isDefault: boolean }>;
   onNavigateToCampaign: () => void;
 }) {
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [newName, setNewName] = useState("");
   const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
   const [newScheduledAt, setNewScheduledAt] = useState("");
+  const [newEvolutionInstanceId, setNewEvolutionInstanceId] = useState("campaign-default");
   const [confirmDispatch, setConfirmDispatch] = useState<CampaignDispatch | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -784,13 +803,28 @@ function DispatchManagerTab({
   const createDispatch = useCreateDispatch(selectedCampaignId);
   const deleteDispatch = useDeleteDispatch(selectedCampaignId);
   const triggerDispatch = useTriggerDispatch(selectedCampaignId);
+  const updateDispatch = useUpdateDispatch(selectedCampaignId);
 
   useEffect(() => {
     setNewName("");
     setNewTriggerType("manual");
     setNewScheduledAt("");
+    setNewEvolutionInstanceId("campaign-default");
     setStatusMsg(null);
   }, [selectedCampaignId]);
+
+  const campaignEvolutionInstanceId =
+    selectedCampaign?.analytics_meta?.dispatchOptions?.evolutionInstanceId || null;
+  const campaignEvolutionName = campaignEvolutionInstanceId
+    ? evolutionInstanceOptions.find((instance) => instance.id === campaignEvolutionInstanceId)?.name || "Evolution da campanha"
+    : "Padrao da empresa";
+
+  function getDispatchEvolutionName(dispatch: CampaignDispatch) {
+    if (dispatch.evolution_instance_id) {
+      return evolutionInstanceOptions.find((instance) => instance.id === dispatch.evolution_instance_id)?.name || "Evolution especifica";
+    }
+    return campaignEvolutionName;
+  }
 
   async function handleCreate() {
     if (!newName.trim()) { setStatusMsg({ type: "error", text: "Informe um nome para o disparo." }); return; }
@@ -798,10 +832,17 @@ function DispatchManagerTab({
     const campaignSteps = selectedCampaign ? normalizeCampaignSequence(selectedCampaign.analytics_meta) : [];
     try {
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
-      await createDispatch.mutateAsync({ name: newName.trim(), steps: campaignSteps, triggerType: newTriggerType, scheduledAt: scheduledIso });
+      await createDispatch.mutateAsync({
+        name: newName.trim(),
+        steps: campaignSteps,
+        triggerType: newTriggerType,
+        scheduledAt: scheduledIso,
+        evolutionInstanceId: newEvolutionInstanceId === "campaign-default" ? null : newEvolutionInstanceId,
+      });
       setNewName("");
       setNewTriggerType("manual");
       setNewScheduledAt("");
+      setNewEvolutionInstanceId("campaign-default");
       setStatusMsg({ type: "success", text: "Disparo criado com sucesso." });
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao criar disparo." });
@@ -825,6 +866,16 @@ function DispatchManagerTab({
       setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" removido.` });
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao remover." });
+    }
+  }
+
+  async function handlePause(dispatch: CampaignDispatch) {
+    try {
+      await updateDispatch.mutateAsync({ dispatchId: dispatch.id, patch: { status: "paused" } });
+      setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" pausado.` });
+      void refetchDispatches();
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao pausar disparo." });
     }
   }
 
@@ -1006,6 +1057,28 @@ function DispatchManagerTab({
                   </div>
                 )}
 
+                <div className="space-y-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Evolution deste disparo</p>
+                  <Select value={newEvolutionInstanceId} onValueChange={setNewEvolutionInstanceId}>
+                    <SelectTrigger className={darkFieldClass}>
+                      <SelectValue placeholder="Usar Evolution da campanha" />
+                    </SelectTrigger>
+                    <SelectContent className={darkSelectContentClass}>
+                      <SelectItem value="campaign-default" className={darkSelectItemClass}>
+                        Usar Evolution da campanha ({campaignEvolutionName})
+                      </SelectItem>
+                      {evolutionInstanceOptions.map((instance) => (
+                        <SelectItem key={instance.id} value={instance.id} className={darkSelectItemClass}>
+                          {instance.name}{instance.isDefault ? " · padrao da empresa" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Use esta opção para rodar disparos da mesma campanha em instancias Evolution diferentes.
+                  </p>
+                </div>
+
                 <div className="space-y-3 rounded-xl border border-border/70 bg-black/20 p-4">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Template da campanha</p>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1080,6 +1153,7 @@ function DispatchManagerTab({
                             {d.triggered_at && (
                               <span>Iniciado {formatDate(d.triggered_at)}</span>
                             )}
+                            <span className="text-cyan-300">Evolution: {getDispatchEvolutionName(d)}</span>
                             {(d.status === "done" || d.status === "running") && (
                               <>
                                 <span className="text-emerald-400">{d.sent_count} enviados</span>
@@ -1109,10 +1183,21 @@ function DispatchManagerTab({
                             </Button>
                           )}
                           {d.status === "running" && (
-                            <span className="flex items-center gap-1.5 rounded-md border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 font-mono text-[10px] text-cyan-300">
-                              <RefreshCw className="h-3 w-3 animate-spin" />
-                              Executando...
-                            </span>
+                            <>
+                              <span className="flex items-center gap-1.5 rounded-md border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 font-mono text-[10px] text-cyan-300">
+                                <RefreshCw className="h-3 w-3 animate-spin" />
+                                Executando...
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void handlePause(d)}
+                                disabled={updateDispatch.isPending}
+                              >
+                                <Pause className="mr-1.5 h-3 w-3" />
+                                Pausar
+                              </Button>
+                            </>
                           )}
                           {d.status !== "running" && (
                             <Button
@@ -1335,8 +1420,40 @@ export default function LeadImports({
   }, [selectedClientId, pendingFilter, selectedImportId]);
 
   const selectedClient = crmClient?.selectedClient || null;
+  const selectedLeadClient = selectedClient || crmClient?.clients.find((client) => client.id === selectedClientId) || null;
+  const evolutionInstanceOptions = useMemo(
+    () =>
+      (selectedLeadClient?.n8n_settings?.evolution_instances || [])
+        .filter((instance) => instance.active && instance.dispatch_webhook_url)
+        .map((instance) => ({
+          id: instance.id,
+          name: instance.name || "Evolution",
+          isDefault: instance.is_default,
+        })),
+    [selectedLeadClient],
+  );
   const resolvedClientName = fixedClientName || selectedClient?.name || selectedClientId;
   const tabs = isInternalUser ? INTERNAL_TABS : CLIENT_TABS;
+
+  useEffect(() => {
+    const defaultEvolutionInstanceId =
+      evolutionInstanceOptions.find((instance) => instance.isDefault)?.id ||
+      evolutionInstanceOptions[0]?.id ||
+      null;
+
+    setDispatchOptions((current) => {
+      const selectedExists =
+        !current.evolutionInstanceId ||
+        evolutionInstanceOptions.some((instance) => instance.id === current.evolutionInstanceId);
+
+      if (selectedExists) return current;
+
+      return {
+        ...current,
+        evolutionInstanceId: defaultEvolutionInstanceId,
+      };
+    });
+  }, [evolutionInstanceOptions, selectedClientId]);
 
   const totalImportsPages = Math.max(1, Math.ceil(imports.length / IMPORTS_PAGE_SIZE));
   const safeImportsPage = Math.min(importsPage, totalImportsPages);
@@ -3119,6 +3236,38 @@ export default function LeadImports({
                   )}
 
                   <div className="grid gap-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30 sm:grid-cols-2">
+                    <div className="space-y-1 sm:col-span-2">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Evolution do disparo</p>
+                      <Select
+                        value={dispatchOptions.evolutionInstanceId || "tenant-default"}
+                        onValueChange={(value) =>
+                          setDispatchOptions((current) => ({
+                            ...current,
+                            evolutionInstanceId: value === "tenant-default" ? null : value,
+                          }))
+                        }
+                        disabled={evolutionInstanceOptions.length === 0}
+                      >
+                        <SelectTrigger className={darkFieldClass}>
+                          <SelectValue placeholder="Padrao da empresa" />
+                        </SelectTrigger>
+                        <SelectContent className={darkSelectContentClass}>
+                          <SelectItem value="tenant-default" className={darkSelectItemClass}>
+                            Padrao da empresa
+                          </SelectItem>
+                          {evolutionInstanceOptions.map((instance) => (
+                            <SelectItem key={instance.id} value={instance.id} className={darkSelectItemClass}>
+                              {instance.name}{instance.isDefault ? " · padrao" : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        {evolutionInstanceOptions.length > 0
+                          ? "Esta campanha usara a Evolution escolhida nos disparos e nos passos apos resposta."
+                          : "Nenhuma instancia Evolution ativa cadastrada; o sistema tentara usar o fallback da empresa."}
+                      </p>
+                    </div>
                     <div className="space-y-1">
                       <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Atraso entre leads</p>
                       <Input
@@ -3438,6 +3587,7 @@ export default function LeadImports({
             campaigns={filteredCampaigns}
             campaignsLoading={campaignsLoading}
             selectedClientId={selectedClientId}
+            evolutionInstanceOptions={evolutionInstanceOptions}
             onNavigateToCampaign={() => setActiveTab("campanha")}
           />
         )}

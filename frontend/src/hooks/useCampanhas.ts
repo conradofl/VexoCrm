@@ -35,12 +35,13 @@ export interface CampaignDispatch {
   steps: CampaignSequenceStep[];
   trigger_type: "manual" | "scheduled";
   scheduled_at: string | null;
-  status: "draft" | "scheduled" | "running" | "done" | "failed" | "cancelled";
+  status: "draft" | "scheduled" | "running" | "paused" | "done" | "failed" | "cancelled";
   sent_count: number;
   failed_count: number;
   triggered_at: string | null;
   finished_at: string | null;
   error_message: string | null;
+  evolution_instance_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +77,7 @@ export interface CampaignDispatchOptions {
   leadDelaySeconds: number;
   stopOnStepFailure: boolean;
   aiAssisted: boolean;
+  evolutionInstanceId?: string | null;
   templateStrategy?: "single" | "ai_variations";
   templateVariantCount?: number;
   waitForReply?: boolean;
@@ -158,6 +160,7 @@ export interface CreateDispatchPayload {
   steps: CampaignSequenceStep[];
   triggerType?: "manual" | "scheduled";
   scheduledAt?: string | null;
+  evolutionInstanceId?: string | null;
 }
 
 export interface UpdateDispatchPayload {
@@ -165,6 +168,7 @@ export interface UpdateDispatchPayload {
   steps?: CampaignSequenceStep[];
   triggerType?: "manual" | "scheduled";
   scheduledAt?: string | null;
+  evolutionInstanceId?: string | null;
   status?: CampaignDispatch["status"];
 }
 
