@@ -160,6 +160,7 @@ export function registerAllDomainRoutes(app) {
     getDateLabel,
     getDefaultPresetForRole,
     getHealthPostgresPingBudgetMs,
+    getLeadClientEvolutionInstances,
     getLeadClientN8nSettings,
     getLeadClientN8nSettingsMap,
     getLeadClientN8nSettingsStatus,
@@ -206,6 +207,7 @@ export function registerAllDomainRoutes(app) {
     markCampaignDispatchFailed,
     markCampaignLeadWaitingReply,
     maskN8nSettings,
+    maskEvolutionInstance,
     maskPhoneForLog,
     maybeFinalizeCampaignAfterReply,
     mergeCampaignProgress,
@@ -286,7 +288,10 @@ export function registerAllDomainRoutes(app) {
     toComparableCampaignTimestamp,
     updateLeadConversationState,
     updateLeadImportItemCampaignProgress,
+    upsertLeadClientEvolutionInstance,
+    provisionLeadClientEvolutionInstance,
     upsertLeadClientN8nSettings,
+    deleteLeadClientEvolutionInstance,
     useDirectPostgres,
     validateLeadWebhookBearer,
     validateLeadsOutlierRecord,
@@ -819,6 +824,184 @@ export function registerAllDomainRoutes(app) {
   
         console.error("lead client n8n settings update error:", error);
         sendError(res, 500, "N8N_SETTINGS_SAVE_FAILED", "Failed to save n8n settings");
+      }
+    }
+  );
+
+  async function ensureTenantExistsForEvolutionRoute(tenantId, res) {
+    const { data: tenant, error: tenantError } = await supabase
+      .from("leads_clients")
+      .select("id")
+      .eq("id", tenantId)
+      .maybeSingle();
+
+    if (tenantError) throw tenantError;
+    if (!tenant) {
+      sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
+      return false;
+    }
+
+    return true;
+  }
+
+  app.get(
+    "/api/lead-clients/:tenantId/evolution-instances",
+    requireFirebaseAuth,
+    requireAdminAccess,
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      if (!tenantId) {
+        sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+        return;
+      }
+
+      try {
+        if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+        const instances = await getLeadClientEvolutionInstances(tenantId);
+        res.json({ items: instances.map(maskEvolutionInstance) });
+      } catch (error) {
+        console.error("lead client evolution instances query error:", error);
+        sendError(res, 500, "EVOLUTION_INSTANCES_QUERY_FAILED", "Failed to query Evolution instances");
+      }
+    }
+  );
+
+  app.post(
+    "/api/lead-clients/:tenantId/evolution-instances",
+    requireFirebaseAuth,
+    requireAdminAccess,
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      if (!tenantId) {
+        sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+        return;
+      }
+
+      try {
+        if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+        const saved = await upsertLeadClientEvolutionInstance(tenantId, req.body || {}, req.authAccess, null);
+        res.status(201).json({ item: maskEvolutionInstance(saved) });
+      } catch (error) {
+        if (error instanceof Error && error.message === "INVALID_DISPATCH_WEBHOOK_URL") {
+          sendError(res, 400, "INVALID_BODY", "dispatchWebhookUrl must be a valid http or https URL");
+          return;
+        }
+
+        console.error("lead client evolution instance create error:", error);
+        sendError(res, 500, "EVOLUTION_INSTANCE_SAVE_FAILED", "Failed to save Evolution instance");
+      }
+    }
+  );
+
+  app.post(
+    "/api/lead-clients/:tenantId/evolution-instances/provision",
+    requireFirebaseAuth,
+    requireAdminAccess,
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      if (!tenantId) {
+        sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+        return;
+      }
+
+      try {
+        if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+        const provisioned = await provisionLeadClientEvolutionInstance(tenantId, req.body || {}, req.authAccess);
+        res.status(201).json({
+          item: maskEvolutionInstance(provisioned.instance),
+          evolution: provisioned.evolution,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === "EVOLUTION_ADMIN_UNCONFIGURED") {
+          sendError(
+            res,
+            503,
+            "EVOLUTION_ADMIN_UNCONFIGURED",
+            "EVOLUTION_API_URL e EVOLUTION_API_KEY precisam estar configurados no backend"
+          );
+          return;
+        }
+
+        console.error("lead client evolution instance provision error:", error);
+        sendError(
+          res,
+          error?.statusCode || 500,
+          error?.code || "EVOLUTION_INSTANCE_PROVISION_FAILED",
+          error instanceof Error ? error.message : "Failed to provision Evolution instance"
+        );
+      }
+    }
+  );
+
+  app.patch(
+    "/api/lead-clients/:tenantId/evolution-instances/:instanceId",
+    requireFirebaseAuth,
+    requireAdminAccess,
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      const instanceId = normalizeString(req.params?.instanceId);
+      if (!tenantId || !parseOptionalUuid(instanceId)) {
+        sendError(res, 400, "INVALID_BODY", "Invalid tenant or Evolution instance id");
+        return;
+      }
+
+      try {
+        if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+        const instances = await getLeadClientEvolutionInstances(tenantId);
+        const existing = instances.find((instance) => instance.id === instanceId);
+        if (!existing) {
+          sendError(res, 404, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found");
+          return;
+        }
+
+        const saved = await upsertLeadClientEvolutionInstance(tenantId, req.body || {}, req.authAccess, existing);
+        res.json({ item: maskEvolutionInstance(saved) });
+      } catch (error) {
+        if (error instanceof Error && error.message === "INVALID_DISPATCH_WEBHOOK_URL") {
+          sendError(res, 400, "INVALID_BODY", "dispatchWebhookUrl must be a valid http or https URL");
+          return;
+        }
+
+        console.error("lead client evolution instance update error:", error);
+        sendError(res, 500, "EVOLUTION_INSTANCE_SAVE_FAILED", "Failed to save Evolution instance");
+      }
+    }
+  );
+
+  app.delete(
+    "/api/lead-clients/:tenantId/evolution-instances/:instanceId",
+    requireFirebaseAuth,
+    requireAdminAccess,
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      const instanceId = normalizeString(req.params?.instanceId);
+      if (!tenantId || !parseOptionalUuid(instanceId)) {
+        sendError(res, 400, "INVALID_BODY", "Invalid tenant or Evolution instance id");
+        return;
+      }
+
+      try {
+        if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+        const removed = await deleteLeadClientEvolutionInstance(tenantId, instanceId);
+        if (!removed) {
+          sendError(res, 404, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found");
+          return;
+        }
+
+        res.json({ item: removed });
+      } catch (error) {
+        console.error("lead client evolution instance delete error:", error);
+        sendError(res, 500, "EVOLUTION_INSTANCE_DELETE_FAILED", "Failed to delete Evolution instance");
       }
     }
   );
@@ -4055,7 +4238,15 @@ export function registerAllDomainRoutes(app) {
       const authorizedClientId = resolveAuthorizedClientId(req, res, clientId);
       if (!authorizedClientId) return;
   
-      const dispatchSettings = await resolveDispatchWebhookSettings(authorizedClientId);
+      const validation = validateCampaignAnalyticsMeta(analyticsMeta);
+      if (!validation.valid) {
+        sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
+        return;
+      }
+
+      const dispatchSettings = await resolveCampaignDispatchSettings(authorizedClientId, {
+        analytics_meta: validation.analyticsMeta,
+      });
       const { webhookUrl, webhookToken } = dispatchSettings;
       if (!webhookUrl) {
         sendError(
@@ -4064,12 +4255,6 @@ export function registerAllDomainRoutes(app) {
           "EVOLUTION_SETTINGS_MISSING",
           "Configure uma URL ativa de disparo Evolution para esta empresa antes de criar campanhas"
         );
-        return;
-      }
-  
-      const validation = validateCampaignAnalyticsMeta(analyticsMeta);
-      if (!validation.valid) {
-        sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
         return;
       }
   
@@ -4392,11 +4577,61 @@ export function registerAllDomainRoutes(app) {
   
   // ── Campaign Dispatches ──────────────────────────────────────────────────────
 
+  async function ensureCampaignDispatchPausedStatusAllowed() {
+    if (!pgDatabasePool) return;
+
+    await pgDatabasePool.query(`
+      ALTER TABLE public.campaign_dispatches
+      DROP CONSTRAINT IF EXISTS campaign_dispatches_status_check
+    `);
+    await pgDatabasePool.query(`
+      ALTER TABLE public.campaign_dispatches
+      ADD CONSTRAINT campaign_dispatches_status_check
+      CHECK (status IN ('draft', 'scheduled', 'running', 'paused', 'done', 'failed', 'cancelled'))
+    `);
+  }
+
+  async function ensureCampaignDispatchEvolutionInstanceColumn() {
+    if (!pgDatabasePool) return;
+
+    await pgDatabasePool.query(`
+      ALTER TABLE public.campaign_dispatches
+      ADD COLUMN IF NOT EXISTS evolution_instance_id UUID
+    `);
+  }
+
+  async function validateCampaignDispatchEvolutionInstance(clientId, instanceId, res) {
+    if (!instanceId) return true;
+
+    const instances = await getLeadClientEvolutionInstances(clientId);
+    const instance = instances.find((item) => item.id === instanceId);
+    if (!instance) {
+      sendError(res, 400, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found for this tenant");
+      return false;
+    }
+    if (instance.active === false) {
+      sendError(res, 400, "EVOLUTION_INSTANCE_INACTIVE", "Evolution instance is inactive");
+      return false;
+    }
+
+    return true;
+  }
+
   async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
     const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
     const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+    const dispatchEvolutionInstanceId = normalizeString(dispatch.evolution_instance_id);
+    const dispatchCampaignMeta = dispatchEvolutionInstanceId
+      ? {
+          ...campaignMeta,
+          dispatchOptions: {
+            ...campaignMeta.dispatchOptions,
+            evolutionInstanceId: dispatchEvolutionInstanceId,
+          },
+        }
+      : campaignMeta;
     const steps = dispatchSteps ?? campaignMeta.sequence;
     const validation = validateCampaignAnalyticsMeta({
       ...campaignMeta,
@@ -4405,7 +4640,10 @@ export function registerAllDomainRoutes(app) {
     if (!validation.valid) {
       throw new Error(validation.message || "Disparo sem template valido.");
     }
-    const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaign);
+    const dispatchSettings = await resolveCampaignDispatchSettings(clientId, {
+      ...campaign,
+      analytics_meta: dispatchCampaignMeta,
+    });
     const { webhookUrl, webhookToken } = dispatchSettings;
     if (!webhookUrl) {
       throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
@@ -4428,6 +4666,26 @@ export function registerAllDomainRoutes(app) {
     const analyticsMeta = validation.analyticsMeta;
 
     let sentCount = 0;
+    let lastPauseCheckAt = 0;
+
+    const isDispatchStillRunning = async () => {
+      const now = Date.now();
+      if (now - lastPauseCheckAt < 1000) return true;
+      lastPauseCheckAt = now;
+
+      const { data: current, error: currentError } = await db
+        .from("campaign_dispatches")
+        .select("status")
+        .eq("id", dispatchId)
+        .maybeSingle();
+
+      if (currentError) {
+        console.warn("[campaign-dispatch] pause status check failed:", currentError.message || currentError);
+        return true;
+      }
+
+      return current?.status === "running";
+    };
 
     const result = await dispatchCampaignSequence({
       webhookUrl,
@@ -4477,6 +4735,7 @@ export function registerAllDomainRoutes(app) {
         }
         await db.from("campaign_dispatches").update({ sent_count: sentCount, updated_at: new Date().toISOString() }).eq("id", dispatchId).catch(() => {});
       },
+      shouldContinue: isDispatchStillRunning,
     });
 
     // Registra falhas por lead
@@ -4496,6 +4755,17 @@ export function registerAllDomainRoutes(app) {
 
     const failedCount = result?.summary?.failureCount ?? (leads.length - sentCount);
 
+    if (result?.summary?.paused) {
+      await db.from("campaign_dispatches").update({
+        status: "paused",
+        sent_count: sentCount,
+        failed_count: failedCount,
+        error_message: "Disparo pausado manualmente.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", dispatchId);
+      return;
+    }
+
     await db.from("campaign_dispatches").update({
       status: "done",
       sent_count: sentCount,
@@ -4513,6 +4783,7 @@ export function registerAllDomainRoutes(app) {
     const campaignId = normalizeString(req.params.id);
     if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
     try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
       const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
         .select("id, client_id")
@@ -4546,8 +4817,10 @@ export function registerAllDomainRoutes(app) {
     const requestedSteps = Array.isArray(body.steps) ? body.steps : [];
     const triggerType = body.triggerType === "scheduled" ? "scheduled" : "manual";
     const scheduledAt = triggerType === "scheduled" ? (normalizeString(body.scheduledAt) || null) : null;
+    const requestedEvolutionInstanceId = parseOptionalUuid(body.evolutionInstanceId) || null;
 
     try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
       // Verifica que a campanha pertence ao cliente autorizado
       const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
@@ -4558,6 +4831,8 @@ export function registerAllDomainRoutes(app) {
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
+      if (!(await validateCampaignDispatchEvolutionInstance(authorizedClientId, requestedEvolutionInstanceId, res))) return;
+
       const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
       const steps = requestedSteps.length > 0 ? requestedSteps : campaignMeta.sequence;
       const validation = validateCampaignAnalyticsMeta({
@@ -4577,6 +4852,7 @@ export function registerAllDomainRoutes(app) {
           steps: validation.analyticsMeta.sequence,
           trigger_type: triggerType,
           scheduled_at: scheduledAt,
+          evolution_instance_id: requestedEvolutionInstanceId,
           status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
         })
         .select("*")
@@ -4599,10 +4875,14 @@ export function registerAllDomainRoutes(app) {
     if (body.name != null) patch.name = normalizeString(body.name) || "Disparo";
     if (body.triggerType != null) patch.trigger_type = body.triggerType === "scheduled" ? "scheduled" : "manual";
     if (body.scheduledAt != null) patch.scheduled_at = normalizeString(body.scheduledAt) || null;
-    if (body.status != null && ["draft","scheduled","cancelled"].includes(body.status)) patch.status = body.status;
+    if (Object.prototype.hasOwnProperty.call(body, "evolutionInstanceId")) {
+      patch.evolution_instance_id = parseOptionalUuid(body.evolutionInstanceId) || null;
+    }
+    if (body.status != null && ["draft","scheduled","paused","cancelled"].includes(body.status)) patch.status = body.status;
     patch.updated_at = new Date().toISOString();
 
     try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
       const { data: existing, error: existingErr } = await supabase
         .from("campaign_dispatches")
         .select("id, campaign_id, client_id, status")
@@ -4611,7 +4891,20 @@ export function registerAllDomainRoutes(app) {
       if (existingErr || !existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
       const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
       if (!authorizedClientId) return;
-      if (existing.status === "running") return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
+      if (
+        Object.prototype.hasOwnProperty.call(patch, "evolution_instance_id") &&
+        !(await validateCampaignDispatchEvolutionInstance(authorizedClientId, patch.evolution_instance_id, res))
+      ) {
+        return;
+      }
+
+      const isPauseRequest = existing.status === "running" && patch.status === "paused" && Object.keys(patch).length === 2;
+      if (existing.status === "running" && !isPauseRequest) {
+        return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
+      }
+      if (patch.status === "paused") {
+        await ensureCampaignDispatchPausedStatusAllowed();
+      }
 
       if (Array.isArray(body.steps)) {
         const { data: campaign, error: campaignErr } = await supabase
@@ -4652,6 +4945,7 @@ export function registerAllDomainRoutes(app) {
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
     try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
       const { data: existing } = await supabase.from("campaign_dispatches").select("status, client_id").eq("id", dispatchId).single();
       if (!existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
       const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
@@ -4671,6 +4965,7 @@ export function registerAllDomainRoutes(app) {
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
     try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
       const { data: dispatch, error: fetchErr } = await supabase
         .from("campaign_dispatches")
         .select("*")

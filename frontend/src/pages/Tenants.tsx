@@ -25,10 +25,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   LeadClient,
   useCreateLeadClient,
+  useDeleteLeadClientEvolutionInstance,
   useDeleteLeadClient,
   useLeadClients,
+  useProvisionLeadClientEvolutionInstance,
+  useSaveLeadClientEvolutionInstance,
   useUpdateLeadClientN8nSettings,
   useVerifyLeadClientTable,
+  type LeadClientEvolutionInstance,
   type LeadClientTableStatus,
 } from "@/hooks/useLeadClients";
 import { createTenantSchema } from "@/lib/validationSchemas";
@@ -85,6 +89,9 @@ export default function Tenants() {
   const createTenant = useCreateLeadClient();
   const deleteTenant = useDeleteLeadClient();
   const updateN8nSettings = useUpdateLeadClientN8nSettings();
+  const saveEvolutionInstance = useSaveLeadClientEvolutionInstance();
+  const provisionEvolutionInstance = useProvisionLeadClientEvolutionInstance();
+  const deleteEvolutionInstance = useDeleteLeadClientEvolutionInstance();
   const verifyTenantTable = useVerifyLeadClientTable();
   const { hasPermission, isAdminUser } = useAuth();
   const [name, setName] = useState("");
@@ -98,6 +105,18 @@ export default function Tenants() {
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
   const [tableStatuses, setTableStatuses] = useState<Record<string, LeadClientTableStatus>>({});
+  const [evolutionDrafts, setEvolutionDrafts] = useState<
+    Record<
+      string,
+      {
+        name?: string;
+        dispatchWebhookUrl?: string;
+        dispatchWebhookToken?: string;
+        active?: boolean;
+        isDefault?: boolean;
+      }
+    >
+  >({});
   const [n8nDrafts, setN8nDrafts] = useState<
     Record<
       string,
@@ -313,6 +332,145 @@ export default function Tenants() {
     }
   };
 
+  const handleCreateEvolutionInstance = async (tenant: LeadClient) => {
+    const draft = getEvolutionDraft(tenant.id);
+
+    try {
+      await saveEvolutionInstance.mutateAsync({
+        tenantId: tenant.id,
+        name: draft.name.trim() || "Evolution",
+        dispatchWebhookUrl: draft.dispatchWebhookUrl.trim(),
+        dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
+        active: draft.active,
+        isDefault: draft.isDefault,
+      });
+
+      setEvolutionDrafts((current) => ({
+        ...current,
+        [tenant.id]: {
+          name: "",
+          dispatchWebhookUrl: "",
+          dispatchWebhookToken: "",
+          active: true,
+          isDefault: false,
+        },
+      }));
+
+      toast({
+        title: "Evolution adicionada",
+        description: `A instancia foi vinculada a ${tenant.name}.`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao adicionar Evolution",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel adicionar a instancia Evolution.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleProvisionEvolutionInstance = async (tenant: LeadClient) => {
+    const draft = getEvolutionDraft(tenant.id);
+
+    try {
+      await provisionEvolutionInstance.mutateAsync({
+        tenantId: tenant.id,
+        name: draft.name.trim() || tenant.name || "Evolution",
+        dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
+        active: draft.active,
+        isDefault: draft.isDefault,
+      });
+
+      setEvolutionDrafts((current) => ({
+        ...current,
+        [tenant.id]: {
+          name: "",
+          dispatchWebhookUrl: "",
+          dispatchWebhookToken: "",
+          active: true,
+          isDefault: false,
+        },
+      }));
+
+      toast({
+        title: "Evolution criada",
+        description: `A instancia foi criada na Evolution API e vinculada a ${tenant.name}.`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao criar na Evolution",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel criar a instancia na Evolution API.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateEvolutionInstance = async (
+    tenant: LeadClient,
+    instance: LeadClientEvolutionInstance,
+    patch: {
+      active?: boolean;
+      isDefault?: boolean;
+    }
+  ) => {
+    try {
+      await saveEvolutionInstance.mutateAsync({
+        tenantId: tenant.id,
+        instanceId: instance.id,
+        name: instance.name,
+        dispatchWebhookUrl: instance.dispatch_webhook_url || "",
+        active: patch.active ?? instance.active,
+        isDefault: patch.isDefault ?? instance.is_default,
+      });
+
+      toast({
+        title: patch.isDefault ? "Evolution padrao atualizada" : "Evolution atualizada",
+        description: `${tenant.name}: ${instance.name}`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao atualizar Evolution",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel atualizar a instancia Evolution.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteEvolutionInstance = async (
+    tenant: LeadClient,
+    instance: LeadClientEvolutionInstance
+  ) => {
+    try {
+      await deleteEvolutionInstance.mutateAsync({
+        tenantId: tenant.id,
+        instanceId: instance.id,
+      });
+
+      toast({
+        title: "Evolution removida",
+        description: `${tenant.name}: ${instance.name}`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao remover Evolution",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel remover a instancia Evolution.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleDeleteTenant = async (tenant: { id: string; name: string }) => {
     try {
       await deleteTenant.mutateAsync(tenant.id);
@@ -333,6 +491,36 @@ export default function Tenants() {
         variant: "destructive",
       });
     }
+  };
+
+  const getEvolutionDraft = (tenantId: string) => {
+    const draft = evolutionDrafts[tenantId] || {};
+    return {
+      name: draft.name ?? "",
+      dispatchWebhookUrl: draft.dispatchWebhookUrl ?? "",
+      dispatchWebhookToken: draft.dispatchWebhookToken ?? "",
+      active: draft.active ?? true,
+      isDefault: draft.isDefault ?? false,
+    };
+  };
+
+  const updateEvolutionDraft = (
+    tenantId: string,
+    patch: {
+      name?: string;
+      dispatchWebhookUrl?: string;
+      dispatchWebhookToken?: string;
+      active?: boolean;
+      isDefault?: boolean;
+    }
+  ) => {
+    setEvolutionDrafts((current) => ({
+      ...current,
+      [tenantId]: {
+        ...current[tenantId],
+        ...patch,
+      },
+    }));
   };
 
   const handleVerifyTenantTable = async (tenant: LeadClient) => {
@@ -619,6 +807,8 @@ export default function Tenants() {
                   {filteredTenants.map((tenant) => {
                     const tableStatus = tableStatuses[tenant.id] || tenant.leads_table;
                     const expectedTableName = tableStatus?.tableName || `leads_${tenant.id.replace(/-/g, "_")}`;
+                    const evolutionInstances = tenant.n8n_settings?.evolution_instances || [];
+                    const evolutionDraft = getEvolutionDraft(tenant.id);
 
                     return (
                     <div
@@ -683,67 +873,238 @@ export default function Tenants() {
                         <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
-                              <p className="text-sm font-medium text-foreground">Disparo Evolution</p>
+                              <p className="text-sm font-medium text-foreground">Instancias Evolution</p>
                               <p className="text-xs text-muted-foreground">
-                                A URL vale para campanhas novas e disparos futuros. Tokens existentes ficam mascarados.
+                                Cadastre mais de uma Evolution API dentro do mesmo tenant e escolha qual sera padrao.
                               </p>
                             </div>
-                            <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                checked={getTenantN8nDraft(tenant).active}
+                            <Badge className="border border-slate-300/80 bg-white/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
+                              {evolutionInstances.length} instancia{evolutionInstances.length === 1 ? "" : "s"}
+                            </Badge>
+                          </div>
+
+                          {evolutionInstances.length > 0 ? (
+                            <div className="grid gap-2">
+                              {evolutionInstances.map((instance) => (
+                                <div
+                                  key={instance.id}
+                                  className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/85 p-3 text-sm dark:border-white/10 dark:bg-white/[0.04] lg:grid-cols-[minmax(0,1fr)_auto]"
+                                >
+                                  <div className="min-w-0 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="font-medium text-foreground">{instance.name}</p>
+                                      {instance.is_default ? (
+                                        <Badge className="border border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
+                                          padrao
+                                        </Badge>
+                                      ) : null}
+                                      <Badge
+                                        className={
+                                          instance.active
+                                            ? "border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                                            : "border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65"
+                                        }
+                                      >
+                                        {instance.active ? "ativa" : "inativa"}
+                                      </Badge>
+                                      {instance.has_dispatch_webhook_token ? (
+                                        <Badge className="border border-violet-400/25 bg-violet-500/10 text-violet-700 dark:text-violet-200">
+                                          api key
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                    <p className="truncate font-mono text-xs text-muted-foreground">
+                                      {instance.dispatch_webhook_url}
+                                    </p>
+                                  </div>
+                                  <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={saveEvolutionInstance.isPending || instance.is_default}
+                                      onClick={() =>
+                                        void handleUpdateEvolutionInstance(tenant, instance, { isDefault: true })
+                                      }
+                                    >
+                                      Padrao
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={saveEvolutionInstance.isPending}
+                                      onClick={() =>
+                                        void handleUpdateEvolutionInstance(tenant, instance, {
+                                          active: !instance.active,
+                                        })
+                                      }
+                                    >
+                                      {instance.active ? "Desativar" : "Ativar"}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={deleteEvolutionInstance.isPending}
+                                      onClick={() => void handleDeleteEvolutionInstance(tenant, instance)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      Remover
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-dashed border-slate-300/80 bg-white/70 px-3 py-4 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
+                              Nenhuma instancia extra cadastrada. O fallback abaixo continua atendendo os disparos atuais.
+                            </div>
+                          )}
+
+                          <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                            <div className="grid gap-3 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
+                              <Input
+                                placeholder="Nome da instancia"
+                                value={evolutionDraft.name}
                                 onChange={(event) =>
-                                  updateTenantN8nDraft(tenant.id, { active: event.target.checked })
+                                  updateEvolutionDraft(tenant.id, { name: event.target.value })
                                 }
                               />
-                              ativo
-                            </label>
+                              <Input
+                                placeholder="URL de disparo Evolution"
+                                value={evolutionDraft.dispatchWebhookUrl}
+                                onChange={(event) =>
+                                  updateEvolutionDraft(tenant.id, {
+                                    dispatchWebhookUrl: event.target.value,
+                                  })
+                                }
+                              />
+                              <Input
+                                placeholder="API Key Evolution"
+                                value={evolutionDraft.dispatchWebhookToken}
+                                onChange={(event) =>
+                                  updateEvolutionDraft(tenant.id, {
+                                    dispatchWebhookToken: event.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-4">
+                                <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                  <input
+                                    type="checkbox"
+                                    checked={evolutionDraft.active}
+                                    onChange={(event) =>
+                                      updateEvolutionDraft(tenant.id, { active: event.target.checked })
+                                    }
+                                  />
+                                  ativa
+                                </label>
+                                <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                  <input
+                                    type="checkbox"
+                                    checked={evolutionDraft.isDefault}
+                                    onChange={(event) =>
+                                      updateEvolutionDraft(tenant.id, { isDefault: event.target.checked })
+                                    }
+                                  />
+                                  tornar padrao
+                                </label>
+                              </div>
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={provisionEvolutionInstance.isPending}
+                                  onClick={() => void handleProvisionEvolutionInstance(tenant)}
+                                >
+                                  <Wand2 className="h-4 w-4" />
+                                  {provisionEvolutionInstance.isPending ? "Criando..." : "Criar na Evolution"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  disabled={
+                                    saveEvolutionInstance.isPending ||
+                                    !evolutionDraft.dispatchWebhookUrl.trim()
+                                  }
+                                  onClick={() => void handleCreateEvolutionInstance(tenant)}
+                                >
+                                  <Plus className="h-4 w-4" />
+                                  {saveEvolutionInstance.isPending ? "Adicionando..." : "Adicionar manual"}
+                                </Button>
+                              </div>
+                            </div>
                           </div>
-                          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.85fr)_minmax(0,0.85fr)]">
-                            <Input
-                              placeholder="URL de disparo Evolution"
-                              value={getTenantN8nDraft(tenant).dispatchWebhookUrl}
-                              onChange={(event) =>
-                                updateTenantN8nDraft(tenant.id, {
-                                  dispatchWebhookUrl: event.target.value,
-                                })
-                              }
-                            />
-                            <Input
-                              placeholder={
-                                tenant.n8n_settings?.has_dispatch_webhook_token
-                                  ? "API Key Evolution definida"
-                                  : "API Key Evolution (apikey do header)"
-                              }
-                              value={getTenantN8nDraft(tenant).dispatchWebhookToken}
-                              onChange={(event) =>
-                                updateTenantN8nDraft(tenant.id, {
-                                  dispatchWebhookToken: event.target.value,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="flex flex-wrap justify-end gap-2">
-                            {tenant.n8n_settings?.has_dispatch_webhook_token ? (
+
+                          <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.02]">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-medium text-foreground">Fallback legado</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Usado quando nenhuma instancia Evolution padrao estiver ativa.
+                                </p>
+                              </div>
+                              <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                <input
+                                  type="checkbox"
+                                  checked={getTenantN8nDraft(tenant).active}
+                                  onChange={(event) =>
+                                    updateTenantN8nDraft(tenant.id, { active: event.target.checked })
+                                  }
+                                />
+                                ativo
+                              </label>
+                            </div>
+                            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.85fr)]">
+                              <Input
+                                placeholder="URL de disparo Evolution"
+                                value={getTenantN8nDraft(tenant).dispatchWebhookUrl}
+                                onChange={(event) =>
+                                  updateTenantN8nDraft(tenant.id, {
+                                    dispatchWebhookUrl: event.target.value,
+                                  })
+                                }
+                              />
+                              <Input
+                                placeholder={
+                                  tenant.n8n_settings?.has_dispatch_webhook_token
+                                    ? "API Key Evolution definida"
+                                    : "API Key Evolution (apikey do header)"
+                                }
+                                value={getTenantN8nDraft(tenant).dispatchWebhookToken}
+                                onChange={(event) =>
+                                  updateTenantN8nDraft(tenant.id, {
+                                    dispatchWebhookToken: event.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              {tenant.n8n_settings?.has_dispatch_webhook_token ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={updateN8nSettings.isPending}
+                                  onClick={() => void handleClearTenantToken(tenant, "dispatchWebhookToken")}
+                                >
+                                  Remover API Key
+                                </Button>
+                              ) : null}
                               <Button
                                 type="button"
-                                variant="outline"
                                 size="sm"
                                 disabled={updateN8nSettings.isPending}
-                                onClick={() => void handleClearTenantToken(tenant, "dispatchWebhookToken")}
+                                onClick={() => void handleSaveTenantN8n(tenant)}
                               >
-                                Remover API Key
+                                <Save className="h-4 w-4" />
+                                {updateN8nSettings.isPending ? "Salvando..." : "Salvar fallback"}
                               </Button>
-                            ) : null}
-                            <Button
-                              type="button"
-                              size="sm"
-                              disabled={updateN8nSettings.isPending}
-                              onClick={() => void handleSaveTenantN8n(tenant)}
-                            >
-                              <Save className="h-4 w-4" />
-                              {updateN8nSettings.isPending ? "Salvando..." : "Salvar"}
-                            </Button>
+                            </div>
                           </div>
                         </div>
                       ) : null}

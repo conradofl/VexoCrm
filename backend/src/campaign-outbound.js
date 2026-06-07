@@ -166,6 +166,7 @@ function normalizeDispatchOptions(rawOptions = {}) {
     waitForReply,
     replyTimeoutSeconds,
     replyPollIntervalSeconds,
+    evolutionInstanceId: normalizeString(rawOptions.evolutionInstanceId) || null,
   };
 }
 
@@ -464,6 +465,7 @@ export async function dispatchCampaignSequence({
   context = {},
   onLeadDispatched = null,
   onStepDispatched = null,
+  shouldContinue = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -474,10 +476,16 @@ export async function dispatchCampaignSequence({
     failures: [],
     warnings: [],
     completedCampaign: false,
+    paused: false,
   };
   const failedPhones = new Set();
 
   for (let leadIndex = 0; leadIndex < leads.length; leadIndex += 1) {
+    if (typeof shouldContinue === "function" && !(await shouldContinue({ leadIndex, phase: "lead" }))) {
+      summary.paused = true;
+      break;
+    }
+
     const lead = leads[leadIndex];
     const phone = normalizeString(lead?.telefone || lead?.phone || lead?.number);
 
@@ -498,6 +506,14 @@ export async function dispatchCampaignSequence({
     let lastSentAt = null;
 
     for (let stepIndex = 0; stepIndex < enabledSteps.length; stepIndex += 1) {
+      if (
+        typeof shouldContinue === "function" &&
+        !(await shouldContinue({ leadIndex, stepIndex, phase: "step" }))
+      ) {
+        summary.paused = true;
+        break;
+      }
+
       const step = enabledSteps[stepIndex];
       const stepForPayload = {
         ...step,
@@ -571,6 +587,8 @@ export async function dispatchCampaignSequence({
       }
     }
 
+    if (summary.paused) break;
+
     if (!leadFailed) {
       summary.successCount += 1;
       summary.successPhones.push(phone);
@@ -608,6 +626,10 @@ export async function dispatchCampaignSequence({
 
     const hasNextLead = leadIndex < leads.length - 1;
     if (hasNextLead) {
+      if (typeof shouldContinue === "function" && !(await shouldContinue({ leadIndex, phase: "lead_delay" }))) {
+        summary.paused = true;
+        break;
+      }
       await sleep(normalizedMeta.dispatchOptions.leadDelaySeconds * 1000);
     }
   }
