@@ -18,6 +18,10 @@ export const INTERNAL_PAGE_ORDER = [
   "chatbot-docs",
   "onboarding-wizard",
   "onboarding-agent",
+  "conexoes",
+  "disparos",
+  "aquecimento",
+  "relatorios",
 ] as const;
 
 export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];
@@ -219,6 +223,10 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "usuarios",
       "empresas",
       "campanhas",
+      "conexoes",
+      "disparos",
+      "aquecimento",
+      "relatorios",
     ],
     allowedViews: [],
   },

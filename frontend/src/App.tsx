@@ -29,6 +29,10 @@ import WhatsAppInbox from "./pages/WhatsAppInbox";
 import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
 import VexoSales from "./pages/VexoSales";
+import Conexoes from "./pages/Conexoes";
+import Disparos from "./pages/Disparos";
+import Aquecimento from "./pages/Aquecimento";
+import Relatorios from "./pages/Relatorios";
 import ChatbotKanban from "./pages/ChatbotKanban";
 import ChatbotDocs from "./pages/ChatbotDocs";
 import ChatbotSettings from "./pages/ChatbotSettings";
@@ -266,6 +270,38 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
                     <VexoSales />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="conexoes"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="conexoes">
+                    <Conexoes />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="disparos"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="disparos">
+                    <Disparos />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="aquecimento"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="aquecimento">
+                    <Aquecimento />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="relatorios"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="relatorios">
+                    <Relatorios />
                   </ProtectedRoute>
                 }
               />
