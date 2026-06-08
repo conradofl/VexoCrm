@@ -24,6 +24,10 @@ import {
   ChevronDown,
   Sparkles,
   UserPlus,
+  Wifi,
+  Send,
+  Flame,
+  BarChart2,
 } from "lucide-react";
 import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
@@ -76,6 +80,20 @@ const adminNavItems = [
   title: string;
   url: string;
   icon: ComponentType<{ className?: string }>;
+}>;
+
+// ─── MÁQUINA DE DISPAROS ──────────────────────────────────────────────────────
+const disparosNavItems = [
+  { title: "Conexões", url: "/crm/conexoes", icon: Wifi, page: "conexoes" as const },
+  { title: "Campanhas", url: "/crm/planilhas", icon: FileSpreadsheet, page: "planilhas" as const },
+  { title: "Disparos", url: "/crm/disparos", icon: Send, page: "disparos" as const },
+  { title: "Aquecimento", url: "/crm/aquecimento", icon: Flame, page: "aquecimento" as const },
+  { title: "Relatórios", url: "/crm/relatorios", icon: BarChart2, page: "relatorios" as const },
+] satisfies Array<{
+  title: string;
+  url: string;
+  icon: ComponentType<{ className?: string }>;
+  page: InternalPage;
 }>;
 
 function NavItem({
@@ -149,6 +167,8 @@ export function AppSidebar() {
   const visibleBottom = navItemsBottom.filter((item) => canAccessInternalPage(item.page));
   const visibleFupItems = followupSubItems.filter((item) => canAccessInternalPage(item.page));
   const showFupGroup = visibleFupItems.length > 0;
+  const visibleDisparos = disparosNavItems.filter((item) => canAccessInternalPage(item.page));
+  const showDisparosGroup = visibleDisparos.length > 0;
 
   const { data: suggestionCount = 0 } = useFollowupSuggestionCount();
 
@@ -209,6 +229,20 @@ export function AppSidebar() {
           {visibleTop.map((item) => (
             <NavItem key={item.url} item={item} collapsed={collapsed} />
           ))}
+
+          {/* ─── Máquina de Disparos ──────────────────────────── */}
+          {showDisparosGroup && (
+            <>
+              {!collapsed && (
+                <p className="mt-3 px-2.5 pb-1.5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-amber-500/80">
+                  Disparos
+                </p>
+              )}
+              {visibleDisparos.map((item) => (
+                <NavItem key={item.url} item={item} collapsed={collapsed} />
+              ))}
+            </>
+          )}
 
           {/* Grupo colapsável Follow-up */}
           {showFupGroup && (
