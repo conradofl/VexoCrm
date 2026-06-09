@@ -34,73 +34,97 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { type InternalPage } from "@/lib/access";
 
-const navItemsTop = [
-  { title: "Dashboard", url: "/crm/dashboard", icon: LayoutDashboard, page: "dashboard" as const },
-  { title: "Leads", url: "/crm/leads", icon: Users, badge: "CRM", page: "leads" as const },
-  { title: "Campanhas", url: "/crm/planilhas", icon: FileSpreadsheet, page: "planilhas" as const },
-  { title: "Inteligencia Comercial", url: "/crm/inteligencia-comercial", icon: LineChart, page: "inteligencia-comercial" as const },
-  { title: "WhatsApp", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" as const },
-  { title: "Chatbot Kanban", url: "/crm/chatbot", icon: KanbanSquare, page: "chatbot-kanban" as const },
-  { title: "Chatbot", url: "/crm/chatbot-settings", icon: Settings2, page: "chatbot-config" as const },
-] satisfies Array<{
-  title: string;
+// ═══════════════════════════════════════════════════════════════════════════════
+// ESTRUTURA GRANULAR DE MÓDULOS — Máquina de Vendas vs Máquina de Disparos
+//
+// Cada ferramenta tem `key` própria para filtro de permissão por pacote.
+// PASSO 2 (futuro): substituir o filter abaixo por:
+//   ferramentas.filter(f => canAccessInternalPage(f.page) && clienteTemAcesso(f.key))
+//
+// Para adicionar uma ferramenta: inclua o objeto aqui e o InternalPage em access.ts.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type Modo = "vendas" | "disparos";
+
+type Ferramenta = {
+  key: string;          // identificador único — usado no Passo 2 para filtro de pacote
+  label: string;
   url: string;
   icon: ComponentType<{ className?: string }>;
   badge?: string;
-  page: InternalPage;
-}>;
+  page: InternalPage;   // controla visibilidade via canAccessInternalPage
+};
 
-const followupSubItems = [
-  { title: "Fila", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" as const },
-  { title: "Campanhas", url: "/crm/followup-campanhas", icon: Megaphone, page: "followup-campanhas" as const },
-  { title: "Analytics", url: "/crm/followup-analytics", icon: BarChart3, page: "followup-analytics" as const },
-  { title: "Sugestões IA", url: "/crm/followup-sugestoes", icon: Sparkles, page: "followup-sugestoes" as const },
-  { title: "Empresas", url: "/crm/followup-empresas", icon: Landmark, page: "followup-empresas" as const },
-] satisfies Array<{
-  title: string;
-  url: string;
-  icon: ComponentType<{ className?: string }>;
-  page: InternalPage;
-}>;
+type Modulo = {
+  labelCurto: string;   // exibido no pill do switcher
+  labelLongo: string;   // exibido em tooltip/collapsed
+  cor: string;          // cor de identidade hex
+  ferramentas: Ferramenta[];
+};
 
-const navItemsBottom = [
-  { title: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen, page: "chatbot-docs" as const },
-  { title: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" as const },
-  { title: "Usuarios", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" as const },
-] satisfies Array<{
-  title: string;
-  url: string;
-  icon: ComponentType<{ className?: string }>;
-  page: InternalPage;
-}>;
+const MODULOS: Record<Modo, Modulo> = {
+  vendas: {
+    labelCurto: "Vendas",
+    labelLongo: "Máquina de Vendas",
+    cor: "#6366F1", // Electric Indigo — token oficial (tailwind.config.ts:21, index.css:63)
+    ferramentas: [
+      // PASSO 2: filtrar esta lista por clienteTemAcesso(f.key) antes de renderizar
+      { key: "dashboard",      label: "Dashboard",          url: "/crm/dashboard",              icon: LayoutDashboard, page: "dashboard" },
+      { key: "leads",          label: "Leads",              url: "/crm/leads",                  icon: Users,           page: "leads",               badge: "CRM" },
+      { key: "conversas",      label: "Conversas",          url: "/crm/whatsapp",               icon: MessageCircle,   page: "whatsapp" },
+      { key: "agentes-ia",     label: "Agentes IA",         url: "/crm/agente",                 icon: Bot,             page: "agente" },
+      { key: "inteligencia",   label: "Int. Comercial",     url: "/crm/inteligencia-comercial", icon: LineChart,       page: "inteligencia-comercial" },
+      { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
+      { key: "chatbot",        label: "Chatbot",            url: "/crm/chatbot-settings",       icon: Settings2,       page: "chatbot-config" },
+    ],
+  },
+  disparos: {
+    labelCurto: "Disparos",
+    labelLongo: "Máquina de Disparos",
+    cor: "#ff7a1a", // Laranja marca — demo-liv-pub.html (--accent, botão primário + logo)
+    ferramentas: [
+      // PASSO 2: filtrar esta lista por clienteTemAcesso(f.key) antes de renderizar
+      { key: "conexoes",    label: "Conexões",    url: "/crm/conexoes",    icon: Wifi,            page: "conexoes" },
+      { key: "campanhas",   label: "Campanhas",   url: "/crm/planilhas",   icon: FileSpreadsheet, page: "planilhas" },
+      { key: "disparos",    label: "Disparos",    url: "/crm/disparos",    icon: Send,            page: "disparos" },
+      { key: "aquecimento", label: "Aquecimento", url: "/crm/aquecimento", icon: Flame,           page: "aquecimento" },
+      { key: "relatorios",  label: "Relatórios",  url: "/crm/relatorios",  icon: BarChart2,       page: "relatorios" },
+    ],
+  },
+} satisfies Record<Modo, Modulo>;
 
-const adminNavItems = [
-  { title: "Vendas Vexo", url: "/crm/vexo-sales", icon: Briefcase },
-] satisfies Array<{
-  title: string;
-  url: string;
-  icon: ComponentType<{ className?: string }>;
-}>;
+// Follow-up: sub-módulo de Vendas com layout colapsável especial (do Luiz, PR #120).
+// Mantido separado do MODULOS.vendas.ferramentas por ora — no Passo 2 pode virar
+// uma entrada com type:"collapsible-group" dentro de vendas.ferramentas.
+const FUP_ITEMS = [
+  { key: "followup-fila",      label: "Fila",         url: "/crm/followup",           icon: ListChecks, page: "fila-de-followup" as InternalPage },
+  { key: "followup-campanhas", label: "Campanhas",    url: "/crm/followup-campanhas", icon: Megaphone,  page: "followup-campanhas" as InternalPage },
+  { key: "followup-analytics", label: "Analytics",    url: "/crm/followup-analytics", icon: BarChart3,  page: "followup-analytics" as InternalPage },
+  { key: "followup-sugestoes", label: "Sugestões IA", url: "/crm/followup-sugestoes", icon: Sparkles,   page: "followup-sugestoes" as InternalPage },
+  { key: "followup-empresas",  label: "Empresas",     url: "/crm/followup-empresas",  icon: Landmark,   page: "followup-empresas" as InternalPage },
+];
 
-// ─── MÁQUINA DE DISPAROS ──────────────────────────────────────────────────────
-const disparosNavItems = [
-  { title: "Conexões", url: "/crm/conexoes", icon: Wifi, page: "conexoes" as const },
-  { title: "Campanhas", url: "/crm/planilhas", icon: FileSpreadsheet, page: "planilhas" as const },
-  { title: "Disparos", url: "/crm/disparos", icon: Send, page: "disparos" as const },
-  { title: "Aquecimento", url: "/crm/aquecimento", icon: Flame, page: "aquecimento" as const },
-  { title: "Relatórios", url: "/crm/relatorios", icon: BarChart2, page: "relatorios" as const },
-] satisfies Array<{
-  title: string;
-  url: string;
-  icon: ComponentType<{ className?: string }>;
-  page: InternalPage;
-}>;
+// Sistema: FIXO, fora dos modos, não é módulo vendável.
+// Visível para quem tiver canAccessInternalPage para a page correspondente.
+const SISTEMA_ITEMS = [
+  { key: "chatbot-docs", label: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen,    page: "chatbot-docs" as InternalPage },
+  { key: "empresas",     label: "Empresas",     url: "/crm/empresas",     icon: Building2,   page: "empresas" as InternalPage },
+  { key: "usuarios",     label: "Usuários",     url: "/crm/usuarios",     icon: ShieldCheck, page: "usuarios" as InternalPage },
+];
 
+// Configuração + admin tools — FIXO, somente para isAdminUser.
+const ADMIN_ITEMS = [
+  { key: "vexo-sales",      label: "Vendas Vexo",     url: "/crm/vexo-sales",      icon: Briefcase },
+  { key: "onboarding",      label: "Onboarding",       url: "/crm/onboarding",       icon: UserPlus },
+  { key: "onboarding-agent",label: "Criar com IA",     url: "/crm/onboarding-agent", icon: Sparkles },
+];
+
+// ─── NavItem ──────────────────────────────────────────────────────────────────
 function NavItem({
   item,
   collapsed,
 }: {
-  item: { title: string; url: string; icon: ComponentType<{ className?: string }>; badge?: string };
+  item: { label: string; url: string; icon: ComponentType<{ className?: string }>; badge?: string };
   collapsed: boolean;
 }) {
   return (
@@ -128,7 +152,7 @@ function NavItem({
                 : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
             )}
           />
-          {!collapsed && <span className="truncate">{item.title}</span>}
+          {!collapsed && <span className="truncate">{item.label}</span>}
           {!collapsed && item.badge && (
             <span className="ml-auto rounded-full border border-cyan-400/20 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-cyan-700 dark:text-cyan-200">
               {item.badge}
@@ -150,25 +174,134 @@ function NavItem({
   );
 }
 
+// ─── AdminNavLink ─────────────────────────────────────────────────────────────
+// NavLink com badge "Admin" — reutilizado para itens de ADMIN_ITEMS.
+function AdminNavLink({
+  item,
+  collapsed,
+  showAdminBadge = false,
+}: {
+  item: { label: string; url: string; icon: ComponentType<{ className?: string }> };
+  collapsed: boolean;
+  showAdminBadge?: boolean;
+}) {
+  return (
+    <NavLink
+      to={item.url}
+      className={({ isActive }) =>
+        cn(
+          "group relative flex font-medium transition-all",
+          collapsed
+            ? "h-9 items-center justify-center rounded-xl px-0"
+            : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
+          isActive
+            ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24),0_14px_28px_rgba(15,23,42,0.08)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34),0_16px_28px_rgba(15,23,42,0.26)]"
+            : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <item.icon
+            className={cn(
+              "h-4 w-4 shrink-0",
+              isActive
+                ? "text-cyan-600 dark:text-cyan-200"
+                : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
+            )}
+          />
+          {!collapsed && <span className="truncate">{item.label}</span>}
+          {!collapsed && showAdminBadge && (
+            <span className="ml-auto rounded-full border border-violet-400/20 bg-violet-400/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-violet-700 dark:text-violet-200">
+              Admin
+            </span>
+          )}
+          {isActive && (
+            <span
+              className={cn(
+                "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
+                collapsed
+                  ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
+                  : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
+              )}
+            />
+          )}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
+// ─── ModeSwitcher ─────────────────────────────────────────────────────────────
+// Alternador visual Vendas | Disparos.
+// Não implementa trava de permissão (Passo 2).
+function ModeSwitcher({
+  modo,
+  onModoChange,
+  collapsed,
+}: {
+  modo: Modo;
+  onModoChange: (m: Modo) => void;
+  collapsed: boolean;
+}) {
+  if (collapsed) {
+    // Collapsed: duas barras coloridas empilhadas como indicador de modo
+    return (
+      <div className="mb-3 flex flex-col items-center gap-1.5">
+        {(["vendas", "disparos"] as Modo[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => onModoChange(m)}
+            title={MODULOS[m].labelLongo}
+            className={cn(
+              "h-1.5 w-8 rounded-full transition-all duration-150",
+              modo === m ? "opacity-100" : "opacity-20 hover:opacity-50"
+            )}
+            style={{ backgroundColor: MODULOS[m].cor }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/60 p-1 dark:border-white/8 dark:bg-white/[0.04]">
+      {(["vendas", "disparos"] as Modo[]).map((m) => (
+        <button
+          key={m}
+          onClick={() => onModoChange(m)}
+          title={MODULOS[m].labelLongo}
+          className={cn(
+            "rounded-lg px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.10em] transition-all duration-150",
+            modo === m
+              ? "text-white shadow-sm"
+              : "text-slate-500 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70"
+          )}
+          style={modo === m ? { backgroundColor: MODULOS[m].cor } : {}}
+        >
+          {MODULOS[m].labelCurto}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── AppSidebar ───────────────────────────────────────────────────────────────
 export function AppSidebar() {
   const { logout, canAccessInternalPage, isAdminUser, user, accessProfile } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const location = useLocation();
 
+  // Modo ativo: "vendas" por padrão, reseta para "vendas" ao recarregar a página.
+  const [modo, setModo] = useState<Modo>("vendas");
+
+  const location = useLocation();
   const isFupActive = location.pathname.startsWith("/crm/followup");
   const [fupOpen, setFupOpen] = useState(isFupActive);
 
   useEffect(() => {
     if (isFupActive) setFupOpen(true);
   }, [isFupActive]);
-
-  const visibleTop = navItemsTop.filter((item) => canAccessInternalPage(item.page));
-  const visibleBottom = navItemsBottom.filter((item) => canAccessInternalPage(item.page));
-  const visibleFupItems = followupSubItems.filter((item) => canAccessInternalPage(item.page));
-  const showFupGroup = visibleFupItems.length > 0;
-  const visibleDisparos = disparosNavItems.filter((item) => canAccessInternalPage(item.page));
-  const showDisparosGroup = visibleDisparos.length > 0;
 
   const { data: suggestionCount = 0 } = useFollowupSuggestionCount();
 
@@ -184,6 +317,17 @@ export function AppSidebar() {
       setIsLoggingOut(false);
     }
   };
+
+  // PASSO 2: substituir canAccessInternalPage(f.page) por
+  // canAccessInternalPage(f.page) && clienteTemAcesso(f.key)
+  const ferramentasVisiveis = MODULOS[modo].ferramentas.filter((f) =>
+    canAccessInternalPage(f.page)
+  );
+
+  const visibleFupItems = FUP_ITEMS.filter((f) => canAccessInternalPage(f.page));
+  const showFupGroup = modo === "vendas" && visibleFupItems.length > 0;
+
+  const visibleSistema = SISTEMA_ITEMS.filter((f) => canAccessInternalPage(f.page));
 
   return (
     <aside
@@ -217,34 +361,17 @@ export function AppSidebar() {
         </div>
       </div>
 
-      <nav className={cn("flex-1 overflow-y-auto", collapsed ? "px-2 py-3.5" : "px-2 py-3.5")}>
-        {!collapsed && (
-          <p className="px-2.5 pb-2.5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-            Principal
-          </p>
-        )}
+      <nav className="flex-1 overflow-y-auto px-2 py-3.5">
+        {/* ── Alternador de modo: Vendas | Disparos ───────────────────── */}
+        <ModeSwitcher modo={modo} onModoChange={setModo} collapsed={collapsed} />
 
         <div className="space-y-1">
-          {/* Itens do topo */}
-          {visibleTop.map((item) => (
-            <NavItem key={item.url} item={item} collapsed={collapsed} />
+          {/* Ferramentas do modo ativo */}
+          {ferramentasVisiveis.map((ferramenta) => (
+            <NavItem key={ferramenta.key} item={ferramenta} collapsed={collapsed} />
           ))}
 
-          {/* ─── Máquina de Disparos ──────────────────────────── */}
-          {showDisparosGroup && (
-            <>
-              {!collapsed && (
-                <p className="mt-3 px-2.5 pb-1.5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-amber-500/80">
-                  Disparos
-                </p>
-              )}
-              {visibleDisparos.map((item) => (
-                <NavItem key={item.url} item={item} collapsed={collapsed} />
-              ))}
-            </>
-          )}
-
-          {/* Grupo colapsável Follow-up */}
+          {/* Follow-up — sub-módulo colapsável de Vendas (do Luiz, PR #120) */}
           {showFupGroup && (
             <>
               <button
@@ -305,7 +432,7 @@ export function AppSidebar() {
                                 : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
                             )}
                           />
-                          <span className="truncate">{item.title}</span>
+                          <span className="truncate">{item.label}</span>
                           {item.page === "followup-sugestoes" && suggestionCount > 0 && (
                             <span className="ml-auto rounded-full bg-violet-500 px-1.5 py-0.5 font-mono text-[9px] font-bold text-white">
                               {suggestionCount > 99 ? "99+" : suggestionCount}
@@ -322,126 +449,47 @@ export function AppSidebar() {
               )}
             </>
           )}
-
-          {/* Itens do rodapé da nav */}
-          {visibleBottom.map((item) => (
-            <NavItem key={item.url} item={item} collapsed={collapsed} />
-          ))}
-
-          {/* Vendas Vexo (admin only) */}
-          {isAdminUser &&
-            adminNavItems.map((item) => (
-              <NavLink
-                key={item.url}
-                to={item.url}
-                className={({ isActive }) =>
-                  cn(
-                    "group relative flex font-medium transition-all",
-                    collapsed
-                      ? "h-9 items-center justify-center rounded-xl px-0"
-                      : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
-                    isActive
-                      ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24),0_14px_28px_rgba(15,23,42,0.08)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34),0_16px_28px_rgba(15,23,42,0.26)]"
-                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <item.icon
-                      className={cn(
-                        "h-4 w-4 shrink-0",
-                        isActive
-                          ? "text-cyan-600 dark:text-cyan-200"
-                          : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
-                      )}
-                    />
-                    {!collapsed && <span className="truncate">{item.title}</span>}
-                    {!collapsed && (
-                      <span className="ml-auto rounded-full border border-violet-400/20 bg-violet-400/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-violet-700 dark:text-violet-200">
-                        Admin
-                      </span>
-                    )}
-                    {isActive && (
-                      <span
-                        className={cn(
-                          "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
-                          collapsed
-                            ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
-                            : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
-                        )}
-                      />
-                    )}
-                  </>
-                )}
-              </NavLink>
-            ))}
         </div>
 
-        {/* Seção CONFIGURAÇÃO — admin only */}
-        {isAdminUser && (
+        {/* ── Sistema — FIXO, fora dos modos ─────────────────────────── */}
+        {visibleSistema.length > 0 && (
           <>
             {!collapsed && (
-              <p className="px-2.5 pb-2.5 pt-5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-                Configuração
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Sistema
               </p>
             )}
             <div className="space-y-1">
-              {[
-                { title: "Onboarding Wizard", url: "/crm/onboarding", icon: UserPlus },
-                { title: "Criar com IA", url: "/crm/onboarding-agent", icon: Sparkles },
-              ].map((item) => (
-                <NavLink
-                  key={item.url}
-                  to={item.url}
-                  className={({ isActive }) =>
-                    cn(
-                      "group relative flex font-medium transition-all",
-                      collapsed
-                        ? "h-9 items-center justify-center rounded-xl px-0"
-                        : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
-                      isActive
-                        ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24),0_14px_28px_rgba(15,23,42,0.08)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34),0_16px_28px_rgba(15,23,42,0.26)]"
-                        : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      <item.icon
-                        className={cn(
-                          "h-4 w-4 shrink-0",
-                          isActive
-                            ? "text-cyan-600 dark:text-cyan-200"
-                            : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
-                        )}
-                      />
-                      {!collapsed && <span className="truncate">{item.title}</span>}
-                      {isActive && (
-                        <span
-                          className={cn(
-                            "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
-                            collapsed
-                              ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
-                              : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
-                          )}
-                        />
-                      )}
-                    </>
-                  )}
-                </NavLink>
+              {visibleSistema.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
             </div>
           </>
         )}
 
-        {!collapsed && (
-          <p className="px-2.5 pb-2.5 pt-5 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-            Sistema
-          </p>
+        {/* ── Configuração — admin only, FIXO ────────────────────────── */}
+        {isAdminUser && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Configuração
+              </p>
+            )}
+            <div className="space-y-1">
+              {ADMIN_ITEMS.map((item, i) => (
+                <AdminNavLink
+                  key={item.key}
+                  item={item}
+                  collapsed={collapsed}
+                  showAdminBadge={i === 0} // badge "Admin" só no primeiro item
+                />
+              ))}
+            </div>
+          </>
         )}
 
-        <div className="space-y-1">
+        {/* ── Recolher sidebar ────────────────────────────────────────── */}
+        <div className="mt-3 space-y-1">
           <button
             onClick={() => setCollapsed(!collapsed)}
             className={cn(
@@ -457,6 +505,7 @@ export function AppSidebar() {
         </div>
       </nav>
 
+      {/* Footer: usuário + logout */}
       <div
         className={cn(
           "shrink-0 border-t border-slate-200/80 dark:border-sidebar-border/20",

@@ -40,5 +40,9 @@ Mudanças do T4 (branch `codex/fix-campaign-reply-sequence`, stash `t3-t4-trabal
 - **Renomeação Supabase→Postgres no código.** Arriscado (já quebrou migrations). Só com evidência de que não quebra.
 - **Migração Vercel→VPS/EasyPanel + repo privado.** Plano futuro: tirar o front da Vercel, centralizar tudo no VPS/EasyPanel e tornar o repositório privado. Registrar, não executar.
 
+## Design System — pendências (P4)
+
+- **P4 — Resolver identidade de marca / paleta oficial.** O código Vexo usa `#6366F1` (Electric Indigo) + `#22D3EE` (Cyan Neon) como identidade. Materiais de cliente (demo-liv-pub.html) usam `#ff7a1a` (laranja vibrante) como cor primária/logo. O laranja não é token registrado no `tailwind.config.ts` nem no `index.css`. Antes de P4 (design system completo), decidir: o Vexo Copiloto vai adotar o laranja como cor primária? Unificar no `tailwind.config.ts` e `index.css` antes de qualquer redesign de superfície.
+
 ## A confirmar com o Conrado quando relevante
 - **Status da Liv Pub.** O dashboard do Copiloto (P4) era bônus condicionado ao fechamento da Liv Pub até 06/06. Perguntar antes de priorizar P4 — muda a urgência.
