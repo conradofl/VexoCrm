@@ -58,6 +58,22 @@ export interface LeadClientEvolutionInstance {
   updated_by_email?: string | null;
 }
 
+// QR + metadados retornados pela Evolution no provision (server.js:1978-1983).
+export interface EvolutionProvisionQr {
+  instanceName?: string | null;
+  status?: string | null;
+  qrcode?: {
+    code?: string | null;
+    base64?: string | null;
+  } | null;
+}
+
+// Resposta completa do provision: a instância salva (item) + o QR (evolution).
+export interface LeadClientEvolutionProvisionResult {
+  item: LeadClientEvolutionInstance;
+  evolution: EvolutionProvisionQr | null;
+}
+
 export interface LeadClientN8nSettingsSummary {
   client_id?: string;
   dispatch_webhook_url: string | null;
@@ -285,7 +301,7 @@ export function useProvisionLeadClientEvolutionInstance() {
     }: LeadClientEvolutionInstancePayload & {
       tenantId: string;
       instanceName?: string;
-    }): Promise<LeadClientEvolutionInstance> => {
+    }): Promise<LeadClientEvolutionProvisionResult> => {
       const token = await getIdToken();
       if (!token) {
         throw new Error("Usuario nao autenticado.");
@@ -307,15 +323,19 @@ export function useProvisionLeadClientEvolutionInstance() {
         throw new Error(await readApiErrorMessage(res, "Evolution instance provision failed"));
       }
 
-      const responsePayload = await readApiJson<{ item?: LeadClientEvolutionInstance }>(
-        res,
-        "provision_lead_client_evolution_instance"
-      );
+      const responsePayload = await readApiJson<{
+        item?: LeadClientEvolutionInstance;
+        evolution?: EvolutionProvisionQr | null;
+      }>(res, "provision_lead_client_evolution_instance");
       if (!responsePayload?.item) {
         throw new Error("Evolution instance provision failed: missing response payload");
       }
 
-      return responsePayload.item;
+      // Propaga o QR (evolution.qrcode.base64) além da instância salva.
+      return {
+        item: responsePayload.item,
+        evolution: responsePayload.evolution ?? null,
+      };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lead-clients"] });

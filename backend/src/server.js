@@ -1522,6 +1522,9 @@ function maskN8nSettings(row) {
     sdr_whatsapp_number: row.sdr_whatsapp_number || null,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
+    // Preserva a lista de instâncias já mascarada por maskEvolutionInstance (server.js:1717).
+    // Sem isso a whitelist cortava o campo e a UI mostrava "0 instâncias".
+    evolution_instances: Array.isArray(row.evolution_instances) ? row.evolution_instances : [],
   };
 }
 

@@ -18,6 +18,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
@@ -128,6 +136,12 @@ export default function Tenants() {
       }
     >
   >({});
+  // QR exibido após criar a instância na Evolution (Fatia 1 do self-service).
+  const [qrModal, setQrModal] = useState<{
+    base64: string;
+    tenantName: string;
+    instanceName: string | null;
+  } | null>(null);
   const canManageTenants = hasPermission("tenants.manage");
   const canManageN8n = isAdminUser;
   const tablePreviewName = tenantId ? `leads_${tenantId.replace(/-/g, "_")}` : "leads_tenant_id";
@@ -376,7 +390,7 @@ export default function Tenants() {
     const draft = getEvolutionDraft(tenant.id);
 
     try {
-      await provisionEvolutionInstance.mutateAsync({
+      const result = await provisionEvolutionInstance.mutateAsync({
         tenantId: tenant.id,
         name: draft.name.trim() || tenant.name || "Evolution",
         dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
@@ -395,10 +409,20 @@ export default function Tenants() {
         },
       }));
 
-      toast({
-        title: "Evolution criada",
-        description: `A instancia foi criada na Evolution API e vinculada a ${tenant.name}.`,
-      });
+      // Se a Evolution devolveu o QR, abre o modal de pareamento.
+      const qrBase64 = result.evolution?.qrcode?.base64 || null;
+      if (qrBase64) {
+        setQrModal({
+          base64: qrBase64,
+          tenantName: tenant.name,
+          instanceName: result.evolution?.instanceName || result.item?.name || null,
+        });
+      } else {
+        toast({
+          title: "Evolution criada",
+          description: `Instancia vinculada a ${tenant.name}, mas a Evolution nao retornou QR. Tente remover e criar de novo.`,
+        });
+      }
     } catch (settingsError) {
       toast({
         title: "Falha ao criar na Evolution",
@@ -964,13 +988,18 @@ export default function Tenants() {
 
                           <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
                             <div className="grid gap-3 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
-                              <Input
-                                placeholder="Nome da instancia"
-                                value={evolutionDraft.name}
-                                onChange={(event) =>
-                                  updateEvolutionDraft(tenant.id, { name: event.target.value })
-                                }
-                              />
+                              <div className="grid gap-1">
+                                <Input
+                                  placeholder="Nome da instancia"
+                                  value={evolutionDraft.name}
+                                  onChange={(event) =>
+                                    updateEvolutionDraft(tenant.id, { name: event.target.value })
+                                  }
+                                />
+                                <p className="px-1 text-[11px] text-muted-foreground">
+                                  Espacos e acentos viram hifen ao criar (ex.: "Chip Vendas" -&gt; "chip-vendas"). E normal.
+                                </p>
+                              </div>
                               <Input
                                 placeholder="URL de disparo Evolution"
                                 value={evolutionDraft.dispatchWebhookUrl}
@@ -1181,6 +1210,46 @@ export default function Tenants() {
           </div>
         </div>
       </div>
+
+      {/* Modal de QR — pareamento da instância recém-criada (Fatia 1 do self-service) */}
+      <Dialog open={!!qrModal} onOpenChange={(open) => !open && setQrModal(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Parear WhatsApp</DialogTitle>
+            <DialogDescription>
+              Instancia{qrModal?.instanceName ? ` "${qrModal.instanceName}"` : ""} criada para{" "}
+              {qrModal?.tenantName || "a empresa"}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col items-center gap-4 py-2">
+            {qrModal?.base64 && (
+              <img
+                src={qrModal.base64}
+                alt="QR Code para parear o WhatsApp"
+                className="h-64 w-64 rounded-xl border border-slate-200 bg-white p-2 dark:border-white/10"
+              />
+            )}
+            <div className="text-center text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">
+                Escaneie em WhatsApp &gt; Aparelhos conectados
+              </p>
+              <p className="mt-2 text-xs">
+                O QR expira em poucos minutos. Se expirar antes de escanear, use{" "}
+                <span className="font-semibold">Remover</span> e crie a instancia de novo.
+                <br />
+                (Re-gerar o QR sem recriar vem na proxima atualizacao.)
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setQrModal(null)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }
