@@ -4817,7 +4817,11 @@ export function registerAllDomainRoutes(app) {
     const requestedSteps = Array.isArray(body.steps) ? body.steps : [];
     const triggerType = body.triggerType === "scheduled" ? "scheduled" : "manual";
     const scheduledAt = triggerType === "scheduled" ? (normalizeString(body.scheduledAt) || null) : null;
-    const requestedEvolutionInstanceId = parseOptionalUuid(body.evolutionInstanceId) || null;
+    const parsedEvolutionInstanceId = parseOptionalUuid(body.evolutionInstanceId);
+    if (parsedEvolutionInstanceId.error) {
+      return sendError(res, 400, "INVALID_EVOLUTION_INSTANCE_ID", parsedEvolutionInstanceId.error);
+    }
+    const requestedEvolutionInstanceId = parsedEvolutionInstanceId.value || null;
 
     try {
       await ensureCampaignDispatchEvolutionInstanceColumn();
@@ -4876,7 +4880,11 @@ export function registerAllDomainRoutes(app) {
     if (body.triggerType != null) patch.trigger_type = body.triggerType === "scheduled" ? "scheduled" : "manual";
     if (body.scheduledAt != null) patch.scheduled_at = normalizeString(body.scheduledAt) || null;
     if (Object.prototype.hasOwnProperty.call(body, "evolutionInstanceId")) {
-      patch.evolution_instance_id = parseOptionalUuid(body.evolutionInstanceId) || null;
+      const parsedEvInstanceId = parseOptionalUuid(body.evolutionInstanceId);
+      if (parsedEvInstanceId.error) {
+        return sendError(res, 400, "INVALID_EVOLUTION_INSTANCE_ID", parsedEvInstanceId.error);
+      }
+      patch.evolution_instance_id = parsedEvInstanceId.value || null;
     }
     if (body.status != null && ["draft","scheduled","paused","cancelled"].includes(body.status)) patch.status = body.status;
     patch.updated_at = new Date().toISOString();
