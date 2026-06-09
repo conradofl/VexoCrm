@@ -4600,6 +4600,63 @@ export function registerAllDomainRoutes(app) {
     `);
   }
 
+  // ── Anti-ban (Fatia 3a): cota diária por chip ───────────────────────────────
+  // Defaults por estado do chip; daily_limit_override sobrescreve quando > 0.
+  const EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS = { cold: 100, warm: 500 };
+
+  async function ensureEvolutionInstanceDailyUsageTable() {
+    if (!pgDatabasePool) return false;
+    await pgDatabasePool.query(`
+      CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_usage (
+        instance_id UUID NOT NULL REFERENCES public.lead_client_evolution_instances(id) ON DELETE CASCADE,
+        date DATE NOT NULL,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, date)
+      )
+    `);
+    return true;
+  }
+
+  function resolveEvolutionInstanceDailyLimit(instance) {
+    const override = Number.parseInt(String(instance?.daily_limit_override ?? ""), 10);
+    if (Number.isInteger(override) && override > 0) return override;
+    const state = normalizeString(instance?.chip_state) === "warm" ? "warm" : "cold";
+    return EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS[state];
+  }
+
+  // Incremento ATÔMICO da cota do dia. Dois disparos simultâneos do mesmo tenant
+  // recebem sent_count distintos e sequenciais (sem race condition de SELECT-then-INSERT).
+  // Retorna o NOVO total do dia (use ESTE valor para decidir se estourou a cota).
+  async function reserveEvolutionInstanceDailyQuota(instanceId) {
+    if (!instanceId || !(await ensureEvolutionInstanceDailyUsageTable())) return null;
+    const { rows } = await pgDatabasePool.query(
+      `
+        INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count)
+        VALUES ($1, CURRENT_DATE, 1)
+        ON CONFLICT (instance_id, date)
+        DO UPDATE SET sent_count = public.evolution_instance_daily_usage.sent_count + 1
+        RETURNING sent_count
+      `,
+      [instanceId]
+    );
+    return rows[0]?.sent_count ?? null;
+  }
+
+  // Devolve 1 unidade quando o chip foi reservado mas o envio não aconteceu.
+  async function releaseEvolutionInstanceDailyQuota(instanceId) {
+    if (!instanceId || !pgDatabasePool) return;
+    await pgDatabasePool
+      .query(
+        `
+          UPDATE public.evolution_instance_daily_usage
+          SET sent_count = GREATEST(sent_count - 1, 0)
+          WHERE instance_id = $1 AND date = CURRENT_DATE
+        `,
+        [instanceId]
+      )
+      .catch(() => {});
+  }
+
   async function validateCampaignDispatchEvolutionInstance(clientId, instanceId, res) {
     if (!instanceId) return true;
 
@@ -4687,11 +4744,67 @@ export function registerAllDomainRoutes(app) {
       return current?.status === "running";
     };
 
+    // Anti-ban (Fatia 3a): pool de chips para rotação round-robin com cota diária.
+    // Instâncias ATIVAS do tenant com URL de disparo. Se o disparo fixa uma instância
+    // específica, restringe o pool a ela (chip único — sem rotação, mas com cota e delay).
+    const tenantInstances = await getLeadClientEvolutionInstances(clientId);
+    const activeInstances = tenantInstances.filter(
+      (inst) => inst.active !== false && normalizeString(inst.dispatch_webhook_url)
+    );
+    const rotationPool = dispatchEvolutionInstanceId
+      ? activeInstances.filter((inst) => inst.id === dispatchEvolutionInstanceId)
+      : activeInstances;
+
+    let rotationCursor = 0;
+    // chipProvider: antes de cada lead, percorre o pool a partir do cursor (round-robin)
+    // e RESERVA cota atômica no primeiro chip que ainda tiver cota. Devolve o chip ou,
+    // se todos estourarem, null (→ dispatchCampaignSequence sinaliza allChipsExhausted).
+    const chipProvider =
+      rotationPool.length > 0
+        ? async () => {
+            for (let attempt = 0; attempt < rotationPool.length; attempt += 1) {
+              const inst = rotationPool[(rotationCursor + attempt) % rotationPool.length];
+              const limit = resolveEvolutionInstanceDailyLimit(inst);
+              const reserved = await reserveEvolutionInstanceDailyQuota(inst.id);
+
+              if (reserved === null) {
+                // Banco/cota indisponível — não bloqueia o disparo; usa o chip sem contagem.
+                rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
+                return {
+                  webhookUrl: normalizeString(inst.dispatch_webhook_url),
+                  webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
+                  instanceId: inst.id,
+                  release: null,
+                };
+              }
+
+              if (reserved > limit) {
+                // Estourou: devolve a reserva e tenta o próximo chip do pool.
+                await releaseEvolutionInstanceDailyQuota(inst.id);
+                continue;
+              }
+
+              // Reservou dentro da cota. Avança o cursor para o próximo lead.
+              rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
+              return {
+                webhookUrl: normalizeString(inst.dispatch_webhook_url),
+                webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
+                instanceId: inst.id,
+                release: () => releaseEvolutionInstanceDailyQuota(inst.id),
+              };
+            }
+            return null; // todos os chips ativos esgotaram a cota de hoje
+          }
+        : null;
+
     const result = await dispatchCampaignSequence({
       webhookUrl,
       webhookToken,
       leads,
       analyticsMeta,
+      chipProvider,
+      // Anti-ban: delay aleatório 30–90s entre leads.
+      leadDelayProvider: () => 30_000 + Math.floor(Math.random() * 60_001),
       context: {
         campaign: {
           id: campaign.id,
@@ -4754,6 +4867,19 @@ export function registerAllDomainRoutes(app) {
     }
 
     const failedCount = result?.summary?.failureCount ?? (leads.length - sentCount);
+
+    // Anti-ban: todos os chips ativos bateram a cota diária → pausa (reusa o status
+    // "paused"). O disparo pode ser retomado depois — a cota reseta por data (CURRENT_DATE).
+    if (result?.summary?.allChipsExhausted) {
+      await db.from("campaign_dispatches").update({
+        status: "paused",
+        sent_count: sentCount,
+        failed_count: failedCount,
+        error_message: "Cota diaria atingida em todos os chips ativos.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", dispatchId);
+      return;
+    }
 
     if (result?.summary?.paused) {
       await db.from("campaign_dispatches").update({
