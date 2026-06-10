@@ -216,6 +216,7 @@ const useDirectPostgres =
 
 let pgDatabasePool = null;
 let supabase = null;
+let _evolutionInstancesSchemaEnsured = false;
 
 if (useDirectPostgres) {
   if (!databaseUrl) {
@@ -1563,6 +1564,7 @@ function mergeEvolutionInstanceIntoSettings(settings, instance) {
 
 async function ensureLeadClientEvolutionInstancesTable() {
   if (!pgDatabasePool) return false;
+  if (_evolutionInstancesSchemaEnsured) return true;
 
   await pgDatabasePool.query(`
     CREATE TABLE IF NOT EXISTS public.lead_client_evolution_instances (
@@ -1590,6 +1592,18 @@ async function ensureLeadClientEvolutionInstancesTable() {
       ON public.lead_client_evolution_instances (client_id, active)
   `);
 
+  // Anti-ban: chip_state (cold|warm) + daily_limit_override.
+  // ALTER TABLE acquires ACCESS EXCLUSIVE mesmo em no-op no PG — roda só uma vez por processo.
+  await pgDatabasePool.query(`
+    ALTER TABLE public.lead_client_evolution_instances
+    ADD COLUMN IF NOT EXISTS chip_state TEXT NOT NULL DEFAULT 'cold'
+  `);
+  await pgDatabasePool.query(`
+    ALTER TABLE public.lead_client_evolution_instances
+    ADD COLUMN IF NOT EXISTS daily_limit_override INTEGER
+  `);
+
+  _evolutionInstancesSchemaEnsured = true;
   return true;
 }
 
@@ -1599,7 +1613,8 @@ async function getLeadClientEvolutionInstances(clientId) {
   const { rows } = await pgDatabasePool.query(
     `
       SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-             inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+             inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
+             created_at, updated_at, updated_by_email
       FROM public.lead_client_evolution_instances
       WHERE client_id = $1
       ORDER BY is_default DESC, active DESC, created_at ASC
@@ -1616,7 +1631,8 @@ async function getLeadClientEvolutionInstancesMap(clientIds) {
   const { rows } = await pgDatabasePool.query(
     `
       SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-             inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+             inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
+             created_at, updated_at, updated_by_email
       FROM public.lead_client_evolution_instances
       WHERE client_id = ANY($1::text[])
       ORDER BY is_default DESC, active DESC, created_at ASC

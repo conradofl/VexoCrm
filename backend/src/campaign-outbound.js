@@ -466,6 +466,8 @@ export async function dispatchCampaignSequence({
   onLeadDispatched = null,
   onStepDispatched = null,
   shouldContinue = null,
+  chipProvider = null,
+  leadDelayProvider = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -477,6 +479,7 @@ export async function dispatchCampaignSequence({
     warnings: [],
     completedCampaign: false,
     paused: false,
+    allChipsExhausted: false,
   };
   const failedPhones = new Set();
 
@@ -500,7 +503,21 @@ export async function dispatchCampaignSequence({
       continue;
     }
 
+    let leadWebhookUrl = webhookUrl;
+    let leadWebhookToken = webhookToken;
+    let activeChip = null;
+    if (typeof chipProvider === "function") {
+      activeChip = await chipProvider({ leadIndex });
+      if (!activeChip) {
+        summary.allChipsExhausted = true;
+        break;
+      }
+      leadWebhookUrl = activeChip.webhookUrl;
+      leadWebhookToken = activeChip.webhookToken ?? null;
+    }
+
     let leadFailed = false;
+    let leadSentAnything = false;
     let lastSuccessfulStep = null;
     let lastSuccessfulStepIndex = null;
     let lastSentAt = null;
@@ -534,7 +551,8 @@ export async function dispatchCampaignSequence({
 
       try {
         const sentAt = new Date().toISOString();
-        await postEvolutionPayload(webhookUrl, webhookToken, payload);
+        await postEvolutionPayload(leadWebhookUrl, leadWebhookToken, payload);
+        leadSentAnything = true;
         lastSuccessfulStep = step;
         lastSuccessfulStepIndex = stepIndex;
         lastSentAt = sentAt;
@@ -589,6 +607,14 @@ export async function dispatchCampaignSequence({
 
     if (summary.paused) break;
 
+    if (activeChip && typeof activeChip.release === "function" && !leadSentAnything) {
+      try {
+        await activeChip.release();
+      } catch {
+        /* devolução de cota é best-effort */
+      }
+    }
+
     if (!leadFailed) {
       summary.successCount += 1;
       summary.successPhones.push(phone);
@@ -630,7 +656,11 @@ export async function dispatchCampaignSequence({
         summary.paused = true;
         break;
       }
-      await sleep(normalizedMeta.dispatchOptions.leadDelaySeconds * 1000);
+      const leadDelayMs =
+        typeof leadDelayProvider === "function"
+          ? leadDelayProvider({ leadIndex })
+          : normalizedMeta.dispatchOptions.leadDelaySeconds * 1000;
+      await sleep(leadDelayMs);
     }
   }
 

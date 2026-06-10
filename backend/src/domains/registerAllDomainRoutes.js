@@ -78,6 +78,8 @@ import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { query as fupQuery } from "../followup/db.js";
 import { getFollowupQueue } from "../followup/queue.js";
 
+let _evolutionDailyUsageSchemaEnsured = false;
+
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
  * routeDeps must be populated in server.js before this runs.
@@ -4617,6 +4619,61 @@ export function registerAllDomainRoutes(app) {
     return true;
   }
 
+  // ── Anti-ban (Fatia 3a): cota diária por chip ───────────────────────────────
+  const EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS = { cold: 100, warm: 500 };
+
+  async function ensureEvolutionInstanceDailyUsageTable() {
+    if (!pgDatabasePool) return false;
+    if (_evolutionDailyUsageSchemaEnsured) return true;
+    await pgDatabasePool.query(`
+      CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_usage (
+        instance_id UUID NOT NULL REFERENCES public.lead_client_evolution_instances(id) ON DELETE CASCADE,
+        date DATE NOT NULL,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, date)
+      )
+    `);
+    _evolutionDailyUsageSchemaEnsured = true;
+    return true;
+  }
+
+  function resolveEvolutionInstanceDailyLimit(instance) {
+    const override = Number.parseInt(String(instance?.daily_limit_override ?? ""), 10);
+    if (Number.isInteger(override) && override > 0) return override;
+    const state = normalizeString(instance?.chip_state) === "warm" ? "warm" : "cold";
+    return EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS[state];
+  }
+
+  async function reserveEvolutionInstanceDailyQuota(instanceId) {
+    if (!instanceId || !(await ensureEvolutionInstanceDailyUsageTable())) return null;
+    const { rows } = await pgDatabasePool.query(
+      `
+        INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count)
+        VALUES ($1, CURRENT_DATE, 1)
+        ON CONFLICT (instance_id, date)
+        DO UPDATE SET sent_count = public.evolution_instance_daily_usage.sent_count + 1
+        RETURNING sent_count
+      `,
+      [instanceId]
+    );
+    return rows[0]?.sent_count ?? null;
+  }
+
+  async function releaseEvolutionInstanceDailyQuota(instanceId) {
+    if (!instanceId || !pgDatabasePool) return;
+    await pgDatabasePool
+      .query(
+        `
+          UPDATE public.evolution_instance_daily_usage
+          SET sent_count = GREATEST(sent_count - 1, 0)
+          WHERE instance_id = $1 AND date = CURRENT_DATE
+        `,
+        [instanceId]
+      )
+      .catch(() => {});
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
@@ -4664,6 +4721,51 @@ export function registerAllDomainRoutes(app) {
 
     // Constrói analyticsMeta compatível com dispatchCampaignSequence
     const analyticsMeta = validation.analyticsMeta;
+
+    // Anti-ban: pool de chips para rotação round-robin com cota diária.
+    const tenantInstances = await getLeadClientEvolutionInstances(clientId);
+    const activeInstances = tenantInstances.filter(
+      (inst) => inst.active !== false && normalizeString(inst.dispatch_webhook_url)
+    );
+    const rotationPool = dispatchEvolutionInstanceId
+      ? activeInstances.filter((inst) => inst.id === dispatchEvolutionInstanceId)
+      : activeInstances;
+
+    let rotationCursor = 0;
+    const chipProvider =
+      rotationPool.length > 0
+        ? async () => {
+            for (let attempt = 0; attempt < rotationPool.length; attempt += 1) {
+              const inst = rotationPool[(rotationCursor + attempt) % rotationPool.length];
+              const limit = resolveEvolutionInstanceDailyLimit(inst);
+              const reserved = await reserveEvolutionInstanceDailyQuota(inst.id);
+
+              if (reserved === null) {
+                rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
+                return {
+                  webhookUrl: normalizeString(inst.dispatch_webhook_url),
+                  webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
+                  instanceId: inst.id,
+                  release: null,
+                };
+              }
+
+              if (reserved > limit) {
+                await releaseEvolutionInstanceDailyQuota(inst.id);
+                continue;
+              }
+
+              rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
+              return {
+                webhookUrl: normalizeString(inst.dispatch_webhook_url),
+                webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
+                instanceId: inst.id,
+                release: () => releaseEvolutionInstanceDailyQuota(inst.id),
+              };
+            }
+            return null;
+          }
+        : null;
 
     let sentCount = 0;
     let lastPauseCheckAt = 0;
@@ -4736,6 +4838,8 @@ export function registerAllDomainRoutes(app) {
         await db.from("campaign_dispatches").update({ sent_count: sentCount, updated_at: new Date().toISOString() }).eq("id", dispatchId).catch(() => {});
       },
       shouldContinue: isDispatchStillRunning,
+      chipProvider,
+      leadDelayProvider: () => 30_000 + Math.floor(Math.random() * 60_001),
     });
 
     // Registra falhas por lead
@@ -4754,6 +4858,17 @@ export function registerAllDomainRoutes(app) {
     }
 
     const failedCount = result?.summary?.failureCount ?? (leads.length - sentCount);
+
+    if (result?.summary?.allChipsExhausted) {
+      await db.from("campaign_dispatches").update({
+        status: "paused",
+        sent_count: sentCount,
+        failed_count: failedCount,
+        error_message: "Cota diaria atingida em todos os chips ativos.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", dispatchId);
+      return;
+    }
 
     if (result?.summary?.paused) {
       await db.from("campaign_dispatches").update({
