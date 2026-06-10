@@ -1590,17 +1590,6 @@ async function ensureLeadClientEvolutionInstancesTable() {
       ON public.lead_client_evolution_instances (client_id, active)
   `);
 
-  // Anti-ban (Fatia 3a): estado do chip controla a cota diária padrão
-  // (cold=100/dia, warm=500/dia). daily_limit_override (NULL = usa o padrão do estado).
-  await pgDatabasePool.query(`
-    ALTER TABLE public.lead_client_evolution_instances
-    ADD COLUMN IF NOT EXISTS chip_state TEXT NOT NULL DEFAULT 'cold'
-  `);
-  await pgDatabasePool.query(`
-    ALTER TABLE public.lead_client_evolution_instances
-    ADD COLUMN IF NOT EXISTS daily_limit_override INTEGER
-  `);
-
   return true;
 }
 
@@ -1610,8 +1599,7 @@ async function getLeadClientEvolutionInstances(clientId) {
   const { rows } = await pgDatabasePool.query(
     `
       SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-             inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
-             created_at, updated_at, updated_by_email
+             inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
       FROM public.lead_client_evolution_instances
       WHERE client_id = $1
       ORDER BY is_default DESC, active DESC, created_at ASC
@@ -1969,9 +1957,7 @@ function getEvolutionAdminConfig() {
 function buildEvolutionManagedInstanceName(clientId, inputName) {
   const source = normalizeString(inputName) || clientId || "vexo";
   const normalized = normalizeTenantKey(source) || normalizeTenantKey(clientId) || `vexo-${randomUUID().slice(0, 8)}`;
-  // Evita duplo-prefixo: cobre "clientId-foo" (já prefixado com algo) e "clientId" (nome == tenant id).
-  const alreadyPrefixed = normalized === clientId || normalized.startsWith(`${clientId}-`);
-  const withClientPrefix = alreadyPrefixed ? normalized : `${clientId}-${normalized}`;
+  const withClientPrefix = normalized.startsWith(`${clientId}-`) ? normalized : `${clientId}-${normalized}`;
   return withClientPrefix.slice(0, 64).replace(/-+$/g, "");
 }
 

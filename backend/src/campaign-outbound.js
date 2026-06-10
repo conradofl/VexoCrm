@@ -466,12 +466,6 @@ export async function dispatchCampaignSequence({
   onLeadDispatched = null,
   onStepDispatched = null,
   shouldContinue = null,
-  // Anti-ban (Fatia 3a): se fornecido, escolhe o chip (instância Evolution) por lead,
-  // com rotação e cota. Retorna { webhookUrl, webhookToken, instanceId, release } ou null
-  // (null = todos os chips esgotaram a cota). Quando ausente, usa o webhook fixo do topo.
-  chipProvider = null,
-  // Se fornecido, define o delay (ms) entre leads; senão usa leadDelaySeconds fixo.
-  leadDelayProvider = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -483,7 +477,6 @@ export async function dispatchCampaignSequence({
     warnings: [],
     completedCampaign: false,
     paused: false,
-    allChipsExhausted: false,
   };
   const failedPhones = new Set();
 
@@ -507,24 +500,7 @@ export async function dispatchCampaignSequence({
       continue;
     }
 
-    // Anti-ban: escolhe o chip deste lead (rotação + reserva de cota) antes de enviar.
-    // O chip fica FIXO durante todos os steps deste lead; só rotaciona entre leads.
-    let leadWebhookUrl = webhookUrl;
-    let leadWebhookToken = webhookToken;
-    let activeChip = null;
-    if (typeof chipProvider === "function") {
-      activeChip = await chipProvider({ leadIndex });
-      if (!activeChip) {
-        // Nenhum chip ativo com cota disponível → encerra (será pausado pelo chamador).
-        summary.allChipsExhausted = true;
-        break;
-      }
-      leadWebhookUrl = activeChip.webhookUrl;
-      leadWebhookToken = activeChip.webhookToken ?? null;
-    }
-
     let leadFailed = false;
-    let leadSentAnything = false;
     let lastSuccessfulStep = null;
     let lastSuccessfulStepIndex = null;
     let lastSentAt = null;
@@ -558,8 +534,7 @@ export async function dispatchCampaignSequence({
 
       try {
         const sentAt = new Date().toISOString();
-        await postEvolutionPayload(leadWebhookUrl, leadWebhookToken, payload);
-        leadSentAnything = true;
+        await postEvolutionPayload(webhookUrl, webhookToken, payload);
         lastSuccessfulStep = step;
         lastSuccessfulStepIndex = stepIndex;
         lastSentAt = sentAt;
@@ -612,16 +587,6 @@ export async function dispatchCampaignSequence({
       }
     }
 
-    // Anti-ban: se reservou cota mas NADA foi enviado (falha total ou pausa antes do 1º envio),
-    // devolve a unidade reservada — falha não consome cota.
-    if (activeChip && typeof activeChip.release === "function" && !leadSentAnything) {
-      try {
-        await activeChip.release();
-      } catch {
-        /* devolução de cota é best-effort */
-      }
-    }
-
     if (summary.paused) break;
 
     if (!leadFailed) {
@@ -665,14 +630,7 @@ export async function dispatchCampaignSequence({
         summary.paused = true;
         break;
       }
-      // Anti-ban: delay entre leads. Se o chamador fornecer um provider (campanha de
-      // disparo usa aleatório 30–90s), usa-o; senão mantém o leadDelaySeconds fixo
-      // (preserva os fluxos de reply/direto que não passam provider).
-      const leadDelayMs =
-        typeof leadDelayProvider === "function"
-          ? leadDelayProvider({ leadIndex })
-          : normalizedMeta.dispatchOptions.leadDelaySeconds * 1000;
-      await sleep(leadDelayMs);
+      await sleep(normalizedMeta.dispatchOptions.leadDelaySeconds * 1000);
     }
   }
 
