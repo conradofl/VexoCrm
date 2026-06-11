@@ -42,6 +42,8 @@ export interface LeadClientEvolutionInstancePayload {
   inboundBearerToken?: string | null;
   active?: boolean;
   isDefault?: boolean;
+  chipState?: "cold" | "warm";
+  dailyLimitOverride?: number | null;
 }
 
 export interface LeadClientEvolutionInstance {
@@ -53,6 +55,9 @@ export interface LeadClientEvolutionInstance {
   inbound_bearer_token_label?: string | null;
   active: boolean;
   is_default: boolean;
+  chip_state: "cold" | "warm";
+  daily_limit_override: number | null;
+  sent_count_today: number;
   created_at?: string | null;
   updated_at?: string | null;
   updated_by_email?: string | null;

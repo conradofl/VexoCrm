@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2, Wand2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -136,6 +137,10 @@ export default function Tenants() {
       }
     >
   >({});
+  const [chipDrafts, setChipDrafts] = useState<
+    Record<string, { chipState?: "cold" | "warm"; dailyLimitOverride?: string }>
+  >({});
+
   // QR exibido após criar a instância na Evolution (Fatia 1 do self-service).
   const [qrModal, setQrModal] = useState<{
     base64: string;
@@ -430,6 +435,70 @@ export default function Tenants() {
           settingsError instanceof Error
             ? settingsError.message
             : "Nao foi possivel criar a instancia na Evolution API.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  function resolveChipLimit(chipState: "cold" | "warm", overrideStr?: string): number {
+    const parsed = overrideStr ? parseInt(overrideStr, 10) : NaN;
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+    return chipState === "warm" ? 500 : 100;
+  }
+
+  const getChipDraft = (instance: LeadClientEvolutionInstance) => {
+    const draft = chipDrafts[instance.id] || {};
+    return {
+      chipState: draft.chipState ?? instance.chip_state,
+      dailyLimitOverride:
+        draft.dailyLimitOverride !== undefined
+          ? draft.dailyLimitOverride
+          : instance.daily_limit_override != null
+            ? String(instance.daily_limit_override)
+            : "",
+    };
+  };
+
+  const updateChipDraft = (
+    instanceId: string,
+    patch: { chipState?: "cold" | "warm"; dailyLimitOverride?: string }
+  ) => {
+    setChipDrafts((current) => ({
+      ...current,
+      [instanceId]: { ...current[instanceId], ...patch },
+    }));
+  };
+
+  const handleSaveChipSettings = async (
+    tenant: LeadClient,
+    instance: LeadClientEvolutionInstance
+  ) => {
+    const draft = getChipDraft(instance);
+    const limitNum = draft.dailyLimitOverride.trim()
+      ? parseInt(draft.dailyLimitOverride, 10)
+      : null;
+    const dailyLimitOverride =
+      limitNum != null && Number.isInteger(limitNum) && limitNum > 0 ? limitNum : null;
+
+    try {
+      await saveEvolutionInstance.mutateAsync({
+        tenantId: tenant.id,
+        instanceId: instance.id,
+        name: instance.name,
+        dispatchWebhookUrl: instance.dispatch_webhook_url || "",
+        chipState: draft.chipState,
+        dailyLimitOverride,
+      });
+      setChipDrafts((current) => {
+        const next = { ...current };
+        delete next[instance.id];
+        return next;
+      });
+      toast({ title: "Cota atualizada", description: `${tenant.name}: ${instance.name}` });
+    } catch (err) {
+      toast({
+        title: "Falha ao salvar cota",
+        description: err instanceof Error ? err.message : "Nao foi possivel salvar.",
         variant: "destructive",
       });
     }
@@ -940,6 +1009,81 @@ export default function Tenants() {
                                     <p className="truncate font-mono text-xs text-muted-foreground">
                                       {instance.dispatch_webhook_url}
                                     </p>
+
+                                    {/* Anti-ban: saúde do chip (cota diária) */}
+                                    {(() => {
+                                      const draft = getChipDraft(instance);
+                                      const savedLimit =
+                                        instance.daily_limit_override ??
+                                        (instance.chip_state === "warm" ? 500 : 100);
+                                      const sent = instance.sent_count_today;
+                                      const pct = savedLimit > 0 ? Math.min(100, Math.round((sent / savedLimit) * 100)) : 0;
+                                      const barColor =
+                                        pct >= 90
+                                          ? "bg-red-500"
+                                          : pct >= 70
+                                            ? "bg-amber-400"
+                                            : "bg-emerald-500";
+                                      const previewLimit = resolveChipLimit(draft.chipState, draft.dailyLimitOverride);
+                                      return (
+                                        <div className="mt-1 space-y-2 rounded-lg border border-slate-200/70 bg-slate-50/60 p-2.5 text-xs dark:border-white/10 dark:bg-white/[0.03]">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="text-muted-foreground">Enviadas hoje</span>
+                                            <span className="font-mono font-semibold text-foreground">
+                                              {sent} / {savedLimit}
+                                            </span>
+                                          </div>
+                                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
+                                            <div
+                                              className={cn("h-full rounded-full transition-all duration-300", barColor)}
+                                              style={{ width: `${pct}%` }}
+                                            />
+                                          </div>
+                                          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                                            <Select
+                                              value={draft.chipState}
+                                              onValueChange={(v) =>
+                                                updateChipDraft(instance.id, { chipState: v as "cold" | "warm" })
+                                              }
+                                            >
+                                              <SelectTrigger className="h-7 w-[130px] text-xs">
+                                                <SelectValue />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="cold">Frio (100/dia)</SelectItem>
+                                                <SelectItem value="warm">Aquecido (500/dia)</SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                            <Input
+                                              className="h-7 w-24 text-xs"
+                                              placeholder="Limite custom"
+                                              type="number"
+                                              min="1"
+                                              value={draft.dailyLimitOverride}
+                                              onChange={(e) =>
+                                                updateChipDraft(instance.id, { dailyLimitOverride: e.target.value })
+                                              }
+                                            />
+                                            {draft.dailyLimitOverride && (
+                                              <span className="text-muted-foreground">
+                                                → {previewLimit}/dia
+                                              </span>
+                                            )}
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-7 text-xs"
+                                              disabled={saveEvolutionInstance.isPending}
+                                              onClick={() => void handleSaveChipSettings(tenant, instance)}
+                                            >
+                                              <Save className="mr-1 h-3 w-3" />
+                                              Salvar cota
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                   <div className="flex flex-wrap items-center justify-end gap-2">
                                     <Button

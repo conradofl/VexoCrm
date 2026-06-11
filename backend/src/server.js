@@ -1540,6 +1540,9 @@ function maskEvolutionInstance(row) {
     inbound_bearer_token_label: row.inbound_bearer_token ? "definido" : null,
     active: row.active !== false,
     is_default: row.is_default === true,
+    chip_state: row.chip_state === "warm" ? "warm" : "cold",
+    daily_limit_override: row.daily_limit_override != null ? Number(row.daily_limit_override) : null,
+    sent_count_today: row.sent_count_today != null ? Number(row.sent_count_today) : 0,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
@@ -1612,12 +1615,15 @@ async function getLeadClientEvolutionInstances(clientId) {
 
   const { rows } = await pgDatabasePool.query(
     `
-      SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-             inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
-             created_at, updated_at, updated_by_email
-      FROM public.lead_client_evolution_instances
-      WHERE client_id = $1
-      ORDER BY is_default DESC, active DESC, created_at ASC
+      SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
+             i.inbound_bearer_token, i.active, i.is_default, i.chip_state, i.daily_limit_override,
+             i.created_at, i.updated_at, i.updated_by_email,
+             COALESCE(u.sent_count, 0) AS sent_count_today
+      FROM public.lead_client_evolution_instances i
+      LEFT JOIN public.evolution_instance_daily_usage u
+        ON u.instance_id = i.id AND u.date = CURRENT_DATE
+      WHERE i.client_id = $1
+      ORDER BY i.is_default DESC, i.active DESC, i.created_at ASC
     `,
     [clientId]
   );
@@ -1630,12 +1636,15 @@ async function getLeadClientEvolutionInstancesMap(clientIds) {
 
   const { rows } = await pgDatabasePool.query(
     `
-      SELECT id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-             inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
-             created_at, updated_at, updated_by_email
-      FROM public.lead_client_evolution_instances
-      WHERE client_id = ANY($1::text[])
-      ORDER BY is_default DESC, active DESC, created_at ASC
+      SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
+             i.inbound_bearer_token, i.active, i.is_default, i.chip_state, i.daily_limit_override,
+             i.created_at, i.updated_at, i.updated_by_email,
+             COALESCE(u.sent_count, 0) AS sent_count_today
+      FROM public.lead_client_evolution_instances i
+      LEFT JOIN public.evolution_instance_daily_usage u
+        ON u.instance_id = i.id AND u.date = CURRENT_DATE
+      WHERE i.client_id = ANY($1::text[])
+      ORDER BY i.is_default DESC, i.active DESC, i.created_at ASC
     `,
     [clientIds]
   );
@@ -1843,11 +1852,21 @@ async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, ex
   const active = Object.prototype.hasOwnProperty.call(body, "active")
     ? body.active !== false
     : existing?.active !== false;
+  const chipState = Object.prototype.hasOwnProperty.call(body, "chipState")
+    ? normalizeString(body.chipState) === "warm" ? "warm" : "cold"
+    : existing?.chip_state === "warm" ? "warm" : "cold";
+  const rawLimit = Object.prototype.hasOwnProperty.call(body, "dailyLimitOverride")
+    ? body.dailyLimitOverride
+    : existing?.daily_limit_override ?? null;
+  const dailyLimitOverride =
+    rawLimit == null ? null : Number.isInteger(Number(rawLimit)) && Number(rawLimit) > 0 ? Number(rawLimit) : null;
 
   const payload = {
     client_id: clientId,
     name,
     dispatch_webhook_url: dispatchWebhookUrl,
+    chip_state: chipState,
+    daily_limit_override: dailyLimitOverride,
     dispatch_webhook_token:
       Object.prototype.hasOwnProperty.call(body, "dispatchWebhookToken")
         ? body.dispatchWebhookToken === null
@@ -1892,12 +1911,15 @@ async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, ex
               inbound_bearer_token = $4,
               active = $5,
               is_default = $6,
+              chip_state = $7,
+              daily_limit_override = $8,
               updated_at = now(),
-              updated_by_uid = $7,
-              updated_by_email = $8
-          WHERE id = $9 AND client_id = $10
+              updated_by_uid = $9,
+              updated_by_email = $10
+          WHERE id = $11 AND client_id = $12
           RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-                    inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+                    inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
+                    created_at, updated_at, updated_by_email
         `,
         [
           payload.name,
@@ -1906,6 +1928,8 @@ async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, ex
           payload.inbound_bearer_token,
           payload.active,
           payload.is_default,
+          payload.chip_state,
+          payload.daily_limit_override,
           payload.updated_by_uid,
           payload.updated_by_email,
           existing.id,
@@ -1930,10 +1954,11 @@ async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, ex
         `
           INSERT INTO public.lead_client_evolution_instances
             (client_id, name, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token,
-             active, is_default, updated_by_uid, updated_by_email)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             active, is_default, chip_state, daily_limit_override, updated_by_uid, updated_by_email)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-                    inbound_bearer_token, active, is_default, created_at, updated_at, updated_by_email
+                    inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
+                    created_at, updated_at, updated_by_email
         `,
         [
           clientId,
@@ -1943,6 +1968,8 @@ async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, ex
           payload.inbound_bearer_token,
           payload.active,
           shouldDefault,
+          payload.chip_state,
+          payload.daily_limit_override,
           payload.updated_by_uid,
           payload.updated_by_email,
         ]
