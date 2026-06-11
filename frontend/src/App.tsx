@@ -261,7 +261,9 @@ const App = () => (
                 path="empresas"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
-                    <Tenants />
+                    <ErrorBoundary>
+                      <Tenants />
+                    </ErrorBoundary>
                   </ProtectedRoute>
                 }
               />

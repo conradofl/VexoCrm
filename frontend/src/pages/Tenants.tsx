@@ -449,7 +449,7 @@ export default function Tenants() {
   const getChipDraft = (instance: LeadClientEvolutionInstance) => {
     const draft = chipDrafts[instance.id] || {};
     return {
-      chipState: draft.chipState ?? instance.chip_state,
+      chipState: draft.chipState ?? instance.chip_state ?? "cold",
       dailyLimitOverride:
         draft.dailyLimitOverride !== undefined
           ? draft.dailyLimitOverride
@@ -1013,24 +1013,21 @@ export default function Tenants() {
                                     {/* Anti-ban: saúde do chip (cota diária) */}
                                     {(() => {
                                       const draft = getChipDraft(instance);
-                                      const savedLimit =
-                                        instance.daily_limit_override ??
-                                        (instance.chip_state === "warm" ? 500 : 100);
-                                      const sent = instance.sent_count_today;
-                                      const pct = savedLimit > 0 ? Math.min(100, Math.round((sent / savedLimit) * 100)) : 0;
+                                      const displayLimit = resolveChipLimit(draft.chipState, draft.dailyLimitOverride);
+                                      const sent = instance.sent_count_today ?? 0;
+                                      const pct = displayLimit > 0 ? Math.min(100, Math.round((sent / displayLimit) * 100)) : 0;
                                       const barColor =
                                         pct >= 90
                                           ? "bg-red-500"
                                           : pct >= 70
                                             ? "bg-amber-400"
                                             : "bg-emerald-500";
-                                      const previewLimit = resolveChipLimit(draft.chipState, draft.dailyLimitOverride);
                                       return (
                                         <div className="mt-1 space-y-2 rounded-lg border border-slate-200/70 bg-slate-50/60 p-2.5 text-xs dark:border-white/10 dark:bg-white/[0.03]">
                                           <div className="flex items-center justify-between gap-2">
                                             <span className="text-muted-foreground">Enviadas hoje</span>
                                             <span className="font-mono font-semibold text-foreground">
-                                              {sent} / {savedLimit}
+                                              {sent} / {displayLimit}
                                             </span>
                                           </div>
                                           <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
@@ -1064,11 +1061,6 @@ export default function Tenants() {
                                                 updateChipDraft(instance.id, { dailyLimitOverride: e.target.value })
                                               }
                                             />
-                                            {draft.dailyLimitOverride && (
-                                              <span className="text-muted-foreground">
-                                                → {previewLimit}/dia
-                                              </span>
-                                            )}
                                             <Button
                                               type="button"
                                               variant="outline"
