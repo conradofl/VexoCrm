@@ -60,6 +60,15 @@ export function createDatabasePool(connectionString) {
     maxUses: Number(process.env.PG_MAX_USES || 7500),
     keepAlive: true,
     keepAliveInitialDelayMillis: Number(process.env.PG_KEEPALIVE_INITIAL_DELAY_MS || 10_000),
+    // Rede de segurança contra queries travadas em lock: o `pg` aplica estes
+    // dois timeouts a TODA conexão criada pelo pool (são repassados como
+    // parâmetros de conexão), logo cobrem todas as queries — diretas e via
+    // o wrapper supabase-compat. statement_timeout corta a query no servidor
+    // (Postgres aborta e devolve erro); query_timeout corta no cliente como
+    // reforço. Sem isto, uma query em lock pendura o disparo em "running"
+    // para sempre, sem exceção (mesma classe do bug da Fatia 3a).
+    statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 30_000),
+    query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS || 30_000),
     ssl,
     application_name: process.env.PG_APPLICATION_NAME || "vexoapi",
   });
