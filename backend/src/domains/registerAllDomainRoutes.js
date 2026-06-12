@@ -4986,6 +4986,44 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
+  // GET /api/reports/evolution-usage — Relatórios v1: envios por dia, por chip.
+  // Lê direto de evolution_instance_daily_usage (instance_id, date, sent_count),
+  // agregação no SQL. JOIN com lead_client_evolution_instances p/ label humano.
+  // Tenant scoping idêntico aos endpoints de dispatch (resolveAuthorizedClientId).
+  app.get("/api/reports/evolution-usage", requireFirebaseAuth, requireInternalPageAccess("relatorios"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    const requestedClientId = normalizeString(req.query.clientId);
+    if (!requestedClientId) return sendError(res, 400, "MISSING_CLIENT_ID", "Missing clientId");
+    const authorizedClientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!authorizedClientId) return;
+
+    let days = Number.parseInt(String(req.query.days ?? "14"), 10);
+    if (!Number.isInteger(days) || days < 1) days = 14;
+    if (days > 31) days = 31;
+
+    try {
+      const { rows } = await pgDatabasePool.query(
+        `
+          SELECT u.date::text                         AS dia,
+                 u.instance_id::text                  AS chip_id,
+                 COALESCE(i.name, u.instance_id::text) AS chip_label,
+                 SUM(u.sent_count)::int               AS enviados
+          FROM public.evolution_instance_daily_usage u
+          JOIN public.lead_client_evolution_instances i ON i.id = u.instance_id
+          WHERE i.client_id = $1
+            AND u.date >= (CURRENT_DATE - ($2::int - 1))
+          GROUP BY u.date, u.instance_id, i.name
+          ORDER BY u.date ASC, chip_label ASC
+        `,
+        [authorizedClientId, days]
+      );
+      res.json({ days, items: rows });
+    } catch (err) {
+      sendError(res, 500, "EVOLUTION_USAGE_REPORT_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // GET /api/campaigns/dispatches/:dispatchId/failed — leads falhados do disparo,
   // exportável para planilha (?format=csv). Defeito A: failed sai do reprocesso e
   // fica disponível para tratamento/exclusão manual.
