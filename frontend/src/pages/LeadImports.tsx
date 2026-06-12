@@ -154,6 +154,8 @@ const SCHEDULED = [
 const IMPORTS_PAGE_SIZE = 10;
 const ALL_IMPORTS_VALUE = "__all__";
 const ALL_SEGMENT_VALUE = "__all__";
+// Teto de segurança do lote por disparo (loop síncrono no Express, sem fila).
+const CAMPAIGN_LIMIT_MAX = 500;
 const AI_STYLE_PRESETS = [
   {
     label: "Nome + curiosidade",
@@ -1381,6 +1383,9 @@ export default function LeadImports({
   const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
+  // Lote por disparo: input numérico livre, 1–500 (teto de segurança — disparo roda
+  // em loop síncrono no Express, não em fila. Acima de 500 exige migração pra fila).
+  const [campaignLimitPerRun, setCampaignLimitPerRun] = useState("50");
   const [campaignMode, setCampaignMode] = useState<"disparo" | "agente">("disparo");
   const [campaignPromptId, setCampaignPromptId] = useState("");
   const [campaignStartsAt, setCampaignStartsAt] = useState("");
@@ -1922,6 +1927,7 @@ export default function LeadImports({
   function resetCampaignForm() {
     setEditingCampaignId(null);
     setCampaignName("");
+    setCampaignLimitPerRun("50");
     setCampaignMode("disparo");
     setCampaignPromptId("");
     setCampaignStartsAt("");
@@ -1954,6 +1960,7 @@ export default function LeadImports({
 
     setEditingCampaignId(campaign.id);
     setCampaignName(campaign.name || "");
+    setCampaignLimitPerRun(String(campaign.limit_per_run ?? 50));
     setCampaignMode(campaign.mode === "agente" ? "agente" : "disparo");
     setCampaignPromptId(campaign.campaign_prompt_id || "");
     setCampaignStartsAt(campaignUtcIsoToLocalDateTime(campaign.starts_at));
@@ -2001,6 +2008,12 @@ export default function LeadImports({
       return;
     }
 
+    const limitPerRun = Number.parseInt(campaignLimitPerRun, 10);
+    if (!Number.isInteger(limitPerRun) || limitPerRun < 1 || limitPerRun > CAMPAIGN_LIMIT_MAX) {
+      setDispatchStatus(`Lote invalido: informe um numero de 1 a ${CAMPAIGN_LIMIT_MAX} (maximo ${CAMPAIGN_LIMIT_MAX} por lote nesta versao).`);
+      return;
+    }
+
     setIsDispatching(true);
     setDispatchStatus(null);
 
@@ -2008,6 +2021,7 @@ export default function LeadImports({
       name: campaignName.trim(),
       clientId: selectedClientId,
       importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
+      limitPerRun,
       mode: campaignMode,
       campaignPromptId: campaignPromptId || null,
       startsAt: campaignStartsAt ? campaignLocalDateTimeToUtcIso(campaignStartsAt) : null,
@@ -2040,6 +2054,7 @@ export default function LeadImports({
           id: editingCampaignId,
           name: campaignPayload.name,
           importId: campaignPayload.importId,
+          limitPerRun: campaignPayload.limitPerRun,
           mode: campaignPayload.mode,
           campaignPromptId: campaignPayload.campaignPromptId,
           startsAt: campaignPayload.startsAt,
@@ -2833,6 +2848,24 @@ export default function LeadImports({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
+                    Lote por disparo
+                    <InfoTip text="Quantos leads cada disparo processa. Máximo 500 por lote nesta versão (o disparo roda em loop síncrono; lotes maiores exigem fila)." />
+                  </p>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={CAMPAIGN_LIMIT_MAX}
+                    step={1}
+                    className={cn("w-40", darkFieldClass)}
+                    placeholder="50"
+                    value={campaignLimitPerRun}
+                    onChange={(e) => setCampaignLimitPerRun(e.target.value)}
+                  />
+                  <p className="font-mono text-[10px] text-muted-foreground">1 a {CAMPAIGN_LIMIT_MAX} leads por lote.</p>
                 </div>
 
                 {/* Seletor de modo — ocupa linha inteira */}
