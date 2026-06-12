@@ -24,6 +24,7 @@ export interface Campaign {
   starts_at: string | null;
   ends_at: string | null;
   chatbot_prompt_type: string;
+  campaign_prompt_id: string | null;
   mode: "disparo" | "agente";
 }
 

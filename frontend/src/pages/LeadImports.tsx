@@ -1955,7 +1955,7 @@ export default function LeadImports({
     setEditingCampaignId(campaign.id);
     setCampaignName(campaign.name || "");
     setCampaignMode(campaign.mode === "agente" ? "agente" : "disparo");
-    setCampaignPromptId(((campaign as unknown as { campaign_prompt_id?: string | null }).campaign_prompt_id) || "");
+    setCampaignPromptId(campaign.campaign_prompt_id || "");
     setCampaignStartsAt(campaignUtcIsoToLocalDateTime(campaign.starts_at));
     setCampaignEndsAt(campaignUtcIsoToLocalDateTime(campaign.ends_at));
     setSelectedImportId(campaign.import_id || ALL_IMPORTS_VALUE);
