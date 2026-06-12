@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2, Wand2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
+import { EvolutionChipsPanel } from "@/components/EvolutionChipsPanel";
 import { PageShell } from "@/components/PageShell";
 import {
   AlertDialog,
@@ -19,14 +19,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
@@ -34,14 +26,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   LeadClient,
   useCreateLeadClient,
-  useDeleteLeadClientEvolutionInstance,
   useDeleteLeadClient,
   useLeadClients,
-  useProvisionLeadClientEvolutionInstance,
-  useSaveLeadClientEvolutionInstance,
   useUpdateLeadClientN8nSettings,
   useVerifyLeadClientTable,
-  type LeadClientEvolutionInstance,
   type LeadClientTableStatus,
 } from "@/hooks/useLeadClients";
 import { createTenantSchema } from "@/lib/validationSchemas";
@@ -98,9 +86,6 @@ export default function Tenants() {
   const createTenant = useCreateLeadClient();
   const deleteTenant = useDeleteLeadClient();
   const updateN8nSettings = useUpdateLeadClientN8nSettings();
-  const saveEvolutionInstance = useSaveLeadClientEvolutionInstance();
-  const provisionEvolutionInstance = useProvisionLeadClientEvolutionInstance();
-  const deleteEvolutionInstance = useDeleteLeadClientEvolutionInstance();
   const verifyTenantTable = useVerifyLeadClientTable();
   const { hasPermission, isAdminUser } = useAuth();
   const [name, setName] = useState("");
@@ -114,18 +99,6 @@ export default function Tenants() {
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
   const [tableStatuses, setTableStatuses] = useState<Record<string, LeadClientTableStatus>>({});
-  const [evolutionDrafts, setEvolutionDrafts] = useState<
-    Record<
-      string,
-      {
-        name?: string;
-        dispatchWebhookUrl?: string;
-        dispatchWebhookToken?: string;
-        active?: boolean;
-        isDefault?: boolean;
-      }
-    >
-  >({});
   const [n8nDrafts, setN8nDrafts] = useState<
     Record<
       string,
@@ -137,16 +110,6 @@ export default function Tenants() {
       }
     >
   >({});
-  const [chipDrafts, setChipDrafts] = useState<
-    Record<string, { chipState?: "cold" | "warm"; dailyLimitOverride?: string }>
-  >({});
-
-  // QR exibido após criar a instância na Evolution (Fatia 1 do self-service).
-  const [qrModal, setQrModal] = useState<{
-    base64: string;
-    tenantName: string;
-    instanceName: string | null;
-  } | null>(null);
   const canManageTenants = hasPermission("tenants.manage");
   const canManageN8n = isAdminUser;
   const tablePreviewName = tenantId ? `leads_${tenantId.replace(/-/g, "_")}` : "leads_tenant_id";
@@ -391,178 +354,6 @@ export default function Tenants() {
     }
   };
 
-  const handleProvisionEvolutionInstance = async (tenant: LeadClient) => {
-    const draft = getEvolutionDraft(tenant.id);
-
-    try {
-      const result = await provisionEvolutionInstance.mutateAsync({
-        tenantId: tenant.id,
-        name: draft.name.trim() || tenant.name || "Evolution",
-        dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
-        active: draft.active,
-        isDefault: draft.isDefault,
-      });
-
-      setEvolutionDrafts((current) => ({
-        ...current,
-        [tenant.id]: {
-          name: "",
-          dispatchWebhookUrl: "",
-          dispatchWebhookToken: "",
-          active: true,
-          isDefault: false,
-        },
-      }));
-
-      // Se a Evolution devolveu o QR, abre o modal de pareamento.
-      const qrBase64 = result.evolution?.qrcode?.base64 || null;
-      if (qrBase64) {
-        setQrModal({
-          base64: qrBase64,
-          tenantName: tenant.name,
-          instanceName: result.evolution?.instanceName || result.item?.name || null,
-        });
-      } else {
-        toast({
-          title: "Evolution criada",
-          description: `Instancia vinculada a ${tenant.name}, mas a Evolution nao retornou QR. Tente remover e criar de novo.`,
-        });
-      }
-    } catch (settingsError) {
-      toast({
-        title: "Falha ao criar na Evolution",
-        description:
-          settingsError instanceof Error
-            ? settingsError.message
-            : "Nao foi possivel criar a instancia na Evolution API.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  function resolveChipLimit(chipState: "cold" | "warm", overrideStr?: string): number {
-    const parsed = overrideStr ? parseInt(overrideStr, 10) : NaN;
-    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
-    return chipState === "warm" ? 500 : 100;
-  }
-
-  const getChipDraft = (instance: LeadClientEvolutionInstance) => {
-    const draft = chipDrafts[instance.id] || {};
-    return {
-      chipState: draft.chipState ?? instance.chip_state ?? "cold",
-      dailyLimitOverride:
-        draft.dailyLimitOverride !== undefined
-          ? draft.dailyLimitOverride
-          : instance.daily_limit_override != null
-            ? String(instance.daily_limit_override)
-            : "",
-    };
-  };
-
-  const updateChipDraft = (
-    instanceId: string,
-    patch: { chipState?: "cold" | "warm"; dailyLimitOverride?: string }
-  ) => {
-    setChipDrafts((current) => ({
-      ...current,
-      [instanceId]: { ...current[instanceId], ...patch },
-    }));
-  };
-
-  const handleSaveChipSettings = async (
-    tenant: LeadClient,
-    instance: LeadClientEvolutionInstance
-  ) => {
-    const draft = getChipDraft(instance);
-    const limitNum = draft.dailyLimitOverride.trim()
-      ? parseInt(draft.dailyLimitOverride, 10)
-      : null;
-    const dailyLimitOverride =
-      limitNum != null && Number.isInteger(limitNum) && limitNum > 0 ? limitNum : null;
-
-    try {
-      await saveEvolutionInstance.mutateAsync({
-        tenantId: tenant.id,
-        instanceId: instance.id,
-        name: instance.name,
-        dispatchWebhookUrl: instance.dispatch_webhook_url || "",
-        chipState: draft.chipState,
-        dailyLimitOverride,
-      });
-      setChipDrafts((current) => {
-        const next = { ...current };
-        delete next[instance.id];
-        return next;
-      });
-      toast({ title: "Cota atualizada", description: `${tenant.name}: ${instance.name}` });
-    } catch (err) {
-      toast({
-        title: "Falha ao salvar cota",
-        description: err instanceof Error ? err.message : "Nao foi possivel salvar.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleUpdateEvolutionInstance = async (
-    tenant: LeadClient,
-    instance: LeadClientEvolutionInstance,
-    patch: {
-      active?: boolean;
-      isDefault?: boolean;
-    }
-  ) => {
-    try {
-      await saveEvolutionInstance.mutateAsync({
-        tenantId: tenant.id,
-        instanceId: instance.id,
-        name: instance.name,
-        dispatchWebhookUrl: instance.dispatch_webhook_url || "",
-        active: patch.active ?? instance.active,
-        isDefault: patch.isDefault ?? instance.is_default,
-      });
-
-      toast({
-        title: patch.isDefault ? "Evolution padrao atualizada" : "Evolution atualizada",
-        description: `${tenant.name}: ${instance.name}`,
-      });
-    } catch (settingsError) {
-      toast({
-        title: "Falha ao atualizar Evolution",
-        description:
-          settingsError instanceof Error
-            ? settingsError.message
-            : "Nao foi possivel atualizar a instancia Evolution.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDeleteEvolutionInstance = async (
-    tenant: LeadClient,
-    instance: LeadClientEvolutionInstance
-  ) => {
-    try {
-      await deleteEvolutionInstance.mutateAsync({
-        tenantId: tenant.id,
-        instanceId: instance.id,
-      });
-
-      toast({
-        title: "Evolution removida",
-        description: `${tenant.name}: ${instance.name}`,
-      });
-    } catch (settingsError) {
-      toast({
-        title: "Falha ao remover Evolution",
-        description:
-          settingsError instanceof Error
-            ? settingsError.message
-            : "Nao foi possivel remover a instancia Evolution.",
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleDeleteTenant = async (tenant: { id: string; name: string }) => {
     try {
@@ -584,36 +375,6 @@ export default function Tenants() {
         variant: "destructive",
       });
     }
-  };
-
-  const getEvolutionDraft = (tenantId: string) => {
-    const draft = evolutionDrafts[tenantId] || {};
-    return {
-      name: draft.name ?? "",
-      dispatchWebhookUrl: draft.dispatchWebhookUrl ?? "",
-      dispatchWebhookToken: draft.dispatchWebhookToken ?? "",
-      active: draft.active ?? true,
-      isDefault: draft.isDefault ?? false,
-    };
-  };
-
-  const updateEvolutionDraft = (
-    tenantId: string,
-    patch: {
-      name?: string;
-      dispatchWebhookUrl?: string;
-      dispatchWebhookToken?: string;
-      active?: boolean;
-      isDefault?: boolean;
-    }
-  ) => {
-    setEvolutionDrafts((current) => ({
-      ...current,
-      [tenantId]: {
-        ...current[tenantId],
-        ...patch,
-      },
-    }));
   };
 
   const handleVerifyTenantTable = async (tenant: LeadClient) => {
@@ -900,9 +661,6 @@ export default function Tenants() {
                   {filteredTenants.map((tenant) => {
                     const tableStatus = tableStatuses[tenant.id] || tenant.leads_table;
                     const expectedTableName = tableStatus?.tableName || `leads_${tenant.id.replace(/-/g, "_")}`;
-                    const evolutionInstances = tenant.n8n_settings?.evolution_instances || [];
-                    const evolutionDraft = getEvolutionDraft(tenant.id);
-
                     return (
                     <div
                       key={tenant.id}
@@ -963,248 +721,10 @@ export default function Tenants() {
                         </div>
                       </div>
                       {canManageN8n ? (
-                        <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">Instancias Evolution</p>
-                              <p className="text-xs text-muted-foreground">
-                                Cadastre mais de uma Evolution API dentro do mesmo tenant e escolha qual sera padrao.
-                              </p>
-                            </div>
-                            <Badge className="border border-slate-300/80 bg-white/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
-                              {evolutionInstances.length} instancia{evolutionInstances.length === 1 ? "" : "s"}
-                            </Badge>
-                          </div>
+                        <div className="mt-4 space-y-3">
+                          <EvolutionChipsPanel tenant={tenant} />
 
-                          {evolutionInstances.length > 0 ? (
-                            <div className="grid gap-2">
-                              {evolutionInstances.map((instance) => (
-                                <div
-                                  key={instance.id}
-                                  className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/85 p-3 text-sm dark:border-white/10 dark:bg-white/[0.04] lg:grid-cols-[minmax(0,1fr)_auto]"
-                                >
-                                  <div className="min-w-0 space-y-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <p className="font-medium text-foreground">{instance.name}</p>
-                                      {instance.is_default ? (
-                                        <Badge className="border border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
-                                          padrao
-                                        </Badge>
-                                      ) : null}
-                                      <Badge
-                                        className={
-                                          instance.active
-                                            ? "border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-                                            : "border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65"
-                                        }
-                                      >
-                                        {instance.active ? "ativa" : "inativa"}
-                                      </Badge>
-                                      {instance.has_dispatch_webhook_token ? (
-                                        <Badge className="border border-violet-400/25 bg-violet-500/10 text-violet-700 dark:text-violet-200">
-                                          api key
-                                        </Badge>
-                                      ) : null}
-                                    </div>
-                                    <p className="truncate font-mono text-xs text-muted-foreground">
-                                      {instance.dispatch_webhook_url}
-                                    </p>
-
-                                    {/* Anti-ban: saúde do chip (cota diária) */}
-                                    {(() => {
-                                      const draft = getChipDraft(instance);
-                                      const displayLimit = resolveChipLimit(draft.chipState, draft.dailyLimitOverride);
-                                      const sent = instance.sent_count_today ?? 0;
-                                      const pct = displayLimit > 0 ? Math.min(100, Math.round((sent / displayLimit) * 100)) : 0;
-                                      const barColor =
-                                        pct >= 90
-                                          ? "bg-red-500"
-                                          : pct >= 70
-                                            ? "bg-amber-400"
-                                            : "bg-emerald-500";
-                                      return (
-                                        <div className="mt-1 space-y-2 rounded-lg border border-slate-200/70 bg-slate-50/60 p-2.5 text-xs dark:border-white/10 dark:bg-white/[0.03]">
-                                          <div className="flex items-center justify-between gap-2">
-                                            <span className="text-muted-foreground">Enviadas hoje</span>
-                                            <span className="font-mono font-semibold text-foreground">
-                                              {sent} / {displayLimit}
-                                            </span>
-                                          </div>
-                                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
-                                            <div
-                                              className={cn("h-full rounded-full transition-all duration-300", barColor)}
-                                              style={{ width: `${pct}%` }}
-                                            />
-                                          </div>
-                                          <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                                            <Select
-                                              value={draft.chipState}
-                                              onValueChange={(v) =>
-                                                updateChipDraft(instance.id, { chipState: v as "cold" | "warm" })
-                                              }
-                                            >
-                                              <SelectTrigger className="h-7 w-[130px] text-xs">
-                                                <SelectValue />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectItem value="cold">Frio (100/dia)</SelectItem>
-                                                <SelectItem value="warm">Aquecido (500/dia)</SelectItem>
-                                              </SelectContent>
-                                            </Select>
-                                            <Input
-                                              className="h-7 w-24 text-xs"
-                                              placeholder="Limite custom"
-                                              type="number"
-                                              min="1"
-                                              value={draft.dailyLimitOverride}
-                                              onChange={(e) =>
-                                                updateChipDraft(instance.id, { dailyLimitOverride: e.target.value })
-                                              }
-                                            />
-                                            <Button
-                                              type="button"
-                                              variant="outline"
-                                              size="sm"
-                                              className="h-7 text-xs"
-                                              disabled={saveEvolutionInstance.isPending}
-                                              onClick={() => void handleSaveChipSettings(tenant, instance)}
-                                            >
-                                              <Save className="mr-1 h-3 w-3" />
-                                              Salvar cota
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })()}
-                                  </div>
-                                  <div className="flex flex-wrap items-center justify-end gap-2">
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={saveEvolutionInstance.isPending || instance.is_default}
-                                      onClick={() =>
-                                        void handleUpdateEvolutionInstance(tenant, instance, { isDefault: true })
-                                      }
-                                    >
-                                      Padrao
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={saveEvolutionInstance.isPending}
-                                      onClick={() =>
-                                        void handleUpdateEvolutionInstance(tenant, instance, {
-                                          active: !instance.active,
-                                        })
-                                      }
-                                    >
-                                      {instance.active ? "Desativar" : "Ativar"}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={deleteEvolutionInstance.isPending}
-                                      onClick={() => void handleDeleteEvolutionInstance(tenant, instance)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                      Remover
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-dashed border-slate-300/80 bg-white/70 px-3 py-4 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
-                              Nenhuma instancia extra cadastrada. O fallback abaixo continua atendendo os disparos atuais.
-                            </div>
-                          )}
-
-                          <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                            <div className="grid gap-3 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
-                              <div className="grid gap-1">
-                                <Input
-                                  placeholder="Nome da instancia"
-                                  value={evolutionDraft.name}
-                                  onChange={(event) =>
-                                    updateEvolutionDraft(tenant.id, { name: event.target.value })
-                                  }
-                                />
-                                <p className="px-1 text-[11px] text-muted-foreground">
-                                  Espacos e acentos viram hifen ao criar (ex.: "Chip Vendas" -&gt; "chip-vendas"). E normal.
-                                </p>
-                              </div>
-                              <Input
-                                placeholder="URL de disparo Evolution"
-                                value={evolutionDraft.dispatchWebhookUrl}
-                                onChange={(event) =>
-                                  updateEvolutionDraft(tenant.id, {
-                                    dispatchWebhookUrl: event.target.value,
-                                  })
-                                }
-                              />
-                              <Input
-                                placeholder="API Key Evolution"
-                                value={evolutionDraft.dispatchWebhookToken}
-                                onChange={(event) =>
-                                  updateEvolutionDraft(tenant.id, {
-                                    dispatchWebhookToken: event.target.value,
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex flex-wrap items-center gap-4">
-                                <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                                  <input
-                                    type="checkbox"
-                                    checked={evolutionDraft.active}
-                                    onChange={(event) =>
-                                      updateEvolutionDraft(tenant.id, { active: event.target.checked })
-                                    }
-                                  />
-                                  ativa
-                                </label>
-                                <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                                  <input
-                                    type="checkbox"
-                                    checked={evolutionDraft.isDefault}
-                                    onChange={(event) =>
-                                      updateEvolutionDraft(tenant.id, { isDefault: event.target.checked })
-                                    }
-                                  />
-                                  tornar padrao
-                                </label>
-                              </div>
-                              <div className="flex flex-wrap justify-end gap-2">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={provisionEvolutionInstance.isPending}
-                                  onClick={() => void handleProvisionEvolutionInstance(tenant)}
-                                >
-                                  <Wand2 className="h-4 w-4" />
-                                  {provisionEvolutionInstance.isPending ? "Criando..." : "Criar na Evolution"}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  disabled={
-                                    saveEvolutionInstance.isPending ||
-                                    !evolutionDraft.dispatchWebhookUrl.trim()
-                                  }
-                                  onClick={() => void handleCreateEvolutionInstance(tenant)}
-                                >
-                                  <Plus className="h-4 w-4" />
-                                  {saveEvolutionInstance.isPending ? "Adicionando..." : "Adicionar manual"}
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-
+                          {/* Fallback legado — usado quando nenhuma instância Evolution padrão estiver ativa */}
                           <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.02]">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
@@ -1347,45 +867,6 @@ export default function Tenants() {
         </div>
       </div>
 
-      {/* Modal de QR — pareamento da instância recém-criada (Fatia 1 do self-service) */}
-      <Dialog open={!!qrModal} onOpenChange={(open) => !open && setQrModal(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Parear WhatsApp</DialogTitle>
-            <DialogDescription>
-              Instancia{qrModal?.instanceName ? ` "${qrModal.instanceName}"` : ""} criada para{" "}
-              {qrModal?.tenantName || "a empresa"}.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex flex-col items-center gap-4 py-2">
-            {qrModal?.base64 && (
-              <img
-                src={qrModal.base64}
-                alt="QR Code para parear o WhatsApp"
-                className="h-64 w-64 rounded-xl border border-slate-200 bg-white p-2 dark:border-white/10"
-              />
-            )}
-            <div className="text-center text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">
-                Escaneie em WhatsApp &gt; Aparelhos conectados
-              </p>
-              <p className="mt-2 text-xs">
-                O QR expira em poucos minutos. Se expirar antes de escanear, use{" "}
-                <span className="font-semibold">Remover</span> e crie a instancia de novo.
-                <br />
-                (Re-gerar o QR sem recriar vem na proxima atualizacao.)
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setQrModal(null)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </PageShell>
   );
 }

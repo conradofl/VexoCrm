@@ -279,7 +279,9 @@ const App = () => (
                 path="conexoes"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="conexoes">
-                    <Conexoes />
+                    <ErrorBoundary>
+                      <Conexoes />
+                    </ErrorBoundary>
                   </ProtectedRoute>
                 }
               />

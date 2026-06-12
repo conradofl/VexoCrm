@@ -1,17 +1,66 @@
+import { useState } from "react";
 import { Wifi } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { EvolutionChipsPanel } from "@/components/EvolutionChipsPanel";
+import { PageShell } from "@/components/PageShell";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/contexts/AuthContext";
+import { useLeadClients } from "@/hooks/useLeadClients";
 
 export default function Conexoes() {
+  const { clientId, isAdminUser } = useAuth();
+  const { data: tenants = [], isLoading } = useLeadClients();
+
+  // Admins sem clientId fixo podem selecionar qualquer tenant.
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(() => clientId ?? "");
+  const showSelector = isAdminUser || !clientId;
+
+  const activeTenant = tenants.find((t) => t.id === selectedTenantId) ?? null;
+
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200/60 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/40">
-        <Wifi className="h-7 w-7 text-amber-500" />
-      </div>
-      <div className="text-center">
-        <p className="text-base font-semibold text-foreground">Conexões</p>
-        <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-          Gerencie seus chips e instâncias WhatsApp aqui. Em construção.
-        </p>
-      </div>
-    </div>
+    <PageShell
+      title="Conexões"
+      subtitle="Chips WhatsApp do seu tenant — cota diária, estado e pareamento."
+      spacing="space-y-4"
+      compactHero
+      headerRight={
+        showSelector ? (
+          <Select value={selectedTenantId} onValueChange={setSelectedTenantId}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Selecione um tenant" />
+            </SelectTrigger>
+            <SelectContent>
+              {tenants.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null
+      }
+    >
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center gap-4 py-16 text-sm text-muted-foreground">
+          <Wifi className="h-7 w-7 animate-pulse text-amber-500" />
+          Carregando chips...
+        </div>
+      )}
+
+      {!isLoading && !activeTenant && (
+        <EmptyState
+          title={showSelector ? "Selecione um tenant" : "Nenhum tenant associado"}
+          description={
+            showSelector
+              ? "Escolha um tenant no seletor acima para ver os chips vinculados."
+              : "Seu perfil nao tem um tenant associado. Fale com o administrador."
+          }
+        />
+      )}
+
+      {!isLoading && activeTenant && (
+        <EvolutionChipsPanel tenant={activeTenant} />
+      )}
+    </PageShell>
   );
 }
