@@ -20,6 +20,7 @@ import {
   History,
   Megaphone,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
   Search,
@@ -275,6 +276,30 @@ function campaignLocalDateTimeToUtcIso(value: string) {
   const utcDate = new Date(localAsUtc.getTime() - getTimeZoneOffsetMs(localAsUtc, CAMPAIGN_TIME_ZONE));
 
   return Number.isNaN(utcDate.getTime()) ? null : utcDate.toISOString();
+}
+
+// Inverso de campaignLocalDateTimeToUtcIso: ISO UTC → "YYYY-MM-DDTHH:mm" no fuso
+// da campanha, para pré-preencher os inputs datetime-local ao editar.
+function campaignUtcIsoToLocalDateTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: CAMPAIGN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, part) => {
+      acc[part.type] = part.value;
+      return acc;
+    }, {});
+  if (!parts.year) return "";
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 function getScheduleDateParts(campaign: Campaign) {
@@ -1354,6 +1379,7 @@ export default function LeadImports({
   const [directImage, setDirectImage] = useState<CampaignImageAsset | null>(null);
   const [directImageError, setDirectImageError] = useState<string | null>(null);
   const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
   const [campaignMode, setCampaignMode] = useState<"disparo" | "agente">("disparo");
   const [campaignPromptId, setCampaignPromptId] = useState("");
@@ -1893,6 +1919,63 @@ export default function LeadImports({
     }
   }
 
+  function resetCampaignForm() {
+    setEditingCampaignId(null);
+    setCampaignName("");
+    setCampaignMode("disparo");
+    setCampaignPromptId("");
+    setCampaignStartsAt("");
+    setCampaignEndsAt("");
+    setCampaignMessage("");
+    setCampaignImage(null);
+    setCampaignImageCaption("");
+    setCampaignImageFirst(false);
+    setCampaignImageError(null);
+    setCampaignComposerMode("simple");
+    setCampaignTemplateStrategy("single");
+    setCampaignTemplateVariants([]);
+    setCampaignSequence([createCampaignStep("text", 1)]);
+    setDispatchOptions(defaultDispatchOptions);
+    setAiGoal("");
+    setAiStyle("");
+    setSegmentation(defaultSegmentation);
+    setSelectedImportId(ALL_IMPORTS_VALUE);
+  }
+
+  // Editar campanha: pré-preenche o MESMO formulário de criação com os dados da
+  // campanha e entra em modo edição (salva via UPDATE, não cria nova).
+  function handleStartEditCampaign(campaign: Campaign) {
+    const meta = campaign.analytics_meta || {};
+    const seq = normalizeCampaignSequence(campaign.analytics_meta);
+    const opts = { ...defaultDispatchOptions, ...(meta.dispatchOptions || {}) };
+    const seg = meta.segmentation || {};
+    const firstTextVariants =
+      seq.find((step) => step.type === "text" && (step.textVariants?.length || 0) > 0)?.textVariants || [];
+
+    setEditingCampaignId(campaign.id);
+    setCampaignName(campaign.name || "");
+    setCampaignMode(campaign.mode === "agente" ? "agente" : "disparo");
+    setCampaignPromptId(((campaign as unknown as { campaign_prompt_id?: string | null }).campaign_prompt_id) || "");
+    setCampaignStartsAt(campaignUtcIsoToLocalDateTime(campaign.starts_at));
+    setCampaignEndsAt(campaignUtcIsoToLocalDateTime(campaign.ends_at));
+    setSelectedImportId(campaign.import_id || ALL_IMPORTS_VALUE);
+    setSegmentation({
+      gender: seg.gender ? String(seg.gender) : ALL_SEGMENT_VALUE,
+      productType: seg.productType ? String(seg.productType) : ALL_SEGMENT_VALUE,
+      ticket: seg.ticket ? String(seg.ticket) : ALL_SEGMENT_VALUE,
+      ticketThreshold: seg.ticketThreshold != null ? String(seg.ticketThreshold) : "",
+      interest: seg.interest ? String(seg.interest) : "",
+      campaignTag: seg.campaignTag ? String(seg.campaignTag) : "",
+    });
+    setCampaignSequence(seq.length > 0 ? seq : [createCampaignStep("text", 1)]);
+    setCampaignComposerMode("advanced");
+    setCampaignTemplateStrategy(opts.templateStrategy === "ai_variations" ? "ai_variations" : "single");
+    setCampaignTemplateVariants(firstTextVariants);
+    setDispatchOptions(opts);
+    setDispatchStatus(`Editando a campanha "${campaign.name}". Salve para atualizar.`);
+    setActiveTab("campanha");
+  }
+
   async function handleCreateCampaign() {
     if (!selectedClientId) {
       setDispatchStatus("Selecione uma empresa antes de criar a campanha.");
@@ -1951,39 +2034,55 @@ export default function LeadImports({
     });
 
     try {
+      if (editingCampaignId) {
+        // Modo edição: UPDATE na campanha existente (não cria nova).
+        const updated = await updateCampaign.mutateAsync({
+          id: editingCampaignId,
+          name: campaignPayload.name,
+          importId: campaignPayload.importId,
+          mode: campaignPayload.mode,
+          campaignPromptId: campaignPayload.campaignPromptId,
+          startsAt: campaignPayload.startsAt,
+          endsAt: campaignPayload.endsAt,
+          analyticsMeta: campaignPayload.analyticsMeta,
+        });
+        const savedName = campaignName.trim();
+        resetCampaignForm();
+        await refetchCampaigns();
+        setExpandedDispatchCampaignId(updated.id);
+        setActiveTab("enviadas");
+        setDispatchStatus(`Campanha "${savedName}" atualizada.`);
+        console.info("[campaigns-ui] update_campaign_success", { campaignId: updated.id });
+        return;
+      }
+
       const createdCampaign = await createCampaign.mutateAsync(campaignPayload);
 
-      setCampaignName("");
-      setCampaignMessage("");
-      setCampaignImage(null);
-      setCampaignImageCaption("");
-      setCampaignImageFirst(false);
-      setCampaignImageError(null);
-      setCampaignComposerMode("simple");
-      setCampaignTemplateStrategy("single");
-      setCampaignTemplateVariants([]);
-      setCampaignSequence([createCampaignStep("text", 1)]);
-      setDispatchOptions(defaultDispatchOptions);
-      setAiGoal("");
-      setAiStyle("");
-      setSegmentation(defaultSegmentation);
-      setSelectedImportId(ALL_IMPORTS_VALUE);
+      const savedName = campaignName.trim();
+      resetCampaignForm();
       await refetchCampaigns();
       setExpandedDispatchCampaignId(createdCampaign.id);
       setActiveTab("enviadas");
-      setDispatchStatus(`Campanha "${campaignName.trim()}" criada. Agora crie um Disparo abaixo para enviar.`);
+      setDispatchStatus(`Campanha "${savedName}" criada. Agora crie um Disparo abaixo para enviar.`);
       console.info("[campaigns-ui] create_campaign_success", {
         campaignId: createdCampaign.id,
         clientId: createdCampaign.client_id,
         status: createdCampaign.status,
       });
     } catch (error) {
-      console.error("[campaigns-ui] create_campaign_failed", {
+      console.error("[campaigns-ui] campaign_submit_failed", {
+        editing: Boolean(editingCampaignId),
         clientId: campaignPayload.clientId,
         importId: campaignPayload.importId,
         message: error instanceof Error ? error.message : String(error),
       });
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao criar campanha.");
+      setDispatchStatus(
+        error instanceof Error
+          ? error.message
+          : editingCampaignId
+            ? "Falha ao atualizar campanha."
+            : "Falha ao criar campanha."
+      );
     } finally {
       setIsDispatching(false);
     }
@@ -3330,10 +3429,26 @@ export default function LeadImports({
               </div>
 
               <div className="flex flex-wrap gap-3 border-t border-border/70 pt-5">
-                <Button onClick={() => void handleDispatch()} disabled={isDispatching || createCampaign.isPending || !selectedClientId}>
+                <Button onClick={() => void handleDispatch()} disabled={isDispatching || createCampaign.isPending || updateCampaign.isPending || !selectedClientId}>
                   <Megaphone className="mr-2 h-4 w-4" />
-                  {isDispatching || createCampaign.isPending ? "Criando..." : "Criar campanha"}
+                  {isDispatching || createCampaign.isPending || updateCampaign.isPending
+                    ? "Salvando..."
+                    : editingCampaignId
+                      ? "Salvar alterações"
+                      : "Criar campanha"}
                 </Button>
+                {editingCampaignId && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      resetCampaignForm();
+                      setDispatchStatus(null);
+                    }}
+                    disabled={isDispatching || updateCampaign.isPending}
+                  >
+                    Cancelar edição
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -3562,6 +3677,10 @@ export default function LeadImports({
                     <div className="flex flex-wrap gap-2 border-t border-border/70 pt-4">
                       <Button variant="outline" size="sm" onClick={() => setExpandedDispatchCampaignId(expandedDispatchCampaignId === campaign.id ? null : campaign.id)}>
                         Disparos
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleStartEditCampaign(campaign)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Editar
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => setCampaignActionDialog({ action: "archive", campaign })}>
                         <Archive className="mr-2 h-4 w-4" />

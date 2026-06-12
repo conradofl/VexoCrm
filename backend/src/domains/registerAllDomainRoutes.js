@@ -4353,6 +4353,7 @@ export function registerAllDomainRoutes(app) {
       const v = Number.parseInt(String(req.body.limitPerRun), 10);
       if (!Number.isNaN(v) && v > 0) updates.limit_per_run = Math.min(v, 500);
     }
+    if ("importId" in req.body) updates.import_id = normalizeString(req.body?.importId) || null;
     if ("scheduledFor" in req.body) updates.scheduled_for = normalizeString(req.body?.scheduledFor) || null;
     if ("startsAt" in req.body) updates.starts_at = normalizeString(req.body?.startsAt) || null;
     if ("endsAt" in req.body) updates.ends_at = normalizeString(req.body?.endsAt) || null;

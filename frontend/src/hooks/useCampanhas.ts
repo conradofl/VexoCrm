@@ -145,11 +145,13 @@ export interface DirectDispatchPayload {
 export interface UpdateCampaignPayload {
   name?: string;
   status?: CampaignStatus;
+  importId?: string | null;
   limitPerRun?: number;
   scheduledFor?: string | null;
   startsAt?: string | null;
   endsAt?: string | null;
   chatbotPromptType?: string;
+  campaignPromptId?: string | null;
   mode?: "disparo" | "agente";
   archived?: boolean;
   analyticsMeta?: CampaignAnalyticsMeta;
