@@ -79,6 +79,7 @@ import { query as fupQuery } from "../followup/db.js";
 import { getFollowupQueue } from "../followup/queue.js";
 
 let _evolutionDailyUsageSchemaEnsured = false;
+let _dispatchRunsClaimSchemaEnsured = false;
 
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
@@ -4674,6 +4675,36 @@ export function registerAllDomainRoutes(app) {
   }
   // ────────────────────────────────────────────────────────────────────────────
 
+  // ── Defeito A: elegibilidade idempotente por disparo ────────────────────────
+  // Estende campaign_dispatch_runs (tabela equivalente já existente) com claim por
+  // lead. Memoizado: ALTER/CREATE rodam UMA vez por processo, nunca no caminho
+  // quente (lição da Fatia 3a: ALTER TABLE pega ACCESS EXCLUSIVE mesmo em no-op).
+  async function ensureDispatchRunsClaimSchema() {
+    if (!pgDatabasePool) return false;
+    if (_dispatchRunsClaimSchemaEnsured) return true;
+    await pgDatabasePool.query(
+      `ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS lead_id UUID`
+    );
+    await pgDatabasePool.query(
+      `ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`
+    );
+    await pgDatabasePool.query(
+      `ALTER TABLE public.campaign_dispatch_runs DROP CONSTRAINT IF EXISTS campaign_dispatch_runs_status_check`
+    );
+    await pgDatabasePool.query(
+      `ALTER TABLE public.campaign_dispatch_runs ADD CONSTRAINT campaign_dispatch_runs_status_check CHECK (status IN ('pending','claimed','sent','failed','skipped'))`
+    );
+    await pgDatabasePool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_dispatch_runs_dispatch_lead ON public.campaign_dispatch_runs (dispatch_id, lead_id)`
+    );
+    await pgDatabasePool.query(
+      `CREATE INDEX IF NOT EXISTS idx_campaign_dispatch_runs_dispatch_status ON public.campaign_dispatch_runs (dispatch_id, status)`
+    );
+    _dispatchRunsClaimSchemaEnsured = true;
+    return true;
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
@@ -4706,12 +4737,18 @@ export function registerAllDomainRoutes(app) {
       throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
     }
 
-    // Obtém lista de leads da campanha via lead_import_items
+    // Defeito A: garante o schema de claim (idempotência por disparo) antes de montar a fila.
+    await ensureDispatchRunsClaimSchema();
+
+    // Obtém lista de leads da campanha via lead_import_items.
+    // excludeDispatchId remove da fila todo lead que JÁ tem registro neste disparo
+    // (claimed/sent/failed) → segunda execução do mesmo disparo traz 0 leads.
     const leads = await buildDispatchLeads({
       clientId,
       importId: campaign.import_id || null,
       limit: campaign.limit_per_run,
       segmentation: validation.analyticsMeta.segmentation || null,
+      excludeDispatchId: dispatchId,
     });
 
     if (leads.length === 0) {
@@ -4767,6 +4804,48 @@ export function registerAllDomainRoutes(app) {
           }
         : null;
 
+    // Defeito A: claim idempotente por lead. INSERT ... ON CONFLICT DO NOTHING marca o
+    // lead como 'claimed' ANTES do envio. Se a linha não foi inserida (conflito), o lead
+    // já foi tocado neste disparo → pular (evita duplicidade mesmo em retomada/concorrência).
+    const claimLead = async ({ lead, phone }) => {
+      if (!pgDatabasePool || !lead?.id) return true; // sem lead_id não há como garantir idempotência → permite (legado)
+      const { rows } = await pgDatabasePool.query(
+        `
+          INSERT INTO public.campaign_dispatch_runs
+            (dispatch_id, campaign_id, client_id, lead_id, phone, status, claimed_at, created_at)
+          VALUES ($1, $2, $3, $4, $5, 'claimed', now(), now())
+          ON CONFLICT (dispatch_id, lead_id) DO NOTHING
+          RETURNING id
+        `,
+        [dispatchId, campaign.id, clientId, lead.id, phone || ""]
+      );
+      return rows.length > 0;
+    };
+
+    const finalizeLeadSent = async ({ lead, sentAt }) => {
+      if (!pgDatabasePool || !lead?.id) return;
+      await pgDatabasePool
+        .query(
+          `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1 WHERE dispatch_id = $2 AND lead_id = $3`,
+          [sentAt || new Date().toISOString(), dispatchId, lead.id]
+        )
+        .catch((err) => {
+          console.warn("[campaign-dispatch] finalize_sent_failed:", err?.message || err);
+        });
+    };
+
+    const finalizeLeadFailed = async ({ lead, reason }) => {
+      if (!pgDatabasePool || !lead?.id) return;
+      await pgDatabasePool
+        .query(
+          `UPDATE public.campaign_dispatch_runs SET status = 'failed', error_message = $1 WHERE dispatch_id = $2 AND lead_id = $3`,
+          [reason || null, dispatchId, lead.id]
+        )
+        .catch((err) => {
+          console.warn("[campaign-dispatch] finalize_failed_failed:", err?.message || err);
+        });
+    };
+
     let sentCount = 0;
     let lastPauseCheckAt = 0;
 
@@ -4804,16 +4883,14 @@ export function registerAllDomainRoutes(app) {
         },
         client: { id: clientId, name: await getClientName(clientId) },
       },
+      onLeadClaim: claimLead,
+      onLeadFailed: async ({ lead, reason }) => {
+        await finalizeLeadFailed({ lead, reason });
+      },
       onLeadDispatched: async ({ lead, phone, sentAt }) => {
         sentCount += 1;
-        await db.from("campaign_dispatch_runs").insert({
-          dispatch_id: dispatchId,
-          campaign_id: campaign.id,
-          client_id: clientId,
-          phone,
-          status: "sent",
-          sent_at: sentAt,
-        }).catch(() => {});
+        // Finaliza o registro de claim deste lead como 'sent' (UPDATE da linha já reservada).
+        await finalizeLeadSent({ lead, sentAt });
         const leadPatch = {
           status_conversa: "campanha_enviada",
           ultima_interacao_bot: sentAt || new Date().toISOString(),
@@ -4842,21 +4919,9 @@ export function registerAllDomainRoutes(app) {
       leadDelayProvider: () => 30_000 + Math.floor(Math.random() * 60_001),
     });
 
-    // Registra falhas por lead
-    const failures = result?.summary?.failures || [];
-    for (const f of failures) {
-      if (f.phone) {
-        await db.from("campaign_dispatch_runs").insert({
-          dispatch_id: dispatchId,
-          campaign_id: campaign.id,
-          client_id: clientId,
-          phone: f.phone,
-          status: "failed",
-          error_message: f.reason || null,
-        }).catch(() => {});
-      }
-    }
-
+    // Falhas por lead já são finalizadas em tempo real via onLeadFailed (UPDATE do
+    // registro de claim para status='failed'). Lead que falhou NÃO volta para a fila
+    // do mesmo disparo — fica registrado para tratamento manual (endpoint /failed).
     const failedCount = result?.summary?.failureCount ?? (leads.length - sentCount);
 
     if (result?.summary?.allChipsExhausted) {
@@ -4918,6 +4983,53 @@ export function registerAllDomainRoutes(app) {
       res.json({ dispatches: data || [] });
     } catch (err) {
       sendError(res, 500, "DISPATCHES_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // GET /api/campaigns/dispatches/:dispatchId/failed — leads falhados do disparo,
+  // exportável para planilha (?format=csv). Defeito A: failed sai do reprocesso e
+  // fica disponível para tratamento/exclusão manual.
+  app.get("/api/campaigns/dispatches/:dispatchId/failed", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const dispatchId = normalizeString(req.params.dispatchId);
+    if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+    try {
+      const { data: dispatch, error: dispatchErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, client_id, campaign_id, name")
+        .eq("id", dispatchId)
+        .maybeSingle();
+      if (dispatchErr || !dispatch) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, dispatch.client_id);
+      if (!authorizedClientId) return;
+
+      const { data, error } = await supabase
+        .from("campaign_dispatch_runs")
+        .select("dispatch_id, lead_id, phone, status, error_message, claimed_at, sent_at, created_at")
+        .eq("dispatch_id", dispatchId)
+        .eq("status", "failed")
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      const rows = data || [];
+
+      if (normalizeString(req.query.format).toLowerCase() === "csv") {
+        const header = ["dispatch_id", "lead_id", "telefone", "status", "error_message", "claimed_at", "sent_at", "created_at"];
+        const esc = (v) => {
+          const s = v == null ? "" : String(v);
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const lines = [header.join(",")];
+        for (const r of rows) {
+          lines.push([r.dispatch_id, r.lead_id, r.phone, r.status, r.error_message, r.claimed_at, r.sent_at, r.created_at].map(esc).join(","));
+        }
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="disparo-${dispatchId}-falhados.csv"`);
+        return res.send(lines.join("\n"));
+      }
+
+      res.json({ dispatchId, dispatchName: dispatch.name, failedCount: rows.length, items: rows });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_FAILED_EXPORT_FAILED", err instanceof Error ? err.message : "Failed");
     }
   });
 

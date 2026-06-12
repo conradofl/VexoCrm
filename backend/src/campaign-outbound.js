@@ -468,6 +468,8 @@ export async function dispatchCampaignSequence({
   shouldContinue = null,
   chipProvider = null,
   leadDelayProvider = null,
+  onLeadClaim = null,
+  onLeadFailed = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -516,7 +518,24 @@ export async function dispatchCampaignSequence({
       leadWebhookToken = activeChip.webhookToken ?? null;
     }
 
+    // Defeito A: claim idempotente imediatamente ANTES do envio (chip já reservado).
+    // Se o lead já foi tocado neste disparo, pula — e devolve a cota reservada do chip.
+    if (typeof onLeadClaim === "function") {
+      const claimed = await onLeadClaim({ lead, phone, leadIndex });
+      if (!claimed) {
+        if (activeChip && typeof activeChip.release === "function") {
+          try {
+            await activeChip.release();
+          } catch {
+            /* devolução de cota é best-effort */
+          }
+        }
+        continue;
+      }
+    }
+
     let leadFailed = false;
+    let leadFailReason = null;
     let leadSentAnything = false;
     let lastSuccessfulStep = null;
     let lastSuccessfulStepIndex = null;
@@ -582,16 +601,18 @@ export async function dispatchCampaignSequence({
       } catch (error) {
         leadFailed = true;
         failedPhones.add(phone);
+        const failureReason =
+          error?.name === "AbortError"
+            ? "Timeout ao chamar a integracao Evolution."
+            : error instanceof Error
+              ? error.message
+              : "Falha ao chamar a integracao Evolution.";
+        if (!leadFailReason) leadFailReason = failureReason;
         summary.failures.push({
           phone,
           stepId: step.id,
           stepType: step.type,
-          reason:
-            error?.name === "AbortError"
-              ? "Timeout ao chamar a integracao Evolution."
-              : error instanceof Error
-                ? error.message
-                : "Falha ao chamar a integracao Evolution.",
+          reason: failureReason,
         });
 
         if (normalizedMeta.dispatchOptions.stopOnStepFailure) {
@@ -647,6 +668,16 @@ export async function dispatchCampaignSequence({
             reason,
           });
         }
+      }
+    } else if (typeof onLeadFailed === "function") {
+      // Defeito A: finaliza o registro de claim deste lead como 'failed' (não volta à fila).
+      try {
+        await onLeadFailed({ lead, phone, reason: leadFailReason });
+      } catch (callbackError) {
+        console.warn("[campaign-outbound] lead_failed_callback_failed", {
+          phone: maskOutboundPhone(phone),
+          reason: callbackError instanceof Error ? callbackError.message : String(callbackError),
+        });
       }
     }
 

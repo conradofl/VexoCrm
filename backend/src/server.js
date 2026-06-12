@@ -4944,7 +4944,7 @@ async function getClientName(clientId) {
   return data?.name || clientId;
 }
 
-async function buildDispatchLeads({ clientId, importId = null, limit = null, segmentation = null }) {
+async function buildDispatchLeads({ clientId, importId = null, limit = null, segmentation = null, excludeDispatchId = null }) {
   if (!supabase) return [];
 
   let query = supabase
@@ -5001,11 +5001,33 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
     ).values()
   );
 
-  if (limit && Number.isInteger(limit) && limit > 0) {
-    return leads.slice(0, limit);
+  // Defeito A: elegibilidade por disparo. Remove da fila todo lead que JÁ tem registro
+  // neste disparo (qualquer status: claimed/sent/failed) → já tocado = fora.
+  // Escopo é POR DISPARO (excludeDispatchId), não histórico global do lead.
+  let eligibleLeads = leads;
+  if (excludeDispatchId) {
+    const { data: touchedRows, error: touchedError } = await supabase
+      .from("campaign_dispatch_runs")
+      .select("lead_id")
+      .eq("dispatch_id", excludeDispatchId);
+    if (touchedError) {
+      throw touchedError;
+    }
+    const touchedLeadIds = new Set(
+      (touchedRows || [])
+        .map((row) => row.lead_id)
+        .filter((id) => id != null)
+    );
+    if (touchedLeadIds.size > 0) {
+      eligibleLeads = leads.filter((lead) => !touchedLeadIds.has(lead.id));
+    }
   }
 
-  return leads;
+  if (limit && Number.isInteger(limit) && limit > 0) {
+    return eligibleLeads.slice(0, limit);
+  }
+
+  return eligibleLeads;
 }
 
 /**
