@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Wand2 } from "lucide-react";
+import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -313,47 +313,6 @@ export default function Tenants() {
       });
     }
   };
-
-  const handleCreateEvolutionInstance = async (tenant: LeadClient) => {
-    const draft = getEvolutionDraft(tenant.id);
-
-    try {
-      await saveEvolutionInstance.mutateAsync({
-        tenantId: tenant.id,
-        name: draft.name.trim() || "Evolution",
-        dispatchWebhookUrl: draft.dispatchWebhookUrl.trim(),
-        dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
-        active: draft.active,
-        isDefault: draft.isDefault,
-      });
-
-      setEvolutionDrafts((current) => ({
-        ...current,
-        [tenant.id]: {
-          name: "",
-          dispatchWebhookUrl: "",
-          dispatchWebhookToken: "",
-          active: true,
-          isDefault: false,
-        },
-      }));
-
-      toast({
-        title: "Evolution adicionada",
-        description: `A instancia foi vinculada a ${tenant.name}.`,
-      });
-    } catch (settingsError) {
-      toast({
-        title: "Falha ao adicionar Evolution",
-        description:
-          settingsError instanceof Error
-            ? settingsError.message
-            : "Nao foi possivel adicionar a instancia Evolution.",
-        variant: "destructive",
-      });
-    }
-  };
-
 
   const handleDeleteTenant = async (tenant: { id: string; name: string }) => {
     try {
