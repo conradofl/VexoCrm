@@ -56,6 +56,15 @@ const TEMP_COLORS: Record<string, string> = {
 // Placeholder honesto para métrica sem fonte de dado real.
 const DASH = "—";
 
+// Helper ÚNICO de formatação: mostra "—" quando o valor é null/undefined/NaN,
+// e o número formatado quando existe. Aplicado a TODOS os KPIs/células (uniforme),
+// para que assim que o backend retornar o campo, o número apareça sozinho —
+// zero edição neste arquivo. NÃO chumbar "—" como texto fixo em lugar nenhum.
+function formatMetric(value: number | null | undefined, kind: "int" | "pct" = "int"): string {
+  if (value == null || (typeof value === "number" && !Number.isFinite(value))) return DASH;
+  return kind === "pct" ? `${value}%` : Number(value).toLocaleString("pt-BR");
+}
+
 function formatDiaLabel(dia: string): string {
   const p = String(dia).split("-");
   return p.length === 3 ? `${p[2]}/${p[1]}` : dia;
@@ -107,13 +116,24 @@ const Dashboard = ({
     );
   }, [usage.data]);
 
+  // Respostas por dia: PRÉ-CABEADO em leadsByDay[].respostas (backend ainda não envia).
+  // Mapeado por data; renderiza vazio enquanto nulo, sem quebrar o gráfico.
+  const repliesByDay = useMemo(() => {
+    const map = new Map<string, number | null | undefined>();
+    for (const p of data?.leadsByDay ?? []) map.set(p.day, p.respostas);
+    return map;
+  }, [data]);
+
   const { sentCurrent, sentDelta, currentSeries } = useMemo(() => {
-    if (sentByDay.length === 0) return { sentCurrent: 0, sentDelta: null as number | null, currentSeries: [] as typeof sentByDay };
-    const half = sentByDay.slice(-PERIOD_DAYS);
-    const prev = sentByDay.slice(0, Math.max(0, sentByDay.length - PERIOD_DAYS));
-    const sum = (arr: typeof sentByDay) => arr.reduce((s, r) => s + r.enviados, 0);
+    const withReplies = sentByDay.map((r) => ({ ...r, respostas: repliesByDay.get(r.dia) ?? undefined }));
+    if (withReplies.length === 0) {
+      return { sentCurrent: null as number | null, sentDelta: null as number | null, currentSeries: [] as typeof withReplies };
+    }
+    const half = withReplies.slice(-PERIOD_DAYS);
+    const prev = withReplies.slice(0, Math.max(0, withReplies.length - PERIOD_DAYS));
+    const sum = (arr: typeof withReplies) => arr.reduce((s, r) => s + r.enviados, 0);
     return { sentCurrent: sum(half), sentDelta: pctDelta(sum(half), sum(prev)), currentSeries: half };
-  }, [sentByDay]);
+  }, [sentByDay, repliesByDay]);
 
   const hasUsage = (usage.data?.items?.length ?? 0) > 0;
 
@@ -123,35 +143,40 @@ const Dashboard = ({
     [data]
   );
 
-  // ── Funil (Novo / Em contato[sem fonte] / Qualificado / Fechado) ──────────────
+  // ── Funil (Novo / Em contato / Qualificado / Fechado) ─────────────────────────
+  // "Em contato" ligado a summary.contactedLeads (pré-cabeado): "—" enquanto nulo.
   const funnel = useMemo(() => {
-    if (!summary) return [];
+    if (!summary) return [] as { stage: string; value: number | null | undefined }[];
     return [
-      { stage: "Novo", value: summary.totalLeads, hasData: true },
-      { stage: "Em contato", value: null as number | null, hasData: false }, // SEM FONTE limpa
-      { stage: "Qualificado", value: summary.qualifiedLeads, hasData: true },
-      { stage: "Fechado", value: summary.conversions, hasData: true },
+      { stage: "Novo", value: summary.totalLeads },
+      { stage: "Em contato", value: summary.contactedLeads },
+      { stage: "Qualificado", value: summary.qualifiedLeads },
+      { stage: "Fechado", value: summary.conversions },
     ];
   }, [summary]);
 
   // ── Export ────────────────────────────────────────────────────────────────────
   const handleExportExcel = () => {
+    // Mesmo critério do helper de UI: null/undefined/NaN → "—".
+    const cell = (v: number | null | undefined) =>
+      v == null || (typeof v === "number" && !Number.isFinite(v)) ? DASH : v;
     const wb = XLSX.utils.book_new();
     const kpis = [
       ["Métrica", "Valor"],
-      ["Mensagens enviadas (período)", hasUsage ? sentCurrent : DASH],
-      ["Taxa de resposta", DASH],
-      ["Leads quentes", summary?.hotLeads ?? DASH],
-      ["Leads sem contato +3 dias", DASH],
-      ["Conversão (%)", summary ? summary.conversionRate : DASH],
-      ["Total de leads", summary?.totalLeads ?? DASH],
-      ["Qualificados", summary?.qualifiedLeads ?? DASH],
-      ["Fechamentos", summary?.conversions ?? DASH],
+      ["Mensagens enviadas (período)", cell(sentCurrent)],
+      ["Taxa de resposta (%)", cell(summary?.responseRate)],
+      ["Leads quentes", cell(summary?.hotLeads)],
+      ["Leads sem contato +3 dias", cell(summary?.noContact3d)],
+      ["Conversão (%)", cell(summary?.conversionRate)],
+      ["Total de leads", cell(summary?.totalLeads)],
+      ["Em contato", cell(summary?.contactedLeads)],
+      ["Qualificados", cell(summary?.qualifiedLeads)],
+      ["Fechamentos", cell(summary?.conversions)],
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpis), "KPIs");
     const camp = [
-      ["Campanha", "Status", "Enviados", "Respostas", "Conversão"],
-      ...campaigns.map((c) => [c.name, c.status, DASH, DASH, DASH]),
+      ["Campanha", "Status", "Enviados", "Respostas", "Conversão (%)"],
+      ...campaigns.map((c) => [c.name, c.status, cell(c.sent), cell(c.replies), cell(c.conversionRate)]),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(camp), "Campanhas");
     XLSX.writeFile(wb, `dashboard-${effectiveClientId || "cliente"}.xlsx`);
@@ -206,18 +231,18 @@ const Dashboard = ({
                 </CardHeader>
                 <CardContent>
                   <div className="text-4xl font-extrabold tracking-tight text-foreground">
-                    {hasUsage ? sentCurrent.toLocaleString("pt-BR") : DASH}
+                    {formatMetric(sentCurrent)}
                   </div>
-                  <DeltaBadge delta={hasUsage ? sentDelta : null} />
+                  <DeltaBadge delta={sentDelta} />
                 </CardContent>
               </Card>
 
-              {/* KPIs de apoio */}
+              {/* KPIs de apoio — todos via formatMetric + campo nomeado (pré-cabeado) */}
               <div className="grid grid-cols-2 gap-4 lg:col-span-2">
-                <KpiMini icon={<Percent className="h-4 w-4" />} label="Taxa de resposta" value={DASH} delta={null} note="sem fonte" />
-                <KpiMini icon={<Flame className="h-4 w-4" />} label="Leads quentes" value={summary ? summary.hotLeads.toLocaleString("pt-BR") : DASH} delta={null} />
-                <KpiMini icon={<TimerReset className="h-4 w-4" />} label="Sem contato +3 dias" value={DASH} delta={null} note="sem fonte" />
-                <KpiMini icon={<TrendingUp className="h-4 w-4" />} label="Conversão" value={summary ? `${summary.conversionRate}%` : DASH} delta={null} />
+                <KpiMini icon={<Percent className="h-4 w-4" />} label="Taxa de resposta" value={formatMetric(summary?.responseRate, "pct")} delta={null} />
+                <KpiMini icon={<Flame className="h-4 w-4" />} label="Leads quentes" value={formatMetric(summary?.hotLeads)} delta={summary?.hotLeadsDelta ?? null} />
+                <KpiMini icon={<TimerReset className="h-4 w-4" />} label="Sem contato +3 dias" value={formatMetric(summary?.noContact3d)} delta={null} />
+                <KpiMini icon={<TrendingUp className="h-4 w-4" />} label="Conversão" value={formatMetric(summary?.conversionRate, "pct")} delta={summary?.conversionRateDelta ?? null} />
               </div>
             </div>
 
@@ -225,8 +250,8 @@ const Dashboard = ({
               {/* Barras: enviados por dia (real). Respostas: sem fonte. */}
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Enviados por dia</CardTitle>
-                  <CardDescription>Série real de envios. Respostas por dia: sem fonte de dado ({DASH}).</CardDescription>
+                  <CardTitle className="text-base">Enviados vs respostas por dia</CardTitle>
+                  <CardDescription>Enviados: série real. Respostas: pré-cabeada (aparece quando o backend enviar).</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {hasUsage ? (
@@ -238,6 +263,8 @@ const Dashboard = ({
                         <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Dia ${formatDiaLabel(String(l))}`} />
                         <Legend wrapperStyle={{ fontSize: 12 }} />
                         <Bar dataKey="enviados" name="Enviados" fill={SOLID.indigo} radius={[4, 4, 0, 0]} />
+                        {/* Série pré-cabeada: vazia até leadsByDay[].respostas existir */}
+                        <Bar dataKey="respostas" name="Respostas" fill={SOLID.orange} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
@@ -281,15 +308,13 @@ const Dashboard = ({
                 {funnel.map((step, i) => {
                   const prev = i > 0 ? funnel[i - 1] : null;
                   const drop =
-                    prev && prev.hasData && step.hasData && prev.value && step.value != null
+                    prev && prev.value != null && prev.value > 0 && step.value != null
                       ? Math.round(((prev.value - step.value) / prev.value) * 100)
                       : null;
                   return (
                     <div key={step.stage} className="rounded-xl border border-border/70 bg-card/60 p-4">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{step.stage}</p>
-                      <p className="mt-1 text-2xl font-extrabold text-foreground">
-                        {step.hasData && step.value != null ? step.value.toLocaleString("pt-BR") : DASH}
-                      </p>
+                      <p className="mt-1 text-2xl font-extrabold text-foreground">{formatMetric(step.value)}</p>
                       {i > 0 && (
                         <p className="mt-1 text-xs text-muted-foreground">
                           {drop != null ? `↓ ${drop}% da etapa anterior` : `queda: ${DASH}`}
@@ -329,9 +354,9 @@ const Dashboard = ({
                           <tr key={c.id} className="border-b border-border/40 last:border-0">
                             <td className="px-4 py-3 font-medium text-foreground">{c.name}</td>
                             <td className="px-4 py-3"><Badge variant="outline">{c.status}</Badge></td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{DASH}</td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{DASH}</td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{DASH}</td>
+                            <td className="px-4 py-3 text-right text-muted-foreground">{formatMetric(c.sent)}</td>
+                            <td className="px-4 py-3 text-right text-muted-foreground">{formatMetric(c.replies)}</td>
+                            <td className="px-4 py-3 text-right text-muted-foreground">{formatMetric(c.conversionRate, "pct")}</td>
                           </tr>
                         ))}
                       </tbody>

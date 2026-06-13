@@ -26,6 +26,12 @@ export interface Campaign {
   chatbot_prompt_type: string;
   campaign_prompt_id: string | null;
   mode: "disparo" | "agente";
+  // ── Campos PRÉ-CABEADOS (Dashboard Fase 1 — desempenho por campanha).
+  // O endpoint de campanhas ainda NÃO retorna estes; quando retornar, a tabela
+  // do Dashboard preenche sozinha (helper "—" enquanto nulo).
+  sent?: number | null;            // mensagens enviadas pela campanha
+  replies?: number | null;         // respostas recebidas
+  conversionRate?: number | null;  // conversão (%) da campanha
 }
 
 export interface CampaignDispatch {

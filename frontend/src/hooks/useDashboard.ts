@@ -18,12 +18,21 @@ export interface DashboardSummary {
   averageTicket: number;
   performanceScore: number;
   funnelCoverage: number;
+  // ── Campos PRÉ-CABEADOS (Dashboard Fase 1): o backend ainda NÃO retorna.
+  // Quando /api/dashboard passar a incluí-los, aparecem sozinhos na UI (helper "—").
+  responseRate?: number | null;        // taxa de resposta (%) do período
+  noContact3d?: number | null;         // leads sem contato há +3 dias (contagem)
+  contactedLeads?: number | null;      // etapa "Em contato" do funil (contagem)
+  hotLeadsDelta?: number | null;       // delta % de leads quentes vs período anterior
+  conversionRateDelta?: number | null; // delta % de conversão vs período anterior
 }
 
 export interface DashboardChartPoint {
   day: string;
   leads: number;
   qualifiedLeads: number;
+  // PRÉ-CABEADO: respostas por dia (série do gráfico). Ainda não vem do backend.
+  respostas?: number | null;
 }
 
 export interface DashboardBreakdownItem {
