@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Lexend:wght@300;400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
 @import url("https://fonts.cdnfonts.com/css/geist-mono");
 
 @tailwind base;
@@ -49,21 +49,21 @@
 
 @layer base {
   :root {
-    /* Deep Navy / Indigo palette */
-    --background: 230 84% 4%;        /* #020617 */
+    /* Deep Navy / Indigo palette (Direction C Soft Tones) */
+    --background: 231 36% 5%;        /* #090A0F Deep slate dark */
     --foreground: 210 40% 98%;       /* #F8FAFC */
 
-    --card: 228 30% 5%;             /* ~#0B0E14 */
+    --card: 231 27% 9%;             /* #11131E Visual surface card */
     --card-foreground: 210 40% 98%;
 
-    --popover: 228 30% 5%;
+    --popover: 231 27% 9%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 239 84% 67%;         /* #6366F1 Electric Indigo */
     --primary-foreground: 0 0% 100%;
 
     --secondary: 188 94% 53%;       /* #22D3EE Cyan Neon */
-    --secondary-foreground: 230 84% 4%;
+    --secondary-foreground: 231 36% 5%;
 
     --muted: 230 20% 10%;
     --muted-foreground: 215 20% 65%;
@@ -87,7 +87,7 @@
     --input: 230 20% 10%;
     --ring: 239 84% 67%;
 
-    --radius: 0.75rem;
+    --radius: 1.125rem; /* Soft 18px radius */
 
     --sidebar-background: 230 50% 5%;
     --sidebar-foreground: 215 20% 65%;
@@ -154,20 +154,20 @@
   }
 
   .dark {
-    --background: 230 84% 4%;
+    --background: 231 36% 5%;       /* #090A0F Deep slate dark */
     --foreground: 210 40% 98%;
 
-    --card: 228 30% 5%;
+    --card: 231 27% 9%;             /* #11131E Visual surface card */
     --card-foreground: 210 40% 98%;
 
-    --popover: 228 30% 5%;
+    --popover: 231 27% 9%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 239 84% 67%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 188 94% 53%;
-    --secondary-foreground: 230 84% 4%;
+    --secondary-foreground: 231 36% 5%;
 
     --muted: 230 20% 10%;
     --muted-foreground: 215 20% 65%;
@@ -213,23 +213,23 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: "Inter", system-ui, sans-serif;
+    font-family: "Lexend", "Inter", system-ui, sans-serif;
     min-height: 100vh;
     overflow-x: hidden;
-    background-color: #f2f6ff;
+    background-color: #f5f7fa; /* Direction C Light background */
     background-image:
-      radial-gradient(circle at 20% 15%, rgba(59, 130, 246, 0.10), transparent 28%),
-      radial-gradient(circle at 80% 10%, rgba(16, 185, 129, 0.06), transparent 22%),
-      radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.06), transparent 30%);
+      radial-gradient(circle at 20% 15%, rgba(59, 130, 246, 0.08), transparent 28%),
+      radial-gradient(circle at 80% 10%, rgba(16, 185, 129, 0.05), transparent 22%),
+      radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.05), transparent 30%);
     background-attachment: fixed;
   }
 
   .dark body {
-    background-color: #020617;
+    background-color: #090a0f; /* Direction C Dark background */
     background-image:
-      radial-gradient(circle at 20% 15%, rgba(99, 102, 241, 0.10), transparent 28%),
-      radial-gradient(circle at 80% 10%, rgba(34, 211, 238, 0.06), transparent 22%),
-      radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.05), transparent 30%);
+      radial-gradient(circle at 20% 15%, rgba(99, 102, 241, 0.08), transparent 28%),
+      radial-gradient(circle at 80% 10%, rgba(34, 211, 238, 0.05), transparent 22%),
+      radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.04), transparent 30%);
   }
 
   body::before {

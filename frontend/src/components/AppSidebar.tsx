@@ -83,9 +83,8 @@ const MODULOS: Record<Modo, Modulo> = {
     labelLongo: "Máquina de Disparos",
     cor: "#ff7a1a", // Laranja marca — demo-liv-pub.html (--accent, botão primário + logo)
     ferramentas: [
-      // PASSO 2: filtrar esta lista por clienteTemAcesso(f.key) antes de renderizar
-      { key: "conexoes",    label: "Conexões",    url: "/crm/conexoes",    icon: Wifi,            page: "conexoes" },
-      { key: "campanhas",   label: "Campanhas",   url: "/crm/planilhas",   icon: FileSpreadsheet, page: "planilhas" },
+      { key: "conexoes",    label: "Chips WhatsApp", url: "/crm/conexoes",    icon: Wifi,            page: "conexoes" },
+      { key: "campanhas",   label: "Envios por Planilha", url: "/crm/planilhas",   icon: FileSpreadsheet, page: "planilhas" },
       { key: "disparos",    label: "Disparos",    url: "/crm/disparos",    icon: Send,            page: "disparos" },
       { key: "aquecimento", label: "Aquecimento", url: "/crm/aquecimento", icon: Flame,           page: "aquecimento" },
       { key: "relatorios",  label: "Relatórios",  url: "/crm/relatorios",  icon: BarChart2,       page: "relatorios" },

@@ -60,6 +60,8 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
     instanceName: string | null;
   } | null>(null);
 
+  const [createMode, setCreateMode] = useState<"provision" | "manual">("provision");
+
   const evolutionInstances: LeadClientEvolutionInstance[] =
     tenant.n8n_settings?.evolution_instances ?? [];
 
@@ -251,21 +253,21 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
 
   return (
     <>
-      <div className="grid gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="grid gap-4 rounded-2xl border border-slate-200/60 bg-slate-50/50 p-5 dark:border-white/10 dark:bg-white/[0.02]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 dark:border-white/10 pb-3 mb-2">
           <div>
-            <p className="text-sm font-medium text-foreground">Instancias Evolution</p>
+            <p className="text-base font-bold font-display text-foreground">Chips WhatsApp Conectados</p>
             <p className="text-xs text-muted-foreground">
-              Chips WhatsApp vinculados a este tenant. Cada chip tem cota diaria independente.
+              Chips de WhatsApp vinculados a esta empresa. Cada chip possui cota diária e rotação automática.
             </p>
           </div>
-          <Badge className="border border-slate-300/80 bg-white/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
-            {evolutionInstances.length} instancia{evolutionInstances.length === 1 ? "" : "s"}
+          <Badge className="border border-slate-200 bg-white text-slate-700 rounded-xl dark:border-white/5 dark:bg-white/[0.05] dark:text-white/80 font-num">
+            {evolutionInstances.length} {evolutionInstances.length === 1 ? "conexão" : "conexões"}
           </Badge>
         </div>
 
         {evolutionInstances.length > 0 ? (
-          <div className="grid gap-2">
+          <div className="grid gap-3">
             {evolutionInstances.map((instance) => {
               const draft = getChipDraft(instance);
               const displayLimit = resolveChipLimit(draft.chipState, draft.dailyLimitOverride);
@@ -277,34 +279,35 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
               return (
                 <div
                   key={instance.id}
-                  className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/85 p-3 text-sm dark:border-white/10 dark:bg-white/[0.04] lg:grid-cols-[minmax(0,1fr)_auto]"
+                  className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white to-slate-50/30 dark:from-white/[0.02] dark:to-transparent shadow-sm hover:shadow-md transition-all duration-200 dark:border-white/5"
                 >
-                  <div className="min-w-0 space-y-2">
+                  <div className="min-w-0 flex-1 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <p className="max-w-[200px] truncate font-medium text-foreground">
+                          <p className="max-w-[200px] truncate font-display font-semibold text-foreground text-sm">
                             {instance.name}
                           </p>
                         </TooltipTrigger>
                         <TooltipContent>{instance.name}</TooltipContent>
                       </Tooltip>
                       {instance.is_default ? (
-                        <Badge className="border border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
-                          padrao
+                        <Badge className="border border-cyan-400/25 bg-cyan-500/10 text-cyan-700 rounded-xl dark:text-cyan-200 text-[10px]">
+                          padrão
                         </Badge>
                       ) : null}
                       <Badge
-                        className={
+                        className={cn(
+                          "rounded-xl text-[10px]",
                           instance.active
                             ? "border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
                             : "border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65"
-                        }
+                        )}
                       >
                         {instance.active ? "ativa" : "inativa"}
                       </Badge>
                       {instance.has_dispatch_webhook_token ? (
-                        <Badge className="border border-violet-400/25 bg-violet-500/10 text-violet-700 dark:text-violet-200">
+                        <Badge className="border border-violet-400/25 bg-violet-500/10 text-violet-700 rounded-xl dark:text-violet-200 text-[10px]">
                           api key
                         </Badge>
                       ) : null}
@@ -312,30 +315,30 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
 
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <p className="truncate font-mono text-xs text-muted-foreground">
+                        <p className="truncate font-mono text-[11px] text-muted-foreground">
                           {instance.dispatch_webhook_url ?? "—"}
                         </p>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs break-all">
-                        {instance.dispatch_webhook_url ?? "URL nao definida"}
+                        {instance.dispatch_webhook_url ?? "URL não definida"}
                       </TooltipContent>
                     </Tooltip>
 
                     {/* Anti-ban: saúde do chip (cota diária) */}
-                    <div className="mt-1 space-y-2 rounded-lg border border-slate-200/70 bg-slate-50/60 p-2.5 text-xs dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="space-y-2 rounded-xl border border-slate-200/50 bg-slate-50/50 p-3.5 text-xs dark:border-white/5 dark:bg-white/[0.01]">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">Enviadas hoje</span>
-                        <span className="font-mono font-semibold text-foreground">
+                        <span className="text-muted-foreground font-medium">Cota Diária de Envios</span>
+                        <span className="font-num font-semibold text-foreground">
                           {sent} / {displayLimit}
                         </span>
                       </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
                         <div
                           className={cn("h-full rounded-full transition-all duration-300", barColor)}
                           style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
                         <Select
                           value={draft.chipState}
                           onValueChange={(v) =>
@@ -343,18 +346,18 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                           }
                           disabled={!canEdit}
                         >
-                          <SelectTrigger className="h-7 w-[130px] text-xs">
+                          <SelectTrigger className="h-8 w-[150px] text-xs rounded-xl">
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="cold">Frio (100/dia)</SelectItem>
-                            <SelectItem value="warm">Aquecido (500/dia)</SelectItem>
+                          <SelectContent className="rounded-xl">
+                            <SelectItem value="cold">Frio (100 msgs/dia)</SelectItem>
+                            <SelectItem value="warm">Aquecido (500 msgs/dia)</SelectItem>
                           </SelectContent>
                         </Select>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Input
-                              className="h-7 w-24 text-xs"
+                              className="h-8 w-28 text-xs rounded-xl font-num"
                               placeholder="Limite custom"
                               title="Limite customizado de mensagens por dia"
                               type="number"
@@ -366,18 +369,18 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                               }
                             />
                           </TooltipTrigger>
-                          <TooltipContent>Limite customizado de mensagens por dia</TooltipContent>
+                          <TooltipContent>Definir limite diário customizado de mensagens</TooltipContent>
                         </Tooltip>
                         {canEdit && (
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="default"
                             size="sm"
-                            className="h-7 text-xs"
+                            className="h-8 text-xs rounded-xl"
                             disabled={saveEvolutionInstance.isPending}
                             onClick={() => void handleSaveChipSettings(instance)}
                           >
-                            <Save className="mr-1 h-3 w-3" />
+                            <Save className="mr-1.5 h-3.5 w-3.5" />
                             Salvar cota
                           </Button>
                         )}
@@ -386,20 +389,22 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                   </div>
 
                   {canEdit && (
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-row lg:flex-col items-center justify-end gap-2 shrink-0 self-end lg:self-center">
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
+                        className="rounded-xl text-xs h-9 w-full lg:w-28"
                         disabled={saveEvolutionInstance.isPending || instance.is_default}
                         onClick={() => void handleUpdateEvolutionInstance(instance, { isDefault: true })}
                       >
-                        Padrao
+                        Tornar Padrão
                       </Button>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant={instance.active ? "outline" : "default"}
                         size="sm"
+                        className="rounded-xl text-xs h-9 w-full lg:w-28"
                         disabled={saveEvolutionInstance.isPending}
                         onClick={() =>
                           void handleUpdateEvolutionInstance(instance, { active: !instance.active })
@@ -411,10 +416,11 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                         type="button"
                         variant="outline"
                         size="sm"
+                        className="rounded-xl text-xs h-9 w-full lg:w-28 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20"
                         disabled={deleteEvolutionInstance.isPending}
                         onClick={() => void handleDeleteEvolutionInstance(instance)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
                         Remover
                       </Button>
                     </div>
@@ -424,128 +430,215 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
             })}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-300/80 bg-white/70 px-3 py-4 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
-            Nenhuma instancia cadastrada. Use o formulario abaixo para adicionar um chip.
+          <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/70 px-4 py-6 text-sm text-center text-muted-foreground dark:border-white/10 dark:bg-white/[0.01]">
+            Nenhuma conexão de chip cadastrada. Use o formulário abaixo para parear ou adicionar uma nova.
           </div>
         )}
 
         {canEdit && (
-          <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
-              <div className="grid gap-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
+          <div className="grid gap-4 rounded-2xl border border-slate-200/60 bg-white/80 p-5 mt-4 dark:border-white/5 dark:bg-white/[0.03]">
+            {/* Abas Internas de Criação (Linearidade e Organização) */}
+            <div className="flex border-b border-slate-200/60 dark:border-white/10 pb-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setCreateMode("provision")}
+                className={cn(
+                  "pb-2 px-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all font-display",
+                  createMode === "provision"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Conectar Novo Chip (Automático)
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreateMode("manual")}
+                className={cn(
+                  "pb-2 px-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all font-display",
+                  createMode === "manual"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Vincular Manualmente
+              </button>
+            </div>
+
+            {createMode === "provision" ? (
+              /* ABA A: Criar com QR Code automático */
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">Identificador do Chip</label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          className="rounded-xl h-10"
+                          placeholder="Ex: chip-vendas-financeiro"
+                          value={evolutionDraft.name}
+                          onChange={(e) => updateEvolutionDraft({ name: e.target.value })}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Escolha um nome simples para identificar este chip no Vexo OS</TooltipContent>
+                    </Tooltip>
+                    <p className="px-1 text-[10px] text-muted-foreground">
+                      Espaços viram hifen ao criar (ex.: "Chip Vendas" → "chip-vendas").
+                    </p>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">Chave de API Secundária (Opcional)</label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          className="rounded-xl h-10"
+                          placeholder="Chave customizada para segurança"
+                          value={evolutionDraft.dispatchWebhookToken}
+                          onChange={(e) => updateEvolutionDraft({ dispatchWebhookToken: e.target.value })}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Chave secreta para autorização na Evolution API (opcional)</TooltipContent>
+                    </Tooltip>
+                    <p className="px-1 text-[10px] text-muted-foreground">
+                      O sistema auto-gera uma chave segura se deixada em branco.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4"
+                        checked={evolutionDraft.active}
+                        onChange={(e) => updateEvolutionDraft({ active: e.target.checked })}
+                      />
+                      Chip Ativo
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4"
+                        checked={evolutionDraft.isDefault}
+                        onChange={(e) => updateEvolutionDraft({ isDefault: e.target.checked })}
+                      />
+                      Tornar Padrão de Envio
+                    </label>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="default"
+                    className="rounded-xl px-5 h-10"
+                    disabled={provisionEvolutionInstance.isPending}
+                    onClick={() => void handleProvisionEvolutionInstance()}
+                  >
+                    <Wand2 className="mr-2 h-4 w-4 animate-pulse" />
+                    {provisionEvolutionInstance.isPending ? "Conectando..." : "Gerar QR Code de Pareamento"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              /* ABA B: Vinculação manual para dev/infra existente */
+              <div className="space-y-4">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">Identificador do Chip</label>
                     <Input
-                      placeholder="Nome da instancia"
-                      title="Nome da instancia (ex: Chip Vendas)"
+                      className="rounded-xl h-10"
+                      placeholder="Ex: chip-suporte-manual"
                       value={evolutionDraft.name}
                       onChange={(e) => updateEvolutionDraft({ name: e.target.value })}
                     />
-                  </TooltipTrigger>
-                  <TooltipContent>Nome da instancia (ex: Chip Vendas)</TooltipContent>
-                </Tooltip>
-                <p className="px-1 text-[11px] text-muted-foreground">
-                  Espacos viram hifen ao criar (ex.: "Chip Vendas" → "chip-vendas").
-                </p>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">URL de Disparo Evolution</label>
+                    <Input
+                      className="rounded-xl h-10"
+                      placeholder="https://.../message/sendText/Instancia"
+                      value={evolutionDraft.dispatchWebhookUrl}
+                      onChange={(e) => updateEvolutionDraft({ dispatchWebhookUrl: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">API Key da Conexão</label>
+                    <Input
+                      className="rounded-xl h-10"
+                      placeholder="Chave do header apikey"
+                      value={evolutionDraft.dispatchWebhookToken}
+                      onChange={(e) => updateEvolutionDraft({ dispatchWebhookToken: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4"
+                        checked={evolutionDraft.active}
+                        onChange={(e) => updateEvolutionDraft({ active: e.target.checked })}
+                      />
+                      Chip Ativo
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4"
+                        checked={evolutionDraft.isDefault}
+                        onChange={(e) => updateEvolutionDraft({ isDefault: e.target.checked })}
+                      />
+                      Tornar Padrão de Envio
+                    </label>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="default"
+                    className="rounded-xl px-5 h-10"
+                    disabled={saveEvolutionInstance.isPending || !evolutionDraft.dispatchWebhookUrl.trim()}
+                    onClick={() => void handleCreateEvolutionInstance()}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    {saveEvolutionInstance.isPending ? "Adicionando..." : "Vincular Conexão Existente"}
+                  </Button>
+                </div>
               </div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Input
-                    placeholder="URL de disparo Evolution"
-                    title="URL de disparo Evolution (ex: https://.../message/sendText/Instancia)"
-                    value={evolutionDraft.dispatchWebhookUrl}
-                    onChange={(e) => updateEvolutionDraft({ dispatchWebhookUrl: e.target.value })}
-                  />
-                </TooltipTrigger>
-                <TooltipContent>URL de disparo Evolution (ex: https://…/message/sendText/Instancia)</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Input
-                    placeholder="API Key Evolution"
-                    title="API Key Evolution (apikey do header)"
-                    value={evolutionDraft.dispatchWebhookToken}
-                    onChange={(e) => updateEvolutionDraft({ dispatchWebhookToken: e.target.value })}
-                  />
-                </TooltipTrigger>
-                <TooltipContent>API Key Evolution (apikey do header)</TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-4">
-                <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={evolutionDraft.active}
-                    onChange={(e) => updateEvolutionDraft({ active: e.target.checked })}
-                  />
-                  ativa
-                </label>
-                <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={evolutionDraft.isDefault}
-                    onChange={(e) => updateEvolutionDraft({ isDefault: e.target.checked })}
-                  />
-                  tornar padrao
-                </label>
-              </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={provisionEvolutionInstance.isPending}
-                  onClick={() => void handleProvisionEvolutionInstance()}
-                >
-                  <Wand2 className="h-4 w-4" />
-                  {provisionEvolutionInstance.isPending ? "Criando..." : "Criar na Evolution"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={saveEvolutionInstance.isPending || !evolutionDraft.dispatchWebhookUrl.trim()}
-                  onClick={() => void handleCreateEvolutionInstance()}
-                >
-                  <Plus className="h-4 w-4" />
-                  {saveEvolutionInstance.isPending ? "Adicionando..." : "Adicionar manual"}
-                </Button>
-              </div>
-            </div>
+            )}
           </div>
         )}
       </div>
 
       {/* Modal de QR — pareamento da instância recém-criada */}
       <Dialog open={!!qrModal} onOpenChange={(open) => !open && setQrModal(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md rounded-2xl p-6">
           <DialogHeader>
-            <DialogTitle>Parear WhatsApp</DialogTitle>
-            <DialogDescription>
-              Instancia{qrModal?.instanceName ? ` "${qrModal.instanceName}"` : ""} criada para{" "}
-              {qrModal?.tenantName ?? "a empresa"}.
+            <DialogTitle className="font-display text-lg font-bold">Parear WhatsApp</DialogTitle>
+            <DialogDescription className="text-xs">
+              Siga as instruções abaixo para vincular o chip <strong>{qrModal?.instanceName ?? "da empresa"}</strong>.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col items-center gap-4 py-2">
+          <div className="flex flex-col items-center gap-4 py-4">
             {qrModal?.base64 && (
-              <img
-                src={qrModal.base64}
-                alt="QR Code para parear o WhatsApp"
-                className="h-64 w-64 rounded-xl border border-slate-200 bg-white p-2 dark:border-white/10"
-              />
+              <div className="p-3 bg-white border border-slate-200/80 rounded-2xl shadow-sm dark:border-white/10">
+                <img
+                  src={qrModal.base64}
+                  alt="QR Code para parear o WhatsApp"
+                  className="h-60 w-60 rounded-xl"
+                />
+              </div>
             )}
-            <div className="text-center text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">
-                Escaneie em WhatsApp &gt; Aparelhos conectados
+            <div className="text-center text-sm space-y-2">
+              <p className="font-medium text-foreground text-xs">
+                No celular, abra o WhatsApp &gt; Aparelhos conectados &gt; Conectar um aparelho
               </p>
-              <p className="mt-2 text-xs">
-                O QR expira em poucos minutos. Se expirar antes de escanear, use{" "}
-                <span className="font-semibold">Remover</span> e crie a instancia de novo.
+              <p className="text-[11px] text-muted-foreground px-4">
+                O QR Code expira rapidamente. Se necessário, feche este modal, remova a conexão criada e gere um novo QR Code.
               </p>
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setQrModal(null)}>
+          <DialogFooter className="sm:justify-center">
+            <Button type="button" variant="outline" className="rounded-xl w-full sm:w-28" onClick={() => setQrModal(null)}>
               Fechar
             </Button>
           </DialogFooter>

@@ -19,17 +19,17 @@ export default function Conexoes() {
 
   return (
     <PageShell
-      title="Conexões"
-      subtitle="Chips WhatsApp do seu tenant — cota diária, estado e pareamento."
+      title="Conexões de WhatsApp"
+      subtitle="Monitore os chips de WhatsApp conectados, cotas diárias, estado de aquecimento e pareamento."
       spacing="space-y-4"
       compactHero
       headerRight={
         showSelector ? (
           <Select value={selectedTenantId} onValueChange={setSelectedTenantId}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Selecione um tenant" />
+            <SelectTrigger className="w-[220px] rounded-xl">
+              <SelectValue placeholder="Selecione uma empresa" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-xl">
               {tenants.map((t) => (
                 <SelectItem key={t.id} value={t.id}>
                   {t.name}
@@ -42,18 +42,18 @@ export default function Conexoes() {
     >
       {isLoading && (
         <div className="flex flex-col items-center justify-center gap-4 py-16 text-sm text-muted-foreground">
-          <Wifi className="h-7 w-7 animate-pulse text-amber-500" />
-          Carregando chips...
+          <Wifi className="h-7 w-7 animate-pulse text-primary" />
+          Carregando conexões...
         </div>
       )}
 
       {!isLoading && !activeTenant && (
         <EmptyState
-          title={showSelector ? "Selecione um tenant" : "Nenhum tenant associado"}
+          title={showSelector ? "Selecione uma empresa" : "Nenhuma empresa associada"}
           description={
             showSelector
-              ? "Escolha um tenant no seletor acima para ver os chips vinculados."
-              : "Seu perfil nao tem um tenant associado. Fale com o administrador."
+              ? "Escolha uma empresa no seletor acima para ver os chips de WhatsApp vinculados."
+              : "Seu perfil nao tem uma empresa associada. Fale com o administrador."
           }
         />
       )}
