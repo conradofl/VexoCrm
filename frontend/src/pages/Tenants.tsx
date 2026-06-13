@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, ShieldCheck, Trash2, Wand2 } from "lucide-react";
+import { CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, Trash2, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -19,6 +19,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
@@ -95,6 +103,7 @@ export default function Tenants() {
   const [inboundBearerToken, setInboundBearerToken] = useState("");
   const [search, setSearch] = useState("");
   const [formError, setFormError] = useState("");
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [chatbotModel, setChatbotModel] = useState<"outlier" | "infinie" | "generico">("outlier");
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
@@ -209,6 +218,7 @@ export default function Tenants() {
       setInboundBearerToken("");
       setChatbotModel("outlier");
       setTenantIdEdited(false);
+      setCreateDialogOpen(false);
     } catch (submissionError) {
       if (submissionError instanceof ZodError) {
         setFormError(submissionError.errors[0]?.message || "Dados invalidos.");
@@ -379,181 +389,184 @@ export default function Tenants() {
           <Badge className="border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-emerald-700 dark:text-emerald-200">
             {canManageN8n ? "Disparo Evolution liberado" : "Evolution restrito a admins"}
           </Badge>
+          <Dialog
+            open={createDialogOpen}
+            onOpenChange={(open) => {
+              setCreateDialogOpen(open);
+              if (open) setFormError("");
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button type="button" disabled={!canManageTenants}>
+                <Plus className="h-4 w-4" />
+                Nova empresa
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.98))] p-0 dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(13,18,54,0.98),rgba(8,10,32,0.98))]">
+              <DialogHeader className="space-y-3 px-6 pb-0 pt-6">
+                <div className="flex items-start justify-between gap-3 pr-8">
+                  <div className="space-y-1.5">
+                    <DialogTitle className="text-xl">Criar empresa</DialogTitle>
+                    <DialogDescription>
+                      Cadastre o cliente uma vez. O CRM cria o tenant, a tabela de leads e a rota do portal automaticamente.
+                    </DialogDescription>
+                  </div>
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
+                    <Wand2 className="h-5 w-5" />
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {CREATION_STEPS.map((step, index) => (
+                    <div
+                      key={step}
+                      className="rounded-xl border border-slate-200/80 bg-white/78 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
+                    >
+                      <span className="mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/10 text-[11px] font-bold text-cyan-700 dark:text-cyan-200">
+                        {index + 1}
+                      </span>
+                      {step}
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Database className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
+                    <p className="text-sm font-medium text-foreground">Preview da criacao</p>
+                  </div>
+                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                    <div>
+                      <p className="text-muted-foreground">Tenant ID</p>
+                      <p className="truncate font-mono text-foreground">{tenantId || "tenant-id"}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Tabela de leads</p>
+                      <p className="truncate font-mono text-foreground">{tablePreviewName}</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-muted-foreground">Portal</p>
+                      <p className="truncate font-mono text-foreground">/clientes/{tenantId || "tenant-id"}/dashboard</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-muted-foreground">Modelo inicial</p>
+                      <p className="truncate text-foreground">{selectedModel.title}</p>
+                    </div>
+                  </div>
+                </div>
+              </DialogHeader>
+              <form className="space-y-4 px-6 pb-6 pt-4" onSubmit={handleSubmit}>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground" htmlFor="tenant-name">
+                    Nome da empresa
+                  </label>
+                  <Input
+                    id="tenant-name"
+                    placeholder="Ex.: Solar Prime Holding"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    disabled={!canManageTenants || createTenant.isPending}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-medium text-foreground" htmlFor="tenant-id">
+                      Tenant ID
+                    </label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={resetSuggestedTenantId}
+                      disabled={!name || !canManageTenants || createTenant.isPending}
+                    >
+                      Regenerar
+                    </Button>
+                  </div>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="tenant-id"
+                      className="pl-10"
+                      placeholder="solar-prime"
+                      value={tenantId}
+                      onChange={(event) => handleTenantIdChange(event.target.value)}
+                      disabled={!canManageTenants || createTenant.isPending}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Portal previsto:{" "}
+                    <span className="font-mono text-foreground">
+                      /clientes/{tenantId || "tenant-id"}/dashboard
+                    </span>
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Tipo de schema do chatbot
+                  </label>
+                  <Select
+                    value={chatbotModel}
+                    onValueChange={(v) => setChatbotModel(v as "outlier" | "infinie" | "generico")}
+                    disabled={!canManageTenants || createTenant.isPending}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="outlier">Outlier - Consorcio (credito, parcela, FGTS)</SelectItem>
+                      <SelectItem value="infinie">Infinie - Solar (instalacao, conta de luz)</SelectItem>
+                      <SelectItem value="generico">Generico - Campos padrao apenas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Define quais colunas extras serao criadas na tabela de leads desta empresa.
+                  </p>
+                </div>
+
+                <ErrorMessage message={formError} variant="banner" />
+
+                {canManageN8n ? (
+                  <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                    <div className="flex items-start gap-3">
+                      <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Evolution API</p>
+                        <p className="text-xs text-muted-foreground">
+                          URL e API Key da instancia Evolution para envio de mensagens.
+                        </p>
+                      </div>
+                    </div>
+                    <Input
+                      placeholder="URL de disparo Evolution (ex: https://.../message/sendText/Instancia)"
+                      value={dispatchWebhookUrl}
+                      onChange={(event) => setDispatchWebhookUrl(event.target.value)}
+                      disabled={!canManageTenants || createTenant.isPending}
+                    />
+                    <Input
+                      placeholder="API Key Evolution (apikey do header)"
+                      value={dispatchWebhookToken}
+                      onChange={(event) => setDispatchWebhookToken(event.target.value)}
+                      disabled={!canManageTenants || createTenant.isPending}
+                    />
+                  </div>
+                ) : null}
+
+                <Button
+                  type="submit"
+                  className="w-full justify-center"
+                  disabled={!canSubmitTenant}
+                >
+                  <Plus className="h-4 w-4" />
+                  {createTenant.isPending ? "Criando tenant e tabela..." : "Criar empresa e tabela"}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
         </div>
       }
     >
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
-        <Card className="overflow-hidden border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(239,246,255,0.96))] shadow-[0_24px_60px_rgba(15,23,42,0.10)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(13,18,54,0.92),rgba(8,10,32,0.96))]">
-          <CardHeader className="space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1.5">
-                <CardTitle className="text-xl">Criar empresa</CardTitle>
-                <CardDescription>
-                  Cadastre o cliente uma vez. O CRM cria o tenant, a tabela de leads e a rota do portal automaticamente.
-                </CardDescription>
-              </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
-                <Wand2 className="h-5 w-5" />
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {CREATION_STEPS.map((step, index) => (
-                <div
-                  key={step}
-                  className="rounded-xl border border-slate-200/80 bg-white/78 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
-                >
-                  <span className="mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/10 text-[11px] font-bold text-cyan-700 dark:text-cyan-200">
-                    {index + 1}
-                  </span>
-                  {step}
-                </div>
-              ))}
-            </div>
-            <div className="rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-              <div className="mb-3 flex items-center gap-2">
-                <Database className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
-                <p className="text-sm font-medium text-foreground">Preview da criacao</p>
-              </div>
-              <div className="grid gap-2 text-xs sm:grid-cols-2">
-                <div>
-                  <p className="text-muted-foreground">Tenant ID</p>
-                  <p className="truncate font-mono text-foreground">{tenantId || "tenant-id"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Tabela de leads</p>
-                  <p className="truncate font-mono text-foreground">{tablePreviewName}</p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-muted-foreground">Portal</p>
-                  <p className="truncate font-mono text-foreground">/clientes/{tenantId || "tenant-id"}/dashboard</p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-muted-foreground">Modelo inicial</p>
-                  <p className="truncate text-foreground">{selectedModel.title}</p>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground" htmlFor="tenant-name">
-                  Nome da empresa
-                </label>
-                <Input
-                  id="tenant-name"
-                  placeholder="Ex.: Solar Prime Holding"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  disabled={!canManageTenants || createTenant.isPending}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-sm font-medium text-foreground" htmlFor="tenant-id">
-                    Tenant ID
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={resetSuggestedTenantId}
-                    disabled={!name || !canManageTenants || createTenant.isPending}
-                  >
-                    Regenerar
-                  </Button>
-                </div>
-                <div className="relative">
-                  <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="tenant-id"
-                    className="pl-10"
-                    placeholder="solar-prime"
-                    value={tenantId}
-                    onChange={(event) => handleTenantIdChange(event.target.value)}
-                    disabled={!canManageTenants || createTenant.isPending}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Portal previsto:{" "}
-                  <span className="font-mono text-foreground">
-                    /clientes/{tenantId || "tenant-id"}/dashboard
-                  </span>
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Tipo de schema do chatbot
-                </label>
-                <Select
-                  value={chatbotModel}
-                  onValueChange={(v) => setChatbotModel(v as "outlier" | "infinie" | "generico")}
-                  disabled={!canManageTenants || createTenant.isPending}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="outlier">Outlier — Consórcio (crédito, parcela, FGTS)</SelectItem>
-                    <SelectItem value="infinie">Infinie — Solar (instalação, conta de luz)</SelectItem>
-                    <SelectItem value="generico">Genérico — Campos padrão apenas</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Define quais colunas extras serão criadas na tabela de leads desta empresa.
-                </p>
-              </div>
-
-              <ErrorMessage message={formError} variant="banner" />
-
-              {canManageN8n ? (
-                <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="flex items-start gap-3">
-                    <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Evolution API</p>
-                      <p className="text-xs text-muted-foreground">
-                        URL e API Key da instância Evolution para envio de mensagens.
-                      </p>
-                    </div>
-                  </div>
-                  <Input
-                    placeholder="URL de disparo Evolution (ex: https://.../message/sendText/Instancia)"
-                    value={dispatchWebhookUrl}
-                    onChange={(event) => setDispatchWebhookUrl(event.target.value)}
-                    disabled={!canManageTenants || createTenant.isPending}
-                  />
-                  <Input
-                    placeholder="API Key Evolution (apikey do header)"
-                    value={dispatchWebhookToken}
-                    onChange={(event) => setDispatchWebhookToken(event.target.value)}
-                    disabled={!canManageTenants || createTenant.isPending}
-                  />
-                </div>
-              ) : null}
-
-              {!canManageTenants && (
-                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-200">
-                  Seu perfil atual pode consultar os tenants cadastrados, mas a criacao esta
-                  reservada para perfis com permissao de gestao.
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                className="w-full justify-center"
-                disabled={!canSubmitTenant}
-              >
-                <Plus className="h-4 w-4" />
-                {createTenant.isPending ? "Criando tenant e tabela..." : "Criar empresa e tabela"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-4">
+      <div className="grid gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
               <CardHeader className="pb-3">
@@ -823,7 +836,6 @@ export default function Tenants() {
               </div>
             </div>
           </div>
-        </div>
       </div>
 
     </PageShell>
