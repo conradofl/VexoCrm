@@ -500,7 +500,12 @@ export function registerAllDomainRoutes(app) {
       }
   
       const clientIds = (data || []).map((client) => client.id).filter(Boolean);
-      const settingsMap = await getLeadClientN8nSettingsMap(clientIds);
+      let settingsMap = {};
+      try {
+        settingsMap = await getLeadClientN8nSettingsMap(clientIds);
+      } catch (settingsError) {
+        console.warn("[lead-clients] Failed to load N8N/Evolution settings; returning base clients only:", settingsError);
+      }
       const items = (data || []).map((client) => {
         const settings = settingsMap[client.id] || null;
         return {
