@@ -27,6 +27,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  type LucideIcon,
   Zap,
   XCircle,
 } from "lucide-react";
@@ -89,6 +90,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
 import { useChatbotTemplates } from "@/hooks/useChatbotTemplates";
 import { useCampaignPrompts, useSaveCampaignPrompt } from "@/hooks/useCampaignPrompts";
+import type { LeadClientSegmentationKpi } from "@/hooks/useLeadClients";
 
 type SheetTab = "dados" | "campanha" | "disparo-direto" | "pendentes" | "enviadas" | "agendamentos";
 type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
@@ -123,18 +125,25 @@ type TriggerConfirmState = {
   leadCount: number | null;
 } | null;
 
-const INTERNAL_TABS: Array<{ id: SheetTab; label: string }> = [
-  { id: "dados", label: "Dados Gerais" },
-  { id: "pendentes", label: "Leads Pendentes" },
-  { id: "campanha", label: "Nova Campanha" },
-  { id: "disparo-direto", label: "Disparo Direto" },
-  { id: "enviadas", label: "Campanhas" },
-  { id: "agendamentos", label: "Disparos" },
+type SheetTabDefinition = {
+  id: SheetTab;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  step?: string;
+};
+
+const INTERNAL_TABS: SheetTabDefinition[] = [
+  { id: "dados", label: "Importar base", description: "Suba a planilha de contatos", icon: Upload, step: "1" },
+  { id: "pendentes", label: "Conferir leads", description: "Veja quem ainda não recebeu", icon: List, step: "2" },
+  { id: "campanha", label: "Criar campanha", description: "Monte a mensagem", icon: Megaphone, step: "3" },
+  { id: "enviadas", label: "Campanhas", description: "Edite e abra os disparos", icon: History, step: "4" },
+  { id: "agendamentos", label: "Fila de disparos", description: "Acompanhe lotes e envios", icon: Zap, step: "5" },
 ];
 
-const CLIENT_TABS: Array<{ id: SheetTab; label: string }> = [
-  { id: "dados", label: "Dados Gerais" },
-  { id: "pendentes", label: "Leads Pendentes" },
+const CLIENT_TABS: SheetTabDefinition[] = [
+  { id: "dados", label: "Importar base", description: "Suba a planilha de contatos", icon: Upload, step: "1" },
+  { id: "pendentes", label: "Conferir leads", description: "Veja quem ainda não recebeu", icon: List, step: "2" },
 ];
 
 const CAMPAIGNS = [
@@ -493,6 +502,29 @@ function getLeadNormalizedData(item: { normalized_data?: Record<string, unknown>
   return item.normalized_data && typeof item.normalized_data === "object" ? item.normalized_data : {};
 }
 
+function summarizeSegmentationKpi(
+  kpi: LeadClientSegmentationKpi,
+  items: Array<{ normalized_data?: Record<string, unknown> | null }>
+) {
+  const values = items
+    .map((item) => {
+      const data = getLeadNormalizedData(item);
+      return getLeadField(data, [kpi.field, kpi.label]);
+    })
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const distinctCount = new Set(values.map(normalizeLooseText)).size;
+
+  return {
+    ...kpi,
+    filledCount: values.length,
+    distinctCount,
+    detail: kpi.type === "money" || kpi.type === "number"
+      ? `${values.length} com valor`
+      : `${distinctCount || 0} grupos`,
+  };
+}
+
 function readImageAsCampaignAsset(file: File): Promise<{ name: string; type: string; size: number; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -631,12 +663,12 @@ function PaginationControls({
   const endItem = Math.min(currentPage * pageSize, totalItems);
 
   return (
-    <div className="mt-4 flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mt-3 flex flex-col gap-2 border-t border-border/70 pt-3 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-xs text-muted-foreground">
-        Mostrando {startItem}-{endItem} de {totalItems} registros
+        {startItem}-{endItem} de {totalItems}
       </p>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1">
         <Button type="button" variant="outline" size="sm" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1}>
           <ChevronLeft className="h-4 w-4" />
           Anterior
@@ -644,11 +676,11 @@ function PaginationControls({
 
         {buildPaginationItems(currentPage, totalPages).map((item, index) =>
           typeof item === "string" ? (
-            <span key={`${item}-${index}`} className="flex h-9 min-w-9 items-center justify-center px-2 text-sm text-muted-foreground">
+            <span key={`${item}-${index}`} className="flex h-8 min-w-8 items-center justify-center px-1 text-xs text-muted-foreground">
               ...
             </span>
           ) : (
-            <Button key={item} type="button" variant={item === currentPage ? "secondary" : "outline"} size="sm" className="min-w-9 px-3" onClick={() => onPageChange(item)}>
+            <Button key={item} type="button" variant={item === currentPage ? "secondary" : "outline"} size="sm" className="min-w-8 px-2" onClick={() => onPageChange(item)}>
               {item}
             </Button>
           ),
@@ -1340,7 +1372,7 @@ export default function LeadImports({
   fixedClientId,
   fixedClientName,
   title = "Campanhas",
-  subtitle = "Importe bases, crie campanhas e acompanhe o que ja foi disparado no CRM.",
+  subtitle = "Siga o fluxo: importe a base, confira os leads, crie a campanha e acompanhe os disparos.",
   headerRight,
 }: LeadImportsProps) {
   const { isInternalUser } = useAuth();
@@ -1452,6 +1484,13 @@ export default function LeadImports({
 
   const selectedClient = crmClient?.selectedClient || null;
   const selectedLeadClient = selectedClient || crmClient?.clients.find((client) => client.id === selectedClientId) || null;
+  const tenantSegmentationKpis = useMemo(
+    () =>
+      (selectedLeadClient?.n8n_settings?.segmentation_config?.kpis || [])
+        .filter((kpi) => kpi.enabled !== false && kpi.label && kpi.field)
+        .slice(0, 4),
+    [selectedLeadClient],
+  );
   const evolutionInstanceOptions = useMemo(
     () =>
       (selectedLeadClient?.n8n_settings?.evolution_instances || [])
@@ -1492,6 +1531,11 @@ export default function LeadImports({
     () => imports.slice((safeImportsPage - 1) * IMPORTS_PAGE_SIZE, safeImportsPage * IMPORTS_PAGE_SIZE),
     [imports, safeImportsPage],
   );
+  const latestImport = imports[0] ?? null;
+  const totalImportedRows = useMemo(
+    () => imports.reduce((sum, item) => sum + Number(item.imported_rows || 0), 0),
+    [imports],
+  );
   const pendingItems = useMemo(() => pendingData?.items ?? [], [pendingData?.items]);
   const segmentedPendingItems = useMemo(
     () =>
@@ -1501,8 +1545,6 @@ export default function LeadImports({
       }),
     [pendingItems, segmentation],
   );
-  const segmentMatchedCount = segmentedPendingItems.length;
-  const segmentRejectedCount = Math.max(0, pendingItems.length - segmentMatchedCount);
   const pendingSummaryLabel = pendingLoading
     ? "Carregando..."
     : pendingError
@@ -1521,6 +1563,10 @@ export default function LeadImports({
         : selectedClientId
           ? "Nenhum lead pendente"
           : "Selecione uma empresa";
+  const segmentationKpiSummary = useMemo(
+    () => tenantSegmentationKpis.map((kpi) => summarizeSegmentationKpi(kpi, segmentedPendingItems)),
+    [tenantSegmentationKpis, segmentedPendingItems],
+  );
   const funnelGroups = useMemo(() => {
     const groups = [
       {
@@ -1954,7 +2000,6 @@ export default function LeadImports({
     const meta = campaign.analytics_meta || {};
     const seq = normalizeCampaignSequence(campaign.analytics_meta);
     const opts = { ...defaultDispatchOptions, ...(meta.dispatchOptions || {}) };
-    const seg = meta.segmentation || {};
     const firstTextVariants =
       seq.find((step) => step.type === "text" && (step.textVariants?.length || 0) > 0)?.textVariants || [];
 
@@ -1966,14 +2011,7 @@ export default function LeadImports({
     setCampaignStartsAt(campaignUtcIsoToLocalDateTime(campaign.starts_at));
     setCampaignEndsAt(campaignUtcIsoToLocalDateTime(campaign.ends_at));
     setSelectedImportId(campaign.import_id || ALL_IMPORTS_VALUE);
-    setSegmentation({
-      gender: seg.gender ? String(seg.gender) : ALL_SEGMENT_VALUE,
-      productType: seg.productType ? String(seg.productType) : ALL_SEGMENT_VALUE,
-      ticket: seg.ticket ? String(seg.ticket) : ALL_SEGMENT_VALUE,
-      ticketThreshold: seg.ticketThreshold != null ? String(seg.ticketThreshold) : "",
-      interest: seg.interest ? String(seg.interest) : "",
-      campaignTag: seg.campaignTag ? String(seg.campaignTag) : "",
-    });
+    setSegmentation(defaultSegmentation);
     setCampaignSequence(seq.length > 0 ? seq : [createCampaignStep("text", 1)]);
     setCampaignComposerMode("advanced");
     setCampaignTemplateStrategy(opts.templateStrategy === "ai_variations" ? "ai_variations" : "single");
@@ -2291,25 +2329,37 @@ export default function LeadImports({
       </AlertDialog>
 
       <section className="space-y-5">
-        <div className="flex flex-wrap items-center gap-2 border-b border-border/70">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3 dark:border-white/10">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "relative -mb-px px-4 py-3 text-sm font-semibold transition-colors",
-                activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                "group inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm font-semibold transition-all",
+                activeTab === tab.id
+                  ? "border-primary/35 bg-primary text-primary-foreground shadow-[0_12px_26px_rgba(37,99,235,0.16)]"
+                  : "border-slate-200/90 bg-white/70 text-slate-600 hover:border-primary/25 hover:text-foreground dark:border-white/10 dark:bg-white/[0.03] dark:text-white/62 dark:hover:bg-white/[0.06] dark:hover:text-white",
               )}
             >
-              {tab.label}
+              {tab.step ? (
+                <span className={cn(
+                  "flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold",
+                  activeTab === tab.id ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500 dark:bg-white/[0.08] dark:text-white/55",
+                )}>
+                  {tab.step}
+                </span>
+              ) : (
+                <tab.icon className="h-4 w-4" />
+              )}
+              <span>{tab.label}</span>
               {tab.id === "pendentes" && pendingData && (
-                <span className="ml-1.5 rounded-full bg-primary/20 px-1.5 py-0.5 font-mono text-[10px] text-primary">
+                <span className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-bold",
+                  activeTab === tab.id ? "bg-white/20 text-white" : "bg-amber-400/15 text-amber-600 dark:text-amber-300",
+                )}>
                   {pendingData.pendingCount}
                 </span>
-              )}
-              {activeTab === tab.id && (
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-primary shadow-[0_0_10px_rgba(0,212,255,0.9)]" />
               )}
             </button>
           ))}
@@ -2317,19 +2367,22 @@ export default function LeadImports({
 
         {activeTab === "dados" && (
           <div className="space-y-6">
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/75 px-4 py-3 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
+              <Building2 className="h-4 w-4 text-primary" />
+              <span className="font-semibold text-foreground">{resolvedClientName || "Selecione uma empresa"}</span>
+              <span className="hidden text-slate-300 dark:text-white/20 sm:inline">/</span>
+              <span>{totalImportedRows.toLocaleString("pt-BR")} contatos no CRM</span>
+              <span className="hidden text-slate-300 dark:text-white/20 sm:inline">/</span>
+              <span>{pendingData?.pendingCount ?? 0} aguardando envio</span>
+            </div>
+
             <section>
               <SectionHeader
-                title="Nova importacao"
-                subtitle="Aceita CSV, XLS e XLSX. O backend normaliza os campos e popula a tabela leads."
+                title="Importar base"
+                subtitle="Envie uma planilha CSV, XLS ou XLSX."
                 icon={Upload}
               />
-              <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <FileSpreadsheet className="h-4 w-4" />
-                    {resolvedClientName || "Selecione um cliente"}
-                  </CardTitle>
-                </CardHeader>
+              <Card className="overflow-hidden rounded-2xl border-slate-200/90 bg-white/95 shadow-[0_18px_46px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_46px_rgba(0,0,0,0.24)]">
                 <CardContent className="space-y-4">
                   <ErrorMessage message={parseError} variant="banner" />
                   <div className="space-y-3">
@@ -2340,33 +2393,47 @@ export default function LeadImports({
                       onChange={handleFileChange}
                       className="sr-only"
                     />
-                    <div className="rounded-2xl border border-slate-200/90 bg-slate-50/90 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-black/35 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900 dark:text-white">Anexar planilha</p>
-                          <p className="mt-1 text-sm text-slate-500 dark:text-white/55">Clique no botao abaixo para enviar um arquivo CSV, XLS ou XLSX.</p>
+                    <div className="rounded-2xl border border-dashed border-primary/35 bg-primary/[0.04] p-4 dark:bg-primary/[0.06]">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                            <Upload className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="text-base font-bold text-foreground">Anexe a planilha da empresa</p>
+                            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                              Nome e telefone são suficientes. Campos extras ajudam nos filtros depois.
+                            </p>
+                          </div>
                         </div>
                         <Button
                           type="button"
-                          variant="outline"
                           onClick={() => fileInputRef.current?.click()}
-                          className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-white/12 dark:bg-white/[0.03] dark:text-white dark:hover:bg-white/[0.06] dark:hover:text-white"
+                          className="h-12 shrink-0 rounded-xl px-5"
                         >
                           <Upload className="h-4 w-4" />
-                          {selectedFile ? "Trocar arquivo" : "Clique para anexar"}
+                          {selectedFile ? "Trocar planilha" : "Escolher planilha"}
                         </Button>
                       </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-                      <div className={cn("flex min-h-[48px] items-center rounded-xl px-4 text-sm", darkFieldClass)}>
-                        <span className={selectedFile ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-white/40"}>
-                          {selectedFile ? selectedFile.name : "Nenhum arquivo selecionado"}
-                        </span>
+                    <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-black/25">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Planilha selecionada</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-3">
+                          <p className={cn("min-w-0 truncate text-sm font-semibold", selectedFile ? "text-foreground" : "text-muted-foreground")}>
+                            {selectedFile ? selectedFile.name : "Nenhum arquivo selecionado"}
+                          </p>
+                          {selectedFile ? (
+                            <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
+                              {parsedRows.length.toLocaleString("pt-BR")} linhas lidas
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                      <Button onClick={handleImport} disabled={!selectedFile || createLeadImport.isPending} className="h-12 rounded-xl">
+                      <Button onClick={handleImport} disabled={!selectedFile || createLeadImport.isPending} className="h-full min-h-[72px] rounded-2xl px-6">
                         <Upload className="mr-2 h-4 w-4" />
-                        {createLeadImport.isPending ? "Importando..." : "Importar planilha"}
+                        {createLeadImport.isPending ? "Importando..." : "Importar para o CRM"}
                       </Button>
                     </div>
                   </div>
@@ -2388,8 +2455,8 @@ export default function LeadImports({
 
                   {selectedFile && !importSummary && (
                     <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/78 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                      <p>Arquivo: {selectedFile.name}</p>
-                      <p>Linhas lidas: {parsedRows.length}</p>
+                      <p className="font-semibold text-foreground">Prévia pronta para conferência</p>
+                      <p className="mt-1">Arquivo: {selectedFile.name} · {parsedRows.length.toLocaleString("pt-BR")} linhas lidas</p>
                     </div>
                   )}
 
@@ -2455,14 +2522,21 @@ export default function LeadImports({
 
             <section>
               <SectionHeader
-                title="Historico"
-                subtitle="Ultimas cargas registradas para consulta operacional e uso em nos de disparo."
+                title="Histórico"
+                subtitle="Bases importadas recentemente."
                 icon={History}
               />
-              <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+              <Card className="rounded-2xl border-slate-200/90 bg-white/95 shadow-[0_18px_46px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_46px_rgba(0,0,0,0.24)]">
                 <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">Importacoes recentes</CardTitle>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Histórico de bases</CardTitle>
+                      {latestImport ? (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Última importação: {latestImport.source_name} em {formatDate(latestImport.created_at)}
+                        </p>
+                      ) : null}
+                    </div>
                     <Button variant="outline" size="sm" onClick={() => refetch()} disabled={importsLoading}>
                       <RefreshCw className={cn("mr-1 h-4 w-4", importsLoading && "animate-spin")} />
                       Atualizar
@@ -2484,29 +2558,40 @@ export default function LeadImports({
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead>Arquivo</TableHead>
-                              <TableHead>Tipo</TableHead>
-                              <TableHead>Total</TableHead>
-                              <TableHead>Importadas</TableHead>
+                              <TableHead>Planilha</TableHead>
+                              <TableHead>Linhas lidas</TableHead>
+                              <TableHead>Entraram no CRM</TableHead>
                               <TableHead>Ignoradas</TableHead>
-                              <TableHead>Usuario</TableHead>
-                              <TableHead>Data</TableHead>
-                              <TableHead className="w-[80px]">Acoes</TableHead>
+                              <TableHead>Responsável</TableHead>
+                              <TableHead>Importada em</TableHead>
+                              <TableHead className="w-[92px] text-right">Remover</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {paginatedImports.map((item) => (
                               <TableRow key={item.id}>
-                                <TableCell>{item.source_name}</TableCell>
-                                <TableCell>{item.source_type}</TableCell>
-                                <TableCell>{item.total_rows}</TableCell>
-                                <TableCell>{item.imported_rows}</TableCell>
-                                <TableCell>{item.skipped_rows}</TableCell>
+                                <TableCell>
+                                  <div className="min-w-[220px]">
+                                    <p className="font-semibold text-foreground">{item.source_name}</p>
+                                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-muted-foreground">{item.source_type}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell>{Number(item.total_rows || 0).toLocaleString("pt-BR")}</TableCell>
+                                <TableCell>
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-300">
+                                    {Number(item.imported_rows || 0).toLocaleString("pt-BR")}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className={cn(Number(item.skipped_rows || 0) > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted-foreground")}>
+                                    {Number(item.skipped_rows || 0).toLocaleString("pt-BR")}
+                                  </span>
+                                </TableCell>
                                 <TableCell>{item.uploaded_by_email || "-"}</TableCell>
                                 <TableCell>{formatDate(item.created_at)}</TableCell>
-                                <TableCell>
+                                <TableCell className="text-right">
                                   {deleteConfirmId === item.id ? (
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center justify-end gap-1">
                                       <Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={() => void handleDelete(item.id)} disabled={deleteLeadImport.isPending}>
                                         {deleteLeadImport.isPending ? "..." : "Sim"}
                                       </Button>
@@ -2515,7 +2600,7 @@ export default function LeadImports({
                                       </Button>
                                     </div>
                                   ) : (
-                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => setDeleteConfirmId(item.id)}>
+                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => setDeleteConfirmId(item.id)} title="Remover importação">
                                       <Trash2 className="h-4 w-4" />
                                     </Button>
                                   )}
@@ -2806,12 +2891,12 @@ export default function LeadImports({
         )}
 
         {activeTab === "campanha" && isInternalUser && (
-          <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-            <CardContent className="space-y-6 p-6">
+          <Card className="rounded-xl border-border/80 bg-card/95 shadow-[0_14px_34px_rgba(0,0,0,0.16)]">
+            <CardContent className="space-y-4 p-4">
               <div>
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Criar Nova Campanha</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Configure a campanha aqui. Após criada, vá até <strong>Campanhas Enviadas</strong> → card da campanha → botão <strong>Disparos</strong> para criar e acionar os envios.
+                <h2 className="text-xl font-extrabold tracking-tight text-foreground">Criar Nova Campanha</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Crie a campanha; os disparos ficam no card da campanha em <strong>Campanhas</strong>.
                 </p>
               </div>
 
@@ -2828,7 +2913,7 @@ export default function LeadImports({
                 </div>
               )}
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Nome da Campanha *</p>
                   <Input placeholder="Ex: Newsletter Marco 2026" className={darkFieldClass} value={campaignName} onChange={(e) => setCampaignName(e.target.value)} />
@@ -2850,7 +2935,7 @@ export default function LeadImports({
                   </Select>
                 </div>
 
-                <div className="space-y-2 md:col-span-2">
+                <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
                     Lote por disparo
                     <InfoTip text="Quantos leads cada disparo processa. Máximo 500 por lote nesta versão (o disparo roda em loop síncrono; lotes maiores exigem fila)." />
@@ -2865,47 +2950,46 @@ export default function LeadImports({
                     value={campaignLimitPerRun}
                     onChange={(e) => setCampaignLimitPerRun(e.target.value)}
                   />
-                  <p className="font-mono text-[10px] text-muted-foreground">1 a {CAMPAIGN_LIMIT_MAX} leads por lote.</p>
                 </div>
 
                 {/* Seletor de modo — ocupa linha inteira */}
-                <div className="space-y-2 md:col-span-2">
+                <div className="space-y-2">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
                     Modo da Campanha
                     <InfoTip text="Define o comportamento do chatbot quando o lead responder ao disparo. O disparo em si é configurado depois, no painel 'Disparos' do card da campanha." />
                   </p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => setCampaignMode("disparo")}
                       className={cn(
-                        "rounded-xl border-2 p-4 text-left transition-all",
+                        "rounded-lg border p-3 text-left transition-all",
                         campaignMode === "disparo"
                           ? "border-primary bg-primary/10"
                           : "border-border/50 bg-card/40 hover:border-border"
                       )}
                     >
                       <p className="font-semibold text-sm">Só Disparo</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Envia as mensagens. Lead responde → chatbot padrão de qualificação.</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">Resposta vai para o chatbot padrão.</p>
                     </button>
                     <button
                       type="button"
                       onClick={() => setCampaignMode("agente")}
                       className={cn(
-                        "rounded-xl border-2 p-4 text-left transition-all",
+                        "rounded-lg border p-3 text-left transition-all",
                         campaignMode === "agente"
                           ? "border-sky-500 bg-sky-500/10"
                           : "border-border/50 bg-card/40 hover:border-border"
                       )}
                     >
                       <p className="font-semibold text-sm">Com Agente IA</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Lead responde durante o período → chatbot usa prompt de campanha.</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">Resposta usa prompt da campanha.</p>
                     </button>
                   </div>
                 </div>
 
                 {/* Período ativo e prompt — só aparecem no modo agente */}
-                <div className="space-y-3 rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03] md:col-span-2">
+                <div className="space-y-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03] md:col-span-2">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tipo de template</p>
@@ -3004,117 +3088,35 @@ export default function LeadImports({
                     />
                   </>
                 )}
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Leads pendentes</p>
-                  <div className={cn("flex h-10 items-center rounded-md px-3 font-mono text-sm text-slate-500 dark:text-white/62", darkFieldClass)}>
-                    {campaignPendingLabel}
-                  </div>
-                </div>
               </div>
 
-              <div className="grid gap-4 rounded-2xl border border-slate-200/90 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03] lg:grid-cols-[1fr_0.9fr]">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Segmentacao da base</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {segmentMatchedCount} leads entram nesta campanha
-                        {segmentRejectedCount > 0 ? ` · ${segmentRejectedCount} fora do filtro` : ""}
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSegmentation(defaultSegmentation)}
-                    >
-                      Limpar filtros
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Genero</p>
-                      <Select value={segmentation.gender} onValueChange={(value) => setSegmentation((current) => ({ ...current, gender: value }))}>
-                        <SelectTrigger className={darkFieldClass}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className={darkSelectContentClass}>
-                          <SelectItem value={ALL_SEGMENT_VALUE} className={darkSelectItemClass}>Todos</SelectItem>
-                          <SelectItem value="homem" className={darkSelectItemClass}>Homem</SelectItem>
-                          <SelectItem value="mulher" className={darkSelectItemClass}>Mulher</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Produto</p>
-                      <Select value={segmentation.productType} onValueChange={(value) => setSegmentation((current) => ({ ...current, productType: value }))}>
-                        <SelectTrigger className={darkFieldClass}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className={darkSelectContentClass}>
-                          <SelectItem value={ALL_SEGMENT_VALUE} className={darkSelectItemClass}>Todos</SelectItem>
-                          <SelectItem value="imovel" className={darkSelectItemClass}>Imovel</SelectItem>
-                          <SelectItem value="veiculo" className={darkSelectItemClass}>Veiculo</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Valor</p>
-                      <Select value={segmentation.ticket} onValueChange={(value) => setSegmentation((current) => ({ ...current, ticket: value }))}>
-                        <SelectTrigger className={darkFieldClass}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className={darkSelectContentClass}>
-                          <SelectItem value={ALL_SEGMENT_VALUE} className={darkSelectItemClass}>Todos</SelectItem>
-                          <SelectItem value="alto" className={darkSelectItemClass}>Ticket alto</SelectItem>
-                          <SelectItem value="baixo" className={darkSelectItemClass}>Ticket baixo</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Corte de ticket</p>
-                      <Input
-                        inputMode="decimal"
-                        placeholder="Ex: 50000"
-                        className={darkFieldClass}
-                        value={segmentation.ticketThreshold}
-                        onChange={(event) => setSegmentation((current) => ({ ...current, ticketThreshold: event.target.value }))}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Interesse</p>
-                      <Input
-                        placeholder="Investimento, automotivo..."
-                        className={darkFieldClass}
-                        value={segmentation.interest}
-                        onChange={(event) => setSegmentation((current) => ({ ...current, interest: event.target.value }))}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Campanha especifica</p>
-                      <Input
-                        placeholder="Dia das Maes, Black Friday..."
-                        className={darkFieldClass}
-                        value={segmentation.campaignTag}
-                        onChange={(event) => setSegmentation((current) => ({ ...current, campaignTag: event.target.value }))}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-3 rounded-xl border border-slate-200/90 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                  <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200/80 pb-3 dark:border-white/10">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Conteudo do disparo</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {campaignComposerMode === "simple" ? "Modo simples" : `${campaignSequence.length} passos na sequencia`}
-                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="rounded-full border border-slate-200/90 bg-white px-2 py-1 dark:border-white/10 dark:bg-black/25">
+                          {campaignPendingLabel}
+                        </span>
+                        {segmentationKpiSummary.length > 0 ? (
+                          segmentationKpiSummary.map((kpi) => (
+                            <span key={kpi.id} className="rounded-full border border-slate-200/90 bg-white px-2 py-1 dark:border-white/10 dark:bg-black/25">
+                              {kpi.label}: {kpi.detail}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="rounded-full border border-slate-200/90 bg-white px-2 py-1 dark:border-white/10 dark:bg-black/25">
+                            KPIs na empresa
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="rounded-full border border-slate-200/90 bg-white px-2 py-1 font-medium text-primary hover:bg-primary/5 dark:border-white/10 dark:bg-black/25"
+                          onClick={() => setActiveTab("pendentes")}
+                        >
+                          Conferir leads
+                        </button>
+                      </div>
                     </div>
                     <div className="flex rounded-lg border border-slate-200/90 bg-white p-1 dark:border-white/10 dark:bg-black/30">
                       <Button
@@ -3137,44 +3139,43 @@ export default function LeadImports({
                   </div>
 
                   {campaignAiStatus?.enabled ? (
-                    <div className="space-y-2 rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-3">
+                    <div className="space-y-2 rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-2">
                       <div className="grid gap-2 sm:grid-cols-2">
                         <Input
                           placeholder="Objetivo da campanha"
-                          className={darkFieldClass}
+                          className={cn("h-9", darkFieldClass)}
                           value={aiGoal}
                           onChange={(event) => setAiGoal(event.target.value)}
                         />
                         <Input
                           placeholder="Estilo da copy"
-                          className={darkFieldClass}
+                          className={cn("h-9", darkFieldClass)}
                           value={aiStyle}
                           onChange={(event) => setAiStyle(event.target.value)}
                         />
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1.5">
                         {AI_STYLE_PRESETS.map((preset) => (
                           <Button
                             key={preset.label}
                             type="button"
                             variant={aiStyle === preset.value ? "secondary" : "outline"}
                             size="sm"
+                            className="h-8 rounded-full px-3 text-xs"
                             onClick={() => setAiStyle(preset.value)}
                           >
                             {preset.label}
                           </Button>
                         ))}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => void handleGenerateCampaignCopy()} disabled={generateCampaignCopy.isPending}>
+                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => void handleGenerateCampaignCopy()} disabled={generateCampaignCopy.isPending}>
                           <Sparkles className="h-4 w-4" />
                           Gerar copy
                         </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => void handleSuggestCampaignSequence()} disabled={suggestCampaignSequence.isPending}>
+                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => void handleSuggestCampaignSequence()} disabled={suggestCampaignSequence.isPending}>
                           <Sparkles className="h-4 w-4" />
                           Sugerir sequencia
                         </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => void handleSuggestCampaignDelays()} disabled={suggestCampaignDelays.isPending}>
+                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => void handleSuggestCampaignDelays()} disabled={suggestCampaignDelays.isPending}>
                           <Clock3 className="h-4 w-4" />
                           Sugerir atrasos
                         </Button>
@@ -3448,20 +3449,19 @@ export default function LeadImports({
                       habilitar passos apos resposta no modo avancado
                     </label>
                   </div>
-                </div>
               </div>
 
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-primary">
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-primary">
                   <Megaphone className="h-4 w-4" />
                   Fluxo real
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Esta aba cria uma campanha real na tabela <code>campaigns</code>. Depois disso, a operacao continua nas tabs <strong>Agendamentos</strong> e <strong>Campanhas Enviadas</strong>.
+                <p className="text-xs text-muted-foreground">
+                  A campanha fica salva em <strong>Campanhas</strong>. Os envios sao criados e acompanhados em <strong>Fila de disparos</strong>.
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-3 border-t border-border/70 pt-5">
+              <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
                 <Button onClick={() => void handleDispatch()} disabled={isDispatching || createCampaign.isPending || updateCampaign.isPending || !selectedClientId}>
                   <Megaphone className="mr-2 h-4 w-4" />
                   {isDispatching || createCampaign.isPending || updateCampaign.isPending

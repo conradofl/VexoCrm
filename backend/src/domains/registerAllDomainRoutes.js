@@ -681,7 +681,7 @@ export function registerAllDomainRoutes(app) {
       }
 
       let savedSettings = null;
-      const settingsPayload = { ...(n8nSettings || {}), chatbotModel: schemaType };
+      const settingsPayload = { ...(n8nSettings || {}), chatbotModel: schemaType, segmentationConfig: req.body?.segmentationConfig };
       savedSettings = await upsertLeadClientN8nSettings(
         tenantId,
         settingsPayload,
@@ -832,6 +832,53 @@ export function registerAllDomainRoutes(app) {
   
         console.error("lead client n8n settings update error:", error);
         sendError(res, 500, "N8N_SETTINGS_SAVE_FAILED", "Failed to save n8n settings");
+      }
+    }
+  );
+
+  app.patch(
+    "/api/lead-clients/:tenantId/segmentation-config",
+    requireFirebaseAuth,
+    requireInternalPageAccess("empresas"),
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      if (!hasAccessPermission(req.authAccess, "tenants.manage")) {
+        sendError(res, 403, "FORBIDDEN", "Tenant management permission required");
+        return;
+      }
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      if (!tenantId) {
+        sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+        return;
+      }
+
+      try {
+        const { data: tenant, error: tenantError } = await supabase
+          .from("leads_clients")
+          .select("id")
+          .eq("id", tenantId)
+          .maybeSingle();
+
+        if (tenantError) throw tenantError;
+        if (!tenant) {
+          sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
+          return;
+        }
+
+        const existing = await getLeadClientN8nSettings(tenantId);
+        const savedSettings = await upsertLeadClientN8nSettings(
+          tenantId,
+          { segmentationConfig: req.body?.segmentationConfig },
+          req.authAccess,
+          existing
+        );
+
+        res.json({ item: maskN8nSettings(savedSettings) });
+      } catch (error) {
+        console.error("lead client segmentation config update error:", error);
+        sendError(res, 500, "SEGMENTATION_CONFIG_SAVE_FAILED", "Failed to save segmentation config");
       }
     }
   );

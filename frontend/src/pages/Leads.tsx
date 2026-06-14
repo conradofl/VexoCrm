@@ -35,6 +35,8 @@ const META_COLUMNS = [
 
 type ColumnDef = { key: string; label: string };
 
+const LEADS_PAGE_SIZE = 25;
+
 interface LeadsProps {
   fixedClientId?: string;
   fixedClientName?: string;
@@ -78,6 +80,7 @@ export default function Leads({
   const [filterTerm, setFilterTerm] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [originFilter, setOriginFilter] = useState<string>("all"); // "all" | "campanha" | "organico" | "trafego_pago" | "whatsapp_ads" | "indicacao"
+  const [leadsPage, setLeadsPage] = useState(1);
   const { data: campaigns = [], error: campaignsError } = useCampanhas(effectiveClientId || undefined);
   const { data: templates = [] } = useChatbotTemplates(effectiveClientId || null);
   const {
@@ -132,6 +135,16 @@ export default function Leads({
       return matchesText && matchesOrigin;
     });
   }, [filterTerm, selectedColumn, sourceRows, originFilter]);
+  const totalLeadPages = Math.max(1, Math.ceil(filteredRows.length / LEADS_PAGE_SIZE));
+  const safeLeadsPage = Math.min(leadsPage, totalLeadPages);
+  const paginatedRows = filteredRows.slice(
+    (safeLeadsPage - 1) * LEADS_PAGE_SIZE,
+    safeLeadsPage * LEADS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setLeadsPage(1);
+  }, [filterTerm, selectedColumn, originFilter, selectedCampaignId, effectiveClientId]);
 
   return (
     <PageShell
@@ -338,7 +351,7 @@ export default function Leads({
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredRows.map((row) => (
+                          {paginatedRows.map((row) => (
                             <TableRow key={row.id}>
                               {columns.map((col) => (
                                 <TableCell key={col.key} className="max-w-[240px] truncate">
@@ -350,6 +363,37 @@ export default function Leads({
                         </TableBody>
                       </Table>
                     </div>
+                    {filteredRows.length > LEADS_PAGE_SIZE ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+                        <span>
+                          Mostrando {(safeLeadsPage - 1) * LEADS_PAGE_SIZE + 1}-
+                          {Math.min(safeLeadsPage * LEADS_PAGE_SIZE, filteredRows.length)} de {filteredRows.length}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={safeLeadsPage <= 1}
+                            onClick={() => setLeadsPage((page) => Math.max(1, page - 1))}
+                          >
+                            Anterior
+                          </Button>
+                          <span className="rounded-md border border-border/70 px-2 py-1 font-semibold text-foreground">
+                            {safeLeadsPage}/{totalLeadPages}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={safeLeadsPage >= totalLeadPages}
+                            onClick={() => setLeadsPage((page) => Math.min(totalLeadPages, page + 1))}
+                          >
+                            Proxima
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>

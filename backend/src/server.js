@@ -1507,6 +1507,7 @@ function maskN8nSettings(row) {
       active: false,
       chatbot_enabled: false,
       chatbot_model: "outlier",
+      segmentation_config: buildDefaultSegmentationConfig("outlier"),
       sdr_whatsapp_number: null,
       updated_at: null,
     };
@@ -1520,12 +1521,66 @@ function maskN8nSettings(row) {
     active: row.active !== false,
     chatbot_enabled: row.chatbot_enabled === true,
     chatbot_model: row.chatbot_model || "outlier",
+    segmentation_config: sanitizeSegmentationConfig(row.segmentation_config, row.chatbot_model || "outlier"),
     sdr_whatsapp_number: row.sdr_whatsapp_number || null,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
     // Preserva a lista de instâncias já mascarada por maskEvolutionInstance (server.js:1717).
     // Sem isso a whitelist cortava o campo e a UI mostrava "0 instâncias".
     evolution_instances: Array.isArray(row.evolution_instances) ? row.evolution_instances : [],
+  };
+}
+
+function buildDefaultSegmentationConfig(model = "generico") {
+  const normalizedModel = normalizeTenantKey(model) || "generico";
+  const defaults = {
+    outlier: [
+      { id: "objetivo", label: "Objetivo", field: "objetivo_compra", type: "category", enabled: true },
+      { id: "credito", label: "Credito", field: "valor_credito", type: "money", enabled: true },
+      { id: "entrada", label: "Entrada/FGTS", field: "fgts_entrada", type: "money", enabled: true },
+    ],
+    infinie: [
+      { id: "consumo", label: "Conta de luz", field: "faixa_consumo", type: "money", enabled: true },
+      { id: "cidade", label: "Cidade", field: "cidade", type: "category", enabled: true },
+      { id: "prazo", label: "Prazo", field: "prazo_instalacao", type: "category", enabled: true },
+    ],
+    generico: [
+      { id: "origem", label: "Origem", field: "origem", type: "category", enabled: true },
+      { id: "interesse", label: "Interesse", field: "interesse", type: "category", enabled: true },
+      { id: "valor", label: "Valor", field: "valor", type: "money", enabled: true },
+    ],
+  };
+
+  return {
+    version: 1,
+    kpis: defaults[normalizedModel] || defaults.generico,
+  };
+}
+
+function sanitizeSegmentationConfig(input, model = "generico") {
+  const fallback = buildDefaultSegmentationConfig(model);
+  const source = input && typeof input === "object" ? input : fallback;
+  const rawKpis = Array.isArray(source.kpis) ? source.kpis : fallback.kpis;
+  const kpis = rawKpis
+    .slice(0, 6)
+    .map((item, index) => {
+      const label = normalizeString(item?.label).slice(0, 40) || `KPI ${index + 1}`;
+      const field = normalizeTenantKey(item?.field || item?.key || label).replace(/-/g, "_").slice(0, 64);
+      if (!field) return null;
+      const rawType = normalizeTenantKey(item?.type);
+      return {
+        id: normalizeTenantKey(item?.id || field || label).slice(0, 48) || `kpi-${index + 1}`,
+        label,
+        field,
+        type: ["money", "number", "category", "date"].includes(rawType) ? rawType : "category",
+        enabled: item?.enabled !== false,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    version: 1,
+    kpis: kpis.length ? kpis : fallback.kpis,
   };
 }
 
@@ -1682,7 +1737,7 @@ async function getLeadClientN8nSettingsStatus(clientId) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, sdr_whatsapp_number, updated_at, updated_by_uid, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, updated_at, updated_by_uid, updated_by_email"
     )
     .eq("client_id", clientId)
     .maybeSingle();
@@ -1719,7 +1774,7 @@ async function getLeadClientN8nSettingsMap(clientIds) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, sdr_whatsapp_number, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, updated_at, updated_by_email"
     )
     .in("client_id", clientIds);
 
@@ -1758,12 +1813,16 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const activeProvided = Object.prototype.hasOwnProperty.call(body, "active");
   const chatbotEnabledProvided = Object.prototype.hasOwnProperty.call(body, "chatbotEnabled");
   const chatbotModelProvided = Object.prototype.hasOwnProperty.call(body, "chatbotModel");
+  const segmentationConfigProvided = Object.prototype.hasOwnProperty.call(body, "segmentationConfig");
   const sdrWhatsappNumberProvided = Object.prototype.hasOwnProperty.call(body, "sdrWhatsappNumber");
 
   const payload = {
     active: activeProvided ? body.active !== false : existing?.active ?? true,
     chatbot_enabled: chatbotEnabledProvided ? body.chatbotEnabled === true : existing?.chatbot_enabled ?? false,
     chatbot_model: chatbotModelProvided ? (body.chatbotModel || "outlier") : existing?.chatbot_model ?? "outlier",
+    segmentation_config: segmentationConfigProvided
+      ? sanitizeSegmentationConfig(body.segmentationConfig, body.chatbotModel || existing?.chatbot_model || "generico")
+      : sanitizeSegmentationConfig(existing?.segmentation_config, existing?.chatbot_model || body.chatbotModel || "generico"),
     sdr_whatsapp_number: sdrWhatsappNumberProvided ? (normalizeString(body.sdrWhatsappNumber) || null) : existing?.sdr_whatsapp_number ?? null,
     updated_at: new Date().toISOString(),
     updated_by_uid: authAccess?.uid || null,
@@ -1822,7 +1881,7 @@ async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing
     .from("lead_client_n8n_settings")
     .upsert(payload, { onConflict: "client_id" })
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, sdr_whatsapp_number, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, updated_at, updated_by_email"
     )
     .single();
 

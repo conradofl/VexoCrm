@@ -22,7 +22,21 @@ export interface CreateLeadClientPayload {
   id: string;
   name: string;
   chatbotModel?: string;
+  segmentationConfig?: LeadClientSegmentationConfig;
   n8nSettings?: LeadClientN8nSettingsPayload;
+}
+
+export interface LeadClientSegmentationKpi {
+  id: string;
+  label: string;
+  field: string;
+  type: "category" | "money" | "number" | "date";
+  enabled: boolean;
+}
+
+export interface LeadClientSegmentationConfig {
+  version: number;
+  kpis: LeadClientSegmentationKpi[];
 }
 
 export interface LeadClientN8nSettingsPayload {
@@ -32,6 +46,7 @@ export interface LeadClientN8nSettingsPayload {
   active?: boolean;
   chatbotEnabled?: boolean;
   chatbotModel?: string;
+  segmentationConfig?: LeadClientSegmentationConfig;
   sdrWhatsappNumber?: string | null;
 }
 
@@ -87,6 +102,7 @@ export interface LeadClientN8nSettingsSummary {
   active: boolean;
   chatbot_enabled: boolean;
   chatbot_model: string;
+  segmentation_config?: LeadClientSegmentationConfig;
   sdr_whatsapp_number: string | null;
   evolution_instances?: LeadClientEvolutionInstance[];
   updated_at: string | null;
@@ -237,6 +253,52 @@ export function useUpdateLeadClientN8nSettings() {
       const responsePayload = await readApiJson<{ item?: LeadClientN8nSettingsSummary }>(res, "update_lead_client_n8n_settings");
       if (!responsePayload?.item) {
         throw new Error("N8N settings update failed: missing response payload");
+      }
+
+      return responsePayload.item;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lead-clients"] });
+    },
+  });
+}
+
+export function useUpdateLeadClientSegmentationConfig() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      tenantId,
+      segmentationConfig,
+    }: {
+      tenantId: string;
+      segmentationConfig: LeadClientSegmentationConfig;
+    }): Promise<LeadClientN8nSettingsSummary> => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuario nao autenticado.");
+      }
+
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}/segmentation-config`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ segmentationConfig }),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Segmentation config update failed"));
+      }
+
+      const responsePayload = await readApiJson<{ item?: LeadClientN8nSettingsSummary }>(res, "update_lead_client_segmentation_config");
+      if (!responsePayload?.item) {
+        throw new Error("Segmentation config update failed: missing response payload");
       }
 
       return responsePayload.item;

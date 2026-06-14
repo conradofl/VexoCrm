@@ -1,112 +1,57 @@
 ---
 name: Estado atual
-description: Estado persistente atualizado por /end-session
+description: Estado persistente resumido; fonte operacional principal em _memoria/
 type: memory
-tags: [#current-state, #critical]
+tags: [#current-state, #critical, #vexocrm]
 status: active
 created: 2026-05-09
-updated: 2026-05-12
+updated: 2026-06-13
 ---
 
 # Estado Atual — VexoCRM
 
-**Última atualização:** 2026-05-12 (fim de sessão)
-**Sessão:** #4 (Chatbot toggle por tenant + kill-switch loop)
+**Última atualização:** 2026-06-13
+**Fonte operacional principal:** `_memoria/contexto-vivo.md`, `_memoria/pendencias.md`, `_memoria/indice-projeto.md`
 
 ---
 
-## 🎯 Prioridades para próxima sessão
+## Snapshot
 
-🔴 **URGENTE:**
-- [ ] Rodar migration no Postgres de produção (EasyPanel terminal ou psql):
-  ```sql
-  ALTER TABLE lead_client_n8n_settings
-    ADD COLUMN IF NOT EXISTS chatbot_enabled BOOLEAN NOT NULL DEFAULT false;
-  ```
-- [ ] Investigar causa raiz do loop no chatbot (fromMe filter não resolveu)
-- [ ] Após corrigir loop: remover kill-switch do código e redeploy
+- Repositório ativo: `/home/luizfelipe/Documents/Programação/Vexo/VexoCrm`.
+- Branch: `main`.
+- HEAD: `93653a7` — Merge PR #122 `codex/empresas-modal-listagem`.
+- `git pull --ff-only origin main` executado em 2026-06-13; remoto já estava atualizado.
+- Memória operacional atualizada em `_memoria/`.
 
-🟡 **MÉDIO PRAZO:**
-- [ ] Bug de persistência `_currentStepId`: UPDATE retorna `rows: 0` silenciosamente
-- [ ] Kanban do chatbot: refresh automático e filtragem por step SPIN
-- [ ] Implementar validação multi-tenant centralizada
+## Arquitetura real
 
-🟢 **BAIXA PRIORIDADE:**
-- [ ] Notificar consultor quando conversa do chatbot finaliza
-- [ ] Melhorar logs de error em campaign-ai.js
+- Backend: Node.js/Express, PostgreSQL/EasyPanel, Docker, Firebase Admin, BullMQ/Redis, Groq.
+- Frontend: React/Vite/TypeScript, TanStack Query, Radix UI, Tailwind, Firebase, Vercel.
+- Código ainda usa rótulos "Supabase" por compatibilidade histórica com migrations/camada de dados; não renomear sem plano.
+- Migrations canônicas: `backend/supabase/migrations/`.
 
----
+## Produto
 
-## 🚧 Estado atual do Chatbot
+- Navegação organizada em **Máquina de Vendas** e **Máquina de Disparos**.
+- `Conexoes.tsx`: funcional; chips WhatsApp por tenant via `EvolutionChipsPanel`.
+- `Relatorios.tsx`: funcional v1; envios por dia/chip via `/api/reports/evolution-usage`.
+- `Disparos.tsx`: placeholder.
+- `Aquecimento.tsx`: placeholder.
+- Follow-up, chatbot, portal cliente, tenants, planilhas/campanhas e usuários continuam presentes no frontend.
 
-| Item | Status |
-| --- | --- |
-| Kill-switch global | ✅ Ativo (loop detectado) |
-| fromMe filter | ✅ Commitado |
-| Toggle por tenant (frontend) | ✅ Implementado |
-| Migration chatbot_enabled | ❌ PENDENTE em prod |
-| Loop investigado | ❌ Causa raiz desconhecida |
+## Pendências prioritárias
 
-**Kill-switch location:** `backend/src/server.js` — início do handler `POST /api/hardcoded-chat-webhook`
-Para reativar: remover as 3 linhas do kill-switch + redeploy
+1. Validar live anti-reenvio por disparo: mesmo `dispatch_id` rodado 2x não pode reenviar leads já tocados.
+2. Validar live anti-ban 3a v2: cota por chip e rotação para segundo chip.
+3. Implementar opt-out por palavra-chave.
+4. Implementar aviso de cota aos 80%.
+5. Construir tela operacional real de `Disparos`.
+6. Definir e construir regra de `Aquecimento`.
 
----
+## Regras de sessão
 
-## 🚧 Em andamento
-
-| Task | Status | Bloqueador |
-| --- | --- | --- |
-| **Chatbot SPIN + Evolution** | ⛔ Desativado | Loop não resolvido |
-| **Página Chatbot Config** | ✅ Deploy feito | Migration pendente |
-| **Kanban chatbot** | ✅ Deployed | Testar com dados reais |
-| Validação multi-tenant | Backlog | Nenhum |
-
----
-
-## 💡 Decisões desta sessão
-
-1. **Chatbot off por default para todos os tenants** (2026-05-12)
-   - `chatbot_enabled BOOLEAN DEFAULT false` em `lead_client_n8n_settings`
-   - Novos tenants nascem sem chatbot ativo
-
-2. **Kill-switch global no código** (2026-05-12)
-   - Loop detectado em produção, chatbot desativado globalmente
-   - Não é a solução permanente — investigar causa raiz antes de reativar
-
----
-
-## 📊 Status por componente
-
-| Componente | % | Saúde | Última mudança |
-| --- | --- | --- | --- |
-| **Backend** | 77% | 🟡 Chatbot com problema | Hoje (kill-switch + toggle) |
-| **Frontend** | 82% | 🟢 Estável | Hoje (ChatbotConfig toggle) |
-| **Infra** | 62% | 🟡 Avançando | — |
-| **Docs** | 72% | 🟢 Atualizado | Hoje |
-
----
-
-## 🔄 Contexto arquitetural
-
-### Backend (Node.js/Express)
-- Porta: 3001 (EasyPanel, deploy automático via GitHub)
-- Banco: Postgres direto via DATABASE_URL (não Supabase JS)
-- Deploy: automático ao push no main
-
-### Frontend (React/Vite)
-- Deploy: Vercel (automático ao push no main)
-
-### Database
-- Postgres puro na VPS — migrations manuais via psql ou EasyPanel terminal
-- NÃO é Supabase JS — rodar SQL direto no banco
-
----
-
-## 📅 Próxima sessão
-
-**O que fazer primeiro:**
-1. Rodar migration `chatbot_enabled` no banco de produção
-2. Investigar loop do chatbot nos logs do EasyPanel
-3. Corrigir loop → remover kill-switch → testar end-to-end
-
-**Timezone:** America/Sao_Paulo
+1. Antes de trabalhar: `git status --short --branch`, `git pull --ff-only origin main`, `git log --oneline --decorate -20`.
+2. Se `.cerebro/` e `_memoria/` divergirem, `_memoria/` vence.
+3. Nunca gravar segredos em memória, docs ou código.
+4. Gate de frontend: usar type-check do `frontend/tsconfig.app.json`; `vite build` não pega identificador global não importado.
+5. Gate de backend: não colocar migration/`ALTER TABLE` no caminho quente.

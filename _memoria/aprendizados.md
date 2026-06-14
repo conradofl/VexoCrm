@@ -2,6 +2,13 @@
 
 > Append-only. O que deu certo/errado e a lição. Só fato confirmado.
 
+## 2026-06-13
+
+- **A memória precisa ser atualizada depois do pull, não antes.** Em 2026-06-13, `origin/main` estava em `93653a7` com PRs #121/#122 já mergeados, enquanto `_memoria/contexto-vivo.md` ainda descrevia estado de 08/jun e `.cerebro/_memory/current-state.md` ainda descrevia maio. Lição: início de sessão operacional deve ser `git status`, `git pull --ff-only origin main`, `git log --oneline -20`, depois memória.
+- **Duas memórias coexistem no repo e podem divergir.** `_memoria/` é a memória lida por `ORQUESTRACAO.md`; `.cerebro/` é um vault histórico com comandos/knowledge. Lição: consolidar estado vivo primeiro em `_memoria/` e atualizar `.cerebro/_memory/current-state.md` apenas como espelho resumido para evitar duas fontes concorrentes.
+- **Placeholder precisa ser revalidado antes de virar pendência.** `Conexoes.tsx` e `Relatorios.tsx` deixaram de ser placeholders; `Disparos.tsx` e `Aquecimento.tsx` ainda são placeholders. Lição: checar o arquivo atual antes de carregar pendência antiga.
+- **Gate live deve ficar separado de "implementado".** Anti-reenvio por `campaign_dispatch_runs` e anti-ban 3a v2 estão implementados na `main`, mas ainda têm validação live pendente. Lição: memória deve separar entrega de código, deploy e evidência operacional.
+
 ## 2026-06-12
 
 - **`npx tsc --noEmit` no root `tsconfig.json` NÃO checa os arquivos de `src/` neste projeto.** O root tem `"files": []` + só `references` para `tsconfig.app.json`/`tsconfig.node.json`. Nesse modo (solution-style tsconfig), o `tsc --noEmit` apontado ao root valida apenas o grafo de referências — não type-checka o código da app. Passava "limpo" sem olhar nada. Isso deu falsa confiança em 3 fatias seguidas e deixou passar um `Trash2` não importado (import órfão cortado por engano) → `ReferenceError` em produção. **Comando correto de validação: `npx tsc --noEmit -p tsconfig.app.json`** (pega o caso como `TS2304: Cannot find name`). Alternativa: `npx tsc -b`.

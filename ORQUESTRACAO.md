@@ -18,10 +18,13 @@ Você NÃO escreve o código das tarefas dos terminais. Você:
 4. Sinaliza risco e bloqueio cedo.
 
 Ao iniciar qualquer sessão, FAÇA NESTA ORDEM:
-1. Leia `_memoria/contexto-vivo.md` → estado atual.
-2. Leia `_memoria/pendencias.md` → o que está aberto/bloqueado.
-3. Leia `CONTRACT.md` → regras técnicas.
-4. Só então responda ao Conrado, já sabendo onde paramos.
+1. Rode `git status --short --branch`.
+2. Rode `git pull --ff-only origin main` se a árvore estiver limpa.
+3. Leia `_memoria/contexto-vivo.md` → estado atual.
+4. Leia `_memoria/pendencias.md` → o que está aberto/bloqueado.
+5. Leia `_memoria/indice-projeto.md` quando precisar localizar módulos.
+6. Leia `CONTRACT.md` → regras técnicas.
+7. Só então responda ao Conrado, já sabendo onde paramos.
 
 ---
 
@@ -32,6 +35,7 @@ Vault Obsidian com MCP + RAG. Pasta `_memoria/`:
 - `decisoes.md` → decisões tomadas + data + porquê (append-only).
 - `aprendizados.md` → o que deu errado/certo e a lição (append-only).
 - `pendencias.md` → tarefas abertas, bloqueios, esperando-confirmação.
+- `indice-projeto.md` → mapa atual do repo e localização de módulos.
 
 **Quando ESCREVER:**
 - Terminou um terminal e validou → atualize `contexto-vivo.md` e `pendencias.md`.
@@ -65,47 +69,41 @@ aquecimento mais importam).
 
 ## 3. Roadmap (ordem de prioridade) — fonte da verdade da fila
 
-> **Atualizado 2026-06-08** pós-auditoria do PR #120 do Luiz.
-> A fundação multi-instância já existe; o foco agora é validar + corrigir + construir o que falta.
+> **Atualizado 2026-06-13** após pull da `main` (`93653a7`).
+> A fundação multi-instância, tela Conexões e Relatórios v1 já existem; o foco agora é validar gates live e construir o que ainda é placeholder.
 
 | Prioridade | Etapa | Estado |
 |---|---|---|
-| P0 | Desbloqueio: keys revogadas + banco PostgreSQL confirmado + repo canônico | **RESOLVIDO** |
-| E1 | **Validar** QR ponta-a-ponta real + multi-instância em disparo (já implementado pelo Luiz, não testado) | **a fazer — PRIMEIRO** |
-| E2 | **Resolver caminho duplo de QR** (REST novo vs legado `whatsapp.js`) — escolher um, isolar/remover o outro com evidência | a fazer |
-| E3 | **Anti-ban REAL**: cota por número (≤200/nº/dia) + lotes + delay aleatório + tratamento de ban | a fazer — **MAIOR VALOR** |
-| E4 | **Webhook fan-in**: confirmar/garantir que ouve TODAS as instâncias com roteamento por tenant | a fazer |
-| E5 | **Nav Vendas × Disparos** (em cima dos arquivos novos do Luiz no Repo B) | a fazer |
-| E6 | **Bugs UI**: scroll import (10/509) + status variação vermelho→verde (verificar se `LeadImports.tsx` reescrito já resolveu) | a fazer |
-| — | Aquecimento de chip | aguardando regra de negócio do Conrado |
+| P0 | Pull/estado/memória do repo | **RESOLVIDO em 2026-06-13** |
+| P1 | Gate live anti-reenvio por disparo (`campaign_dispatch_runs` claim) | **a validar** |
+| P1 | Gate live anti-ban 3a v2: cota por chip + rotação | **a validar** |
+| P2 | Opt-out por palavra-chave | a fazer |
+| P2 | Aviso de cota aos 80% | a fazer |
+| P2 | Tela operacional real de `Disparos.tsx` | a fazer |
+| P3 | Aquecimento de chip (`Aquecimento.tsx`) | aguardando regra de negócio |
+| P3 | QR/status automático via webhook Evolution | a fazer |
 
 Notas permanentes:
 - Banco é PostgreSQL (Easypanel, `db-vexo`/`vexo-data`). Código está nomeado "Supabase" — rótulo herdado. NÃO renomear (já quebrou migrations).
-- Repo canônico = **Repo B** (`~/Documents/vexo-sales-module`). Repo A (`Desktop/.../VexoCrm`) é lixo — não usar.
+- Repo ativo confirmado em 2026-06-13 = `/home/luizfelipe/Documents/Programação/Vexo/VexoCrm`, branch `main`, HEAD `93653a7`.
 - Entidade de conexão = `lead_client_evolution_instances` (Luiz, PR #120). Migration `connections` do T1 **DESCARTADA**.
 - P4 Copiloto dashboard: bônus condicionado ao fechamento da Liv Pub (prazo era 06/06). Perguntar status antes de priorizar.
 - Existe fila separada do dashboard (`CONTRACT-dashboard.md`, commit `dd806b1`). NÃO confundir.
 
 ---
 
-## 4. Estado atual — Etapa 1 em 4 terminais
+## 4. Estado atual — frentes abertas
 
-Lógica: T1 é o GATE (camada de dados, trava o contrato). T2/T3/T4 trabalham em
-domínios que não tocam dados, então rodam em paralelo sem esperar.
+| Frente | Arquivos principais | Status |
+|---|---|---|
+| Chips/Conexões | `Conexoes.tsx`, `EvolutionChipsPanel.tsx`, `useLeadClients.ts`, `server.js` | funcional; precisa validação/polimento |
+| Relatórios | `Relatorios.tsx`, `useReports.ts`, `/api/reports/evolution-usage` | v1 funcional |
+| Anti-ban | `server.js`, `campaign-outbound.js`, `lead_client_evolution_instances`, `evolution_instance_daily_usage` | implementado; gate live pendente |
+| Anti-reenvio | `server.js`, `20260612060000_dispatch_runs_lead_claim.sql` | implementado; gate live pendente |
+| Disparos | `Disparos.tsx` | placeholder |
+| Aquecimento | `Aquecimento.tsx` | placeholder |
 
-| Terminal | Domínio (arquivos) | Tarefa | Status |
-|---|---|---|---|
-| T1 | backend / DB | Fundação multi-tenant + tabela `connections` + atualizar CONTRACT | _registre aqui_ |
-| T2 | módulo novo Evolution | Cliente REST isolado (createInstance/QR/status/delete) | _registre aqui_ |
-| T3 | navegação / shell / rotas | Menu Vendas × Disparos | _registre aqui_ |
-| T4 | apresentação tela campanha | Status vermelho→verde + bug scroll import | _registre aqui_ |
-
-**Regra de não-colisão (faça cumprir):** cada terminal declara os arquivos que
-vai tocar ANTES de codar e para se invadir o domínio de outro. Se dois quiserem
-o mesmo arquivo, você decide quem fica e adia o outro.
-
-**Gate:** T2/T3/T4 podem rodar já; mas a integração Evolution↔banco (Etapa 2) só
-começa depois que T1 travar a interface da entidade Conexão no CONTRACT.
+**Regra de não-colisão:** antes de codar, declarar arquivos que serão tocados. Se duas frentes quiserem o mesmo arquivo, decidir uma ordem explícita.
 
 ---
 

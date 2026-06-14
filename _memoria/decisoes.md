@@ -2,6 +2,15 @@
 
 > Append-only. Cada entrada: data + decisão + 1 frase de porquê. Só fato confirmado.
 
+## 2026-06-13
+- **Memória operacional principal = `_memoria/`; `.cerebro/` fica como histórico/segundo vault.** O orquestrador lê `_memoria/` explicitamente e a `.cerebro/` estava defasada desde maio, então o estado vivo passa a ser consolidado primeiro em `_memoria/`.
+- **Repositório ativo confirmado = `/home/luizfelipe/Documents/Programação/Vexo/VexoCrm` em `main` (`93653a7`).** Foi executado `git pull --ff-only origin main` e o remoto já estava atualizado; este snapshot substitui referências antigas de caminho canônico que divergiam.
+- **`Conexoes.tsx` é a casa operacional dos chips WhatsApp.** A tela já reutiliza `EvolutionChipsPanel` por tenant, então a gestão de chips deixou de ser exclusiva de `Tenants.tsx`.
+- **`Relatorios.tsx` virou relatório v1 real de envios por chip/dia.** O placeholder de relatórios foi substituído por gráfico baseado em `evolution_instance_daily_usage` via `/api/reports/evolution-usage`.
+- **`Disparos.tsx` e `Aquecimento.tsx` continuam placeholders.** Devem ser tratados como próximas entregas, não como funcionalidades prontas.
+- **Segmentação pertence ao tenant/empresa, não à campanha.** Cada empresa pode ter campos e filtros próprios por tipo de negócio; por isso a criação de campanha deve ficar simples e a escolha de perfil/schema fica em `Tenants.tsx`.
+- **KPIs de segmentação são personalizados por empresa.** O tenant guarda `segmentation_config` em `lead_client_n8n_settings`, com KPIs/campos editáveis na criação da empresa e leitura desses KPIs na criação da campanha.
+
 ## 2026-06-08
 - **Migração Supabase→PostgreSQL concluída.** A infra é PostgreSQL (Easypanel, `db-vexo`/`vexo-data`); não há serviço Supabase ativo. O código mantém o rótulo "Supabase" apontando para o PostgreSQL — renomear foi revertido por quebrar migrations, então fica como está.
 - **Incidente de key vazada resolvido.** Keys revogadas; sem risco ativo. Deixa de ser pendência.

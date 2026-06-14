@@ -71,28 +71,33 @@ Concorrentes BR limitam a 5–10 chips conectados. Meta do Vexo: 20+ (a Evolutio
 
 ## ENTIDADE: Conexão/Instância Evolution
 
-> **Atualizado 2026-06-08 pós-auditoria.** A entidade oficial é a tabela do Luiz
-> (`lead_client_evolution_instances`), já mergeada na `main` via PR #120.
-> A migration `connections` criada pelo T1 está **DESCARTADA** — não aplicar.
-> O wrapper T2 (cliente Evolution) também está **DESCARTADO** — os endpoints do
-> Luiz já cumprem o papel.
+> **Atualizado 2026-06-13 após pull da `main` (`93653a7`).** A entidade oficial
+> continua sendo `lead_client_evolution_instances`. A migration `connections`
+> criada pelo T1 está **DESCARTADA** — não aplicar. O wrapper T2 também está
+> **DESCARTADO** — os endpoints atuais já cumprem esse papel.
 
 ### Tabela oficial: `public.lead_client_evolution_instances`
 
-Criada por DDL inline em `backend/src/server.js:1565` (Luiz, PR #120, 07/jun).
+Criada/garantida por DDL inline memoizado em `backend/src/server.js`.
 Chave de tenant: **`client_id`** (não `tenant_id`).
 
 | Coluna | Tipo | Regra |
 |---|---|---|
 | `id` | `UUID` | `gen_random_uuid()` |
 | `client_id` | referência ao tenant | FK; toda query filtra por este campo |
-| `instance_name` | `TEXT` | Nome exato na Evolution API |
+| `name` | `TEXT` | Nome da instância/chip no Vexo/Evolution |
+| `dispatch_webhook_url` | `TEXT` | Endpoint Evolution usado no envio |
+| `dispatch_webhook_token` | `TEXT` | Token mascarado no frontend; nunca registrar em memória |
+| `inbound_bearer_token` | `TEXT` | Token inbound legado |
 | `active` | `BOOLEAN` | `true` = instância disponível para disparo |
-| (demais colunas) | ver DDL em `server.js:1565` | |
+| `is_default` | `BOOLEAN` | no máximo uma default por `client_id` |
+| `chip_state` | `TEXT` | `cold` ou `warm` para cota anti-ban |
+| `daily_limit_override` | `INTEGER` | override opcional da cota diária |
+| (demais colunas) | ver DDL em `server.js` | auditoria/criação/atualização |
 
-**Índices (já criados pelo Luiz):**
-- `idx_lead_client_evolution_default` — `(client_id, active)`
-- `idx_lead_client_evolution_client` — `(client_id)`
+**Índices:**
+- `idx_lead_client_evolution_default` — único por `client_id` quando `is_default = true`.
+- `idx_lead_client_evolution_client` — `(client_id, active)`.
 
 **Endpoints já existentes (não recriar):**
 - `GET  /api/lead-clients/:tenantId/evolution-instances` — lista instâncias do tenant
@@ -100,14 +105,14 @@ Chave de tenant: **`client_id`** (não `tenant_id`).
 - `POST /api/lead-clients/:tenantId/evolution-instances/:instanceId/provision` — provisiona/QR
 - `DELETE /api/lead-clients/:tenantId/evolution-instances/:instanceId` — remove
 
-**Integração em campanhas:**
-- Coluna `evolution_instance_id UUID` adicionada em `campaign_dispatches`
-  (`registerAllDomainRoutes.js:4599`).
-- Validação tenant-scoped na seleção da instância (:4609–4613).
+**Integração em campanhas/disparos:**
+- O envio usa configurações do tenant/instância Evolution resolvidas pelo backend.
+- `campaign_dispatch_runs` agora também é usado como claim idempotente por `(dispatch_id, lead_id)`.
+- `evolution_instance_daily_usage` alimenta cota/relatório por chip.
 
 **Caminho de QR (atenção — duplo, risco):**
-- **Novo (REST Evolution):** `server.js:1969–2005` — usa API REST da Evolution (`qrcode.base64`).
-- **Legado (whatsapp-web.js):** `backend/src/whatsapp.js:4,90` — lib `qrcode`, `client.on("qr")`.
+- **Novo (REST Evolution):** `server.js` — provisionamento chama API REST da Evolution e retorna `qrcode.base64`.
+- **Legado (whatsapp-web.js):** `backend/src/whatsapp.js` — lib `qrcode`, `client.on("qr")`.
 - Os dois coexistem. E2 do roadmap resolve isso.
 
 **Invariantes que continuam valendo:**
@@ -118,14 +123,14 @@ Chave de tenant: **`client_id`** (não `tenant_id`).
 
 ---
 
-## ORDEM DAS ETAPAS (roadmap atualizado 2026-06-08)
+## ORDEM DAS ETAPAS (roadmap atualizado 2026-06-13)
 
 | # | Etapa | Estado |
 |---|---|---|
-| E1 | **Validar** o que o Luiz fez: QR ponta-a-ponta real + multi-instância em disparo | a fazer (PRIMEIRO) |
-| E2 | **Resolver caminho duplo de QR** (REST novo vs legado `whatsapp.js`) — escolher um, remover/isolar o outro com evidência de não quebrar | a fazer |
-| E3 | **Anti-ban REAL**: cota por número (≤200/nº/dia) + lotes + delay aleatório + tratamento de ban/desconexão | a fazer — **MAIOR VALOR** |
-| E4 | **Webhook fan-in**: confirmar/garantir que ouve TODAS as instâncias com roteamento por tenant | a fazer |
-| E5 | **Nav Vendas × Disparos** (em cima dos arquivos novos do Luiz no Repo B) | a fazer |
-| E6 | **Bugs UI**: scroll import (10/509) + status variação vermelho→verde (verificar se `LeadImports.tsx` reescrito pelo Luiz já resolveu) | a fazer |
-| — | Aquecimento de chip | aguardando regra de negócio do Conrado |
+| P1 | Gate live anti-reenvio por disparo (`campaign_dispatch_runs` claim) | a validar |
+| P1 | Gate live anti-ban 3a v2: cota por chip + rotação | a validar |
+| P2 | Opt-out por palavra-chave | a fazer |
+| P2 | Aviso de cota aos 80% | a fazer |
+| P2 | Tela operacional real de `Disparos.tsx` | a fazer |
+| P3 | Aquecimento de chip | aguardando regra de negócio |
+| P3 | QR/status automático via webhook Evolution | a fazer |

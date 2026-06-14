@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, Trash2, Wand2 } from "lucide-react";
+import { CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, SlidersHorizontal, Trash2, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -33,9 +33,11 @@ import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   LeadClient,
+  type LeadClientSegmentationKpi,
   useCreateLeadClient,
   useDeleteLeadClient,
   useLeadClients,
+  useUpdateLeadClientSegmentationConfig,
   useUpdateLeadClientN8nSettings,
   useVerifyLeadClientTable,
   type LeadClientTableStatus,
@@ -46,17 +48,17 @@ const CHATBOT_MODEL_OPTIONS = [
   {
     value: "outlier",
     title: "Consorcio / credito",
-    description: "Campos para credito, parcela, FGTS, lance e objetivo de compra.",
+    description: "Campos e filtros para credito, parcela, FGTS, lance e objetivo de compra.",
   },
   {
     value: "infinie",
     title: "Energia solar",
-    description: "Campos para instalacao, conta de luz, localidade e prazo.",
+    description: "Campos e filtros para instalacao, conta de luz, localidade e prazo.",
   },
   {
     value: "generico",
     title: "Modelo generico",
-    description: "Campos comuns para operacoes que ainda serao modeladas.",
+    description: "Campos basicos para empresas que ainda nao tem segmentacao propria.",
   },
 ] as const;
 
@@ -65,6 +67,26 @@ const CREATION_STEPS = [
   "Cria a tabela dinamica de leads",
   "Libera dashboard, planilhas e portal",
 ];
+
+const TENANTS_PAGE_SIZE = 8;
+
+const DEFAULT_SEGMENTATION_KPIS: Record<"outlier" | "infinie" | "generico", LeadClientSegmentationKpi[]> = {
+  outlier: [
+    { id: "objetivo", label: "Objetivo", field: "objetivo_compra", type: "category", enabled: true },
+    { id: "credito", label: "Credito", field: "valor_credito", type: "money", enabled: true },
+    { id: "entrada", label: "Entrada/FGTS", field: "fgts_entrada", type: "money", enabled: true },
+  ],
+  infinie: [
+    { id: "consumo", label: "Conta de luz", field: "faixa_consumo", type: "money", enabled: true },
+    { id: "cidade", label: "Cidade", field: "cidade", type: "category", enabled: true },
+    { id: "prazo", label: "Prazo", field: "prazo_instalacao", type: "category", enabled: true },
+  ],
+  generico: [
+    { id: "origem", label: "Origem", field: "origem", type: "category", enabled: true },
+    { id: "interesse", label: "Interesse", field: "interesse", type: "category", enabled: true },
+    { id: "valor", label: "Valor", field: "valor", type: "money", enabled: true },
+  ],
+};
 
 function buildTenantKey(value: string) {
   return value
@@ -75,6 +97,10 @@ function buildTenantKey(value: string) {
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-")
     .slice(0, 50);
+}
+
+function buildFieldKey(value: string) {
+  return buildTenantKey(value).replace(/-/g, "_");
 }
 
 function formatCreatedAt(value?: string) {
@@ -94,6 +120,7 @@ export default function Tenants() {
   const createTenant = useCreateLeadClient();
   const deleteTenant = useDeleteLeadClient();
   const updateN8nSettings = useUpdateLeadClientN8nSettings();
+  const updateSegmentationConfig = useUpdateLeadClientSegmentationConfig();
   const verifyTenantTable = useVerifyLeadClientTable();
   const { hasPermission, isAdminUser } = useAuth();
   const [name, setName] = useState("");
@@ -105,6 +132,8 @@ export default function Tenants() {
   const [formError, setFormError] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [chatbotModel, setChatbotModel] = useState<"outlier" | "infinie" | "generico">("outlier");
+  const [segmentationKpis, setSegmentationKpis] = useState<LeadClientSegmentationKpi[]>(DEFAULT_SEGMENTATION_KPIS.outlier);
+  const [tenantsPage, setTenantsPage] = useState(1);
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
   const [tableStatuses, setTableStatuses] = useState<Record<string, LeadClientTableStatus>>({});
@@ -119,17 +148,40 @@ export default function Tenants() {
       }
     >
   >({});
+  const [segmentationDrafts, setSegmentationDrafts] = useState<Record<string, LeadClientSegmentationKpi[]>>({});
   const canManageTenants = hasPermission("tenants.manage");
   const canManageN8n = isAdminUser;
   const tablePreviewName = tenantId ? `leads_${tenantId.replace(/-/g, "_")}` : "leads_tenant_id";
   const selectedModel = CHATBOT_MODEL_OPTIONS.find((option) => option.value === chatbotModel) || CHATBOT_MODEL_OPTIONS[0];
   const canSubmitTenant = canManageTenants && Boolean(name.trim()) && Boolean(tenantId.trim()) && !createTenant.isPending;
 
+  const handleModelChange = (value: "outlier" | "infinie" | "generico") => {
+    setChatbotModel(value);
+    setSegmentationKpis(DEFAULT_SEGMENTATION_KPIS[value]);
+  };
+
+  const updateSegmentationKpi = (index: number, patch: Partial<LeadClientSegmentationKpi>) => {
+    setSegmentationKpis((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      )
+    );
+  };
+
   useEffect(() => {
     if (!tenantIdEdited) {
       setTenantId(buildTenantKey(name));
     }
   }, [name, tenantIdEdited]);
+
+  useEffect(() => {
+    setTenantsPage(1);
+  }, [search]);
 
   const filteredTenants = tenants.filter((tenant) => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -140,6 +192,12 @@ export default function Tenants() {
       tenant.id.toLowerCase().includes(normalizedSearch)
     );
   });
+  const totalTenantPages = Math.max(1, Math.ceil(filteredTenants.length / TENANTS_PAGE_SIZE));
+  const safeTenantsPage = Math.min(tenantsPage, totalTenantPages);
+  const paginatedTenants = filteredTenants.slice(
+    (safeTenantsPage - 1) * TENANTS_PAGE_SIZE,
+    safeTenantsPage * TENANTS_PAGE_SIZE
+  );
 
   const latestTenant = tenants.reduce<string | null>((latest, tenant) => {
     if (!tenant.created_at) return latest;
@@ -183,8 +241,19 @@ export default function Tenants() {
         );
 
       const createdTenant = await createTenant.mutateAsync({
-        ...payload,
+        id: payload.id!,
+        name: payload.name!,
         chatbotModel,
+        segmentationConfig: {
+          version: 1,
+          kpis: segmentationKpis
+            .filter((item) => item.enabled && item.label.trim() && item.field.trim())
+            .map((item) => ({
+              ...item,
+              label: item.label.trim(),
+              field: buildFieldKey(item.field),
+            })),
+        },
         ...(hasN8nSettings
           ? {
               n8nSettings: {
@@ -217,6 +286,7 @@ export default function Tenants() {
       setDispatchWebhookToken("");
       setInboundBearerToken("");
       setChatbotModel("outlier");
+      setSegmentationKpis(DEFAULT_SEGMENTATION_KPIS.outlier);
       setTenantIdEdited(false);
       setCreateDialogOpen(false);
     } catch (submissionError) {
@@ -258,6 +328,72 @@ export default function Tenants() {
       inboundBearerToken: draft.inboundBearerToken ?? "",
       active: draft.active ?? tenant.n8n_settings?.active ?? true,
     };
+  };
+
+  const getTenantSegmentationDraft = (tenant: LeadClient) => {
+    const currentModel = (tenant.n8n_settings?.chatbot_model || "generico") as "outlier" | "infinie" | "generico";
+    return (
+      segmentationDrafts[tenant.id] ||
+      tenant.n8n_settings?.segmentation_config?.kpis ||
+      DEFAULT_SEGMENTATION_KPIS[currentModel] ||
+      DEFAULT_SEGMENTATION_KPIS.generico
+    );
+  };
+
+  const updateTenantSegmentationKpi = (tenant: LeadClient, index: number, patch: Partial<LeadClientSegmentationKpi>) => {
+    setSegmentationDrafts((current) => {
+      const base = current[tenant.id] || getTenantSegmentationDraft(tenant);
+      return {
+        ...current,
+        [tenant.id]: base.map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                ...patch,
+              }
+            : item
+        ),
+      };
+    });
+  };
+
+  const handleSaveTenantSegmentation = async (tenant: LeadClient) => {
+    const kpis = getTenantSegmentationDraft(tenant)
+      .filter((item) => item.enabled !== false && item.label.trim() && item.field.trim())
+      .map((item) => ({
+        ...item,
+        label: item.label.trim(),
+        field: buildFieldKey(item.field),
+      }));
+
+    try {
+      await updateSegmentationConfig.mutateAsync({
+        tenantId: tenant.id,
+        segmentationConfig: {
+          version: 1,
+          kpis,
+        },
+      });
+
+      setSegmentationDrafts((current) => ({
+        ...current,
+        [tenant.id]: kpis,
+      }));
+
+      toast({
+        title: "KPIs de segmentacao atualizados",
+        description: `A segmentacao da empresa ${tenant.name} foi salva.`,
+      });
+    } catch (settingsError) {
+      toast({
+        title: "Falha ao salvar KPIs",
+        description:
+          settingsError instanceof Error
+            ? settingsError.message
+            : "Nao foi possivel atualizar a segmentacao.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSaveTenantN8n = async (tenant: LeadClient) => {
@@ -380,13 +516,13 @@ export default function Tenants() {
       compactHero
       headerRight={
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="border border-cyan-400/25 bg-cyan-500/10 px-3 py-1 text-cyan-700 dark:text-cyan-200">
+          <Badge className="border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-700 dark:text-cyan-200">
             {tenants.length} tenants
           </Badge>
-          <Badge className="border border-slate-300/80 bg-white/90 px-3 py-1 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
+          <Badge className="border border-slate-300/80 bg-white/90 px-2 py-0.5 text-[11px] text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
             {canManageTenants ? "Criacao liberada" : "Consulta apenas"}
           </Badge>
-          <Badge className="border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-emerald-700 dark:text-emerald-200">
+          <Badge className="border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-200">
             {canManageN8n ? "Disparo Evolution liberado" : "Evolution restrito a admins"}
           </Badge>
           <Dialog
@@ -402,38 +538,38 @@ export default function Tenants() {
                 Nova empresa
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.98))] p-0 dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(13,18,54,0.98),rgba(8,10,32,0.98))]">
-              <DialogHeader className="space-y-3 px-6 pb-0 pt-6">
+            <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.98))] p-0 dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(13,18,54,0.98),rgba(8,10,32,0.98))]">
+              <DialogHeader className="space-y-3 px-4 pb-0 pt-4">
                 <div className="flex items-start justify-between gap-3 pr-8">
-                  <div className="space-y-1.5">
-                    <DialogTitle className="text-xl">Criar empresa</DialogTitle>
-                    <DialogDescription>
+                  <div className="space-y-1">
+                    <DialogTitle className="text-lg">Criar empresa</DialogTitle>
+                    <DialogDescription className="text-xs">
                       Cadastre o cliente uma vez. O CRM cria o tenant, a tabela de leads e a rota do portal automaticamente.
                     </DialogDescription>
                   </div>
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
-                    <Wand2 className="h-5 w-5" />
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
+                    <Wand2 className="h-4 w-4" />
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {CREATION_STEPS.map((step, index) => (
                     <div
                       key={step}
-                      className="rounded-xl border border-slate-200/80 bg-white/78 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
+                      className="rounded-lg border border-slate-200/80 bg-white/78 px-2.5 py-2 text-[11px] leading-snug text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
                     >
-                      <span className="mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/10 text-[11px] font-bold text-cyan-700 dark:text-cyan-200">
+                      <span className="mb-1 flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500/10 text-[10px] font-bold text-cyan-700 dark:text-cyan-200">
                         {index + 1}
                       </span>
                       {step}
                     </div>
                   ))}
                 </div>
-                <div className="rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="mb-3 flex items-center gap-2">
+                <div className="rounded-lg border border-slate-200/80 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="mb-2 flex items-center gap-2">
                     <Database className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
-                    <p className="text-sm font-medium text-foreground">Preview da criacao</p>
+                    <p className="text-xs font-semibold text-foreground">Preview</p>
                   </div>
-                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                  <div className="grid gap-2 text-[11px] sm:grid-cols-2">
                     <div>
                       <p className="text-muted-foreground">Tenant ID</p>
                       <p className="truncate font-mono text-foreground">{tenantId || "tenant-id"}</p>
@@ -453,9 +589,9 @@ export default function Tenants() {
                   </div>
                 </div>
               </DialogHeader>
-              <form className="space-y-4 px-6 pb-6 pt-4" onSubmit={handleSubmit}>
+              <form className="space-y-3 px-4 pb-4 pt-3" onSubmit={handleSubmit}>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground" htmlFor="tenant-name">
+                  <label className="text-xs font-semibold text-foreground" htmlFor="tenant-name">
                     Nome da empresa
                   </label>
                   <Input
@@ -469,7 +605,7 @@ export default function Tenants() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
-                    <label className="text-sm font-medium text-foreground" htmlFor="tenant-id">
+                    <label className="text-xs font-semibold text-foreground" htmlFor="tenant-id">
                       Tenant ID
                     </label>
                     <Button
@@ -493,7 +629,7 @@ export default function Tenants() {
                       disabled={!canManageTenants || createTenant.isPending}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[11px] text-muted-foreground">
                     Portal previsto:{" "}
                     <span className="font-mono text-foreground">
                       /clientes/{tenantId || "tenant-id"}/dashboard
@@ -502,37 +638,91 @@ export default function Tenants() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    Tipo de schema do chatbot
-                  </label>
-                  <Select
-                    value={chatbotModel}
-                    onValueChange={(v) => setChatbotModel(v as "outlier" | "infinie" | "generico")}
-                    disabled={!canManageTenants || createTenant.isPending}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="outlier">Outlier - Consorcio (credito, parcela, FGTS)</SelectItem>
-                      <SelectItem value="infinie">Infinie - Solar (instalacao, conta de luz)</SelectItem>
-                      <SelectItem value="generico">Generico - Campos padrao apenas</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Define quais colunas extras serao criadas na tabela de leads desta empresa.
-                  </p>
+                  <div className="flex items-start gap-3 rounded-lg border border-slate-200/80 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                    <SlidersHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">
+                          Segmentacao da empresa
+                        </label>
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                          Escolha o perfil do negocio. Ele define os campos de leads e os filtros que farao sentido para este tenant.
+                        </p>
+                      </div>
+                      <Select
+                        value={chatbotModel}
+                        onValueChange={(v) => handleModelChange(v as "outlier" | "infinie" | "generico")}
+                        disabled={!canManageTenants || createTenant.isPending}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CHATBOT_MODEL_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.title}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 p-2.5 text-[11px] leading-relaxed text-muted-foreground dark:border-white/10 dark:bg-black/25">
+                        <span className="font-semibold text-foreground">{selectedModel.title}:</span>{" "}
+                        {selectedModel.description}
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold text-foreground">KPIs de segmentacao</p>
+                        <div className="grid gap-2">
+                          {segmentationKpis.map((kpi, index) => (
+                            <div key={kpi.id} className="grid gap-2 rounded-lg border border-slate-200/70 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-black/25 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
+                              <Input
+                                className="h-9"
+                                placeholder="Nome do KPI"
+                                value={kpi.label}
+                                onChange={(event) => updateSegmentationKpi(index, { label: event.target.value })}
+                                disabled={!canManageTenants || createTenant.isPending}
+                              />
+                              <Input
+                                className="h-9 font-mono text-xs"
+                                placeholder="campo_da_planilha"
+                                value={kpi.field}
+                                onChange={(event) => updateSegmentationKpi(index, { field: buildFieldKey(event.target.value) })}
+                                disabled={!canManageTenants || createTenant.isPending}
+                              />
+                              <Select
+                                value={kpi.type}
+                                onValueChange={(value) => updateSegmentationKpi(index, { type: value as LeadClientSegmentationKpi["type"] })}
+                                disabled={!canManageTenants || createTenant.isPending}
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="category">Categoria</SelectItem>
+                                  <SelectItem value="money">Valor</SelectItem>
+                                  <SelectItem value="number">Numero</SelectItem>
+                                  <SelectItem value="date">Data</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          Esses KPIs aparecem na criacao de campanha e usam os campos importados na planilha desta empresa.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <ErrorMessage message={formError} variant="banner" />
 
                 {canManageN8n ? (
-                  <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="space-y-3 rounded-lg border border-slate-200/80 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
                     <div className="flex items-start gap-3">
                       <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">Evolution API</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs font-semibold text-foreground">Evolution API</p>
+                        <p className="text-[11px] text-muted-foreground">
                           URL e API Key da instancia Evolution para envio de mensagens.
                         </p>
                       </div>
@@ -566,45 +756,45 @@ export default function Tenants() {
         </div>
       }
     >
-      <div className="grid gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
-              <CardHeader className="pb-3">
+      <div className="grid gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Card className="border-slate-200/80 bg-white/90 shadow-[0_12px_28px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
+              <CardHeader className="pb-2">
                 <CardDescription>Base operacional</CardDescription>
-                <CardTitle className="text-3xl">{tenants.length}</CardTitle>
+                <CardTitle className="text-2xl">{tenants.length}</CardTitle>
               </CardHeader>
-              <CardContent className="pt-0 text-sm text-muted-foreground">
+              <CardContent className="pt-0 text-xs text-muted-foreground">
                 Total de empresas prontas para receber usuarios, dados e campanhas.
               </CardContent>
             </Card>
 
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
-              <CardHeader className="pb-3">
+            <Card className="border-slate-200/80 bg-white/90 shadow-[0_12px_28px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
+              <CardHeader className="pb-2">
                 <CardDescription>Ultimo cadastro</CardDescription>
-                <CardTitle className="text-lg">
+                <CardTitle className="text-base">
                   {latestTenant ? formatCreatedAt(latestTenant) : "Nenhum tenant criado"}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-0 text-sm text-muted-foreground">
+              <CardContent className="pt-0 text-xs text-muted-foreground">
                 Use esse painel para garantir que todo novo cliente entre com `clientId` padrao e
                 rota consistente.
               </CardContent>
             </Card>
           </div>
 
-          <Card className="border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(245,248,255,0.96))] shadow-[0_22px_56px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(9,12,38,0.9),rgba(7,10,28,0.96))]">
-            <CardHeader className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+          <Card className="border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(245,248,255,0.96))] shadow-[0_14px_34px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(9,12,38,0.9),rgba(7,10,28,0.96))]">
+            <CardHeader className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <CardTitle>Tenants cadastrados</CardTitle>
                   <CardDescription>
                     Consulte IDs, datas de criacao e a rota base de cada empresa.
                   </CardDescription>
                 </div>
-                <div className="relative w-full max-w-sm">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <div className="relative w-full max-w-xs">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    className="pl-10"
+                    className="pl-9"
                     placeholder="Buscar por nome ou tenant ID"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
@@ -612,11 +802,11 @@ export default function Tenants() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2">
               <ErrorMessage message={error ? (error as Error).message : null} variant="banner" />
 
               {isLoading ? (
-                <div className="rounded-2xl border border-slate-200/80 bg-white/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-lg border border-slate-200/80 bg-white/70 px-4 py-6 text-center text-xs text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
                   Carregando empresas...
                 </div>
               ) : filteredTenants.length === 0 ? (
@@ -629,19 +819,20 @@ export default function Tenants() {
                   }
                 />
               ) : (
-                <div className="grid gap-3">
-                  {filteredTenants.map((tenant) => {
+                <div className="grid gap-2">
+                  {paginatedTenants.map((tenant) => {
                     const tableStatus = tableStatuses[tenant.id] || tenant.leads_table;
                     const expectedTableName = tableStatus?.tableName || `leads_${tenant.id.replace(/-/g, "_")}`;
+                    const tenantSegmentationKpis = getTenantSegmentationDraft(tenant);
                     return (
                     <div
                       key={tenant.id}
-                      className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_18px_40px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03]"
+                      className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03]"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-base font-semibold text-foreground">{tenant.name}</p>
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="text-sm font-semibold text-foreground">{tenant.name}</p>
                             <Badge className="border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
                               {tenant.id}
                             </Badge>
@@ -653,12 +844,12 @@ export default function Tenants() {
                             {formatCreatedAt(tenant.created_at)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border border-slate-200/80 bg-slate-50/90 px-3 py-2 text-right text-xs text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
+                        <div className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-3 py-2 text-right text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
                           <p className="font-medium text-foreground">Rota base</p>
                           <p className="mt-1 font-mono">/clientes/{tenant.id}/dashboard</p>
                         </div>
                       </div>
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.03]">
                         <div className="flex min-w-0 items-start gap-3">
                           <Database className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
                           <div className="min-w-0">
@@ -692,6 +883,60 @@ export default function Tenants() {
                           </Button>
                         </div>
                       </div>
+                      {canManageTenants ? (
+                        <div className="mt-3 rounded-lg border border-slate-200/80 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.02]">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold text-foreground">KPIs de segmentacao</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Ajuste os indicadores usados nas campanhas desta empresa.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={updateSegmentationConfig.isPending}
+                              onClick={() => void handleSaveTenantSegmentation(tenant)}
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              {updateSegmentationConfig.isPending ? "Salvando..." : "Salvar KPIs"}
+                            </Button>
+                          </div>
+                          <div className="grid gap-2">
+                            {tenantSegmentationKpis.map((kpi, index) => (
+                              <div key={`${tenant.id}-${kpi.id}-${index}`} className="grid gap-2 rounded-lg border border-slate-200/70 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-black/20 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
+                                <Input
+                                  className="h-8"
+                                  placeholder="Nome do KPI"
+                                  value={kpi.label}
+                                  onChange={(event) => updateTenantSegmentationKpi(tenant, index, { label: event.target.value })}
+                                />
+                                <Input
+                                  className="h-8 font-mono text-xs"
+                                  placeholder="campo_da_planilha"
+                                  value={kpi.field}
+                                  onChange={(event) => updateTenantSegmentationKpi(tenant, index, { field: buildFieldKey(event.target.value) })}
+                                />
+                                <Select
+                                  value={kpi.type}
+                                  onValueChange={(value) => updateTenantSegmentationKpi(tenant, index, { type: value as LeadClientSegmentationKpi["type"] })}
+                                >
+                                  <SelectTrigger className="h-8">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="category">Categoria</SelectItem>
+                                    <SelectItem value="money">Valor</SelectItem>
+                                    <SelectItem value="number">Numero</SelectItem>
+                                    <SelectItem value="date">Data</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       {canManageN8n ? (
                         <div className="mt-4 space-y-3">
                           <EvolutionChipsPanel tenant={tenant} />
@@ -818,6 +1063,37 @@ export default function Tenants() {
                     </div>
                     );
                   })}
+                  {totalTenantPages > 1 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-3 text-xs text-muted-foreground dark:border-white/10">
+                      <span>
+                        Mostrando {(safeTenantsPage - 1) * TENANTS_PAGE_SIZE + 1}-
+                        {Math.min(safeTenantsPage * TENANTS_PAGE_SIZE, filteredTenants.length)} de {filteredTenants.length}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={safeTenantsPage <= 1}
+                          onClick={() => setTenantsPage((page) => Math.max(1, page - 1))}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="rounded-md border border-slate-200/80 bg-white px-2 py-1 font-semibold text-foreground dark:border-white/10 dark:bg-white/[0.04]">
+                          {safeTenantsPage}/{totalTenantPages}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={safeTenantsPage >= totalTenantPages}
+                          onClick={() => setTenantsPage((page) => Math.min(totalTenantPages, page + 1))}
+                        >
+                          Proxima
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </CardContent>

@@ -184,6 +184,12 @@ async function migrationAlreadyRepresented(client, fileName) {
         where table_schema = 'public' and table_name = 'lead_client_n8n_settings' and column_name = 'sdr_whatsapp_number'
       ) as ok
     `,
+    "20260613190000_add_segmentation_config_to_n8n_settings.sql": `
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'lead_client_n8n_settings' and column_name = 'segmentation_config'
+      ) as ok
+    `,
     "20260512130000_rename_leads_to_leads_infinie_and_create_leads_teste.sql": `
       select exists (
         select 1 from information_schema.tables
