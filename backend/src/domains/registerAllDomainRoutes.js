@@ -330,6 +330,9 @@ export function registerAllDomainRoutes(app) {
     const normalizedMessage = normalizeString(messageText);
     if (!normalizedMessage) return null;
 
+    // REGRA DE CANONIZAÇÃO: lead_id = SEMPRE o lead do CRM do tenant (leads.id da tabela
+    // leadsTableName), nunca lead_import_items.id. campaign_id carrega a atribuição de
+    // campanha (inequívoco, é o que o Dashboard usa) e PODE vir do disparo.
     let resolvedLeadId = leadId || null;
     let resolvedCampaignId = campaignId || null;
 
@@ -353,17 +356,18 @@ export function registerAllDomainRoutes(app) {
       }
     }
 
-    // Captura de resposta vinculada a disparo: para inbound ainda sem campanha/lead,
-    // casa pelo disparo (campaign_dispatch_runs status='sent') mais recente daquele
-    // telefone, dentro da janela. Fallback gracioso: se nada casar, segue com NULL.
-    if (direction === "inbound" && (!resolvedCampaignId || !resolvedLeadId)) {
+    // Atribuição de CAMPANHA por disparo: para inbound ainda sem campanha, casa pelo
+    // disparo (campaign_dispatch_runs status='sent') mais recente daquele telefone,
+    // dentro da janela. Preenche SÓ campaign_id — NÃO lead_id (runRow.lead_id é
+    // lead_import_items.id, id-space errado). Fallback gracioso: nada casar → NULL.
+    if (direction === "inbound" && !resolvedCampaignId) {
       try {
         const windowStartIso = new Date(
           Date.now() - DISPATCH_ATTRIBUTION_WINDOW_DAYS * 24 * 60 * 60 * 1000
         ).toISOString();
         const { data: runRow, error: runError } = await supabase
           .from("campaign_dispatch_runs")
-          .select("lead_id, campaign_id, dispatch_id, sent_at, created_at")
+          .select("campaign_id, dispatch_id, sent_at, created_at")
           .eq("client_id", clientId)
           .eq("phone", phone)
           .eq("status", "sent")
@@ -374,7 +378,6 @@ export function registerAllDomainRoutes(app) {
           .maybeSingle();
         if (!runError && runRow) {
           resolvedCampaignId = resolvedCampaignId || runRow.campaign_id || null;
-          resolvedLeadId = resolvedLeadId || runRow.lead_id || null;
         }
       } catch (error) {
         console.warn("[lead-messages] dispatch attribution lookup failed:", error?.message || error);
