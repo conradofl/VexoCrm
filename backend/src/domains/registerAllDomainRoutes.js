@@ -309,6 +309,10 @@ export function registerAllDomainRoutes(app) {
     return ensureDynamicLeadClientTable(pgDatabasePool, tenantId, schemaType);
   }
 
+  // Janela de atribuição de resposta → disparo (ajustável). Um inbound é vinculado ao
+  // disparo com status='sent' mais recente daquele telefone DENTRO desta janela.
+  const DISPATCH_ATTRIBUTION_WINDOW_DAYS = 14;
+
   async function appendLeadMessage({
     clientId,
     phone,
@@ -349,6 +353,34 @@ export function registerAllDomainRoutes(app) {
       }
     }
 
+    // Captura de resposta vinculada a disparo: para inbound ainda sem campanha/lead,
+    // casa pelo disparo (campaign_dispatch_runs status='sent') mais recente daquele
+    // telefone, dentro da janela. Fallback gracioso: se nada casar, segue com NULL.
+    if (direction === "inbound" && (!resolvedCampaignId || !resolvedLeadId)) {
+      try {
+        const windowStartIso = new Date(
+          Date.now() - DISPATCH_ATTRIBUTION_WINDOW_DAYS * 24 * 60 * 60 * 1000
+        ).toISOString();
+        const { data: runRow, error: runError } = await supabase
+          .from("campaign_dispatch_runs")
+          .select("lead_id, campaign_id, dispatch_id, sent_at, created_at")
+          .eq("client_id", clientId)
+          .eq("phone", phone)
+          .eq("status", "sent")
+          .gte("created_at", windowStartIso)
+          .order("sent_at", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!runError && runRow) {
+          resolvedCampaignId = resolvedCampaignId || runRow.campaign_id || null;
+          resolvedLeadId = resolvedLeadId || runRow.lead_id || null;
+        }
+      } catch (error) {
+        console.warn("[lead-messages] dispatch attribution lookup failed:", error?.message || error);
+      }
+    }
+
     const { error } = await supabase.from("lead_messages").insert({
       client_id: clientId,
       lead_id: resolvedLeadId,
@@ -364,6 +396,21 @@ export function registerAllDomainRoutes(app) {
 
     if (error && !isMissingSchemaError(error)) {
       console.warn("[lead-messages] insert failed:", error.message || error);
+    }
+
+    // Marca o lead como "respondeu": grava ultima_interacao_usuario no momento do inbound.
+    // Casa por telefone (robusto ao id-space: dispatch usa lead_import_items.id, a tabela
+    // de leads usa leads.id). Best-effort: nunca derruba o webhook.
+    if (direction === "inbound") {
+      try {
+        await supabase
+          .from(leadsTableName(clientId))
+          .update({ ultima_interacao_usuario: deliveredAt || new Date().toISOString() })
+          .eq("client_id", clientId)
+          .eq("telefone", phone);
+      } catch (updateError) {
+        console.warn("[lead-messages] ultima_interacao_usuario update failed:", updateError?.message || updateError);
+      }
     }
 
     return { leadId: resolvedLeadId, campaignId: resolvedCampaignId };
