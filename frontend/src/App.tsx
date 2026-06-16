@@ -44,6 +44,7 @@ import FollowupAnalytics from "./pages/FollowupAnalytics";
 import FollowupSuggestions from "./pages/FollowupSuggestions";
 import OnboardingWizard from "./pages/OnboardingWizard";
 import OnboardingAgent from "./pages/OnboardingAgent";
+import EvolutionAdmin from "./pages/EvolutionAdmin";
 
 const queryClient = new QueryClient();
 
@@ -322,6 +323,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
                     <OnboardingAgent />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="evolution-admin"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
+                    <EvolutionAdmin />
                   </ProtectedRoute>
                 }
               />
