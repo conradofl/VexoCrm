@@ -5679,7 +5679,11 @@ export function registerAllDomainRoutes(app) {
         // Finaliza o registro de claim deste lead como 'sent' (UPDATE da linha já reservada).
         await finalizeLeadSent({ lead, sentAt });
         const leadPatch = {
-          status_conversa: "campanha_enviada",
+          // "aguardando_usuario": pós-disparo, esperando o lead responder. Valor permitido
+          // pela CHECK lead_import_items_status_conversa_check (aguardando_usuario|
+          // em_atendimento|finalizado). O sinal de fila de follow-up é followup_status,
+          // não status_conversa. (Antes gravava "campanha_enviada", fora da CHECK → erro.)
+          status_conversa: "aguardando_usuario",
           ultima_interacao_bot: sentAt || new Date().toISOString(),
           followup_status: "pending",
           followup_scheduled_at: null,

@@ -827,9 +827,12 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
 
   // Salvar turno em lead_messages (fire-and-forget — não bloqueia resposta)
   const now = new Date().toISOString();
+  // Schema real de lead_messages: phone / sender_type / direction / message_text
+  // (as colunas lead_phone/role/content da migration 20260516 nunca aplicaram).
+  // Convenção canônica do projeto (appendLeadMessage): lead=inbound, bot=outbound.
   const leadMsgs = [
-    { client_id: clientId, lead_phone: phone, role: "user", content: combinedText, created_at: now },
-    { client_id: clientId, lead_phone: phone, role: "assistant", content: aiResponse.mensagem, created_at: now },
+    { client_id: clientId, phone, sender_type: "lead", direction: "inbound", message_text: combinedText, created_at: now },
+    { client_id: clientId, phone, sender_type: "bot", direction: "outbound", message_text: aiResponse.mensagem, created_at: now },
   ];
   supabase.from("lead_messages").insert(leadMsgs).then(({ error }) => {
     if (error) console.warn("[chatbot-ai] lead_messages insert error:", error.message);

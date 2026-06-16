@@ -65,7 +65,7 @@ describe("campaign reply flow safeguards", () => {
 
   it("marks successful campaign dispatch leads for the followup queue", () => {
     expect(routeBundle).toContain('followup_status: "pending"');
-    expect(routeBundle).toContain('status_conversa: "campanha_enviada"');
+    expect(routeBundle).toContain('status_conversa: "aguardando_usuario"');
     expect(routeBundle).toContain('ultima_interacao_bot: sentAt || new Date().toISOString()');
     expect(routeBundle).toContain('onLeadDispatched: async ({ lead, phone, sentAt })');
   });
