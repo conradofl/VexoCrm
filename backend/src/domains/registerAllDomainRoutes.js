@@ -81,6 +81,13 @@ import { getFollowupQueue } from "../followup/queue.js";
 let _evolutionDailyUsageSchemaEnsured = false;
 let _dispatchRunsClaimSchemaEnsured = false;
 
+// Trava de backend contra o martelo em /instance/fetchInstances da Evolution (incidente
+// 15/06). Cache curto + dedupe de chamadas concorrentes: N requisições na janela viram
+// 1 chamada real à Evolution. Persiste no processo (registerAllDomainRoutes roda 1x).
+const EVOLUTION_REMOTE_CACHE_TTL_MS = Number(process.env.EVOLUTION_REMOTE_CACHE_TTL_MS || 60_000);
+let _remoteEvoInventoryCache = null; // { at: number, value: object }
+let _remoteEvoInventoryInflight = null; // Promise | null
+
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
  * routeDeps must be populated in server.js before this runs.
@@ -396,7 +403,33 @@ export function registerAllDomainRoutes(app) {
     };
   }
 
+  // Wrapper com cache (TTL) + dedupe de in-flight. É o ÚNICO ponto que chama o fetch real
+  // à Evolution. Garante no máximo 1 chamada real por janela, qualquer que seja a origem
+  // (aba, monitor, cliente) — a trava de backend que o fix de frontend sozinho não dava.
   async function fetchRemoteEvolutionInstances() {
+    const now = Date.now();
+    if (_remoteEvoInventoryCache && now - _remoteEvoInventoryCache.at < EVOLUTION_REMOTE_CACHE_TTL_MS) {
+      return _remoteEvoInventoryCache.value;
+    }
+    if (_remoteEvoInventoryInflight) {
+      // Já existe uma consulta pesada em andamento — reusa a mesma promise (não abre outra).
+      return _remoteEvoInventoryInflight;
+    }
+    _remoteEvoInventoryInflight = (async () => {
+      try {
+        const result = await fetchRemoteEvolutionInstancesRaw();
+        // Cacheia o resultado (sucesso OU erro): durante instabilidade da Evolution, manter
+        // o último resultado por TTL evita reentrar em loop martelando enquanto ela se recupera.
+        _remoteEvoInventoryCache = { at: Date.now(), value: result };
+        return result;
+      } finally {
+        _remoteEvoInventoryInflight = null;
+      }
+    })();
+    return _remoteEvoInventoryInflight;
+  }
+
+  async function fetchRemoteEvolutionInstancesRaw() {
     const config = getEvolutionAdminApiConfig();
     if (!config.configured) {
       return {
