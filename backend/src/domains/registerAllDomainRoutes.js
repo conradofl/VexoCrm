@@ -82,6 +82,26 @@ let _evolutionDailyUsageSchemaEnsured = false;
 let _dispatchRunsClaimSchemaEnsured = false;
 
 /**
+ * Detecta JID de GRUPO / broadcast no inbound da Evolution. Resposta de lead legítima
+ * vem SEMPRE de número individual (@s.whatsapp.net); grupo (@g.us) nunca é lead.
+ * IMPORTANTE: receber o remoteJid CRU (antes de sanitizePhone, que stripa o "@g.us").
+ * Regra (conservadora p/ não descartar individual): @g.us | @broadcast | user-part com
+ * hífen (formato legado phone-timestamp) | user-part numérico > 15 dígitos (ids de grupo
+ * têm 18+; individual BR ≤ 13).
+ */
+function isGroupJid(rawJid) {
+  const s = String(rawJid ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (s.includes("@g.us")) return true;
+  if (s.includes("@broadcast")) return true;
+  const userPart = s.split("@")[0];
+  if (userPart.includes("-")) return true;
+  const digits = userPart.replace(/\D/g, "");
+  if (digits.length > 15) return true;
+  return false;
+}
+
+/**
  * Registers all HTTP routes (extracted from legacy server.js).
  * routeDeps must be populated in server.js before this runs.
  */
@@ -5382,8 +5402,17 @@ export function registerAllDomainRoutes(app) {
 
   app.post("/api/campaigns/reply-webhook", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
+
+    // Descarta mensagem de GRUPO/broadcast cedo (antes de qualquer gravação): resposta de
+    // lead vem sempre de número individual. Responde 200 p/ a Evolution não reenviar.
+    const rawRemoteJid = body.data?.key?.remoteJid ?? body.remoteJid ?? body.senderJid ?? null;
+    if (isGroupJid(rawRemoteJid)) {
+      res.json({ success: true, ignored: "group" });
+      return;
+    }
+
     const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? body.client?.id);
     const phone = sanitizePhone(
       body.phone ??
@@ -6458,7 +6487,14 @@ export function registerAllDomainRoutes(app) {
       res.json({ success: true, ignored: "fromMe" });
       return;
     }
-  
+
+    // Descarta mensagem de GRUPO/broadcast antes de qualquer lookup no banco ou chatbot.
+    const rawRemoteJid = body.data?.key?.remoteJid ?? body.remoteJid ?? body.senderJid ?? null;
+    if (isGroupJid(rawRemoteJid)) {
+      res.json({ success: true, ignored: "group" });
+      return;
+    }
+
     const clientId = normalizeTenantKey(
       body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id
     ) || "outlier";
