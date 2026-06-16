@@ -28,6 +28,7 @@ import {
   Send,
   Flame,
   BarChart2,
+  Database,
 } from "lucide-react";
 import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
@@ -114,6 +115,7 @@ const SISTEMA_ITEMS = [
 // Configuração + admin tools — FIXO, somente para isAdminUser.
 const ADMIN_ITEMS = [
   { key: "vexo-sales",      label: "Vendas Vexo",     url: "/crm/vexo-sales",      icon: Briefcase },
+  { key: "evolution-admin", label: "Evolution Admin",  url: "/crm/evolution-admin", icon: Database },
   { key: "onboarding",      label: "Onboarding",       url: "/crm/onboarding",       icon: UserPlus },
   { key: "onboarding-agent",label: "Criar com IA",     url: "/crm/onboarding-agent", icon: Sparkles },
 ];

@@ -309,6 +309,315 @@ export function registerAllDomainRoutes(app) {
     return ensureDynamicLeadClientTable(pgDatabasePool, tenantId, schemaType);
   }
 
+  function maskSecretPresence(value) {
+    return Boolean(normalizeString(value));
+  }
+
+  function buildEvolutionAdminEnvInventory() {
+    const fallbackKeys = Object.keys(process.env)
+      .filter((key) => /^(EVOLUTION|N8N)_DISPATCH_WEBHOOK_(URL|TOKEN)_[A-Z0-9_]+$/.test(key))
+      .sort()
+      .map((key) => ({
+        key,
+        value: key.includes("_TOKEN_") ? null : normalizeString(process.env[key]) || null,
+        configured: Boolean(normalizeString(process.env[key])),
+        secret: key.includes("_TOKEN_"),
+      }));
+
+    return {
+      evolutionApiUrl: normalizeString(process.env.EVOLUTION_API_URL) || null,
+      hasEvolutionApiKey: maskSecretPresence(process.env.EVOLUTION_API_KEY),
+      dispatchJsonFallbacks: ["EVOLUTION_DISPATCH_WEBHOOKS_JSON", "N8N_DISPATCH_WEBHOOKS_JSON"].map((key) => ({
+        key,
+        configured: Boolean(normalizeString(process.env[key])),
+      })),
+      tenantFallbacks: fallbackKeys,
+    };
+  }
+
+  function getEvolutionAdminApiConfig() {
+    const baseUrl = (normalizeString(process.env.EVOLUTION_API_URL) || "").replace(/\/+$/, "");
+    const apiKey = normalizeString(process.env.EVOLUTION_API_KEY);
+    return {
+      baseUrl,
+      apiKey,
+      configured: Boolean(baseUrl && apiKey),
+    };
+  }
+
+  function buildEvolutionDispatchUrl(instanceName) {
+    const { baseUrl } = getEvolutionAdminApiConfig();
+    if (!baseUrl) return null;
+    return `${baseUrl}/message/sendText/${encodeURIComponent(instanceName)}`;
+  }
+
+  function getEvolutionInstanceNameFromDispatchUrl(value) {
+    const parsed = parseEvolutionWebhookEndpoint(value);
+    return parsed?.instance || null;
+  }
+
+  function normalizeRemoteEvolutionInstance(row) {
+    if (!row || typeof row !== "object") return null;
+    const nested = row.instance && typeof row.instance === "object" ? row.instance : {};
+    const name =
+      normalizeString(row.instanceName) ||
+      normalizeString(row.name) ||
+      normalizeString(row.instance_name) ||
+      normalizeString(nested.instanceName) ||
+      normalizeString(nested.name);
+    if (!name) return null;
+
+    return {
+      name,
+      display_name:
+        normalizeString(row.profileName) ||
+        normalizeString(row.profile?.name) ||
+        normalizeString(row.ownerJid) ||
+        null,
+      status:
+        normalizeString(row.connectionStatus) ||
+        normalizeString(row.state) ||
+        normalizeString(row.status) ||
+        normalizeString(nested.state) ||
+        normalizeString(nested.status) ||
+        null,
+      integration: normalizeString(row.integration) || normalizeString(nested.integration) || null,
+      owner_jid: normalizeString(row.ownerJid) || normalizeString(nested.ownerJid) || null,
+      webhook_url:
+        normalizeString(row.webhook?.url) ||
+        normalizeString(row.Webhook?.url) ||
+        normalizeString(row.webhookUrl) ||
+        null,
+      updated_at:
+        normalizeString(row.updatedAt) ||
+        normalizeString(row.updated_at) ||
+        normalizeString(nested.updatedAt) ||
+        null,
+    };
+  }
+
+  async function fetchRemoteEvolutionInstances() {
+    const config = getEvolutionAdminApiConfig();
+    if (!config.configured) {
+      return {
+        configured: false,
+        error: "EVOLUTION_API_URL ou EVOLUTION_API_KEY ausente",
+        items: [],
+      };
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(`${config.baseUrl}/instance/fetchInstances`, {
+        method: "GET",
+        headers: {
+          apikey: config.apiKey,
+        },
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let payload = null;
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = text;
+        }
+      }
+
+      if (!response.ok) {
+        const message =
+          normalizeString(payload?.response?.message) ||
+          normalizeString(payload?.message) ||
+          normalizeString(payload?.error) ||
+          `Evolution API HTTP ${response.status}`;
+        return {
+          configured: true,
+          error: message,
+          items: [],
+        };
+      }
+
+      const rawItems = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.instances)
+          ? payload.instances
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+      const seen = new Set();
+      const items = rawItems
+        .map(normalizeRemoteEvolutionInstance)
+        .filter(Boolean)
+        .filter((item) => {
+          const key = item.name.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      return {
+        configured: true,
+        error: null,
+        items,
+      };
+    } catch (error) {
+      return {
+        configured: true,
+        error: error instanceof Error ? error.message : "Falha ao consultar Evolution API",
+        items: [],
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  function buildEmptyRemoteEvolutionInventory() {
+    return {
+      configured: getEvolutionAdminApiConfig().configured,
+      error: null,
+      items: [],
+      skipped: true,
+    };
+  }
+
+  async function fetchAdminEvolutionInventory({ includeRemote = false } = {}) {
+    if (!pgDatabasePool) {
+      return {
+        env: buildEvolutionAdminEnvInventory(),
+        instances: [],
+        legacySettings: [],
+        followupCompanies: [],
+        tenants: [],
+        remoteInstances: includeRemote ? await fetchRemoteEvolutionInstances() : buildEmptyRemoteEvolutionInventory(),
+      };
+    }
+
+    const [instancesResult, settingsResult, followupResult, tenantsResult] = await Promise.all([
+      pgDatabasePool.query(`
+        SELECT i.id, i.client_id, c.name AS client_name, i.name, i.dispatch_webhook_url,
+               i.dispatch_webhook_token, i.inbound_bearer_token, i.active, i.is_default,
+               i.chip_state, i.daily_limit_override, i.created_at, i.updated_at, i.updated_by_email
+        FROM public.lead_client_evolution_instances i
+        LEFT JOIN public.leads_clients c ON c.id = i.client_id
+        ORDER BY i.client_id, i.is_default DESC, i.active DESC, i.created_at ASC
+      `).catch((error) => {
+        if (isMissingSchemaError(error) || error?.code === "42P01") return { rows: [] };
+        throw error;
+      }),
+      pgDatabasePool.query(`
+        SELECT s.client_id, c.name AS client_name, s.dispatch_webhook_url,
+               s.dispatch_webhook_token, s.inbound_bearer_token, s.active,
+               s.chatbot_enabled, s.chatbot_model, s.sdr_whatsapp_number,
+               s.updated_at, s.updated_by_email
+        FROM public.lead_client_n8n_settings s
+        LEFT JOIN public.leads_clients c ON c.id = s.client_id
+        ORDER BY s.client_id
+      `).catch((error) => {
+        if (isMissingSchemaError(error) || error?.code === "42P01") return { rows: [] };
+        throw error;
+      }),
+      pgDatabasePool.query(`
+        SELECT id, name, evolution_instance, webhook_url, panel_access, created_at, updated_at
+        FROM public.followup_companies
+        WHERE archived_at IS NULL
+        ORDER BY name
+      `).catch((error) => {
+        if (isMissingSchemaError(error) || error?.code === "42P01" || error?.code === "42703") return { rows: [] };
+        throw error;
+      }),
+      pgDatabasePool.query(`
+        SELECT id, name
+        FROM public.leads_clients
+        ORDER BY name ASC
+      `).catch((error) => {
+        if (isMissingSchemaError(error) || error?.code === "42P01") return { rows: [] };
+        throw error;
+      }),
+    ]);
+    const remoteInstances = includeRemote ? await fetchRemoteEvolutionInstances() : buildEmptyRemoteEvolutionInventory();
+
+    const localInstanceByRemoteName = new Map();
+    for (const row of instancesResult.rows) {
+      const instanceName = getEvolutionInstanceNameFromDispatchUrl(row.dispatch_webhook_url) || row.name;
+      if (!instanceName) continue;
+      localInstanceByRemoteName.set(instanceName.toLowerCase(), {
+        id: row.id,
+        client_id: row.client_id,
+        client_name: row.client_name || row.client_id,
+      });
+    }
+
+    return {
+      env: buildEvolutionAdminEnvInventory(),
+      tenants: tenantsResult.rows.map((row) => ({
+        id: row.id,
+        name: row.name || row.id,
+      })),
+      remoteInstances: {
+        ...remoteInstances,
+        items: remoteInstances.items.map((item) => {
+          const local = localInstanceByRemoteName.get(item.name.toLowerCase()) || null;
+          return {
+            ...item,
+            dispatch_webhook_url: buildEvolutionDispatchUrl(item.name),
+            local_instance_id: local?.id || null,
+            local_client_id: local?.client_id || null,
+            local_client_name: local?.client_name || null,
+          };
+        }),
+      },
+      instances: instancesResult.rows.map((row) => ({
+        id: row.id,
+        client_id: row.client_id,
+        client_name: row.client_name || row.client_id,
+        name: row.name || "Evolution",
+        dispatch_webhook_url: row.dispatch_webhook_url || null,
+        has_dispatch_webhook_token: maskSecretPresence(row.dispatch_webhook_token),
+        has_inbound_bearer_token: maskSecretPresence(row.inbound_bearer_token),
+        active: row.active !== false,
+        is_default: row.is_default === true,
+        chip_state: row.chip_state === "warm" ? "warm" : "cold",
+        daily_limit_override: row.daily_limit_override != null ? Number(row.daily_limit_override) : null,
+        created_at: row.created_at || null,
+        updated_at: row.updated_at || null,
+        updated_by_email: row.updated_by_email || null,
+      })),
+      legacySettings: settingsResult.rows.map((row) => ({
+        client_id: row.client_id,
+        client_name: row.client_name || row.client_id,
+        dispatch_webhook_url: row.dispatch_webhook_url || null,
+        has_dispatch_webhook_token: maskSecretPresence(row.dispatch_webhook_token),
+        has_inbound_bearer_token: maskSecretPresence(row.inbound_bearer_token),
+        active: row.active !== false,
+        chatbot_enabled: row.chatbot_enabled === true,
+        chatbot_model: row.chatbot_model || null,
+        sdr_whatsapp_number: row.sdr_whatsapp_number || null,
+        updated_at: row.updated_at || null,
+        updated_by_email: row.updated_by_email || null,
+      })),
+      followupCompanies: followupResult.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        evolution_instance: row.evolution_instance || null,
+        webhook_url: row.webhook_url || null,
+        panel_access: row.panel_access === true,
+        created_at: row.created_at || null,
+        updated_at: row.updated_at || null,
+      })),
+    };
+  }
+
+  function parseOptionalAdminSecret(body, key) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) return { provided: false, value: undefined };
+    if (body[key] === null) return { provided: true, value: null };
+    const value = normalizeString(body[key]);
+    if (!value || isMaskedSecretPlaceholder(value)) return { provided: false, value: undefined };
+    return { provided: true, value };
+  }
+
   async function appendLeadMessage({
     clientId,
     phone,
@@ -922,6 +1231,329 @@ export function registerAllDomainRoutes(app) {
       }
     }
   );
+
+  app.get("/api/admin/evolution-config", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+    try {
+      const includeRemote = normalizeString(req.query?.remote).toLowerCase() === "true";
+      const inventory = await fetchAdminEvolutionInventory({ includeRemote });
+      res.json(inventory);
+    } catch (error) {
+      console.error("admin evolution config query error:", error);
+      sendError(res, 500, "EVOLUTION_CONFIG_QUERY_FAILED", error instanceof Error ? error.message : "Failed");
+    }
+  });
+
+  app.patch("/api/admin/evolution-config/evolution-instances/:instanceId", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const instanceId = normalizeString(req.params?.instanceId);
+    if (!parseOptionalUuid(instanceId)?.value) {
+      sendError(res, 400, "INVALID_INSTANCE_ID", "Invalid Evolution instance id");
+      return;
+    }
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const updates = [];
+    const values = [];
+    const addUpdate = (sql, value) => {
+      values.push(value);
+      updates.push(sql.replace("?", `$${values.length}`));
+    };
+
+    if (Object.prototype.hasOwnProperty.call(body, "name")) {
+      addUpdate("name = ?", normalizeString(body.name) || "Evolution");
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "dispatchWebhookUrl")) {
+      const url = normalizeHttpUrl(body.dispatchWebhookUrl);
+      if (!url) {
+        sendError(res, 400, "INVALID_DISPATCH_WEBHOOK_URL", "dispatchWebhookUrl must be a valid http or https URL");
+        return;
+      }
+      addUpdate("dispatch_webhook_url = ?", url);
+    }
+    const dispatchToken = parseOptionalAdminSecret(body, "dispatchWebhookToken");
+    if (dispatchToken.provided) addUpdate("dispatch_webhook_token = ?", dispatchToken.value);
+    const inboundToken = parseOptionalAdminSecret(body, "inboundBearerToken");
+    if (inboundToken.provided) addUpdate("inbound_bearer_token = ?", inboundToken.value);
+    if (Object.prototype.hasOwnProperty.call(body, "active")) {
+      addUpdate("active = ?", body.active !== false);
+    }
+
+    if (updates.length === 0) {
+      sendError(res, 400, "NO_UPDATES", "No valid fields to update");
+      return;
+    }
+
+    values.push(req.authAccess?.uid || null, req.authAccess?.email || null, instanceId);
+    try {
+      const result = await pgDatabasePool.query(
+        `
+          UPDATE public.lead_client_evolution_instances
+          SET ${updates.join(", ")}, updated_at = now(), updated_by_uid = $${values.length - 2}, updated_by_email = $${values.length - 1}
+          WHERE id = $${values.length}
+          RETURNING id
+        `,
+        values
+      );
+      if (result.rowCount === 0) {
+        sendError(res, 404, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found");
+        return;
+      }
+      res.json(await fetchAdminEvolutionInventory());
+    } catch (error) {
+      console.error("admin evolution instance update error:", error);
+      sendError(res, 500, "EVOLUTION_INSTANCE_UPDATE_FAILED", error instanceof Error ? error.message : "Failed");
+    }
+  });
+
+  app.patch("/api/admin/evolution-config/n8n-settings/:clientId", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const clientId = normalizeTenantKey(req.params?.clientId);
+    if (!clientId) {
+      sendError(res, 400, "INVALID_CLIENT_ID", "Invalid client id");
+      return;
+    }
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const updates = [];
+    const values = [];
+    const addUpdate = (sql, value) => {
+      values.push(value);
+      updates.push(sql.replace("?", `$${values.length}`));
+    };
+
+    if (Object.prototype.hasOwnProperty.call(body, "dispatchWebhookUrl")) {
+      const rawUrl = normalizeString(body.dispatchWebhookUrl);
+      const url = rawUrl ? normalizeHttpUrl(rawUrl) : null;
+      if (rawUrl && !url) {
+        sendError(res, 400, "INVALID_DISPATCH_WEBHOOK_URL", "dispatchWebhookUrl must be a valid http or https URL");
+        return;
+      }
+      addUpdate("dispatch_webhook_url = ?", url);
+    }
+    const dispatchToken = parseOptionalAdminSecret(body, "dispatchWebhookToken");
+    if (dispatchToken.provided) addUpdate("dispatch_webhook_token = ?", dispatchToken.value);
+    const inboundToken = parseOptionalAdminSecret(body, "inboundBearerToken");
+    if (inboundToken.provided) addUpdate("inbound_bearer_token = ?", inboundToken.value);
+    if (Object.prototype.hasOwnProperty.call(body, "active")) {
+      addUpdate("active = ?", body.active !== false);
+    }
+
+    if (updates.length === 0) {
+      sendError(res, 400, "NO_UPDATES", "No valid fields to update");
+      return;
+    }
+
+    values.push(req.authAccess?.uid || null, req.authAccess?.email || null, clientId);
+    try {
+      const result = await pgDatabasePool.query(
+        `
+          UPDATE public.lead_client_n8n_settings
+          SET ${updates.join(", ")}, updated_at = now(), updated_by_uid = $${values.length - 2}, updated_by_email = $${values.length - 1}
+          WHERE client_id = $${values.length}
+          RETURNING client_id
+        `,
+        values
+      );
+      if (result.rowCount === 0) {
+        sendError(res, 404, "N8N_SETTINGS_NOT_FOUND", "Legacy settings not found");
+        return;
+      }
+      res.json(await fetchAdminEvolutionInventory());
+    } catch (error) {
+      console.error("admin n8n settings update error:", error);
+      sendError(res, 500, "N8N_SETTINGS_UPDATE_FAILED", error instanceof Error ? error.message : "Failed");
+    }
+  });
+
+  app.patch("/api/admin/evolution-config/followup-companies/:companyId", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const companyId = normalizeString(req.params?.companyId);
+    if (!parseOptionalUuid(companyId)?.value) {
+      sendError(res, 400, "INVALID_COMPANY_ID", "Invalid follow-up company id");
+      return;
+    }
+
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const updates = [];
+    const values = [];
+    const addUpdate = (sql, value) => {
+      values.push(value);
+      updates.push(sql.replace("?", `$${values.length}`));
+    };
+
+    if (Object.prototype.hasOwnProperty.call(body, "evolutionInstance")) {
+      const instanceName = normalizeString(body.evolutionInstance);
+      if (!instanceName) {
+        sendError(res, 400, "INVALID_EVOLUTION_INSTANCE", "evolutionInstance is required");
+        return;
+      }
+      addUpdate("evolution_instance = ?", instanceName);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "webhookUrl")) {
+      const rawUrl = normalizeString(body.webhookUrl);
+      const url = rawUrl ? normalizeHttpUrl(rawUrl) : null;
+      if (rawUrl && !url) {
+        sendError(res, 400, "INVALID_WEBHOOK_URL", "webhookUrl must be a valid http or https URL");
+        return;
+      }
+      addUpdate("webhook_url = ?", url);
+    }
+
+    if (updates.length === 0) {
+      sendError(res, 400, "NO_UPDATES", "No valid fields to update");
+      return;
+    }
+
+    values.push(companyId);
+    try {
+      const result = await pgDatabasePool.query(
+        `
+          UPDATE public.followup_companies
+          SET ${updates.join(", ")}, updated_at = now()
+          WHERE id = $${values.length}
+          RETURNING id
+        `,
+        values
+      );
+      if (result.rowCount === 0) {
+        sendError(res, 404, "FOLLOWUP_COMPANY_NOT_FOUND", "Follow-up company not found");
+        return;
+      }
+      res.json(await fetchAdminEvolutionInventory());
+    } catch (error) {
+      console.error("admin followup company update error:", error);
+      sendError(res, 500, "FOLLOWUP_COMPANY_UPDATE_FAILED", error instanceof Error ? error.message : "Failed");
+    }
+  });
+
+  app.post("/api/admin/evolution-config/remote-instances/link", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const tenantId = normalizeTenantKey(req.body?.tenantId);
+    const instanceName = normalizeString(req.body?.instanceName);
+    const displayName = normalizeString(req.body?.name) || instanceName || "Evolution";
+    if (!tenantId || !instanceName) {
+      sendError(res, 400, "INVALID_BODY", "tenantId and instanceName are required");
+      return;
+    }
+
+    try {
+      if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+      await upsertLeadClientEvolutionInstance(
+        tenantId,
+        {
+          name: displayName,
+          dispatchWebhookUrl: buildEvolutionDispatchUrl(instanceName),
+          dispatchWebhookToken: req.body?.dispatchWebhookToken,
+          inboundBearerToken: req.body?.inboundBearerToken,
+          active: req.body?.active !== false,
+          isDefault: req.body?.isDefault === true,
+          chipState: req.body?.chipState,
+          dailyLimitOverride: req.body?.dailyLimitOverride,
+        },
+        req.authAccess,
+        null
+      );
+      res.status(201).json(await fetchAdminEvolutionInventory());
+    } catch (error) {
+      if (error instanceof Error && error.message === "INVALID_DISPATCH_WEBHOOK_URL") {
+        sendError(res, 400, "INVALID_DISPATCH_WEBHOOK_URL", "Could not build a valid Evolution dispatch URL");
+        return;
+      }
+
+      console.error("admin remote evolution link error:", error);
+      sendError(res, 500, "REMOTE_EVOLUTION_LINK_FAILED", error instanceof Error ? error.message : "Failed");
+    }
+  });
+
+  app.post("/api/admin/evolution-config/bulk-replace", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const oldBaseUrl = normalizeString(req.body?.oldBaseUrl).replace(/\/+$/, "");
+    const newBaseUrl = normalizeString(req.body?.newBaseUrl).replace(/\/+$/, "");
+    const normalizedNewBaseUrl = normalizeHttpUrl(newBaseUrl);
+    if (!oldBaseUrl || !newBaseUrl || !normalizedNewBaseUrl) {
+      sendError(res, 400, "INVALID_BODY", "oldBaseUrl and newBaseUrl must be valid base URLs");
+      return;
+    }
+
+    const dispatchToken = parseOptionalAdminSecret(req.body || {}, "dispatchWebhookToken");
+    const updateToken = req.body?.updateDispatchToken === true && dispatchToken.provided;
+
+    const client = await pgDatabasePool.connect();
+    try {
+      await client.query("BEGIN");
+      const instanceValues = updateToken
+        ? [oldBaseUrl, normalizedNewBaseUrl, dispatchToken.value, req.authAccess?.uid || null, req.authAccess?.email || null]
+        : [oldBaseUrl, normalizedNewBaseUrl, req.authAccess?.uid || null, req.authAccess?.email || null];
+      const instanceResult = await client.query(
+        updateToken
+          ? `
+            UPDATE public.lead_client_evolution_instances
+            SET dispatch_webhook_url = replace(dispatch_webhook_url, $1, $2),
+                dispatch_webhook_token = $3,
+                updated_at = now(),
+                updated_by_uid = $4,
+                updated_by_email = $5
+            WHERE dispatch_webhook_url LIKE $1 || '%'
+          `
+          : `
+            UPDATE public.lead_client_evolution_instances
+            SET dispatch_webhook_url = replace(dispatch_webhook_url, $1, $2),
+                updated_at = now(),
+                updated_by_uid = $3,
+                updated_by_email = $4
+            WHERE dispatch_webhook_url LIKE $1 || '%'
+          `,
+        instanceValues
+      );
+
+      const settingsValues = updateToken
+        ? [oldBaseUrl, normalizedNewBaseUrl, dispatchToken.value, req.authAccess?.uid || null, req.authAccess?.email || null]
+        : [oldBaseUrl, normalizedNewBaseUrl, req.authAccess?.uid || null, req.authAccess?.email || null];
+      const settingsResult = await client.query(
+        updateToken
+          ? `
+            UPDATE public.lead_client_n8n_settings
+            SET dispatch_webhook_url = replace(dispatch_webhook_url, $1, $2),
+                dispatch_webhook_token = $3,
+                updated_at = now(),
+                updated_by_uid = $4,
+                updated_by_email = $5
+            WHERE dispatch_webhook_url LIKE $1 || '%'
+          `
+          : `
+            UPDATE public.lead_client_n8n_settings
+            SET dispatch_webhook_url = replace(dispatch_webhook_url, $1, $2),
+                updated_at = now(),
+                updated_by_uid = $3,
+                updated_by_email = $4
+            WHERE dispatch_webhook_url LIKE $1 || '%'
+          `,
+        settingsValues
+      );
+
+      await client.query("COMMIT");
+      const inventory = await fetchAdminEvolutionInventory();
+      res.json({
+        ...inventory,
+        bulkResult: {
+          evolutionInstancesUpdated: instanceResult.rowCount,
+          legacySettingsUpdated: settingsResult.rowCount,
+          dispatchTokenUpdated: updateToken,
+        },
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("admin evolution bulk replace error:", error);
+      sendError(res, 500, "EVOLUTION_BULK_REPLACE_FAILED", error instanceof Error ? error.message : "Failed");
+    } finally {
+      client.release();
+    }
+  });
 
   app.post(
     "/api/lead-clients/:tenantId/evolution-instances",
