@@ -89,6 +89,26 @@ let _remoteEvoInventoryCache = null; // { at: number, value: object }
 let _remoteEvoInventoryInflight = null; // Promise | null
 
 /**
+ * Detecta JID de GRUPO / broadcast no inbound da Evolution. Resposta de lead legítima
+ * vem SEMPRE de número individual (@s.whatsapp.net); grupo (@g.us) nunca é lead.
+ * IMPORTANTE: receber o remoteJid CRU (antes de sanitizePhone, que stripa o "@g.us").
+ * Regra (conservadora p/ não descartar individual): @g.us | @broadcast | user-part com
+ * hífen (formato legado phone-timestamp) | user-part numérico > 15 dígitos (ids de grupo
+ * têm 18+; individual BR ≤ 13).
+ */
+function isGroupJid(rawJid) {
+  const s = String(rawJid ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (s.includes("@g.us")) return true;
+  if (s.includes("@broadcast")) return true;
+  const userPart = s.split("@")[0];
+  if (userPart.includes("-")) return true;
+  const digits = userPart.replace(/\D/g, "");
+  if (digits.length > 15) return true;
+  return false;
+}
+
+/**
  * Registers all HTTP routes (extracted from legacy server.js).
  * routeDeps must be populated in server.js before this runs.
  */
@@ -651,6 +671,10 @@ export function registerAllDomainRoutes(app) {
     return { provided: true, value };
   }
 
+  // Janela de atribuição de resposta → disparo (ajustável). Um inbound é vinculado ao
+  // disparo com status='sent' mais recente daquele telefone DENTRO desta janela.
+  const DISPATCH_ATTRIBUTION_WINDOW_DAYS = 14;
+
   async function appendLeadMessage({
     clientId,
     phone,
@@ -668,6 +692,9 @@ export function registerAllDomainRoutes(app) {
     const normalizedMessage = normalizeString(messageText);
     if (!normalizedMessage) return null;
 
+    // REGRA DE CANONIZAÇÃO: lead_id = SEMPRE o lead do CRM do tenant (leads.id da tabela
+    // leadsTableName), nunca lead_import_items.id. campaign_id carrega a atribuição de
+    // campanha (inequívoco, é o que o Dashboard usa) e PODE vir do disparo.
     let resolvedLeadId = leadId || null;
     let resolvedCampaignId = campaignId || null;
 
@@ -691,6 +718,34 @@ export function registerAllDomainRoutes(app) {
       }
     }
 
+    // Atribuição de CAMPANHA por disparo: para inbound ainda sem campanha, casa pelo
+    // disparo (campaign_dispatch_runs status='sent') mais recente daquele telefone,
+    // dentro da janela. Preenche SÓ campaign_id — NÃO lead_id (runRow.lead_id é
+    // lead_import_items.id, id-space errado). Fallback gracioso: nada casar → NULL.
+    if (direction === "inbound" && !resolvedCampaignId) {
+      try {
+        const windowStartIso = new Date(
+          Date.now() - DISPATCH_ATTRIBUTION_WINDOW_DAYS * 24 * 60 * 60 * 1000
+        ).toISOString();
+        const { data: runRow, error: runError } = await supabase
+          .from("campaign_dispatch_runs")
+          .select("campaign_id, dispatch_id, sent_at, created_at")
+          .eq("client_id", clientId)
+          .eq("phone", phone)
+          .eq("status", "sent")
+          .gte("created_at", windowStartIso)
+          .order("sent_at", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!runError && runRow) {
+          resolvedCampaignId = resolvedCampaignId || runRow.campaign_id || null;
+        }
+      } catch (error) {
+        console.warn("[lead-messages] dispatch attribution lookup failed:", error?.message || error);
+      }
+    }
+
     const { error } = await supabase.from("lead_messages").insert({
       client_id: clientId,
       lead_id: resolvedLeadId,
@@ -706,6 +761,20 @@ export function registerAllDomainRoutes(app) {
 
     if (error && !isMissingSchemaError(error)) {
       console.warn("[lead-messages] insert failed:", error.message || error);
+    }
+
+    // Marca o lead como "respondeu": grava ultima_interacao_usuario no momento do inbound.
+    // Casa por telefone (robusto ao id-space). Best-effort: nunca derruba o webhook.
+    if (direction === "inbound") {
+      try {
+        await supabase
+          .from(leadsTableName(clientId))
+          .update({ ultima_interacao_usuario: deliveredAt || new Date().toISOString() })
+          .eq("client_id", clientId)
+          .eq("telefone", phone);
+      } catch (updateError) {
+        console.warn("[lead-messages] ultima_interacao_usuario update failed:", updateError?.message || updateError);
+      }
     }
 
     return { leadId: resolvedLeadId, campaignId: resolvedCampaignId };
@@ -5997,8 +6066,17 @@ export function registerAllDomainRoutes(app) {
 
   app.post("/api/campaigns/reply-webhook", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
+
+    // Descarta mensagem de GRUPO/broadcast cedo (antes de qualquer gravação): resposta de
+    // lead vem sempre de número individual. Responde 200 p/ a Evolution não reenviar.
+    const rawRemoteJid = body.data?.key?.remoteJid ?? body.remoteJid ?? body.senderJid ?? null;
+    if (isGroupJid(rawRemoteJid)) {
+      res.json({ success: true, ignored: "group" });
+      return;
+    }
+
     const clientId = normalizeTenantKey(body.clientId ?? body.client_id ?? body.client?.id);
     const phone = sanitizePhone(
       body.phone ??
@@ -7073,7 +7151,14 @@ export function registerAllDomainRoutes(app) {
       res.json({ success: true, ignored: "fromMe" });
       return;
     }
-  
+
+    // Descarta mensagem de GRUPO/broadcast antes de qualquer lookup no banco ou chatbot.
+    const rawRemoteJid = body.data?.key?.remoteJid ?? body.remoteJid ?? body.senderJid ?? null;
+    if (isGroupJid(rawRemoteJid)) {
+      res.json({ success: true, ignored: "group" });
+      return;
+    }
+
     const clientId = normalizeTenantKey(
       body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id
     ) || "outlier";
