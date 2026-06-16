@@ -185,6 +185,15 @@ export default function EvolutionAdmin() {
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "Falha ao carregar Evolution"));
       return readApiJson<EvolutionInventory>(res, "admin-evolution-config");
     },
+    // INCIDENTE 15/06: com remote=true esta query chama /instance/fetchInstances na
+    // Evolution (query pesada no banco DELA). Com as opções default do react-query
+    // (staleTime 0 + refetchOnWindowFocus + retry 3) a aba aberta martelava a Evolution
+    // a cada foco/timeout → sobrecarga da Evo DB + Evo API. Busca remota é one-shot,
+    // só via botão "Buscar Evolution": sem refetch automático nem retry.
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
   });
 
   const updateMutation = useMutation({
