@@ -248,11 +248,12 @@ if (useDirectPostgres) {
 
 function shutdownPgPool() {
   if (pgDatabasePool) {
-    pgDatabasePool.end().catch(() => {});
+    return pgDatabasePool.end().catch(() => {});
   }
+  return Promise.resolve();
 }
-process.once("SIGTERM", shutdownPgPool);
-process.once("SIGINT", shutdownPgPool);
+// SIGTERM/SIGINT são tratados por gracefulShutdown (fecha HTTP + pool + exit), definido
+// junto ao app.listen — não registrar handlers de sinal aqui para não duplicar.
 
 // Firebase: prefer env vars; fallback to service account JSON in backend dir
 let firebaseConfig = {
@@ -7195,32 +7196,117 @@ app.use((error, req, res, _next) => {
 });
 
 const port = Number.parseInt(process.env.PORT || "3001", 10);
+
+// Config do retry de bind (porta temporariamente ocupada após restart — janela em que
+// o processo anterior ainda está liberando :PORT). Ajustável por env.
+const LISTEN_RETRY_MAX = Number.parseInt(process.env.LISTEN_RETRY_MAX || "5", 10);
+const LISTEN_RETRY_DELAY_MS = Number.parseInt(process.env.LISTEN_RETRY_DELAY_MS || "3000", 10);
+// Tempo máximo para o shutdown gracioso antes de forçar a saída (libera a porta).
+const SHUTDOWN_FORCE_MS = Number.parseInt(process.env.SHUTDOWN_FORCE_MS || "10000", 10);
+
+let httpServer = null;
+
+function startBackgroundServices() {
+  startCampaignScheduler();
+  if (supabase) {
+    setSupabaseClient(supabase);
+  }
+  initializeRedisChat().catch((error) => {
+    console.error("hardcoded-chatbot redis init error:", error);
+  });
+  whatsappSessionManager.restorePersistedSession().catch((error) => {
+    console.error("whatsapp startup restore error:", error);
+  });
+  // BullMQ worker do módulo de follow-up
+  if (process.env.REDIS_URL || process.env.REDIS_HOST) {
+    startFollowupWorker();
+  } else {
+    console.warn("[followup/worker] REDIS_URL/REDIS_HOST não configurado — worker não iniciado.");
+  }
+  // Motor proativo de sugestões (node-cron, a cada 6h)
+  startAutomationEngine();
+}
+
+// (A) Sobe o HTTP com handler de 'error'. EADDRINUSE → retry curto e limitado (cobre a
+// janela transitória do restart em que a instância anterior ainda segura a porta);
+// se persistir, exit(1) controlado (deixa o orquestrador reiniciar limpo, sem crash
+// não tratado). Qualquer outro erro de listen → loga e exit(1).
+function listenWithRetry(attempt = 1) {
+  const server = app.listen(port, () => {
+    httpServer = server;
+    console.log(`VexoApi listening on port ${port}`);
+    startBackgroundServices();
+  });
+
+  server.on("error", (err) => {
+    if (err && err.code === "EADDRINUSE") {
+      if (attempt < LISTEN_RETRY_MAX) {
+        console.warn(
+          `[server] porta ${port} ocupada (EADDRINUSE) — tentativa ${attempt}/${LISTEN_RETRY_MAX}; novo retry em ${LISTEN_RETRY_DELAY_MS}ms`
+        );
+        setTimeout(() => listenWithRetry(attempt + 1), LISTEN_RETRY_DELAY_MS);
+        return;
+      }
+      console.error(
+        `[server] porta ${port} ainda ocupada após ${LISTEN_RETRY_MAX} tentativas — encerrando para o orquestrador reiniciar.`
+      );
+      process.exit(1);
+    }
+    console.error("[server] erro fatal no listen:", err);
+    process.exit(1);
+  });
+}
+
+// (B) Shutdown gracioso: fecha o servidor HTTP (libera a porta RÁPIDO), encerra o pool
+// pg, e sai com 0. Timeout de força garante que nunca fique pendurado segurando :PORT.
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} recebido — iniciando shutdown gracioso...`);
+
+  const forceTimer = setTimeout(() => {
+    console.error(`[server] shutdown excedeu ${SHUTDOWN_FORCE_MS}ms — forçando saída.`);
+    process.exit(0);
+  }, SHUTDOWN_FORCE_MS);
+  forceTimer.unref();
+
+  const finish = () => {
+    Promise.resolve(shutdownPgPool())
+      .catch(() => {})
+      .finally(() => {
+        console.log("[server] shutdown concluído.");
+        clearTimeout(forceTimer);
+        process.exit(0);
+      });
+  };
+
+  if (httpServer) {
+    httpServer.close((err) => {
+      if (err) console.error("[server] erro ao fechar HTTP server:", err.message || err);
+      else console.log("[server] HTTP server fechado (porta liberada).");
+      finish();
+    });
+  } else {
+    finish();
+  }
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+// (C) Nunca mais ficar cego: loga o erro completo de uncaughtException/unhandledRejection.
+// Em uncaughtException, o processo está em estado indefinido → loga e sai (1) para reinício
+// limpo (em vez do throw silencioso que matava sem rastro).
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandledRejection:", reason instanceof Error ? reason.stack || reason.message : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaughtException:", err instanceof Error ? err.stack || err.message : err);
+  process.exit(1);
+});
+
 // Rodar migrations antes de subir o servidor
 runMigrations(pgDatabasePool).finally(() => {
-  app.listen(port, () => {
-    console.log(`VexoApi listening on port ${port}`);
-    startCampaignScheduler();
-
-    if (supabase) {
-      setSupabaseClient(supabase);
-    }
-
-    initializeRedisChat().catch((error) => {
-      console.error("hardcoded-chatbot redis init error:", error);
-    });
-
-    whatsappSessionManager.restorePersistedSession().catch((error) => {
-      console.error("whatsapp startup restore error:", error);
-    });
-
-    // BullMQ worker do módulo de follow-up
-    if (process.env.REDIS_URL || process.env.REDIS_HOST) {
-      startFollowupWorker();
-    } else {
-      console.warn("[followup/worker] REDIS_URL/REDIS_HOST não configurado — worker não iniciado.");
-    }
-
-    // Motor proativo de sugestões (node-cron, a cada 6h)
-    startAutomationEngine();
-  });
+  listenWithRetry();
 });
