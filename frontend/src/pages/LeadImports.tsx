@@ -2123,7 +2123,7 @@ export default function LeadImports({
         status: createdCampaign.status,
       });
     } catch (error) {
-      console.error("[campaigns-ui] campaign_submit_failed", {
+      console.error("[campaigns-ui] create_campaign_failed", {
         editing: Boolean(editingCampaignId),
         clientId: campaignPayload.clientId,
         importId: campaignPayload.importId,
