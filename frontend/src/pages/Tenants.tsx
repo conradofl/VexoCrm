@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Database, KeyRound, Link2, Plus, Save, Search, SlidersHorizontal, Trash2, Wand2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, Database, Info, KeyRound, Link2, Plus, Save, Search, SlidersHorizontal, Trash2, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -137,6 +137,14 @@ export default function Tenants() {
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
   const [tableStatuses, setTableStatuses] = useState<Record<string, LeadClientTableStatus>>({});
+  const [expandedTenants, setExpandedTenants] = useState<Record<string, boolean>>({});
+
+  const toggleTenantExpanded = (id: string) => {
+    setExpandedTenants((current) => ({
+      ...current,
+      [id]: !current[id],
+    }));
+  };
   const [n8nDrafts, setN8nDrafts] = useState<
     Record<
       string,
@@ -827,239 +835,322 @@ export default function Tenants() {
                     return (
                     <div
                       key={tenant.id}
-                      className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03]"
+                      className="rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-1.5">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <p className="text-sm font-semibold text-foreground">{tenant.name}</p>
-                            <Badge className="border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200">
+                      {/* Compact Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-white/5">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{tenant.name}</p>
+                            <Badge className="border border-cyan-400/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200 text-[10px]">
                               {tenant.id}
                             </Badge>
-                            <Badge className="border border-emerald-400/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200">
+                            <Badge className="border border-emerald-400/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200 text-[10px]">
                               {tenant.n8n_onboarding_status || "pendente"}
                             </Badge>
                           </div>
-                          <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-white/45">
-                            {formatCreatedAt(tenant.created_at)}
+                          <p className="text-[10px] text-slate-400 dark:text-white/30 uppercase tracking-[0.1em] font-mono">
+                            Criado em: {formatCreatedAt(tenant.created_at)}
                           </p>
                         </div>
-                        <div className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-3 py-2 text-right text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
-                          <p className="font-medium text-foreground">Rota base</p>
-                          <p className="mt-1 font-mono">/clientes/{tenant.id}/dashboard</p>
-                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleTenantExpanded(tenant.id)}
+                          className="h-8 text-xs gap-1.5 hover:bg-slate-100 dark:hover:bg-white/5 border border-slate-200 dark:border-white/10"
+                        >
+                          <SlidersHorizontal className="h-3.5 w-3.5" />
+                          {expandedTenants[tenant.id] ? "Recolher Configurações" : "Configurações Avançadas & KPIs"}
+                          {expandedTenants[tenant.id] ? (
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
                       </div>
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.03]">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <Database className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
-                          <div className="min-w-0">
-                            <p className="font-medium text-foreground">Tabela dinamica de leads</p>
-                            <p className="truncate font-mono text-xs text-muted-foreground">{expectedTableName}</p>
+
+                      {/* Summary Metrics Row */}
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        {/* Rota base */}
+                        <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.03] flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-foreground text-[11px]">Rota base do portal</p>
+                            <p className="font-mono text-xs text-muted-foreground">/clientes/{tenant.id}/dashboard</p>
                           </div>
+                          <Badge variant="outline" className="text-[10px] uppercase font-mono">link</Badge>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge
-                            className={
-                              tableStatus?.exists
-                                ? "border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-                                : "border border-amber-400/25 bg-amber-500/10 text-amber-700 dark:text-amber-200"
-                            }
-                          >
-                            {tableStatus?.exists ? "Tabela OK" : "Nao verificada"}
-                          </Badge>
-                          {tableStatus?.exists ? (
-                            <Badge className="border border-slate-300/80 bg-white/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
-                              {tableStatus.columns?.length || 0} colunas
-                            </Badge>
-                          ) : null}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={verifyTenantTable.isPending}
-                            onClick={() => void handleVerifyTenantTable(tenant)}
-                          >
-                            {verifyTenantTable.isPending ? "Verificando..." : "Verificar"}
-                          </Button>
-                        </div>
-                      </div>
-                      {canManageTenants ? (
-                        <div className="mt-3 rounded-lg border border-slate-200/80 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.02]">
-                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="text-xs font-semibold text-foreground">KPIs de segmentacao</p>
-                              <p className="text-[11px] text-muted-foreground">
-                                Ajuste os indicadores usados nas campanhas desta empresa.
-                              </p>
+                        {/* Tabela de leads */}
+                        <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.03] flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Database className="h-3.5 w-3.5 shrink-0 text-cyan-700 dark:text-cyan-200" />
+                            <div className="min-w-0">
+                              <p className="font-medium text-foreground text-[11px]">Tabela de leads</p>
+                              <p className="truncate font-mono text-[10px] text-muted-foreground">{expectedTableName}</p>
                             </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge
+                              className={
+                                tableStatus?.exists
+                                  ? "border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200 text-[10px]"
+                                  : "border border-amber-400/25 bg-amber-500/10 text-amber-700 dark:text-amber-200 text-[10px]"
+                              }
+                            >
+                              {tableStatus?.exists ? "OK" : "Não verif."}
+                            </Badge>
+                            {tableStatus?.exists ? (
+                              <Badge className="border border-slate-300/80 bg-white/90 text-[10px] text-slate-700 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/80">
+                                {tableStatus.columns?.length || 0} col
+                              </Badge>
+                            ) : null}
                             <Button
                               type="button"
-                              size="sm"
                               variant="outline"
-                              disabled={updateSegmentationConfig.isPending}
-                              onClick={() => void handleSaveTenantSegmentation(tenant)}
+                              size="sm"
+                              className="h-7 text-[10px] px-2"
+                              disabled={verifyTenantTable.isPending}
+                              onClick={() => void handleVerifyTenantTable(tenant)}
                             >
-                              <Save className="h-3.5 w-3.5" />
-                              {updateSegmentationConfig.isPending ? "Salvando..." : "Salvar KPIs"}
+                              {verifyTenantTable.isPending ? "..." : "Verificar"}
                             </Button>
                           </div>
-                          <div className="grid gap-2">
-                            {tenantSegmentationKpis.map((kpi, index) => (
-                              <div key={`${tenant.id}-${kpi.id}-${index}`} className="grid gap-2 rounded-lg border border-slate-200/70 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-black/20 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
-                                <Input
-                                  className="h-8"
-                                  placeholder="Nome do KPI"
-                                  value={kpi.label}
-                                  onChange={(event) => updateTenantSegmentationKpi(tenant, index, { label: event.target.value })}
-                                />
-                                <Input
-                                  className="h-8 font-mono text-xs"
-                                  placeholder="campo_da_planilha"
-                                  value={kpi.field}
-                                  onChange={(event) => updateTenantSegmentationKpi(tenant, index, { field: buildFieldKey(event.target.value) })}
-                                />
-                                <Select
-                                  value={kpi.type}
-                                  onValueChange={(value) => updateTenantSegmentationKpi(tenant, index, { type: value as LeadClientSegmentationKpi["type"] })}
-                                >
-                                  <SelectTrigger className="h-8">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="category">Categoria</SelectItem>
-                                    <SelectItem value="money">Valor</SelectItem>
-                                    <SelectItem value="number">Numero</SelectItem>
-                                    <SelectItem value="date">Data</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            ))}
-                          </div>
                         </div>
-                      ) : null}
-                      {canManageN8n ? (
-                        <div className="mt-4 space-y-3">
-                          <EvolutionChipsPanel tenant={tenant} />
+                      </div>
 
-                          {/* Fallback legado — usado quando nenhuma instância Evolution padrão estiver ativa */}
-                          <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.02]">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <p className="text-sm font-medium text-foreground">Fallback legado</p>
-                                <p className="text-xs text-muted-foreground">
-                                  Usado quando nenhuma instancia Evolution padrao estiver ativa.
-                                </p>
-                              </div>
-                              <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                                <input
-                                  type="checkbox"
-                                  checked={getTenantN8nDraft(tenant).active}
-                                  onChange={(event) =>
-                                    updateTenantN8nDraft(tenant.id, { active: event.target.checked })
-                                  }
-                                />
-                                ativo
-                              </label>
-                            </div>
-                            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.85fr)]">
-                              <Input
-                                placeholder="URL de disparo Evolution"
-                                value={getTenantN8nDraft(tenant).dispatchWebhookUrl}
-                                onChange={(event) =>
-                                  updateTenantN8nDraft(tenant.id, {
-                                    dispatchWebhookUrl: event.target.value,
-                                  })
-                                }
-                              />
-                              <Input
-                                placeholder={
-                                  tenant.n8n_settings?.has_dispatch_webhook_token
-                                    ? "API Key Evolution definida"
-                                    : "API Key Evolution (apikey do header)"
-                                }
-                                value={getTenantN8nDraft(tenant).dispatchWebhookToken}
-                                onChange={(event) =>
-                                  updateTenantN8nDraft(tenant.id, {
-                                    dispatchWebhookToken: event.target.value,
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="flex flex-wrap justify-end gap-2">
-                              {tenant.n8n_settings?.has_dispatch_webhook_token ? (
+                      {/* Collapsible Panel */}
+                      {expandedTenants[tenant.id] && (
+                        <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-white/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                          {/* KPIs de segmentacao */}
+                          {canManageTenants ? (
+                            <div className="rounded-lg border border-slate-200/80 bg-slate-50/50 p-3 dark:border-white/10 dark:bg-white/[0.01]">
+                              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <SlidersHorizontal className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
+                                    <p className="text-xs font-semibold text-foreground">KPIs de Segmentação</p>
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                                    Configure as colunas de dados do lead que viram filtros de campanhas no CRM.
+                                  </p>
+                                </div>
                                 <Button
                                   type="button"
-                                  variant="outline"
                                   size="sm"
-                                  disabled={updateN8nSettings.isPending}
-                                  onClick={() => void handleClearTenantToken(tenant, "dispatchWebhookToken")}
+                                  disabled={updateSegmentationConfig.isPending}
+                                  onClick={() => void handleSaveTenantSegmentation(tenant)}
+                                  className="h-8"
                                 >
-                                  Remover API Key
+                                  <Save className="h-3.5 w-3.5" />
+                                  {updateSegmentationConfig.isPending ? "Salvando..." : "Salvar KPIs"}
                                 </Button>
-                              ) : null}
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={updateN8nSettings.isPending}
-                                onClick={() => void handleSaveTenantN8n(tenant)}
-                              >
-                                <Save className="h-4 w-4" />
-                                {updateN8nSettings.isPending ? "Salvando..." : "Salvar fallback"}
-                              </Button>
+                              </div>
+
+                              {/* Help box for KPIs */}
+                              <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-blue-400/25 bg-blue-500/5 p-3 text-[11px] leading-relaxed text-blue-700 dark:text-blue-300">
+                                <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                                <div className="space-y-1">
+                                  <p className="font-semibold">O que são os KPIs de Segmentação?</p>
+                                  <p>
+                                    Eles conectam os campos do seu Excel/banco de dados com os filtros na tela de criação de campanhas de disparo.
+                                  </p>
+                                  <ul className="list-disc pl-4 space-y-0.5 mt-1">
+                                    <li><strong>Rótulo de Exibição (CRM):</strong> Como o filtro aparecerá para você na interface do CRM (ex: <em>Origem</em>).</li>
+                                    <li><strong>Coluna da Planilha:</strong> O nome exato da coluna da tabela de leads no banco de dados (ex: <em>origem</em>).</li>
+                                    <li><strong>Tipo do Dado:</strong> Define como os leads serão filtrados (Categoria, Valor/Dinheiro, Número ou Data).</li>
+                                  </ul>
+                                  <p className="text-muted-foreground text-[10px] mt-1">
+                                    * A repetição (ex: Origem {"->"} origem) é comum se você está usando o modelo padrão. Não é um erro.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* KPI Inputs Grid */}
+                              <div className="space-y-2">
+                                {/* Column Headers */}
+                                <div className="hidden md:grid gap-2 px-2 text-[10px] uppercase font-semibold tracking-wider text-muted-foreground md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
+                                  <div>Rótulo de Exibição (CRM)</div>
+                                  <div>Coluna da Planilha (Banco)</div>
+                                  <div>Tipo do Dado</div>
+                                </div>
+
+                                {tenantSegmentationKpis.map((kpi, index) => (
+                                  <div key={`${tenant.id}-${kpi.id}-${index}`} className="grid gap-2 rounded-lg border border-slate-200/70 bg-white p-2 dark:border-white/10 dark:bg-black/20 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
+                                    <div className="space-y-1">
+                                      <label className="text-[10px] font-medium text-muted-foreground md:hidden">Rótulo de Exibição (CRM)</label>
+                                      <Input
+                                        className="h-8"
+                                        placeholder="Ex: Origem do Lead"
+                                        value={kpi.label}
+                                        onChange={(event) => updateTenantSegmentationKpi(tenant, index, { label: event.target.value })}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[10px] font-medium text-muted-foreground md:hidden">Coluna da Planilha (Banco)</label>
+                                      <Input
+                                        className="h-8 font-mono text-xs"
+                                        placeholder="Ex: origem"
+                                        value={kpi.field}
+                                        onChange={(event) => updateTenantSegmentationKpi(tenant, index, { field: buildFieldKey(event.target.value) })}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[10px] font-medium text-muted-foreground md:hidden">Tipo do Dado</label>
+                                      <Select
+                                        value={kpi.type}
+                                        onValueChange={(value) => updateTenantSegmentationKpi(tenant, index, { type: value as LeadClientSegmentationKpi["type"] })}
+                                      >
+                                        <SelectTrigger className="h-8">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="category">Categoria</SelectItem>
+                                          <SelectItem value="money">Valor</SelectItem>
+                                          <SelectItem value="number">Numero</SelectItem>
+                                          <SelectItem value="date">Data</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      ) : null}
-                      {canManageTenants ? (
-                        <div className="mt-4 flex justify-end">
-                          <AlertDialog
-                            open={tenantPendingDelete === tenant.id}
-                            onOpenChange={(open) => {
-                              setTenantPendingDelete(open ? tenant.id : null);
-                            }}
-                          >
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                size="sm"
-                                disabled={deleteTenant.isPending}
+                          ) : null}
+
+                          {/* Chips and integrations settings */}
+                          {canManageN8n ? (
+                            <div className="space-y-3 rounded-lg border border-slate-200/80 bg-slate-50/50 p-3 dark:border-white/10 dark:bg-white/[0.01]">
+                              <EvolutionChipsPanel tenant={tenant} />
+
+                              {/* Fallback legado */}
+                              <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-white p-3 dark:border-white/10 dark:bg-black/20">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-xs font-semibold text-foreground">Fallback Legado</p>
+                                    <p className="text-[11px] text-muted-foreground">
+                                      URL e Token usados quando nenhuma instância Evolution padrão estiver configurada.
+                                    </p>
+                                  </div>
+                                  <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                    <input
+                                      type="checkbox"
+                                      className="rounded border-slate-300 dark:border-white/10 text-cyan-600 focus:ring-cyan-500"
+                                      checked={getTenantN8nDraft(tenant).active}
+                                      onChange={(event) =>
+                                        updateTenantN8nDraft(tenant.id, { active: event.target.checked })
+                                      }
+                                    />
+                                    Ativo
+                                  </label>
+                                </div>
+                                <div className="grid gap-2 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.85fr)]">
+                                  <Input
+                                    placeholder="URL de disparo Evolution"
+                                    className="h-8 text-xs"
+                                    value={getTenantN8nDraft(tenant).dispatchWebhookUrl}
+                                    onChange={(event) =>
+                                      updateTenantN8nDraft(tenant.id, {
+                                        dispatchWebhookUrl: event.target.value,
+                                      })
+                                    }
+                                  />
+                                  <Input
+                                    placeholder={
+                                      tenant.n8n_settings?.has_dispatch_webhook_token
+                                        ? "API Key Evolution definida"
+                                        : "API Key Evolution (apikey do header)"
+                                    }
+                                    className="h-8 text-xs"
+                                    value={getTenantN8nDraft(tenant).dispatchWebhookToken}
+                                    onChange={(event) =>
+                                      updateTenantN8nDraft(tenant.id, {
+                                        dispatchWebhookToken: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </div>
+                                <div className="flex flex-wrap justify-end gap-2">
+                                  {tenant.n8n_settings?.has_dispatch_webhook_token ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 text-xs"
+                                      disabled={updateN8nSettings.isPending}
+                                      onClick={() => void handleClearTenantToken(tenant, "dispatchWebhookToken")}
+                                    >
+                                      Remover API Key
+                                    </Button>
+                                  ) : null}
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-8 text-xs"
+                                    disabled={updateN8nSettings.isPending}
+                                    onClick={() => void handleSaveTenantN8n(tenant)}
+                                  >
+                                    <Save className="h-3.5 w-3.5" />
+                                    {updateN8nSettings.isPending ? "Salvando..." : "Salvar fallback"}
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {/* Danger zone / Delete button */}
+                          {canManageTenants ? (
+                            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-white/5">
+                              <AlertDialog
+                                open={tenantPendingDelete === tenant.id}
+                                onOpenChange={(open) => {
+                                  setTenantPendingDelete(open ? tenant.id : null);
+                                }}
                               >
-                                <Trash2 className="h-4 w-4" />
-                                Excluir empresa
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Excluir empresa cadastrada?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Vamos remover <strong>{tenant.name}</strong> ({tenant.id}). Se
-                                  esse tenant tiver leads, campanhas ou dados operacionais, eles
-                                  tambem serao apagados. Se houver usuarios vinculados, a exclusao
-                                  sera bloqueada automaticamente.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel disabled={deleteTenant.isPending}>
-                                  Cancelar
-                                </AlertDialogCancel>
-                                <AlertDialogAction
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                  disabled={deleteTenant.isPending}
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    void handleDeleteTenant(tenant);
-                                  }}
-                                >
-                                  {deleteTenant.isPending && tenantPendingDelete === tenant.id
-                                    ? "Excluindo..."
-                                    : "Confirmar exclusao"}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    disabled={deleteTenant.isPending}
+                                    className="h-8 text-xs animate-pulse hover:animate-none"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Excluir empresa
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Excluir empresa cadastrada?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Vamos remover <strong>{tenant.name}</strong> ({tenant.id}). Se
+                                      esse tenant tiver leads, campanhas ou dados operacionais, eles
+                                      tambem serao apagados. Se houver usuarios vinculados, a exclusao
+                                      sera bloqueada automaticamente.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel disabled={deleteTenant.isPending}>
+                                      Cancelar
+                                    </AlertDialogCancel>
+                                    <AlertDialogAction
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      disabled={deleteTenant.isPending}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        void handleDeleteTenant(tenant);
+                                      }}
+                                    >
+                                      {deleteTenant.isPending && tenantPendingDelete === tenant.id
+                                        ? "Excluindo..."
+                                        : "Confirmar exclusao"}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
+                      )}
                     </div>
                     );
                   })}
