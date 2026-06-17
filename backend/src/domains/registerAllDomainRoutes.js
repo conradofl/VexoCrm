@@ -780,6 +780,13 @@ export function registerAllDomainRoutes(app) {
     return { leadId: resolvedLeadId, campaignId: resolvedCampaignId };
   }
 
+  // Liveness: só confirma que o processo está vivo e atendendo HTTP. NÃO toca no banco.
+  // É o que o HEALTHCHECK do container usa — um banco lento não deve reiniciar a API
+  // (reiniciar não conserta o DB e gera crash loop sob carga). Readiness fica no /health.
+  app.get("/health/live", (_req, res) => {
+    res.json({ ok: true, status: "live", uptimeSeconds: process.uptime() });
+  });
+
   app.get("/health", async (_req, res) => {
     let postgresPing = null;
     /** Short diagnostic when ping fails (no secrets; may include host from PG error text). */

@@ -16,4 +16,10 @@ if [[ "${VEXO_START_DRY_RUN:-0}" == "1" ]]; then
     exit 0
 fi
 
-exec npm start
+# Migrations condicionais (equivalente ao `npm prestart`). Rodadas ANTES do exec.
+node scripts/conditional-migrate.mjs
+
+# `exec node` faz o node virar PID 1 → recebe SIGTERM/SIGINT direto do Docker/Easypanel
+# (sem a camada do npm, que não repassava o sinal e deixava o processo antigo segurando
+# a porta no restart → EADDRINUSE no novo processo).
+exec node src/server.js
