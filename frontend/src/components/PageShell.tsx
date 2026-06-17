@@ -31,6 +31,7 @@ export function PageShell({
   const { resolvedTheme, setTheme } = useTheme();
   const { user, accessProfile } = useAuth();
   const crmClient = useOptionalCrmClient();
+  const selectedClientId = crmClient?.selectedClientId || "global";
   const [mounted, setMounted] = useState(false);
   const userEmail = user?.email || accessProfile?.email || "";
   const userName =
@@ -59,6 +60,57 @@ export function PageShell({
       ? [selectedClientFallback, ...crmClient.clients]
       : crmClient?.clients || [];
 
+  const [logo, setLogo] = useState<string | null>(null);
+  const [brandTitle, setBrandTitle] = useState<string | null>(null);
+  const [color, setColor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const loadBrand = () => {
+      const savedLogo = localStorage.getItem(`vexocrm_logo_${selectedClientId}`);
+      const savedTitle = localStorage.getItem(`vexocrm_title_${selectedClientId}`);
+      const savedColor = localStorage.getItem(`vexocrm_color_${selectedClientId}`);
+      setLogo(savedLogo);
+      setBrandTitle(savedTitle);
+      setColor(savedColor);
+    };
+    loadBrand();
+    window.addEventListener("vexo-brand-change", loadBrand);
+    return () => {
+      window.removeEventListener("vexo-brand-change", loadBrand);
+    };
+  }, [selectedClientId]);
+
+  // Dynamic Browser Tab Favicon
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const link = document.querySelector("link[rel*='icon']") as HTMLLinkElement || document.createElement('link');
+    link.type = 'image/x-icon';
+    link.rel = 'shortcut icon';
+    if (logo) {
+      link.href = logo;
+    } else {
+      link.href = '/favicon.ico'; // default fallback
+    }
+    document.getElementsByTagName('head')[0].appendChild(link);
+  }, [logo]);
+
+  // Dynamic Browser Tab Title
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    document.title = brandTitle ? `${brandTitle} - ${title}` : `Vexo OS - ${title}`;
+  }, [brandTitle, title]);
+
+  const COLOR_PRESETS = {
+    default: { from: "#8b5cf6", to: "#22d3ee" },
+    emerald: { from: "#059669", to: "#10b981" },
+    rose: { from: "#e11d48", to: "#f43f5e" },
+    amber: { from: "#d97706", to: "#f59e0b" },
+    indigo: { from: "#4f46e5", to: "#6366f1" },
+  };
+
+  const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
+
   const globalClientSelector = shouldShowGlobalClientSelector ? (
     <div className="flex min-w-[160px] sm:min-w-[210px] items-center gap-2">
       <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -85,9 +137,27 @@ export function PageShell({
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-[rgba(255,255,255,0.82)] backdrop-blur-2xl dark:border-white/10 dark:bg-[rgba(8,10,34,0.84)]">
         <div className="flex items-center justify-between gap-3 px-4 py-3 lg:px-6">
-          <div className="hidden items-center gap-2 lg:flex">
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-700 dark:text-cyan-200">
-              VEXO
+          <div
+            onClick={() => window.dispatchEvent(new Event("vexo-open-brand-customizer"))}
+            className="hidden items-center gap-2.5 lg:flex cursor-pointer group/header-brand hover:opacity-80 transition-opacity"
+            title="Clique para personalizar a marca do sistema"
+          >
+            {logo ? (
+              <img
+                src={logo}
+                alt="Logo"
+                className="h-6 w-6 rounded-lg object-cover shadow-[0_2px_8px_rgba(0,0,0,0.12)] border border-slate-200/50 dark:border-white/10"
+              />
+            ) : (
+              <div
+                className="flex h-6 w-6 items-center justify-center rounded-lg text-[10px] font-black text-white shadow-[0_2px_8px_rgba(6,182,212,0.25)] font-sans"
+                style={{ backgroundImage: `linear-gradient(135deg, ${selectedPreset.from}, ${selectedPreset.to})` }}
+              >
+                {(brandTitle || "Vexo OS")[0]?.toUpperCase()}
+              </div>
+            )}
+            <span className="font-sans text-xs font-extrabold tracking-tight text-foreground group-hover/header-brand:text-cyan-500 transition-colors">
+              {brandTitle || "Vexo OS"}
             </span>
             <span className="text-slate-400 dark:text-white/25">/</span>
             <span className="text-xs font-semibold text-foreground">{title}</span>

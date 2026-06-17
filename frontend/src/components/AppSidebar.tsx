@@ -316,13 +316,29 @@ export function AppSidebar() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const savedLogo = localStorage.getItem(`vexocrm_logo_${selectedClientId}`);
-    const savedTitle = localStorage.getItem(`vexocrm_title_${selectedClientId}`);
-    const savedColor = localStorage.getItem(`vexocrm_color_${selectedClientId}`);
-    setLogo(savedLogo);
-    setTitle(savedTitle);
-    setColor(savedColor);
+    const loadBrand = () => {
+      const savedLogo = localStorage.getItem(`vexocrm_logo_${selectedClientId}`);
+      const savedTitle = localStorage.getItem(`vexocrm_title_${selectedClientId}`);
+      const savedColor = localStorage.getItem(`vexocrm_color_${selectedClientId}`);
+      setLogo(savedLogo);
+      setTitle(savedTitle);
+      setColor(savedColor);
+    };
+    loadBrand();
+    window.addEventListener("vexo-brand-change", loadBrand);
+    return () => {
+      window.removeEventListener("vexo-brand-change", loadBrand);
+    };
   }, [selectedClientId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOpen = () => setIsCustomizerOpen(true);
+    window.addEventListener("vexo-open-brand-customizer", onOpen);
+    return () => {
+      window.removeEventListener("vexo-open-brand-customizer", onOpen);
+    };
+  }, []);
 
   // Modo ativo: "vendas" por padrão, reseta para "vendas" ao recarregar a página.
   const [modo, setModo] = useState<Modo>("vendas");
@@ -358,6 +374,7 @@ export function AppSidebar() {
       const base64 = reader.result as string;
       localStorage.setItem(`vexocrm_logo_${selectedClientId}`, base64);
       setLogo(base64);
+      window.dispatchEvent(new Event("vexo-brand-change"));
     };
     reader.readAsDataURL(file);
   };
@@ -367,6 +384,7 @@ export function AppSidebar() {
     localStorage.setItem(`vexocrm_color_${selectedClientId}`, newColor);
     setTitle(newTitle);
     setColor(newColor);
+    window.dispatchEvent(new Event("vexo-brand-change"));
     setIsCustomizerOpen(false);
   };
 
@@ -377,6 +395,7 @@ export function AppSidebar() {
     setLogo(null);
     setTitle(null);
     setColor(null);
+    window.dispatchEvent(new Event("vexo-brand-change"));
     setIsCustomizerOpen(false);
   };
 
