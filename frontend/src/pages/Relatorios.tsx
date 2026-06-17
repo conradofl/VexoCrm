@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 import { BarChart2 } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -144,7 +144,7 @@ export default function Relatorios() {
             />
           ) : (
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <BarChart data={chartData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={gridColor} />
                 <XAxis
                   dataKey="dia"
@@ -168,18 +168,15 @@ export default function Relatorios() {
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 {chips.map((chip, index) => (
-                  <Line
+                  <Bar
                     key={chip.id}
-                    type="monotone"
                     dataKey={chip.id}
                     name={chip.label}
-                    stroke={CHIP_PALETTE[index % CHIP_PALETTE.length]}
-                    strokeWidth={2.5}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
+                    fill={CHIP_PALETTE[index % CHIP_PALETTE.length]}
+                    radius={[4, 4, 0, 0]}
                   />
                 ))}
-              </LineChart>
+              </BarChart>
             </ResponsiveContainer>
           )}
         </CardContent>

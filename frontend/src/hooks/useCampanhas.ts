@@ -764,6 +764,27 @@ export function useTriggerDispatch(campaignId: string) {
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao disparar"));
       return res.json();
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaign-dispatches", campaignId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+      qc.invalidateQueries({ queryKey: ["all-dispatches"] });
+    },
+  });
+}
+
+export function useAllDispatches(clientId: string | null) {
+  const { getIdToken } = useAuth();
+  return useQuery<CampaignDispatch[]>({
+    queryKey: ["all-dispatches", clientId],
+    enabled: !!clientId,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/dispatches?clientId=${encodeURIComponent(clientId!)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao buscar disparos"));
+      const data = await res.json();
+      return data.dispatches ?? [];
+    },
   });
 }

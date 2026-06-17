@@ -5755,6 +5755,34 @@ export function registerAllDomainRoutes(app) {
 
   // ── Campaign Dispatches CRUD ─────────────────────────────────────────────────
 
+  // GET /api/dispatches — lista todos os disparos de um tenant (todas as campanhas)
+  app.get("/api/dispatches", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.query.clientId);
+    if (!requestedClientId) return sendError(res, 400, "MISSING_CLIENT_ID", "Missing clientId query param");
+    
+    const authorizedClientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!authorizedClientId) return;
+
+    try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
+      if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+      const { rows } = await pgDatabasePool.query(
+        `
+          SELECT d.*, c.name as campaign_name
+          FROM public.campaign_dispatches d
+          LEFT JOIN public.campaigns c ON c.id = d.campaign_id
+          WHERE d.client_id = $1
+          ORDER BY d.created_at DESC
+        `,
+        [authorizedClientId]
+      );
+      res.json({ dispatches: rows });
+    } catch (err) {
+      sendError(res, 500, "DISPATCHES_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // GET /api/campaigns/:id/dispatches — lista disparos de uma campanha
   app.get("/api/campaigns/:id/dispatches", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
