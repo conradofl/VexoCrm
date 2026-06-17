@@ -163,7 +163,6 @@ export default function Leads({
       <section>
         <SectionHeader
           title="Base de Leads"
-          subtitle="Dados no PostgreSQL. Atualize via n8n (HTTP Request -> /api/import-lead-infinie-n8n)."
           icon={Database}
         />
 

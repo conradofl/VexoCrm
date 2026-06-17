@@ -1,21 +1,16 @@
-import { useState } from "react";
 import { Wifi } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { EvolutionChipsPanel } from "@/components/EvolutionChipsPanel";
 import { PageShell } from "@/components/PageShell";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAuth } from "@/contexts/AuthContext";
 import { useLeadClients } from "@/hooks/useLeadClients";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 
 export default function Conexoes() {
-  const { clientId, isAdminUser } = useAuth();
+  const crmClient = useOptionalCrmClient();
   const { data: tenants = [], isLoading } = useLeadClients();
+  const effectiveClientId = crmClient?.selectedClientId || "";
 
-  // Admins sem clientId fixo podem selecionar qualquer tenant.
-  const [selectedTenantId, setSelectedTenantId] = useState<string>(() => clientId ?? "");
-  const showSelector = isAdminUser || !clientId;
-
-  const activeTenant = tenants.find((t) => t.id === selectedTenantId) ?? null;
+  const activeTenant = tenants.find((t) => t.id === effectiveClientId) ?? null;
 
   return (
     <PageShell
@@ -23,22 +18,6 @@ export default function Conexoes() {
       subtitle="Monitore os chips de WhatsApp conectados, cotas diárias, estado de aquecimento e pareamento."
       spacing="space-y-4"
       compactHero
-      headerRight={
-        showSelector ? (
-          <Select value={selectedTenantId} onValueChange={setSelectedTenantId}>
-            <SelectTrigger className="w-[220px] rounded-xl">
-              <SelectValue placeholder="Selecione uma empresa" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl">
-              {tenants.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null
-      }
     >
       {isLoading && (
         <div className="flex flex-col items-center justify-center gap-4 py-16 text-sm text-muted-foreground">
@@ -49,12 +28,8 @@ export default function Conexoes() {
 
       {!isLoading && !activeTenant && (
         <EmptyState
-          title={showSelector ? "Selecione uma empresa" : "Nenhuma empresa associada"}
-          description={
-            showSelector
-              ? "Escolha uma empresa no seletor acima para ver os chips de WhatsApp vinculados."
-              : "Seu perfil nao tem uma empresa associada. Fale com o administrador."
-          }
+          title="Selecione uma empresa"
+          description="Escolha uma empresa no seletor do topo para ver os chips de WhatsApp vinculados."
         />
       )}
 
