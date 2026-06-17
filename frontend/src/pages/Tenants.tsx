@@ -546,7 +546,7 @@ export default function Tenants() {
                 Nova empresa
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.98))] p-0 dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(13,18,54,0.98),rgba(8,10,32,0.98))]">
+            <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto p-0">
               <DialogHeader className="space-y-3 px-4 pb-0 pt-4">
                 <div className="flex items-start justify-between gap-3 pr-8">
                   <div className="space-y-1">
@@ -563,7 +563,7 @@ export default function Tenants() {
                   {CREATION_STEPS.map((step, index) => (
                     <div
                       key={step}
-                      className="rounded-lg border border-slate-200/80 bg-white/78 px-2.5 py-2 text-[11px] leading-snug text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70"
+                      className="rounded-lg border border-border/70 bg-slate-50/50 px-2.5 py-2 text-[11px] leading-snug text-slate-600 dark:border-white/5 dark:bg-white/[0.02] dark:text-white/70"
                     >
                       <span className="mb-1 flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500/10 text-[10px] font-bold text-cyan-700 dark:text-cyan-200">
                         {index + 1}
@@ -572,7 +572,7 @@ export default function Tenants() {
                     </div>
                   ))}
                 </div>
-                <div className="rounded-lg border border-slate-200/80 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                <div className="rounded-lg border border-border/70 bg-slate-50/50 p-3 dark:border-white/5 dark:bg-white/[0.02]">
                   <div className="mb-2 flex items-center gap-2">
                     <Database className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
                     <p className="text-xs font-semibold text-foreground">Preview</p>
@@ -646,7 +646,7 @@ export default function Tenants() {
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-start gap-3 rounded-lg border border-slate-200/80 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="flex items-start gap-3 rounded-lg border border-border/70 bg-slate-50/50 p-3 dark:border-white/5 dark:bg-white/[0.02]">
                     <SlidersHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <div className="min-w-0 flex-1 space-y-3">
                       <div>
@@ -673,7 +673,7 @@ export default function Tenants() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 p-2.5 text-[11px] leading-relaxed text-muted-foreground dark:border-white/10 dark:bg-black/25">
+                      <div className="rounded-lg border border-border/70 bg-slate-100/50 p-2.5 text-[11px] leading-relaxed text-muted-foreground dark:border-white/5 dark:bg-black/25">
                         <span className="font-semibold text-foreground">{selectedModel.title}:</span>{" "}
                         {selectedModel.description}
                       </div>
@@ -681,7 +681,7 @@ export default function Tenants() {
                         <p className="text-xs font-semibold text-foreground">KPIs de segmentacao</p>
                         <div className="grid gap-2">
                           {segmentationKpis.map((kpi, index) => (
-                            <div key={kpi.id} className="grid gap-2 rounded-lg border border-slate-200/70 bg-slate-50/80 p-2 dark:border-white/10 dark:bg-black/25 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
+                            <div key={kpi.id} className="grid gap-2 rounded-lg border border-border/70 bg-slate-100/50 p-2 dark:border-white/5 dark:bg-black/25 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
                               <Input
                                 className="h-9"
                                 placeholder="Nome do KPI"
@@ -725,7 +725,7 @@ export default function Tenants() {
                 <ErrorMessage message={formError} variant="banner" />
 
                 {canManageN8n ? (
-                  <div className="space-y-3 rounded-lg border border-slate-200/80 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="space-y-3 rounded-lg border border-border/70 bg-slate-50/50 p-3 dark:border-white/5 dark:bg-white/[0.02]">
                     <div className="flex items-start gap-3">
                       <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
                       <div>
@@ -766,7 +766,7 @@ export default function Tenants() {
     >
       <div className="grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_12px_28px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
+            <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Base operacional</CardDescription>
                 <CardTitle className="text-2xl">{tenants.length}</CardTitle>
@@ -776,7 +776,7 @@ export default function Tenants() {
               </CardContent>
             </Card>
 
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_12px_28px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
+            <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Ultimo cadastro</CardDescription>
                 <CardTitle className="text-base">
@@ -790,7 +790,7 @@ export default function Tenants() {
             </Card>
           </div>
 
-          <Card className="border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(245,248,255,0.96))] shadow-[0_14px_34px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(9,12,38,0.9),rgba(7,10,28,0.96))]">
+          <Card>
             <CardHeader className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -835,7 +835,7 @@ export default function Tenants() {
                     return (
                     <div
                       key={tenant.id}
-                      className="rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]"
+                      className="rounded-xl border border-border/70 bg-card/60 p-4 shadow-sm"
                     >
                       {/* Compact Header */}
                       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-white/5">
@@ -1190,7 +1190,7 @@ export default function Tenants() {
             </CardContent>
           </Card>
 
-          <div className="rounded-[28px] border border-slate-200/80 bg-[linear-gradient(135deg,rgba(8,145,178,0.08),rgba(59,130,246,0.08),rgba(15,23,42,0.02))] px-5 py-4 text-sm text-slate-700 shadow-[0_22px_56px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[linear-gradient(135deg,rgba(34,211,238,0.10),rgba(59,130,246,0.08),rgba(15,23,42,0.38))] dark:text-white/75">
+          <div className="rounded-[22px] border border-cyan-500/20 bg-cyan-500/5 px-5 py-4 text-sm text-slate-700 dark:text-white/75 shadow-sm">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-200" />
               <div className="space-y-1">
