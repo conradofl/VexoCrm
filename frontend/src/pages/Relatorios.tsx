@@ -33,6 +33,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLeadClients } from "@/hooks/useLeadClients";
+import { useCrmClient } from "@/hooks/useCrmClient";
 import { useEvolutionUsageReport } from "@/hooks/useReports";
 
 const REPORT_DAYS = 14;
@@ -46,12 +47,11 @@ function formatDiaLabel(dia: string): string {
 }
 
 export default function Relatorios() {
-  const { clientId, isAdminUser } = useAuth();
+  const { clientId } = useAuth();
+  const { selectedClientId } = useCrmClient();
   const { data: tenants = [] } = useLeadClients();
   const { resolvedTheme } = useTheme();
 
-  const [selectedClientId, setSelectedClientId] = useState<string>(() => clientId ?? "");
-  const showSelector = isAdminUser || !clientId;
   const activeClientId = selectedClientId || clientId || "";
 
   const { data, isLoading, error } = useEvolutionUsageReport(activeClientId || null, REPORT_DAYS);
@@ -155,22 +155,7 @@ export default function Relatorios() {
       subtitle={`Histórico de tráfego, consumo de limites e balanceamento de envios.`}
       spacing="space-y-6"
       compactHero
-      headerRight={
-        showSelector ? (
-          <Select value={selectedClientId} onValueChange={setSelectedClientId}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Selecione um tenant" />
-            </SelectTrigger>
-            <SelectContent>
-              {tenants.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null
-      }
+      headerRight={null}
     >
       <ErrorMessage message={error ? (error as Error).message : null} variant="banner" />
 

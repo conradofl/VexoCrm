@@ -33,7 +33,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLeadClients } from "@/hooks/useLeadClients";
+import { useCrmClient } from "@/hooks/useCrmClient";
 import {
   useAllDispatches,
   useTriggerDispatch,
@@ -59,16 +59,14 @@ function formatDateTime(dateStr: string | null): string {
 }
 
 export default function Disparos() {
-  const { clientId, isAdminUser, getIdToken } = useAuth();
-  const { data: tenants = [] } = useLeadClients();
+  const { clientId, getIdToken } = useAuth();
+  const { selectedClientId } = useCrmClient();
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
 
-  const [selectedClientId, setSelectedClientId] = useState<string>(() => clientId ?? "");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  const showSelector = isAdminUser || !clientId;
   const activeClientId = selectedClientId || clientId || "";
 
   const { data: dispatches = [], isLoading, error, refetch, isRefetching } = useAllDispatches(activeClientId || null);
@@ -284,32 +282,16 @@ export default function Disparos() {
       spacing="space-y-6"
       compactHero
       headerRight={
-        <div className="flex items-center gap-3">
-          {showSelector && (
-            <Select value={selectedClientId} onValueChange={setSelectedClientId}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Selecione um tenant" />
-              </SelectTrigger>
-              <SelectContent>
-                {tenants.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-xl h-10 border-slate-200/80 dark:border-white/10"
-            disabled={isLoading || isRefetching}
-            onClick={() => void refetch()}
-          >
-            <RefreshCw className={`h-4 w-4 mr-1.5 ${isRefetching ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-xl h-10 border-slate-200/80 dark:border-white/10"
+          disabled={isLoading || isRefetching}
+          onClick={() => void refetch()}
+        >
+          <RefreshCw className={`h-4 w-4 mr-1.5 ${isRefetching ? "animate-spin" : ""}`} />
+          Atualizar
+        </Button>
       }
     >
       <ErrorMessage message={error ? (error as Error).message : null} variant="banner" />

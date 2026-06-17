@@ -32,6 +32,7 @@ import {
   type LeadClient,
   type LeadClientEvolutionInstance,
 } from "@/hooks/useLeadClients";
+import { useCrmClient } from "@/hooks/useCrmClient";
 import { toast } from "@/components/ui/use-toast";
 
 // Notion-based 10-day checklist guide data
@@ -121,12 +122,12 @@ const DIALOGUES = [
 ];
 
 export default function Aquecimento() {
-  const { clientId, isAdminUser } = useAuth();
+  const { clientId } = useAuth();
+  const { selectedClientId } = useCrmClient();
   const { data: tenants = [], isLoading, error } = useLeadClients();
   const saveEvolutionInstance = useSaveLeadClientEvolutionInstance();
   const queryClient = useQueryClient();
 
-  const [selectedClientId, setSelectedClientId] = useState<string>(() => clientId ?? "");
   const [selectedDays, setSelectedDays] = useState<Record<string, number>>({});
   const [updatingChipId, setUpdatingChipId] = useState<string | null>(null);
 
@@ -147,7 +148,6 @@ export default function Aquecimento() {
     }
   });
 
-  const showSelector = isAdminUser || !clientId;
   const activeClientId = selectedClientId || clientId || "";
 
   const activeTenant = useMemo(() => {
@@ -322,22 +322,7 @@ export default function Aquecimento() {
       subtitle="Central completa de maturação de números. Configure limites, esteira de mensagens mútuas e checklists manuais."
       spacing="space-y-6"
       compactHero
-      headerRight={
-        showSelector ? (
-          <Select value={selectedClientId} onValueChange={setSelectedClientId}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Selecione um tenant" />
-            </SelectTrigger>
-            <SelectContent>
-              {tenants.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null
-      }
+      headerRight={null}
     >
       <ErrorMessage message={error ? (error as Error).message : null} variant="banner" />
 

@@ -26,7 +26,7 @@ export function PageShell({
   spacing = "space-y-4",
   compactHero = false,
   contentClassName,
-  showGlobalClientSelector = false,
+  showGlobalClientSelector = true,
 }: PageShellProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const { user, accessProfile } = useAuth();
@@ -60,7 +60,7 @@ export function PageShell({
       : crmClient?.clients || [];
 
   const globalClientSelector = shouldShowGlobalClientSelector ? (
-    <div className="hidden min-w-[210px] items-center gap-2 xl:flex">
+    <div className="flex min-w-[160px] sm:min-w-[210px] items-center gap-2">
       <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
       <Select value={crmClient.selectedClientId || undefined} onValueChange={crmClient.setSelectedClientId} disabled={crmClient.isLoading || selectorClients.length === 0}>
         <SelectTrigger className="h-9 rounded-lg border-slate-200 bg-white/85 shadow-[0_10px_20px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
