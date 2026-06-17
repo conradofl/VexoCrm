@@ -7199,7 +7199,7 @@ const port = Number.parseInt(process.env.PORT || "3001", 10);
 
 // Config do retry de bind (porta temporariamente ocupada após restart — janela em que
 // o processo anterior ainda está liberando :PORT). Ajustável por env.
-const LISTEN_RETRY_MAX = Number.parseInt(process.env.LISTEN_RETRY_MAX || "5", 10);
+const LISTEN_RETRY_MAX = Number.parseInt(process.env.LISTEN_RETRY_MAX || "3", 10);
 const LISTEN_RETRY_DELAY_MS = Number.parseInt(process.env.LISTEN_RETRY_DELAY_MS || "3000", 10);
 // Tempo máximo para o shutdown gracioso antes de forçar a saída (libera a porta).
 const SHUTDOWN_FORCE_MS = Number.parseInt(process.env.SHUTDOWN_FORCE_MS || "10000", 10);
