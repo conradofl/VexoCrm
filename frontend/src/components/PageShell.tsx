@@ -198,9 +198,6 @@ export function PageShell({
           }
         >
           <div className="max-w-3xl">
-            <p className={compactHero ? "mb-0.5 font-mono text-[8px] font-bold uppercase tracking-[0.2em] text-cyan-700 dark:text-cyan-200" : "mb-1 font-mono text-[9px] font-bold uppercase tracking-[0.22em] text-cyan-700 dark:text-cyan-200"}>
-              Command center
-            </p>
             <h1 className={compactHero ? "text-xl font-extrabold tracking-tight text-foreground" : "text-2xl font-extrabold tracking-tight text-foreground"}>
               {title}
             </h1>

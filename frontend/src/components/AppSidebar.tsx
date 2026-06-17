@@ -76,7 +76,6 @@ const MODULOS: Record<Modo, Modulo> = {
       { key: "dashboard",      label: "Dashboard",          url: "/crm/dashboard",              icon: LayoutDashboard, page: "dashboard" },
       { key: "leads",          label: "Leads",              url: "/crm/leads",                  icon: Users,           page: "leads",               badge: "CRM" },
       { key: "conversas",      label: "Conversas",          url: "/crm/whatsapp",               icon: MessageCircle,   page: "whatsapp" },
-      { key: "agentes-ia",     label: "Agentes IA",         url: "/crm/agente",                 icon: Bot,             page: "agente" },
       { key: "inteligencia",   label: "Int. Comercial",     url: "/crm/inteligencia-comercial", icon: LineChart,       page: "inteligencia-comercial" },
       { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
       { key: "chatbot",        label: "Chatbot",            url: "/crm/chatbot-settings",       icon: Settings2,       page: "chatbot-config" },

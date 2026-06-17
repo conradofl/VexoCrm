@@ -2773,8 +2773,22 @@ export function registerAllDomainRoutes(app) {
       } catch (conversionError) {
         console.warn("dashboard conversions unavailable:", conversionError?.message || conversionError);
       }
-  
-      res.json(buildDashboardPayload(client || { id: clientId, name: clientId }, leads || [], conversions));
+
+      let messages = [];
+      try {
+        const { data: messageRows, error: messagesError } = await supabase
+          .from("lead_messages")
+          .select("lead_id, phone, direction, created_at")
+          .eq("client_id", clientId);
+
+        if (!messagesError) {
+          messages = messageRows || [];
+        }
+      } catch (msgError) {
+        console.warn("dashboard messages unavailable:", msgError?.message || msgError);
+      }
+
+      res.json(buildDashboardPayload(client || { id: clientId, name: clientId }, leads || [], conversions, messages));
     } catch (error) {
       console.error("dashboard query error:", error);
       const details =

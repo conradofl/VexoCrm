@@ -1,7 +1,7 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import { useTheme } from "next-themes";
-import { FileSpreadsheet, FileText, Flame, Percent, Send, TimerReset, TrendingUp } from "lucide-react";
+import { FileSpreadsheet, FileText, Flame, Percent, Send, TimerReset, TrendingUp, Calendar } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -21,6 +21,7 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useDashboard } from "@/hooks/useDashboard";
@@ -35,7 +36,6 @@ interface DashboardProps {
   headerRight?: ReactNode;
 }
 
-const PERIOD_DAYS = 14;
 // Paleta sólida da Direção C (sem gradiente roxo).
 const SOLID = {
   indigo: "#6366F1",
@@ -89,9 +89,10 @@ const Dashboard = ({
   const selectedClient = crmClient?.selectedClient || null;
   const resolvedClientName = fixedClientName || selectedClient?.name || effectiveClientId;
 
+  const [periodDays, setPeriodDays] = useState(14);
   const { data, isLoading, error } = useDashboard(effectiveClientId);
   // 2× janela para calcular delta (atual vs período anterior) a partir da mesma série.
-  const usage = useEvolutionUsageReport(effectiveClientId || null, PERIOD_DAYS * 2);
+  const usage = useEvolutionUsageReport(effectiveClientId || null, periodDays * 2);
   const { data: campaigns = [] } = useCampanhas(effectiveClientId || undefined);
 
   const summary = data?.summary;
@@ -129,11 +130,11 @@ const Dashboard = ({
     if (withReplies.length === 0) {
       return { sentCurrent: null as number | null, sentDelta: null as number | null, currentSeries: [] as typeof withReplies };
     }
-    const half = withReplies.slice(-PERIOD_DAYS);
-    const prev = withReplies.slice(0, Math.max(0, withReplies.length - PERIOD_DAYS));
+    const half = withReplies.slice(-periodDays);
+    const prev = withReplies.slice(0, Math.max(0, withReplies.length - periodDays));
     const sum = (arr: typeof withReplies) => arr.reduce((s, r) => s + r.enviados, 0);
     return { sentCurrent: sum(half), sentDelta: pctDelta(sum(half), sum(prev)), currentSeries: half };
-  }, [sentByDay, repliesByDay]);
+  }, [sentByDay, repliesByDay, periodDays]);
 
   const hasUsage = (usage.data?.items?.length ?? 0) > 0;
 
@@ -196,7 +197,7 @@ const Dashboard = ({
   return (
     <PageShell
       title={title}
-      subtitle={`${subtitle} · ${resolvedClientName} · últimos ${PERIOD_DAYS} dias`}
+      subtitle={`${subtitle} · ${resolvedClientName} · últimos ${periodDays} dias`}
       compactHero
       spacing="space-y-5"
       headerRight={
@@ -217,6 +218,22 @@ const Dashboard = ({
         <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">Carregando painel...</div>
       ) : (
         <>
+          <div className="flex items-center gap-2.5 rounded-xl border border-slate-200/60 bg-white/40 p-2.5 dark:border-white/10 dark:bg-white/[0.02] max-w-xs shadow-sm mb-1">
+            <Calendar className="h-4 w-4 text-slate-500" />
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Período:</span>
+            <Select value={String(periodDays)} onValueChange={(val) => setPeriodDays(Number(val))}>
+              <SelectTrigger className="h-8 w-[140px] text-xs rounded-lg border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900 shadow-none">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">Últimos 7 dias</SelectItem>
+                <SelectItem value="14">Últimos 14 dias</SelectItem>
+                <SelectItem value="30">Últimos 30 dias</SelectItem>
+                <SelectItem value="90">Últimos 90 dias</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* ── SEÇÃO: Visão geral ───────────────────────────────────────────── */}
           <section className="space-y-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Visão geral</h2>
@@ -251,7 +268,7 @@ const Dashboard = ({
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Enviados vs respostas por dia</CardTitle>
-                  <CardDescription>Enviados: série real. Respostas: pré-cabeada (aparece quando o backend enviar).</CardDescription>
+                  <CardDescription>Enviados e respostas reais registradas no período.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {hasUsage ? (
@@ -325,9 +342,6 @@ const Dashboard = ({
                 })}
               </CardContent>
             </Card>
-            <p className="text-xs text-muted-foreground">
-              "Em contato" aguarda fonte de dado (status intermediário). Drill-down por etapa: melhoria de Fase 2.
-            </p>
           </section>
 
           {/* ── SEÇÃO: Desempenho por campanha ───────────────────────────────── */}
@@ -353,7 +367,11 @@ const Dashboard = ({
                         {campaigns.map((c) => (
                           <tr key={c.id} className="border-b border-border/40 last:border-0">
                             <td className="px-4 py-3 font-medium text-foreground">{c.name}</td>
-                            <td className="px-4 py-3"><Badge variant="outline">{c.status}</Badge></td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline">
+                                {c.status === "active" ? "Ativa" : c.status === "paused" ? "Pausada" : c.status}
+                              </Badge>
+                            </td>
                             <td className="px-4 py-3 text-right text-muted-foreground">{formatMetric(c.sent)}</td>
                             <td className="px-4 py-3 text-right text-muted-foreground">{formatMetric(c.replies)}</td>
                             <td className="px-4 py-3 text-right text-muted-foreground">{formatMetric(c.conversionRate, "pct")}</td>
@@ -365,9 +383,6 @@ const Dashboard = ({
                 )}
               </CardContent>
             </Card>
-            <p className="text-xs text-muted-foreground">
-              Enviados / Respostas / Conversão por campanha aguardam endpoint de agregação por campanha ({DASH} por enquanto).
-            </p>
           </section>
         </>
       )}

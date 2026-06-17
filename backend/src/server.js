@@ -3136,7 +3136,7 @@ function parseLeadReferenceDate(lead) {
   return tryParse(lead?.data_hora) ?? tryParse(lead?.created_at);
 }
 
-function buildDashboardPayload(client, leads, conversions = []) {
+function buildDashboardPayload(client, leads, conversions = [], messages = []) {
   const now = new Date();
   const timeZone = "America/Sao_Paulo";
   const todayKey = getDateKey(now, timeZone);
@@ -3149,6 +3149,7 @@ function buildDashboardPayload(client, leads, conversions = []) {
       day: getDateLabel(date, timeZone),
       leads: 0,
       qualifiedLeads: 0,
+      respostas: 0,
     };
   });
 
@@ -3206,6 +3207,109 @@ function buildDashboardPayload(client, leads, conversions = []) {
     }
   }
 
+  // Populate daily replies (respostas) based on inbound messages
+  for (const m of messages) {
+    if (m.direction !== "inbound") continue;
+    const msgDate = new Date(m.created_at || now);
+    let dateKey = null;
+    try {
+      dateKey = getDateKey(msgDate, timeZone);
+    } catch {
+      continue;
+    }
+    const dayEntry = dateKey ? recentDaysMap.get(dateKey) : null;
+    if (dayEntry) {
+      dayEntry.respostas = (dayEntry.respostas || 0) + 1;
+    }
+  }
+
+  // ── Calculate metrics: responseRate, noContact3d, contactedLeads ───────────
+  const outboundPhones = new Set();
+  const inboundPhones = new Set();
+  const outboundLeads = new Set();
+  const inboundLeads = new Set();
+
+  for (const m of messages) {
+    const phone = m.phone;
+    const leadId = m.lead_id;
+    if (m.direction === "outbound") {
+      if (leadId) outboundLeads.add(leadId);
+      if (phone) outboundPhones.add(phone);
+    } else if (m.direction === "inbound") {
+      if (leadId) inboundLeads.add(leadId);
+      if (phone) inboundPhones.add(phone);
+    }
+  }
+
+  const totalMessaged = leads.filter((lead) => {
+    return (lead.id && outboundLeads.has(lead.id)) || (lead.telefone && outboundPhones.has(lead.telefone));
+  }).length;
+
+  const totalResponded = leads.filter((lead) => {
+    const sent = (lead.id && outboundLeads.has(lead.id)) || (lead.telefone && outboundPhones.has(lead.telefone));
+    const replied = (lead.id && inboundLeads.has(lead.id)) || (lead.telefone && inboundPhones.has(lead.telefone));
+    return sent && replied;
+  }).length;
+
+  const responseRate = totalMessaged === 0 ? 0 : Math.round((totalResponded / totalMessaged) * 100);
+
+  // Sem contato +3 dias
+  const threeDaysAgo = new Date();
+  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+  const lastContactByLead = new Map();
+  const lastContactByPhone = new Map();
+
+  for (const m of messages) {
+    const msgDate = new Date(m.created_at || now);
+    if (Number.isNaN(msgDate.getTime())) continue;
+
+    if (m.lead_id) {
+      const current = lastContactByLead.get(m.lead_id);
+      if (!current || msgDate > current) {
+        lastContactByLead.set(m.lead_id, msgDate);
+      }
+    }
+    if (m.phone) {
+      const current = lastContactByPhone.get(m.phone);
+      if (!current || msgDate > current) {
+        lastContactByPhone.set(m.phone, msgDate);
+      }
+    }
+  }
+
+  let noContact3d = 0;
+  let contactedLeads = 0;
+
+  for (const lead of leads) {
+    const statusKey = (normalizeString(lead.status) || "sem_status").toLowerCase();
+    const isClosedOrQualified = isQualifiedStatus(statusKey) || normalizeWonStatus(statusKey) || statusKey === "perdido" || statusKey === "arquivado";
+    if (isClosedOrQualified) continue;
+
+    // Last contact calculation for noContact3d
+    let lastDate = null;
+    if (lead.id && lastContactByLead.has(lead.id)) {
+      lastDate = lastContactByLead.get(lead.id);
+    } else if (lead.telefone && lastContactByPhone.has(lead.telefone)) {
+      lastDate = lastContactByPhone.get(lead.telefone);
+    } else {
+      lastDate = parseLeadReferenceDate(lead);
+    }
+
+    if (lastDate && lastDate < threeDaysAgo) {
+      noContact3d++;
+    }
+
+    // ContactedLeads (Em contato) calculation
+    const hasMessages = (lead.id && (outboundLeads.has(lead.id) || inboundLeads.has(lead.id))) ||
+                        (lead.telefone && (outboundPhones.has(lead.telefone) || inboundPhones.has(lead.telefone)));
+    const isExplicitlyEmContato = statusKey === "em_contato" || statusKey === "em contato" || statusKey === "conversando" || statusKey === "atendimento";
+
+    if (isExplicitlyEmContato || hasMessages) {
+      contactedLeads++;
+    }
+  }
+
   const totalLeads = leads.length;
   const qualificationRate = totalLeads === 0 ? 0 : Math.round((qualifiedLeads / totalLeads) * 100);
   const closedConversions = (conversions || []).filter((conversion) => {
@@ -3246,6 +3350,9 @@ function buildDashboardPayload(client, leads, conversions = []) {
       averageTicket,
       performanceScore,
       funnelCoverage,
+      responseRate,
+      noContact3d,
+      contactedLeads,
     },
     leadsByDay: recentDays,
     temperatureBreakdown: [
