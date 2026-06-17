@@ -13,6 +13,8 @@ import {
   PanelLeftClose,
   PanelLeft,
   FileSpreadsheet,
+  Upload,
+  X,
   MessageCircle,
   KanbanSquare,
   BookOpen,
@@ -33,6 +35,7 @@ import {
 import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { type InternalPage } from "@/lib/access";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -162,11 +165,12 @@ function NavItem({
           {isActive && (
             <span
               className={cn(
-                "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
+                "absolute shadow-[0_0_16px_var(--primary-shadow)]",
                 collapsed
                   ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
                   : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
               )}
+              style={{ background: `linear-gradient(180deg, var(--primary-from, #8b5cf6), var(--primary-to, #22d3ee))` }}
             />
           )}
         </>
@@ -220,11 +224,12 @@ function AdminNavLink({
           {isActive && (
             <span
               className={cn(
-                "absolute bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]",
+                "absolute shadow-[0_0_16px_var(--primary-shadow)]",
                 collapsed
                   ? "left-1/2 top-auto h-1 w-6 -translate-x-1/2 rounded-full bottom-0.5"
                   : "left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full"
               )}
+              style={{ background: `linear-gradient(180deg, var(--primary-from, #8b5cf6), var(--primary-to, #22d3ee))` }}
             />
           )}
         </>
@@ -287,11 +292,37 @@ function ModeSwitcher({
   );
 }
 
+const COLOR_PRESETS = {
+  default: { label: "Padrão", from: "#8b5cf6", to: "#22d3ee", shadow: "rgba(139,92,246,0.3)" },
+  emerald: { label: "Esmeralda", from: "#059669", to: "#10b981", shadow: "rgba(5,150,105,0.3)" },
+  rose: { label: "Rose", from: "#e11d48", to: "#f43f5e", shadow: "rgba(225,29,72,0.3)" },
+  amber: { label: "Âmbar", from: "#d97706", to: "#f59e0b", shadow: "rgba(217,119,6,0.3)" },
+  indigo: { label: "Indigo", from: "#4f46e5", to: "#6366f1", shadow: "rgba(79,70,229,0.3)" },
+};
+
 // ─── AppSidebar ───────────────────────────────────────────────────────────────
 export function AppSidebar() {
   const { logout, canAccessInternalPage, isAdminUser, user, accessProfile } = useAuth();
+  const crmClient = useOptionalCrmClient();
+  const selectedClientId = crmClient?.selectedClientId || "global";
+
   const [collapsed, setCollapsed] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isCustomizerOpen, setIsCustomizerOpen] = useState(false);
+
+  const [logo, setLogo] = useState<string | null>(null);
+  const [title, setTitle] = useState<string | null>(null);
+  const [color, setColor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedLogo = localStorage.getItem(`vexocrm_logo_${selectedClientId}`);
+    const savedTitle = localStorage.getItem(`vexocrm_title_${selectedClientId}`);
+    const savedColor = localStorage.getItem(`vexocrm_color_${selectedClientId}`);
+    setLogo(savedLogo);
+    setTitle(savedTitle);
+    setColor(savedColor);
+  }, [selectedClientId]);
 
   // Modo ativo: "vendas" por padrão, reseta para "vendas" ao recarregar a página.
   const [modo, setModo] = useState<Modo>("vendas");
@@ -319,6 +350,36 @@ export function AppSidebar() {
     }
   };
 
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      localStorage.setItem(`vexocrm_logo_${selectedClientId}`, base64);
+      setLogo(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveBrand = (newTitle: string, newColor: string) => {
+    localStorage.setItem(`vexocrm_title_${selectedClientId}`, newTitle);
+    localStorage.setItem(`vexocrm_color_${selectedClientId}`, newColor);
+    setTitle(newTitle);
+    setColor(newColor);
+    setIsCustomizerOpen(false);
+  };
+
+  const handleResetBrand = () => {
+    localStorage.removeItem(`vexocrm_logo_${selectedClientId}`);
+    localStorage.removeItem(`vexocrm_title_${selectedClientId}`);
+    localStorage.removeItem(`vexocrm_color_${selectedClientId}`);
+    setLogo(null);
+    setTitle(null);
+    setColor(null);
+    setIsCustomizerOpen(false);
+  };
+
   // PASSO 2: substituir canAccessInternalPage(f.page) por
   // canAccessInternalPage(f.page) && clienteTemAcesso(f.key)
   const ferramentasVisiveis = MODULOS[modo].ferramentas.filter((f) =>
@@ -330,32 +391,50 @@ export function AppSidebar() {
 
   const visibleSistema = SISTEMA_ITEMS.filter((f) => canAccessInternalPage(f.page));
 
+  const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
+
   return (
     <aside
       className={cn(
         "relative flex h-full shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-[linear-gradient(180deg,rgba(248,250,255,0.98),rgba(237,242,255,0.98))] text-slate-700 backdrop-blur-xl transition-all duration-200 dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(8,10,34,0.98),rgba(5,6,24,0.98))] dark:text-slate-100",
         collapsed ? "w-[74px]" : "w-[204px]"
       )}
+      style={{
+        "--primary-from": selectedPreset.from,
+        "--primary-to": selectedPreset.to,
+        "--primary-shadow": selectedPreset.shadow,
+      } as React.CSSProperties}
     >
       {/* Logo / título */}
       <div
+        onClick={() => setIsCustomizerOpen(true)}
         className={cn(
-          "relative shrink-0 border-b border-slate-200/80 dark:border-white/10",
+          "relative shrink-0 border-b border-slate-200/80 dark:border-white/10 cursor-pointer transition-all hover:bg-slate-100/50 dark:hover:bg-white/[0.03] group/brand",
           collapsed ? "px-3 py-3.5" : "px-3.5 py-4"
         )}
+        title="Clique para personalizar a marca do sistema"
       >
         <div className="absolute -left-10 -top-10 h-32 w-32 rounded-full bg-fuchsia-500/10 blur-3xl dark:bg-fuchsia-500/16" />
         <div className={cn("relative flex items-center", collapsed ? "justify-center" : "gap-3")}>
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/90 shadow-[0_8px_20px_rgba(34,211,238,0.10)] dark:border-white/10 dark:bg-white/5 dark:shadow-[0_8px_20px_rgba(34,211,238,0.14)]">
-            <span className="bg-[linear-gradient(135deg,#8b5cf6,#22d3ee)] bg-clip-text text-base font-black text-transparent">
-              V
-            </span>
+          <div
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/90 shadow-[0_8px_20px_var(--primary-shadow)] dark:border-white/10 dark:bg-white/5",
+              !logo && "bg-gradient-to-br"
+            )}
+            style={!logo ? { backgroundImage: `linear-gradient(135deg, ${selectedPreset.from}, ${selectedPreset.to})` } : undefined}
+          >
+            {logo ? (
+              <img src={logo} alt="Logo" className="h-full w-full rounded-xl object-cover" />
+            ) : (
+              <span className="text-base font-black text-white">
+                {(title || "Vexo OS")[0]?.toUpperCase()}
+              </span>
+            )}
           </div>
           {!collapsed && (
-            <div className="overflow-hidden">
-              <p className="text-[17px] font-extrabold tracking-tight text-foreground">Vexo OS</p>
-              <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-slate-500 dark:text-white/45">
-                Control hub
+            <div className="overflow-hidden flex-1">
+              <p className="text-[17px] font-extrabold tracking-tight text-foreground truncate group-hover/brand:text-cyan-500 transition-colors">
+                {title || "Vexo OS"}
               </p>
             </div>
           )}
@@ -541,6 +620,119 @@ export function AppSidebar() {
           {!collapsed && <span>{isLoggingOut ? "Saindo..." : "Sair"}</span>}
         </button>
       </div>
+
+      {isCustomizerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white/95 p-6 shadow-2xl dark:border-white/10 dark:bg-slate-900/95 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-3">
+              <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-cyan-500" />
+                Personalizar Marca
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsCustomizerOpen(false)}
+                className="rounded-full p-1 text-muted-foreground hover:bg-slate-100 dark:hover:bg-white/5 hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 py-2">
+              {/* Logo Upload */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Logo da Empresa</label>
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      "flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/5",
+                      !logo && "bg-gradient-to-br"
+                    )}
+                    style={!logo ? { backgroundImage: `linear-gradient(135deg, ${selectedPreset.from}, ${selectedPreset.to})` } : undefined}
+                  >
+                    {logo ? (
+                      <img src={logo} alt="Preview" className="h-full w-full rounded-xl object-cover" />
+                    ) : (
+                      <span className="text-lg font-black text-white">
+                        {(title || "Vexo OS")[0]?.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-grow">
+                    <input
+                      type="file"
+                      id="brand-logo-file"
+                      accept="image/png, image/jpeg"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="brand-logo-file"
+                      className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                    >
+                      <Upload className="h-3.5 w-3.5 mr-1.5" />
+                      Fazer Upload
+                    </label>
+                    <p className="mt-1 text-[10px] text-muted-foreground">PNG ou JPEG até 1MB</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Workspace Title */}
+              <div className="space-y-1.5">
+                <label htmlFor="brand-title-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Nome do Workspace</label>
+                <input
+                  type="text"
+                  id="brand-title-input"
+                  placeholder="Vexo OS"
+                  defaultValue={title || "Vexo OS"}
+                  className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-foreground outline-none focus:border-cyan-500 dark:border-white/10 dark:bg-white/5"
+                />
+              </div>
+
+              {/* Accent Color Presets */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Cor Temática Principal</label>
+                <div className="flex gap-2">
+                  {Object.entries(COLOR_PRESETS).map(([key, preset]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setColor(key)}
+                      className={cn(
+                        "h-7 w-7 rounded-full border-2 transition-all hover:scale-105",
+                        (color || "default") === key ? "border-slate-800 dark:border-white" : "border-transparent"
+                      )}
+                      style={{ backgroundImage: `linear-gradient(135deg, ${preset.from}, ${preset.to})` }}
+                      title={preset.label}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end border-t border-slate-100 dark:border-white/5 pt-3">
+              <button
+                type="button"
+                onClick={handleResetBrand}
+                className="rounded-xl px-3 py-2 text-xs font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+              >
+                Restaurar Padrão
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const input = document.getElementById("brand-title-input") as HTMLInputElement;
+                  handleSaveBrand(input.value || "Vexo OS", color || "default");
+                }}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-white/90"
+              >
+                Salvar Marca
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

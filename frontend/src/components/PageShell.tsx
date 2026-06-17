@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Building2, ChevronDown, Moon, Search, Sun } from "lucide-react";
+import { Building2, ChevronDown, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAuth } from "@/contexts/AuthContext";
 import { HelpDeskWidget } from "@/components/HelpDeskWidget";
@@ -84,23 +84,13 @@ export function PageShell({
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-[rgba(255,255,255,0.82)] backdrop-blur-2xl dark:border-white/10 dark:bg-[rgba(8,10,34,0.84)]">
-        <div className="flex items-center gap-3 px-4 py-3 lg:px-6">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:px-6">
           <div className="hidden items-center gap-2 lg:flex">
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-700 dark:text-cyan-200">
               VEXO
             </span>
             <span className="text-slate-400 dark:text-white/25">/</span>
             <span className="text-xs font-semibold text-foreground">{title}</span>
-          </div>
-
-          <div className="relative w-full max-w-lg flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              readOnly
-              value=""
-              placeholder="Pesquisar..."
-              className="h-9 w-full rounded-full border border-slate-200 bg-white/80 pl-9 pr-3 text-xs text-foreground outline-none transition-all placeholder:text-muted-foreground focus:border-cyan-500/30 dark:border-white/10 dark:bg-white/[0.05] dark:focus:border-cyan-300/40"
-            />
           </div>
 
           <div className="flex items-center gap-2">
