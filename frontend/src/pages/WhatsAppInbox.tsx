@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { cn } from "@/lib/utils";
-import { useWhatsAppSession } from "@/hooks/useWhatsAppSession";
+import { useLeadClients } from "@/hooks/useLeadClients";
 import {
   useSendWhatsAppMessage,
   useWhatsAppChats,
@@ -93,6 +93,7 @@ interface WhatsAppInboxProps {
   subtitle?: string;
   headerRight?: ReactNode;
   allowSessionControls?: boolean;
+  clientId?: string;
 }
 
 function OriginBadge({ origin, campaignId, campaignNames }: { origin: string | null; campaignId: string | null; campaignNames: Map<string, string> }) {
@@ -120,9 +121,10 @@ function OriginBadge({ origin, campaignId, campaignNames }: { origin: string | n
 
 export default function WhatsAppInbox({
   title = "WhatsApp",
-  subtitle = "Conecte a conta por QR Code e atenda conversas dentro do CRM.",
+  subtitle = "Visualize e atenda conversas em tempo real direto do CRM.",
   headerRight,
   allowSessionControls = true,
+  clientId: propClientId,
 }: WhatsAppInboxProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialPhone = searchParams.get("phone") ?? null;
@@ -133,7 +135,14 @@ export default function WhatsAppInbox({
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const { selectedClientId } = useCrmClient();
-  const campaignsQuery = useCampanhas(selectedClientId ?? undefined);
+  const clientId = propClientId || selectedClientId;
+
+  const { data: tenants = [], isLoading: tenantsLoading } = useLeadClients();
+  const activeTenant = tenants.find((t) => t.id === clientId) ?? null;
+  const evolutionInstances = activeTenant?.n8n_settings?.evolution_instances ?? [];
+  const hasConnectedInstances = evolutionInstances.some((inst) => inst.active);
+
+  const campaignsQuery = useCampanhas(clientId ?? undefined);
   const campaignNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const c of campaignsQuery.data ?? []) {
@@ -142,32 +151,13 @@ export default function WhatsAppInbox({
     return map;
   }, [campaignsQuery.data]);
 
-  const {
-    session,
-    isLoading: sessionLoading,
-    isFetching: sessionFetching,
-    error: sessionError,
-    refetch: refetchSession,
-    startSession,
-    resetSession,
-    isStarting,
-    isResetting,
-  } = useWhatsAppSession();
-
-  const isReady = session?.status === "ready";
-  const canLoadInbox = isReady && !sessionLoading && !sessionFetching;
-  const chatsQuery = useWhatsAppChats(!!canLoadInbox);
-  const messagesQuery = useWhatsAppMessages(selectedChatId, !!canLoadInbox);
-  const sendMessage = useSendWhatsAppMessage(selectedChatId);
+  const canLoadInbox = !!clientId && hasConnectedInstances && !tenantsLoading;
+  const chatsQuery = useWhatsAppChats(clientId, !!canLoadInbox);
+  const messagesQuery = useWhatsAppMessages(clientId, selectedChatId, !!canLoadInbox);
+  const sendMessage = useSendWhatsAppMessage(clientId, selectedChatId);
 
   const chats = chatsQuery.items ?? [];
   const messages = messagesQuery.data ?? [];
-  const isSyncingAfterQr =
-    session?.status === "authenticated" ||
-    (session?.status === "ready" && chatsQuery.isLoading && chats.length === 0);
-  const syncElapsedMinutes = session?.syncStartedAt
-    ? Math.max(0, Math.floor((Date.now() - new Date(session.syncStartedAt).getTime()) / 60000))
-    : 0;
 
   useEffect(() => {
     if (!canLoadInbox) {
@@ -223,23 +213,6 @@ export default function WhatsAppInbox({
     }
   };
 
-  const handleStartSession = async () => {
-    try {
-      await startSession();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha ao iniciar o WhatsApp.");
-    }
-  };
-
-  const handleResetSession = async () => {
-    try {
-      await resetSession();
-      setSelectedChatId(null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha ao reiniciar a sessao.");
-    }
-  };
-
   const handleSendMessage = async () => {
     const trimmedDraft = draft.trim();
     if (!selectedChatId || !trimmedDraft) return;
@@ -252,170 +225,14 @@ export default function WhatsAppInbox({
     }
   };
 
-  const sessionControls = allowSessionControls ? (
-    <div className="flex items-center gap-2">
-      <Button variant="outline" size="sm" onClick={() => refetchSession()} disabled={sessionLoading}>
-        <RefreshCw className={cn("h-4 w-4", sessionLoading && "animate-spin")} />
-        Atualizar
-      </Button>
-      <Button onClick={handleStartSession} disabled={isStarting || isReady}>
-        {isStarting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-        {session?.status === "idle" ? "Iniciar sessao" : "Gerar QR"}
-      </Button>
-      <Button variant="outline" size="sm" onClick={handleResetSession} disabled={isResetting}>
-        {isResetting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />}
-        Desconectar
-      </Button>
-    </div>
-  ) : null;
-
   return (
     <PageShell
       title={title}
       subtitle={subtitle}
-      headerRight={
-        headerRight ? (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {headerRight}
-            {sessionControls}
-          </div>
-        ) : (
-          sessionControls
-        )
-      }
+      headerRight={headerRight}
       spacing="space-y-6"
     >
-      <section className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <Card className="border-border/70 bg-card/70">
-          <CardHeader className="pb-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Smartphone className="h-5 w-5 text-electric-indigo" />
-                  Conexao
-                </CardTitle>
-                <CardDescription>
-                  {session?.message || "Inicialize a sessao para gerar o QR Code."}
-                </CardDescription>
-              </div>
-              <span
-                className={cn(
-                  "rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em]",
-                  isReady
-                    ? "border-electric-indigo/30 bg-electric-indigo/10 text-electric-indigo"
-                    : "border-amber-400/20 bg-amber-500/8 text-amber-200"
-                )}
-              >
-                {STATUS_LABELS[session?.status || "idle"]}
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ErrorMessage
-              message={
-                (sessionError as Error | null)?.message || session?.lastError || chatsQuery.error?.message || null
-              }
-              variant="banner"
-            />
-
-            {session?.qrCodeDataUrl ? (
-              <div className="rounded-2xl border border-border/70 bg-white p-5">
-                <img
-                  src={session.qrCodeDataUrl}
-                  alt="QR Code do WhatsApp"
-                  className="mx-auto block w-full max-w-[280px]"
-                />
-              </div>
-            ) : isSyncingAfterQr ? (
-              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-5">
-                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-amber-200">
-                  <Clock3 className="h-4 w-4" />
-                  QR lido. Sincronizando conversas...
-                </div>
-                <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-background/40 p-4">
-                  <LoaderCircle className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-amber-200/80" />
-                  <div className="space-y-2 text-sm text-muted-foreground">
-                    <p className="text-foreground">A conexao foi iniciada com sucesso.</p>
-                    <p>
-                      Aguarde enquanto sincronizamos o WhatsApp e montamos as conversas iniciais
-                      no CRM.
-                    </p>
-                    <p>
-                      {session?.syncStatusMessage
-                        ? `Etapa atual: ${session.syncStatusMessage}.`
-                        : "O WhatsApp ainda esta preparando o historico inicial."}
-                    </p>
-                    {typeof session?.syncProgress === "number" && (
-                      <p>Progresso informado pelo cliente: {session.syncProgress}%.</p>
-                    )}
-                    <p>
-                      Em contas maiores, esse processo pode passar de 2 a 3 minutos antes das
-                      primeiras conversas aparecerem.
-                    </p>
-                    {syncElapsedMinutes >= 5 && (
-                      <p className="text-amber-200">
-                        Ja estamos ha mais de 5 minutos sincronizando. Se nao sair disso,
-                        reinicie a sessao do WhatsApp.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : isReady ? (
-              <div className="rounded-2xl border border-electric-indigo/20 bg-electric-indigo/5 p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-electric-indigo">
-                  <Wifi className="h-4 w-4" />
-                  Conta conectada
-                </div>
-                <div className="space-y-2 text-sm text-muted-foreground">
-                  <p>Nome: <span className="text-foreground">{session.clientInfo?.pushname || "Nao identificado"}</span></p>
-                  <p>Numero: <span className="text-foreground">{session.clientInfo?.wid || "Nao identificado"}</span></p>
-                  <p>Plataforma: <span className="text-foreground">{session.clientInfo?.platform || "WhatsApp Web"}</span></p>
-                </div>
-              </div>
-            ) : allowSessionControls ? (
-              <EmptyState
-                icon={WifiOff}
-                title="Sessao offline"
-                description="Clique em iniciar sessao para abrir o WhatsApp Web no backend e gerar o QR Code."
-                className="rounded-2xl border border-dashed border-border/70 bg-background/30"
-              />
-            ) : (
-              <EmptyState
-                icon={WifiOff}
-                title="Sessao offline"
-                description="O WhatsApp da operacao esta offline no momento. Assim que a equipe reconectar a sessao, suas conversas liberadas voltam a aparecer aqui."
-                className="rounded-2xl border border-dashed border-border/70 bg-background/30"
-              />
-            )}
-
-            {allowSessionControls && (
-              <>
-                <div className="grid gap-2 text-xs text-muted-foreground">
-                  <p>1. Clique em iniciar sessao para subir o cliente do WhatsApp.</p>
-                  <p>2. Escaneie o QR Code com o celular do atendente.</p>
-                  <p>3. Quando o status mudar para conectado, a caixa de entrada libera automaticamente.</p>
-                </div>
-
-                <Button className="w-full" onClick={handleStartSession} disabled={isStarting || isReady}>
-                  {isStarting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                  {session?.status === "idle" ? "Iniciar sessao e gerar QR" : "Gerar novo QR Code"}
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleResetSession}
-                  disabled={isResetting}
-                >
-                  {isResetting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  Sair da sessao do WhatsApp Web
-                </Button>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
+      <section className="w-full">
         <Card className="border-border/70 bg-card/70">
           <CardHeader className="pb-4">
             <SectionHeader
@@ -426,25 +243,16 @@ export default function WhatsAppInbox({
             />
           </CardHeader>
           <CardContent>
-            {!canLoadInbox ? (
+            {tenantsLoading ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-16 text-sm text-muted-foreground">
+                <LoaderCircle className="h-7 w-7 animate-spin text-primary" />
+                Carregando conversas do WhatsApp...
+              </div>
+            ) : !hasConnectedInstances ? (
               <EmptyState
-                icon={QrCode}
-                title="Conecte o WhatsApp primeiro"
-                description={
-                  sessionLoading || sessionFetching
-                    ? "Validando o estado atual da sessao do WhatsApp..."
-                    : "A interface de conversas aparece assim que a sessao estiver pronta."
-                }
-              />
-            ) : isSyncingAfterQr ? (
-              <EmptyState
-                icon={Clock3}
-                title="Sincronizando conversas"
-                description={
-                  syncElapsedMinutes >= 5
-                    ? "A sincronizacao esta demorando mais que o normal. Se continuar assim, reinicie a sessao."
-                    : "O WhatsApp acabou de conectar e ainda esta carregando os chats mais recentes."
-                }
+                icon={WifiOff}
+                title="Nenhum chip de WhatsApp conectado"
+                description="Conecte pelo menos um chip de WhatsApp ativo em 'Chips WhatsApp' para visualizar e enviar mensagens."
               />
             ) : (
               <div className="grid h-[calc(100vh-260px)] min-h-[620px] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -462,7 +270,7 @@ export default function WhatsAppInbox({
                     ) : chats.length === 0 ? (
                       <EmptyState
                         title="Nenhuma conversa encontrada"
-                        description="A conta conectou, mas ainda nao retornou chats disponiveis."
+                        description="Nenhuma conversa registrada no banco de dados para os chips conectados."
                       />
                     ) : (
                       chats.map((chat) => (
@@ -536,7 +344,7 @@ export default function WhatsAppInbox({
                     className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
                   >
                     {messagesQuery.isLoading ? (
-                      <EmptyState message="Carregando ultimas 20 mensagens..." />
+                      <EmptyState message="Carregando ultimas mensagens..." />
                     ) : !selectedChat ? (
                       <EmptyState
                         title="Escolha uma conversa"
@@ -545,7 +353,7 @@ export default function WhatsAppInbox({
                     ) : messages.length === 0 ? (
                       <EmptyState
                         title="Sem mensagens carregadas"
-                        description="Esse chat ainda nao retornou historico pelo cliente do WhatsApp."
+                        description="Nenhuma mensagem registrada no banco de dados para esta conversa."
                       />
                     ) : (
                       messages.map((message) => (
@@ -557,7 +365,7 @@ export default function WhatsAppInbox({
                   <div className="border-t border-border/70 p-4">
                     <div className="space-y-3">
                       <p className="text-xs text-muted-foreground">
-                        Mostrando as 20 mensagens mais recentes desta conversa.
+                        Histórico de mensagens sincronizado diretamente a partir do banco de dados do CRM.
                       </p>
                       <Textarea
                         value={draft}

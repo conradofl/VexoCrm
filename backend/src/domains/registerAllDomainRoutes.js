@@ -4293,140 +4293,272 @@ export function registerAllDomainRoutes(app) {
   });
   
   app.get("/api/whatsapp/chats", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
+    if (!ensureDb(res)) return;
+
     try {
       const search = normalizeString(_req.query.search)?.toLowerCase() || "";
       const rawLimit = Number.parseInt(String(_req.query.limit || "100"), 10);
       const rawOffset = Number.parseInt(String(_req.query.offset || "0"), 10);
       const limit = Number.isNaN(rawLimit) ? 20 : Math.min(Math.max(rawLimit, 1), 200);
       const offset = Number.isNaN(rawOffset) ? 0 : Math.max(rawOffset, 0);
-  
-      if (_req.authAccess?.role === "client") {
-        const authorizedChatIds = await getAuthorizedWhatsAppChatIdsForRequest(_req, res);
-        if (!authorizedChatIds) {
-          return;
-        }
-  
-        const matchesSearch = (chat) => {
-          if (!search) return true;
-  
-          const haystack = [
-            chat.name,
-            chat.id,
-            chat.lastMessage?.body,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-  
-          return haystack.includes(search);
-        };
-  
-        const items = (await whatsappSessionManager.getChats())
-          .filter((chat) => authorizedChatIds.has(normalizeWhatsAppChatId(chat.id)))
-          .filter(matchesSearch);
-        const pageItems = items.slice(offset, offset + limit);
-  
-        res.json({
-          items: pageItems,
-          total: items.length,
-          nextOffset: offset + pageItems.length,
-          hasMore: offset + pageItems.length < items.length,
-        });
-        return;
+
+      const requestedClientId = normalizeString(_req.query.clientId);
+      const clientId = resolveAuthorizedClientId(_req, res, requestedClientId);
+      if (!clientId) return;
+
+      const leadsTable = leadsTableName(clientId);
+
+      const queryParams = [clientId];
+      let searchFilter = "";
+      if (search) {
+        queryParams.push(`%${search}%`);
+        searchFilter = `AND (LOWER(l.nome) LIKE $2 OR m.phone LIKE $2 OR LOWER(m.message_text) LIKE $2)`;
       }
-  
-      const payload = await whatsappSessionManager.getChatsPage({ search, limit, offset });
-  
-      res.json(payload);
+
+      const countQueryText = `
+        WITH latest_messages AS (
+          SELECT DISTINCT ON (phone)
+            phone
+          FROM public.lead_messages
+          WHERE client_id = $1
+          ORDER BY phone, delivered_at DESC
+        )
+        SELECT COUNT(*)::integer as total
+        FROM latest_messages m
+        LEFT JOIN public.${leadsTable} l ON l.telefone = m.phone AND l.client_id = $1
+        WHERE 1=1
+        ${searchFilter}
+      `;
+
+      const countRes = await pgDatabasePool.query(countQueryText, queryParams);
+      const total = countRes.rows[0]?.total || 0;
+
+      const queryParamsWithPaging = [...queryParams, limit, offset];
+      const queryText = `
+        WITH latest_messages AS (
+          SELECT DISTINCT ON (phone)
+            phone,
+            message_text,
+            direction,
+            delivered_at,
+            campaign_id
+          FROM public.lead_messages
+          WHERE client_id = $1
+          ORDER BY phone, delivered_at DESC
+        )
+        SELECT
+          m.phone as phone_number,
+          m.message_text,
+          m.direction,
+          m.delivered_at,
+          m.campaign_id,
+          l.nome as lead_name,
+          l.lead_origin,
+          l.source_campaign_id
+        FROM latest_messages m
+        LEFT JOIN public.${leadsTable} l ON l.telefone = m.phone AND l.client_id = $1
+        WHERE 1=1
+        ${searchFilter}
+        ORDER BY m.delivered_at DESC
+        LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
+      `;
+
+      const result = await pgDatabasePool.query(queryText, queryParamsWithPaging);
+
+      const items = result.rows.map((row) => {
+        const timestampVal = row.delivered_at ? Math.floor(new Date(row.delivered_at).getTime() / 1000) : null;
+        return {
+          id: row.phone_number,
+          name: row.lead_name || row.phone_number,
+          isGroup: false,
+          unreadCount: 0,
+          timestamp: timestampVal,
+          archived: false,
+          pinned: false,
+          muted: false,
+          lastMessage: {
+            id: null,
+            body: row.message_text || "",
+            fromMe: row.direction === "outbound",
+            timestamp: timestampVal,
+            type: "chat",
+          },
+          leadOrigin: row.lead_origin || null,
+          sourceCampaignId: row.source_campaign_id || null,
+        };
+      });
+
+      res.json({
+        items,
+        total,
+        nextOffset: offset + items.length,
+        hasMore: offset + items.length < total,
+      });
     } catch (error) {
-      console.error("whatsapp chats error:", error);
-      sendError(
-        res,
-        409,
-        "WHATSAPP_NOT_READY",
-        error instanceof Error ? error.message : "WhatsApp session is not connected"
-      );
+      console.error("whatsapp database chats query error:", error);
+      sendError(res, 500, "WHATSAPP_CHATS_FAILED", error instanceof Error ? error.message : "Failed to fetch chats from database");
     }
   });
-  
+
   app.post("/api/whatsapp/chats/read", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
     const chatId = normalizeString(req.body?.chatId);
-  
     if (!chatId) {
       sendError(res, 400, "INVALID_BODY", "Missing chatId");
       return;
     }
-  
-    if (!(await ensureAuthorizedWhatsAppChat(req, res, chatId))) {
-      return;
-    }
-  
-    try {
-      const result = await whatsappSessionManager.markChatAsSeen(chatId);
-      res.json(result);
-    } catch (error) {
-      console.error("whatsapp mark read error:", error);
-      sendError(
-        res,
-        409,
-        "WHATSAPP_MARK_READ_FAILED",
-        error instanceof Error ? error.message : "Failed to mark WhatsApp chat as seen"
-      );
-    }
+    res.json({ success: true, chatId });
   });
-  
+
   app.get("/api/whatsapp/messages", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
-    const chatId = normalizeString(req.query.chatId);
-    const rawLimit = Number.parseInt(String(req.query.limit || "20"), 10);
-    const limit = Number.isNaN(rawLimit) ? 20 : Math.min(Math.max(rawLimit, 1), 50);
-  
-    if (!chatId) {
-      sendError(res, 400, "INVALID_QUERY", "Missing chatId");
-      return;
-    }
-  
-    if (!(await ensureAuthorizedWhatsAppChat(req, res, chatId))) {
-      return;
-    }
-  
+    if (!ensureDb(res)) return;
+
     try {
-      const items = await whatsappSessionManager.getMessages(chatId, limit);
-      res.json({ items });
+      const chatId = normalizeString(req.query.chatId);
+      const rawLimit = Number.parseInt(String(req.query.limit || "50"), 10);
+      const limit = Number.isNaN(rawLimit) ? 50 : Math.min(Math.max(rawLimit, 1), 200);
+
+      const requestedClientId = normalizeString(req.query.clientId);
+      const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+      if (!clientId) return;
+
+      if (!chatId) {
+        sendError(res, 400, "INVALID_QUERY", "Missing chatId");
+        return;
+      }
+
+      const cleanPhone = sanitizePhone(chatId);
+      const queryText = `
+        SELECT
+          id,
+          message_text,
+          direction,
+          delivered_at,
+          sender_type
+        FROM public.lead_messages
+        WHERE client_id = $1 AND phone = $2
+        ORDER BY delivered_at DESC
+        LIMIT $3
+      `;
+      const result = await pgDatabasePool.query(queryText, [clientId, cleanPhone, limit]);
+
+      const items = result.rows.map((row) => {
+        const timestampVal = row.delivered_at ? Math.floor(new Date(row.delivered_at).getTime() / 1000) : null;
+        return {
+          id: String(row.id),
+          body: row.message_text || "",
+          from: row.direction === "inbound" ? cleanPhone : "me",
+          to: row.direction === "outbound" ? cleanPhone : "me",
+          author: null,
+          fromMe: row.direction === "outbound",
+          timestamp: timestampVal,
+          type: "chat",
+          hasMedia: false,
+        };
+      });
+
+      res.json({ items: items.reverse() });
     } catch (error) {
-      console.error("whatsapp messages error:", error);
-      sendError(
-        res,
-        409,
-        "WHATSAPP_MESSAGES_FAILED",
-        error instanceof Error ? error.message : "Failed to fetch WhatsApp messages"
-      );
+      console.error("whatsapp database messages query error:", error);
+      sendError(res, 500, "WHATSAPP_MESSAGES_FAILED", error instanceof Error ? error.message : "Failed to fetch messages from database");
     }
   });
-  
+
   app.post("/api/whatsapp/messages", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
-    const chatId = normalizeString(req.body?.chatId);
-    const body = normalizeString(req.body?.body);
-  
-    if (!chatId || !body) {
-      sendError(res, 400, "INVALID_BODY", "Missing chatId or body");
-      return;
-    }
-  
-    if (!(await ensureAuthorizedWhatsAppChat(req, res, chatId))) {
-      return;
-    }
-  
+    if (!ensureDb(res)) return;
+
     try {
-      const item = await whatsappSessionManager.sendMessage(chatId, body);
-      res.status(201).json({ item });
+      const chatId = normalizeString(req.body?.chatId);
+      const body = normalizeString(req.body?.body);
+      const requestedClientId = normalizeString(req.body?.clientId);
+
+      const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+      if (!clientId) return;
+
+      if (!chatId || !body) {
+        sendError(res, 400, "INVALID_BODY", "Missing chatId or body");
+        return;
+      }
+
+      const cleanPhone = sanitizePhone(chatId);
+
+      // Locate active/default Evolution instance for this client
+      const instances = await getLeadClientEvolutionInstances(clientId);
+      const activeInstance = instances.find(inst => inst.active && inst.is_default) || instances.find(inst => inst.active);
+
+      if (!activeInstance) {
+        sendError(res, 400, "NO_ACTIVE_WHATSAPP_CHIP", "Nao ha nenhum chip WhatsApp ativo configurado para esta empresa.");
+        return;
+      }
+
+      const webhookUrl = activeInstance.dispatch_webhook_url;
+      const webhookToken = activeInstance.dispatch_webhook_token;
+
+      // Construct and send message payload to Evolution API
+      const payload = {
+        source: "vexocrm",
+        provider: "evolution",
+        type: "text",
+        stepType: "text",
+        number: cleanPhone,
+        text: body,
+        message: body,
+      };
+
+      const headers = { "Content-Type": "application/json" };
+      if (webhookToken) {
+        headers.apikey = webhookToken;
+        headers.Authorization = `Bearer ${webhookToken}`;
+      }
+
+      console.info("[manual-chat] dispatching manual response to Evolution API", {
+        phone: cleanPhone,
+        webhookUrl,
+      });
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        throw new Error(responseText || `HTTP ${response.status}`);
+      }
+
+      // Log sent message in the database
+      await appendLeadMessage({
+        clientId,
+        phone: cleanPhone,
+        senderType: "agent",
+        direction: "outbound",
+        messageText: body,
+        deliveredAt: new Date().toISOString(),
+        meta: {
+          source: "manual-inbox-reply",
+          instanceId: activeInstance.id,
+          instanceName: activeInstance.name,
+        },
+      });
+
+      const timestampVal = Math.floor(Date.now() / 1000);
+      res.status(201).json({
+        item: {
+          id: `msg-${Date.now()}`,
+          body,
+          from: "me",
+          to: cleanPhone,
+          author: null,
+          fromMe: true,
+          timestamp: timestampVal,
+          type: "chat",
+          hasMedia: false,
+        }
+      });
     } catch (error) {
-      console.error("whatsapp send message error:", error);
-      sendError(
-        res,
-        409,
-        "WHATSAPP_SEND_FAILED",
-        error instanceof Error ? error.message : "Failed to send WhatsApp message"
-      );
+      console.error("whatsapp database send message error:", error);
+      sendError(res, 500, "WHATSAPP_SEND_FAILED", error instanceof Error ? error.message : "Failed to send message via Evolution API");
     }
   });
   

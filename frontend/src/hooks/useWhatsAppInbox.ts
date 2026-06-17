@@ -62,7 +62,7 @@ async function parseApiResponse<T>(res: Response): Promise<T> {
   throw new Error(message);
 }
 
-export function useWhatsAppChats(enabled: boolean) {
+export function useWhatsAppChats(clientId: string | null, enabled: boolean) {
   const { getIdToken } = useAuth();
   const [olderPagesEnabled, setOlderPagesEnabled] = useState(false);
 
@@ -83,6 +83,10 @@ export function useWhatsAppChats(enabled: boolean) {
       offset: String(offset),
     });
 
+    if (clientId) {
+      params.append("clientId", clientId);
+    }
+
     const res = await fetch(`${API_BASE_URL}/api/whatsapp/chats?${params.toString()}`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -93,16 +97,16 @@ export function useWhatsAppChats(enabled: boolean) {
   };
 
   const recentChatsQuery = useQuery({
-    queryKey: ["whatsapp-chats", "recent"],
-    enabled,
+    queryKey: ["whatsapp-chats", clientId, "recent"],
+    enabled: enabled && !!clientId,
     queryFn: async () => fetchChatsPage(0),
-    refetchInterval: enabled ? 5000 : false,
+    refetchInterval: enabled && !!clientId ? 5000 : false,
     staleTime: 0,
   });
 
   const olderChatsQuery = useInfiniteQuery({
-    queryKey: ["whatsapp-chats", "older"],
-    enabled: enabled && olderPagesEnabled,
+    queryKey: ["whatsapp-chats", clientId, "older"],
+    enabled: enabled && olderPagesEnabled && !!clientId,
     initialPageParam: 20,
     queryFn: async ({ pageParam }) => fetchChatsPage(pageParam),
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextOffset : undefined),
@@ -150,20 +154,29 @@ export function useWhatsAppChats(enabled: boolean) {
   };
 }
 
-export function useWhatsAppMessages(chatId: string | null, enabled: boolean) {
+export function useWhatsAppMessages(clientId: string | null, chatId: string | null, enabled: boolean) {
   const { getIdToken } = useAuth();
 
   return useQuery({
-    queryKey: ["whatsapp-messages", chatId],
-    enabled: enabled && !!chatId,
+    queryKey: ["whatsapp-messages", clientId, chatId],
+    enabled: enabled && !!chatId && !!clientId,
     queryFn: async (): Promise<WhatsAppMessage[]> => {
       const token = await getIdToken();
       if (!token) {
         throw new Error("Usuario nao autenticado.");
       }
 
+      const params = new URLSearchParams({
+        chatId: chatId || "",
+        limit: "20",
+      });
+
+      if (clientId) {
+        params.append("clientId", clientId);
+      }
+
       const res = await fetch(
-        `${API_BASE_URL}/api/whatsapp/messages?chatId=${encodeURIComponent(chatId || "")}&limit=20`,
+        `${API_BASE_URL}/api/whatsapp/messages?${params.toString()}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -174,12 +187,12 @@ export function useWhatsAppMessages(chatId: string | null, enabled: boolean) {
       const payload = await parseApiResponse<{ items?: WhatsAppMessage[] }>(res);
       return Array.isArray(payload.items) ? payload.items : [];
     },
-    refetchInterval: enabled && !!chatId ? 4000 : false,
+    refetchInterval: enabled && !!chatId && !!clientId ? 4000 : false,
     staleTime: 0,
   });
 }
 
-export function useSendWhatsAppMessage(chatId: string | null) {
+export function useSendWhatsAppMessage(clientId: string | null, chatId: string | null) {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();
 
@@ -197,6 +210,7 @@ export function useSendWhatsAppMessage(chatId: string | null) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          clientId,
           chatId,
           body,
         }),
@@ -205,8 +219,8 @@ export function useSendWhatsAppMessage(chatId: string | null) {
       return parseApiResponse<{ item: WhatsAppMessage }>(res);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-messages", chatId] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-messages", clientId, chatId] });
     },
   });
 }
