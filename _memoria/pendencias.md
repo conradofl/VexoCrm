@@ -26,6 +26,13 @@
 
 ## Próximas entregas
 
+### Gate Evolution após incidente `/instance/fetchInstances`
+
+- CRM já mitigou loop: `EvolutionAdmin` busca remoto só manualmente e backend usa cache/dedupe.
+- Pendente operacional: validar em produção que abrir `EvolutionAdmin` não chama `/instance/fetchInstances` sem clicar "Buscar Evolution".
+- Pendente infra Evolution: manter/criar no banco da Evolution o índice `idx_message_instance_remotejid_status_fromme_false` em `public."Message"` para a query de unread/status não varrer tabela inteira.
+- Quando a Evolution estabilizar, testar "Buscar Evolution" uma vez e confirmar que retorna instâncias sem saturar CPU/I/O.
+
 ### Opt-out por palavra-chave
 
 - Detectar inbound com termos como "pare", "sair", "remover".
@@ -106,7 +113,11 @@
 
 ## Resolvidos / movidos para estado atual
 
-- Repo local atual confirmado em `main` e `origin/main` atualizado em 2026-06-13.
+- Loop do CRM em `/instance/fetchInstances` foi mitigado: busca remota manual (`?remote=true`) + cache/dedupe backend.
+- Writer do chatbot alinhado ao schema real de `lead_messages`; não usa mais colunas fantasmas `lead_phone/role/content`.
+- Pós-disparo deixou de gravar `status_conversa = "campanha_enviada"` e usa `aguardando_usuario` + `followup_status = "pending"`.
+- Inbound de grupo/broadcast descartado cedo.
+- Repo local atual confirmado em `main` e `origin/main` atualizado em 2026-06-16.
 - `Conexoes.tsx` deixou de ser placeholder e agora renderiza `EvolutionChipsPanel` por tenant.
 - `Relatorios.tsx` deixou de ser placeholder e entrega relatório v1 de envios por dia/chip.
 - Painel de chips foi extraído para `frontend/src/components/EvolutionChipsPanel.tsx`.

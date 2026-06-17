@@ -2,6 +2,12 @@
 
 > Append-only. Cada entrada: data + decisão + 1 frase de porquê. Só fato confirmado.
 
+## 2026-06-16
+- **Segundo cérebro compartilhado via RAG é regra global para Codex/Cursor/Claude.** O servidor em `segundo-cerebro/_rag` expõe `/api/query`, `/api/search` e `/api/chat`; Codex/Cursor usam o helper global `cerebro`, e Claude Code pode consultar os endpoints HTTP.
+- **Evolution Admin não consulta instâncias remotas por padrão.** `GET /api/admin/evolution-config` retorna só inventário local; a chamada cara à Evolution (`/instance/fetchInstances`) fica atrás de `?remote=true`/botão "Buscar Evolution", com cache/dedupe no backend para evitar loop e sobrecarga.
+- **Resposta inbound de grupo/broadcast é descartada cedo.** Mensagens com JID de grupo/broadcast não devem criar lead, mensagem ou acionar chatbot/follow-up; isso reduz spam e gravação indevida.
+- **`lead_messages.lead_id` não tem FK para tabela dinâmica específica.** A migration `20260613200000_drop_lead_messages_lead_id_fkey.sql` remove a FK podre porque o lead canônico vem da tabela CRM do tenant; a coluna permanece para vínculo lógico.
+
 ## 2026-06-13
 - **Memória operacional principal = `_memoria/`; `.cerebro/` fica como histórico/segundo vault.** O orquestrador lê `_memoria/` explicitamente e a `.cerebro/` estava defasada desde maio, então o estado vivo passa a ser consolidado primeiro em `_memoria/`.
 - **Repositório ativo confirmado = `/home/luizfelipe/Documents/Programação/Vexo/VexoCrm` em `main` (`93653a7`).** Foi executado `git pull --ff-only origin main` e o remoto já estava atualizado; este snapshot substitui referências antigas de caminho canônico que divergiam.

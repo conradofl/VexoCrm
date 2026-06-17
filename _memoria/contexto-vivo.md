@@ -2,16 +2,16 @@
 
 > Estado atual do projeto. Fonte de estado para novas sessões, mas o repo vence em caso de divergência.
 
-_Última atualização: 2026-06-13 após `git pull --ff-only origin main`._
+_Última atualização: 2026-06-16 após `git pull --ff-only origin main`._
 
 ## Snapshot Git
 
 - Repositório local ativo: `/home/luizfelipe/Documents/Programação/Vexo/VexoCrm`.
 - Branch: `main`.
 - Remoto: `origin https://github.com/LuizApenas/VexoCrm.git`.
-- HEAD confirmado: `93653a7` — Merge PR #122 `codex/empresas-modal-listagem`.
-- Pull em `origin/main`: executado em 2026-06-13; resultado `Already up to date`.
-- Worktree antes da atualização da memória: limpo.
+- HEAD confirmado: `cfcdbe3` — Merge `fix writer do chatbot + marcador de follow-up (bugs 1 e 2) + aprendizados 16/06`.
+- Pull em `origin/main`: executado em 2026-06-16; resultado fast-forward de `5dc6011` para `cfcdbe3`.
+- Worktree antes da atualização da memória: havia `docs/evolution-migration-inventory.md` não rastreado; preservado fora do pull/commit.
 
 ## Infraestrutura e stack
 
@@ -22,10 +22,16 @@ _Última atualização: 2026-06-13 após `git pull --ff-only origin main`._
 - Auth: Firebase Auth/custom claims.
 - Fila/automação: BullMQ/Redis presente no backend; disparo de campanha principal ainda roda no processo Express.
 - WhatsApp/Evolution: instâncias por tenant em `lead_client_evolution_instances`.
+- Evolution Admin: rota admin com inventário local e busca remota manual/cacheada; não chamar `/instance/fetchInstances` automaticamente.
 - IA: Groq para campanhas/chatbot/helpdesk onde configurado.
 
 ## Memórias do repo
 
+- Segundo cérebro RAG global:
+  - Servidor: `segundo-cerebro/_rag` com Groq (`llama-3-8b-instant`).
+  - Endpoints: `/api/query`, `/api/search`, `/api/chat`.
+  - CLI global para Codex/Cursor: `cerebro "pergunta"` e `cerebro search "termo"`.
+  - Claude Code pode consultar via HTTP quando o servidor estiver ativo.
 - `_memoria/`: memória operacional ativa do orquestrador.
   - `contexto-vivo.md`: estado atual.
   - `pendencias.md`: fila aberta e dívidas.
@@ -67,6 +73,7 @@ Estado real das telas de Disparos:
 - `frontend/src/pages/Tenants.tsx`: gestão admin de empresas/tenants.
 - `frontend/src/pages/Conexoes.tsx`: gestão de chips por tenant.
 - `frontend/src/pages/Relatorios.tsx`: relatório de uso por chip.
+- `frontend/src/pages/EvolutionAdmin.tsx`: inventário admin de Evolution; local por padrão, remoto só via "Buscar Evolution".
 - `frontend/src/pages/LeadImports.tsx`: planilhas/campanhas/envios.
 - `frontend/src/pages/Followup*.tsx`: módulo follow-up.
 - `frontend/src/pages/Chatbot*.tsx`: chatbot, configurações, docs e Kanban.
@@ -78,13 +85,17 @@ Estado real das telas de Disparos:
 
 - Diretório canônico de migrations para deploy: `backend/supabase/migrations/`.
 - `frontend/supabase/migrations/` existe, mas está defasado e menor; sincronizar com `node scripts/sync-supabase-assets.mjs` apenas quando o fluxo exigir.
-- Migration mais recente confirmada: `backend/supabase/migrations/20260612060000_dispatch_runs_lead_claim.sql`.
-- Essa migration estende `campaign_dispatch_runs` com `lead_id`, `claimed_at`, status `claimed` e índice único `(dispatch_id, lead_id)` para evitar reenvio no mesmo disparo.
+- Migrations recentes confirmadas:
+  - `backend/supabase/migrations/20260612060000_dispatch_runs_lead_claim.sql` — estende `campaign_dispatch_runs` com `lead_id`, `claimed_at`, status `claimed` e índice único `(dispatch_id, lead_id)` para evitar reenvio no mesmo disparo.
+  - `backend/supabase/migrations/20260613200000_drop_lead_messages_lead_id_fkey.sql` — remove FK inválida de `lead_messages.lead_id`, mantendo a coluna para vínculo lógico com lead canônico do tenant.
 
 ## Estado das frentes recentes
 
 - PR #122: melhoria na tela de empresas/modal/listagem, já na `main`.
 - PR #121: redesign visual Direção C/Conexões/Chips/tokens, já na `main`.
+- PR #124/fix Evolution Admin loop: `EvolutionAdmin` não martela `/instance/fetchInstances`; backend usa cache curto + dedupe quando a busca remota é acionada manualmente.
+- PR #125/inbound reply capture: resposta inbound agora pode vincular `lead_id` canônico e `campaign_id`; mensagens de grupo/broadcast são descartadas antes de gravação/chatbot.
+- Fix 16/06 chatbot/follow-up: writer do chatbot grava no schema real de `lead_messages` (`phone/sender_type/direction/message_text`) e pós-disparo usa `status_conversa = "aguardando_usuario"` + `followup_status = "pending"`, sem valor inválido `"campanha_enviada"`.
 - Anti-ban 3a v2: motor com cota/rotação/delay e schema memoizado está na `main`; precisa validação live final.
 - 3b UI: painel de chips já foi extraído para `EvolutionChipsPanel` e aparece em `Conexoes`; faltam polimentos e validação de UX em produção.
 - Relatórios v1: implementado por chip/dia.
@@ -100,7 +111,9 @@ Estado real das telas de Disparos:
 ## Regras operacionais permanentes
 
 - Nunca gravar segredos em `_memoria/`, `.cerebro/`, docs ou código.
+- Nunca fazer polling/refetch automático em `/instance/fetchInstances` da Evolution; em admin, busca remota é ação manual e cacheada.
 - Se o cérebro e o repo divergirem, o repo vence e a memória deve ser corrigida.
+- Para consultas de contexto transversal entre Codex/Cursor/Claude, preferir o helper global `cerebro` ou os endpoints HTTP do RAG quando disponíveis.
 - Antes de planejar feature nova, rodar `git pull --ff-only origin main` e auditar commits recentes.
 - Para frontend, `vite build` não substitui type-check. Usar `npx tsc --noEmit -p frontend/tsconfig.app.json` ou comando equivalente no contexto correto.
 - Para migrations, não colocar `ALTER TABLE` no caminho quente. Se existir `ensure*`, precisa ser memoizado ou migrado para boot/migration.

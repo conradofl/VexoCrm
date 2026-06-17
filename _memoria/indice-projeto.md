@@ -92,6 +92,7 @@ Páginas principais:
 - `Agente.tsx`: agentes/notificações.
 - `Tenants.tsx`: empresas/tenants.
 - `Conexoes.tsx`: chips WhatsApp por tenant.
+- `EvolutionAdmin.tsx`: inventário admin Evolution; busca remota manual/cacheada.
 - `Relatorios.tsx`: envios por chip/dia.
 - `Disparos.tsx`: placeholder.
 - `Aquecimento.tsx`: placeholder.
@@ -156,6 +157,7 @@ Banco/tabelas-chave:
 Frontend:
 
 - `Conexoes.tsx`: seleciona tenant e mostra `EvolutionChipsPanel`.
+- `EvolutionAdmin.tsx`: lista inventário local de instâncias/settings/follow-up; só chama `/instance/fetchInstances` com ação manual "Buscar Evolution".
 - `EvolutionChipsPanel.tsx`: provisionamento, manual add, QR modal, default/active, cota e estado cold/warm.
 - `Relatorios.tsx`: gráfico Recharts por chip/dia.
 - `LeadImports.tsx`: fluxo de planilha/campanha.
@@ -163,6 +165,7 @@ Frontend:
 Backend:
 
 - `server.js` linhas de Evolution/instâncias: funções `ensureLeadClientEvolutionInstancesTable`, `getLeadClientEvolutionInstances*`, `upsertLeadClientEvolutionInstance`, `provisionLeadClientEvolutionInstance`, `deleteLeadClientEvolutionInstance`.
+- `registerAllDomainRoutes.js` admin Evolution: `GET /api/admin/evolution-config` local por padrão; `?remote=true` usa cache/dedupe para buscar `/instance/fetchInstances`.
 - `server.js` campanha: `buildDispatchLeads`, `executeCampaignDispatch`, `claimCampaignForDispatch`.
 - `campaign-outbound.js`: envio por sequência.
 
