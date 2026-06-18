@@ -2197,6 +2197,12 @@ async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
 
   const client = await pgDatabasePool.connect();
   try {
+    const instanceRes = await client.query(
+      `SELECT dispatch_webhook_url, name FROM public.lead_client_evolution_instances WHERE id = $1 AND client_id = $2`,
+      [instanceId, clientId]
+    );
+    const instanceRow = instanceRes.rows[0];
+
     await client.query("BEGIN");
     const removed = await client.query(
       `
@@ -2225,6 +2231,32 @@ async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
     }
 
     await client.query("COMMIT");
+
+    if (instanceRow?.dispatch_webhook_url) {
+      const parts = instanceRow.dispatch_webhook_url.split("/");
+      const instanceName = parts[parts.length - 1];
+      if (instanceName) {
+        const config = getEvolutionAdminConfig();
+        if (config.configured) {
+          try {
+            const response = await fetch(`${config.baseUrl}/instance/delete/${encodeURIComponent(instanceName)}`, {
+              method: "DELETE",
+              headers: {
+                apikey: config.apiKey,
+              },
+            });
+            if (!response.ok) {
+              console.warn(`[database] Evolution API returned HTTP ${response.status} when deleting instance ${instanceName}`);
+            } else {
+              console.info(`[database] Evolution API successfully deleted instance ${instanceName}`);
+            }
+          } catch (apiErr) {
+            console.error(`[database] Failed to delete Evolution instance ${instanceName} on API:`, apiErr?.message || apiErr);
+          }
+        }
+      }
+    }
+
     return removed.rows[0] || null;
   } catch (error) {
     await client.query("ROLLBACK");
