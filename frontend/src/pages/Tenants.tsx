@@ -862,7 +862,7 @@ export default function Tenants() {
               const tableStatus = tableStatuses[tenant.id] || tenant.leads_table;
               const expectedTableName = tableStatus?.tableName || `leads_${tenant.id.replace(/-/g, "_")}`;
               return (
-                <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto p-0 border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-white/10 dark:bg-[#0b0e1a] dark:text-white">
+                <DialogContent className="max-h-[95vh] max-w-[95vw] md:max-w-5xl lg:max-w-6xl w-full overflow-y-auto p-0 border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-white/10 dark:bg-[#0b0e1a] dark:text-white">
                   <DialogHeader className="space-y-1 px-6 pt-6 pb-4 border-b border-slate-100 dark:border-white/5">
                     <div className="flex items-center justify-between gap-3">
                       <div className="space-y-1">
