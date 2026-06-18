@@ -298,7 +298,7 @@ function detectSpreadsheetColumns(rows: Record<string, unknown>[]) {
 
   // 2. Fallback scan by value content for phone and name
   const sampleRows = rows.slice(0, 10);
-  
+
   if (!mapping.telefone) {
     for (const key of keys) {
       let matches = 0;
@@ -838,6 +838,11 @@ export default function LeadImports({
           return false;
         }
 
+        // Also if name matches a header and phone is empty/invalid, it is likely a header
+        if ((phoneVal === "" || phoneVal === "telefone") && ["nome", "name", "cliente", "contato", "lead", "responsavel"].includes(nameVal)) {
+          return false;
+        }
+
         return true;
       });
       setParsedRows(filteredNormalizedRows);
@@ -1132,7 +1137,7 @@ export default function LeadImports({
       // 2. Register Dispatch Batch Execution
       const token = await getIdToken();
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
-      
+
       let totalLeads = 0;
       if (selectedFile) {
         totalLeads = finalRowsCount;
@@ -2480,6 +2485,11 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const [creatingSubset, setCreatingSubset] = useState(false);
+  const [deletingItems, setDeletingItems] = useState(false);
+
+  const selectedImport = useMemo(() => {
+    return imports.find((imp) => imp.id === selectedImportId);
+  }, [imports, selectedImportId]);
 
   // Dispatches executions history & chart states
   const { resolvedTheme } = useTheme();
@@ -2587,7 +2597,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
         }
       );
       if (!res.ok) throw new Error("Erro ao baixar relatório de falhas");
-      
+
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -2600,7 +2610,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
+
       toast({
         title: "Download concluído",
         description: `Relatório de falhas para "${dispatch.name}" baixado com sucesso.`,
@@ -2693,7 +2703,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
       setAuditItems([]);
       return;
     }
-    
+
     async function loadAudit() {
       setLoading(true);
       try {
@@ -2832,7 +2842,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
 
       if (!res.ok) throw new Error("Erro ao criar base de recampanha");
       const data = await res.json();
-      
+
       toast({
         title: "Sucesso!",
         description: `Base "${finalCampaignName}" criada com ${selectedItemIds.size} leads. Redirecionando...`,
@@ -2846,6 +2856,45 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
       });
     } finally {
       setCreatingSubset(false);
+    }
+  };
+
+  const handleDeleteImportItems = async () => {
+    if (selectedItemIds.size === 0) return;
+    if (!confirm(`Tem certeza que deseja excluir os ${selectedItemIds.size} leads selecionados desta planilha?`)) return;
+
+    setDeletingItems(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/reports/delete-import-items`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          clientId: activeClientId,
+          leadImportItemIds: Array.from(selectedItemIds),
+        }),
+      });
+
+      if (!res.ok) throw new Error("Erro ao excluir leads");
+
+      toast({
+        title: "Sucesso!",
+        description: `${selectedItemIds.size} leads foram excluídos com sucesso.`,
+      });
+
+      setAuditItems((prev) => prev.filter((item) => !selectedItemIds.has(item.lead_import_item_id)));
+      setSelectedItemIds(new Set());
+    } catch (err) {
+      toast({
+        title: "Erro ao excluir leads",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingItems(false);
     }
   };
 
@@ -3137,8 +3186,53 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
             </div>
           </div>
         </CardHeader>
-        
+
         <CardContent className="space-y-4">
+          {imports.length > 0 && selectedImport && !loading && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50/50 dark:bg-white/[0.02] p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 text-xs">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300">
+                  <FileSpreadsheet className="h-4 w-4 text-indigo-500" />
+                  <span>Origem (De onde veio)</span>
+                </div>
+                <div className="space-y-1 text-muted-foreground pl-5">
+                  <p>
+                    <strong className="text-foreground">Tipo de Origem: </strong>
+                    {selectedImport.source_type === "segmentation_campaign" ? "Campanha de Segmentação" : "Upload de Planilha"}
+                  </p>
+                  <p>
+                    <strong className="text-foreground">Nome da Base: </strong>
+                    {selectedImport.source_name}
+                  </p>
+                  <p>
+                    <strong className="text-foreground">Importado em: </strong>
+                    {formatDateTime(selectedImport.created_at)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300">
+                  <Send className="h-4 w-4 text-emerald-500" />
+                  <span>Destino (Para onde direcionar)</span>
+                </div>
+                <div className="space-y-1 text-muted-foreground pl-5">
+                  <p>
+                    <strong className="text-foreground">Status Atual: </strong>
+                    Processado e direcionado para a **Fila de Envios** para disparos automatizados.
+                  </p>
+                  <p>
+                    <strong className="text-foreground">Total de Leads: </strong>
+                    {selectedImport.total_rows ?? (selectedImport.imported_rows + selectedImport.skipped_rows)} total ({selectedImport.imported_rows} válidos / {selectedImport.skipped_rows} ignorados)
+                  </p>
+                  <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                    💡 Use os filtros de status abaixo para segmentar os leads e criar novas campanhas de remarketing.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {imports.length === 0 ? (
             <div className="p-8">
               <EmptyState title="Nenhuma planilha importada" description="Importe uma planilha na aba Novo Disparo para visualizar os relatórios." />
@@ -3211,7 +3305,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="h-9 text-xs w-full sm:w-64 rounded-xl"
                   />
-                  
+
                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-1 sm:mt-0">
                     <span>Selecionar:</span>
                     <button type="button" onClick={() => handleSelectCohort("all")} className="rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-0.5">Todos</button>
@@ -3221,18 +3315,35 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                 </div>
 
                 {selectedItemIds.size > 0 && (
-                  <Button
-                    onClick={handleCreateCohortCampaign}
-                    disabled={creatingSubset}
-                    className="w-full sm:w-auto h-9 text-xs font-bold gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm"
-                  >
-                    {creatingSubset ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
-                    )}
-                    Criar Campanha com Selecionados ({selectedItemIds.size})
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <Button
+                      type="button"
+                      onClick={handleDeleteImportItems}
+                      disabled={deletingItems || creatingSubset}
+                      variant="destructive"
+                      className="w-full sm:w-auto h-9 text-xs font-bold gap-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-sm"
+                    >
+                      {deletingItems ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5 text-white" />
+                      )}
+                      Excluir Selecionados ({selectedItemIds.size})
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleCreateCohortCampaign}
+                      disabled={creatingSubset || deletingItems}
+                      className="w-full sm:w-auto h-9 text-xs font-bold gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm"
+                    >
+                      {creatingSubset ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-white" />
+                      )}
+                      Criar Campanha com Selecionados ({selectedItemIds.size})
+                    </Button>
+                  </div>
                 )}
               </div>
 
@@ -3264,7 +3375,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                     <TableBody>
                       {filteredItems.map((item) => {
                         const isSelected = selectedItemIds.has(item.lead_import_item_id);
-                        
+
                         let timeAgo = "—";
                         if (item.last_attempt_at) {
                           const diffMs = Date.now() - new Date(item.last_attempt_at).getTime();

@@ -158,7 +158,7 @@ function detectImportColumns(rows) {
 
   // 2. Fallback scan by value content for phone and name
   const sampleRows = rows.slice(0, 10);
-  
+
   if (!mapping.telefone) {
     for (const key of keys) {
       let matches = 0;
@@ -932,35 +932,35 @@ export function registerAllDomainRoutes(app) {
       services,
     });
   });
-  
+
   // P0.1 SECURITY FIX: SSRF in /api/sheets - Add authentication, validation, and timeout
   const VALID_GOOGLE_SHEETS_REGEX = /^[a-zA-Z0-9-_]{44}$/; // UUID do Google Sheets
-  
+
   app.get("/api/sheets", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const sheetId = normalizeString(req.query?.sheetId);
     const gid = normalizeString(req.query?.gid);
-  
+
     // Validação de formato
     if (!sheetId || !VALID_GOOGLE_SHEETS_REGEX.test(sheetId)) {
       sendError(res, 400, "INVALID_SHEET_ID", "Invalid Google Sheets ID");
       return;
     }
-  
+
     if (gid && !/^\d+$/.test(gid)) {
       sendError(res, 400, "INVALID_GID", "Invalid sheet GID");
       return;
     }
-  
+
     try {
       const exportUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(
         sheetId
       )}/export?format=csv&gid=${encodeURIComponent(gid || "0")}`;
-  
+
       const sheetResponse = await fetch(exportUrl, {
         timeout: 10000, // Timeout de 10 segundos
         headers: { "User-Agent": "VexoCRM/1.0" }
       });
-  
+
       if (!sheetResponse.ok) {
         sendError(
           res,
@@ -971,7 +971,7 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       const csv = await sheetResponse.text();
       if (csv.trim().toLowerCase().startsWith("<!") || csv.includes("Sign in")) {
         sendError(
@@ -982,51 +982,51 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       res.json({ rows: parseCsvToRows(csv) });
     } catch (error) {
       console.error("[SECURITY] Sheets fetch error:", error.message);
       sendError(res, 502, "SHEETS_FETCH_FAILED", "Failed to fetch spreadsheet");
     }
   });
-  
+
   app.get("/api/lead-clients", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     if (req.authAccess?.role === "pending") {
       sendError(res, 403, "PENDING_APPROVAL", "Your account is waiting for approval");
       return;
     }
-  
+
     try {
       let query = supabase.from("leads_clients").select("id, name, created_at");
       const scopeMode =
         req.authAccess?.scopeMode || (req.authAccess?.role === "client" ? "assigned_clients" : "all_clients");
-  
+
       if (req.authAccess?.role === "client") {
         if (scopeMode === "no_client_access" || !req.authAccess.clientIds?.length) {
           res.json({ items: [] });
           return;
         }
-  
+
         query = query.in("id", req.authAccess.clientIds).order("name", { ascending: true });
       } else if (scopeMode === "assigned_clients") {
         if (!req.authAccess.clientIds?.length) {
           res.json({ items: [] });
           return;
         }
-  
+
         query = query.in("id", req.authAccess.clientIds).order("name", { ascending: true });
       } else {
         query = query.order("name", { ascending: true });
       }
-  
+
       const { data, error } = await query;
-  
+
       if (error) {
         throw error;
       }
-  
+
       const clientIds = (data || []).map((client) => client.id).filter(Boolean);
       let settingsMap = {};
       try {
@@ -1042,7 +1042,7 @@ export function registerAllDomainRoutes(app) {
           n8n_onboarding_status: getN8nOnboardingStatus(settings),
         };
       });
-  
+
       res.json({ items });
     } catch (error) {
       console.error("lead clients query error:", error);
@@ -1133,27 +1133,27 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "LEAD_CLIENT_TABLE_STATUS_FAILED", "Failed to verify tenant leads table");
     }
   });
-  
+
   app.post("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     if (!hasAccessPermission(req.authAccess, "tenants.manage")) {
       sendError(res, 403, "FORBIDDEN", "Tenant management permission required");
       return;
     }
-  
+
     const name = normalizeString(req.body?.name);
     const tenantId = normalizeTenantKey(
       req.body?.id ?? req.body?.tenantId ?? req.body?.clientId ?? name
     );
     const n8nSettings = req.body?.n8nSettings;
     const schemaType = normalizeTenantKey(req.body?.chatbotModel) || "generico";
-  
+
     if (!name || name.length < 3) {
       sendError(res, 400, "INVALID_BODY", "Tenant name must have at least 3 characters");
       return;
     }
-  
+
     if (!tenantId) {
       sendError(
         res,
@@ -1163,28 +1163,28 @@ export function registerAllDomainRoutes(app) {
       );
       return;
     }
-  
+
     if (n8nSettings && !req.authAccess?.isAdmin) {
       sendError(res, 403, "FORBIDDEN", "Admin permission required to configure n8n webhooks");
       return;
     }
-  
+
     try {
       const { data: existingTenant, error: existingTenantError } = await supabase
         .from("leads_clients")
         .select("id")
         .eq("id", tenantId)
         .maybeSingle();
-  
+
       if (existingTenantError) {
         throw existingTenantError;
       }
-  
+
       if (existingTenant) {
         sendError(res, 409, "TENANT_ALREADY_EXISTS", "A tenant with this ID already exists");
         return;
       }
-  
+
       const { data, error } = await supabase
         .from("leads_clients")
         .insert({
@@ -1193,7 +1193,7 @@ export function registerAllDomainRoutes(app) {
         })
         .select("id, name, created_at")
         .single();
-  
+
       if (error) {
         throw error;
       }
@@ -1230,17 +1230,17 @@ export function registerAllDomainRoutes(app) {
         sendError(res, 400, "INVALID_BODY", "dispatchWebhookUrl must be a valid http or https URL");
         return;
       }
-  
+
       if (isDuplicateKeyError(error)) {
         sendError(res, 409, "TENANT_ALREADY_EXISTS", "A tenant with this ID already exists");
         return;
       }
-  
+
       console.error("lead client create error:", error);
       sendError(res, 500, "LEAD_CLIENT_CREATE_FAILED", "Failed to create tenant");
     }
   });
-  
+
   const LEAD_CLIENT_OPERATIONAL_TABLES = [
     "analytics_insights",
     "metric_snapshots",
@@ -1293,20 +1293,20 @@ export function registerAllDomainRoutes(app) {
 
     return results;
   }
-  
+
   app.get(
     "/api/lead-clients/:tenantId/n8n-settings",
     requireFirebaseAuth,
     requireAdminAccess,
     async (req, res) => {
       if (!ensureDb(res)) return;
-  
+
       const tenantId = normalizeTenantKey(req.params?.tenantId);
       if (!tenantId) {
         sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
         return;
       }
-  
+
       try {
         const settings = await getLeadClientN8nSettings(tenantId);
         res.json({ item: maskN8nSettings(settings) });
@@ -1316,33 +1316,33 @@ export function registerAllDomainRoutes(app) {
       }
     }
   );
-  
+
   app.patch(
     "/api/lead-clients/:tenantId/n8n-settings",
     requireFirebaseAuth,
     requireAdminAccess,
     async (req, res) => {
       if (!ensureDb(res)) return;
-  
+
       const tenantId = normalizeTenantKey(req.params?.tenantId);
       if (!tenantId) {
         sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
         return;
       }
-  
+
       try {
         const { data: tenant, error: tenantError } = await supabase
           .from("leads_clients")
           .select("id")
           .eq("id", tenantId)
           .maybeSingle();
-  
+
         if (tenantError) throw tenantError;
         if (!tenant) {
           sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
           return;
         }
-  
+
         const existing = await getLeadClientN8nSettings(tenantId);
         const savedSettings = await upsertLeadClientN8nSettings(
           tenantId,
@@ -1350,14 +1350,14 @@ export function registerAllDomainRoutes(app) {
           req.authAccess,
           existing
         );
-  
+
         res.json({ item: maskN8nSettings(savedSettings) });
       } catch (error) {
         if (error instanceof Error && error.message === "INVALID_DISPATCH_WEBHOOK_URL") {
           sendError(res, 400, "INVALID_BODY", "dispatchWebhookUrl must be a valid http or https URL");
           return;
         }
-  
+
         console.error("lead client n8n settings update error:", error);
         sendError(res, 500, "N8N_SETTINGS_SAVE_FAILED", "Failed to save n8n settings");
       }
@@ -1911,15 +1911,15 @@ export function registerAllDomainRoutes(app) {
       }
     }
   );
-  
+
   async function deleteLeadClientHandler(req, res, explicitTenantId) {
     if (!ensureDb(res)) return;
-  
+
     if (!hasAccessPermission(req.authAccess, "tenants.manage")) {
       sendError(res, 403, "FORBIDDEN", "Tenant management permission required");
       return;
     }
-  
+
     const tenantId = normalizeTenantKey(
       explicitTenantId ??
         req.params?.tenantId ??
@@ -1927,7 +1927,7 @@ export function registerAllDomainRoutes(app) {
         req.body?.id ??
         req.body?.clientId
     );
-  
+
     if (!tenantId) {
       sendError(
         res,
@@ -1937,30 +1937,30 @@ export function registerAllDomainRoutes(app) {
       );
       return;
     }
-  
+
     try {
       const { data: tenant, error: tenantError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", tenantId)
         .maybeSingle();
-  
+
       if (tenantError) {
         throw tenantError;
       }
-  
+
       if (!tenant) {
         sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
         return;
       }
-  
+
       const users = await listAllFirebaseUsers();
       const linkedUsers = users.filter((user) => {
         const access = extractManagedAccessClaims(user.customClaims || {}, {
           uid: user.uid,
           email: user.email,
         });
-  
+
         return (
           access.clientId === tenantId ||
           access.tenantId === tenantId ||
@@ -1968,7 +1968,7 @@ export function registerAllDomainRoutes(app) {
           access.tenantIds?.includes(tenantId)
         );
       });
-  
+
       if (linkedUsers.length > 0) {
         sendError(
           res,
@@ -1978,18 +1978,18 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       const purge = await purgeLeadClientOperationalData(tenantId);
-  
+
       const { error: deleteError } = await supabase
         .from("leads_clients")
         .delete()
         .eq("id", tenantId);
-  
+
       if (deleteError) {
         throw deleteError;
       }
-  
+
       res.json({
         success: true,
         item: {
@@ -2003,33 +2003,33 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "LEAD_CLIENT_DELETE_FAILED", "Failed to delete tenant");
     }
   }
-  
+
   app.delete("/api/lead-clients/:tenantId", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
     await deleteLeadClientHandler(req, res);
   });
-  
+
   app.post("/api/lead-clients/delete", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
     await deleteLeadClientHandler(req, res);
   });
-  
+
   app.post("/api/lead-clients/:tenantId/delete", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
     await deleteLeadClientHandler(req, res);
   });
-  
+
   app.delete("/api/lead-clients", requireFirebaseAuth, requireInternalPageAccess("empresas"), async (req, res) => {
     await deleteLeadClientHandler(req, res, req.query?.tenantId ?? req.query?.id ?? req.query?.clientId);
   });
-  
+
   app.get("/api/admin/users", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (req, res) => {
     if (!hasUserPermission(req.authAccess, "users.view")) {
       sendError(res, 403, "FORBIDDEN", "User view permission required");
       return;
     }
-  
+
     try {
       const users = await listAllFirebaseUsers();
       const mappedUsers = users.map(mapAdminUserRecord);
-  
+
       res.json({
         items: filterVisibleUserRecords(mappedUsers, req.authAccess),
       });
@@ -2082,13 +2082,13 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.get("/api/admin/access-profiles", requireFirebaseAuth, requireInternalPageAccess("usuarios"), async (req, res) => {
     if (!hasUserPermission(req.authAccess, "users.view")) {
       sendError(res, 403, "FORBIDDEN", "User view permission required");
       return;
     }
-  
+
     try {
       const items = await listAccessProfiles();
       res.json({ items });
@@ -2102,54 +2102,54 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.patch("/api/admin/users/:uid/access", requireFirebaseAuth, requireUserManagementAccess, async (req, res) => {
     const uid = normalizeString(req.params.uid);
     const rawRole = normalizeString(req.body?.role);
     const role = normalizeRole(rawRole);
-  
+
     if (!uid || !rawRole) {
       sendError(res, 400, "INVALID_BODY", "Missing uid or role");
       return;
     }
-  
+
     if (!isValidManagedRoleInput(rawRole)) {
       sendError(res, 400, "INVALID_ROLE", "Unsupported role");
       return;
     }
-  
+
     if (!isValidManagedScopeInput(req.body?.scopeMode ?? req.body?.tenantScope)) {
       sendError(res, 400, "INVALID_SCOPE_MODE", "Unsupported scope mode");
       return;
     }
-  
+
     if (!isValidManagedApprovalLevelInput(req.body?.approvalLevel)) {
       sendError(res, 400, "INVALID_APPROVAL_LEVEL", "Unsupported approval level");
       return;
     }
-  
+
     try {
       const auth = getAuth();
       const accessProfiles = await listAccessProfiles();
       const selectedProfile = resolveRequestedAccessProfile(accessProfiles, req.body?.accessPreset, role);
-  
+
       if (req.body?.accessPreset && !findAccessProfileByKey(accessProfiles, req.body?.accessPreset)) {
         sendError(res, 400, "INVALID_ACCESS_PRESET", "Unsupported access preset");
         return;
       }
-  
+
       const user = await auth.getUser(uid);
       const isTargetFixedAdmin = isFixedAdminIdentity({ uid: user.uid, email: user.email });
       const currentTargetAccess = extractManagedAccessClaims(user.customClaims || {}, {
         uid: user.uid,
         email: user.email,
       });
-  
+
       if (!canManageTargetAccess(req.authAccess, currentTargetAccess)) {
         sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You do not have permission to manage this user");
         return;
       }
-  
+
       const managedClaims = isTargetFixedAdmin
         ? buildManagedClaims({
             role: "internal",
@@ -2179,27 +2179,27 @@ export function registerAllDomainRoutes(app) {
             companyName: req.body?.companyName,
             internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
           });
-  
+
       if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
         sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
         return;
       }
-  
+
       if (isTargetFixedAdmin && typeof req.body?.disabled === "boolean" && req.body.disabled) {
         sendError(res, 400, "INVALID_BODY", "Fixed admin accounts cannot be disabled");
         return;
       }
-  
+
       const mergedClaims = mergeManagedClaims(user.customClaims || {}, managedClaims);
-  
+
       await auth.setCustomUserClaims(uid, mergedClaims);
-  
+
       if (!isTargetFixedAdmin && typeof req.body?.disabled === "boolean") {
         await auth.updateUser(uid, { disabled: req.body.disabled });
       }
-  
+
       const updatedUser = await auth.getUser(uid);
-  
+
       res.json({
         item: mapAdminUserRecord(updatedUser),
       });
@@ -2213,7 +2213,7 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.post("/api/admin/users", requireFirebaseAuth, requireUserManagementAccess, async (req, res) => {
     const email = normalizeString(req.body?.email)?.toLowerCase();
     const password = normalizeString(req.body?.password);
@@ -2221,44 +2221,44 @@ export function registerAllDomainRoutes(app) {
     const rawRole = normalizeString(req.body?.role);
     const role = normalizeRole(rawRole);
     const sendPasswordReset = normalizeBool(req.body?.sendPasswordReset);
-  
+
     if (!email || !password || !rawRole) {
       sendError(res, 400, "INVALID_BODY", "Missing email, password or role");
       return;
     }
-  
+
     if (!isValidManagedRoleInput(rawRole)) {
       sendError(res, 400, "INVALID_ROLE", "Unsupported role");
       return;
     }
-  
+
     if (!isValidManagedScopeInput(req.body?.scopeMode ?? req.body?.tenantScope)) {
       sendError(res, 400, "INVALID_SCOPE_MODE", "Unsupported scope mode");
       return;
     }
-  
+
     if (!isValidManagedApprovalLevelInput(req.body?.approvalLevel)) {
       sendError(res, 400, "INVALID_APPROVAL_LEVEL", "Unsupported approval level");
       return;
     }
-  
+
     if (password.length < 8) {
       sendError(res, 400, "WEAK_PASSWORD", "Password must have at least 8 characters");
       return;
     }
 
     let managedClaims = null;
-  
+
     try {
       const auth = getAuth();
       const accessProfiles = await listAccessProfiles();
       const selectedProfile = resolveRequestedAccessProfile(accessProfiles, req.body?.accessPreset, role);
-  
+
       if (req.body?.accessPreset && !findAccessProfileByKey(accessProfiles, req.body?.accessPreset)) {
         sendError(res, 400, "INVALID_ACCESS_PRESET", "Unsupported access preset");
         return;
       }
-  
+
       managedClaims = buildManagedClaims({
         role: selectedProfile?.role || role,
         accessPreset: selectedProfile?.key || req.body?.accessPreset,
@@ -2273,27 +2273,27 @@ export function registerAllDomainRoutes(app) {
         companyName: req.body?.companyName,
         internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
       });
-  
+
       if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
         sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
         return;
       }
-  
+
       const user = await auth.createUser({
         email,
         password,
         displayName: displayName || undefined,
       });
-  
+
       await auth.setCustomUserClaims(user.uid, mergeManagedClaims({}, managedClaims));
-  
+
       let passwordResetLink = null;
       if (sendPasswordReset) {
         passwordResetLink = await auth.generatePasswordResetLink(email);
       }
-  
+
       const createdUser = await auth.getUser(user.uid);
-  
+
       res.status(201).json({
         item: mapAdminUserRecord(createdUser),
         passwordResetLink,
@@ -2301,7 +2301,7 @@ export function registerAllDomainRoutes(app) {
     } catch (error) {
       console.error("admin user create error:", error);
       const code = error?.code || "";
-  
+
       if (code === "auth/email-already-exists") {
         try {
           const auth = getAuth();
@@ -2349,7 +2349,7 @@ export function registerAllDomainRoutes(app) {
           return;
         }
       }
-  
+
       sendError(
         res,
         500,
@@ -2358,20 +2358,20 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.delete("/api/admin/users/:uid", requireFirebaseAuth, requireUserManagementAccess, async (req, res) => {
     const uid = normalizeString(req.params?.uid);
-  
+
     if (!uid) {
       sendError(res, 400, "INVALID_PARAM", "Missing user uid");
       return;
     }
-  
+
     if (uid === req.authAccess?.uid) {
       sendError(res, 400, "SELF_DELETE_NOT_ALLOWED", "You cannot delete your own account");
       return;
     }
-  
+
     try {
       const auth = getAuth();
       const user = await auth.getUser(uid);
@@ -2379,19 +2379,19 @@ export function registerAllDomainRoutes(app) {
         uid: user.uid,
         email: user.email,
       });
-  
+
       if (!canManageTargetAccess(req.authAccess, targetAccess)) {
         sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You do not have permission to delete this user");
         return;
       }
-  
+
       if (isFixedAdminIdentity({ uid: user.uid, email: user.email })) {
         sendError(res, 400, "FIXED_ADMIN_DELETE_BLOCKED", "Fixed admin accounts cannot be deleted");
         return;
       }
-  
+
       await auth.deleteUser(uid);
-  
+
       res.json({
         success: true,
         uid,
@@ -2399,7 +2399,7 @@ export function registerAllDomainRoutes(app) {
     } catch (error) {
       console.error("admin user delete error:", error);
       const code = error?.code || "";
-  
+
       if (code === "auth/user-not-found") {
         sendError(res, 404, "USER_NOT_FOUND", "User not found");
         return;
@@ -2412,7 +2412,7 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   const VEXO_SALES_STAGES = new Set([
     "Novo lead",
     "Primeiro contato",
@@ -2423,39 +2423,39 @@ export function registerAllDomainRoutes(app) {
     "Fechado ganho",
     "Fechado perdido",
   ]);
-  
+
   const VEXO_SALES_STATUSES = new Set(["ativo", "pausado", "ganho", "perdido"]);
   const VEXO_SALES_PRIORITIES = new Set(["baixa", "media", "alta"]);
   const VEXO_SALES_INTERACTION_TYPES = new Set(["ligacao", "whatsapp", "reuniao", "email", "observacao"]);
-  
+
   function normalizeVexoSalesChoice(value, allowedValues, fallback) {
     const normalized = normalizeString(value);
     return normalized && allowedValues.has(normalized) ? normalized : fallback;
   }
-  
+
   function normalizeVexoSalesNumber(value) {
     if (value === null || value === undefined || value === "") return 0;
     const parsed = Number(value);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }
-  
+
   function normalizeVexoSalesDate(value) {
     const normalized = normalizeString(value);
     if (!normalized) return null;
-  
+
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return null;
-  
+
     return normalized.slice(0, 10);
   }
-  
+
   function getVexoSalesActor(req) {
     return {
       email: normalizeString(req.authAccess?.email || req.authUser?.email),
       uid: normalizeString(req.authUser?.uid),
     };
   }
-  
+
   function logVexoSalesApi(level, event, req, details = {}) {
     const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
     logger("[vexo-sales-api]", event, {
@@ -2467,28 +2467,28 @@ export function registerAllDomainRoutes(app) {
       ...details,
     });
   }
-  
+
   function requireVexoSalesAdminAccess(req, res, next) {
     if (req.authAccess?.role !== "internal" || !req.authAccess?.isAdmin) {
       logVexoSalesApi("warn", "access_denied", req);
       sendError(res, 403, "FORBIDDEN", "Admin permission required");
       return;
     }
-  
+
     next();
   }
-  
+
   function buildVexoSalesOpportunityPayload(body, req, { partial = false } = {}) {
     const actor = getVexoSalesActor(req);
     const payload = {};
-  
+
     const hasAnyField = (...fields) => fields.some((field) => Object.prototype.hasOwnProperty.call(body, field));
     const assignString = (field, value, ...aliases) => {
       if (!partial || hasAnyField(field, ...aliases)) {
         payload[field] = normalizeString(value);
       }
     };
-  
+
     assignString("company_name", body?.company_name ?? body?.companyName, "companyName");
     assignString("contact_name", body?.contact_name ?? body?.contactName, "contactName");
     assignString("contact_phone", body?.contact_phone ?? body?.contactPhone, "contactPhone");
@@ -2497,39 +2497,39 @@ export function registerAllDomainRoutes(app) {
     assignString("segment", body?.segment);
     assignString("assigned_to", body?.assigned_to ?? body?.assignedTo, "assignedTo");
     assignString("notes", body?.notes);
-  
+
     if (!partial || hasAnyField("estimated_value", "estimatedValue")) {
       payload.estimated_value = normalizeVexoSalesNumber(body?.estimated_value ?? body?.estimatedValue);
     }
-  
+
     if (!partial || Object.prototype.hasOwnProperty.call(body, "stage")) {
       payload.stage = normalizeVexoSalesChoice(body?.stage, VEXO_SALES_STAGES, "Novo lead");
     }
-  
+
     if (!partial || Object.prototype.hasOwnProperty.call(body, "status")) {
       payload.status = normalizeVexoSalesChoice(body?.status, VEXO_SALES_STATUSES, "ativo");
     }
-  
+
     if (!partial || Object.prototype.hasOwnProperty.call(body, "priority")) {
       payload.priority = normalizeVexoSalesChoice(body?.priority, VEXO_SALES_PRIORITIES, "media");
     }
-  
+
     if (!partial || hasAnyField("expected_close_date", "expectedCloseDate")) {
       payload.expected_close_date = normalizeVexoSalesDate(body?.expected_close_date ?? body?.expectedCloseDate);
     }
-  
+
     if (!partial) {
       payload.owner_company = "vexo";
       payload.internal_module = true;
       payload.created_by = actor.email;
       payload.created_by_uid = actor.uid;
     }
-  
+
     payload.updated_at = new Date().toISOString();
-  
+
     return payload;
   }
-  
+
   function buildVexoSalesSummary(items) {
     const now = new Date();
     const month = now.getMonth();
@@ -2542,13 +2542,13 @@ export function registerAllDomainRoutes(app) {
       const updatedAt = new Date(item.updated_at || item.created_at);
       return updatedAt.getMonth() === month && updatedAt.getFullYear() === year;
     });
-  
+
     const estimatedNegotiationValue = open.reduce(
       (sum, item) => sum + normalizeVexoSalesNumber(item.estimated_value),
       0
     );
     const closedCount = won.length + lost.length;
-  
+
     return {
       total,
       open: open.length,
@@ -2557,10 +2557,10 @@ export function registerAllDomainRoutes(app) {
       conversionRate: closedCount ? Math.round((won.length / closedCount) * 100) : 0,
     };
   }
-  
+
   app.get("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     try {
       let query = supabase
         .from("vexo_sales_opportunities")
@@ -2568,22 +2568,22 @@ export function registerAllDomainRoutes(app) {
         .eq("owner_company", "vexo")
         .eq("internal_module", true)
         .order("updated_at", { ascending: false });
-  
+
       const stage = normalizeString(req.query?.stage);
       const status = normalizeString(req.query?.status);
       const priority = normalizeString(req.query?.priority);
       const source = normalizeString(req.query?.source);
       const assignedTo = normalizeString(req.query?.assignedTo ?? req.query?.assigned_to);
-  
+
       if (stage && VEXO_SALES_STAGES.has(stage)) query = query.eq("stage", stage);
       if (status && VEXO_SALES_STATUSES.has(status)) query = query.eq("status", status);
       if (priority && VEXO_SALES_PRIORITIES.has(priority)) query = query.eq("priority", priority);
       if (source) query = query.ilike("source", `%${source}%`);
       if (assignedTo) query = query.ilike("assigned_to", `%${assignedTo}%`);
-  
+
       const { data, error } = await query;
       if (error) throw error;
-  
+
       res.json({
         items: data || [],
         summary: buildVexoSalesSummary(data || []),
@@ -2599,24 +2599,24 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.post("/api/vexo-sales/opportunities", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const payload = buildVexoSalesOpportunityPayload(req.body || {}, req);
     if (!payload.company_name) {
       logVexoSalesApi("warn", "opportunity_create_invalid_body", req);
       sendError(res, 400, "INVALID_BODY", "Company name is required");
       return;
     }
-  
+
     try {
       const { data, error } = await supabase
         .from("vexo_sales_opportunities")
         .insert(payload)
         .select("*")
         .single();
-  
+
       if (error) throw error;
       logVexoSalesApi("info", "opportunity_created", req, { opportunityId: data?.id });
       res.status(201).json({ item: data });
@@ -2625,24 +2625,24 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "VEXO_SALES_CREATE_FAILED", error instanceof Error ? error.message : "Failed to create opportunity");
     }
   });
-  
+
   app.patch("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params.id);
     if (!id) {
       logVexoSalesApi("warn", "opportunity_update_missing_id", req);
       sendError(res, 400, "INVALID_ID", "Missing opportunity id");
       return;
     }
-  
+
     const payload = buildVexoSalesOpportunityPayload(req.body || {}, req, { partial: true });
     if (Object.prototype.hasOwnProperty.call(payload, "company_name") && !payload.company_name) {
       logVexoSalesApi("warn", "opportunity_update_invalid_body", req, { opportunityId: id });
       sendError(res, 400, "INVALID_BODY", "Company name is required");
       return;
     }
-  
+
     try {
       const { data, error } = await supabase
         .from("vexo_sales_opportunities")
@@ -2652,7 +2652,7 @@ export function registerAllDomainRoutes(app) {
         .eq("internal_module", true)
         .select("*")
         .single();
-  
+
       if (error) throw error;
       logVexoSalesApi("info", "opportunity_updated", req, { opportunityId: data?.id || id });
       res.json({ item: data });
@@ -2661,17 +2661,17 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "VEXO_SALES_UPDATE_FAILED", error instanceof Error ? error.message : "Failed to update opportunity");
     }
   });
-  
+
   app.delete("/api/vexo-sales/opportunities/:id", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params.id);
     if (!id) {
       logVexoSalesApi("warn", "opportunity_delete_missing_id", req);
       sendError(res, 400, "INVALID_ID", "Missing opportunity id");
       return;
     }
-  
+
     try {
       const { error } = await supabase
         .from("vexo_sales_opportunities")
@@ -2679,7 +2679,7 @@ export function registerAllDomainRoutes(app) {
         .eq("id", id)
         .eq("owner_company", "vexo")
         .eq("internal_module", true);
-  
+
       if (error) throw error;
       logVexoSalesApi("info", "opportunity_deleted", req, { opportunityId: id });
       res.json({ success: true });
@@ -2688,24 +2688,24 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "VEXO_SALES_DELETE_FAILED", error instanceof Error ? error.message : "Failed to delete opportunity");
     }
   });
-  
+
   app.get("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params.id);
     if (!id) {
       logVexoSalesApi("warn", "interactions_query_missing_id", req);
       sendError(res, 400, "INVALID_ID", "Missing opportunity id");
       return;
     }
-  
+
     try {
       const { data, error } = await supabase
         .from("vexo_sales_interactions")
         .select("*")
         .eq("opportunity_id", id)
         .order("interaction_at", { ascending: false });
-  
+
       if (error) throw error;
       res.json({ items: data || [] });
     } catch (error) {
@@ -2713,20 +2713,20 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "VEXO_SALES_INTERACTIONS_QUERY_FAILED", error instanceof Error ? error.message : "Failed to query interactions");
     }
   });
-  
+
   app.post("/api/vexo-sales/opportunities/:id/interactions", requireFirebaseAuth, requireVexoSalesAdminAccess, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const opportunityId = normalizeString(req.params.id);
     const type = normalizeVexoSalesChoice(req.body?.type, VEXO_SALES_INTERACTION_TYPES, null);
     const description = normalizeString(req.body?.description);
-  
+
     if (!opportunityId || !type || !description) {
       logVexoSalesApi("warn", "interaction_create_invalid_body", req, { opportunityId });
       sendError(res, 400, "INVALID_BODY", "Opportunity id, interaction type and description are required");
       return;
     }
-  
+
     const actor = getVexoSalesActor(req);
     const interactionAt = req.body?.interaction_at || req.body?.interactionAt;
     const payload = {
@@ -2738,13 +2738,13 @@ export function registerAllDomainRoutes(app) {
       created_by: actor.email,
       created_by_uid: actor.uid,
     };
-  
+
     if (Number.isNaN(new Date(payload.interaction_at).getTime())) {
       logVexoSalesApi("warn", "interaction_create_invalid_date", req, { opportunityId });
       sendError(res, 400, "INVALID_DATE", "Invalid interaction date");
       return;
     }
-  
+
     try {
       const { data: opportunity, error: opportunityError } = await supabase
         .from("vexo_sales_opportunities")
@@ -2753,28 +2753,28 @@ export function registerAllDomainRoutes(app) {
         .eq("owner_company", "vexo")
         .eq("internal_module", true)
         .single();
-  
+
       if (opportunityError || !opportunity) {
         logVexoSalesApi("warn", "interaction_create_opportunity_not_found", req, { opportunityId });
         sendError(res, 404, "OPPORTUNITY_NOT_FOUND", "Opportunity not found");
         return;
       }
-  
+
       const { data, error } = await supabase
         .from("vexo_sales_interactions")
         .insert(payload)
         .select("*")
         .single();
-  
+
       if (error) throw error;
-  
+
       await supabase
         .from("vexo_sales_opportunities")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", opportunityId)
         .eq("owner_company", "vexo")
         .eq("internal_module", true);
-  
+
       logVexoSalesApi("info", "interaction_created", req, { opportunityId, interactionId: data?.id });
       res.status(201).json({ item: data });
     } catch (error) {
@@ -2782,7 +2782,7 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "VEXO_SALES_INTERACTION_CREATE_FAILED", error instanceof Error ? error.message : "Failed to create interaction");
     }
   });
-  
+
   app.post("/api/client-signup", async (req, res) => {
     if (!firebaseReady) {
       sendError(
@@ -2793,22 +2793,22 @@ export function registerAllDomainRoutes(app) {
       );
       return;
     }
-  
+
     const name = normalizeString(req.body?.name);
     const companyName = normalizeString(req.body?.companyName);
     const email = normalizeString(req.body?.email)?.toLowerCase();
     const password = normalizeString(req.body?.password);
-  
+
     if (!name || !companyName || !email || !password) {
       sendError(res, 400, "INVALID_BODY", "Missing name, companyName, email or password");
       return;
     }
-  
+
     if (password.length < 8) {
       sendError(res, 400, "WEAK_PASSWORD", "Password must have at least 8 characters");
       return;
     }
-  
+
     try {
       const auth = getAuth();
       const user = await auth.createUser({
@@ -2816,14 +2816,14 @@ export function registerAllDomainRoutes(app) {
         password,
         displayName: `${name} - ${companyName}`.slice(0, 100),
       });
-  
+
       const managedClaims = buildManagedClaims({
         role: "pending",
         companyName,
       });
-  
+
       await auth.setCustomUserClaims(user.uid, mergeManagedClaims({}, managedClaims));
-  
+
       res.status(201).json({
         success: true,
         message: "Conta criada. Aguarde a liberacao do acesso pela equipe Vexo.",
@@ -2835,48 +2835,48 @@ export function registerAllDomainRoutes(app) {
         sendError(res, 409, "EMAIL_ALREADY_EXISTS", "This email is already registered");
         return;
       }
-  
+
       sendError(res, 500, "CLIENT_SIGNUP_FAILED", "Failed to create client account");
     }
   });
-  
+
   app.get("/api/dashboard", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
-  
+
     const requestedClientId = normalizeString(req.query.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-  
+
     try {
       const { data: client, error: clientError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", clientId)
         .maybeSingle();
-  
+
       if (clientError) {
         throw clientError;
       }
-  
+
       const { data: leads, error } = await supabase
         .from(leadsTableName(clientId))
         .select("id, nome, tipo_cliente, status, qualificacao, data_hora, cidade, created_at")
         .eq("client_id", clientId)
         .order("data_hora", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
-  
+
       if (error) {
         throw error;
       }
-  
+
       let conversions = [];
       try {
         const { data: conversionRows, error: conversionsError } = await supabase
           .from("lead_conversions")
           .select("id, conversion_status, contract_value, revenue_amount, closed_at, created_at")
           .eq("client_id", clientId);
-  
+
         if (!conversionsError) {
           conversions = conversionRows || [];
         }
@@ -2913,37 +2913,37 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "DASHBOARD_QUERY_FAILED", "Failed to query dashboard data", details);
     }
   });
-  
+
   app.get("/api/revenue-ops", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
-  
+
     const requestedClientId = normalizeString(req.query.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-  
+
     try {
       const { data: client, error: clientError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", clientId)
         .maybeSingle();
-  
+
       if (clientError) {
         throw clientError;
       }
-  
+
       const { data: leads, error: leadsError } = await supabase
         .from(leadsTableName(clientId))
         .select("id, client_id, telefone, nome, tipo_cliente, faixa_consumo, cidade, estado, status, bot_ativo, historico, data_hora, qualificacao, created_at, updated_at")
         .eq("client_id", clientId)
         .order("data_hora", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
-  
+
       if (leadsError) {
         throw leadsError;
       }
-  
+
       const [
         campaignsQuery,
         messagesQuery,
@@ -3007,7 +3007,7 @@ export function registerAllDomainRoutes(app) {
             .not("import_id", "is", null)
         ),
       ]);
-  
+
       const payload = buildRevenueOpsPayload({
         client: client || { id: clientId, name: clientId },
         leads: leads || [],
@@ -3032,34 +3032,34 @@ export function registerAllDomainRoutes(app) {
           importItems: importItemsQuery.available,
         },
       });
-  
+
       res.json(payload);
     } catch (error) {
       console.error("revenue ops query error:", error);
       res.json(buildRevenueOpsFallbackPayload(clientId));
     }
   });
-  
+
   app.get("/api/commercial-intelligence", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
-  
+
     const requestedClientId = normalizeString(req.query.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-  
+
     const defaultSettings = getCommercialIntelligenceDefaultSettings();
     const filters = parseCommercialIntelligenceFilters(req.query, defaultSettings.defaultPeriod);
-  
+
     try {
       const { data: client, error: clientError } = await supabase
         .from("leads_clients")
         .select("id, name")
         .eq("id", clientId)
         .maybeSingle();
-  
+
       if (clientError) throw clientError;
-  
+
       const [
         leadsQuery,
         campaignsQuery,
@@ -3157,9 +3157,9 @@ export function registerAllDomainRoutes(app) {
           null
         ),
       ]);
-  
+
       if (leadsQuery.error) throw leadsQuery.error;
-  
+
       const payload = buildCommercialIntelligencePayload({
         client: client || { id: clientId, name: clientId },
         filters,
@@ -3175,26 +3175,26 @@ export function registerAllDomainRoutes(app) {
         storedInsights: insightsQuery.data || [],
         settings: settingsQuery.data || null,
       });
-  
+
       res.json(payload);
     } catch (error) {
       console.error("commercial intelligence query error:", error);
       sendError(res, 500, "COMMERCIAL_INTELLIGENCE_QUERY_FAILED", "Falha ao carregar a inteligencia comercial");
     }
   });
-  
+
   app.post("/api/commercial-intelligence/consultants", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const authorizedClientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
     if (!authorizedClientId) return;
-  
+
     const name = normalizeString(req.body?.name);
     if (!name) {
       sendError(res, 400, "INVALID_BODY", "Nome do consultor e obrigatorio");
       return;
     }
-  
+
     const performanceMeta = {
       position: normalizeString(req.body?.position) || "",
       territory_regions: normalizeStringArray(req.body?.territoryRegions || []),
@@ -3202,7 +3202,7 @@ export function registerAllDomainRoutes(app) {
       acceptsAutoAssign: normalizeBool(req.body?.acceptsAutoAssign ?? true),
       notes: normalizeString(req.body?.notes) || "",
     };
-  
+
     try {
       const { data, error } = await supabase
         .from("crm_consultants")
@@ -3228,43 +3228,43 @@ export function registerAllDomainRoutes(app) {
         })
         .select("id")
         .single();
-  
+
       if (error) {
         sendError(res, 500, "CONSULTANT_CREATE_FAILED", "Falha ao criar consultor", error.message);
         return;
       }
-  
+
       res.status(201).json({ success: true, id: data.id });
     } catch (error) {
       console.error("consultant create error:", error);
       sendError(res, 500, "CONSULTANT_CREATE_FAILED", "Falha ao criar consultor");
     }
   });
-  
+
   app.patch("/api/commercial-intelligence/consultants/:id", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) {
       sendError(res, 400, "INVALID_PARAM", "Consultor invalido");
       return;
     }
-  
+
     try {
       const { data: current, error: currentError } = await supabase
         .from("crm_consultants")
         .select("id, client_id, performance_meta")
         .eq("id", id)
         .single();
-  
+
       if (currentError || !current) {
         sendError(res, 404, "CONSULTANT_NOT_FOUND", "Consultor nao encontrado");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
-  
+
       const currentMeta = current.performance_meta || {};
       const updates = {
         email: "email" in req.body ? normalizeString(req.body?.email) : undefined,
@@ -3292,81 +3292,81 @@ export function registerAllDomainRoutes(app) {
           ...(req.body?.notes !== undefined ? { notes: normalizeString(req.body?.notes) || "" } : {}),
         },
       };
-  
+
       const sanitizedUpdates = Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined));
-  
+
       const { error } = await supabase
         .from("crm_consultants")
         .update(sanitizedUpdates)
         .eq("id", id)
         .eq("client_id", authorizedClientId);
-  
+
       if (error) {
         sendError(res, 500, "CONSULTANT_UPDATE_FAILED", "Falha ao atualizar consultor", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("consultant update error:", error);
       sendError(res, 500, "CONSULTANT_UPDATE_FAILED", "Falha ao atualizar consultor");
     }
   });
-  
+
   app.delete("/api/commercial-intelligence/consultants/:id", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) {
       sendError(res, 400, "INVALID_PARAM", "Consultor invalido");
       return;
     }
-  
+
     try {
       const { data: current, error: currentError } = await supabase
         .from("crm_consultants")
         .select("id, client_id")
         .eq("id", id)
         .single();
-  
+
       if (currentError || !current) {
         sendError(res, 404, "CONSULTANT_NOT_FOUND", "Consultor nao encontrado");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
-  
+
       const { error } = await supabase
         .from("crm_consultants")
         .delete()
         .eq("id", id)
         .eq("client_id", authorizedClientId);
-  
+
       if (error) {
         sendError(res, 500, "CONSULTANT_DELETE_FAILED", "Falha ao excluir consultor", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("consultant delete error:", error);
       sendError(res, 500, "CONSULTANT_DELETE_FAILED", "Falha ao excluir consultor");
     }
   });
-  
+
   app.post("/api/commercial-intelligence/distribution-rules", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const authorizedClientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
     if (!authorizedClientId) return;
-  
+
     const name = normalizeString(req.body?.name);
     if (!name) {
       sendError(res, 400, "INVALID_BODY", "Nome da regra e obrigatorio");
       return;
     }
-  
+
     try {
       const { data, error } = await supabase
         .from("lead_distribution_rules")
@@ -3385,43 +3385,43 @@ export function registerAllDomainRoutes(app) {
         })
         .select("id")
         .single();
-  
+
       if (error) {
         sendError(res, 500, "RULE_CREATE_FAILED", "Falha ao criar regra de distribuicao", error.message);
         return;
       }
-  
+
       res.status(201).json({ success: true, id: data.id });
     } catch (error) {
       console.error("distribution rule create error:", error);
       sendError(res, 500, "RULE_CREATE_FAILED", "Falha ao criar regra de distribuicao");
     }
   });
-  
+
   app.patch("/api/commercial-intelligence/distribution-rules/:id", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) {
       sendError(res, 400, "INVALID_PARAM", "Regra invalida");
       return;
     }
-  
+
     try {
       const { data: current, error: currentError } = await supabase
         .from("lead_distribution_rules")
         .select("id, client_id, config")
         .eq("id", id)
         .single();
-  
+
       if (currentError || !current) {
         sendError(res, 404, "RULE_NOT_FOUND", "Regra nao encontrada");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
-  
+
       const updates = {
         name: "name" in req.body ? normalizeString(req.body?.name) : undefined,
         distribution_mode: "distributionMode" in req.body ? normalizeString(req.body?.distributionMode) || "round_robin" : undefined,
@@ -3436,55 +3436,55 @@ export function registerAllDomainRoutes(app) {
           ? { ...(current.config || {}), ...req.body.config }
           : undefined,
       };
-  
+
       const sanitizedUpdates = Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined));
-  
+
       const { error } = await supabase
         .from("lead_distribution_rules")
         .update(sanitizedUpdates)
         .eq("id", id)
         .eq("client_id", authorizedClientId);
-  
+
       if (error) {
         sendError(res, 500, "RULE_UPDATE_FAILED", "Falha ao atualizar regra de distribuicao", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("distribution rule update error:", error);
       sendError(res, 500, "RULE_UPDATE_FAILED", "Falha ao atualizar regra de distribuicao");
     }
   });
-  
+
   app.patch("/api/commercial-intelligence/assignments/:id/action", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     const action = normalizeString(req.body?.action);
     if (!id || !action) {
       sendError(res, 400, "INVALID_BODY", "Atribuicao e acao sao obrigatorias");
       return;
     }
-  
+
     try {
       const { data: assignment, error: assignmentError } = await supabase
         .from("lead_assignments")
         .select("id, client_id, consultant_id, assignment_reason")
         .eq("id", id)
         .single();
-  
+
       if (assignmentError || !assignment) {
         sendError(res, 404, "ASSIGNMENT_NOT_FOUND", "Atribuicao nao encontrada");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, assignment.client_id);
       if (!authorizedClientId) return;
-  
+
       const assignmentReason = assignment.assignment_reason || {};
       const updates = {};
-  
+
       if (action === "reatribuir") {
         const consultantId = normalizeString(req.body?.consultantId);
         if (!consultantId) {
@@ -3515,33 +3515,33 @@ export function registerAllDomainRoutes(app) {
         sendError(res, 400, "INVALID_BODY", "Acao de atribuicao invalida");
         return;
       }
-  
+
       const { error } = await supabase
         .from("lead_assignments")
         .update(updates)
         .eq("id", id)
         .eq("client_id", authorizedClientId);
-  
+
       if (error) {
         sendError(res, 500, "ASSIGNMENT_ACTION_FAILED", "Falha ao atualizar atribuicao", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("assignment action error:", error);
       sendError(res, 500, "ASSIGNMENT_ACTION_FAILED", "Falha ao atualizar atribuicao");
     }
   });
-  
+
   app.put("/api/commercial-intelligence/settings", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const authorizedClientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
     if (!authorizedClientId) return;
-  
+
     const defaults = getCommercialIntelligenceDefaultSettings();
-  
+
     try {
       const payload = {
         client_id: authorizedClientId,
@@ -3555,79 +3555,79 @@ export function registerAllDomainRoutes(app) {
         permissions: req.body?.permissions && typeof req.body.permissions === "object" ? req.body.permissions : defaults.permissions,
         updated_at: new Date().toISOString(),
       };
-  
+
       const { error } = await supabase
         .from("commercial_intelligence_settings")
         .upsert(payload, { onConflict: "client_id" });
-  
+
       if (error) {
         sendError(res, 500, "SETTINGS_SAVE_FAILED", "Falha ao salvar configuracoes", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("commercial intelligence settings save error:", error);
       sendError(res, 500, "SETTINGS_SAVE_FAILED", "Falha ao salvar configuracoes");
     }
   });
-  
+
   app.patch("/api/commercial-intelligence/insights/:id/status", requireFirebaseAuth, requireInternalPageAccess("dashboard"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     const status = normalizeString(req.body?.status);
     if (!id || !status) {
       sendError(res, 400, "INVALID_BODY", "Insight e status sao obrigatorios");
       return;
     }
-  
+
     try {
       const { data: current, error: currentError } = await supabase
         .from("analytics_insights")
         .select("id, client_id")
         .eq("id", id)
         .single();
-  
+
       if (currentError || !current) {
         sendError(res, 404, "INSIGHT_NOT_FOUND", "Insight nao encontrado");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
-  
+
       const updates = {
         status,
         resolved_at: status === "resolved" ? new Date().toISOString() : null,
       };
-  
+
       const { error } = await supabase
         .from("analytics_insights")
         .update(updates)
         .eq("id", id)
         .eq("client_id", authorizedClientId);
-  
+
       if (error) {
         sendError(res, 500, "INSIGHT_UPDATE_FAILED", "Falha ao atualizar insight", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("insight update error:", error);
       sendError(res, 500, "INSIGHT_UPDATE_FAILED", "Falha ao atualizar insight");
     }
   });
-  
+
   app.get("/api/leads", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     if (!ensureSharedRoutePageAccess(req, res, "leads")) return;
-  
+
     const requestedClientId = normalizeString(req.query.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-  
+
     try {
       const { data, error } = await supabase
         .from(leadsTableName(clientId))
@@ -3635,25 +3635,25 @@ export function registerAllDomainRoutes(app) {
         .eq("client_id", clientId)
         .order("data_hora", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
-  
+
       if (error) {
         throw error;
       }
-  
+
       res.json({ items: data || [] });
     } catch (error) {
       console.error("leads query error:", error);
       sendError(res, 500, "LEADS_QUERY_FAILED", "Failed to query leads");
     }
   });
-  
+
   app.get("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const requestedClientId = normalizeString(req.query.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-  
+
     try {
       const { data, error } = await supabase
         .from("lead_imports")
@@ -3661,72 +3661,72 @@ export function registerAllDomainRoutes(app) {
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
         .limit(20);
-  
+
       if (error) {
         throw error;
       }
-  
+
       res.json({ items: data || [] });
     } catch (error) {
       console.error("lead imports query error:", error);
       sendError(res, 500, "LEAD_IMPORTS_QUERY_FAILED", "Failed to query imported spreadsheets");
     }
   });
-  
+
   app.delete("/api/lead-imports/:importId", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const importId = normalizeString(req.params.importId);
     if (!importId) {
       sendError(res, 400, "INVALID_PARAMS", "Missing importId");
       return;
     }
-  
+
     try {
       const { data: record, error: fetchError } = await supabase
         .from("lead_imports")
         .select("id, client_id")
         .eq("id", importId)
         .maybeSingle();
-  
+
       if (fetchError) throw fetchError;
       if (!record) {
         sendError(res, 404, "NOT_FOUND", "Import not found");
         return;
       }
-  
+
       const clientId = resolveAuthorizedClientId(req, res, record.client_id);
       if (!clientId) return;
-  
+
       const { error: itemsDeleteError } = await supabase
         .from("lead_import_items")
         .delete()
         .eq("import_id", importId);
       if (itemsDeleteError) throw itemsDeleteError;
-  
+
       const { error: importDeleteError } = await supabase
         .from("lead_imports")
         .delete()
         .eq("id", importId);
       if (importDeleteError) throw importDeleteError;
-  
+
       res.json({ success: true, deletedId: importId });
     } catch (error) {
       console.error("lead import delete error:", error);
       sendError(res, 500, "LEAD_IMPORT_DELETE_FAILED", "Failed to delete import");
     }
   });
-  
+
   app.get("/api/lead-import-items", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const requestedClientId = normalizeString(req.query.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-  
+
     const importId = normalizeString(req.query.importId);
     const dispatched = req.query.dispatched;
-  
+
     try {
       let query = supabase
         .from("lead_import_items")
@@ -3735,16 +3735,16 @@ export function registerAllDomainRoutes(app) {
         .eq("imported", true)
         .not("telefone", "is", null)
         .order("row_number", { ascending: true });
-  
+
       if (importId) {
         query = query.eq("import_id", importId);
       }
-  
+
       const { data: items, error } = await query;
       if (error) throw error;
-  
+
       const allItems = items || [];
-  
+
       const { data: dispatchRuns } = await supabase
         .from("campaign_dispatch_runs")
         .select("phone")
@@ -3752,12 +3752,12 @@ export function registerAllDomainRoutes(app) {
         .eq("status", "sent");
 
       const dispatchedPhones = new Set((dispatchRuns || []).map((r) => r.phone).filter(Boolean));
-  
+
       const enriched = allItems.map((item) => ({
         ...item,
         dispatched: dispatchedPhones.has(item.telefone),
       }));
-  
+
       if (dispatched === "false") {
         res.json({ items: enriched.filter((i) => !i.dispatched), total: enriched.length, pendingCount: enriched.filter((i) => !i.dispatched).length });
       } else if (dispatched === "true") {
@@ -3770,33 +3770,51 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "LEAD_IMPORT_ITEMS_QUERY_FAILED", "Failed to query import items");
     }
   });
-  
+
+  const isRowHeader = (row) => {
+    if (!row || typeof row !== "object") return false;
+    const values = Object.values(row).map(val =>
+      String(val ?? "").trim().toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "")
+    );
+    const hasPhoneHeader = values.some(val =>
+      ["telefone", "celular", "phone", "fone", "whatsapp", "number", "numero"].some(alias => val.includes(alias))
+    );
+    const hasNameHeader = values.some(val =>
+      ["nome", "name", "cliente", "contato", "lead", "responsavel"].some(alias => val.includes(alias))
+    );
+    return hasPhoneHeader && hasNameHeader;
+  };
+
   app.post("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const clientId = normalizeString(req.body?.clientId);
     const sourceName = normalizeString(req.body?.sourceName) || "planilha";
     const sourceType = normalizeString(req.body?.sourceType) || "spreadsheet";
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
-  
+
     if (!clientId || !rows) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId or rows");
       return;
     }
-  
+
     if (rows.length === 0) {
       sendError(res, 400, "INVALID_BODY", "rows must contain at least one item");
       return;
     }
-  
+
     if (rows.length > 5000) {
       sendError(res, 413, "PAYLOAD_TOO_LARGE", "Maximum 5000 rows per import");
       return;
     }
-  
+
     try {
-      const mapping = detectImportColumns(rows);
-      const parsedItems = rows.map((row, index) => {
+      const filteredRows = rows.filter(row => !isRowHeader(row));
+      const mapping = detectImportColumns(filteredRows);
+      const parsedItems = filteredRows.map((row, index) => {
         const enrichedRow = { ...row };
         if (mapping.telefone && !enrichedRow.telefone) {
           enrichedRow.telefone = row[mapping.telefone];
@@ -3804,7 +3822,7 @@ export function registerAllDomainRoutes(app) {
         if (mapping.nome && !enrichedRow.nome) {
           enrichedRow.nome = row[mapping.nome];
         }
-        
+
         const normalized = normalizeImportedLead(enrichedRow, clientId);
         const imported = !!normalized.telefone;
         const skipReason = imported
@@ -3812,7 +3830,7 @@ export function registerAllDomainRoutes(app) {
           : isImportedLeadEmpty(normalized)
             ? "Linha vazia ou sem dados aproveitaveis"
             : "Telefone ausente ou invalido";
-  
+
         return {
           rowNumber: index + 2,
           rawData: row,
@@ -3821,16 +3839,16 @@ export function registerAllDomainRoutes(app) {
           skipReason,
         };
       });
-  
+
       const validRowsMap = new Map();
       for (const item of parsedItems) {
         if (!item.imported) continue;
         validRowsMap.set(item.normalized.telefone, item.normalized);
       }
-  
+
       const validRows = Array.from(validRowsMap.values());
       const skippedRows = parsedItems.length - validRows.length;
-  
+
       const { data: importRecord, error: importError } = await supabase
         .from("lead_imports")
         .insert({
@@ -3845,11 +3863,11 @@ export function registerAllDomainRoutes(app) {
         })
         .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at")
         .single();
-  
+
       if (importError) {
         throw importError;
       }
-  
+
       const importItems = parsedItems.map((item) => ({
         import_id: importRecord.id,
         client_id: clientId,
@@ -3861,12 +3879,12 @@ export function registerAllDomainRoutes(app) {
         raw_data: item.rawData,
         normalized_data: item.normalized,
       }));
-  
+
       const { error: itemsError } = await supabase.from("lead_import_items").insert(importItems);
       if (itemsError) {
         throw itemsError;
       }
-  
+
       res.status(201).json({
         item: importRecord,
         preview: buildImportPreview(parsedItems),
@@ -3881,14 +3899,14 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.post(
     "/api/n8n-dispatches",
     requireFirebaseAuth,
     requireAppViewAccess("planilhas"),
     async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const requestedClientId = normalizeString(req.body?.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
@@ -3907,7 +3925,7 @@ export function registerAllDomainRoutes(app) {
           dispatchOptions: req.body?.dispatchOptions,
         }
     );
-  
+
     try {
       const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
       const { webhookUrl, webhookToken } = dispatchSettings;
@@ -3929,24 +3947,24 @@ export function registerAllDomainRoutes(app) {
           campaignName: campaignName || null,
         },
       });
-  
+
       if (!validation.valid) {
         sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
         return;
       }
-  
+
       const leads = await buildDispatchLeads({
         clientId,
         importId,
         limit,
         segmentation: validation.analyticsMeta.segmentation || null,
       });
-  
+
       if (leads.length === 0) {
         sendError(res, 404, "NO_DISPATCH_LEADS", "No leads found for dispatch");
         return;
       }
-  
+
       const clientName = await getClientName(clientId);
       const { summary } = await dispatchCampaignSequence({
         webhookUrl,
@@ -3971,7 +3989,7 @@ export function registerAllDomainRoutes(app) {
           },
         },
       });
-  
+
       res.json({
         success: true,
         provider: "evolution",
@@ -3994,18 +4012,18 @@ export function registerAllDomainRoutes(app) {
     }
     }
   );
-  
+
   // Supabase Edge `lead-webhook` parity: POST only, action create | finalize, same JSON bodies and responses.
   // Authorization: Bearer LEAD_WEBHOOK_BEARER_TOKEN or legacy default @Vexo2026 (matches Edge constant).
   app.post("/api/lead-webhook", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     if (!validateLeadWebhookBearer(req, res)) return;
-  
+
     try {
       const body = req.body || {};
       const action = normalizeString(body.action)?.toLowerCase();
-  
+
       if (action !== "create" && action !== "finalize") {
         sendLeadWebhookEdgeStyle(res, 400, {
           success: false,
@@ -4013,12 +4031,12 @@ export function registerAllDomainRoutes(app) {
         });
         return;
       }
-  
+
       const clientId = normalizeString(body.client_id) ?? "infinie";
       const telefone = sanitizePhoneLeadWebhookStyle(body.telefone);
       const nome = normalizeString(body.nome);
       const now = new Date().toISOString();
-  
+
       if (!telefone) {
         sendLeadWebhookEdgeStyle(res, 400, {
           success: false,
@@ -4026,7 +4044,7 @@ export function registerAllDomainRoutes(app) {
         });
         return;
       }
-  
+
       if (action === "create") {
         const { data: existingLead, error: lookupError } = await supabase
           .from(leadsTableName(clientId))
@@ -4034,7 +4052,7 @@ export function registerAllDomainRoutes(app) {
           .eq("client_id", clientId)
           .eq("telefone", telefone)
           .maybeSingle();
-  
+
         if (lookupError) {
           console.error("lead-webhook create lookup error:", lookupError);
           sendLeadWebhookEdgeStyle(res, 500, {
@@ -4044,7 +4062,7 @@ export function registerAllDomainRoutes(app) {
           });
           return;
         }
-  
+
         if (existingLead) {
           sendLeadWebhookEdgeStyle(res, 200, {
             success: true,
@@ -4057,7 +4075,7 @@ export function registerAllDomainRoutes(app) {
           });
           return;
         }
-  
+
         const createPayload = {
           client_id: clientId,
           telefone,
@@ -4067,7 +4085,7 @@ export function registerAllDomainRoutes(app) {
           created_at: now,
           updated_at: now,
         };
-  
+
         const { data: insertedLead, error: insertError } = await supabase
           .from(leadsTableName(clientId))
           .insert(createPayload)
@@ -4082,7 +4100,7 @@ export function registerAllDomainRoutes(app) {
               .eq("client_id", clientId)
               .eq("telefone", telefone)
               .maybeSingle();
-  
+
             if (duplicateLookupError) {
               console.error("lead-webhook create duplicate lookup error:", duplicateLookupError);
               sendLeadWebhookEdgeStyle(res, 500, {
@@ -4092,7 +4110,7 @@ export function registerAllDomainRoutes(app) {
               });
               return;
             }
-  
+
             sendLeadWebhookEdgeStyle(res, 200, {
               success: true,
               status: "ok",
@@ -4104,7 +4122,7 @@ export function registerAllDomainRoutes(app) {
             });
             return;
           }
-  
+
           console.error("lead-webhook create insert error:", insertError);
           sendLeadWebhookEdgeStyle(res, 500, {
             success: false,
@@ -4113,7 +4131,7 @@ export function registerAllDomainRoutes(app) {
           });
           return;
         }
-  
+
         sendLeadWebhookEdgeStyle(res, 200, {
           success: true,
           status: "ok",
@@ -4125,7 +4143,7 @@ export function registerAllDomainRoutes(app) {
         });
         return;
       }
-  
+
       const finalizePayload = {
         client_id: clientId,
         telefone,
@@ -4139,7 +4157,7 @@ export function registerAllDomainRoutes(app) {
         qualificacao: normalizeString(body.qualificacao),
         updated_at: now,
       };
-  
+
       const { data: finalizedLead, error: finalizeError } = await supabase
         .from(leadsTableName(clientId))
         .upsert(finalizePayload, {
@@ -4148,7 +4166,7 @@ export function registerAllDomainRoutes(app) {
         })
         .select("id")
         .single();
-  
+
       if (finalizeError) {
         console.error("lead-webhook finalize error:", finalizeError);
         sendLeadWebhookEdgeStyle(res, 500, {
@@ -4158,7 +4176,7 @@ export function registerAllDomainRoutes(app) {
         });
         return;
       }
-  
+
       sendLeadWebhookEdgeStyle(res, 200, {
         success: true,
         status: "ok",
@@ -4173,37 +4191,37 @@ export function registerAllDomainRoutes(app) {
       sendLeadWebhookEdgeStyle(res, 500, { success: false, error: "Internal server error" });
     }
   });
-  
+
   // Entrada n8n: upsert em `leads` (Bearer por tenant em lead_client_n8n_settings).
   // Caminho antigo: POST /api/leads-webhook — atualizar URLs no n8n após o rename.
   app.post("/api/import-lead-infinie-n8n", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     try {
       const body = req.body || {};
       const leadsRaw = body.leads ?? (body.lead ? [body.lead] : []);
       const leads = Array.isArray(leadsRaw) ? leadsRaw : [leadsRaw];
-  
+
       if (leads.length === 0) {
         sendError(res, 400, "INVALID_BODY", "Missing lead or leads array in body");
         return;
       }
-  
+
       const clientId = normalizeTenantKey(body.client_id ?? body.clientId);
       if (!clientId) {
         sendError(res, 400, "INVALID_BODY", "Missing client_id");
         return;
       }
-  
+
       if (!(await validateN8nInboundBearer(req, res, clientId))) {
         return;
       }
-  
+
       const rows = leads
         .map((lead) => {
           const telefone = sanitizePhone(lead.telefone ?? lead.Telefone);
           if (!telefone) return null;
-  
+
           const dataHora = normalizeIsoDate(lead.data_hora ?? lead["Data e Hora"]);
           return {
             client_id: clientId,
@@ -4221,7 +4239,7 @@ export function registerAllDomainRoutes(app) {
           };
         })
         .filter(Boolean);
-  
+
       const { data, error } = await supabase
         .from(leadsTableName(clientId))
         .upsert(rows, {
@@ -4229,26 +4247,26 @@ export function registerAllDomainRoutes(app) {
           ignoreDuplicates: false,
         })
         .select("id");
-  
+
       if (error) {
         console.error("leads upsert error:", error);
         sendError(res, 500, "LEADS_SAVE_FAILED", "Failed to save leads", error.message);
         return;
       }
-  
+
       res.json({ success: true, count: rows.length, ids: data?.map((item) => item.id) || [] });
     } catch (error) {
       console.error("import-lead-infinie-n8n error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   // n8n / automação: insere leads no formato do chat outlier em `leads_outlier` (Bearer inbound por tenant).
   // O payload espelha colunas de `leads` (exceto tipo_cliente, faixa_consumo, cidade, estado) mais campos do chat.
   // Obrigatório: telefone, mensagem, finalizado, status_conversa. Temperatura: JSON `status` ou `lead_temperature` → BD `lead_temperature`; texto do pipeline CRM → `pipeline_status` → coluna `status`.
   app.post("/api/import-leads-outlier", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     try {
       const body = req.body || {};
       const rawList =
@@ -4257,12 +4275,12 @@ export function registerAllDomainRoutes(app) {
         (body.lead != null ? [body.lead] : null) ??
         (body.record != null ? [body.record] : null);
       const items = Array.isArray(rawList) ? rawList : rawList != null ? [rawList] : [];
-  
+
       if (items.length === 0) {
         sendError(res, 400, "INVALID_BODY", "Missing leads, records, lead, or record in body");
         return;
       }
-  
+
       if (items.length > MAX_LEADS_OUTLIER_BATCH) {
         sendError(
           res,
@@ -4272,17 +4290,17 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       const clientId = normalizeTenantKey(body.client_id ?? body.clientId);
       if (!clientId) {
         sendError(res, 400, "INVALID_BODY", "Missing client_id");
         return;
       }
-  
+
       if (!(await validateN8nInboundBearer(req, res, clientId))) {
         return;
       }
-  
+
       const rows = [];
       for (let i = 0; i < items.length; i++) {
         const parsed = validateLeadsOutlierRecord(items[i], `items[${i}]`);
@@ -4292,7 +4310,7 @@ export function registerAllDomainRoutes(app) {
         }
         rows.push({ client_id: clientId, ...parsed.row });
       }
-  
+
       const { data, error } = await supabase.from(leadsTableName(clientId)).insert(rows).select("id");
 
       if (error) {
@@ -4311,21 +4329,21 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   // Entrada n8n: insert em `leads_outlier` (mesmo Bearer que outros imports; validação em validateLeadsOutlierRecord — ver import-leads-outlier).
   app.post("/api/import-lead-outlier-n8n", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     try {
       const body = req.body || {};
       const leadsRaw = body.leads ?? (body.lead ? [body.lead] : []);
       const leads = Array.isArray(leadsRaw) ? leadsRaw : [leadsRaw];
-  
+
       if (leads.length === 0) {
         sendError(res, 400, "INVALID_BODY", "Missing lead or leads array in body");
         return;
       }
-  
+
       if (leads.length > MAX_LEADS_OUTLIER_BATCH) {
         sendError(
           res,
@@ -4335,17 +4353,17 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       const clientId = normalizeTenantKey(body.client_id ?? body.clientId);
       if (!clientId) {
         sendError(res, 400, "INVALID_BODY", "Missing client_id");
         return;
       }
-  
+
       if (!(await validateN8nInboundBearer(req, res, clientId))) {
         return;
       }
-  
+
       const rows = [];
       for (let i = 0; i < leads.length; i++) {
         const parsed = validateLeadsOutlierRecord(leads[i], `leads[${i}]`);
@@ -4355,7 +4373,7 @@ export function registerAllDomainRoutes(app) {
         }
         rows.push({ client_id: clientId, ...parsed.row });
       }
-  
+
       const { data, error } = await supabase.from(leadsTableName(clientId)).insert(rows).select("id");
 
       if (error) {
@@ -4370,17 +4388,17 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   app.get("/api/whatsapp/session", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     if (whatsappSessionManager.getState().hasPersistedSession) {
       whatsappSessionManager.restorePersistedSession().catch((error) => {
         console.error("whatsapp persisted session restore error:", error);
       });
     }
-  
+
     res.json(whatsappSessionManager.getState());
   });
-  
+
   app.post("/api/whatsapp/session/start", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     try {
       const state = await whatsappSessionManager.start();
@@ -4395,7 +4413,7 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.post("/api/whatsapp/session/reset", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     try {
       const state = await whatsappSessionManager.reset();
@@ -4410,7 +4428,7 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.get("/api/whatsapp/chats", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     if (!ensureDb(res)) return;
 
@@ -4680,29 +4698,29 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "WHATSAPP_SEND_FAILED", error instanceof Error ? error.message : "Failed to send message via Evolution API");
     }
   });
-  
+
   app.post("/api/whatsapp/messages/direct", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
     const phone = normalizeString(req.body?.phone);
     const body = normalizeString(req.body?.body);
-  
+
     // ✅ Validação de phone (10-13 dígitos)
     if (!phone || !/^\d{10,13}$/.test(phone.replace(/\D/g, ""))) {
       sendError(res, 400, "INVALID_PHONE", "Invalid phone number (must be 10-13 digits)");
       return;
     }
-  
+
     // ✅ Validação de mensagem (não vazio, máximo 4096 caracteres)
     if (!body || body.length > 4096) {
       sendError(res, 400, "INVALID_MESSAGE", "Message too long or empty (max 4096 characters)");
       return;
     }
-  
+
     try {
       // ✅ Auditoria log com UID + phone
       console.log(
         `[AUDIT] WhatsApp direct message sent by admin ${req.authAccess?.uid} to phone ${phone}`
       );
-  
+
       const result = await whatsappSessionManager.sendDirectMessage(phone, body);
       res.status(201).json(result);
     } catch (error) {
@@ -4715,44 +4733,44 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   // ─────────────────────────────────────────────────────────────
   // CAMPANHAS — CRUD + TRIGGER + LEADS-FOR-DISPATCH
   // ─────────────────────────────────────────────────────────────
-  
+
   // GET /api/campaigns — lista campanhas do usuário
   app.get("/api/campaigns/ai/status", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (_req, res) => {
     res.json(getGroqCampaignAiStatus());
   });
-  
+
   app.post("/api/campaigns/ai/generate-copy", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
       if (!getGroqCampaignAiStatus().enabled) {
         sendError(res, 404, "GROQ_DISABLED", "Groq assistivo nao esta configurado neste ambiente");
         return;
       }
-  
+
       const item = await generateCampaignCopySuggestion({
         campaignName: req.body?.campaignName,
         goal: req.body?.goal,
         style: req.body?.style,
         segmentation: req.body?.segmentation,
       });
-  
+
       res.json({ item });
     } catch (error) {
       console.error("campaign ai generate copy error:", error);
       sendError(res, 502, "GROQ_REQUEST_FAILED", error instanceof Error ? error.message : "Falha ao consultar a Groq");
     }
   });
-  
+
   app.post("/api/campaigns/ai/suggest-sequence", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
       if (!getGroqCampaignAiStatus().enabled) {
         sendError(res, 404, "GROQ_DISABLED", "Groq assistivo nao esta configurado neste ambiente");
         return;
       }
-  
+
       const suggestion = await suggestCampaignSequence({
         campaignName: req.body?.campaignName,
         goal: req.body?.goal,
@@ -4768,7 +4786,7 @@ export function registerAllDomainRoutes(app) {
           aiAssisted: true,
         },
       });
-  
+
       res.json({
         item: {
           sequence: analyticsMeta.sequence,
@@ -4812,7 +4830,7 @@ export function registerAllDomainRoutes(app) {
         sendError(res, 404, "GROQ_DISABLED", "Groq assistivo nao esta configurado neste ambiente");
         return;
       }
-  
+
       const normalizedMeta = normalizeCampaignAnalyticsMeta({
         sequence: req.body?.sequence,
         dispatchOptions: req.body?.dispatchOptions,
@@ -4841,7 +4859,7 @@ export function registerAllDomainRoutes(app) {
           aiAssisted: true,
         },
       });
-  
+
       res.json({
         item: {
           sequence: analyticsMeta.sequence,
@@ -4854,14 +4872,14 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 502, "GROQ_REQUEST_FAILED", error instanceof Error ? error.message : "Falha ao consultar a Groq");
     }
   });
-  
+
   app.post("/api/campaigns/ai/rewrite-step", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
       if (!getGroqCampaignAiStatus().enabled) {
         sendError(res, 404, "GROQ_DISABLED", "Groq assistivo nao esta configurado neste ambiente");
         return;
       }
-  
+
       const step = req.body?.step && typeof req.body.step === "object" ? req.body.step : {};
       const suggestion = await rewriteCampaignStep({
         campaignName: req.body?.campaignName,
@@ -4870,7 +4888,7 @@ export function registerAllDomainRoutes(app) {
         segmentation: req.body?.segmentation,
         step,
       });
-  
+
       res.json({
         item: {
           step: {
@@ -4885,35 +4903,35 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 502, "GROQ_REQUEST_FAILED", error instanceof Error ? error.message : "Falha ao consultar a Groq");
     }
   });
-  
+
   app.post("/api/campaigns/direct-dispatch", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const requestId = getRequestId(req);
     res.setHeader("X-Request-Id", requestId);
-  
+
     const requestedClientId = normalizeString(req.body?.clientId);
     const phone = sanitizePhone(req.body?.phone ?? req.body?.telefone ?? req.body?.number);
     const text = normalizeString(req.body?.text ?? req.body?.message ?? req.body?.txt);
     const imageCaption = normalizeString(req.body?.imageCaption ?? req.body?.caption);
     const imageFirst = req.body?.imageFirst === true || req.body?.imageFirst === "true";
     const image = req.body?.image && typeof req.body.image === "object" ? req.body.image : null;
-  
+
     if (!requestedClientId) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId", { requestId });
       return;
     }
-  
+
     if (!phone) {
       sendError(res, 400, "INVALID_BODY", "Missing valid phone", { requestId });
       return;
     }
-  
+
     if (!text && !image) {
       sendError(res, 400, "INVALID_BODY", "Missing message text or image", { requestId });
       return;
     }
-  
+
     try {
       logDirectDispatch("info", "request_received", {
         requestId,
@@ -4924,20 +4942,20 @@ export function registerAllDomainRoutes(app) {
         phone: maskPhoneForLog(phone),
         userUid: req.authAccess?.uid || null,
       });
-  
+
       const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
       if (!clientId) return;
-  
+
       const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
       const { webhookUrl, webhookToken } = dispatchSettings;
-  
+
       logDirectDispatch("info", "tenant_resolved", {
         requestId,
         requestedClientId,
         resolvedClientId: clientId,
         ...getSafeDispatchSettingsLog(dispatchSettings),
       });
-  
+
       if (!webhookUrl) {
         const details = {
           requestId,
@@ -4945,7 +4963,7 @@ export function registerAllDomainRoutes(app) {
           settingsSource: dispatchSettings.source,
           schemaAvailable: dispatchSettings.schemaAvailable !== false,
         };
-  
+
         if (dispatchSettings.source === "schema_missing") {
           logDirectDispatch("error", "settings_schema_missing", details);
           sendError(
@@ -4957,7 +4975,7 @@ export function registerAllDomainRoutes(app) {
           );
           return;
         }
-  
+
         if (dispatchSettings.source === "env_invalid") {
           logDirectDispatch("error", "settings_env_invalid", details);
           sendError(
@@ -4969,7 +4987,7 @@ export function registerAllDomainRoutes(app) {
           );
           return;
         }
-  
+
         logDirectDispatch("warn", "settings_missing", details);
         sendError(
           res,
@@ -4980,7 +4998,7 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       const clientName = await getClientName(clientId);
       const textStep = text
         ? {
@@ -5006,7 +5024,7 @@ export function registerAllDomainRoutes(app) {
       const sequence = imageFirst
         ? [imageStep, textStep].filter(Boolean).map((step, index) => ({ ...step, order: index + 1 }))
         : [textStep, imageStep].filter(Boolean).map((step, index) => ({ ...step, order: index + 1 }));
-  
+
       await checkEvolutionInstanceHealth({
         webhookUrl,
         webhookToken,
@@ -5016,14 +5034,14 @@ export function registerAllDomainRoutes(app) {
           mode: "direct_dispatch",
         },
       });
-  
+
       logDirectDispatch("info", "dispatch_started", {
         requestId,
         clientId,
         steps: sequence.map((step) => ({ id: step.id, type: step.type, order: step.order })),
         settingsSource: dispatchSettings.source,
       });
-  
+
       const { summary } = await dispatchCampaignSequence({
         webhookUrl,
         webhookToken,
@@ -5051,7 +5069,7 @@ export function registerAllDomainRoutes(app) {
           client: { id: clientId, name: clientName },
         },
       });
-  
+
       logDirectDispatch(summary.successCount > 0 ? "info" : "warn", "dispatch_finished", {
         requestId,
         clientId,
@@ -5065,7 +5083,7 @@ export function registerAllDomainRoutes(app) {
           }
           : null,
       });
-  
+
       if (summary.successCount <= 0) {
         const firstReason = summary.failures[0]?.reason;
         sendError(
@@ -5082,7 +5100,7 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       res.json({
         success: summary.successCount > 0,
         provider: "evolution",
@@ -5110,7 +5128,7 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   app.get("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
     const requestedClientId = normalizeString(req.query.clientId);
@@ -5122,7 +5140,7 @@ export function registerAllDomainRoutes(app) {
       sendError,
     });
     if (!clientId) return;
-  
+
     try {
       const campaignSelect =
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta";
@@ -5133,13 +5151,13 @@ export function registerAllDomainRoutes(app) {
         .select(campaignSelect)
         .is("archived_at", null)
         .order("created_at", { ascending: false });
-  
+
       if (clientId) {
         query = query.eq("client_id", clientId);
       }
-  
+
       let { data, error } = await query;
-  
+
       if (error) {
         let fallbackQuery = supabase
           .from("campaigns")
@@ -5157,7 +5175,7 @@ export function registerAllDomainRoutes(app) {
           return;
         }
       }
-  
+
       // Fetch client names separately (no FK declared in schema cache)
       const clientIds = [...new Set((data || []).map((r) => r.client_id).filter(Boolean))];
       let clientNameMap = {};
@@ -5168,37 +5186,37 @@ export function registerAllDomainRoutes(app) {
           .in("id", clientIds);
         (clients || []).forEach((c) => { clientNameMap[c.id] = c.name; });
       }
-  
+
       const items = (data || []).map((row) => ({
         ...row,
         analytics_meta: normalizeCampaignAnalyticsMeta(row.analytics_meta || {}),
         client_name: clientNameMap[row.client_id] ?? null,
         webhook_token: row.webhook_token ? "***" : null,
       }));
-  
+
       res.json({ items });
     } catch (error) {
       console.error("campaigns fetch error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   app.get("/api/campaigns/:id/leads", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) {
       sendError(res, 400, "INVALID_PARAM", "Missing campaign id");
       return;
     }
-  
+
     try {
       let { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
         .select("id, client_id, import_id, limit_per_run, phones, analytics_meta")
         .eq("id", id)
         .single();
-  
+
       if (fetchError && isMissingSchemaError(fetchError)) {
         const fallback = await supabase
           .from("campaigns")
@@ -5208,20 +5226,20 @@ export function registerAllDomainRoutes(app) {
         campaign = fallback.data;
         fetchError = fallback.error;
       }
-  
+
       if (fetchError || !campaign) {
         sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
-  
+
       let items = [];
       const storedPhones = Array.isArray(campaign.phones)
         ? campaign.phones.filter((phone) => typeof phone === "string" && phone.trim())
         : [];
-  
+
       if (storedPhones.length > 0) {
         const { data: leads, error: leadsError } = await supabase
           .from(leadsTableName(authorizedClientId))
@@ -5230,7 +5248,7 @@ export function registerAllDomainRoutes(app) {
           .in("telefone", storedPhones)
           .order("data_hora", { ascending: false, nullsFirst: false })
           .order("created_at", { ascending: false });
-  
+
         if (leadsError) throw leadsError;
         items = leads || [];
       } else {
@@ -5241,18 +5259,18 @@ export function registerAllDomainRoutes(app) {
           segmentation: campaign.analytics_meta?.segmentation || null,
         });
       }
-  
+
       res.json({ items });
     } catch (error) {
       console.error("campaign leads error:", error);
       sendError(res, 500, "CAMPAIGN_LEADS_FAILED", "Failed to load campaign leads");
     }
   });
-  
+
   // POST /api/campaigns — cria campanha
   app.post("/api/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const name = normalizeString(req.body?.name);
     const requestedClientId = normalizeString(req.body?.clientId);
     const clientId = resolveRequiredAuthorizedClientId({
@@ -5289,16 +5307,16 @@ export function registerAllDomainRoutes(app) {
         updatedAt: new Date().toISOString(),
       },
     };
-  
+
     if (!name) {
       sendError(res, 400, "INVALID_BODY", "Missing name");
       return;
     }
-  
+
     try {
       const authorizedClientId = resolveAuthorizedClientId(req, res, clientId);
       if (!authorizedClientId) return;
-  
+
       const validation = validateCampaignAnalyticsMeta(analyticsMeta);
       if (!validation.valid) {
         sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
@@ -5318,7 +5336,7 @@ export function registerAllDomainRoutes(app) {
         );
         return;
       }
-  
+
       await checkEvolutionInstanceHealth({
         webhookUrl,
         webhookToken,
@@ -5329,7 +5347,7 @@ export function registerAllDomainRoutes(app) {
           ...getSafeDispatchSettingsLog(dispatchSettings),
         },
       });
-  
+
       let { data, error } = await supabase
         .from("campaigns")
         .insert({
@@ -5349,7 +5367,7 @@ export function registerAllDomainRoutes(app) {
         })
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id, mode")
         .single();
-  
+
       if (error) {
         const fallback = await supabase
           .from("campaigns")
@@ -5375,7 +5393,7 @@ export function registerAllDomainRoutes(app) {
           return;
         }
       }
-  
+
       res.status(201).json({
         item: {
           ...data,
@@ -5398,10 +5416,10 @@ export function registerAllDomainRoutes(app) {
   // PATCH /api/campaigns/:id — atualiza campanha
   app.patch("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
-  
+
     const updates = {};
     if (req.body?.name) updates.name = normalizeString(req.body.name);
     if (["active", "paused", "draft", "scheduled", "processing", "sent", "failed", "cancelled"].includes(req.body?.status)) {
@@ -5428,27 +5446,27 @@ export function registerAllDomainRoutes(app) {
       }
       updates.analytics_meta = validation.analyticsMeta;
     }
-  
+
     if (Object.keys(updates).length === 0) {
       sendError(res, 400, "INVALID_BODY", "No valid fields to update");
       return;
     }
-  
+
     try {
       const { data: current, error: currentError } = await supabase
         .from("campaigns")
         .select("id, client_id")
         .eq("id", id)
         .single();
-  
+
       if (currentError || !current) {
         sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
-  
+
       let { data, error } = await supabase
         .from("campaigns")
         .update(updates)
@@ -5456,7 +5474,7 @@ export function registerAllDomainRoutes(app) {
         .eq("client_id", authorizedClientId)
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, last_triggered_at, archived_at, created_at, analytics_meta")
         .single();
-  
+
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {
         const fallbackUpdates = { ...updates };
         delete fallbackUpdates.analytics_meta;
@@ -5470,12 +5488,12 @@ export function registerAllDomainRoutes(app) {
         data = fallback.data ? { ...fallback.data, analytics_meta: updates.analytics_meta } : fallback.data;
         error = fallback.error;
       }
-  
+
       if (error) {
         sendError(res, 500, "CAMPAIGN_UPDATE_FAILED", "Failed to update campaign", error.message);
         return;
       }
-  
+
       res.json({
         item: {
           ...data,
@@ -5488,40 +5506,40 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   // DELETE /api/campaigns/:id — exclui campanha
   app.delete("/api/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
-  
+
     try {
       const { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
         .select("id, client_id")
         .eq("id", id)
         .single();
-  
+
       if (fetchError || !campaign) {
         sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
-  
+
       const { error } = await supabase
         .from("campaigns")
         .delete()
         .eq("id", id)
         .eq("client_id", authorizedClientId);
-  
+
       if (error) {
         sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to delete campaign", error.message);
         return;
       }
-  
+
       res.json({ success: true });
     } catch (error) {
       console.error("campaign delete error:", error);
@@ -5697,7 +5715,7 @@ export function registerAllDomainRoutes(app) {
 
   function requireCampaignRunnerSecret(req, res, next) {
     const configuredSecret = normalizeString(process.env.CAMPAIGN_SCHEDULER_TOKEN);
-  
+
     if (!configuredSecret) {
       sendError(
         res,
@@ -5707,21 +5725,21 @@ export function registerAllDomainRoutes(app) {
       );
       return;
     }
-  
+
     const authorization = normalizeString(req.headers.authorization);
     const providedSecret =
       authorization.toLowerCase().startsWith("bearer ")
         ? authorization.slice(7).trim()
         : normalizeString(req.headers["x-campaign-runner-secret"] || req.query?.secret);
-  
+
     if (providedSecret !== configuredSecret) {
       sendError(res, 401, "UNAUTHORIZED", "Invalid campaign runner secret");
       return;
     }
-  
+
     next();
   }
-  
+
   async function runDueIndependentDispatches({ limit = 10 } = {}) {
     if (!supabase) return { success: false, processed: 0, reason: "DATABASE_NOT_CONFIGURED" };
     const now = new Date().toISOString();
@@ -5800,12 +5818,12 @@ export function registerAllDomainRoutes(app) {
   // POST /api/campaigns/run-due is used by cron/n8n to execute due scheduled campaigns.
   app.post("/api/campaigns/run-due", requireCampaignRunnerSecret, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const rawLimit = Number.parseInt(String(req.body?.limit ?? req.query?.limit ?? ""), 10);
     const limit = Number.isFinite(rawLimit)
       ? Math.min(Math.max(rawLimit, 1), CAMPAIGN_SCHEDULER_MAX_BATCH)
       : CAMPAIGN_SCHEDULER_MAX_BATCH;
-  
+
     try {
       const result = await runDueCampaignDispatches({ limit, triggerSource: "external_runner" });
       const dispatchResult = await runDueIndependentDispatches({ limit });
@@ -5820,21 +5838,21 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   // POST /api/campaigns/:id/trigger — dispara campanha (chama webhook n8n)
   app.post("/api/campaigns/:id/trigger", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const id = normalizeString(req.params?.id);
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
-  
+
     try {
       let { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
         .select("id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, archived_at, created_by_uid, created_by_email, analytics_meta")
         .eq("id", id)
         .single();
-  
+
       if (fetchError && isMissingSchemaError(fetchError)) {
         const fallback = await supabase
           .from("campaigns")
@@ -5844,15 +5862,15 @@ export function registerAllDomainRoutes(app) {
         campaign = fallback.data;
         fetchError = fallback.error;
       }
-  
+
       if (fetchError || !campaign) {
         sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
         return;
       }
-  
+
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
-  
+
       if (!canCampaignBeDispatched(campaign.status)) {
         sendError(res, 400, "CAMPAIGN_NOT_DISPATCHABLE", `Campaign cannot be dispatched from status ${campaign.status}`);
         return;
@@ -5861,7 +5879,7 @@ export function registerAllDomainRoutes(app) {
         sendError(res, 400, "CAMPAIGN_ARCHIVED", "Campaign is archived");
         return;
       }
-  
+
       const result = await executeCampaignDispatch({ ...campaign, client_id: authorizedClientId }, { triggerSource: "manual" });
       res.json(result);
     } catch (error) {
@@ -5878,7 +5896,7 @@ export function registerAllDomainRoutes(app) {
       );
     }
   });
-  
+
   // ── Campaign Dispatches ──────────────────────────────────────────────────────
 
   async function ensureCampaignDispatchPausedStatusAllowed() {
@@ -6289,7 +6307,7 @@ export function registerAllDomainRoutes(app) {
     if (!ensureDb(res)) return;
     const requestedClientId = normalizeString(req.query.clientId);
     if (!requestedClientId) return sendError(res, 400, "MISSING_CLIENT_ID", "Missing clientId query param");
-    
+
     const authorizedClientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!authorizedClientId) return;
 
@@ -6451,7 +6469,7 @@ export function registerAllDomainRoutes(app) {
       }
 
       const sql = `
-        SELECT 
+        SELECT
           lii.id AS lead_import_item_id,
           lii.import_id,
           lii.telefone,
@@ -6461,36 +6479,36 @@ export function registerAllDomainRoutes(app) {
           lii.imported,
           lii.skip_reason,
           (
-            SELECT count(*)::int 
-            FROM public.campaign_dispatch_runs 
+            SELECT count(*)::int
+            FROM public.campaign_dispatch_runs
             WHERE lead_id = lii.id
           ) AS dispatch_count,
           (
-            SELECT max(sent_at) 
-            FROM public.campaign_dispatch_runs 
+            SELECT max(sent_at)
+            FROM public.campaign_dispatch_runs
             WHERE lead_id = lii.id
           ) AS last_sent_at,
           (
-            SELECT max(created_at) 
-            FROM public.campaign_dispatch_runs 
+            SELECT max(created_at)
+            FROM public.campaign_dispatch_runs
             WHERE lead_id = lii.id
           ) AS last_attempt_at,
           (
-            SELECT status 
-            FROM public.campaign_dispatch_runs 
-            WHERE lead_id = lii.id 
-            ORDER BY created_at DESC 
+            SELECT status
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+            ORDER BY created_at DESC
             LIMIT 1
           ) AS last_status,
           (
-            SELECT error_message 
-            FROM public.campaign_dispatch_runs 
-            WHERE lead_id = lii.id 
-            ORDER BY created_at DESC 
+            SELECT error_message
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+            ORDER BY created_at DESC
             LIMIT 1
           ) AS last_error_message,
           EXISTS (
-            SELECT 1 
+            SELECT 1
             FROM public.lead_messages lm
             WHERE (lm.lead_id = lii.lead_id OR lm.phone = lii.telefone)
               AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
@@ -6582,6 +6600,46 @@ export function registerAllDomainRoutes(app) {
     } catch (err) {
       console.error("[create-import-from-subset] error:", err);
       sendError(res, 500, "CREATE_SUBSET_IMPORT_FAILED", err instanceof Error ? err.message : "Failed to create follow-up base");
+    }
+  });
+
+  // POST /api/campaigns/reports/delete-import-items — Deleta itens de importação
+  app.post("/api/campaigns/reports/delete-import-items", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const leadImportItemIds = Array.isArray(req.body?.leadImportItemIds) ? req.body.leadImportItemIds : [];
+    if (leadImportItemIds.length === 0) {
+      return sendError(res, 400, "MISSING_LEAD_IMPORT_ITEM_IDS", "Missing leadImportItemIds array");
+    }
+
+    try {
+      // 1. Deletar os runs associados primeiro para manter a integridade referencial se houver FK
+      await supabase
+        .from("campaign_dispatch_runs")
+        .delete()
+        .in("lead_id", leadImportItemIds)
+        .eq("client_id", clientId);
+
+      // 2. Deletar os itens de importação
+      const { data, error } = await supabase
+        .from("lead_import_items")
+        .delete()
+        .in("id", leadImportItemIds)
+        .eq("client_id", clientId)
+        .select("id");
+
+      if (error) throw error;
+
+      res.json({
+        success: true,
+        deletedCount: data?.length ?? 0
+      });
+    } catch (err) {
+      console.error("[delete-import-items] error:", err);
+      sendError(res, 500, "DELETE_IMPORT_ITEMS_FAILED", err instanceof Error ? err.message : "Failed to delete import items");
     }
   });
 
@@ -6821,25 +6879,25 @@ export function registerAllDomainRoutes(app) {
     const repliedAt =
       normalizeIsoDate(body.repliedAt ?? body.timestamp ?? body.created_at ?? body.data?.messageTimestamp) ||
       new Date().toISOString();
-  
+
     if (!clientId) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId");
       return;
     }
-  
+
     if (!phone) {
       sendError(res, 400, "INVALID_BODY", "Missing valid phone");
       return;
     }
-  
+
     try {
       if (!(await validateN8nInboundBearer(req, res, clientId))) {
         return;
       }
-  
+
       const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
       const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
-  
+
       logCampaignReplyFlow("info", "webhook_received", {
         clientId,
         phone: maskPhoneForLog(phone),
@@ -6848,7 +6906,7 @@ export function registerAllDomainRoutes(app) {
         waitForReplyCampaignCount: campaignReplyContext.waitForReplyMatches.length,
         processingWaitForReplyCampaignCount: campaignReplyContext.processingWaitForReplyMatches.length,
       });
-  
+
       if (activeWaitCampaign) {
         const progression = await continueCampaignLeadFromReply({
           clientId,
@@ -6984,7 +7042,7 @@ export function registerAllDomainRoutes(app) {
           .eq("telefone", phone)
           .select("id"),
       ]);
-  
+
       if (importItemsResult.error && !isMissingSchemaError(importItemsResult.error)) throw importItemsResult.error;
       if (leadsResult.error && !isMissingSchemaError(leadsResult.error)) throw leadsResult.error;
       if (importItemsResult.error && isMissingSchemaError(importItemsResult.error)) {
@@ -7017,7 +7075,7 @@ export function registerAllDomainRoutes(app) {
           },
         });
       }
-  
+
       res.json({
         success: true,
         clientId,
@@ -7046,26 +7104,26 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "CAMPAIGN_REPLY_WEBHOOK_FAILED", error instanceof Error ? error.message : "Failed to register reply");
     }
   });
-  
+
   // GET /api/leads-for-dispatch — n8n busca leads pendentes (autenticado por Bearer token)
   app.get("/api/leads-for-dispatch", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const clientId = normalizeTenantKey(req.query?.clientId ?? req.query?.client_id);
     const importId = normalizeString(req.query?.importId) || null;
     const rawLimit = Number.parseInt(String(req.query?.limit ?? "50"), 10);
     const limit = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 200);
-  
+
     if (!clientId) {
       sendError(res, 400, "INVALID_QUERY", "Missing clientId");
       return;
     }
-  
+
     try {
       if (!(await validateN8nInboundBearer(req, res, clientId))) {
         return;
       }
-  
+
       let query = supabase
         .from(leadsTableName(clientId))
         .select("id, telefone, nome, cidade, estado, status, tipo_cliente, faixa_consumo, qualificacao, created_at")
@@ -7074,7 +7132,7 @@ export function registerAllDomainRoutes(app) {
         .neq("status", "dispatched")
         .order("created_at", { ascending: true })
         .limit(limit);
-  
+
       if (importId) {
         const { data: importItems } = await supabase
           .from("lead_import_items")
@@ -7082,21 +7140,21 @@ export function registerAllDomainRoutes(app) {
           .eq("import_id", importId)
           .eq("client_id", clientId)
           .eq("imported", true);
-  
+
         const phones = (importItems || []).map((i) => i.telefone).filter(Boolean);
         if (phones.length === 0) {
           return res.json({ success: true, total: 0, leads: [] });
         }
         query = query.in("telefone", phones);
       }
-  
+
       const { data, error } = await query;
-  
+
       if (error) {
         sendError(res, 500, "LEADS_FETCH_FAILED", "Failed to fetch leads", error.message);
         return;
       }
-  
+
       const leads = (data || []).map((lead) => ({
         id: lead.id,
         telefone: lead.telefone,
@@ -7109,14 +7167,14 @@ export function registerAllDomainRoutes(app) {
         qualificacao: lead.qualificacao,
         created_at: lead.created_at,
       }));
-  
+
       res.json({ success: true, total: leads.length, leads });
     } catch (error) {
       console.error("leads-for-dispatch error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   // GET /api/prompts — lê prompt customizado de uma empresa por tipo
   app.get("/api/prompts", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
@@ -7743,24 +7801,24 @@ export function registerAllDomainRoutes(app) {
    */
   app.post("/api/hardcoded-chat", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const clientId = normalizeTenantKey(body.clientId ?? body.client_id);
     const phone = sanitizePhone(body.phone ?? body.telefone ?? body.number);
     const userMessage = normalizeString(body.message ?? body.text) || null;
-  
+
     console.log("[hardcoded-chat] Request:", { clientId, phone: maskPhoneForLog(phone), hasMessage: !!userMessage });
-  
+
     if (!clientId || !phone) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId or phone");
       return;
     }
-  
+
     try {
       console.log("[hardcoded-chat] Initializing chatbot");
       // Instanciar chatbot (atualmente suporta apenas Outlier)
       const chatbot = new OutlierQualificationBot(clientId);
-  
+
       // Processar mensagem
       let response;
       if (!userMessage) {
@@ -7783,9 +7841,9 @@ export function registerAllDomainRoutes(app) {
           meta: { source: "hardcoded-chat-api" },
         });
       }
-  
+
       console.log("[hardcoded-chat] Response status:", response.status);
-  
+
       // Se houver erro na resposta, rastrear tentativa inválida
       if (response.status === "invalid_response" && userMessage) {
         await trackInvalidResponse({
@@ -7797,18 +7855,18 @@ export function registerAllDomainRoutes(app) {
           errorMessage: response.message,
         });
       }
-  
+
       // Salvar progresso incrementalmente se conversa está ativa
       if (response.status !== "failed") {
         console.log("[hardcoded-chat] Getting chat memory");
         const memory = await getChatMemory(phone, clientId);
         console.log("[hardcoded-chat] Memory found:", !!memory);
-  
+
         if (memory) {
           const spinPhase = determineSPINPhase(memory.currentStepId);
           const qualification = qualifyLead(memory.collectedData);
           const metrics = chatbot.generateMetrics(memory);
-  
+
           console.log("[hardcoded-chat] Persisting progress");
           const persistResult = await persistChatbotProgress({
             supabase,
@@ -7823,16 +7881,16 @@ export function registerAllDomainRoutes(app) {
             mensagem: response.message,
             isFinalized: response.status === "completed",
           });
-  
+
           console.log("[hardcoded-chat] Persist result:", persistResult.success);
-  
+
           if (!persistResult.success) {
             console.warn(
               "[hardcoded-chat] Failed to persist progress:",
               persistResult.error
             );
           }
-  
+
           // Adicionar métricas à resposta
           response.metrics = metrics;
           response.leadId = persistResult.leadId || null;
@@ -7855,7 +7913,7 @@ export function registerAllDomainRoutes(app) {
           }
         }
       }
-  
+
       console.log("[hardcoded-chat] Sending response");
       res.json({
         success: response.status !== "failed",
@@ -7868,7 +7926,7 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
   /**
    * POST /api/hardcoded-chat-webhook
    * Webhook para receber mensagens do WhatsApp via Evolution API
@@ -7876,7 +7934,7 @@ export function registerAllDomainRoutes(app) {
    */
   app.post("/api/hardcoded-chat-webhook", async (req, res) => {
     const body = req.body && typeof req.body === "object" ? req.body : {};
-  
+
     // Ignorar mensagens enviadas pelo próprio bot (fromMe) para evitar loop
     const fromMe = body.data?.key?.fromMe === true || body.fromMe === true;
     if (fromMe) {
@@ -7894,19 +7952,19 @@ export function registerAllDomainRoutes(app) {
     const clientId = normalizeTenantKey(
       body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id
     ) || "outlier";
-  
+
     // Verificar se chatbot está habilitado para este tenant
     const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
     if (tenantSettings && tenantSettings.chatbot_enabled === false) {
       res.json({ success: true, ignored: "chatbot_disabled" });
       return;
     }
-  
+
     const phone = sanitizePhone(
       body.phone || body.telefone || body.remoteJid ||
       body.data?.key?.remoteJid || body.senderJid
     );
-  
+
     if (!phone) {
       res.json({ success: false, error: "Missing phone" });
       return;
@@ -8011,21 +8069,21 @@ export function registerAllDomainRoutes(app) {
 
     // Responde imediatamente ao Evolution (evita timeout)
     res.json({ success: true, status: "buffering" });
-  
+
     // Detectar tipo e extrair conteúdo da mensagem (async, sem bloquear resposta)
     resolveMessageContent(body).then((messageData) => {
       if (!messageData.text) {
         console.log("[chatbot-webhook] Empty message, skipping", { type: messageData.type, phone: maskPhoneForLog(phone) });
         return;
       }
-  
+
       console.log("[chatbot-webhook] Buffering", {
         clientId,
         type: messageData.type,
         phone: maskPhoneForLog(phone),
         preview: messageData.text.slice(0, 60),
       });
-  
+
       bufferMessage(clientId, phone, messageData, async (messages) => {
         try {
           for (const item of messages) {
@@ -8057,24 +8115,24 @@ export function registerAllDomainRoutes(app) {
             promptType,
             campaignPromptId: campaignPromptIdOverride,
           });
-  
+
           if (!aiResponse?.mensagem) return;
-  
+
           // Enviar resposta via Evolution
           const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
           const { webhookUrl: evolutionUrl, webhookToken: evolutionToken } = dispatchSettings;
-  
+
           if (!evolutionUrl) {
             console.warn("[chatbot-webhook] No Evolution URL for clientId:", clientId);
             return;
           }
-  
+
           const evolutionHeaders = { "Content-Type": "application/json" };
           if (evolutionToken) {
             evolutionHeaders.apikey = evolutionToken;
             evolutionHeaders.Authorization = `Bearer ${evolutionToken}`;
           }
-  
+
           const evolutionResponse = await fetch(evolutionUrl, {
             method: "POST",
             headers: evolutionHeaders,
@@ -8084,7 +8142,7 @@ export function registerAllDomainRoutes(app) {
               message: aiResponse.mensagem,
             }),
           });
-  
+
           if (evolutionResponse.ok) {
             console.log("[chatbot-webhook] Sent to WhatsApp", {
               phone: maskPhoneForLog(phone),
@@ -8111,7 +8169,7 @@ export function registerAllDomainRoutes(app) {
             const errText = await evolutionResponse.text();
             console.error("[chatbot-webhook] Evolution send failed:", evolutionResponse.status, errText.slice(0, 200));
           }
-  
+
           const sdrNumber = tenantSettings?.sdr_whatsapp_number;
 
           // Recontato: lead finalizado voltou a falar — avisa SDR sem gerar novo briefing
@@ -8184,7 +8242,7 @@ export function registerAllDomainRoutes(app) {
       console.error("[chatbot-webhook] resolveMessageContent error:", err.message);
     });
   });
-  
+
   /**
    * POST /api/chatbot-test — endpoint síncrono para simulador de conversa no painel
    * Processa a mensagem diretamente (sem buffer, sem Evolution) e retorna a resposta da IA.
@@ -8230,17 +8288,17 @@ export function registerAllDomainRoutes(app) {
    */
   app.get("/api/hardcoded-chat-leads", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const clientId = normalizeTenantKey(req.query.clientId ?? req.query.client_id);
     const statusFilter = req.query.status || null; // em_atendimento | finalizado | all
     const limitRaw = Number.parseInt(String(req.query.limit || "100"), 10);
     const limit = Math.min(Number.isNaN(limitRaw) ? 100 : limitRaw, 500);
-  
+
     if (!clientId) {
       sendError(res, 400, "INVALID_QUERY", "Missing clientId");
       return;
     }
-  
+
     try {
       let query = supabase
         .from(leadsTableName(clientId))
@@ -8248,19 +8306,19 @@ export function registerAllDomainRoutes(app) {
         .eq("client_id", clientId)
         .order("updated_at", { ascending: false })
         .limit(limit);
-  
+
       if (statusFilter && statusFilter !== "all") {
         query = query.eq("status_conversa", statusFilter);
       }
-  
+
       const { data, error } = await query;
-  
+
       if (error) {
         console.error("[hardcoded-chat-leads] Query error:", error);
         sendError(res, 500, "DB_ERROR", error.message);
         return;
       }
-  
+
       const leads = (data || []).map((row) => {
         const dados = row.dados || {};
         const { _currentStepId, ...collectedData } = dados;
@@ -8292,14 +8350,14 @@ export function registerAllDomainRoutes(app) {
         finalizado: leads.filter((l) => l.statusConversa === "finalizado"),
         total: leads.length,
       };
-  
+
       res.json({ success: true, leads, kanban });
     } catch (err) {
       console.error("[hardcoded-chat-leads] Error:", err);
       sendError(res, 500, "SERVER_ERROR", err.message);
     }
   });
-  
+
   /**
    * POST /api/hardcoded-chat-extract
    * Extrai briefing de uma conversa finalizada
@@ -8307,16 +8365,16 @@ export function registerAllDomainRoutes(app) {
    */
   app.post("/api/hardcoded-chat-extract", async (req, res) => {
     if (!ensureDb(res)) return;
-  
+
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const clientId = normalizeTenantKey(body.clientId ?? body.client_id);
     const phone = sanitizePhone(body.phone ?? body.telefone);
-  
+
     if (!clientId || !phone) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId or phone");
       return;
     }
-  
+
     try {
       // Buscar conversa mais recente
       const { data: conversation, error } = await supabase
@@ -8328,12 +8386,12 @@ export function registerAllDomainRoutes(app) {
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
-  
+
       if (error || !conversation) {
         sendError(res, 404, "NOT_FOUND", "No completed conversation found");
         return;
       }
-  
+
       const parsedHistory = parseStoredHistorico(conversation.historico);
       const aiBriefing = await extractBriefingWithAI({
         supabase,
