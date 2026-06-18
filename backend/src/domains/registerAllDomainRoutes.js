@@ -108,6 +108,116 @@ function isGroupJid(rawJid) {
   return false;
 }
 
+// Fallback column auto-detection based on content and header aliases
+function detectImportColumns(rows) {
+  const mapping = {
+    telefone: null,
+    nome: null,
+    tipo_cliente: null,
+    faixa_consumo: null,
+    cidade: null,
+    estado: null,
+    status: null,
+    data_hora: null,
+    qualificacao: null,
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) return mapping;
+
+  const firstRow = rows[0];
+  if (!firstRow || typeof firstRow !== "object") return mapping;
+
+  const keys = Object.keys(firstRow);
+
+  const aliasesMap = {
+    telefone: ["telefone", "telefones", "fone", "fones", "celular", "celulares", "whatsapp", "whatsapps", "phone", "phones", "numero", "numeros", "numero_telefone", "numero_telefones", "telefone_whatsapp", "telefones_whatsapp"],
+    nome: ["nome", "name", "cliente", "contato", "lead", "responsavel"],
+    tipo_cliente: ["tipo_cliente", "tipo", "perfil", "segmento", "classificacao"],
+    faixa_consumo: ["faixa_consumo", "consumo", "consumo_mensal", "valor_conta", "conta_de_energia", "ticket"],
+    cidade: ["cidade", "city", "municipio"],
+    estado: ["estado", "uf", "state"],
+    status: ["status", "etapa", "situacao", "pipeline_status"],
+    data_hora: ["data_hora", "data", "created_at", "data_de_cadastro", "timestamp"],
+    qualificacao: ["qualificacao", "observacoes", "observacao", "resumo", "anotacoes", "notas", "descricao"],
+  };
+
+  // 1. Try mapping by alias matching first
+  for (const key of keys) {
+    const normalizedKey = key.toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+    for (const [field, aliases] of Object.entries(aliasesMap)) {
+      if (!mapping[field] && aliases.includes(normalizedKey)) {
+        mapping[field] = key;
+      }
+    }
+  }
+
+  // 2. Fallback scan by value content for phone and name
+  const sampleRows = rows.slice(0, 10);
+  
+  if (!mapping.telefone) {
+    for (const key of keys) {
+      let matches = 0;
+      let total = 0;
+      for (const row of sampleRows) {
+        const val = String(row[key] ?? "").trim().replace(/\D/g, "");
+        if (val) {
+          total++;
+          if (val.length >= 8 && val.length <= 15) {
+            matches++;
+          }
+        }
+      }
+      if (total > 0 && matches / total >= 0.7) {
+        mapping.telefone = key;
+        break;
+      }
+    }
+  }
+
+  if (!mapping.nome) {
+    for (const key of keys) {
+      if (key === mapping.telefone) continue;
+      let matches = 0;
+      let total = 0;
+      for (const row of sampleRows) {
+        const val = String(row[key] ?? "").trim();
+        if (val) {
+          total++;
+          const digits = val.replace(/\D/g, "");
+          if (digits.length < val.length * 0.5) {
+            matches++;
+          }
+        }
+      }
+      if (total > 0 && matches / total >= 0.7) {
+        mapping.nome = key;
+        break;
+      }
+    }
+  }
+
+  // Last resort fallbacks if we still don't have phone/nome mapped
+  const unmappedKeys = keys.filter(k => k !== mapping.telefone && k !== mapping.nome);
+  if (!mapping.telefone && keys.length > 0) {
+    mapping.telefone = keys[0];
+  }
+  if (!mapping.nome) {
+    if (unmappedKeys.length > 0) {
+      mapping.nome = unmappedKeys[0];
+    } else if (keys.length > 1) {
+      mapping.nome = keys[1] === mapping.telefone ? keys[0] : keys[1];
+    }
+  }
+
+  return mapping;
+}
+
+
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
  * routeDeps must be populated in server.js before this runs.
@@ -3685,8 +3795,17 @@ export function registerAllDomainRoutes(app) {
     }
   
     try {
+      const mapping = detectImportColumns(rows);
       const parsedItems = rows.map((row, index) => {
-        const normalized = normalizeImportedLead(row, clientId);
+        const enrichedRow = { ...row };
+        if (mapping.telefone && !enrichedRow.telefone) {
+          enrichedRow.telefone = row[mapping.telefone];
+        }
+        if (mapping.nome && !enrichedRow.nome) {
+          enrichedRow.nome = row[mapping.nome];
+        }
+        
+        const normalized = normalizeImportedLead(enrichedRow, clientId);
         const imported = !!normalized.telefone;
         const skipReason = imported
           ? null
@@ -5603,6 +5722,81 @@ export function registerAllDomainRoutes(app) {
     next();
   }
   
+  async function runDueIndependentDispatches({ limit = 10 } = {}) {
+    if (!supabase) return { success: false, processed: 0, reason: "DATABASE_NOT_CONFIGURED" };
+    const now = new Date().toISOString();
+
+    try {
+      const { data: dispatches, error: fetchErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset")
+        .eq("status", "scheduled")
+        .lte("scheduled_at", now)
+        .order("scheduled_at", { ascending: true })
+        .limit(limit);
+
+      if (fetchErr) throw fetchErr;
+      if (!dispatches || dispatches.length === 0) {
+        return { success: true, processed: 0, items: [] };
+      }
+
+      const results = [];
+      for (const dispatch of dispatches) {
+        try {
+          const { data: campaign, error: campErr } = await supabase
+            .from("campaigns")
+            .select("id, name, client_id, import_id, limit_per_run, analytics_meta, webhook_url, webhook_token")
+            .eq("id", dispatch.campaign_id)
+            .single();
+
+          if (campErr || !campaign) {
+            throw new Error(campErr?.message || "Campaign not found");
+          }
+
+          await supabase
+            .from("campaign_dispatches")
+            .update({
+              status: "running",
+              triggered_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", dispatch.id);
+
+          await runCampaignDispatch({ dispatch, campaign, supabase });
+
+          results.push({ id: dispatch.id, campaignId: campaign.id, status: "success" });
+        } catch (err) {
+          console.error(`[campaign-dispatch-scheduler] failed to run dispatch ${dispatch.id}:`, err);
+          await supabase
+            .from("campaign_dispatches")
+            .update({
+              status: "failed",
+              error_message: err.message,
+              finished_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", dispatch.id);
+
+          results.push({ id: dispatch.id, status: "failed", error: err.message });
+        }
+      }
+
+      return { success: true, processed: results.length, items: results };
+    } catch (err) {
+      console.error("[campaign-dispatch-scheduler] global check failed:", err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Native interval scheduler for scheduled independent dispatches
+  setInterval(async () => {
+    try {
+      await runDueIndependentDispatches({ limit: 10 });
+    } catch (err) {
+      console.error("[campaign-dispatch-scheduler] background tick failed:", err);
+    }
+  }, 30000); // ticks every 30 seconds
+
   // POST /api/campaigns/run-due is used by cron/n8n to execute due scheduled campaigns.
   app.post("/api/campaigns/run-due", requireCampaignRunnerSecret, async (req, res) => {
     if (!ensureDb(res)) return;
@@ -5614,7 +5808,8 @@ export function registerAllDomainRoutes(app) {
   
     try {
       const result = await runDueCampaignDispatches({ limit, triggerSource: "external_runner" });
-      res.json(result);
+      const dispatchResult = await runDueIndependentDispatches({ limit });
+      res.json({ campaigns: result, independentDispatches: dispatchResult });
     } catch (error) {
       console.error("campaign run-due error:", error);
       sendError(
@@ -5852,7 +6047,8 @@ export function registerAllDomainRoutes(app) {
     const leads = await buildDispatchLeads({
       clientId,
       importId: campaign.import_id || null,
-      limit: campaign.limit_per_run,
+      limit: dispatch.limit_per_run ?? campaign.limit_per_run,
+      offset: dispatch.offset ?? 0,
       segmentation: validation.analyticsMeta.segmentation || null,
       excludeDispatchId: dispatchId,
     });
@@ -6230,6 +6426,165 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
+  // GET /api/campaigns/reports/import-audit — Relatório de auditoria de leads da planilha
+  app.get("/api/campaigns/reports/import-audit", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.query.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const importId = normalizeString(req.query.importId);
+    if (!importId) {
+      return sendError(res, 400, "MISSING_IMPORT_ID", "Missing importId query parameter");
+    }
+
+    try {
+      const { data: importRec, error: importErr } = await supabase
+        .from("lead_imports")
+        .select("id, client_id, source_name, created_at")
+        .eq("id", importId)
+        .eq("client_id", clientId)
+        .maybeSingle();
+
+      if (importErr || !importRec) {
+        return sendError(res, 404, "IMPORT_NOT_FOUND", "Import not found or unauthorized");
+      }
+
+      const sql = `
+        SELECT 
+          lii.id AS lead_import_item_id,
+          lii.import_id,
+          lii.telefone,
+          lii.normalized_data,
+          lii.created_at AS imported_at,
+          lii.row_number,
+          lii.imported,
+          lii.skip_reason,
+          (
+            SELECT count(*)::int 
+            FROM public.campaign_dispatch_runs 
+            WHERE lead_id = lii.id
+          ) AS dispatch_count,
+          (
+            SELECT max(sent_at) 
+            FROM public.campaign_dispatch_runs 
+            WHERE lead_id = lii.id
+          ) AS last_sent_at,
+          (
+            SELECT max(created_at) 
+            FROM public.campaign_dispatch_runs 
+            WHERE lead_id = lii.id
+          ) AS last_attempt_at,
+          (
+            SELECT status 
+            FROM public.campaign_dispatch_runs 
+            WHERE lead_id = lii.id 
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) AS last_status,
+          (
+            SELECT error_message 
+            FROM public.campaign_dispatch_runs 
+            WHERE lead_id = lii.id 
+            ORDER BY created_at DESC 
+            LIMIT 1
+          ) AS last_error_message,
+          EXISTS (
+            SELECT 1 
+            FROM public.lead_messages lm
+            WHERE (lm.lead_id = lii.lead_id OR lm.phone = lii.telefone)
+              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              AND lm.client_id = $1
+          ) AS has_replied
+        FROM public.lead_import_items lii
+        WHERE lii.client_id = $1
+          AND lii.import_id = $2
+        ORDER BY lii.row_number ASC
+      `;
+
+      const result = await pgDatabasePool.query(sql, [clientId, importId]);
+      res.json({
+        import: importRec,
+        items: result.rows || []
+      });
+    } catch (err) {
+      console.error("[import-audit] error:", err);
+      sendError(res, 500, "IMPORT_AUDIT_FAILED", err instanceof Error ? err.message : "Failed to load audit report");
+    }
+  });
+
+  // POST /api/campaigns/reports/create-import-from-subset — Cria nova base de importação a partir de um subconjunto
+  app.post("/api/campaigns/reports/create-import-from-subset", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const sourceName = normalizeString(req.body?.sourceName) || "Recampanha";
+    const leadImportItemIds = Array.isArray(req.body?.leadImportItemIds) ? req.body.leadImportItemIds : [];
+
+    if (leadImportItemIds.length === 0) {
+      return sendError(res, 400, "MISSING_ITEMS", "No lead items selected");
+    }
+
+    try {
+      const { data: originalItems, error: itemsErr } = await supabase
+        .from("lead_import_items")
+        .select("id, client_id, telefone, lead_id, imported, skip_reason, raw_data, normalized_data")
+        .eq("client_id", clientId)
+        .in("id", leadImportItemIds);
+
+      if (itemsErr || !originalItems || originalItems.length === 0) {
+        return sendError(res, 400, "ITEMS_NOT_FOUND", "No valid original lead items found");
+      }
+
+      const validRows = originalItems.filter(item => item.imported);
+      const skippedRows = originalItems.length - validRows.length;
+
+      const { data: importRecord, error: importError } = await supabase
+        .from("lead_imports")
+        .insert({
+          client_id: clientId,
+          source_name: sourceName,
+          source_type: "segmentation_campaign",
+          total_rows: originalItems.length,
+          imported_rows: validRows.length,
+          skipped_rows: skippedRows,
+          uploaded_by_uid: req.authAccess?.uid || null,
+          uploaded_by_email: req.authAccess?.email || null,
+        })
+        .select("id, client_id, source_name, created_at")
+        .single();
+
+      if (importError) throw importError;
+
+      const newImportItems = originalItems.map((item, index) => ({
+        import_id: importRecord.id,
+        client_id: clientId,
+        row_number: index + 2,
+        telefone: item.telefone,
+        lead_id: item.lead_id || null,
+        imported: item.imported,
+        skip_reason: item.skip_reason,
+        raw_data: item.raw_data,
+        normalized_data: item.normalized_data,
+      }));
+
+      const { error: insertItemsError } = await supabase
+        .from("lead_import_items").insert(newImportItems);
+
+      if (insertItemsError) throw insertItemsError;
+
+      res.status(201).json({
+        success: true,
+        item: importRecord
+      });
+    } catch (err) {
+      console.error("[create-import-from-subset] error:", err);
+      sendError(res, 500, "CREATE_SUBSET_IMPORT_FAILED", err instanceof Error ? err.message : "Failed to create follow-up base");
+    }
+  });
+
   // POST /api/campaigns/:id/dispatches — cria disparo
   app.post("/api/campaigns/:id/dispatches", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
@@ -6271,6 +6626,9 @@ export function registerAllDomainRoutes(app) {
         return sendError(res, 400, "INVALID_DISPATCH_TEMPLATE", validation.message);
       }
 
+      const limitPerRun = body.limitPerRun != null ? Number(body.limitPerRun) : null;
+      const offset = body.offset != null ? Number(body.offset) : null;
+
       const { data, error } = await supabase
         .from("campaign_dispatches")
         .insert({
@@ -6282,6 +6640,8 @@ export function registerAllDomainRoutes(app) {
           scheduled_at: scheduledAt,
           evolution_instance_id: requestedEvolutionInstanceId,
           status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
+          limit_per_run: limitPerRun,
+          offset: offset,
         })
         .select("*")
         .single();

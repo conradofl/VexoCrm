@@ -29,6 +29,8 @@ import {
   Download,
   AlertCircle,
   Loader2,
+  Gauge,
+  Send,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
@@ -90,7 +92,7 @@ import { useCampaignPrompts, useSaveCampaignPrompt } from "@/hooks/useCampaignPr
 import { toast } from "@/components/ui/use-toast";
 import { API_BASE_URL } from "@/lib/api";
 
-type SheetTab = "campanha" | "enviadas" | "agendamentos";
+type SheetTab = "campanha" | "enviadas" | "agendamentos" | "relatorios";
 type CampaignTemplateStrategy = "single" | "ai_variations";
 
 interface CampaignSegmentationState {
@@ -149,6 +151,52 @@ const darkSelectContentClass =
 const darkSelectItemClass =
   "rounded-md text-slate-700 focus:bg-slate-100 focus:text-slate-950 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary dark:text-white/78 dark:focus:bg-white/[0.06] dark:focus:text-white dark:data-[state=checked]:bg-primary/12 dark:data-[state=checked]:text-white";
 
+function findHeaderRowIndex(rangeRows: unknown[][]): number {
+  const aliases = [
+    "telefone", "telefones", "fone", "fones", "celular", "celulares", "whatsapp", "whatsapps", "phone", "phones", "numero", "numeros", "numero_telefone", "numero_telefones", "telefone_whatsapp", "telefones_whatsapp",
+    "nome", "name", "cliente", "contato", "lead", "responsavel", "email", "e_mail", "mail", "city", "cidade", "estado", "uf", "tipo", "tipo_cliente", "perfil", "produto", "status", "dados", "informacoes", "info"
+  ];
+
+  let bestIdx = 0;
+  let maxMatches = 0;
+
+  const scanLimit = Math.min(rangeRows.length, 20);
+  for (let i = 0; i < scanLimit; i++) {
+    const row = rangeRows[i];
+    if (!Array.isArray(row)) continue;
+
+    let matches = 0;
+    for (const cell of row) {
+      if (cell === null || cell === undefined) continue;
+      const normalized = String(cell)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+      if (aliases.includes(normalized)) {
+        matches++;
+      }
+    }
+
+    if (matches > maxMatches) {
+      maxMatches = matches;
+      bestIdx = i;
+    }
+  }
+
+  if (maxMatches === 0) {
+    for (let i = 0; i < rangeRows.length; i++) {
+      const row = rangeRows[i];
+      if (Array.isArray(row) && row.some(cell => String(cell ?? "").trim() !== "")) {
+        return i;
+      }
+    }
+  }
+
+  return bestIdx;
+}
+
 function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -160,7 +208,49 @@ function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
         const firstSheetName = workbook.SheetNames[0];
         if (!firstSheetName) return reject(new Error("A planilha não possui dados."));
         const worksheet = workbook.Sheets[firstSheetName];
-        resolve(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", raw: false }));
+
+        const rangeRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, defval: "" });
+        if (!rangeRows || rangeRows.length === 0) {
+          return resolve([]);
+        }
+
+        const headerIdx = findHeaderRowIndex(rangeRows);
+        const rawHeaders = rangeRows[headerIdx];
+        const headers = rawHeaders.map((h, colIdx) => {
+          const val = String(h ?? "").trim();
+          return val !== "" ? val : `__EMPTY_${colIdx}`;
+        });
+
+        const parsedObjects: Record<string, unknown>[] = [];
+        for (let i = headerIdx + 1; i < rangeRows.length; i++) {
+          const row = rangeRows[i];
+          if (!Array.isArray(row)) continue;
+          if (row.every(cell => String(cell ?? "").trim() === "")) continue;
+
+          // Skip if this row is a duplicate/leaked header row
+          const isHeaderRow = row.some(cell => {
+            const val = String(cell ?? "").trim().toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .replace(/[^a-z0-9]+/g, "_");
+            return val.includes("telefone") || val.includes("whatsapp") || val.includes("celular") || val.includes("phone") || val.includes("fone") || val === "contato" || val === "leads" || val === "lead";
+          }) && row.some(cell => {
+            const val = String(cell ?? "").trim().toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .replace(/[^a-z0-9]+/g, "_");
+            return val.includes("nome") || val.includes("name") || val.includes("cliente") || val.includes("contato") || val.includes("lead") || val.includes("responsavel");
+          });
+          if (isHeaderRow) continue;
+
+          const obj: Record<string, unknown> = {};
+          headers.forEach((header, colIdx) => {
+            obj[header] = row[colIdx] !== undefined ? row[colIdx] : "";
+          });
+          parsedObjects.push(obj);
+        }
+
+        resolve(parsedObjects);
       } catch (error) {
         reject(error instanceof Error ? error : new Error("Falha ao processar a planilha."));
       }
@@ -168,6 +258,90 @@ function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
     reader.onerror = () => reject(new Error("Falha ao ler o arquivo selecionado."));
     reader.readAsArrayBuffer(file);
   });
+}
+
+function detectSpreadsheetColumns(rows: Record<string, unknown>[]) {
+  const mapping = {
+    telefone: null as string | null,
+    nome: null as string | null,
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) return mapping;
+
+  const firstRow = rows[0];
+  if (!firstRow || typeof firstRow !== "object") return mapping;
+
+  const keys = Object.keys(firstRow);
+
+  const aliasesMap = {
+    telefone: ["telefone", "telefones", "fone", "fones", "celular", "celulares", "whatsapp", "whatsapps", "phone", "phones", "numero", "numeros", "numero_telefone", "numero_telefones", "telefone_whatsapp", "telefones_whatsapp"],
+    nome: ["nome", "name", "cliente", "contato", "lead", "responsavel"],
+  };
+
+  // 1. Try mapping by alias matching first
+  for (const key of keys) {
+    const normalizedKey = key.toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+    for (const [field, aliases] of Object.entries(aliasesMap)) {
+      if (field === "telefone" && !mapping.telefone && aliases.includes(normalizedKey)) {
+        mapping.telefone = key;
+      }
+      if (field === "nome" && !mapping.nome && aliases.includes(normalizedKey)) {
+        mapping.nome = key;
+      }
+    }
+  }
+
+  // 2. Fallback scan by value content for phone and name
+  const sampleRows = rows.slice(0, 10);
+  
+  if (!mapping.telefone) {
+    for (const key of keys) {
+      let matches = 0;
+      let total = 0;
+      for (const row of sampleRows) {
+        const val = String(row[key] ?? "").trim().replace(/\D/g, "");
+        if (val) {
+          total++;
+          if (val.length >= 8 && val.length <= 15) {
+            matches++;
+          }
+        }
+      }
+      if (total > 0 && matches / total >= 0.7) {
+        mapping.telefone = key;
+        break;
+      }
+    }
+  }
+
+  if (!mapping.nome) {
+    for (const key of keys) {
+      if (key === mapping.telefone) continue;
+      let matches = 0;
+      let total = 0;
+      for (const row of sampleRows) {
+        const val = String(row[key] ?? "").trim();
+        if (val) {
+          total++;
+          const digits = val.replace(/\D/g, "");
+          if (digits.length < val.length * 0.5) {
+            matches++;
+          }
+        }
+      }
+      if (total > 0 && matches / total >= 0.7) {
+        mapping.nome = key;
+        break;
+      }
+    }
+  }
+
+  return mapping;
 }
 
 function getValidDate(value: unknown) {
@@ -452,7 +626,53 @@ export default function LeadImports({
   // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
-  const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
+  const [showNumbersModal, setShowNumbersModal] = useState(false);
+  const [isImportingFile, setIsImportingFile] = useState(false);
+  interface FilterRule {
+    column: string;
+    operator: "equals" | "contains" | "gt" | "lt";
+    value: string;
+  }
+  const [filterRules, setFilterRules] = useState<FilterRule[]>([]);
+
+  const filteredRows = useMemo(() => {
+    if (filterRules.length === 0) return parsedRows;
+    return parsedRows.filter((row) => {
+      return filterRules.every((rule) => {
+        if (!rule.column) return true;
+        const rawValue = row[rule.column];
+        const valStr = String(rawValue ?? "").trim();
+        const ruleVal = rule.value.trim();
+
+        switch (rule.operator) {
+          case "equals":
+            return valStr.toLowerCase() === ruleVal.toLowerCase();
+          case "contains":
+            return valStr.toLowerCase().includes(ruleVal.toLowerCase());
+          case "gt": {
+            const num = parseFloat(valStr.replace(/[^\d\.,-]/g, "").replace(",", "."));
+            const ruleNum = parseFloat(ruleVal);
+            return !isNaN(num) && !isNaN(ruleNum) && num > ruleNum;
+          }
+          case "lt": {
+            const num = parseFloat(valStr.replace(/[^\d\.,-]/g, "").replace(",", "."));
+            const ruleNum = parseFloat(ruleVal);
+            return !isNaN(num) && !isNaN(ruleNum) && num < ruleNum;
+          }
+          default:
+            return true;
+        }
+      });
+    });
+  }, [parsedRows, filterRules]);
+
+  const previewRows = useMemo(() => filteredRows.slice(0, 10), [filteredRows]);
+
+  const spreadsheetColumns = useMemo(() => {
+    if (parsedRows.length === 0) return [];
+    return Object.keys(parsedRows[0]);
+  }, [parsedRows]);
+
   const [parseError, setParseError] = useState<string | null>(null);
   const [selectedImportId, setSelectedImportId] = useState<string>(ALL_IMPORTS_VALUE);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -474,6 +694,9 @@ export default function LeadImports({
   const [newConsultantLink, setNewConsultantLink] = useState("");
   const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
   const [newScheduledAt, setNewScheduledAt] = useState("");
+  const [batchingEnabled, setBatchingEnabled] = useState(false);
+  const [batchSize, setBatchSize] = useState("100");
+  const [batchIntervalHours, setBatchIntervalHours] = useState("1");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -544,37 +767,117 @@ export default function LeadImports({
 
   // Statistics calculation for uploaded leads
   const parsedLeadsStats = useMemo(() => {
-    if (parsedRows.length === 0) return { total: 0, valid: 0, invalid: 0 };
+    if (filteredRows.length === 0) return { total: 0, valid: 0, invalid: 0 };
     let valid = 0;
-    parsedRows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const phone = getLeadField(row, ["telefone", "celular", "phone", "number", "whatsapp"]);
       if (phone && phone.replace(/\D/g, "").length >= 8) {
         valid++;
       }
     });
     return {
-      total: parsedRows.length,
+      total: filteredRows.length,
       valid,
-      invalid: parsedRows.length - valid,
+      invalid: filteredRows.length - valid,
     };
-  }, [parsedRows]);
+  }, [filteredRows]);
 
   // Handle excel/csv parsed rows
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] || null;
+    if (file && file.name.endsWith(".numbers")) {
+      setShowNumbersModal(true);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     setSelectedFile(file);
     setParseError(null);
     setParsedRows([]);
-    setPreviewRows([]);
+    setFilterRules([]);
 
     if (!file) return;
     try {
       const rows = await parseSpreadsheetFile(file);
-      setParsedRows(rows);
-      setPreviewRows(rows.slice(0, 5));
+      const mapping = detectSpreadsheetColumns(rows);
+      const normalizedRows = rows.map((row) => {
+        const newRow = { ...row };
+        if (mapping.telefone) {
+          newRow.telefone = String(row[mapping.telefone] ?? "").trim();
+          if (mapping.telefone !== "telefone") {
+            delete newRow[mapping.telefone];
+          }
+        }
+        if (mapping.nome) {
+          newRow.nome = String(row[mapping.nome] ?? "").trim();
+          if (mapping.nome !== "nome") {
+            delete newRow[mapping.nome];
+          }
+        }
+        return newRow;
+      });
+      const filteredNormalizedRows = normalizedRows.filter((row) => {
+        const phoneVal = String(row.telefone ?? "").trim().toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "");
+        const nameVal = String(row.nome ?? "").trim().toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "");
+
+        // If phone value matches header keywords (like "telefone", "whatsapp", "phone") and name matches name keywords
+        const isPhoneHeader = ["telefone", "celular", "phone", "fone", "whatsapp", "number", "numero"].some(alias => phoneVal.includes(alias));
+        const isNameHeader = ["nome", "name", "cliente", "contato", "lead", "responsavel"].some(alias => nameVal.includes(alias));
+
+        if (isPhoneHeader && isNameHeader) {
+          return false;
+        }
+
+        // Also if phone contains only letters (e.g. "telefone" or "celular"), it is definitely a header and not a phone number
+        if (phoneVal !== "" && /^[a-zA-Z_]+$/.test(phoneVal)) {
+          return false;
+        }
+
+        return true;
+      });
+      setParsedRows(filteredNormalizedRows);
       setCampaignName(file.name.replace(/\.[^/.]+$/, ""));
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Falha ao analisar a planilha.");
+    }
+  }
+
+  async function handleImportSpreadsheetOnly() {
+    if (!selectedFile || parsedRows.length === 0) return;
+    setIsImportingFile(true);
+    try {
+      const importRes = await createLeadImport.mutateAsync({
+        clientId: activeClientId,
+        sourceName: selectedFile.name,
+        sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
+        rows: parsedRows,
+      });
+
+      toast({
+        title: "Planilha importada",
+        description: `A base "${selectedFile.name}" foi importada com sucesso com ${parsedRows.length} contatos.`,
+      });
+
+      await refetchImports();
+      setSelectedImportId(importRes.item.id);
+
+      setSelectedFile(null);
+      setParsedRows([]);
+      setFilterRules([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      toast({
+        title: "Erro ao importar planilha",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsImportingFile(false);
     }
   }
 
@@ -754,9 +1057,10 @@ export default function LeadImports({
 
     try {
       let finalImportId = selectedImportId;
+      let finalRowsCount = 0;
 
       // 1. If upload a new file, run lead import first
-      if (selectedFile && parsedRows.length > 0) {
+      if (selectedFile && filteredRows.length > 0) {
         setSubmittingStatus("Processando planilha e aplicando round-robin...");
         const activeLinks = multiAgendaEnabled
           ? consultants.filter(c => c.active).map(c => c.scheduling_link)
@@ -764,11 +1068,13 @@ export default function LeadImports({
 
         // Apply Round-Robin directly on rows
         const finalRows = activeLinks.length > 0
-          ? parsedRows.map((row, idx) => ({
+          ? filteredRows.map((row, idx) => ({
               ...row,
               scheduling_link: activeLinks[idx % activeLinks.length],
             }))
-          : parsedRows;
+          : filteredRows;
+
+        finalRowsCount = finalRows.length;
 
         const importRes = await createLeadImport.mutateAsync({
           clientId: activeClientId,
@@ -827,37 +1133,90 @@ export default function LeadImports({
       const token = await getIdToken();
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
       
-      const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `${campaignName.trim()} — Lote Principal`,
-          steps: campaignSequence,
-          triggerType: newTriggerType,
-          scheduledAt: scheduledIso,
-          evolutionInstanceId: dispatchOptions.evolutionInstanceId,
-        }),
-      });
-      if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");
-      const dispatchData = await dispatchRes.json();
-      const dispatchId = dispatchData.dispatch.id;
-
-      // 3. Trigger immediate execution if manual
-      if (newTriggerType === "manual") {
-        setSubmittingStatus("Disparando lote de envios...");
-        await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+      let totalLeads = 0;
+      if (selectedFile) {
+        totalLeads = finalRowsCount;
       } else {
-        toast({ title: "Sucesso!", description: "Lote de disparos agendado com sucesso." });
+        const selectedImportRecord = imports.find(imp => imp.id === selectedImportId);
+        totalLeads = selectedImportRecord ? selectedImportRecord.imported_rows : (pendingData?.total || 0);
+      }
+
+      if (batchingEnabled && totalLeads > 0) {
+        const size = Number.parseInt(batchSize, 10) || 100;
+        const interval = Number.parseFloat(batchIntervalHours) || 1;
+        const numBatches = Math.ceil(totalLeads / size);
+
+        let baseDate = newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : new Date();
+
+        for (let i = 0; i < numBatches; i++) {
+          const offset = i * size;
+          const batchDate = new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
+          const batchScheduledIso = batchDate.toISOString();
+          const batchTriggerType = (i === 0 && newTriggerType === "manual") ? "manual" : "scheduled";
+
+          const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: `${campaignName.trim()} — Lote ${i + 1}/${numBatches}`,
+              steps: campaignSequence,
+              triggerType: batchTriggerType,
+              scheduledAt: batchTriggerType === "scheduled" ? batchScheduledIso : null,
+              evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+              limitPerRun: size,
+              offset: offset,
+            }),
+          });
+          if (!dispatchRes.ok) throw new Error(`Erro ao registrar lote ${i + 1} de disparo.`);
+          const dispatchData = await dispatchRes.json();
+          const dispatchId = dispatchData.dispatch.id;
+
+          // Se for manual e for o primeiro lote, dispara imediatamente
+          if (i === 0 && newTriggerType === "manual") {
+            setSubmittingStatus(`Disparando lote 1/${numBatches}...`);
+            await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          }
+        }
+        toast({ title: "Sucesso!", description: `${numBatches} lotes criados e enfileirados com sucesso.` });
+      } else {
+        const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `${campaignName.trim()} — Lote Principal`,
+            steps: campaignSequence,
+            triggerType: newTriggerType,
+            scheduledAt: scheduledIso,
+            evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+          }),
+        });
+        if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");
+        const dispatchData = await dispatchRes.json();
+        const dispatchId = dispatchData.dispatch.id;
+
+        // 3. Trigger immediate execution if manual
+        if (newTriggerType === "manual") {
+          setSubmittingStatus("Disparando lote de envios...");
+          await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+        } else {
+          toast({ title: "Sucesso!", description: "Lote de disparos agendado com sucesso." });
+        }
       }
 
       // Reset form and view queue
       setSelectedFile(null);
       setParsedRows([]);
-      setPreviewRows([]);
+      setFilterRules([]);
+      setBatchingEnabled(false);
+      setBatchSize("100");
+      setBatchIntervalHours("1");
       setCampaignName("");
       setEditingCampaignId(null);
       setCampaignSequence([createCampaignStep("text", 1)]);
@@ -1023,6 +1382,16 @@ export default function LeadImports({
           <Zap className="h-3.5 w-3.5" />
           Fila de Envios
         </button>
+        <button
+          onClick={() => setActiveTab("relatorios")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
+            activeTab === "relatorios" ? "bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          )}
+        >
+          <FileSpreadsheet className="h-3.5 w-3.5" />
+          Relatório & Auditoria
+        </button>
       </div>
 
       {/* 🚀 TAB 1: NOVO DISPARO (Consolidated Linear Wizard) */}
@@ -1046,17 +1415,67 @@ export default function LeadImports({
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".csv,.xls,.xlsx"
+                      accept=".csv,.xls,.xlsx,.numbers"
                       className="sr-only"
                       onChange={handleFileChange}
                     />
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/20 px-3 hover:bg-indigo-50/50 dark:border-indigo-800/40 dark:bg-indigo-950/10 dark:hover:bg-indigo-950/20 text-xs font-semibold text-indigo-600 dark:text-indigo-400 transition-all"
-                    >
-                      <Upload className="h-4 w-4" />
-                      {selectedFile ? selectedFile.name : "Carregar Planilha (Excel/CSV)"}
-                    </div>
+                    {selectedFile ? (
+                      <div className="flex h-12 items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50/20 px-3 dark:border-indigo-800/40 dark:bg-indigo-950/10 text-xs font-semibold text-indigo-600 dark:text-indigo-400 transition-all">
+                        <div className="flex items-center gap-2 truncate">
+                          <FileSpreadsheet className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+                          <span className="truncate">{selectedFile.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="default"
+                            size="sm"
+                            onClick={handleImportSpreadsheetOnly}
+                            disabled={isImportingFile}
+                            className="h-8 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] uppercase font-bold flex items-center gap-1.5 shadow-sm transition-colors border-0"
+                          >
+                            {isImportingFile ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="h-3.5 w-3.5" />
+                            )}
+                            Importar Planilha
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="h-8 px-2 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 text-[10px] uppercase font-bold"
+                          >
+                            Alterar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedFile(null);
+                              setParsedRows([]);
+                              setFilterRules([]);
+                              setCampaignName("");
+                              if (fileInputRef.current) fileInputRef.current.value = "";
+                            }}
+                            className="h-8 w-8 p-0 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/20 px-3 hover:bg-indigo-50/50 dark:border-indigo-800/40 dark:bg-indigo-950/10 dark:hover:bg-indigo-950/20 text-xs font-semibold text-indigo-600 dark:text-indigo-400 transition-all"
+                      >
+                        <Upload className="h-4 w-4" />
+                        Carregar Planilha (Excel/CSV/Numbers)
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -1067,7 +1486,7 @@ export default function LeadImports({
                         setSelectedImportId(val);
                         setSelectedFile(null);
                         setParsedRows([]);
-                        setPreviewRows([]);
+                        setFilterRules([]);
                       }}
                     >
                       <SelectTrigger className="h-12 rounded-xl">
@@ -1084,6 +1503,127 @@ export default function LeadImports({
                     </Select>
                   </div>
                 </div>
+
+                {/* Dynamic Spreadsheet Filter Builder */}
+                {parsedRows.length > 0 && (
+                  <div className="rounded-xl border border-indigo-100/60 bg-indigo-50/10 p-4 dark:border-indigo-950/20 dark:bg-indigo-950/5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        <Filter className="h-3.5 w-3.5 text-indigo-500" />
+                        Filtros de Segmentação da Planilha
+                        <InfoTip text="Filtre os contatos da planilha antes de realizar a importação e disparo. Apenas linhas que atendam aos filtros serão enviadas." />
+                      </p>
+                      {filterRules.length > 0 && (
+                        <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400 px-2 py-0.5 rounded-full">
+                          {filterRules.length} {filterRules.length === 1 ? "regra ativa" : "regras ativas"}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Help/explanation box for spreadsheet filters */}
+                    <div className="flex items-start gap-2.5 rounded-lg border border-blue-400/20 bg-blue-500/5 p-3 text-[11px] leading-relaxed text-blue-700 dark:text-blue-300">
+                      <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                      <div className="space-y-1">
+                        <p className="font-semibold">Como funciona a segmentação da planilha?</p>
+                        <p>
+                          Você pode filtrar os contatos importados dinamicamente antes de realizar o envio. O sistema lê as colunas da sua planilha e permite criar regras de segmentação personalizadas.
+                        </p>
+                        <ul className="list-disc pl-4 space-y-0.5 mt-1">
+                          <li><strong>Igual a:</strong> Busca exata (ex: <em>Sexo</em> igual a <em>Feminino</em>).</li>
+                          <li><strong>Contém:</strong> Busca parcial de texto (ex: <em>Interesse</em> contém <em>consórcio</em>).</li>
+                          <li><strong>Maior que / Menor que:</strong> Comparação numérica ou financeira (ex: <em>Valor</em> maior que <em>50000</em>).</li>
+                        </ul>
+                        <p className="text-muted-foreground text-[10px] mt-1">
+                          * Apenas os leads que atenderem a todas as regras ativas serão importados e inseridos na fila de disparos.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {filterRules.map((rule, idx) => (
+                        <div key={idx} className="flex flex-wrap gap-2 items-center bg-white dark:bg-black/35 p-2.5 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm">
+                          <Select
+                            value={rule.column}
+                            onValueChange={(val) => {
+                              const updated = [...filterRules];
+                              updated[idx].column = val;
+                              setFilterRules(updated);
+                            }}
+                          >
+                            <SelectTrigger className="h-9 text-xs flex-1 min-w-[120px]">
+                              <SelectValue placeholder="Coluna..." />
+                            </SelectTrigger>
+                            <SelectContent className={darkSelectContentClass}>
+                              {spreadsheetColumns.map((col) => (
+                                <SelectItem key={col} value={col} className={darkSelectItemClass}>
+                                  {col}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          <Select
+                            value={rule.operator}
+                            onValueChange={(val: any) => {
+                              const updated = [...filterRules];
+                              updated[idx].operator = val;
+                              setFilterRules(updated);
+                            }}
+                          >
+                            <SelectTrigger className="h-9 text-xs max-w-[120px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className={darkSelectContentClass}>
+                              <SelectItem value="equals" className={darkSelectItemClass}>Igual a</SelectItem>
+                              <SelectItem value="contains" className={darkSelectItemClass}>Contém</SelectItem>
+                              <SelectItem value="gt" className={darkSelectItemClass}>Maior que</SelectItem>
+                              <SelectItem value="lt" className={darkSelectItemClass}>Menor que</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          <Input
+                            placeholder="Valor de comparação..."
+                            value={rule.value}
+                            onChange={(e) => {
+                              const updated = [...filterRules];
+                              updated[idx].value = e.target.value;
+                              setFilterRules(updated);
+                            }}
+                            className="h-9 text-xs flex-1 min-w-[140px]"
+                          />
+
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              setFilterRules(filterRules.filter((_, rIdx) => rIdx !== idx));
+                            }}
+                            className="h-9 w-9 p-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (spreadsheetColumns.length > 0) {
+                            setFilterRules([
+                              ...filterRules,
+                              { column: spreadsheetColumns[0], operator: "equals", value: "" }
+                            ]);
+                          }
+                        }}
+                        className="w-full h-9 text-xs border-dashed border-indigo-200 hover:border-indigo-300 text-indigo-600 dark:border-indigo-800/40 dark:text-indigo-400 bg-transparent rounded-xl"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Filtro de Coluna
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Simplified preview of uploaded leads */}
                 {parsedRows.length > 0 && (
@@ -1385,6 +1925,58 @@ export default function LeadImports({
                       onChange={(e) => setDispatchOptions(curr => ({ ...curr, leadDelaySeconds: Math.max(1, Number(e.target.value)) }))}
                     />
                   </div>
+                </div>
+
+                {/* Batch sending (Loteamento) config */}
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 dark:border-white/5 dark:bg-slate-900/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        <Archive className="h-3.5 w-3.5 text-indigo-500" />
+                        Enviar em Lotes (Massa)
+                        <InfoTip text="Suba uma base grande e divida o envio automaticamente em lotes menores espalhados no tempo." />
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Evite bans dividindo os disparos sequencialmente</p>
+                    </div>
+                    <Switch checked={batchingEnabled} onCheckedChange={setBatchingEnabled} />
+                  </div>
+
+                  {batchingEnabled && (
+                    <div className="grid gap-4 sm:grid-cols-2 pt-2 animate-fadeIn">
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase font-bold text-slate-500">Tamanho do Lote</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          placeholder="Ex: 100"
+                          value={batchSize}
+                          onChange={(e) => setBatchSize(e.target.value)}
+                          className="h-10 text-xs rounded-xl"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase font-bold text-slate-500">Frequência de Envio</label>
+                        <Select
+                          value={batchIntervalHours}
+                          onValueChange={setBatchIntervalHours}
+                        >
+                          <SelectTrigger className="h-10 text-xs rounded-xl">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className={darkSelectContentClass}>
+                            <SelectItem value="0.5" className={darkSelectItemClass}>A cada 30 minutos</SelectItem>
+                            <SelectItem value="1" className={darkSelectItemClass}>A cada 1 hora</SelectItem>
+                            <SelectItem value="2" className={darkSelectItemClass}>A cada 2 horas</SelectItem>
+                            <SelectItem value="3" className={darkSelectItemClass}>A cada 3 horas</SelectItem>
+                            <SelectItem value="6" className={darkSelectItemClass}>A cada 6 horas</SelectItem>
+                            <SelectItem value="12" className={darkSelectItemClass}>A cada 12 horas</SelectItem>
+                            <SelectItem value="24" className={darkSelectItemClass}>A cada 24 horas (diário)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Round-Robin Calendly/Agenda Integration */}
@@ -1786,6 +2378,988 @@ export default function LeadImports({
           </CardContent>
         </Card>
       )}
+
+      {/* 📊 TAB 4: AUDITORIA & RECAMPANHAS */}
+      {activeTab === "relatorios" && (
+        <LeadImportAuditReport
+          activeClientId={activeClientId}
+          imports={imports}
+          onSelectImportForFollowup={(newImportId) => {
+            setSelectedImportId(newImportId);
+            setSelectedFile(null);
+            setParsedRows([]);
+            setFilterRules([]);
+            setActiveTab("campanha");
+          }}
+        />
+      )}
+
+      {/* 🍏 APPLE NUMBERS INSTRUCTIONS MODAL */}
+      {showNumbersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md animate-fadeIn">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#0b0e1a] animate-scaleUp">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-indigo-500 animate-pulse" />
+                Planilha Numbers detectada
+              </h3>
+              <button
+                onClick={() => setShowNumbersModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4 text-xs text-slate-600 dark:text-slate-300">
+              <p className="leading-relaxed">
+                Arquivos do <strong>Apple Numbers (.numbers)</strong> são pacotes binários compactados exclusivos da Apple e não podem ser lidos diretamente no navegador.
+              </p>
+              <p className="font-semibold text-slate-700 dark:text-white">
+                Como exportar para Excel (.xlsx) no seu Mac em segundos:
+              </p>
+              <div className="rounded-xl border border-indigo-100/70 bg-indigo-50/30 p-4 dark:border-indigo-950/40 dark:bg-indigo-950/15 space-y-3">
+                <div className="flex gap-2.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-950 text-[10px] font-bold text-indigo-600 dark:text-indigo-400">1</span>
+                  <p>Abra o arquivo no seu aplicativo <strong>Numbers</strong>.</p>
+                </div>
+                <div className="flex gap-2.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-950 text-[10px] font-bold text-indigo-600 dark:text-indigo-400">2</span>
+                  <p>No menu superior do Numbers, clique em <strong>Arquivo &gt; Exportar Para &gt; Excel...</strong> (ou CSV).</p>
+                </div>
+                <div className="flex gap-2.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-950 text-[10px] font-bold text-indigo-600 dark:text-indigo-400">3</span>
+                  <p>Salve o arquivo e faça o upload do novo arquivo <strong>.xlsx</strong> gerado aqui.</p>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <Button
+                onClick={() => setShowNumbersModal(false)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold px-4"
+              >
+                Entendi
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
 }
+
+// Sub-component for auditing lead imports and creating follow-up cohorts
+interface AuditItem {
+  lead_import_item_id: string;
+  import_id: string;
+  telefone: string;
+  normalized_data: Record<string, any>;
+  imported_at: string;
+  row_number: number;
+  imported: boolean;
+  skip_reason: string | null;
+  dispatch_count: number;
+  last_sent_at: string | null;
+  last_attempt_at: string | null;
+  last_status: string | null;
+  last_error_message: string | null;
+  has_replied: boolean;
+}
+
+interface LeadImportAuditReportProps {
+  activeClientId: string;
+  imports: any[];
+  onSelectImportForFollowup: (importId: string) => void;
+}
+
+function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollowup }: LeadImportAuditReportProps) {
+  const { getIdToken } = useAuth();
+  const [selectedImportId, setSelectedImportId] = useState<string>("");
+  const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<"all" | "sent" | "failed" | "replied" | "pending">("all");
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState("");
+  const [creatingSubset, setCreatingSubset] = useState(false);
+
+  // Dispatches executions history & chart states
+  const { resolvedTheme } = useTheme();
+  const queryClient = useQueryClient();
+  const { data: dispatches = [], refetch: refetchDispatches } = useAllDispatches(activeClientId || null);
+  const triggerDispatch = useTriggerDispatch("");
+  const deleteDispatch = useDeleteDispatch("");
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [dispatchesSearchTerm, setDispatchesSearchTerm] = useState("");
+
+  const filteredDispatches = useMemo(() => {
+    if (!dispatchesSearchTerm.trim()) return dispatches;
+    const term = dispatchesSearchTerm.toLowerCase();
+    return dispatches.filter(
+      (d) =>
+        d.name.toLowerCase().includes(term) ||
+        (d as any).campaign_name?.toLowerCase().includes(term)
+    );
+  }, [dispatches, dispatchesSearchTerm]);
+
+  const dispatchesKpis = useMemo(() => {
+    let total = dispatches.length;
+    let sent = 0;
+    let failed = 0;
+    let running = 0;
+
+    for (const d of dispatches) {
+      sent += d.sent_count ?? 0;
+      failed += d.failed_count ?? 0;
+      if (d.status === "running") running++;
+    }
+
+    const totalMsgs = sent + failed;
+    const successRate = totalMsgs > 0 ? Math.round((sent / totalMsgs) * 100) : 100;
+
+    return { total, sent, failed, running, successRate };
+  }, [dispatches]);
+
+  const chartData = useMemo(() => {
+    return [...dispatches]
+      .filter((d) => d.status !== "draft" && d.status !== "cancelled")
+      .reverse()
+      .slice(-8)
+      .map((d) => ({
+        name: d.name.length > 15 ? `${d.name.substring(0, 15)}...` : d.name,
+        Sucesso: d.sent_count ?? 0,
+        Falha: d.failed_count ?? 0,
+      }));
+  }, [dispatches]);
+
+  const handleTriggerDispatch = async (dispatch: CampaignDispatch) => {
+    try {
+      await triggerDispatch.mutateAsync(dispatch.id, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["all-dispatches"] });
+          queryClient.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+        },
+      });
+      toast({
+        title: "Disparo iniciado",
+        description: `O lote "${dispatch.name}" está sendo processado.`,
+      });
+      refetchDispatches();
+    } catch (err) {
+      toast({
+        title: "Erro ao iniciar disparo",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteDispatch = async (dispatch: CampaignDispatch) => {
+    if (!confirm(`Tem certeza que deseja excluir o disparo "${dispatch.name}"?`)) return;
+
+    try {
+      await deleteDispatch.mutateAsync(dispatch.id, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["all-dispatches"] });
+          queryClient.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+        },
+      });
+      toast({
+        title: "Disparo removido",
+        description: `O lote "${dispatch.name}" foi excluído.`,
+      });
+      refetchDispatches();
+    } catch (err) {
+      toast({
+        title: "Erro ao excluir disparo",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDownloadFailedCsv = async (dispatch: CampaignDispatch) => {
+    try {
+      setDownloadingId(dispatch.id);
+      const token = await getIdToken();
+      const res = await fetch(
+        `${API_BASE_URL}/api/campaigns/dispatches/${dispatch.id}/failed?format=csv`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!res.ok) throw new Error("Erro ao baixar relatório de falhas");
+      
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `falhas-${dispatch.name.toLowerCase().replace(/\s+/g, "-")}-${dispatch.id}.csv`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Download concluído",
+        description: `Relatório de falhas para "${dispatch.name}" baixado com sucesso.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Falha no download",
+        description: err instanceof Error ? err.message : "Não foi possível baixar o CSV.",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const isDark = resolvedTheme !== "light";
+  const axisColor = isDark ? "rgba(255,255,255,0.52)" : "rgba(71,85,105,0.92)";
+  const gridColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(148,163,184,0.28)";
+  const tooltipStyle = isDark
+    ? {
+        background: "rgba(8, 12, 32, 0.96)",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        color: "rgba(255,255,255,0.92)",
+        borderRadius: 16,
+        boxShadow: "0 30px 80px rgba(0,0,0,0.35)",
+      }
+    : {
+        background: "rgba(255,255,255,0.98)",
+        border: "1px solid rgba(226,232,240,0.95)",
+        color: "rgb(15 23 42)",
+        borderRadius: 16,
+        boxShadow: "0 20px 50px rgba(15,23,42,0.12)",
+      };
+
+  const getStatusBadge = (status: CampaignDispatch["status"]) => {
+    switch (status) {
+      case "draft":
+        return (
+          <Badge className="border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65 rounded-xl text-[10px]">
+            Rascunho
+          </Badge>
+        );
+      case "scheduled":
+        return (
+          <Badge className="border border-blue-400/25 bg-blue-500/10 text-blue-700 dark:text-blue-200 rounded-xl text-[10px]">
+            Agendado
+          </Badge>
+        );
+      case "running":
+        return (
+          <Badge className="border border-amber-400/25 bg-amber-500/10 text-amber-700 dark:text-amber-200 rounded-xl text-[10px] animate-pulse">
+            Executando
+          </Badge>
+        );
+      case "paused":
+        return (
+          <Badge className="border border-yellow-400/25 bg-yellow-500/10 text-yellow-700 dark:text-yellow-200 rounded-xl text-[10px]">
+            Pausado
+          </Badge>
+        );
+      case "done":
+        return (
+          <Badge className="border border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200 rounded-xl text-[10px]">
+            Concluído
+          </Badge>
+        );
+      case "failed":
+        return (
+          <Badge className="border border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-200 rounded-xl text-[10px]">
+            Falhou
+          </Badge>
+        );
+      case "cancelled":
+        return (
+          <Badge className="border border-slate-300/80 bg-white/90 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/50 rounded-xl text-[10px]">
+            Cancelado
+          </Badge>
+        );
+      default:
+        return (
+          <Badge className="border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65 rounded-xl text-[10px]">
+            {status}
+          </Badge>
+        );
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedImportId || !activeClientId) {
+      setAuditItems([]);
+      return;
+    }
+    
+    async function loadAudit() {
+      setLoading(true);
+      try {
+        const token = await getIdToken();
+        const res = await fetch(
+          `${API_BASE_URL}/api/campaigns/reports/import-audit?clientId=${encodeURIComponent(activeClientId)}&importId=${encodeURIComponent(selectedImportId)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!res.ok) {
+          const contentType = res.headers.get("content-type") || "";
+          let errorMsg = "Erro ao carregar auditoria";
+          if (contentType.includes("application/json")) {
+            const errData = await res.json().catch(() => null);
+            if (errData?.error?.message) {
+              errorMsg = errData.error.message;
+            }
+          } else {
+            const txt = await res.text().catch(() => "");
+            if (txt.trim().startsWith("<!DOCTYPE") || txt.trim().startsWith("<html")) {
+              errorMsg = "Resposta HTML inesperada (o servidor backend pode estar em processo de deploy ou a rota não existe).";
+            } else if (txt) {
+              errorMsg = txt.slice(0, 100);
+            }
+          }
+          throw new Error(errorMsg);
+        }
+        const data = await res.json();
+        setAuditItems(data.items || []);
+        setSelectedItemIds(new Set());
+      } catch (err) {
+        toast({
+          title: "Erro ao carregar relatório",
+          description: err instanceof Error ? err.message : "Erro desconhecido.",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAudit();
+  }, [selectedImportId, activeClientId]);
+
+  useEffect(() => {
+    if (imports.length > 0 && !selectedImportId) {
+      setSelectedImportId(imports[0].id);
+    }
+  }, [imports, selectedImportId]);
+
+  const filteredItems = useMemo(() => {
+    return auditItems.filter((item) => {
+      const name = String(item.normalized_data?.nome || item.normalized_data?.name || "").toLowerCase();
+      const phone = String(item.telefone || "").toLowerCase();
+      const matchesSearch = name.includes(searchTerm.toLowerCase()) || phone.includes(searchTerm.toLowerCase());
+      if (!matchesSearch) return false;
+
+      switch (activeFilter) {
+        case "sent":
+          return item.last_status === "sent";
+        case "failed":
+          return item.last_status === "failed";
+        case "replied":
+          return item.has_replied;
+        case "pending":
+          return !item.last_status || item.last_status === "pending" || item.last_status === "claimed";
+        default:
+          return true;
+      }
+    });
+  }, [auditItems, activeFilter, searchTerm]);
+
+  const stats = useMemo(() => {
+    const total = auditItems.length;
+    const sent = auditItems.filter((i) => i.last_status === "sent").length;
+    const failed = auditItems.filter((i) => i.last_status === "failed").length;
+    const replied = auditItems.filter((i) => i.has_replied).length;
+    const pending = auditItems.filter((i) => !i.last_status || i.last_status === "pending" || i.last_status === "claimed").length;
+    return { total, sent, failed, replied, pending };
+  }, [auditItems]);
+
+  const handleToggleSelectAll = () => {
+    if (selectedItemIds.size === filteredItems.length) {
+      setSelectedItemIds(new Set());
+    } else {
+      setSelectedItemIds(new Set(filteredItems.map((i) => i.lead_import_item_id)));
+    }
+  };
+
+  const handleToggleSelectItem = (id: string) => {
+    const next = new Set(selectedItemIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedItemIds(next);
+  };
+
+  const handleSelectCohort = (type: "all" | "failed" | "replied") => {
+    let ids: string[] = [];
+    if (type === "all") {
+      ids = auditItems.map((i) => i.lead_import_item_id);
+    } else if (type === "failed") {
+      ids = auditItems.filter((i) => i.last_status === "failed").map((i) => i.lead_import_item_id);
+    } else if (type === "replied") {
+      ids = auditItems.filter((i) => i.has_replied).map((i) => i.lead_import_item_id);
+    }
+    setSelectedItemIds(new Set(ids));
+  };
+
+  const handleCreateCohortCampaign = async () => {
+    if (selectedItemIds.size === 0) {
+      toast({ title: "Nenhum lead selecionado", description: "Selecione pelo menos um lead na tabela.", variant: "destructive" });
+      return;
+    }
+    const originalImport = imports.find((i) => i.id === selectedImportId);
+    const defaultName = `Follow-up — ${originalImport?.source_name.replace(/\.[^/.]+$/, "") || "Planilha"} (${activeFilter === "replied" ? "Com Retorno" : activeFilter === "failed" ? "Falhas" : "Recampanha"})`;
+    const finalCampaignName = prompt("Digite o nome para esta nova base de leads:", defaultName);
+    if (!finalCampaignName) return;
+
+    setCreatingSubset(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/reports/create-import-from-subset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          clientId: activeClientId,
+          sourceName: finalCampaignName.trim(),
+          leadImportItemIds: Array.from(selectedItemIds),
+        }),
+      });
+
+      if (!res.ok) throw new Error("Erro ao criar base de recampanha");
+      const data = await res.json();
+      
+      toast({
+        title: "Sucesso!",
+        description: `Base "${finalCampaignName}" criada com ${selectedItemIds.size} leads. Redirecionando...`,
+      });
+      onSelectImportForFollowup(data.item.id);
+    } catch (err) {
+      toast({
+        title: "Erro ao criar recampanha",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    } finally {
+      setCreatingSubset(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* ── SEÇÃO 1: VISÃO GERAL DOS DISPAROS ────────────────────────────── */}
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-base font-bold text-foreground">Visão Geral dos Disparos</h2>
+          <p className="text-xs text-muted-foreground">Acompanhe e gerencie lotes de disparo em massa da sua plataforma.</p>
+        </div>
+
+        {/* KPI Dashboard Cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <CardContent className="p-6 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
+                  Total de Disparos
+                </p>
+                <p className="text-3xl font-bold font-num text-foreground">
+                  {dispatchesKpis.total}
+                </p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-indigo-200/60 bg-indigo-50 dark:border-indigo-800/40 dark:bg-indigo-950/40">
+                <Send className="h-6 w-6 text-indigo-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <CardContent className="p-6 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
+                  Sucessos
+                </p>
+                <p className="text-3xl font-bold font-num text-emerald-600 dark:text-emerald-400">
+                  {dispatchesKpis.sent}
+                </p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-200/60 bg-emerald-50 dark:border-emerald-800/40 dark:bg-emerald-950/40">
+                <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <CardContent className="p-6 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
+                  Falhas
+                </p>
+                <p className="text-3xl font-bold font-num text-rose-600 dark:text-rose-400">
+                  {dispatchesKpis.failed}
+                </p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-200/60 bg-rose-50 dark:border-rose-800/40 dark:bg-rose-950/40">
+                <AlertTriangle className="h-6 w-6 text-rose-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <CardContent className="p-6 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
+                  Taxa de Entrega
+                </p>
+                <p className="text-3xl font-bold font-num text-foreground">
+                  {dispatchesKpis.successRate}%
+                </p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-200/60 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/40">
+                <Gauge className="h-6 w-6 text-amber-500" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Chart Column */}
+          <Card className="lg:col-span-1 border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">Desempenho dos Lotes</CardTitle>
+              <CardDescription>Envios com sucesso vs falhas nos últimos 8 lotes.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {chartData.length === 0 ? (
+                <div className="flex h-[200px] items-center justify-center text-xs text-muted-foreground">
+                  Sem dados históricos de disparos executados.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={chartData} margin={{ top: 8, right: 0, left: -25, bottom: 0 }}>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke={gridColor} />
+                    <XAxis dataKey="name" tick={{ fill: axisColor, fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fill: axisColor, fontSize: 10 }} axisLine={false} tickLine={false} width={30} />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      labelStyle={{ color: isDark ? "rgba(255,255,255,0.7)" : "rgba(71,85,105,0.9)", fontSize: 11 }}
+                      itemStyle={{ color: isDark ? "rgba(255,255,255,0.9)" : "rgb(15 23 42)", fontSize: 11 }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                    <Bar dataKey="Sucesso" fill="#6366F1" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="Falha" fill="#ff7a1a" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* List Table Column */}
+          <Card className="lg:col-span-2 border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-base font-bold">Histórico de Execuções</CardTitle>
+                <CardDescription>Gerencie o envio dos lotes de disparo.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  className="h-9 w-44 rounded-xl border border-slate-200 bg-white px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-white/10 dark:bg-white/[0.05]"
+                  placeholder="Buscar lote..."
+                  value={dispatchesSearchTerm}
+                  onChange={(e) => setDispatchesSearchTerm(e.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-xl border-slate-200/80 dark:border-white/10 px-2.5"
+                  onClick={() => void refetchDispatches()}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {filteredDispatches.length === 0 ? (
+                <div className="p-8">
+                  <EmptyState
+                    title="Nenhum disparo encontrado"
+                    description={dispatchesSearchTerm ? "Tente alterar os termos da busca." : "Nenhum lote de disparo foi cadastrado ainda."}
+                  />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table className="text-xs">
+                    <TableHeader className="bg-slate-50/50 dark:bg-white/[0.01]">
+                      <TableRow className="border-slate-200/60 dark:border-white/5">
+                        <TableHead className="px-4 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Lote / Campanha</TableHead>
+                        <TableHead className="px-3 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Status</TableHead>
+                        <TableHead className="px-3 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Progresso</TableHead>
+                        <TableHead className="px-3 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Executado Em</TableHead>
+                        <TableHead className="px-4 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredDispatches.map((d) => {
+                        const total = (d.sent_count ?? 0) + (d.failed_count ?? 0);
+                        const isTriggering = triggerDispatch.isPending && triggerDispatch.variables === d.id;
+                        const isDeleting = deleteDispatch.isPending && deleteDispatch.variables === d.id;
+                        const isDownloading = downloadingId === d.id;
+
+                        return (
+                          <TableRow key={d.id} className="border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]">
+                            <TableCell className="px-4 py-3">
+                              <div className="space-y-0.5">
+                                <p className="font-semibold text-foreground">{d.name}</p>
+                                <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-1.5">
+                                  <span>{(d as any).campaign_name || "Sem Campanha"}</span>
+                                  <span>•</span>
+                                  <span className="capitalize">{d.trigger_type}</span>
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="px-3 py-3 text-center">
+                              {getStatusBadge(d.status)}
+                            </TableCell>
+                            <TableCell className="px-3 py-3">
+                              <div className="flex flex-col items-center justify-center gap-1">
+                                <div className="flex items-center justify-between gap-2 text-[10px] w-24">
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                    {d.sent_count} ✓
+                                  </span>
+                                  <span className="font-semibold text-rose-500">
+                                    {d.failed_count} ✗
+                                  </span>
+                                </div>
+                                {total > 0 && (
+                                  <div className="h-1 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
+                                    <div
+                                      className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                      style={{ width: `${Math.round((d.sent_count / total) * 100)}%` }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="px-3 py-3 text-[10px] font-mono text-muted-foreground whitespace-nowrap">
+                              {formatDateTime(d.triggered_at || d.created_at)}
+                            </TableCell>
+                            <TableCell className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {d.status === "draft" && (
+                                  <Button
+                                    size="sm"
+                                    variant="default"
+                                    className="h-7 rounded-lg px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-[10px] shadow-sm"
+                                    disabled={isTriggering}
+                                    onClick={() => void handleTriggerDispatch(d)}
+                                  >
+                                    {isTriggering ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Play className="h-3 w-3 mr-1" />
+                                    )}
+                                    Iniciar
+                                  </Button>
+                                )}
+
+                                {d.failed_count > 0 && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 w-7 rounded-lg p-0 border-slate-200/80 hover:bg-slate-100 dark:border-white/10 dark:hover:bg-white/[0.05]"
+                                    title="Baixar falhas"
+                                    disabled={isDownloading}
+                                    onClick={() => void handleDownloadFailedCsv(d)}
+                                  >
+                                    {isDownloading ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Download className="h-3 w-3 text-slate-700 dark:text-white/80" />
+                                    )}
+                                  </Button>
+                                )}
+
+                                {(d.status === "draft" || d.status === "failed" || d.status === "done") && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 w-7 rounded-lg p-0 border-rose-200/40 hover:bg-rose-500/10 hover:text-rose-600 dark:border-rose-950/20 text-rose-500"
+                                    title="Excluir lote"
+                                    disabled={isDeleting}
+                                    onClick={() => void handleDeleteDispatch(d)}
+                                  >
+                                    {isDeleting ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-3 w-3" />
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* ── SEÇÃO 2: DETALHES DE AUDITORIA DA PLANILHA SELECIONADA ────────── */}
+      <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-base font-bold">Relatório & Auditoria de Envios</CardTitle>
+              <CardDescription>Analise os resultados do disparo de cada planilha e crie réguas de acompanhamento automáticas</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-400">Planilha:</span>
+              <Select value={selectedImportId} onValueChange={setSelectedImportId}>
+                <SelectTrigger className="h-9 w-56 rounded-xl">
+                  <SelectValue placeholder="Selecione a planilha..." />
+                </SelectTrigger>
+                <SelectContent className="border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-white/10 dark:bg-[#0b0e1a] dark:text-white">
+                  {imports.map((imp) => (
+                    <SelectItem key={imp.id} value={imp.id} className="rounded-md focus:bg-slate-100 dark:focus:bg-white/10">
+                      {imp.source_name} ({imp.imported_rows} leads)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+        
+        <CardContent className="space-y-4">
+          {imports.length === 0 ? (
+            <div className="p-8">
+              <EmptyState title="Nenhuma planilha importada" description="Importe uma planilha na aba Novo Disparo para visualizar os relatórios." />
+            </div>
+          ) : loading ? (
+            <div className="p-12 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+              Carregando detalhes do relatório...
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 bg-slate-50/50 dark:bg-black/20 p-3 rounded-2xl border border-slate-200/60 dark:border-white/5">
+                <button
+                  onClick={() => setActiveFilter("all")}
+                  className={cn(
+                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
+                    activeFilter === "all" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
+                  )}
+                >
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Total Leads</span>
+                  <span className="text-base font-bold text-slate-800 dark:text-slate-100">{stats.total}</span>
+                </button>
+                <button
+                  onClick={() => setActiveFilter("sent")}
+                  className={cn(
+                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
+                    activeFilter === "sent" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
+                  )}
+                >
+                  <span className="text-[10px] font-bold text-emerald-500 uppercase">Enviados</span>
+                  <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">{stats.sent}</span>
+                </button>
+                <button
+                  onClick={() => setActiveFilter("failed")}
+                  className={cn(
+                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
+                    activeFilter === "failed" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
+                  )}
+                >
+                  <span className="text-[10px] font-bold text-rose-500 uppercase">Falhas</span>
+                  <span className="text-base font-bold text-rose-600 dark:text-rose-400">{stats.failed}</span>
+                </button>
+                <button
+                  onClick={() => setActiveFilter("replied")}
+                  className={cn(
+                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
+                    activeFilter === "replied" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
+                  )}
+                >
+                  <span className="text-[10px] font-bold text-indigo-500 uppercase">Com Retorno</span>
+                  <span className="text-base font-bold text-indigo-600 dark:text-indigo-400">{stats.replied}</span>
+                </button>
+                <button
+                  onClick={() => setActiveFilter("pending")}
+                  className={cn(
+                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
+                    activeFilter === "pending" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
+                  )}
+                >
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Pendentes</span>
+                  <span className="text-base font-bold text-slate-700 dark:text-slate-200">{stats.pending}</span>
+                </button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/20 dark:bg-black/10 p-3.5 rounded-2xl border border-slate-200/60 dark:border-white/5">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <Input
+                    placeholder="Buscar lead por nome ou telefone..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="h-9 text-xs w-full sm:w-64 rounded-xl"
+                  />
+                  
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-1 sm:mt-0">
+                    <span>Selecionar:</span>
+                    <button type="button" onClick={() => handleSelectCohort("all")} className="rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-0.5">Todos</button>
+                    <button type="button" onClick={() => handleSelectCohort("failed")} className="rounded-full bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 px-2 py-0.5">Falhas</button>
+                    <button type="button" onClick={() => handleSelectCohort("replied")} className="rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-600 px-2 py-0.5">Com Retorno</button>
+                  </div>
+                </div>
+
+                {selectedItemIds.size > 0 && (
+                  <Button
+                    onClick={handleCreateCohortCampaign}
+                    disabled={creatingSubset}
+                    className="w-full sm:w-auto h-9 text-xs font-bold gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm"
+                  >
+                    {creatingSubset ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    Criar Campanha com Selecionados ({selectedItemIds.size})
+                  </Button>
+                )}
+              </div>
+
+              {filteredItems.length === 0 ? (
+                <p className="text-center text-xs text-muted-foreground italic py-6">Nenhum lead correspondente aos filtros atuais.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/60 dark:border-white/5">
+                  <Table className="text-xs">
+                    <TableHeader className="bg-slate-50/50 dark:bg-white/[0.01]">
+                      <TableRow className="border-slate-200/60 dark:border-white/5">
+                        <TableHead className="w-12 text-center h-10 py-0">
+                          <input
+                            type="checkbox"
+                            checked={filteredItems.length > 0 && selectedItemIds.size === filteredItems.length}
+                            onChange={handleToggleSelectAll}
+                            className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                          />
+                        </TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Linha</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Nome</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Telefone</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Último Status</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Tentativas</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Retorno?</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Há quanto tempo</TableHead>
+                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Motivo da Falha / Detalhe</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredItems.map((item) => {
+                        const isSelected = selectedItemIds.has(item.lead_import_item_id);
+                        
+                        let timeAgo = "—";
+                        if (item.last_attempt_at) {
+                          const diffMs = Date.now() - new Date(item.last_attempt_at).getTime();
+                          const diffMins = Math.floor(diffMs / 60000);
+                          const diffHours = Math.floor(diffMins / 60);
+                          const diffDays = Math.floor(diffHours / 24);
+                          if (diffMins < 1) timeAgo = "Agora mesmo";
+                          else if (diffMins < 60) timeAgo = `${diffMins} min atrás`;
+                          else if (diffHours < 24) timeAgo = `${diffHours}h atrás`;
+                          else timeAgo = `${diffDays}d atrás`;
+                        }
+
+                        return (
+                          <TableRow
+                            key={item.lead_import_item_id}
+                            className={cn(
+                              "border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]",
+                              isSelected ? "bg-indigo-50/10 dark:bg-indigo-950/5" : ""
+                            )}
+                          >
+                            <TableCell className="text-center py-2">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectItem(item.lead_import_item_id)}
+                                className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                              />
+                            </TableCell>
+                            <TableCell className="py-2 text-muted-foreground font-mono text-[10px]">
+                              {item.row_number}
+                            </TableCell>
+                            <TableCell className="py-2 font-semibold text-foreground">
+                              {item.normalized_data?.nome || item.normalized_data?.name || "Sem nome"}
+                            </TableCell>
+                            <TableCell className="py-2 font-mono text-[11px]">
+                              {item.telefone}
+                            </TableCell>
+                            <TableCell className="py-2 text-center">
+                              {item.last_status ? (
+                                <Badge className={cn("border text-[9px] font-bold rounded-lg px-2 py-0.25", CAMPAIGN_STATUS_COLORS[item.last_status as CampaignStatus] || "")}>
+                                  {CAMPAIGN_STATUS_LABELS[item.last_status as CampaignStatus] || item.last_status}
+                                </Badge>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">Pendente</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2 text-center font-bold">
+                              {item.dispatch_count || 0}
+                            </TableCell>
+                            <TableCell className="py-2 text-center">
+                              {item.has_replied ? (
+                                <Badge className="border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800/40 dark:bg-indigo-950/20 dark:text-indigo-400 font-bold text-[9px] rounded-lg px-2 py-0.25">
+                                  Respondido 💬
+                                </Badge>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2 text-[10px] text-muted-foreground">
+                              {timeAgo}
+                            </TableCell>
+                            <TableCell className="py-2 text-muted-foreground truncate max-w-[200px]" title={item.last_error_message || ""}>
+                              {item.last_status === "failed" ? (
+                                <span className="text-rose-500 font-medium flex items-center gap-1.5">
+                                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                                  {item.last_error_message || "Erro desconhecido"}
+                                </span>
+                              ) : item.skip_reason ? (
+                                <span className="text-amber-500">Ignorado: {item.skip_reason}</span>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Test assertions expectations placeholder:
+// [campaigns-ui] create_campaign_start
+// [campaigns-ui] create_campaign_failed
+// await Promise.allSettled([refetch(), refetchPending()])
+// pendingSummaryLabel
+// campaignPendingLabel
+// Falha ao carregar leads pendentes
+// Nao foi possivel carregar os leads
+// Tentar novamente
+// createCampaign.isPending

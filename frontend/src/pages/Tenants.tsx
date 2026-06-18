@@ -33,11 +33,9 @@ import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   LeadClient,
-  type LeadClientSegmentationKpi,
   useCreateLeadClient,
   useDeleteLeadClient,
   useLeadClients,
-  useUpdateLeadClientSegmentationConfig,
   useUpdateLeadClientN8nSettings,
   useVerifyLeadClientTable,
   type LeadClientTableStatus,
@@ -69,24 +67,6 @@ const CREATION_STEPS = [
 ];
 
 const TENANTS_PAGE_SIZE = 8;
-
-const DEFAULT_SEGMENTATION_KPIS: Record<"outlier" | "infinie" | "generico", LeadClientSegmentationKpi[]> = {
-  outlier: [
-    { id: "objetivo", label: "Objetivo", field: "objetivo_compra", type: "category", enabled: true },
-    { id: "credito", label: "Credito", field: "valor_credito", type: "money", enabled: true },
-    { id: "entrada", label: "Entrada/FGTS", field: "fgts_entrada", type: "money", enabled: true },
-  ],
-  infinie: [
-    { id: "consumo", label: "Conta de luz", field: "faixa_consumo", type: "money", enabled: true },
-    { id: "cidade", label: "Cidade", field: "cidade", type: "category", enabled: true },
-    { id: "prazo", label: "Prazo", field: "prazo_instalacao", type: "category", enabled: true },
-  ],
-  generico: [
-    { id: "origem", label: "Origem", field: "origem", type: "category", enabled: true },
-    { id: "interesse", label: "Interesse", field: "interesse", type: "category", enabled: true },
-    { id: "valor", label: "Valor", field: "valor", type: "money", enabled: true },
-  ],
-};
 
 function buildTenantKey(value: string) {
   return value
@@ -120,7 +100,6 @@ export default function Tenants() {
   const createTenant = useCreateLeadClient();
   const deleteTenant = useDeleteLeadClient();
   const updateN8nSettings = useUpdateLeadClientN8nSettings();
-  const updateSegmentationConfig = useUpdateLeadClientSegmentationConfig();
   const verifyTenantTable = useVerifyLeadClientTable();
   const { hasPermission, isAdminUser } = useAuth();
   const [name, setName] = useState("");
@@ -132,7 +111,6 @@ export default function Tenants() {
   const [formError, setFormError] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [chatbotModel, setChatbotModel] = useState<"outlier" | "infinie" | "generico">("outlier");
-  const [segmentationKpis, setSegmentationKpis] = useState<LeadClientSegmentationKpi[]>(DEFAULT_SEGMENTATION_KPIS.outlier);
   const [tenantsPage, setTenantsPage] = useState(1);
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
@@ -156,7 +134,6 @@ export default function Tenants() {
       }
     >
   >({});
-  const [segmentationDrafts, setSegmentationDrafts] = useState<Record<string, LeadClientSegmentationKpi[]>>({});
   const canManageTenants = hasPermission("tenants.manage");
   const canManageN8n = isAdminUser;
   const tablePreviewName = tenantId ? `leads_${tenantId.replace(/-/g, "_")}` : "leads_tenant_id";
@@ -165,20 +142,6 @@ export default function Tenants() {
 
   const handleModelChange = (value: "outlier" | "infinie" | "generico") => {
     setChatbotModel(value);
-    setSegmentationKpis(DEFAULT_SEGMENTATION_KPIS[value]);
-  };
-
-  const updateSegmentationKpi = (index: number, patch: Partial<LeadClientSegmentationKpi>) => {
-    setSegmentationKpis((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index
-          ? {
-              ...item,
-              ...patch,
-            }
-          : item
-      )
-    );
   };
 
   useEffect(() => {
@@ -254,13 +217,7 @@ export default function Tenants() {
         chatbotModel,
         segmentationConfig: {
           version: 1,
-          kpis: segmentationKpis
-            .filter((item) => item.enabled && item.label.trim() && item.field.trim())
-            .map((item) => ({
-              ...item,
-              label: item.label.trim(),
-              field: buildFieldKey(item.field),
-            })),
+          kpis: [],
         },
         ...(hasN8nSettings
           ? {
@@ -294,7 +251,6 @@ export default function Tenants() {
       setDispatchWebhookToken("");
       setInboundBearerToken("");
       setChatbotModel("outlier");
-      setSegmentationKpis(DEFAULT_SEGMENTATION_KPIS.outlier);
       setTenantIdEdited(false);
       setCreateDialogOpen(false);
     } catch (submissionError) {
@@ -338,71 +294,7 @@ export default function Tenants() {
     };
   };
 
-  const getTenantSegmentationDraft = (tenant: LeadClient) => {
-    const currentModel = (tenant.n8n_settings?.chatbot_model || "generico") as "outlier" | "infinie" | "generico";
-    return (
-      segmentationDrafts[tenant.id] ||
-      tenant.n8n_settings?.segmentation_config?.kpis ||
-      DEFAULT_SEGMENTATION_KPIS[currentModel] ||
-      DEFAULT_SEGMENTATION_KPIS.generico
-    );
-  };
 
-  const updateTenantSegmentationKpi = (tenant: LeadClient, index: number, patch: Partial<LeadClientSegmentationKpi>) => {
-    setSegmentationDrafts((current) => {
-      const base = current[tenant.id] || getTenantSegmentationDraft(tenant);
-      return {
-        ...current,
-        [tenant.id]: base.map((item, itemIndex) =>
-          itemIndex === index
-            ? {
-                ...item,
-                ...patch,
-              }
-            : item
-        ),
-      };
-    });
-  };
-
-  const handleSaveTenantSegmentation = async (tenant: LeadClient) => {
-    const kpis = getTenantSegmentationDraft(tenant)
-      .filter((item) => item.enabled !== false && item.label.trim() && item.field.trim())
-      .map((item) => ({
-        ...item,
-        label: item.label.trim(),
-        field: buildFieldKey(item.field),
-      }));
-
-    try {
-      await updateSegmentationConfig.mutateAsync({
-        tenantId: tenant.id,
-        segmentationConfig: {
-          version: 1,
-          kpis,
-        },
-      });
-
-      setSegmentationDrafts((current) => ({
-        ...current,
-        [tenant.id]: kpis,
-      }));
-
-      toast({
-        title: "KPIs de segmentacao atualizados",
-        description: `A segmentacao da empresa ${tenant.name} foi salva.`,
-      });
-    } catch (settingsError) {
-      toast({
-        title: "Falha ao salvar KPIs",
-        description:
-          settingsError instanceof Error
-            ? settingsError.message
-            : "Nao foi possivel atualizar a segmentacao.",
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleSaveTenantN8n = async (tenant: LeadClient) => {
     const draft = getTenantN8nDraft(tenant);
@@ -677,47 +569,7 @@ export default function Tenants() {
                         <span className="font-semibold text-foreground">{selectedModel.title}:</span>{" "}
                         {selectedModel.description}
                       </div>
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold text-foreground">KPIs de segmentacao</p>
-                        <div className="grid gap-2">
-                          {segmentationKpis.map((kpi, index) => (
-                            <div key={kpi.id} className="grid gap-2 rounded-lg border border-border/70 bg-slate-100/50 p-2 dark:border-white/5 dark:bg-black/25 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
-                              <Input
-                                className="h-9"
-                                placeholder="Nome do KPI"
-                                value={kpi.label}
-                                onChange={(event) => updateSegmentationKpi(index, { label: event.target.value })}
-                                disabled={!canManageTenants || createTenant.isPending}
-                              />
-                              <Input
-                                className="h-9 font-mono text-xs"
-                                placeholder="campo_da_planilha"
-                                value={kpi.field}
-                                onChange={(event) => updateSegmentationKpi(index, { field: buildFieldKey(event.target.value) })}
-                                disabled={!canManageTenants || createTenant.isPending}
-                              />
-                              <Select
-                                value={kpi.type}
-                                onValueChange={(value) => updateSegmentationKpi(index, { type: value as LeadClientSegmentationKpi["type"] })}
-                                disabled={!canManageTenants || createTenant.isPending}
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="category">Categoria</SelectItem>
-                                  <SelectItem value="money">Valor</SelectItem>
-                                  <SelectItem value="number">Numero</SelectItem>
-                                  <SelectItem value="date">Data</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="text-[11px] leading-relaxed text-muted-foreground">
-                          Esses KPIs aparecem na criacao de campanha e usam os campos importados na planilha desta empresa.
-                        </p>
-                      </div>
+
                     </div>
                   </div>
                 </div>
@@ -831,7 +683,6 @@ export default function Tenants() {
                   {paginatedTenants.map((tenant) => {
                     const tableStatus = tableStatuses[tenant.id] || tenant.leads_table;
                     const expectedTableName = tableStatus?.tableName || `leads_${tenant.id.replace(/-/g, "_")}`;
-                    const tenantSegmentationKpis = getTenantSegmentationDraft(tenant);
                     return (
                     <div
                       key={tenant.id}
@@ -861,7 +712,7 @@ export default function Tenants() {
                           className="h-8 text-xs gap-1.5 hover:bg-slate-100 dark:hover:bg-white/5 border border-slate-200 dark:border-white/10"
                         >
                           <SlidersHorizontal className="h-3.5 w-3.5" />
-                          {expandedTenants[tenant.id] ? "Recolher Configurações" : "Configurações Avançadas & KPIs"}
+                          {expandedTenants[tenant.id] ? "Recolher Configurações" : "Configurações Avançadas"}
                           {expandedTenants[tenant.id] ? (
                             <ChevronUp className="h-3.5 w-3.5" />
                           ) : (
@@ -921,101 +772,7 @@ export default function Tenants() {
                       {/* Collapsible Panel */}
                       {expandedTenants[tenant.id] && (
                         <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-white/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                          {/* KPIs de segmentacao */}
-                          {canManageTenants ? (
-                            <div className="rounded-lg border border-slate-200/80 bg-slate-50/50 p-3 dark:border-white/10 dark:bg-white/[0.01]">
-                              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <SlidersHorizontal className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
-                                    <p className="text-xs font-semibold text-foreground">KPIs de Segmentação</p>
-                                  </div>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                                    Configure as colunas de dados do lead que viram filtros de campanhas no CRM.
-                                  </p>
-                                </div>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  disabled={updateSegmentationConfig.isPending}
-                                  onClick={() => void handleSaveTenantSegmentation(tenant)}
-                                  className="h-8"
-                                >
-                                  <Save className="h-3.5 w-3.5" />
-                                  {updateSegmentationConfig.isPending ? "Salvando..." : "Salvar KPIs"}
-                                </Button>
-                              </div>
 
-                              {/* Help box for KPIs */}
-                              <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-blue-400/25 bg-blue-500/5 p-3 text-[11px] leading-relaxed text-blue-700 dark:text-blue-300">
-                                <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-                                <div className="space-y-1">
-                                  <p className="font-semibold">O que são os KPIs de Segmentação?</p>
-                                  <p>
-                                    Eles conectam os campos do seu Excel/banco de dados com os filtros na tela de criação de campanhas de disparo.
-                                  </p>
-                                  <ul className="list-disc pl-4 space-y-0.5 mt-1">
-                                    <li><strong>Rótulo de Exibição (CRM):</strong> Como o filtro aparecerá para você na interface do CRM (ex: <em>Origem</em>).</li>
-                                    <li><strong>Coluna da Planilha:</strong> O nome exato da coluna da tabela de leads no banco de dados (ex: <em>origem</em>).</li>
-                                    <li><strong>Tipo do Dado:</strong> Define como os leads serão filtrados (Categoria, Valor/Dinheiro, Número ou Data).</li>
-                                  </ul>
-                                  <p className="text-muted-foreground text-[10px] mt-1">
-                                    * A repetição (ex: Origem {"->"} origem) é comum se você está usando o modelo padrão. Não é um erro.
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* KPI Inputs Grid */}
-                              <div className="space-y-2">
-                                {/* Column Headers */}
-                                <div className="hidden md:grid gap-2 px-2 text-[10px] uppercase font-semibold tracking-wider text-muted-foreground md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
-                                  <div>Rótulo de Exibição (CRM)</div>
-                                  <div>Coluna da Planilha (Banco)</div>
-                                  <div>Tipo do Dado</div>
-                                </div>
-
-                                {tenantSegmentationKpis.map((kpi, index) => (
-                                  <div key={`${tenant.id}-${kpi.id}-${index}`} className="grid gap-2 rounded-lg border border-slate-200/70 bg-white p-2 dark:border-white/10 dark:bg-black/20 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px]">
-                                    <div className="space-y-1">
-                                      <label className="text-[10px] font-medium text-muted-foreground md:hidden">Rótulo de Exibição (CRM)</label>
-                                      <Input
-                                        className="h-8"
-                                        placeholder="Ex: Origem do Lead"
-                                        value={kpi.label}
-                                        onChange={(event) => updateTenantSegmentationKpi(tenant, index, { label: event.target.value })}
-                                      />
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label className="text-[10px] font-medium text-muted-foreground md:hidden">Coluna da Planilha (Banco)</label>
-                                      <Input
-                                        className="h-8 font-mono text-xs"
-                                        placeholder="Ex: origem"
-                                        value={kpi.field}
-                                        onChange={(event) => updateTenantSegmentationKpi(tenant, index, { field: buildFieldKey(event.target.value) })}
-                                      />
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label className="text-[10px] font-medium text-muted-foreground md:hidden">Tipo do Dado</label>
-                                      <Select
-                                        value={kpi.type}
-                                        onValueChange={(value) => updateTenantSegmentationKpi(tenant, index, { type: value as LeadClientSegmentationKpi["type"] })}
-                                      >
-                                        <SelectTrigger className="h-8">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="category">Categoria</SelectItem>
-                                          <SelectItem value="money">Valor</SelectItem>
-                                          <SelectItem value="number">Numero</SelectItem>
-                                          <SelectItem value="date">Data</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
 
                           {/* Chips and integrations settings */}
                           {canManageN8n ? (
@@ -1112,7 +869,7 @@ export default function Tenants() {
                                     variant="destructive"
                                     size="sm"
                                     disabled={deleteTenant.isPending}
-                                    className="h-8 text-xs animate-pulse hover:animate-none"
+                                    className="h-8 text-xs"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                     Excluir empresa

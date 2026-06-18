@@ -5111,7 +5111,7 @@ async function getClientName(clientId) {
   return data?.name || clientId;
 }
 
-async function buildDispatchLeads({ clientId, importId = null, limit = null, segmentation = null, excludeDispatchId = null }) {
+async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null }) {
   if (!supabase) return [];
 
   let query = supabase
@@ -5126,7 +5126,7 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
     query = query.eq("import_id", importId);
   }
 
-  if (limit && Number.isInteger(limit) && limit > 0 && !segmentation) {
+  if (limit && Number.isInteger(limit) && limit > 0 && !segmentation && !excludeDispatchId && (!offset || offset === 0)) {
     query = query.limit(limit);
   }
 
@@ -5191,7 +5191,8 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, seg
   }
 
   if (limit && Number.isInteger(limit) && limit > 0) {
-    return eligibleLeads.slice(0, limit);
+    const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
+    return eligibleLeads.slice(start, start + limit);
   }
 
   return eligibleLeads;

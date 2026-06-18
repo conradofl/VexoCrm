@@ -30,7 +30,6 @@ import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
 import VexoSales from "./pages/VexoSales";
 import Conexoes from "./pages/Conexoes";
-import Disparos from "./pages/Disparos";
 import Aquecimento from "./pages/Aquecimento";
 import Relatorios from "./pages/Relatorios";
 import ChatbotKanban from "./pages/ChatbotKanban";
@@ -243,14 +242,6 @@ const App = () => (
                     <ErrorBoundary>
                       <Conexoes />
                     </ErrorBoundary>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="disparos"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="disparos">
-                    <Disparos />
                   </ProtectedRoute>
                 }
               />
