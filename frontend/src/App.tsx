@@ -37,11 +37,6 @@ import ChatbotKanban from "./pages/ChatbotKanban";
 import ChatbotDocs from "./pages/ChatbotDocs";
 import ChatbotSettings from "./pages/ChatbotSettings";
 import FollowupQueue from "./pages/FollowupQueue";
-import FollowupCompanies from "./pages/FollowupCompanies";
-import FollowupCampaigns from "./pages/FollowupCampaigns";
-import FollowupTemplates from "./pages/FollowupTemplates";
-import FollowupAnalytics from "./pages/FollowupAnalytics";
-import FollowupSuggestions from "./pages/FollowupSuggestions";
 import OnboardingWizard from "./pages/OnboardingWizard";
 import OnboardingAgent from "./pages/OnboardingAgent";
 import EvolutionAdmin from "./pages/EvolutionAdmin";
@@ -207,46 +202,11 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="followup-empresas"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-empresas">
-                    <FollowupCompanies />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="followup-campanhas"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-campanhas">
-                    <FollowupCampaigns />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="followup-templates"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-campanhas">
-                    <FollowupTemplates />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="followup-analytics"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-analytics">
-                    <FollowupAnalytics />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="followup-sugestoes"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="followup-sugestoes">
-                    <FollowupSuggestions />
-                  </ProtectedRoute>
-                }
-              />
+               <Route path="followup-empresas" element={<Navigate to="/crm/followup?tab=config" replace />} />
+              <Route path="followup-campanhas" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
+              <Route path="followup-templates" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
+              <Route path="followup-analytics" element={<Navigate to="/crm/followup?tab=metrics" replace />} />
+              <Route path="followup-sugestoes" element={<Navigate to="/crm/followup?tab=sugestoes" replace />} />
               <Route path="chatbot-templates" element={<Navigate to="/crm/chatbot-settings?tab=template" replace />} />
               <Route
                 path="usuarios"

@@ -43,13 +43,30 @@ function normalizeTextVariants(value) {
  * Supports {{nome}} and {{telefone}} with optional spaces inside braces (case-insensitive tokens).
  */
 function applyMessagePlaceholders(text, lead, phone) {
-  const raw = normalizeString(text);
+  let raw = normalizeString(text);
   if (!raw) return raw;
   const nome = normalizeString(lead?.nome) || "cliente";
   const tel = normalizeString(phone) || normalizeString(lead?.telefone || lead?.phone);
-  return raw
+  
+  raw = raw
     .replace(/\{\{\s*nome\s*\}\}/gi, nome)
     .replace(/\{\{\s*telefone\s*\}\}/gi, tel || "");
+
+  // Dynamic placeholders from spreadsheet columns (normalized_data)
+  const customData = {
+    ...(lead || {}),
+    ...(lead?.normalized_data || {}),
+    ...(lead?.normalizedData || {}),
+  };
+
+  for (const [key, value] of Object.entries(customData)) {
+    if (typeof value === "string" || typeof value === "number") {
+      const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\\}\\}`, "gi");
+      raw = raw.replace(regex, String(value));
+    }
+  }
+
+  return raw;
 }
 
 function resolveStepTextForLead(step, leadIndex) {
@@ -316,8 +333,13 @@ function getSafeEndpointInfo(webhookUrl) {
 }
 
 function resolveStepWebhookUrl(webhookUrl, payload) {
-  if (payload?.type === "image" && typeof webhookUrl === "string") {
-    return webhookUrl.replace("/message/sendText/", "/message/sendMedia/");
+  if (typeof webhookUrl === "string") {
+    if (payload?.type === "image") {
+      return webhookUrl.replace("/message/sendText/", "/message/sendMedia/");
+    }
+    if (Array.isArray(payload?.buttons) && payload.buttons.length > 0) {
+      return webhookUrl.replace("/message/sendText/", "/message/sendButtons/");
+    }
   }
   return webhookUrl;
 }
@@ -333,6 +355,15 @@ function parseDataUrl(dataUrl) {
 }
 
 function buildTextPayload(phone, step, context = {}) {
+  const formattedButtons = Array.isArray(step.buttons) && step.buttons.length > 0
+    ? step.buttons.map((btn, idx) => ({
+        type: btn.type === "url" ? "url" : "reply",
+        displayText: btn.displayText || btn.label || `Botao ${idx + 1}`,
+        id: `btn-${step.id}-${idx}`,
+        url: btn.type === "url" && btn.url ? applyMessagePlaceholders(btn.url, context.lead, phone) : undefined,
+      }))
+    : null;
+
   return {
     source: "vexocrm",
     provider: "evolution",
@@ -343,6 +374,9 @@ function buildTextPayload(phone, step, context = {}) {
     txt: step.text,
     text: step.text,
     message: step.text,
+    title: step.text,
+    description: step.text,
+    buttons: formattedButtons,
     campaign: context.campaign || null,
     client: context.client || null,
   };
@@ -350,6 +384,14 @@ function buildTextPayload(phone, step, context = {}) {
 
 function buildImagePayload(phone, step, context = {}) {
   const parsedImage = parseDataUrl(step.image?.dataUrl || "");
+  const formattedButtons = Array.isArray(step.buttons) && step.buttons.length > 0
+    ? step.buttons.map((btn, idx) => ({
+        type: btn.type === "url" ? "url" : "reply",
+        displayText: btn.displayText || btn.label || `Botao ${idx + 1}`,
+        id: `btn-${step.id}-${idx}`,
+        url: btn.type === "url" && btn.url ? applyMessagePlaceholders(btn.url, context.lead, phone) : undefined,
+      }))
+    : null;
 
   return {
     source: "vexocrm",
@@ -360,6 +402,7 @@ function buildImagePayload(phone, step, context = {}) {
     number: phone,
     txt: step.text || "",
     caption: step.text || "",
+    buttons: formattedButtons,
     fileName: step.image?.name || null,
     filename: step.image?.name || null,
     mimeType: parsedImage?.mimeType || step.image?.type || null,
@@ -558,6 +601,7 @@ export async function dispatchCampaignSequence({
       const extendedContext = {
         ...context,
         lead: {
+          ...lead,
           id: lead?.id || null,
           nome: normalizeString(lead?.nome) || null,
           telefone: phone,

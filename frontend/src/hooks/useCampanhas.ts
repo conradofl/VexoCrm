@@ -78,6 +78,11 @@ export interface CampaignSequenceStep {
   enabled: boolean;
   delayAfterSeconds: number;
   triggerMode?: "immediate" | "after_reply";
+  buttons?: {
+    displayText: string;
+    type: "url" | "reply";
+    url?: string;
+  }[];
 }
 
 export interface CampaignDispatchOptions {

@@ -76,6 +76,7 @@ async function isAlreadyApplied(pool, filename) {
     "20260516220000_spin_fase_and_prompt_updates.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads_infinie' AND column_name='spin_fase') AS ok`,
     "20260516230000_add_tenant_nexus_demo.sql": `SELECT EXISTS (SELECT 1 FROM public.leads_clients WHERE id='nexus') AS ok`,
     "20260516240000_force_upsert_chatbot_prompts.sql": `SELECT EXISTS (SELECT 1 FROM chatbot_prompts WHERE client_id='outlier' AND type='padrao' AND length(content) > 100) AS ok`,
+    "20260618000000_create_crm_consultant_schedules.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='crm_consultant_schedules') AS ok`,
   };
 
   const query = checks[filename];

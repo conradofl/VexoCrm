@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import { useState, useEffect } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
   Building2,
   LayoutDashboard,
@@ -79,6 +79,7 @@ const MODULOS: Record<Modo, Modulo> = {
       { key: "inteligencia",   label: "Int. Comercial",     url: "/crm/inteligencia-comercial", icon: LineChart,       page: "inteligencia-comercial" },
       { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
       { key: "chatbot",        label: "Chatbot",            url: "/crm/chatbot-settings",       icon: Settings2,       page: "chatbot-config" },
+      { key: "followup",       label: "Follow-up",          url: "/crm/followup",               icon: ListChecks,      page: "fila-de-followup" },
     ],
   },
   disparos: {
@@ -94,17 +95,6 @@ const MODULOS: Record<Modo, Modulo> = {
     ],
   },
 } satisfies Record<Modo, Modulo>;
-
-// Follow-up: sub-módulo de Vendas com layout colapsável especial (do Luiz, PR #120).
-// Mantido separado do MODULOS.vendas.ferramentas por ora — no Passo 2 pode virar
-// uma entrada com type:"collapsible-group" dentro de vendas.ferramentas.
-const FUP_ITEMS = [
-  { key: "followup-fila",      label: "Fila",         url: "/crm/followup",           icon: ListChecks, page: "fila-de-followup" as InternalPage },
-  { key: "followup-campanhas", label: "Campanhas",    url: "/crm/followup-campanhas", icon: Megaphone,  page: "followup-campanhas" as InternalPage },
-  { key: "followup-analytics", label: "Analytics",    url: "/crm/followup-analytics", icon: BarChart3,  page: "followup-analytics" as InternalPage },
-  { key: "followup-sugestoes", label: "Sugestões IA", url: "/crm/followup-sugestoes", icon: Sparkles,   page: "followup-sugestoes" as InternalPage },
-  { key: "followup-empresas",  label: "Empresas",     url: "/crm/followup-empresas",  icon: Landmark,   page: "followup-empresas" as InternalPage },
-];
 
 // Sistema: FIXO, fora dos modos, não é módulo vendável.
 // Visível para quem tiver canAccessInternalPage para a page correspondente.
@@ -342,14 +332,6 @@ export function AppSidebar() {
   // Modo ativo: "vendas" por padrão, reseta para "vendas" ao recarregar a página.
   const [modo, setModo] = useState<Modo>("vendas");
 
-  const location = useLocation();
-  const isFupActive = location.pathname.startsWith("/crm/followup");
-  const [fupOpen, setFupOpen] = useState(isFupActive);
-
-  useEffect(() => {
-    if (isFupActive) setFupOpen(true);
-  }, [isFupActive]);
-
   const { data: suggestionCount = 0 } = useFollowupSuggestionCount();
 
   const userEmail = user?.email || accessProfile?.email || "";
@@ -398,14 +380,14 @@ export function AppSidebar() {
     setIsCustomizerOpen(false);
   };
 
-  // PASSO 2: substituir canAccessInternalPage(f.page) por
-  // canAccessInternalPage(f.page) && clienteTemAcesso(f.key)
-  const ferramentasVisiveis = MODULOS[modo].ferramentas.filter((f) =>
-    canAccessInternalPage(f.page)
-  );
-
-  const visibleFupItems = FUP_ITEMS.filter((f) => canAccessInternalPage(f.page));
-  const showFupGroup = modo === "vendas" && visibleFupItems.length > 0;
+  const ferramentasVisiveis = MODULOS[modo].ferramentas
+    .map((f) => {
+      if (f.key === "followup" && suggestionCount > 0) {
+        return { ...f, badge: suggestionCount.toString() };
+      }
+      return f;
+    })
+    .filter((f) => canAccessInternalPage(f.page));
 
   const visibleSistema = SISTEMA_ITEMS.filter((f) => canAccessInternalPage(f.page));
 
@@ -469,84 +451,7 @@ export function AppSidebar() {
             <NavItem key={ferramenta.key} item={ferramenta} collapsed={collapsed} />
           ))}
 
-          {/* Follow-up — sub-módulo colapsável de Vendas (do Luiz, PR #120) */}
-          {showFupGroup && (
-            <>
-              <button
-                onClick={() => setFupOpen((o) => !o)}
-                className={cn(
-                  "group relative flex w-full font-medium transition-all",
-                  collapsed
-                    ? "h-9 items-center justify-center rounded-xl px-0"
-                    : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]",
-                  isFupActive
-                    ? "text-slate-900 dark:text-white"
-                    : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
-                )}
-              >
-                <ListChecks
-                  className={cn(
-                    "h-4 w-4 shrink-0",
-                    isFupActive
-                      ? "text-cyan-600 dark:text-cyan-200"
-                      : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
-                  )}
-                />
-                {!collapsed && (
-                  <>
-                    <span className="truncate">Follow-up</span>
-                    <ChevronDown
-                      className={cn(
-                        "ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200",
-                        fupOpen ? "rotate-0" : "-rotate-90"
-                      )}
-                    />
-                  </>
-                )}
-              </button>
 
-              {fupOpen && !collapsed && (
-                <div className="ml-3 space-y-0.5 border-l border-slate-200/80 pl-2.5 dark:border-white/10">
-                  {visibleFupItems.map((item) => (
-                    <NavLink
-                      key={item.url}
-                      to={item.url}
-                      className={({ isActive }) =>
-                        cn(
-                          "group relative flex items-center gap-2 rounded-xl px-2.5 py-2 text-[12px] font-medium transition-all",
-                          isActive
-                            ? "bg-[linear-gradient(90deg,rgba(99,102,241,0.18),rgba(59,130,246,0.10))] text-slate-900 shadow-[inset_0_0_0_1px_rgba(129,140,248,0.24)] dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(129,140,248,0.34)]"
-                            : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-sidebar-foreground dark:hover:bg-white/[0.04] dark:hover:text-foreground"
-                        )
-                      }
-                    >
-                      {({ isActive }) => (
-                        <>
-                          <item.icon
-                            className={cn(
-                              "h-3.5 w-3.5 shrink-0",
-                              isActive
-                                ? "text-cyan-600 dark:text-cyan-200"
-                                : "text-slate-500 group-hover:text-slate-900 dark:text-sidebar-foreground dark:group-hover:text-foreground"
-                            )}
-                          />
-                          <span className="truncate">{item.label}</span>
-                          {item.page === "followup-sugestoes" && suggestionCount > 0 && (
-                            <span className="ml-auto rounded-full bg-violet-500 px-1.5 py-0.5 font-mono text-[9px] font-bold text-white">
-                              {suggestionCount > 99 ? "99+" : suggestionCount}
-                            </span>
-                          )}
-                          {isActive && (
-                            <span className="absolute left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full bg-[linear-gradient(180deg,#8b5cf6,#22d3ee)] shadow-[0_0_16px_rgba(139,92,246,0.8)]" />
-                          )}
-                        </>
-                      )}
-                    </NavLink>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
         </div>
 
         {/* ── Sistema — FIXO, fora dos modos ─────────────────────────── */}

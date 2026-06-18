@@ -5409,7 +5409,173 @@ export function registerAllDomainRoutes(app) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
-  
+
+  // GET /api/campaigns/consultant-schedules — lista agendas/consultores
+  app.get("/api/campaigns/consultant-schedules", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.query.clientId);
+    const clientId = resolveRequiredAuthorizedClientId({
+      req,
+      res,
+      requestedClientId,
+      resolveAuthorizedClientId,
+      sendError,
+    });
+    if (!clientId) return;
+
+    try {
+      const { rows } = await pgDatabasePool.query(
+        "SELECT id, name, email, phone, scheduling_link, active, created_at, updated_at FROM public.crm_consultant_schedules WHERE client_id = $1 ORDER BY name ASC",
+        [clientId]
+      );
+      res.json({ items: rows });
+    } catch (error) {
+      console.error("GET consultant-schedules error:", error);
+      sendError(res, 500, "DATABASE_ERROR", "Erro ao listar consultores", error.message);
+    }
+  });
+
+  // POST /api/campaigns/consultant-schedules — cria agenda/consultor
+  app.post("/api/campaigns/consultant-schedules", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveRequiredAuthorizedClientId({
+      req,
+      res,
+      requestedClientId,
+      resolveAuthorizedClientId,
+      sendError,
+    });
+    if (!clientId) return;
+
+    const name = normalizeString(req.body?.name);
+    const scheduling_link = normalizeString(req.body?.scheduling_link);
+    if (!name || !scheduling_link) {
+      sendError(res, 400, "MISSING_FIELDS", "Nome e link de agendamento sao obrigatorios");
+      return;
+    }
+
+    const email = normalizeString(req.body?.email) || null;
+    const phone = normalizeString(req.body?.phone) || null;
+    const active = req.body?.active !== false;
+
+    try {
+      const { rows } = await pgDatabasePool.query(
+        `INSERT INTO public.crm_consultant_schedules (client_id, name, email, phone, scheduling_link, active)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, email, phone, scheduling_link, active, created_at, updated_at`,
+        [clientId, name, email, phone, scheduling_link, active]
+      );
+      res.status(201).json({ item: rows[0] });
+    } catch (error) {
+      console.error("POST consultant-schedules error:", error);
+      sendError(res, 500, "DATABASE_ERROR", "Erro ao criar consultor", error.message);
+    }
+  });
+
+  // PATCH /api/campaigns/consultant-schedules/:id — atualiza agenda/consultor
+  app.patch("/api/campaigns/consultant-schedules/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    if (!id) {
+      sendError(res, 400, "INVALID_PARAM", "Falta o ID do consultor");
+      return;
+    }
+
+    try {
+      // 1. Fetch current schedule to check client_id and authorize
+      const checkRes = await pgDatabasePool.query(
+        "SELECT client_id FROM public.crm_consultant_schedules WHERE id = $1",
+        [id]
+      );
+      if (checkRes.rows.length === 0) {
+        sendError(res, 404, "NOT_FOUND", "Consultor nao encontrado");
+        return;
+      }
+
+      const authorizedClientId = resolveAuthorizedClientId(req, res, checkRes.rows[0].client_id);
+      if (!authorizedClientId) return;
+
+      const updates = [];
+      const values = [];
+      let valIdx = 1;
+
+      if (req.body?.name !== undefined) {
+        updates.push(`name = $${valIdx++}`);
+        values.push(normalizeString(req.body.name));
+      }
+      if (req.body?.scheduling_link !== undefined) {
+        updates.push(`scheduling_link = $${valIdx++}`);
+        values.push(normalizeString(req.body.scheduling_link));
+      }
+      if (req.body?.email !== undefined) {
+        updates.push(`email = $${valIdx++}`);
+        values.push(normalizeString(req.body.email) || null);
+      }
+      if (req.body?.phone !== undefined) {
+        updates.push(`phone = $${valIdx++}`);
+        values.push(normalizeString(req.body.phone) || null);
+      }
+      if (req.body?.active !== undefined) {
+        updates.push(`active = $${valIdx++}`);
+        values.push(req.body.active === true);
+      }
+
+      if (updates.length === 0) {
+        sendError(res, 400, "NO_UPDATES", "Nao foram passados campos para atualizacao");
+        return;
+      }
+
+      values.push(id);
+      const updateQuery = `
+        UPDATE public.crm_consultant_schedules
+        SET ${updates.join(", ")}, updated_at = now()
+        WHERE id = $${valIdx}
+        RETURNING id, name, email, phone, scheduling_link, active, created_at, updated_at
+      `;
+
+      const { rows } = await pgDatabasePool.query(updateQuery, values);
+      res.json({ item: rows[0] });
+    } catch (error) {
+      console.error("PATCH consultant-schedules error:", error);
+      sendError(res, 500, "DATABASE_ERROR", "Erro ao atualizar consultor", error.message);
+    }
+  });
+
+  // DELETE /api/campaigns/consultant-schedules/:id — exclui agenda/consultor
+  app.delete("/api/campaigns/consultant-schedules/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    if (!id) {
+      sendError(res, 400, "INVALID_PARAM", "Falta o ID do consultor");
+      return;
+    }
+
+    try {
+      // 1. Fetch current schedule to check client_id and authorize
+      const checkRes = await pgDatabasePool.query(
+        "SELECT client_id FROM public.crm_consultant_schedules WHERE id = $1",
+        [id]
+      );
+      if (checkRes.rows.length === 0) {
+        sendError(res, 404, "NOT_FOUND", "Consultor nao encontrado");
+        return;
+      }
+
+      const authorizedClientId = resolveAuthorizedClientId(req, res, checkRes.rows[0].client_id);
+      if (!authorizedClientId) return;
+
+      await pgDatabasePool.query(
+        "DELETE FROM public.crm_consultant_schedules WHERE id = $1",
+        [id]
+      );
+      res.json({ success: true });
+    } catch (error) {
+      console.error("DELETE consultant-schedules error:", error);
+      sendError(res, 500, "DATABASE_ERROR", "Erro ao deletar consultor", error.message);
+    }
+  });
+
   function requireCampaignRunnerSecret(req, res, next) {
     const configuredSecret = normalizeString(process.env.CAMPAIGN_SCHEDULER_TOKEN);
   
@@ -5694,6 +5860,27 @@ export function registerAllDomainRoutes(app) {
     if (leads.length === 0) {
       await db.from("campaign_dispatches").update({ status: "done", finished_at: new Date().toISOString(), updated_at: new Date().toISOString(), error_message: "Nenhum lead encontrado para o disparo." }).eq("id", dispatchId);
       return;
+    }
+
+    // Apply database Round-Robin scheduling links to leads if they don't have one
+    try {
+      const consultantRes = await pgDatabasePool.query(
+        "SELECT scheduling_link FROM public.crm_consultant_schedules WHERE client_id = $1 AND active = true ORDER BY name ASC",
+        [clientId]
+      );
+      const activeConsultantLinks = consultantRes.rows.map(r => r.scheduling_link);
+      if (activeConsultantLinks.length > 0) {
+        leads.forEach((lead, idx) => {
+          if (!lead.normalized_data) {
+            lead.normalized_data = {};
+          }
+          if (!lead.normalized_data.scheduling_link) {
+            lead.normalized_data.scheduling_link = activeConsultantLinks[idx % activeConsultantLinks.length];
+          }
+        });
+      }
+    } catch (dbErr) {
+      console.warn("[campaign-dispatch] failed to apply consultant schedules to leads:", dbErr.message);
     }
 
     // Constrói analyticsMeta compatível com dispatchCampaignSequence

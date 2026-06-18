@@ -10,37 +10,39 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Columns3,
   Clock3,
   FileSpreadsheet,
   Filter,
   ImagePlus,
-  LayoutGrid,
-  List,
   History,
   Megaphone,
   Pause,
   Pencil,
   Play,
   RefreshCw,
-  Search,
   Sparkles,
   Trash2,
   Upload,
-  type LucideIcon,
   Zap,
   XCircle,
+  Plus,
+  Download,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import {
@@ -55,12 +57,7 @@ import {
   useCampaignAiStatus,
   useCreateCampaign,
   useDeleteCampaign,
-  useDirectDispatch,
-  useGenerateCampaignCopy,
   useGenerateCampaignTemplateVariants,
-  useRewriteCampaignStep,
-  useSuggestCampaignDelays,
-  useSuggestCampaignSequence,
   useTriggerCampaign,
   useUpdateCampaign,
   useCampaignDispatches,
@@ -68,6 +65,7 @@ import {
   useDeleteDispatch,
   useTriggerDispatch,
   useUpdateDispatch,
+  useAllDispatches,
   type Campaign,
   type CampaignDispatch,
   type CampaignStatus,
@@ -76,25 +74,24 @@ import {
   type CampaignSequenceStep,
 } from "@/hooks/useCampanhas";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { PageShell } from "@/components/PageShell";
-import { SectionHeader } from "@/components/SectionHeader";
 import { cn } from "@/lib/utils";
-import { useChatbotTemplates } from "@/hooks/useChatbotTemplates";
 import { useCampaignPrompts, useSaveCampaignPrompt } from "@/hooks/useCampaignPrompts";
-import type { LeadClientSegmentationKpi } from "@/hooks/useLeadClients";
+import { toast } from "@/components/ui/use-toast";
+import { API_BASE_URL } from "@/lib/api";
 
-type SheetTab = "dados" | "campanha" | "disparo-direto" | "pendentes" | "enviadas" | "agendamentos";
-type LeadsViewMode = "lista" | "cards" | "funil" | "kanban";
-type CampaignComposerMode = "simple" | "advanced";
+type SheetTab = "campanha" | "enviadas" | "agendamentos";
+type CampaignTemplateStrategy = "single" | "ai_variations";
 
 interface CampaignSegmentationState {
   gender: string;
@@ -113,78 +110,15 @@ interface LeadImportsProps {
   headerRight?: ReactNode;
 }
 
-type CampaignActionDialogState =
-  | {
-      action: "delete" | "archive";
-      campaign: Campaign;
-    }
-  | null;
+interface StepActionButton {
+  displayText: string;
+  type: "url" | "reply";
+  url?: string;
+}
 
-type TriggerConfirmState = {
-  campaign: Campaign;
-  leadCount: number | null;
-} | null;
-
-type SheetTabDefinition = {
-  id: SheetTab;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  step?: string;
-};
-
-const INTERNAL_TABS: SheetTabDefinition[] = [
-  { id: "dados", label: "Importar base", description: "Suba a planilha de contatos", icon: Upload, step: "1" },
-  { id: "pendentes", label: "Conferir leads", description: "Veja quem ainda não recebeu", icon: List, step: "2" },
-  { id: "campanha", label: "Criar campanha", description: "Monte a mensagem", icon: Megaphone, step: "3" },
-  { id: "enviadas", label: "Campanhas", description: "Edite e abra os disparos", icon: History, step: "4" },
-  { id: "agendamentos", label: "Fila de disparos", description: "Acompanhe lotes e envios", icon: Zap, step: "5" },
-];
-
-const CLIENT_TABS: SheetTabDefinition[] = [
-  { id: "dados", label: "Importar base", description: "Suba a planilha de contatos", icon: Upload, step: "1" },
-  { id: "pendentes", label: "Conferir leads", description: "Veja quem ainda não recebeu", icon: List, step: "2" },
-];
-
-const CAMPAIGNS = [
-  ["Black Friday Preview", "10/03/2026 · 09:15 · 1.240 contatos", "CLIENTES VIP", "E-MAIL", "87%", "42%", "18%"],
-  ["Newsletter Fev/2026", "01/02/2026 · 08:00 · 2.418 contatos", "TODOS", "E-MAIL", "94%", "38%", "14%"],
-  ["Reativacao Inativos", "15/01/2026 · 10:30 · 340 contatos", "INATIVOS", "WHATSAPP", "99%", "61%", "22%"],
-  ["Boas-vindas Leads", "05/01/2026 · 14:00 · 180 contatos", "LEADS NOVOS", "E-MAIL", "96%", "55%", "31%"],
-  ["Promo Natal 2025", "20/12/2025 · 09:00 · 2.300 contatos", "TODOS", "SMS", "98%", "72%", "12%"],
-] as const;
-
-const SCHEDULED = [
-  ["20", "MAR", "Black Friday 2026 - Aviso Previo", "E-mail Marketing", "1.240 contatos", "09:00 BRT", "AGENDADA"],
-  ["25", "MAR", "Newsletter Marco 2026", "E-mail Marketing", "2.418 contatos", "08:00 BRT", "CONFIRMADA"],
-  ["01", "ABR", "Reativacao Q2 - Leads Frios", "WhatsApp", "420 contatos", "10:30 BRT", "RECORRENTE"],
-] as const;
-
-const IMPORTS_PAGE_SIZE = 10;
 const ALL_IMPORTS_VALUE = "__all__";
 const ALL_SEGMENT_VALUE = "__all__";
-// Teto de segurança do lote por disparo (loop síncrono no Express, sem fila).
 const CAMPAIGN_LIMIT_MAX = 500;
-const AI_STYLE_PRESETS = [
-  {
-    label: "Nome + curiosidade",
-    value: "Curiosidade com nome para WhatsApp, objecao vou pensar e recuperacao de leads indecisos",
-  },
-  {
-    label: "Consultivo direto",
-    value: "Consultivo, direto e sem pressao",
-  },
-  {
-    label: "Reativacao leve",
-    value: "Reativacao leve para leads frios",
-  },
-] as const;
-const darkFieldClass =
-  "border-slate-200/90 bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all placeholder:text-slate-400 focus-visible:border-primary/35 focus-visible:ring-2 focus-visible:ring-primary/15 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-black/45 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.18)] dark:placeholder:text-white/30 dark:focus-visible:bg-black/60 dark:focus-visible:ring-1 dark:focus-visible:ring-primary/20";
-const darkSelectContentClass =
-  "border-slate-200/90 bg-white text-slate-900 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#090b17] dark:text-white dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)]";
-const darkSelectItemClass =
-  "rounded-md text-slate-700 focus:bg-slate-100 focus:text-slate-950 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary dark:text-white/78 dark:focus:bg-white/[0.06] dark:focus:text-white dark:data-[state=checked]:bg-primary/12 dark:data-[state=checked]:text-white";
 const CAMPAIGN_TIME_ZONE = "America/Sao_Paulo";
 
 const defaultSegmentation: CampaignSegmentationState = {
@@ -208,12 +142,12 @@ const defaultDispatchOptions: CampaignDispatchOptions = {
   replyPollIntervalSeconds: 5,
 };
 
-const leadViewOptions: Array<{ id: LeadsViewMode; label: string; icon: typeof List }> = [
-  { id: "lista", label: "Lista", icon: List },
-  { id: "cards", label: "Cards", icon: LayoutGrid },
-  { id: "funil", label: "Funil", icon: Filter },
-  { id: "kanban", label: "Kanban", icon: Columns3 },
-];
+const darkFieldClass =
+  "border-slate-200/90 bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all placeholder:text-slate-400 focus-visible:border-primary/35 focus-visible:ring-2 focus-visible:ring-primary/15 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-black/45 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.18)] dark:placeholder:text-white/30 dark:focus-visible:bg-black/60 dark:focus-visible:ring-1 dark:focus-visible:ring-primary/20";
+const darkSelectContentClass =
+  "border-slate-200/90 bg-white text-slate-900 shadow-[0_24px_50px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#090b17] dark:text-white dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)]";
+const darkSelectItemClass =
+  "rounded-md text-slate-700 focus:bg-slate-100 focus:text-slate-950 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary dark:text-white/78 dark:focus:bg-white/[0.06] dark:focus:text-white dark:data-[state=checked]:bg-primary/12 dark:data-[state=checked]:text-white";
 
 function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
   return new Promise((resolve, reject) => {
@@ -221,10 +155,10 @@ function parseSpreadsheetFile(file: File): Promise<Record<string, unknown>[]> {
     reader.onload = (event) => {
       try {
         const result = event.target?.result;
-        if (!result) return reject(new Error("Nao foi possivel ler o arquivo."));
+        if (!result) return reject(new Error("Não foi possível ler o arquivo."));
         const workbook = XLSX.read(result, { type: "array", cellDates: true });
         const firstSheetName = workbook.SheetNames[0];
-        if (!firstSheetName) return reject(new Error("A planilha nao possui abas com dados."));
+        if (!firstSheetName) return reject(new Error("A planilha não possui dados."));
         const worksheet = workbook.Sheets[firstSheetName];
         resolve(XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "", raw: false }));
       } catch (error) {
@@ -247,163 +181,37 @@ function formatDate(value: unknown, fallback = "Sem data") {
   return date ? date.toLocaleString("pt-BR", { timeZone: CAMPAIGN_TIME_ZONE }) : fallback;
 }
 
-function getTimeZoneOffsetMs(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const zonedTime = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  );
-
-  return zonedTime - date.getTime();
-}
-
 function campaignLocalDateTimeToUtcIso(value: string) {
   if (!value) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
   if (!match) return null;
 
   const [, year, month, day, hour, minute] = match;
-  const localAsUtc = new Date(Date.UTC(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-  ));
-  const utcDate = new Date(localAsUtc.getTime() - getTimeZoneOffsetMs(localAsUtc, CAMPAIGN_TIME_ZONE));
-
-  return Number.isNaN(utcDate.getTime()) ? null : utcDate.toISOString();
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-// Inverso de campaignLocalDateTimeToUtcIso: ISO UTC → "YYYY-MM-DDTHH:mm" no fuso
-// da campanha, para pré-preencher os inputs datetime-local ao editar.
 function campaignUtcIsoToLocalDateTime(iso: string | null | undefined): string {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: CAMPAIGN_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
-    .formatToParts(date)
-    .reduce<Record<string, string>>((acc, part) => {
-      acc[part.type] = part.value;
-      return acc;
-    }, {});
-  if (!parts.year) return "";
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function getScheduleDateParts(campaign: Campaign) {
-  const date = getValidDate(campaign.scheduled_for) || getValidDate(campaign.created_at);
-  if (!date) {
-    return {
-      day: "--",
-      month: "sem data",
-      label: "sem data definida",
-    };
+function formatDateTime(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    return new Date(dateStr).toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
   }
-
-  return {
-    day: date.toLocaleDateString("pt-BR", { day: "2-digit", timeZone: CAMPAIGN_TIME_ZONE }),
-    month: date.toLocaleDateString("pt-BR", { month: "short", timeZone: CAMPAIGN_TIME_ZONE }),
-    label: campaign.scheduled_for ? formatDate(campaign.scheduled_for) : "sem data definida",
-  };
-}
-
-const campaignStatusView: Record<CampaignStatus, { label: string; className: string }> = {
-  active: {
-    label: "PRONTA",
-    className: "border-primary/20 bg-primary/10 text-primary",
-  },
-  paused: {
-    label: "PAUSADA",
-    className: "border-amber-500/20 bg-amber-500/10 text-amber-300",
-  },
-  draft: {
-    label: "RASCUNHO",
-    className: "border-slate-400/20 bg-slate-400/10 text-slate-500 dark:text-slate-300",
-  },
-  scheduled: {
-    label: "AGENDADA",
-    className: "border-sky-400/25 bg-sky-400/10 text-sky-600 dark:text-sky-300",
-  },
-  processing: {
-    label: "PROCESSANDO",
-    className: "border-cyan-400/25 bg-cyan-400/10 text-cyan-600 dark:text-cyan-300",
-  },
-  sent: {
-    label: "ENVIADA",
-    className: "border-emerald-400/25 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300",
-  },
-  failed: {
-    label: "FALHOU",
-    className: "border-red-400/25 bg-red-400/10 text-red-600 dark:text-red-300",
-  },
-  cancelled: {
-    label: "CANCELADA",
-    className: "border-slate-400/20 bg-slate-400/10 text-slate-500 dark:text-slate-300",
-  },
-};
-
-function getCampaignStatusView(status: CampaignStatus) {
-  return campaignStatusView[status] || campaignStatusView.draft;
-}
-
-function canPauseCampaign(status: CampaignStatus) {
-  return ["active", "draft", "scheduled", "failed"].includes(status);
-}
-
-function canResumeCampaign(status: CampaignStatus) {
-  return status === "paused";
-}
-
-function canCampaignBeDispatched(status: CampaignStatus) {
-  return ["active", "draft", "scheduled", "failed"].includes(status);
-}
-
-function formatDateInput(value: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const timezoneOffset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 16);
-}
-
-function buildPaginationItems(currentPage: number, totalPages: number): Array<number | string> {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, index) => index + 1);
-  }
-
-  const items: Array<number | string> = [1];
-  const start = Math.max(2, currentPage - 1);
-  const end = Math.min(totalPages - 1, currentPage + 1);
-
-  if (start > 2) items.push("start-ellipsis");
-  for (let page = start; page <= end; page += 1) items.push(page);
-  if (end < totalPages - 1) items.push("end-ellipsis");
-
-  items.push(totalPages);
-  return items;
 }
 
 function normalizeLooseText(value: unknown) {
@@ -419,25 +227,7 @@ function getLeadField(data: Record<string, unknown>, keys: string[]) {
     const value = data[key];
     if (value !== undefined && value !== null && String(value).trim()) return String(value);
   }
-
-  const entries = Object.entries(data);
-  for (const [key, value] of entries) {
-    const normalizedKey = normalizeLooseText(key).replace(/[^a-z0-9]/g, "");
-    if (keys.some((candidate) => normalizeLooseText(candidate).replace(/[^a-z0-9]/g, "") === normalizedKey)) {
-      return String(value ?? "");
-    }
-  }
-
   return "";
-}
-
-function parseMoneyValue(value: string) {
-  const cleaned = value
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
-    .replace(",", ".");
-  const parsed = Number.parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function leadMatchesSegmentation(data: Record<string, unknown>, filters: CampaignSegmentationState) {
@@ -445,45 +235,10 @@ function leadMatchesSegmentation(data: Record<string, unknown>, filters: Campaig
     const gender = normalizeLooseText(getLeadField(data, ["genero", "gênero", "sexo"]));
     if (!gender.includes(filters.gender)) return false;
   }
-
   if (filters.productType !== ALL_SEGMENT_VALUE) {
-    const product = normalizeLooseText(
-      getLeadField(data, ["tipo_produto", "tipo de produto", "produto", "tipo_cliente", "perfil"])
-    );
+    const product = normalizeLooseText(getLeadField(data, ["tipo_produto", "produto", "perfil"]));
     if (!product.includes(filters.productType)) return false;
   }
-
-  if (filters.ticket !== ALL_SEGMENT_VALUE) {
-    const rawValue = getLeadField(data, ["valor", "ticket", "valor_contrato", "contrato", "renda", "faixa_consumo", "consumo"]);
-    const parsedValue = parseMoneyValue(rawValue);
-    const threshold = Number(filters.ticketThreshold || 0);
-    const textValue = normalizeLooseText(rawValue);
-
-    if (parsedValue !== null && threshold > 0) {
-      if (filters.ticket === "alto" && parsedValue < threshold) return false;
-      if (filters.ticket === "baixo" && parsedValue >= threshold) return false;
-    } else if (!textValue.includes(filters.ticket)) {
-      return false;
-    }
-  }
-
-  if (filters.interest.trim()) {
-    const interestSource = normalizeLooseText(
-      [
-        getLeadField(data, ["interesse", "categoria", "segmento", "produto", "tipo_cliente"]),
-        getLeadField(data, ["observacao", "observações", "descricao", "descrição"]),
-      ].join(" ")
-    );
-    if (!interestSource.includes(normalizeLooseText(filters.interest))) return false;
-  }
-
-  if (filters.campaignTag.trim()) {
-    const campaignSource = normalizeLooseText(
-      getLeadField(data, ["campanha", "origem", "source", "utm_campaign"])
-    );
-    if (!campaignSource.includes(normalizeLooseText(filters.campaignTag))) return false;
-  }
-
   return true;
 }
 
@@ -491,10 +246,10 @@ function toCampaignSegmentationPayload(filters: CampaignSegmentationState) {
   return {
     gender: filters.gender === ALL_SEGMENT_VALUE ? "" : filters.gender,
     productType: filters.productType === ALL_SEGMENT_VALUE ? "" : filters.productType,
-    ticket: filters.ticket === ALL_SEGMENT_VALUE ? "" : filters.ticket,
-    ticketThreshold: filters.ticketThreshold.trim() ? Number(filters.ticketThreshold) : null,
-    interest: filters.interest.trim(),
-    campaignTag: filters.campaignTag.trim(),
+    ticket: "",
+    ticketThreshold: null,
+    interest: "",
+    campaignTag: "",
   };
 }
 
@@ -502,58 +257,11 @@ function getLeadNormalizedData(item: { normalized_data?: Record<string, unknown>
   return item.normalized_data && typeof item.normalized_data === "object" ? item.normalized_data : {};
 }
 
-function summarizeSegmentationKpi(
-  kpi: LeadClientSegmentationKpi,
-  items: Array<{ normalized_data?: Record<string, unknown> | null }>
-) {
-  const values = items
-    .map((item) => {
-      const data = getLeadNormalizedData(item);
-      return getLeadField(data, [kpi.field, kpi.label]);
-    })
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const distinctCount = new Set(values.map(normalizeLooseText)).size;
-
-  return {
-    ...kpi,
-    filledCount: values.length,
-    distinctCount,
-    detail: kpi.type === "money" || kpi.type === "number"
-      ? `${values.length} com valor`
-      : `${distinctCount || 0} grupos`,
-  };
-}
-
-function readImageAsCampaignAsset(file: File): Promise<{ name: string; type: string; size: number; dataUrl: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== "string") {
-        reject(new Error("Nao foi possivel carregar a imagem."));
-        return;
-      }
-      resolve({
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        dataUrl: result,
-      });
-    };
-    reader.onerror = () => reject(new Error("Falha ao ler a imagem."));
-    reader.readAsDataURL(file);
-  });
-}
-
 function makeCampaignStepId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
   return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function createCampaignStep(type: "text" | "image", order: number, patch: Partial<CampaignSequenceStep> = {}): CampaignSequenceStep {
+function createCampaignStep(type: "text" | "image", order: number, patch: Partial<CampaignSequenceStep> = {}): CampaignSequenceStep & { buttons?: StepActionButton[] } {
   return {
     id: patch.id || makeCampaignStepId(),
     type,
@@ -564,1196 +272,332 @@ function createCampaignStep(type: "text" | "image", order: number, patch: Partia
     enabled: patch.enabled ?? true,
     delayAfterSeconds: patch.delayAfterSeconds ?? 5,
     triggerMode: patch.triggerMode === "after_reply" ? "after_reply" : "immediate",
+    buttons: (patch as any).buttons || [],
   };
 }
 
-function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): CampaignSequenceStep[] {
+function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): Array<CampaignSequenceStep & { buttons?: StepActionButton[] }> {
   const provided = Array.isArray(meta?.sequence) ? meta.sequence : [];
-  const legacySteps: CampaignSequenceStep[] = [];
-
   if (provided.length > 0) {
     return [...provided]
-      .sort((left, right) => left.order - right.order)
-      .map((step, index) => ({
+      .sort((a, b) => a.order - b.order)
+      .map((step, idx) => ({
         ...step,
-        order: index + 1,
-        textVariants: Array.isArray(step.textVariants) ? step.textVariants.filter((value) => value.trim()) : [],
+        order: idx + 1,
+        textVariants: Array.isArray(step.textVariants) ? step.textVariants : [],
         image: step.image || null,
         enabled: step.enabled !== false,
-        delayAfterSeconds: Number.isFinite(step.delayAfterSeconds) ? step.delayAfterSeconds : 5,
-        triggerMode: step.triggerMode === "after_reply" ? "after_reply" : "immediate",
+        delayAfterSeconds: step.delayAfterSeconds || 5,
+        triggerMode: step.triggerMode || "immediate",
+        buttons: step.buttons || [],
       }));
   }
-
-  if (meta?.message?.trim()) {
-    legacySteps.push(createCampaignStep("text", 1, { text: meta.message.trim() }));
-  }
-
-  if (meta?.image) {
-    legacySteps.push(createCampaignStep("image", legacySteps.length + 1, { image: meta.image }));
-  }
-
-  return legacySteps;
-}
-
-function buildSimpleCampaignSequence(
-  message: string,
-  image: CampaignImageAsset | null,
-  imageCaption: string,
-  imageFirst: boolean,
-) {
-  const textStep = message.trim()
-    ? createCampaignStep("text", 1, { text: message.trim() })
-    : null;
-  const imageStep = image
-    ? createCampaignStep("image", 1, { text: imageCaption.trim(), image })
-    : null;
-  const orderedSteps = imageFirst ? [imageStep, textStep] : [textStep, imageStep];
-  return normalizeStepOrder(orderedSteps.filter(Boolean) as CampaignSequenceStep[]);
-}
-
-function buildLegacySimpleCampaignSequence(message: string, image: CampaignImageAsset | null) {
-  const sequence: CampaignSequenceStep[] = [];
-  const trimmedMessage = message.trim();
-  if (trimmedMessage) {
-    sequence.push(createCampaignStep("text", 1, { text: trimmedMessage }));
-  }
-  if (image) {
-    sequence.push(createCampaignStep("image", sequence.length + 1, { image }));
-  }
-  return sequence;
-}
-
-function normalizeStepOrder(steps: CampaignSequenceStep[]) {
-  return steps.map((step, index) => ({
-    ...step,
-    order: index + 1,
-  }));
-}
-
-function getCampaignPreviewSteps(campaign: Campaign) {
-  return normalizeCampaignSequence(campaign.analytics_meta).filter((step) => step.enabled);
-}
-
-function getDispatchTemplatePreview(steps: CampaignSequenceStep[]) {
-  const firstText = steps.find((step) => step.enabled !== false && step.text.trim());
-  if (firstText) return firstText.text.trim();
-  const firstVariantStep = steps.find((step) => step.enabled !== false && (step.textVariants?.length || 0) > 0);
-  if (firstVariantStep?.textVariants?.length) return `${firstVariantStep.textVariants.length} variacoes IA`;
-  const firstImage = steps.find((step) => step.enabled !== false && step.type === "image");
-  return firstImage ? "Disparo com imagem" : "Sem template";
-}
-
-function PaginationControls({
-  currentPage,
-  totalPages,
-  pageSize,
-  totalItems,
-  onPageChange,
-}: {
-  currentPage: number;
-  totalPages: number;
-  pageSize: number;
-  totalItems: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalItems === 0) return null;
-
-  const startItem = (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(currentPage * pageSize, totalItems);
-
-  return (
-    <div className="mt-3 flex flex-col gap-2 border-t border-border/70 pt-3 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-xs text-muted-foreground">
-        {startItem}-{endItem} de {totalItems}
-      </p>
-
-      <div className="flex flex-wrap items-center gap-1">
-        <Button type="button" variant="outline" size="sm" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1}>
-          <ChevronLeft className="h-4 w-4" />
-          Anterior
-        </Button>
-
-        {buildPaginationItems(currentPage, totalPages).map((item, index) =>
-          typeof item === "string" ? (
-            <span key={`${item}-${index}`} className="flex h-8 min-w-8 items-center justify-center px-1 text-xs text-muted-foreground">
-              ...
-            </span>
-          ) : (
-            <Button key={item} type="button" variant={item === currentPage ? "secondary" : "outline"} size="sm" className="min-w-8 px-2" onClick={() => onPageChange(item)}>
-              {item}
-            </Button>
-          ),
-        )}
-
-        <Button type="button" variant="outline" size="sm" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages}>
-          Proxima
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function Metric({
-  value,
-  label,
-  barClassName,
-  textClassName,
-}: {
-  value: string;
-  label: string;
-  barClassName: string;
-  textClassName: string;
-}) {
-  return (
-    <div>
-      <p className={cn("font-mono text-[12px] font-bold", textClassName)}>{value}</p>
-      <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-      <div className="mt-2 h-1 rounded-full bg-secondary/90">
-        <div className={cn("h-1 rounded-full", barClassName)} style={{ width: value }} />
-      </div>
-    </div>
-  );
+  return [];
 }
 
 function InfoTip({ text }: { text: string }) {
   return (
     <TooltipProvider delayDuration={200}>
-      <Tooltip>
+      <UITooltip>
         <TooltipTrigger asChild>
-          <Info className="inline h-3 w-3 cursor-help text-muted-foreground opacity-60 hover:opacity-100" />
+          <Info className="inline h-3.5 w-3.5 cursor-help text-muted-foreground opacity-60 hover:opacity-100" />
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs text-xs">
+        <TooltipContent side="top" className="max-w-xs text-xs bg-slate-900 border-white/10 text-white rounded-xl">
           {text}
         </TooltipContent>
-      </Tooltip>
+      </UITooltip>
     </TooltipProvider>
   );
 }
 
-const DISPATCH_STATUS_LABELS: Record<CampaignDispatch["status"], string> = {
-  draft: "Rascunho",
-  scheduled: "Agendado",
-  running: "Executando",
-  paused: "Pausado",
-  done: "Concluído",
-  failed: "Falhou",
-  cancelled: "Cancelado",
-};
-
-function CampaignDispatchPanel({ campaignId }: { campaignId: string }) {
-  const { data: dispatches = [], isLoading, refetch } = useCampaignDispatches(campaignId);
-  const createDispatch = useCreateDispatch(campaignId);
-  const deleteDispatch = useDeleteDispatch(campaignId);
-  const triggerDispatch = useTriggerDispatch(campaignId);
-  const updateDispatch = useUpdateDispatch(campaignId);
-  const [newName, setNewName] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  async function handleCreate() {
-    if (!newName.trim()) return;
-    await createDispatch.mutateAsync({ name: newName.trim(), steps: [] });
-    setNewName("");
-    setCreating(false);
-  }
-
-  return (
-    <div className="mt-3 rounded-xl border border-border/60 bg-black/20 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-          Disparos
-          <InfoTip text="Cada disparo envia os passos configurados (textos/imagens) para os leads da campanha. Você pode criar vários disparos com conteúdos diferentes e acioná-los manualmente quando quiser." />
-        </p>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
-            <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
-          </Button>
-          <Button size="sm" onClick={() => setCreating(true)}>+ Novo</Button>
-        </div>
-      </div>
-      {creating && (
-        <div className="flex gap-2">
-          <Input placeholder="Nome do disparo" value={newName} onChange={(e) => setNewName(e.target.value)} className="h-8 text-sm" autoFocus />
-          <Button size="sm" onClick={handleCreate} disabled={createDispatch.isPending}>Criar</Button>
-          <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancelar</Button>
-        </div>
-      )}
-      {dispatches.length === 0 && !isLoading && (
-        <p className="font-mono text-xs text-muted-foreground">Nenhum disparo criado.</p>
-      )}
-      <div className="space-y-2">
-        {dispatches.map((d) => (
-          <div key={d.id} className="flex items-center justify-between rounded-lg border border-border/50 bg-card/60 px-3 py-2">
-            <div>
-              <p className="text-sm font-medium">{d.name}</p>
-              <p className="font-mono text-[10px] text-muted-foreground">
-                {DISPATCH_STATUS_LABELS[d.status]} · {d.sent_count} enviados · {d.failed_count} falhas
-              </p>
-            </div>
-            <div className="flex gap-1">
-              {d.trigger_type === "manual" && d.status === "draft" && (
-                <Button size="sm" variant="outline" onClick={() => triggerDispatch.mutate(d.id)} disabled={triggerDispatch.isPending}>
-                  Disparar
-                </Button>
-              )}
-              {d.status === "running" && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => updateDispatch.mutate({ dispatchId: d.id, patch: { status: "paused" } })}
-                  disabled={updateDispatch.isPending}
-                >
-                  <Pause className="h-3 w-3" />
-                  Pausar
-                </Button>
-              )}
-              {d.status !== "running" && (
-                <Button size="sm" variant="ghost" onClick={() => deleteDispatch.mutate(d.id)} disabled={deleteDispatch.isPending}>
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+interface ConsultantSchedule {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  scheduling_link: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
-const DISPATCH_STATUS_COLORS: Record<CampaignDispatch["status"], string> = {
-  draft: "border-slate-400/20 bg-slate-400/10 text-slate-400",
-  scheduled: "border-sky-400/25 bg-sky-400/10 text-sky-300",
-  running: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300",
-  paused: "border-amber-400/25 bg-amber-400/10 text-amber-300",
-  done: "border-emerald-400/25 bg-emerald-400/10 text-emerald-400",
-  failed: "border-red-400/25 bg-red-400/10 text-red-400",
-  cancelled: "border-slate-400/20 bg-slate-400/10 text-slate-500",
-};
-
-function DispatchManagerTab({
-  campaigns,
-  campaignsLoading,
-  selectedClientId,
-  evolutionInstanceOptions,
-  onNavigateToCampaign,
-}: {
-  campaigns: Campaign[];
-  campaignsLoading: boolean;
-  selectedClientId: string;
-  evolutionInstanceOptions: Array<{ id: string; name: string; isDefault: boolean }>;
-  onNavigateToCampaign: () => void;
-}) {
-  const [selectedCampaignId, setSelectedCampaignId] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
-  const [newScheduledAt, setNewScheduledAt] = useState("");
-  const [newEvolutionInstanceId, setNewEvolutionInstanceId] = useState("campaign-default");
-  const [confirmDispatch, setConfirmDispatch] = useState<CampaignDispatch | null>(null);
-  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  const visibleCampaigns = selectedClientId
-    ? campaigns.filter((c) => c.client_id === selectedClientId && !c.archived_at)
-    : campaigns.filter((c) => !c.archived_at);
-
-  const selectedCampaign = visibleCampaigns.find((c) => c.id === selectedCampaignId) || null;
-
-  const { data: dispatches = [], isLoading: dispatchesLoading, refetch: refetchDispatches } = useCampaignDispatches(selectedCampaignId || undefined);
-  const createDispatch = useCreateDispatch(selectedCampaignId);
-  const deleteDispatch = useDeleteDispatch(selectedCampaignId);
-  const triggerDispatch = useTriggerDispatch(selectedCampaignId);
-  const updateDispatch = useUpdateDispatch(selectedCampaignId);
-
-  useEffect(() => {
-    setNewName("");
-    setNewTriggerType("manual");
-    setNewScheduledAt("");
-    setNewEvolutionInstanceId("campaign-default");
-    setStatusMsg(null);
-  }, [selectedCampaignId]);
-
-  const campaignEvolutionInstanceId =
-    selectedCampaign?.analytics_meta?.dispatchOptions?.evolutionInstanceId || null;
-  const campaignEvolutionName = campaignEvolutionInstanceId
-    ? evolutionInstanceOptions.find((instance) => instance.id === campaignEvolutionInstanceId)?.name || "Evolution da campanha"
-    : "Padrao da empresa";
-
-  function getDispatchEvolutionName(dispatch: CampaignDispatch) {
-    if (dispatch.evolution_instance_id) {
-      return evolutionInstanceOptions.find((instance) => instance.id === dispatch.evolution_instance_id)?.name || "Evolution especifica";
-    }
-    return campaignEvolutionName;
-  }
-
-  async function handleCreate() {
-    if (!newName.trim()) { setStatusMsg({ type: "error", text: "Informe um nome para o disparo." }); return; }
-    if (newTriggerType === "scheduled" && !newScheduledAt) { setStatusMsg({ type: "error", text: "Selecione a data e hora do agendamento." }); return; }
-    const campaignSteps = selectedCampaign ? normalizeCampaignSequence(selectedCampaign.analytics_meta) : [];
-    try {
-      const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
-      await createDispatch.mutateAsync({
-        name: newName.trim(),
-        steps: campaignSteps,
-        triggerType: newTriggerType,
-        scheduledAt: scheduledIso,
-        evolutionInstanceId: newEvolutionInstanceId === "campaign-default" ? null : newEvolutionInstanceId,
+function useConsultantSchedules(clientId: string) {
+  const { isAuthenticated, getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["consultant-schedules", clientId],
+    enabled: isAuthenticated && !!clientId,
+    queryFn: async (): Promise<ConsultantSchedule[]> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/consultant-schedules?clientId=${encodeURIComponent(clientId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      setNewName("");
-      setNewTriggerType("manual");
-      setNewScheduledAt("");
-      setNewEvolutionInstanceId("campaign-default");
-      setStatusMsg({ type: "success", text: "Disparo criado com sucesso." });
-    } catch (err) {
-      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao criar disparo." });
-    }
-  }
-
-  async function handleTrigger(dispatch: CampaignDispatch) {
-    setConfirmDispatch(null);
-    try {
-      await triggerDispatch.mutateAsync(dispatch.id);
-      setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" iniciado.` });
-      void refetchDispatches();
-    } catch (err) {
-      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao disparar." });
-    }
-  }
-
-  async function handleDelete(dispatch: CampaignDispatch) {
-    try {
-      await deleteDispatch.mutateAsync(dispatch.id);
-      setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" removido.` });
-    } catch (err) {
-      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao remover." });
-    }
-  }
-
-  async function handlePause(dispatch: CampaignDispatch) {
-    try {
-      await updateDispatch.mutateAsync({ dispatchId: dispatch.id, patch: { status: "paused" } });
-      setStatusMsg({ type: "success", text: `Disparo "${dispatch.name}" pausado.` });
-      void refetchDispatches();
-    } catch (err) {
-      setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Falha ao pausar disparo." });
-    }
-  }
-
-  return (
-    <>
-      <AlertDialog open={Boolean(confirmDispatch)} onOpenChange={(open) => (!open ? setConfirmDispatch(null) : null)}>
-        <AlertDialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
-          <AlertDialogHeader className="space-y-3 text-left">
-            <AlertDialogTitle className="flex items-center gap-2">
-              <Zap className="h-5 w-5 text-primary" />
-              Confirmar disparo
-            </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
-              <span className="block font-semibold text-foreground">{confirmDispatch?.name}</span>
-              <span className="block">Campanha: <strong className="text-foreground">{selectedCampaign?.name}</strong></span>
-              <span className="block text-amber-400">As mensagens serão enviadas imediatamente para os leads desta campanha. Esta ação não pode ser desfeita.</span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => confirmDispatch && void handleTrigger(confirmDispatch)} disabled={triggerDispatch.isPending}>
-              <Zap className="mr-2 h-4 w-4" />
-              {triggerDispatch.isPending ? "Disparando..." : "Confirmar disparo"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Gerenciar Disparos</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Selecione uma campanha para criar, agendar e acompanhar os disparos.</p>
-          </div>
-          <Button variant="outline" onClick={onNavigateToCampaign}>
-            <Megaphone className="mr-2 h-4 w-4" />
-            Nova Campanha
-          </Button>
-        </div>
-
-        {statusMsg && (
-          <div className={cn("flex items-center gap-3 rounded-xl border p-4 text-sm font-medium", statusMsg.type === "success" ? "border-primary/25 bg-primary/8 text-primary" : "border-destructive/30 bg-destructive/10 text-destructive")}>
-            {statusMsg.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
-            {statusMsg.text}
-            <button type="button" className="ml-auto opacity-60 hover:opacity-100" onClick={() => setStatusMsg(null)}>×</button>
-          </div>
-        )}
-
-        {/* Seletor de Campanha */}
-        <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-          <CardContent className="p-5 space-y-4">
-            <div className="space-y-2">
-              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Campanha</p>
-              {campaignsLoading ? (
-                <div className={cn("flex h-12 items-center rounded-xl px-4 text-sm text-muted-foreground", darkFieldClass)}>Carregando campanhas...</div>
-              ) : visibleCampaigns.length === 0 ? (
-                <div className={cn("flex h-12 items-center rounded-xl px-4 text-sm text-muted-foreground", darkFieldClass)}>
-                  Nenhuma campanha encontrada.{" "}
-                  <button type="button" className="ml-1 text-primary underline" onClick={onNavigateToCampaign}>Criar campanha</button>
-                </div>
-              ) : (
-                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-                  <SelectTrigger className={cn("h-12 rounded-xl", darkFieldClass)}>
-                    <SelectValue placeholder="Selecione uma campanha..." />
-                  </SelectTrigger>
-                  <SelectContent className={darkSelectContentClass}>
-                    {visibleCampaigns.map((c) => (
-                      <SelectItem key={c.id} value={c.id} className={darkSelectItemClass}>
-                        <span className="flex items-center gap-2">
-                          <span>{c.name}</span>
-                          <span className="font-mono text-[10px] text-muted-foreground">· {c.client_name ?? c.client_id} · {getCampaignStatusView(c.status).label}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            {selectedCampaign && (
-              <div className="grid gap-3 rounded-xl border border-border/60 bg-black/20 p-4 sm:grid-cols-3">
-                <div>
-                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Status</p>
-                  <span className={cn("mt-1 inline-block rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(selectedCampaign.status).className)}>
-                    {getCampaignStatusView(selectedCampaign.status).label}
-                  </span>
-                </div>
-                <div>
-                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Modo</p>
-                  <span className={cn("mt-1 inline-block rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", selectedCampaign.mode === "agente" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" : "border-border/50 text-muted-foreground")}>
-                    {selectedCampaign.mode === "agente" ? "Com Agente IA" : "Só Disparo"}
-                  </span>
-                </div>
-                <div>
-                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Empresa</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedCampaign.client_name ?? selectedCampaign.client_id}</p>
-                </div>
-                {(selectedCampaign.starts_at || selectedCampaign.ends_at) && (
-                  <div className="col-span-full rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2">
-                    <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-sky-400">Período ativo do chatbot</p>
-                    <p className="mt-1 font-mono text-xs text-muted-foreground">
-                      {selectedCampaign.starts_at ? formatDate(selectedCampaign.starts_at) : "Sem início"} → {selectedCampaign.ends_at ? formatDate(selectedCampaign.ends_at) : "Sem fim"}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {selectedCampaignId && (
-          <>
-            {/* Novo Disparo */}
-            <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Zap className="h-4 w-4 text-primary" />
-                  Novo Disparo
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 p-5 pt-0">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Nome do disparo</p>
-                    <Input
-                      className={darkFieldClass}
-                      placeholder="Ex: Disparo Semana 1 — Oferta Principal"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tipo de acionamento</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setNewTriggerType("manual")}
-                        className={cn(
-                          "flex flex-col items-center gap-1 rounded-xl border p-3 text-xs font-semibold transition-colors",
-                          newTriggerType === "manual"
-                            ? "border-primary/40 bg-primary/10 text-primary"
-                            : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
-                        )}
-                      >
-                        <Zap className="h-4 w-4" />
-                        Manual
-                        <span className="font-normal opacity-70">Você aciona</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNewTriggerType("scheduled")}
-                        className={cn(
-                          "flex flex-col items-center gap-1 rounded-xl border p-3 text-xs font-semibold transition-colors",
-                          newTriggerType === "scheduled"
-                            ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
-                            : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
-                        )}
-                      >
-                        <Clock3 className="h-4 w-4" />
-                        Agendado
-                        <span className="font-normal opacity-70">Data e hora</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {newTriggerType === "scheduled" && (
-                  <div className="space-y-2">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                      Data e hora do disparo <span className="text-muted-foreground/60">(horário de Brasília)</span>
-                    </p>
-                    <Input
-                      type="datetime-local"
-                      className={darkFieldClass}
-                      value={newScheduledAt}
-                      onChange={(e) => setNewScheduledAt(e.target.value)}
-                      min={new Date().toISOString().slice(0, 16)}
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Evolution deste disparo</p>
-                  <Select value={newEvolutionInstanceId} onValueChange={setNewEvolutionInstanceId}>
-                    <SelectTrigger className={darkFieldClass}>
-                      <SelectValue placeholder="Usar Evolution da campanha" />
-                    </SelectTrigger>
-                    <SelectContent className={darkSelectContentClass}>
-                      <SelectItem value="campaign-default" className={darkSelectItemClass}>
-                        Usar Evolution da campanha ({campaignEvolutionName})
-                      </SelectItem>
-                      {evolutionInstanceOptions.map((instance) => (
-                        <SelectItem key={instance.id} value={instance.id} className={darkSelectItemClass}>
-                          {instance.name}{instance.isDefault ? " · padrao da empresa" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Use esta opção para rodar disparos da mesma campanha em instancias Evolution diferentes.
-                  </p>
-                </div>
-
-                <div className="space-y-3 rounded-xl border border-border/70 bg-black/20 p-4">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Template da campanha</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    O disparo usa o tipo de template definido na criacao da campanha. Para mudar entre template unico e variacoes IA, edite ou recrie a campanha.
-                  </p>
-                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
-                    {selectedCampaign
-                      ? getDispatchTemplatePreview(normalizeCampaignSequence(selectedCampaign.analytics_meta))
-                      : "Selecione uma campanha para ver o template."}
-                  </div>
-                </div>
-
-                <div className="flex gap-2 border-t border-border/70 pt-4">
-                  <Button onClick={() => void handleCreate()} disabled={createDispatch.isPending || !newName.trim()}>
-                    <Zap className="mr-2 h-4 w-4" />
-                    {createDispatch.isPending ? "Criando..." : newTriggerType === "scheduled" ? "Agendar disparo" : "Criar disparo"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Lista de Disparos */}
-            <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <History className="h-4 w-4" />
-                    Disparos da campanha
-                    <span className="ml-1 rounded-full bg-primary/20 px-2 py-0.5 font-mono text-[10px] text-primary">{dispatches.length}</span>
-                  </CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => void refetchDispatches()} disabled={dispatchesLoading}>
-                    <RefreshCw className={cn("h-3 w-3", dispatchesLoading && "animate-spin")} />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="p-5 pt-0">
-                {dispatchesLoading && <EmptyState message="Carregando disparos..." />}
-                {!dispatchesLoading && dispatches.length === 0 && (
-                  <EmptyState
-                    title="Nenhum disparo criado"
-                    description="Crie o primeiro disparo acima para começar a enviar mensagens desta campanha."
-                  />
-                )}
-                {!dispatchesLoading && dispatches.length > 0 && (
-                  <div className="space-y-3">
-                    {dispatches.map((d) => (
-                      <div
-                        key={d.id}
-                        className="flex flex-wrap items-center gap-4 rounded-xl border border-border/60 bg-black/20 p-4"
-                      >
-                        {/* Status badge */}
-                        <span className={cn("shrink-0 rounded-md border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", DISPATCH_STATUS_COLORS[d.status])}>
-                          {DISPATCH_STATUS_LABELS[d.status]}
-                        </span>
-
-                        {/* Info */}
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-foreground truncate">{d.name}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-3 font-mono text-[10px] text-muted-foreground">
-                            {d.trigger_type === "scheduled" && d.scheduled_at && (
-                              <span className="flex items-center gap-1 text-sky-300">
-                                <Clock3 className="h-3 w-3" />
-                                {formatDate(d.scheduled_at)}
-                              </span>
-                            )}
-                            {d.trigger_type === "manual" && (
-                              <span className="flex items-center gap-1">
-                                <Zap className="h-3 w-3" />
-                                Manual
-                              </span>
-                            )}
-                            {d.triggered_at && (
-                              <span>Iniciado {formatDate(d.triggered_at)}</span>
-                            )}
-                            <span className="text-cyan-300">Evolution: {getDispatchEvolutionName(d)}</span>
-                            {(d.status === "done" || d.status === "running") && (
-                              <>
-                                <span className="text-emerald-400">{d.sent_count} enviados</span>
-                                {d.failed_count > 0 && <span className="text-red-400">{d.failed_count} falhas</span>}
-                              </>
-                            )}
-                            {d.finished_at && <span>Concluído {formatDate(d.finished_at)}</span>}
-                            {d.error_message && (
-                              <span className="text-red-400 truncate max-w-[240px]">{d.error_message}</span>
-                            )}
-                          </div>
-                          <p className="mt-2 line-clamp-2 max-w-3xl text-xs text-muted-foreground">
-                            Template: {getDispatchTemplatePreview(d.steps || [])}
-                          </p>
-                        </div>
-
-                        {/* Ações */}
-                        <div className="flex shrink-0 items-center gap-2">
-                          {d.trigger_type === "manual" && d.status === "draft" && (
-                            <Button
-                              size="sm"
-                              onClick={() => setConfirmDispatch(d)}
-                              disabled={triggerDispatch.isPending}
-                            >
-                              <Zap className="mr-1.5 h-3 w-3" />
-                              Disparar
-                            </Button>
-                          )}
-                          {d.status === "running" && (
-                            <>
-                              <span className="flex items-center gap-1.5 rounded-md border border-cyan-400/25 bg-cyan-400/10 px-3 py-1.5 font-mono text-[10px] text-cyan-300">
-                                <RefreshCw className="h-3 w-3 animate-spin" />
-                                Executando...
-                              </span>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void handlePause(d)}
-                                disabled={updateDispatch.isPending}
-                              >
-                                <Pause className="mr-1.5 h-3 w-3" />
-                                Pausar
-                              </Button>
-                            </>
-                          )}
-                          {d.status !== "running" && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-muted-foreground hover:text-destructive"
-                              onClick={() => void handleDelete(d)}
-                              disabled={deleteDispatch.isPending}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </div>
-    </>
-  );
+      if (!res.ok) throw new Error("Falha ao buscar consultores.");
+      const data = await res.json();
+      return data.items || [];
+    },
+    staleTime: 30 * 1000,
+  });
 }
 
-interface CampaignPromptFieldProps {
-  clientId: string;
-  campaignPrompts: Array<{ id: string; name: string; content: string }>;
-  campaignPromptId: string;
-  setCampaignPromptId: (id: string) => void;
-  darkFieldClass: string;
-  darkSelectContentClass: string;
-  darkSelectItemClass: string;
+function useCreateConsultantSchedule() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { clientId: string; name: string; scheduling_link: string; email?: string; phone?: string; active?: boolean }): Promise<ConsultantSchedule> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/consultant-schedules`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Falha ao criar consultor.");
+      }
+      const data = await res.json();
+      return data.item;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["consultant-schedules", variables.clientId] });
+    },
+  });
 }
 
-function CampaignPromptField({
-  clientId,
-  campaignPrompts,
-  campaignPromptId,
-  setCampaignPromptId,
-  darkFieldClass,
-  darkSelectContentClass,
-  darkSelectItemClass,
-}: CampaignPromptFieldProps) {
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newContent, setNewContent] = useState("");
-  const savePrompt = useSaveCampaignPrompt();
-
-  const handleSave = async () => {
-    if (!newName.trim() || !newContent.trim() || !clientId) return;
-    const saved = await savePrompt.mutateAsync({ clientId, name: newName.trim(), content: newContent.trim() });
-    if (saved?.id) setCampaignPromptId(saved.id);
-    setNewName("");
-    setNewContent("");
-    setCreating(false);
-  };
-
-  return (
-    <div className="space-y-2">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-        Prompt de campanha (IA)
-        <InfoTip text="Prompt usado pelo chatbot quando o lead responder durante o período ativo desta campanha." />
-      </p>
-      <Select value={campaignPromptId || "none"} onValueChange={(v) => setCampaignPromptId(v === "none" ? "" : v)}>
-        <SelectTrigger className={darkFieldClass}>
-          <SelectValue placeholder="Prompt padrão de campanha" />
-        </SelectTrigger>
-        <SelectContent className={darkSelectContentClass}>
-          <SelectItem value="none" className={darkSelectItemClass}>Prompt padrão de campanha</SelectItem>
-          {campaignPrompts.map((p) => (
-            <SelectItem key={p.id} value={p.id} className={darkSelectItemClass}>{p.name}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {!creating ? (
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className="text-xs text-cyan-600 hover:underline dark:text-cyan-400"
-        >
-          + Criar novo prompt
-        </button>
-      ) : (
-        <div className="space-y-2 rounded-xl border border-slate-200/80 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-          <Input
-            placeholder="Nome do prompt (ex: Black Friday)"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            className={darkFieldClass}
-          />
-          <Textarea
-            placeholder="Conteúdo do prompt de campanha..."
-            value={newContent}
-            onChange={(e) => setNewContent(e.target.value)}
-            rows={5}
-            className={darkFieldClass}
-          />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={handleSave} disabled={savePrompt.isPending || !newName.trim() || !newContent.trim()}>
-              {savePrompt.isPending ? "Salvando..." : "Salvar"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setCreating(false)}>Cancelar</Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function useUpdateConsultantSchedule() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, clientId, ...payload }: { id: string; clientId: string; name?: string; scheduling_link?: string; email?: string; phone?: string; active?: boolean }): Promise<ConsultantSchedule> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/consultant-schedules/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Falha ao atualizar consultor.");
+      const data = await res.json();
+      return data.item;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["consultant-schedules", variables.clientId] });
+    },
+  });
 }
+
+function useDeleteConsultantSchedule() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, clientId }: { id: string; clientId: string }): Promise<void> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/consultant-schedules/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Falha ao deletar consultor.");
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["consultant-schedules", variables.clientId] });
+    },
+  });
+}
+
+const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
+  active: "Ativa",
+  paused: "Pausada",
+  draft: "Rascunho",
+  scheduled: "Agendada",
+  processing: "Executando",
+  sent: "Enviada",
+  failed: "Falhou",
+  cancelled: "Cancelada",
+};
+
+const CAMPAIGN_STATUS_COLORS: Record<CampaignStatus, string> = {
+  active: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+  paused: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400",
+  draft: "border-slate-300 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400",
+  scheduled: "border-sky-300 bg-sky-50 text-sky-600 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-400",
+  processing: "border-cyan-300 bg-cyan-50 text-cyan-600 dark:border-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-400",
+  sent: "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+  failed: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+  cancelled: "border-slate-300 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-500",
+};
 
 export default function LeadImports({
   fixedClientId,
   fixedClientName,
-  title = "Campanhas",
-  subtitle = "Siga o fluxo: importe a base, confira os leads, crie a campanha e acompanhe os disparos.",
+  title = "Envios por Planilha",
+  subtitle = "Importe contatos, configure mensagens em massa e acompanhe a fila",
   headerRight,
 }: LeadImportsProps) {
-  const { isInternalUser } = useAuth();
-  const crmClient = useOptionalCrmClient();
-  const selectedClientId = fixedClientId || crmClient?.selectedClientId || "";
-  const { data: chatbotTemplates = [] } = useChatbotTemplates(selectedClientId || null);
-  const { data: campaignPrompts = [] } = useCampaignPrompts(selectedClientId || null);
+  const { clientId, getIdToken } = useAuth();
+  const { selectedClientId } = useOptionalCrmClient();
+  const activeClientId = fixedClientId || selectedClientId || "";
+  const isInternalUser = useAuth().isInternalUser;
+  const queryClient = useQueryClient();
 
-  // Colunas dinâmicas para a tabela de Leads Pendentes
-  const pendingTableColumns = useMemo(() => {
-    const clientTemplate = chatbotTemplates.find((t) => t.client_id === selectedClientId);
-    const template = clientTemplate ?? chatbotTemplates.find((t) => t.is_builtin) ?? null;
-    const dynamicCols = template
-      ? template.data_fields
-          .filter((f) => !["nome", "telefone"].includes(f.key))
-          .map((f) => ({ key: f.key, label: f.label }))
-      : [
-          { key: "cidade", label: "Cidade" },
-          { key: "estado", label: "Estado" },
-          { key: "status", label: "Status" },
-        ];
-    return dynamicCols;
-  }, [chatbotTemplates, selectedClientId]);
+  const [activeTab, setActiveTab] = useState<SheetTab>("campanha");
+
+  // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
-  const [importPreview, setImportPreview] = useState<LeadImportPreviewItem[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<SheetTab>("dados");
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [pendingFilter, setPendingFilter] = useState<string>("false");
-  const [dispatchStatus, setDispatchStatus] = useState<string | null>(null);
-  const [isDispatching, setIsDispatching] = useState(false);
-  const [directPhone, setDirectPhone] = useState("");
-  const [directMessage, setDirectMessage] = useState("");
-  const [directImageCaption, setDirectImageCaption] = useState("");
-  const [directImageFirst, setDirectImageFirst] = useState(false);
-  const [directImage, setDirectImage] = useState<CampaignImageAsset | null>(null);
-  const [directImageError, setDirectImageError] = useState<string | null>(null);
-  const [directDispatchStatus, setDirectDispatchStatus] = useState<string | null>(null);
+  const [selectedImportId, setSelectedImportId] = useState<string>(ALL_IMPORTS_VALUE);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  // Campaign builder states
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [campaignName, setCampaignName] = useState("");
-  // Lote por disparo: input numérico livre, 1–500 (teto de segurança — disparo roda
-  // em loop síncrono no Express, não em fila. Acima de 500 exige migração pra fila).
   const [campaignLimitPerRun, setCampaignLimitPerRun] = useState("50");
-  const [campaignMode, setCampaignMode] = useState<"disparo" | "agente">("disparo");
-  const [campaignPromptId, setCampaignPromptId] = useState("");
-  const [campaignStartsAt, setCampaignStartsAt] = useState("");
-  const [campaignEndsAt, setCampaignEndsAt] = useState("");
-  const [campaignMessage, setCampaignMessage] = useState("");
-  const [campaignImage, setCampaignImage] = useState<CampaignImageAsset | null>(null);
-  const [campaignImageCaption, setCampaignImageCaption] = useState("");
-  const [campaignImageFirst, setCampaignImageFirst] = useState(false);
-  const [campaignImageError, setCampaignImageError] = useState<string | null>(null);
-  const [campaignComposerMode, setCampaignComposerMode] = useState<CampaignComposerMode>("simple");
-  const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useState<"single" | "ai_variations">("single");
-  const [campaignTemplateVariants, setCampaignTemplateVariants] = useState<string[]>([]);
-  const [campaignSequence, setCampaignSequence] = useState<CampaignSequenceStep[]>([
+  const [campaignSequence, setCampaignSequence] = useState<Array<CampaignSequenceStep & { buttons?: StepActionButton[] }>>([
     createCampaignStep("text", 1),
   ]);
+  const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useState<CampaignTemplateStrategy>("single");
   const [dispatchOptions, setDispatchOptions] = useState<CampaignDispatchOptions>(defaultDispatchOptions);
-  const [aiGoal, setAiGoal] = useState("");
-  const [aiStyle, setAiStyle] = useState("");
-  const [selectedImageStepId, setSelectedImageStepId] = useState<string | null>(null);
   const [segmentation, setSegmentation] = useState<CampaignSegmentationState>(defaultSegmentation);
-  const [leadViewMode, setLeadViewMode] = useState<LeadsViewMode>("lista");
-  const [campaignSearch, setCampaignSearch] = useState("");
-  const [selectedImportId, setSelectedImportId] = useState(ALL_IMPORTS_VALUE);
-  const [importsPage, setImportsPage] = useState(1);
-  const [campaignActionDialog, setCampaignActionDialog] = useState<CampaignActionDialogState>(null);
-  const [triggerConfirm, setTriggerConfirm] = useState<TriggerConfirmState>(null);
-  const [expandedDispatchCampaignId, setExpandedDispatchCampaignId] = useState<string | null>(null);
-  const [importSummary, setImportSummary] = useState<{ imported: number; skipped: number; errors: number } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const campaignImageInputRef = useRef<HTMLInputElement | null>(null);
-  const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
-  const directImageInputRef = useRef<HTMLInputElement | null>(null);
 
-  const { data: imports = [], isLoading: importsLoading, error: importsError, refetch } = useLeadImports(selectedClientId);
+  // Scheduling & parameters states
+  const [multiAgendaEnabled, setMultiAgendaEnabled] = useState(false);
+  const [newConsultantName, setNewConsultantName] = useState("");
+  const [newConsultantLink, setNewConsultantLink] = useState("");
+  const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
+  const [newScheduledAt, setNewScheduledAt] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedImageStepId, setSelectedImageStepId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingStatus, setSubmittingStatus] = useState<string | null>(null);
+
+  // Hooks queries
+  const { data: imports = [], refetch: refetchImports } = useLeadImports(activeClientId);
+  const { data: campaigns = [], isLoading: loadingCampaigns, refetch: refetchCampaigns } = useCampanhas(activeClientId || undefined);
+  const { data: dispatches = [], isLoading: loadingDispatches, refetch: refetchDispatches } = useAllDispatches(activeClientId || null);
+  const { data: consultants = [], refetch: refetchConsultants } = useConsultantSchedules(activeClientId);
+  const createConsultant = useCreateConsultantSchedule();
+  const updateConsultant = useUpdateConsultantSchedule();
+  const deleteConsultant = useDeleteConsultantSchedule();
+
+  const { data: pendingData, refetch: refetchPending } = useLeadImportItems(
+    activeClientId,
+    selectedImportId === ALL_IMPORTS_VALUE ? undefined : selectedImportId,
+    "pending"
+  );
+
+  // Mutations
   const createLeadImport = useCreateLeadImport();
   const deleteLeadImport = useDeleteLeadImport();
-  const { data: campaigns = [], isLoading: campaignsLoading, error: campaignsError, refetch: refetchCampaigns } = useCampanhas(selectedClientId || undefined);
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
   const deleteCampaign = useDeleteCampaign();
   const triggerCampaign = useTriggerCampaign();
-  const directDispatch = useDirectDispatch();
-  const { data: campaignAiStatus } = useCampaignAiStatus();
-  const generateCampaignCopy = useGenerateCampaignCopy();
-  const generateCampaignTemplateVariants = useGenerateCampaignTemplateVariants();
-  const suggestCampaignSequence = useSuggestCampaignSequence();
-  const suggestCampaignDelays = useSuggestCampaignDelays();
-  const rewriteCampaignStep = useRewriteCampaignStep();
-  const { data: pendingData, isLoading: pendingLoading, error: pendingError, refetch: refetchPending } = useLeadImportItems(
-    selectedClientId,
-    selectedImportId === ALL_IMPORTS_VALUE ? undefined : selectedImportId,
-    pendingFilter,
-  );
+  const generateTemplateVariants = useGenerateCampaignTemplateVariants();
+  const createDispatch = useCreateDispatch(""); // campaign-specific instances are created dynamically
+  const deleteDispatch = useDeleteDispatch("");
+  const triggerDispatch = useTriggerDispatch("");
+  const updateDispatch = useUpdateDispatch("");
 
-  useEffect(() => {
-    if (!isInternalUser && !["dados", "pendentes"].includes(activeTab)) {
-      setActiveTab("dados");
-    }
-  }, [activeTab, isInternalUser]);
-
-  useEffect(() => {
-    setImportsPage(1);
-  }, [selectedClientId, pendingFilter, selectedImportId]);
-
+  // Resolving tenant options
+  const crmClient = useOptionalCrmClient();
   const selectedClient = crmClient?.selectedClient || null;
-  const selectedLeadClient = selectedClient || crmClient?.clients.find((client) => client.id === selectedClientId) || null;
-  const tenantSegmentationKpis = useMemo(
-    () =>
-      (selectedLeadClient?.n8n_settings?.segmentation_config?.kpis || [])
-        .filter((kpi) => kpi.enabled !== false && kpi.label && kpi.field)
-        .slice(0, 4),
-    [selectedLeadClient],
-  );
+  const selectedLeadClient = selectedClient || crmClient?.clients.find((c) => c.id === activeClientId) || null;
   const evolutionInstanceOptions = useMemo(
     () =>
       (selectedLeadClient?.n8n_settings?.evolution_instances || [])
-        .filter((instance) => instance.active && instance.dispatch_webhook_url)
-        .map((instance) => ({
-          id: instance.id,
-          name: instance.name || "Evolution",
-          isDefault: instance.is_default,
+        .filter((inst) => inst.active && inst.dispatch_webhook_url)
+        .map((inst) => ({
+          id: inst.id,
+          name: inst.name || "Evolution",
+          isDefault: inst.is_default,
         })),
-    [selectedLeadClient],
+    [selectedLeadClient]
   );
-  const resolvedClientName = fixedClientName || selectedClient?.name || selectedClientId;
-  const tabs = isInternalUser ? INTERNAL_TABS : CLIENT_TABS;
 
+  const resolvedClientName = fixedClientName || selectedClient?.name || activeClientId;
+
+  // Initialize/refresh settings
   useEffect(() => {
-    const defaultEvolutionInstanceId =
-      evolutionInstanceOptions.find((instance) => instance.isDefault)?.id ||
+    const defaultInstanceId =
+      evolutionInstanceOptions.find((inst) => inst.isDefault)?.id ||
       evolutionInstanceOptions[0]?.id ||
       null;
 
-    setDispatchOptions((current) => {
-      const selectedExists =
-        !current.evolutionInstanceId ||
-        evolutionInstanceOptions.some((instance) => instance.id === current.evolutionInstanceId);
+    setDispatchOptions((current) => ({
+      ...current,
+      evolutionInstanceId: current.evolutionInstanceId && evolutionInstanceOptions.some(i => i.id === current.evolutionInstanceId)
+        ? current.evolutionInstanceId
+        : defaultInstanceId,
+    }));
+  }, [evolutionInstanceOptions]);
 
-      if (selectedExists) return current;
-
-      return {
-        ...current,
-        evolutionInstanceId: defaultEvolutionInstanceId,
-      };
+  // Statistics calculation for uploaded leads
+  const parsedLeadsStats = useMemo(() => {
+    if (parsedRows.length === 0) return { total: 0, valid: 0, invalid: 0 };
+    let valid = 0;
+    parsedRows.forEach((row) => {
+      const phone = getLeadField(row, ["telefone", "celular", "phone", "number", "whatsapp"]);
+      if (phone && phone.replace(/\D/g, "").length >= 8) {
+        valid++;
+      }
     });
-  }, [evolutionInstanceOptions, selectedClientId]);
+    return {
+      total: parsedRows.length,
+      valid,
+      invalid: parsedRows.length - valid,
+    };
+  }, [parsedRows]);
 
-  const totalImportsPages = Math.max(1, Math.ceil(imports.length / IMPORTS_PAGE_SIZE));
-  const safeImportsPage = Math.min(importsPage, totalImportsPages);
-  const paginatedImports = useMemo(
-    () => imports.slice((safeImportsPage - 1) * IMPORTS_PAGE_SIZE, safeImportsPage * IMPORTS_PAGE_SIZE),
-    [imports, safeImportsPage],
-  );
-  const latestImport = imports[0] ?? null;
-  const totalImportedRows = useMemo(
-    () => imports.reduce((sum, item) => sum + Number(item.imported_rows || 0), 0),
-    [imports],
-  );
-  const pendingItems = useMemo(() => pendingData?.items ?? [], [pendingData?.items]);
-  const segmentedPendingItems = useMemo(
-    () =>
-      pendingItems.filter((item) => {
-        const normalizedData = getLeadNormalizedData(item);
-        return leadMatchesSegmentation(normalizedData, segmentation);
-      }),
-    [pendingItems, segmentation],
-  );
-  const pendingSummaryLabel = pendingLoading
-    ? "Carregando..."
-    : pendingError
-      ? "Falha ao carregar leads pendentes"
-      : pendingData
-        ? `${pendingData.pendingCount} pendentes de ${pendingData.total} total`
-        : selectedClientId
-          ? "Nenhum lead encontrado"
-          : "Selecione uma empresa";
-  const campaignPendingLabel = pendingLoading
-    ? "Carregando..."
-    : pendingError
-      ? "Falha ao carregar leads"
-      : pendingData
-        ? `${pendingData.pendingCount} aguardando disparo`
-        : selectedClientId
-          ? "Nenhum lead pendente"
-          : "Selecione uma empresa";
-  const segmentationKpiSummary = useMemo(
-    () => tenantSegmentationKpis.map((kpi) => summarizeSegmentationKpi(kpi, segmentedPendingItems)),
-    [tenantSegmentationKpis, segmentedPendingItems],
-  );
-  const funnelGroups = useMemo(() => {
-    const groups = [
-      {
-        id: "entrada",
-        title: "Entrada",
-        items: segmentedPendingItems,
-      },
-      {
-        id: "segmentados",
-        title: "Segmentados",
-        items: segmentedPendingItems.filter((item) => {
-          const data = getLeadNormalizedData(item);
-          return Boolean(getLeadField(data, ["genero", "sexo"]) || getLeadField(data, ["interesse", "produto", "tipo_cliente"]));
-        }),
-      },
-      {
-        id: "prontos",
-        title: "Prontos para disparo",
-        items: segmentedPendingItems.filter((item) => !item.dispatched),
-      },
-    ];
-    return groups;
-  }, [segmentedPendingItems]);
-  const filteredCampaigns = useMemo(() => {
-    const term = campaignSearch.trim().toLowerCase();
-    const scoped = selectedClientId
-      ? campaigns.filter((campaign) => campaign.client_id === selectedClientId)
-      : campaigns;
-    const visible = scoped.filter((campaign) => !campaign.archived_at);
-
-    return visible.filter((campaign) => {
-      if (!term) return true;
-      return [campaign.name, campaign.client_name, campaign.client_id]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(term);
-    });
-  }, [campaignSearch, campaigns, selectedClientId]);
-  const queuedCampaigns = useMemo(
-    () =>
-      [...filteredCampaigns.filter((campaign) => !campaign.last_triggered_at)].sort((a, b) => {
-        const left = getValidDate(a.scheduled_for) || getValidDate(a.created_at) || new Date(0);
-        const right = getValidDate(b.scheduled_for) || getValidDate(b.created_at) || new Date(0);
-        return left.getTime() - right.getTime();
-      }),
-    [filteredCampaigns],
-  );
-  const sentCampaigns = useMemo(
-    () =>
-      [...filteredCampaigns].sort((a, b) => {
-        const left = getValidDate(b.last_triggered_at) || getValidDate(b.created_at) || new Date(0);
-        const right = getValidDate(a.last_triggered_at) || getValidDate(a.created_at) || new Date(0);
-        return left.getTime() - right.getTime();
-      }),
-    [filteredCampaigns],
-  );
-
+  // Handle excel/csv parsed rows
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] || null;
     setSelectedFile(file);
-    setImportPreview([]);
     setParseError(null);
     setParsedRows([]);
     setPreviewRows([]);
 
     if (!file) return;
-
     try {
       const rows = await parseSpreadsheetFile(file);
       setParsedRows(rows);
-      setPreviewRows(rows.slice(0, 8));
-    } catch (error) {
-      setParseError(error instanceof Error ? error.message : "Falha ao processar a planilha.");
+      setPreviewRows(rows.slice(0, 5));
+      setCampaignName(file.name.replace(/\.[^/.]+$/, ""));
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : "Falha ao analisar a planilha.");
     }
   }
 
-  async function handleCampaignImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] || null;
-    setCampaignImageError(null);
-    setCampaignImage(null);
-
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      setCampaignImageError("Selecione uma imagem valida para a campanha.");
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      setCampaignImageError("Use uma imagem de ate 2MB para manter o disparo leve.");
-      return;
-    }
-
-    try {
-      const asset = await readImageAsCampaignAsset(file);
-      setCampaignImage(asset);
-    } catch (error) {
-      setCampaignImageError(error instanceof Error ? error.message : "Falha ao carregar imagem.");
-    }
-  }
-
-  async function handleSequenceImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] || null;
-    const stepId = selectedImageStepId;
-    setCampaignImageError(null);
-
-    if (!file || !stepId) return;
-
-    if (!file.type.startsWith("image/")) {
-      setCampaignImageError("Selecione uma imagem valida para a sequencia.");
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      setCampaignImageError("Use uma imagem de ate 2MB para manter o disparo leve.");
-      return;
-    }
-
-    try {
-      const asset = await readImageAsCampaignAsset(file);
-      setCampaignSequence((current) =>
-        current.map((step) => (step.id === stepId ? { ...step, image: asset } : step)),
-      );
-    } catch (error) {
-      setCampaignImageError(error instanceof Error ? error.message : "Falha ao carregar imagem.");
-    } finally {
-      event.target.value = "";
-      setSelectedImageStepId(null);
-    }
-  }
-
-  async function handleDirectImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] || null;
-    setDirectImageError(null);
-    setDirectImage(null);
-
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      setDirectImageError("Selecione uma imagem valida para o disparo direto.");
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      setDirectImageError("Use uma imagem de ate 2MB para manter o disparo leve.");
-      return;
-    }
-
-    try {
-      const asset = await readImageAsCampaignAsset(file);
-      setDirectImage(asset);
-    } catch (error) {
-      setDirectImageError(error instanceof Error ? error.message : "Falha ao carregar imagem.");
-    } finally {
-      event.target.value = "";
-    }
-  }
-
-  function updateCampaignStep(stepId: string, patch: Partial<CampaignSequenceStep>) {
-    setCampaignSequence((current) => {
-      const updated = current.map((step) => (step.id === stepId ? { ...step, ...patch } : step));
-
-      // Se triggerMode foi alterado para "after_reply", marcar todos os próximos passos também
-      if (patch.triggerMode === "after_reply") {
-        const stepIndex = updated.findIndex((s) => s.id === stepId);
-        if (stepIndex >= 0) {
-          for (let i = stepIndex + 1; i < updated.length; i++) {
-            updated[i] = { ...updated[i], triggerMode: "after_reply" };
-          }
-        }
-        // Ativar automaticamente waitForReply
-        setDispatchOptions((current) => ({ ...current, waitForReply: true }));
-      }
-
-      return normalizeStepOrder(updated);
-    });
+  // Handle sequence step modifications
+  function updateCampaignStep(stepId: string, patch: Partial<CampaignSequenceStep & { buttons?: StepActionButton[] }>) {
+    setCampaignSequence((current) =>
+      current.map((step) => (step.id === stepId ? { ...step, ...patch } : step))
+    );
   }
 
   function addCampaignStep(type: "text" | "image") {
-    setCampaignSequence((current) => normalizeStepOrder([...current, createCampaignStep(type, current.length + 1)]));
+    setCampaignSequence((current) => [
+      ...current,
+      createCampaignStep(type, current.length + 1),
+    ]);
   }
 
   function removeCampaignStep(stepId: string) {
     setCampaignSequence((current) => {
-      const next = current.filter((step) => step.id !== stepId);
-      return normalizeStepOrder(next.length > 0 ? next : [createCampaignStep("text", 1)]);
+      const filtered = current.filter((step) => step.id !== stepId);
+      return filtered.length > 0
+        ? filtered.map((step, idx) => ({ ...step, order: idx + 1 }))
+        : [createCampaignStep("text", 1)];
     });
   }
 
@@ -1766,1984 +610,1182 @@ export default function LeadImports({
       const next = [...current];
       const [step] = next.splice(index, 1);
       next.splice(targetIndex, 0, step);
-      return normalizeStepOrder(next);
+      return next.map((s, idx) => ({ ...s, order: idx + 1 }));
     });
   }
 
-  function getCurrentSequenceForSubmit() {
-    const sequence = campaignComposerMode === "simple"
-      ? buildSimpleCampaignSequence(campaignMessage, campaignImage, campaignImageCaption, campaignImageFirst)
-      : normalizeStepOrder(campaignSequence);
-    if (campaignTemplateStrategy !== "ai_variations") {
-      return sequence.map((step) => ({ ...step, textVariants: [] }));
+  // Handle trigger sequence image change
+  async function handleSequenceImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
+    const stepId = selectedImageStepId;
+    if (!file || !stepId) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Arquivo inválido", description: "Por favor, envie uma imagem.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ title: "Imagem muito grande", description: "O tamanho máximo é de 2MB.", variant: "destructive" });
+      return;
     }
 
-    const variants = Array.from(new Set(campaignTemplateVariants.map((value) => value.trim()).filter(Boolean)));
-    let applied = false;
-    return sequence.map((step) => {
-      if (applied || step.type !== "text") return step;
-      applied = true;
-      return {
-        ...step,
-        textVariants: variants,
-      };
-    });
-  }
-
-  function validateSequenceForSubmit(sequence: CampaignSequenceStep[]) {
-    const enabledSteps = sequence.filter((step) => step.enabled);
-    if (enabledSteps.length === 0) return "Adicione pelo menos um passo ativo na sequencia.";
-
-    if (dispatchOptions.waitForReply) {
-      const immediateSteps = enabledSteps.filter((step) => step.triggerMode !== "after_reply");
-      const replySteps = enabledSteps.filter((step) => step.triggerMode === "after_reply");
-      if (replySteps.length > 0 && immediateSteps.length === 0) {
-        return "Campanhas com resposta avancada precisam de pelo menos um passo imediato antes dos passos apos resposta.";
-      }
-    }
-
-    const invalidStep = enabledSteps.find((step) =>
-      step.type === "text" ? !step.text.trim() && (step.textVariants?.length || 0) === 0 : !step.image,
-    );
-
-    if (invalidStep) {
-      return invalidStep.type === "text"
-        ? `O passo ${invalidStep.order} precisa de texto.`
-        : `O passo ${invalidStep.order} precisa de imagem.`;
-    }
-
-    return null;
-  }
-
-  async function handleGenerateCampaignCopy() {
     try {
-      const result = await generateCampaignCopy.mutateAsync({
-        campaignName,
-        goal: aiGoal,
-        style: aiStyle,
-        segmentation: toCampaignSegmentationPayload(segmentation),
-      });
-
-      if (campaignComposerMode === "simple") {
-        setCampaignMessage(result.copy);
-      } else {
-        setCampaignSequence((current) => {
-          const firstText = current.find((step) => step.type === "text");
-          if (!firstText) return normalizeStepOrder([createCampaignStep("text", 1, { text: result.copy }), ...current]);
-          return current.map((step) => (step.id === firstText.id ? { ...step, text: result.copy } : step));
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        updateCampaignStep(stepId, {
+          image: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            dataUrl,
+          },
         });
-      }
-      setDispatchStatus(result.rationale || "Copy sugerida pela IA.");
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao gerar copy com IA.");
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      toast({ title: "Erro", description: "Falha ao carregar a imagem.", variant: "destructive" });
+    } finally {
+      event.target.value = "";
+      setSelectedImageStepId(null);
     }
   }
 
-  async function handleGenerateCampaignTemplateVariants() {
-    const sequence = campaignComposerMode === "simple"
-      ? buildSimpleCampaignSequence(campaignMessage, campaignImage, campaignImageCaption, campaignImageFirst)
-      : normalizeStepOrder(campaignSequence);
-    const baseText = sequence.find((step) => step.type === "text" && step.text.trim())?.text || campaignMessage.trim();
-
-    if (!baseText) {
-      setDispatchStatus("Informe um texto base antes de gerar variacoes IA.");
+  // Generate AI Variations inline for a step
+  const handleGenerateStepVariants = async (stepId: string, baseText: string) => {
+    if (!activeClientId || !baseText.trim()) {
+      toast({ title: "Campo de texto vazio", description: "Digite a mensagem base antes de gerar variações.", variant: "destructive" });
       return;
     }
-
     try {
-      const result = await generateCampaignTemplateVariants.mutateAsync({
-        campaignName,
-        goal: aiGoal || campaignName,
-        style: aiStyle || "variacoes naturais para WhatsApp dentro do mesmo tema",
-        baseText,
-        count: 8,
-        segmentation: toCampaignSegmentationPayload(segmentation),
-        sequence,
+      updateCampaignStep(stepId, { textVariants: [] });
+      toast({ title: "Gerando variações...", description: "A IA está processando variações humanizadas." });
+      const result = await generateTemplateVariants.mutateAsync({
+        baseText: baseText.trim(),
       });
-      const variants = Array.from(new Set((result.variants || []).map((value) => value.trim()).filter(Boolean)));
-      setCampaignTemplateStrategy("ai_variations");
-      setCampaignTemplateVariants(variants);
-      setDispatchStatus(result.rationale || `${variants.length} variacoes IA geradas para esta campanha.`);
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao gerar variacoes IA.");
-    }
-  }
-
-  async function handleSuggestCampaignSequence() {
-    try {
-      const result = await suggestCampaignSequence.mutateAsync({
-        campaignName,
-        goal: aiGoal,
-        style: aiStyle,
-        segmentation: toCampaignSegmentationPayload(segmentation),
-        sequence: getCurrentSequenceForSubmit(),
+      updateCampaignStep(stepId, { textVariants: result.variants || [] });
+      toast({ title: "Sucesso!", description: "3 variações humanizadas foram geradas." });
+    } catch (err) {
+      toast({
+        title: "Erro ao gerar variações",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
       });
-
-      setCampaignComposerMode("advanced");
-      setCampaignSequence(normalizeStepOrder(result.sequence));
-      setDispatchOptions(result.dispatchOptions);
-      setDispatchStatus(result.rationale || "Sequencia sugerida pela IA.");
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao sugerir sequencia com IA.");
     }
-  }
+  };
 
-  async function handleSuggestCampaignDelays() {
-    try {
-      const result = await suggestCampaignDelays.mutateAsync({
-        campaignName,
-        goal: aiGoal,
-        style: aiStyle,
-        segmentation: toCampaignSegmentationPayload(segmentation),
-        sequence: getCurrentSequenceForSubmit(),
-        dispatchOptions,
-      });
-
-      setCampaignSequence(normalizeStepOrder(result.sequence));
-      setDispatchOptions(result.dispatchOptions);
-      setDispatchStatus(result.rationale || "Atrasos sugeridos pela IA.");
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao sugerir atrasos com IA.");
-    }
-  }
-
-  async function handleRewriteCampaignStep(step: CampaignSequenceStep) {
-    try {
-      const result = await rewriteCampaignStep.mutateAsync({
-        campaignName,
-        goal: aiGoal,
-        style: aiStyle,
-        segmentation: toCampaignSegmentationPayload(segmentation),
-        step,
-      });
-
-      updateCampaignStep(step.id, { text: result.step.text });
-      setDispatchStatus(result.rationale || "Passo reescrito pela IA.");
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao reescrever passo com IA.");
-    }
-  }
-
-  async function handleImport() {
-    if (!selectedClientId) {
-      setParseError("Selecione um cliente antes de importar.");
+  const handleCreateConsultant = () => {
+    if (!newConsultantName.trim() || !newConsultantLink.trim()) {
+      toast({ title: "Campos vazios", description: "Preencha o nome e o link de agendamento.", variant: "destructive" });
       return;
     }
-
-    if (!selectedFile || parsedRows.length === 0) {
-      setParseError("Selecione uma planilha valida para importar.");
+    if (!newConsultantLink.trim().startsWith("http")) {
+      toast({ title: "Link invalido", description: "O link de agendamento deve comecar com http:// ou https://.", variant: "destructive" });
       return;
     }
-
-    setParseError(null);
-
-    try {
-      const response = await createLeadImport.mutateAsync({
-        clientId: selectedClientId,
-        sourceName: selectedFile.name,
-        sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
-        rows: parsedRows,
-      });
-      setImportPreview(response.preview);
-      setSelectedImportId(response.item.id);
-      const imported = response.preview.filter((r) => r.imported).length;
-      const skipped = response.preview.filter((r) => !r.imported && !r.skipReason?.toLowerCase().includes("erro")).length;
-      const errors = response.preview.filter((r) => !r.imported && r.skipReason?.toLowerCase().includes("erro")).length;
-      setImportSummary({ imported, skipped, errors });
-      await Promise.allSettled([refetch(), refetchPending()]);
-    } catch (error) {
-      console.error("[lead-imports-ui] import_failed", {
-        clientId: selectedClientId,
-        fileName: selectedFile.name,
-        rowCount: parsedRows.length,
-      });
-      setParseError(error instanceof Error ? error.message : "Falha ao importar planilha.");
-    }
-  }
-
-  async function handleDelete(importId: string) {
-    try {
-      await deleteLeadImport.mutateAsync(importId);
-      setDeleteConfirmId(null);
-    } catch (error) {
-      setParseError(error instanceof Error ? error.message : "Falha ao deletar planilha.");
-    }
-  }
-
-  function resetCampaignForm() {
-    setEditingCampaignId(null);
-    setCampaignName("");
-    setCampaignLimitPerRun("50");
-    setCampaignMode("disparo");
-    setCampaignPromptId("");
-    setCampaignStartsAt("");
-    setCampaignEndsAt("");
-    setCampaignMessage("");
-    setCampaignImage(null);
-    setCampaignImageCaption("");
-    setCampaignImageFirst(false);
-    setCampaignImageError(null);
-    setCampaignComposerMode("simple");
-    setCampaignTemplateStrategy("single");
-    setCampaignTemplateVariants([]);
-    setCampaignSequence([createCampaignStep("text", 1)]);
-    setDispatchOptions(defaultDispatchOptions);
-    setAiGoal("");
-    setAiStyle("");
-    setSegmentation(defaultSegmentation);
-    setSelectedImportId(ALL_IMPORTS_VALUE);
-  }
-
-  // Editar campanha: pré-preenche o MESMO formulário de criação com os dados da
-  // campanha e entra em modo edição (salva via UPDATE, não cria nova).
-  function handleStartEditCampaign(campaign: Campaign) {
-    const meta = campaign.analytics_meta || {};
-    const seq = normalizeCampaignSequence(campaign.analytics_meta);
-    const opts = { ...defaultDispatchOptions, ...(meta.dispatchOptions || {}) };
-    const firstTextVariants =
-      seq.find((step) => step.type === "text" && (step.textVariants?.length || 0) > 0)?.textVariants || [];
-
-    setEditingCampaignId(campaign.id);
-    setCampaignName(campaign.name || "");
-    setCampaignLimitPerRun(String(campaign.limit_per_run ?? 50));
-    setCampaignMode(campaign.mode === "agente" ? "agente" : "disparo");
-    setCampaignPromptId(campaign.campaign_prompt_id || "");
-    setCampaignStartsAt(campaignUtcIsoToLocalDateTime(campaign.starts_at));
-    setCampaignEndsAt(campaignUtcIsoToLocalDateTime(campaign.ends_at));
-    setSelectedImportId(campaign.import_id || ALL_IMPORTS_VALUE);
-    setSegmentation(defaultSegmentation);
-    setCampaignSequence(seq.length > 0 ? seq : [createCampaignStep("text", 1)]);
-    setCampaignComposerMode("advanced");
-    setCampaignTemplateStrategy(opts.templateStrategy === "ai_variations" ? "ai_variations" : "single");
-    setCampaignTemplateVariants(firstTextVariants);
-    setDispatchOptions(opts);
-    setDispatchStatus(`Editando a campanha "${campaign.name}". Salve para atualizar.`);
-    setActiveTab("campanha");
-  }
-
-  async function handleCreateCampaign() {
-    if (!selectedClientId) {
-      setDispatchStatus("Selecione uma empresa antes de criar a campanha.");
-      return;
-    }
-
-    if (!campaignName.trim()) {
-      setDispatchStatus("Defina um nome para a campanha.");
-      return;
-    }
-
-    // Text content is validated via validateSequenceForSubmit (simple + advanced).
-    // Advanced mode uses step texts only; backend fills legacy message from the first text step.
-
-    const sequence = getCurrentSequenceForSubmit();
-    if (campaignTemplateStrategy === "ai_variations" && campaignTemplateVariants.length < 2) {
-      setDispatchStatus("Gere pelo menos 2 variacoes IA para usar este tipo de campanha.");
-      return;
-    }
-    const sequenceError = validateSequenceForSubmit(sequence);
-    if (sequenceError) {
-      setDispatchStatus(sequenceError);
-      return;
-    }
-
-    const limitPerRun = Number.parseInt(campaignLimitPerRun, 10);
-    if (!Number.isInteger(limitPerRun) || limitPerRun < 1 || limitPerRun > CAMPAIGN_LIMIT_MAX) {
-      setDispatchStatus(`Lote invalido: informe um numero de 1 a ${CAMPAIGN_LIMIT_MAX} (maximo ${CAMPAIGN_LIMIT_MAX} por lote nesta versao).`);
-      return;
-    }
-
-    setIsDispatching(true);
-    setDispatchStatus(null);
-
-    const campaignPayload = {
-      name: campaignName.trim(),
-      clientId: selectedClientId,
-      importId: selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId || null,
-      limitPerRun,
-      mode: campaignMode,
-      campaignPromptId: campaignPromptId || null,
-      startsAt: campaignStartsAt ? campaignLocalDateTimeToUtcIso(campaignStartsAt) : null,
-      endsAt: campaignEndsAt ? campaignLocalDateTimeToUtcIso(campaignEndsAt) : null,
-      analyticsMeta: {
-        segmentation: toCampaignSegmentationPayload(segmentation),
-        message: campaignMessage.trim(),
-        image: campaignImage,
-        sequence,
-        dispatchOptions: {
-          ...dispatchOptions,
-          aiAssisted: dispatchOptions.aiAssisted || campaignTemplateStrategy === "ai_variations",
-          templateStrategy: campaignTemplateStrategy,
-          templateVariantCount: campaignTemplateStrategy === "ai_variations" ? campaignTemplateVariants.length : 0,
-        },
+    createConsultant.mutate(
+      {
+        clientId: activeClientId,
+        name: newConsultantName.trim(),
+        scheduling_link: newConsultantLink.trim(),
       },
-    };
+      {
+        onSuccess: () => {
+          setNewConsultantName("");
+          setNewConsultantLink("");
+          toast({ title: "Consultor adicionado com sucesso." });
+        },
+      }
+    );
+  };
 
-    console.info("[campaigns-ui] create_campaign_start", {
-      clientId: campaignPayload.clientId,
-      importId: campaignPayload.importId,
-      sequenceSteps: sequence.length,
-      hasImage: Boolean(campaignImage),
-    });
+  // Manage Action buttons inside step cards
+  function handleAddStepButton(stepId: string) {
+    const step = campaignSequence.find((s) => s.id === stepId);
+    if (!step) return;
+    const currentButtons = step.buttons || [];
+    if (currentButtons.length >= 3) {
+      toast({ title: "Limite atingido", description: "O limite máximo é de 3 botões por mensagem." });
+      return;
+    }
+    const updated = [...currentButtons, { displayText: "Link de Acesso", type: "url" as const, url: "{{scheduling_link}}" }];
+    updateCampaignStep(stepId, { buttons: updated });
+  }
+
+  function handleRemoveStepButton(stepId: string, btnIndex: number) {
+    const step = campaignSequence.find((s) => s.id === stepId);
+    if (!step) return;
+    const currentButtons = step.buttons || [];
+    const updated = currentButtons.filter((_, idx) => idx !== btnIndex);
+    updateCampaignStep(stepId, { buttons: updated });
+  }
+
+  function handleUpdateStepButton(stepId: string, btnIndex: number, patch: Partial<StepActionButton>) {
+    const step = campaignSequence.find((s) => s.id === stepId);
+    if (!step) return;
+    const currentButtons = step.buttons || [];
+    const updated = currentButtons.map((btn, idx) => (idx === btnIndex ? { ...btn, ...patch } : btn));
+    updateCampaignStep(stepId, { buttons: updated });
+  }
+
+  // Consolidated linear creation submit trigger
+  async function handleCreateAndDispatch() {
+    if (!activeClientId) {
+      toast({ title: "Seção Inválida", description: "Selecione uma empresa no seletor.", variant: "destructive" });
+      return;
+    }
+    if (!campaignName.trim()) {
+      toast({ title: "Nome ausente", description: "Defina um nome de identificação para o envio.", variant: "destructive" });
+      return;
+    }
+    if (!selectedFile && selectedImportId === ALL_IMPORTS_VALUE) {
+      toast({ title: "Base de leads ausente", description: "Por favor, carregue uma planilha ou selecione uma base ativa.", variant: "destructive" });
+      return;
+    }
+
+    const enabledSteps = campaignSequence.filter((s) => s.enabled);
+    if (enabledSteps.length === 0) {
+      toast({ title: "Mensagem vazia", description: "Adicione pelo menos um passo ativo na timeline de envio.", variant: "destructive" });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmittingStatus("Preparando importação de leads...");
 
     try {
+      let finalImportId = selectedImportId;
+
+      // 1. If upload a new file, run lead import first
+      if (selectedFile && parsedRows.length > 0) {
+        setSubmittingStatus("Processando planilha e aplicando round-robin...");
+        const activeLinks = multiAgendaEnabled
+          ? consultants.filter(c => c.active).map(c => c.scheduling_link)
+          : [];
+
+        // Apply Round-Robin directly on rows
+        const finalRows = activeLinks.length > 0
+          ? parsedRows.map((row, idx) => ({
+              ...row,
+              scheduling_link: activeLinks[idx % activeLinks.length],
+            }))
+          : parsedRows;
+
+        const importRes = await createLeadImport.mutateAsync({
+          clientId: activeClientId,
+          sourceName: selectedFile.name,
+          sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
+          rows: finalRows,
+        });
+        finalImportId = importRes.item.id;
+      }
+
+      setSubmittingStatus("Configurando campanha e timeline...");
+      const limitPerRun = Number.parseInt(campaignLimitPerRun, 10) || 50;
+
+      // Make sure template strategy matches variants state
+      const hasVariants = campaignSequence.some(s => s.textVariants && s.textVariants.length > 0);
+      const templateStrategy: "single" | "ai_variations" = hasVariants ? "ai_variations" : "single";
+
+      const campaignPayload = {
+        name: campaignName.trim(),
+        clientId: activeClientId,
+        importId: finalImportId === ALL_IMPORTS_VALUE ? null : finalImportId,
+        limitPerRun,
+        mode: "disparo" as const,
+        campaignPromptId: null,
+        startsAt: null,
+        endsAt: null,
+        analyticsMeta: {
+          segmentation: toCampaignSegmentationPayload(segmentation),
+          message: campaignSequence.find(s => s.type === "text")?.text || "",
+          image: campaignSequence.find(s => s.type === "image")?.image,
+          sequence: campaignSequence,
+          dispatchOptions: {
+            ...dispatchOptions,
+            aiAssisted: hasVariants,
+            templateStrategy,
+            templateVariantCount: hasVariants ? (campaignSequence.find(s => s.type === "text")?.textVariants?.length || 0) : 0,
+          },
+        },
+      };
+
+      let campaignId = "";
       if (editingCampaignId) {
-        // Modo edição: UPDATE na campanha existente (não cria nova).
         const updated = await updateCampaign.mutateAsync({
           id: editingCampaignId,
-          name: campaignPayload.name,
-          importId: campaignPayload.importId,
-          limitPerRun: campaignPayload.limitPerRun,
-          mode: campaignPayload.mode,
-          campaignPromptId: campaignPayload.campaignPromptId,
-          startsAt: campaignPayload.startsAt,
-          endsAt: campaignPayload.endsAt,
-          analyticsMeta: campaignPayload.analyticsMeta,
+          ...campaignPayload,
         });
-        const savedName = campaignName.trim();
-        resetCampaignForm();
-        await refetchCampaigns();
-        setExpandedDispatchCampaignId(updated.id);
-        setActiveTab("enviadas");
-        setDispatchStatus(`Campanha "${savedName}" atualizada.`);
-        console.info("[campaigns-ui] update_campaign_success", { campaignId: updated.id });
-        return;
-      }
-
-      const createdCampaign = await createCampaign.mutateAsync(campaignPayload);
-
-      const savedName = campaignName.trim();
-      resetCampaignForm();
-      await refetchCampaigns();
-      setExpandedDispatchCampaignId(createdCampaign.id);
-      setActiveTab("enviadas");
-      setDispatchStatus(`Campanha "${savedName}" criada. Agora crie um Disparo abaixo para enviar.`);
-      console.info("[campaigns-ui] create_campaign_success", {
-        campaignId: createdCampaign.id,
-        clientId: createdCampaign.client_id,
-        status: createdCampaign.status,
-      });
-    } catch (error) {
-      console.error("[campaigns-ui] create_campaign_failed", {
-        editing: Boolean(editingCampaignId),
-        clientId: campaignPayload.clientId,
-        importId: campaignPayload.importId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      setDispatchStatus(
-        error instanceof Error
-          ? error.message
-          : editingCampaignId
-            ? "Falha ao atualizar campanha."
-            : "Falha ao criar campanha."
-      );
-    } finally {
-      setIsDispatching(false);
-    }
-  }
-
-  async function executeTriggerCampaign(campaign: Campaign) {
-    setTriggerConfirm(null);
-    try {
-      const result = await triggerCampaign.mutateAsync(campaign.id);
-      if (result.failureCount > 0 && result.successCount > 0) {
-        setDispatchStatus(
-          `Campanha "${campaign.name}": ${result.successCount} enviado(s) com sucesso, ${result.failureCount} falha(s). Verifique os leads com erro.`
-        );
-      } else if (result.failureCount > 0) {
-        const firstReason = result.failures?.[0]?.reason || "Erro desconhecido";
-        setDispatchStatus(
-          `Campanha "${campaign.name}" falhou: ${firstReason}`
-        );
+        campaignId = updated.id;
       } else {
-        setDispatchStatus(
-          `Campanha "${campaign.name}": ${result.successCount} mensagem(ns) enviada(s) com sucesso!`
-        );
-      }
-      void refetchCampaigns();
-      void refetchPending();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha ao disparar campanha.";
-      setDispatchStatus(`Erro na campanha "${campaign.name}": ${message}`);
-    }
-  }
-
-  async function handleDirectDispatch() {
-    if (!selectedClientId) {
-      setDirectDispatchStatus("Selecione uma empresa antes de disparar.");
-      return;
-    }
-
-    if (!directPhone.trim()) {
-      setDirectDispatchStatus("Informe um telefone para disparo.");
-      return;
-    }
-
-    if (!directMessage.trim() && !directImage) {
-      setDirectDispatchStatus("Digite uma mensagem ou selecione uma imagem para envio.");
-      return;
-    }
-
-    setDirectDispatchStatus(null);
-
-    try {
-      const result = await directDispatch.mutateAsync({
-        clientId: selectedClientId,
-        phone: directPhone.trim(),
-        text: directMessage.trim(),
-        imageCaption: directImageCaption.trim(),
-        imageFirst: directImageFirst,
-        image: directImage,
-      });
-
-      if (result.success) {
-        setDirectDispatchStatus(`Disparo enviado para ${result.phone}.`);
-        setDirectPhone("");
-        setDirectMessage("");
-        setDirectImageCaption("");
-        setDirectImageFirst(false);
-        setDirectImage(null);
-        return;
+        const created = await createCampaign.mutateAsync(campaignPayload);
+        campaignId = created.id;
       }
 
-      setDirectDispatchStatus(result.failures[0]?.reason || "Falha no disparo direto.");
-    } catch (error) {
-      setDirectDispatchStatus(error instanceof Error ? error.message : "Falha no disparo direto.");
-    }
-  }
+      setSubmittingStatus("Registrando lote na fila de envios...");
 
-  function handleTriggerCampaign(campaign: Campaign) {
-    const leadCount = pendingData?.pendingCount ?? null;
-    setTriggerConfirm({ campaign, leadCount });
-  }
-
-  async function handleToggleCampaignStatus(campaign: Campaign) {
-    try {
-      const nextStatus = canPauseCampaign(campaign.status) ? "paused" : "scheduled";
-      await updateCampaign.mutateAsync({
-        id: campaign.id,
-        status: nextStatus,
+      // 2. Register Dispatch Batch Execution
+      const token = await getIdToken();
+      const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
+      
+      const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `${campaignName.trim()} — Lote Principal`,
+          steps: campaignSequence,
+          triggerType: newTriggerType,
+          scheduledAt: scheduledIso,
+          evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+        }),
       });
-      setDispatchStatus(
-        nextStatus === "paused"
-          ? `Campanha ${campaign.name} pausada.`
-          : `Campanha ${campaign.name} reativada.`
-      );
-      void refetchCampaigns();
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao atualizar campanha.");
-    }
-  }
+      if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");
+      const dispatchData = await dispatchRes.json();
+      const dispatchId = dispatchData.dispatch.id;
 
-  async function handleDeleteCampaign(campaign: Campaign) {
-    try {
-      await deleteCampaign.mutateAsync(campaign.id);
-      setCampaignActionDialog(null);
-      setDispatchStatus(`Campanha ${campaign.name} apagada com sucesso.`);
-      void refetchCampaigns();
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao apagar campanha.");
-    }
-  }
+      // 3. Trigger immediate execution if manual
+      if (newTriggerType === "manual") {
+        setSubmittingStatus("Disparando lote de envios...");
+        await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+      } else {
+        toast({ title: "Sucesso!", description: "Lote de disparos agendado com sucesso." });
+      }
 
-  async function handleArchiveCampaign(campaign: Campaign) {
-    try {
-      await updateCampaign.mutateAsync({
-        id: campaign.id,
-        archived: true,
+      // Reset form and view queue
+      setSelectedFile(null);
+      setParsedRows([]);
+      setPreviewRows([]);
+      setCampaignName("");
+      setEditingCampaignId(null);
+      setCampaignSequence([createCampaignStep("text", 1)]);
+      setNewConsultantName("");
+      setNewConsultantLink("");
+      setMultiAgendaEnabled(false);
+      setNewScheduledAt("");
+      setNewTriggerType("manual");
+
+      await Promise.allSettled([refetchCampaigns(), refetchDispatches(), refetchImports(), refetchPending()]);
+      setActiveTab("agendamentos");
+    } catch (err) {
+      toast({
+        title: "Erro na operação",
+        description: err instanceof Error ? err.message : "Erro desconhecido ao processar lote.",
+        variant: "destructive",
       });
-      setCampaignActionDialog(null);
-      setDispatchStatus(`Campanha ${campaign.name} arquivada com sucesso.`);
-      void refetchCampaigns();
-    } catch (error) {
-      setDispatchStatus(error instanceof Error ? error.message : "Falha ao arquivar campanha.");
+    } finally {
+      setIsSubmitting(false);
+      setSubmittingStatus(null);
     }
   }
 
-  const handleDispatch = handleCreateCampaign;
+  // Actions for existing dispatches (executions)
+  const handleTriggerDispatchBatch = async (dispId: string) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispId}/trigger`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erro ao iniciar lote.");
+      toast({ title: "Lote iniciado", description: "Processamento de envios em andamento." });
+      refetchDispatches();
+    } catch (err) {
+      toast({ title: "Erro", description: err instanceof Error ? err.message : "Não foi possível iniciar.", variant: "destructive" });
+    }
+  };
+
+  const handlePauseDispatchBatch = async (dispId: string) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "paused" }),
+      });
+      if (!res.ok) throw new Error("Erro ao pausar lote.");
+      toast({ title: "Lote pausado" });
+      refetchDispatches();
+    } catch (err) {
+      toast({ title: "Erro", description: err instanceof Error ? err.message : "Não foi possível pausar.", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteDispatchBatch = async (dispId: string) => {
+    if (!confirm("Excluir lote permanentemente do histórico?")) return;
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erro ao excluir lote.");
+      toast({ title: "Lote removido" });
+      refetchDispatches();
+    } catch (err) {
+      toast({ title: "Erro", description: err instanceof Error ? err.message : "Não foi possível remover.", variant: "destructive" });
+    }
+  };
+
+  const handleDownloadFailedCsv = async (disp: CampaignDispatch) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${disp.id}/failed?format=csv`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Falha ao gerar CSV.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `falhas-${disp.name.toLowerCase().replace(/\s+/g, "-")}-${disp.id}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({ title: "Erro de download", description: "Não foi possível obter o CSV de falhas.", variant: "destructive" });
+    }
+  };
+
+  const handleEditCampaign = (c: Campaign) => {
+    const meta = c.analytics_meta || {};
+    const seq = normalizeCampaignSequence(c.analytics_meta);
+    setEditingCampaignId(c.id);
+    setCampaignName(c.name || "");
+    setCampaignLimitPerRun(String(c.limit_per_run || 50));
+    setCampaignSequence(seq.length > 0 ? seq : [createCampaignStep("text", 1)]);
+    setSelectedImportId(c.import_id || ALL_IMPORTS_VALUE);
+    setDispatchOptions(meta.dispatchOptions || defaultDispatchOptions);
+    setActiveTab("campanha");
+    toast({ title: "Carregado para edição", description: `Edite a campanha "${c.name}" no formulário de Novo Disparo.` });
+  };
+
+  const handleDeleteCampaign = async (c: Campaign) => {
+    if (!confirm(`Excluir a campanha "${c.name}" e todas as configurações permanentemente?`)) return;
+    try {
+      await deleteCampaign.mutateAsync(c.id);
+      toast({ title: "Campanha excluída com sucesso." });
+      refetchCampaigns();
+    } catch (err) {
+      toast({ title: "Erro", description: err instanceof Error ? err.message : "Erro ao excluir.", variant: "destructive" });
+    }
+  };
 
   return (
-    <PageShell title={title} subtitle={subtitle} headerRight={headerRight} spacing="space-y-6" showGlobalClientSelector={!fixedClientId}>
-      <AlertDialog open={Boolean(campaignActionDialog)} onOpenChange={(open) => (!open ? setCampaignActionDialog(null) : null)}>
-        <AlertDialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
-          <AlertDialogHeader className="space-y-3 text-left">
-            <AlertDialogTitle>
-              {campaignActionDialog?.action === "archive" ? "Arquivar campanha" : "Apagar campanha"}
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-sm leading-6 text-muted-foreground">
-              {campaignActionDialog?.action === "archive"
-                ? `A campanha ${campaignActionDialog?.campaign.name} sera removida da listagem ativa e ficara fora das tabs de operacao.`
-                : campaignActionDialog?.campaign.last_triggered_at
-                  ? `A campanha ${campaignActionDialog?.campaign.name} ja foi enviada e sera apagada em definitivo. Essa acao nao pode ser desfeita.`
-                  : `A campanha agendada ${campaignActionDialog?.campaign.name} sera removida da fila em definitivo. Essa acao nao pode ser desfeita.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className={campaignActionDialog?.action === "archive" ? "" : "bg-destructive text-destructive-foreground hover:bg-destructive/90"}
-              onClick={() =>
-                campaignActionDialog?.action === "archive"
-                  ? void handleArchiveCampaign(campaignActionDialog.campaign)
-                  : void handleDeleteCampaign(campaignActionDialog!.campaign)
-              }
-            >
-              {campaignActionDialog?.action === "archive" ? "Arquivar" : "Apagar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={Boolean(triggerConfirm)} onOpenChange={(open) => (!open ? setTriggerConfirm(null) : null)}>
-        <AlertDialogContent className="max-w-md rounded-3xl border-border/80 bg-background/95">
-          <AlertDialogHeader className="space-y-3 text-left">
-            <AlertDialogTitle className="flex items-center gap-2">
-              <Zap className="h-5 w-5 text-primary" />
-              Confirmar disparo
-            </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
-              <span className="block font-semibold text-foreground">{triggerConfirm?.campaign.name}</span>
-              {triggerConfirm?.leadCount != null && triggerConfirm.leadCount > 0 ? (
-                <span className="block">
-                  Esta ação enviará mensagens para <strong className="text-foreground">{triggerConfirm.leadCount} lead{triggerConfirm.leadCount !== 1 ? "s" : ""} pendente{triggerConfirm.leadCount !== 1 ? "s" : ""}</strong> desta campanha.
-                </span>
-              ) : (
-                <span className="block">Esta ação enviará mensagens para os leads pendentes desta campanha.</span>
-              )}
-              <span className="block">
-                Modo: <strong className="text-foreground">{triggerConfirm?.campaign.mode === "agente" ? "Com Agente IA" : "Só Disparo"}</strong>
-              </span>
-              <span className="block text-amber-400">Esta ação não pode ser desfeita.</span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => triggerConfirm && void executeTriggerCampaign(triggerConfirm.campaign)}
-              disabled={triggerCampaign.isPending}
-            >
-              <Zap className="mr-2 h-4 w-4" />
-              {triggerCampaign.isPending ? "Disparando..." : "Confirmar disparo"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <section className="space-y-5">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3 dark:border-white/10">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "group inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm font-semibold transition-all",
-                activeTab === tab.id
-                  ? "border-primary/35 bg-primary text-primary-foreground shadow-[0_12px_26px_rgba(37,99,235,0.16)]"
-                  : "border-slate-200/90 bg-white/70 text-slate-600 hover:border-primary/25 hover:text-foreground dark:border-white/10 dark:bg-white/[0.03] dark:text-white/62 dark:hover:bg-white/[0.06] dark:hover:text-white",
-              )}
-            >
-              {tab.step ? (
-                <span className={cn(
-                  "flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold",
-                  activeTab === tab.id ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500 dark:bg-white/[0.08] dark:text-white/55",
-                )}>
-                  {tab.step}
-                </span>
-              ) : (
-                <tab.icon className="h-4 w-4" />
-              )}
-              <span>{tab.label}</span>
-              {tab.id === "pendentes" && pendingData && (
-                <span className={cn(
-                  "rounded-full px-1.5 py-0.5 text-[10px] font-bold",
-                  activeTab === tab.id ? "bg-white/20 text-white" : "bg-amber-400/15 text-amber-600 dark:text-amber-300",
-                )}>
-                  {pendingData.pendingCount}
-                </span>
-              )}
-            </button>
-          ))}
+    <PageShell
+      title={title}
+      subtitle={subtitle}
+      headerRight={headerRight}
+      spacing="space-y-6"
+      showGlobalClientSelector={!fixedClientId}
+    >
+      {/* Dynamic Overlay Loader */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md">
+          <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+          <h3 className="text-lg font-bold text-white">Processando Operação</h3>
+          <p className="text-sm text-slate-400 mt-1">{submittingStatus}</p>
         </div>
+      )}
 
-        {activeTab === "dados" && (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/75 px-4 py-3 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
-              <Building2 className="h-4 w-4 text-primary" />
-              <span className="font-semibold text-foreground">{resolvedClientName || "Selecione uma empresa"}</span>
-              <span className="hidden text-slate-300 dark:text-white/20 sm:inline">/</span>
-              <span>{totalImportedRows.toLocaleString("pt-BR")} contatos no CRM</span>
-              <span className="hidden text-slate-300 dark:text-white/20 sm:inline">/</span>
-              <span>{pendingData?.pendingCount ?? 0} aguardando envio</span>
-            </div>
+      {/* Tabs Navigation */}
+      <div className="w-full flex justify-start rounded-xl border border-slate-200/80 bg-slate-100/50 p-1 dark:border-white/10 dark:bg-white/[0.02]">
+        <button
+          onClick={() => setActiveTab("campanha")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
+            activeTab === "campanha" ? "bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          )}
+        >
+          <Megaphone className="h-3.5 w-3.5" />
+          Novo Disparo
+        </button>
+        <button
+          onClick={() => setActiveTab("enviadas")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
+            activeTab === "enviadas" ? "bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          )}
+        >
+          <History className="h-3.5 w-3.5" />
+          Campanhas
+        </button>
+        <button
+          onClick={() => setActiveTab("agendamentos")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
+            activeTab === "agendamentos" ? "bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          )}
+        >
+          <Zap className="h-3.5 w-3.5" />
+          Fila de Envios
+        </button>
+      </div>
 
-            <section>
-              <SectionHeader
-                title="Importar base"
-                subtitle="Envie uma planilha CSV, XLS ou XLSX."
-                icon={Upload}
-              />
-              <Card className="overflow-hidden rounded-2xl border-slate-200/90 bg-white/95 shadow-[0_18px_46px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_46px_rgba(0,0,0,0.24)]">
-                <CardContent className="space-y-4">
-                  <ErrorMessage message={parseError} variant="banner" />
-                  <div className="space-y-3">
+      {/* 🚀 TAB 1: NOVO DISPARO (Consolidated Linear Wizard) */}
+      {activeTab === "campanha" && (
+        <div className="grid gap-6 lg:grid-cols-3 items-start">
+          {/* Main Wizard Form */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* STEP 1: Leads Base configuration */}
+            <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">1</span>
+                  Base de Leads
+                </CardTitle>
+                <CardDescription>Carregue a planilha XLSX/CSV com contatos ou selecione uma existente</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-500">Selecionar Planilha</label>
                     <input
                       ref={fileInputRef}
                       type="file"
                       accept=".csv,.xls,.xlsx"
-                      onChange={handleFileChange}
                       className="sr-only"
+                      onChange={handleFileChange}
                     />
-                    <div className="rounded-2xl border border-dashed border-primary/35 bg-primary/[0.04] p-4 dark:bg-primary/[0.06]">
-                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                            <Upload className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <p className="text-base font-bold text-foreground">Anexe a planilha da empresa</p>
-                            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                              Nome e telefone são suficientes. Campos extras ajudam nos filtros depois.
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="h-12 shrink-0 rounded-xl px-5"
-                        >
-                          <Upload className="h-4 w-4" />
-                          {selectedFile ? "Trocar planilha" : "Escolher planilha"}
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-                      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-black/25">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Planilha selecionada</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-3">
-                          <p className={cn("min-w-0 truncate text-sm font-semibold", selectedFile ? "text-foreground" : "text-muted-foreground")}>
-                            {selectedFile ? selectedFile.name : "Nenhum arquivo selecionado"}
-                          </p>
-                          {selectedFile ? (
-                            <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300">
-                              {parsedRows.length.toLocaleString("pt-BR")} linhas lidas
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                      <Button onClick={handleImport} disabled={!selectedFile || createLeadImport.isPending} className="h-full min-h-[72px] rounded-2xl px-6">
-                        <Upload className="mr-2 h-4 w-4" />
-                        {createLeadImport.isPending ? "Importando..." : "Importar para o CRM"}
-                      </Button>
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/20 px-3 hover:bg-indigo-50/50 dark:border-indigo-800/40 dark:bg-indigo-950/10 dark:hover:bg-indigo-950/20 text-xs font-semibold text-indigo-600 dark:text-indigo-400 transition-all"
+                    >
+                      <Upload className="h-4 w-4" />
+                      {selectedFile ? selectedFile.name : "Carregar Planilha (Excel/CSV)"}
                     </div>
                   </div>
 
-                  {importSummary && (
-                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 p-4">
-                      <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />
-                      <div className="flex flex-wrap gap-4 font-mono text-sm">
-                        <span className="font-bold text-primary">{importSummary.imported} importados</span>
-                        {importSummary.skipped > 0 && (
-                          <span className="text-amber-400">{importSummary.skipped} duplicados ignorados</span>
-                        )}
-                        {importSummary.errors > 0 && (
-                          <span className="text-destructive">{importSummary.errors} erros</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedFile && !importSummary && (
-                    <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 text-sm text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:text-white/78 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                      <p className="font-semibold text-foreground">Prévia pronta para conferência</p>
-                      <p className="mt-1">Arquivo: {selectedFile.name} · {parsedRows.length.toLocaleString("pt-BR")} linhas lidas</p>
-                    </div>
-                  )}
-
-                  {previewRows.length > 0 && (
-                    <div className="overflow-x-auto rounded-xl border border-border/70">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            {Object.keys(previewRows[0]).map((column) => (
-                              <TableHead key={column}>{column}</TableHead>
-                            ))}
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {previewRows.map((row, index) => (
-                            <TableRow key={`${index}-${Object.values(row).join("-")}`}>
-                              {Object.keys(previewRows[0]).map((column) => (
-                                <TableCell key={column} className="max-w-[220px] truncate">
-                                  {String(row[column] ?? "")}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-
-                  {importPreview.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Resumo do processamento</p>
-                      <div className="overflow-x-auto rounded-xl border border-border/70">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Linha</TableHead>
-                              <TableHead>Telefone</TableHead>
-                              <TableHead>Nome</TableHead>
-                              <TableHead>Cidade</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Resultado</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {importPreview.map((item) => (
-                              <TableRow key={`${item.rowNumber}-${item.telefone || "skip"}`}>
-                                <TableCell>{item.rowNumber}</TableCell>
-                                <TableCell>{item.telefone || "-"}</TableCell>
-                                <TableCell>{item.nome || "-"}</TableCell>
-                                <TableCell>{item.cidade || "-"}</TableCell>
-                                <TableCell>{item.status || "-"}</TableCell>
-                                <TableCell>{item.imported ? "Importado" : item.skipReason || "Ignorado"}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </section>
-
-            <section>
-              <SectionHeader
-                title="Histórico"
-                subtitle="Bases importadas recentemente."
-                icon={History}
-              />
-              <Card className="rounded-2xl border-slate-200/90 bg-white/95 shadow-[0_18px_46px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_46px_rgba(0,0,0,0.24)]">
-                <CardHeader className="pb-2">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-base">Histórico de bases</CardTitle>
-                      {latestImport ? (
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Última importação: {latestImport.source_name} em {formatDate(latestImport.created_at)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => refetch()} disabled={importsLoading}>
-                      <RefreshCw className={cn("mr-1 h-4 w-4", importsLoading && "animate-spin")} />
-                      Atualizar
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <ErrorMessage message={importsError ? (importsError as Error).message : null} variant="banner" />
-                  {importsLoading && <EmptyState message="Carregando historico..." />}
-                  {!importsLoading && !importsError && imports.length === 0 && (
-                    <EmptyState
-                      title="Nenhuma importacao encontrada"
-                      description="Assim que uma planilha for processada, o historico fica disponivel aqui."
-                    />
-                  )}
-                  {!importsLoading && !importsError && imports.length > 0 && (
-                    <div className="space-y-4">
-                      <div className="overflow-x-auto rounded-xl border border-border/70">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Planilha</TableHead>
-                              <TableHead>Linhas lidas</TableHead>
-                              <TableHead>Entraram no CRM</TableHead>
-                              <TableHead>Ignoradas</TableHead>
-                              <TableHead>Responsável</TableHead>
-                              <TableHead>Importada em</TableHead>
-                              <TableHead className="w-[92px] text-right">Remover</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {paginatedImports.map((item) => (
-                              <TableRow key={item.id}>
-                                <TableCell>
-                                  <div className="min-w-[220px]">
-                                    <p className="font-semibold text-foreground">{item.source_name}</p>
-                                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-muted-foreground">{item.source_type}</p>
-                                  </div>
-                                </TableCell>
-                                <TableCell>{Number(item.total_rows || 0).toLocaleString("pt-BR")}</TableCell>
-                                <TableCell>
-                                  <span className="font-semibold text-emerald-600 dark:text-emerald-300">
-                                    {Number(item.imported_rows || 0).toLocaleString("pt-BR")}
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  <span className={cn(Number(item.skipped_rows || 0) > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted-foreground")}>
-                                    {Number(item.skipped_rows || 0).toLocaleString("pt-BR")}
-                                  </span>
-                                </TableCell>
-                                <TableCell>{item.uploaded_by_email || "-"}</TableCell>
-                                <TableCell>{formatDate(item.created_at)}</TableCell>
-                                <TableCell className="text-right">
-                                  {deleteConfirmId === item.id ? (
-                                    <div className="flex items-center justify-end gap-1">
-                                      <Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={() => void handleDelete(item.id)} disabled={deleteLeadImport.isPending}>
-                                        {deleteLeadImport.isPending ? "..." : "Sim"}
-                                      </Button>
-                                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => setDeleteConfirmId(null)}>
-                                        Nao
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => setDeleteConfirmId(item.id)} title="Remover importação">
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-
-                      <PaginationControls currentPage={safeImportsPage} totalPages={totalImportsPages} pageSize={IMPORTS_PAGE_SIZE} totalItems={imports.length} onPageChange={setImportsPage} />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </section>
-          </div>
-        )}
-
-        {activeTab === "pendentes" && (
-          <div className="space-y-5">
-            <div className="space-y-4">
-              <div>
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Leads Pendentes de Disparo</h2>
-                <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  {pendingSummaryLabel}
-                </p>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Card className="rounded-2xl border-border/80 bg-card/95">
-                  <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/10">
-                      <AlertTriangle className="h-5 w-5 text-amber-400" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-extrabold text-foreground">{pendingData?.pendingCount ?? 0}</p>
-                      <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Aguardando disparo</p>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="rounded-2xl border-border/80 bg-card/95">
-                  <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-extrabold text-foreground">
-                        {pendingData ? pendingData.total - pendingData.pendingCount : 0}
-                      </p>
-                      <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Ja disparados</p>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="rounded-2xl border-border/80 bg-card/95">
-                  <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/5">
-                      <FileSpreadsheet className="h-5 w-5 text-white/60" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-extrabold text-foreground">{pendingData?.total ?? 0}</p>
-                      <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Total importados</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <Select value={selectedImportId} onValueChange={setSelectedImportId}>
-                    <SelectTrigger className={cn("w-[220px] rounded-xl", darkFieldClass)}>
-                      <SelectValue placeholder="Todas as importacoes" />
-                    </SelectTrigger>
-                    <SelectContent className={darkSelectContentClass}>
-                      <SelectItem value={ALL_IMPORTS_VALUE} className={darkSelectItemClass}>Todas as importacoes</SelectItem>
-                      {imports.map((imp) => (
-                        <SelectItem key={imp.id} value={imp.id} className={darkSelectItemClass}>
-                          {imp.source_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={pendingFilter} onValueChange={setPendingFilter}>
-                    <SelectTrigger className={cn("w-[180px] rounded-xl", darkFieldClass)}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className={darkSelectContentClass}>
-                      <SelectItem value="false" className={darkSelectItemClass}>Nao disparados</SelectItem>
-                      <SelectItem value="true" className={darkSelectItemClass}>Ja disparados</SelectItem>
-                      <SelectItem value="all" className={darkSelectItemClass}>Todos</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex rounded-xl border border-slate-200/90 bg-white/80 p-1 dark:border-white/10 dark:bg-white/[0.04]">
-                    {leadViewOptions.map((option) => {
-                      const Icon = option.icon;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => setLeadViewMode(option.id)}
-                          className={cn(
-                            "inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors",
-                            leadViewMode === option.id
-                              ? "bg-primary text-primary-foreground"
-                              : "text-muted-foreground hover:bg-slate-100 hover:text-foreground dark:hover:bg-white/[0.06]",
-                          )}
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => refetchPending()} disabled={pendingLoading}>
-                    <RefreshCw className={cn("mr-1 h-4 w-4", pendingLoading && "animate-spin")} />
-                    Atualizar
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-              <CardContent className="p-4">
-                <ErrorMessage message={pendingError ? (pendingError as Error).message : null} variant="banner" />
-                {pendingLoading && <EmptyState message="Carregando leads..." />}
-                {!pendingLoading && pendingError && (
-                  <div className="space-y-3">
-                    <EmptyState
-                      title="Nao foi possivel carregar os leads"
-                      description="A tentativa de buscar os leads pendentes falhou. Verifique a conexao com a API e tente atualizar."
-                    />
-                    <div className="flex justify-center">
-                      <Button variant="outline" size="sm" onClick={() => refetchPending()}>
-                        <RefreshCw className="h-4 w-4" />
-                        Tentar novamente
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {!pendingLoading && pendingData && segmentedPendingItems.length === 0 && (
-                  <EmptyState
-                    title={pendingFilter === "false" ? "Todos os leads ja foram disparados" : "Nenhum lead encontrado"}
-                    description="Altere o filtro para ver leads em outro estado."
-                  />
-                )}
-                {!pendingLoading && pendingData && segmentedPendingItems.length > 0 && (
-                  <div className="space-y-4">
-                    {leadViewMode === "lista" && (
-                    <div className="overflow-x-auto rounded-xl border border-border/70">
-                      <div className="max-h-[560px] overflow-y-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-[rgba(12,15,28,0.98)]">
-                              <TableHead>#</TableHead>
-                              <TableHead>Telefone</TableHead>
-                              <TableHead>Nome</TableHead>
-                              {pendingTableColumns.map((col) => (
-                                <TableHead key={col.key}>{col.label}</TableHead>
-                              ))}
-                              <TableHead>Disparo</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {segmentedPendingItems.map((item) => {
-                              const normalizedData =
-                                item.normalized_data && typeof item.normalized_data === "object"
-                                  ? (item.normalized_data as Record<string, unknown>)
-                                  : {};
-
-                              return (
-                                <TableRow key={item.id}>
-                                  <TableCell className="font-mono text-xs text-muted-foreground">{item.row_number}</TableCell>
-                                  <TableCell className="font-mono text-sm">{item.telefone || "-"}</TableCell>
-                                  <TableCell>{String(normalizedData.nome || "-")}</TableCell>
-                                  {pendingTableColumns.map((col) => (
-                                    <TableCell key={col.key}>{String(normalizedData[col.key] ?? "-")}</TableCell>
-                                  ))}
-                                  <TableCell>
-                                    {item.dispatched ? (
-                                      <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
-                                        <CheckCircle2 className="h-3 w-3" /> Enviado
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 rounded-md border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 font-mono text-[10px] text-amber-400">
-                                        <XCircle className="h-3 w-3" /> Pendente
-                                      </span>
-                                    )}
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                    )}
-
-                    {leadViewMode === "cards" && (
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {segmentedPendingItems.map((item) => {
-                          const data = getLeadNormalizedData(item);
-                          return (
-                            <div key={item.id} className="rounded-2xl border border-slate-200/90 bg-white/85 p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="font-semibold text-foreground">{String(data.nome || "Lead sem nome")}</p>
-                                  <p className="mt-1 font-mono text-xs text-muted-foreground">{item.telefone || "-"}</p>
-                                </div>
-                                <span className={cn("rounded-md px-2 py-1 font-mono text-[10px]", item.dispatched ? "bg-primary/10 text-primary" : "bg-amber-400/10 text-amber-500")}>
-                                  {item.dispatched ? "Enviado" : "Pendente"}
-                                </span>
-                              </div>
-                              <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                                <span>Cidade: {String(data.cidade || "-")}</span>
-                                <span>Estado: {String(data.estado || "-")}</span>
-                                <span>Perfil: {String(data.perfil || data.tipo_cliente || "-")}</span>
-                                <span>Interesse: {String(data.interesse || data.produto || "-")}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {leadViewMode === "funil" && (
-                      <div className="grid gap-3 lg:grid-cols-3">
-                        {funnelGroups.map((group) => (
-                          <div key={group.id} className="rounded-2xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                            <div className="mb-3 flex items-center justify-between">
-                              <p className="font-semibold text-foreground">{group.title}</p>
-                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{group.items.length}</span>
-                            </div>
-                            <div className="space-y-2">
-                              {group.items.slice(0, 8).map((item) => {
-                                const data = getLeadNormalizedData(item);
-                                return (
-                                  <div key={`${group.id}-${item.id}`} className="rounded-xl border border-slate-200/80 bg-slate-50/90 p-3 text-sm dark:border-white/10 dark:bg-black/25">
-                                    <p className="font-medium text-foreground">{String(data.nome || item.telefone || "Lead")}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">{String(data.cidade || "-")} · {String(data.status || "sem status")}</p>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-500">Ou use uma importada</label>
+                    <Select
+                      value={selectedImportId}
+                      onValueChange={(val) => {
+                        setSelectedImportId(val);
+                        setSelectedFile(null);
+                        setParsedRows([]);
+                        setPreviewRows([]);
+                      }}
+                    >
+                      <SelectTrigger className="h-12 rounded-xl">
+                        <SelectValue placeholder="Selecione uma base existente..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_IMPORTS_VALUE}>Todas as bases importadas</SelectItem>
+                        {imports.map((imp) => (
+                          <SelectItem key={imp.id} value={imp.id}>
+                            {imp.source_name} ({imp.imported_rows} leads)
+                          </SelectItem>
                         ))}
-                      </div>
-                    )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-                    {leadViewMode === "kanban" && (
-                      <div className="grid gap-3 md:grid-cols-3">
-                        {["novo", "em contato", "qualificado"].map((statusGroup) => {
-                          const items = segmentedPendingItems.filter((item) => {
-                            const status = normalizeLooseText(getLeadNormalizedData(item).status);
-                            if (statusGroup === "novo") return !status || status.includes("novo");
-                            if (statusGroup === "em contato") return status.includes("contato") || status.includes("morno");
-                            return status.includes("qualificado") || status.includes("quente");
-                          });
-                          return (
-                            <div key={statusGroup} className="min-h-[260px] rounded-2xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                              <div className="mb-3 flex items-center justify-between">
-                                <p className="capitalize font-semibold text-foreground">{statusGroup}</p>
-                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-muted-foreground dark:bg-white/[0.08]">{items.length}</span>
-                              </div>
-                              <div className="space-y-2">
-                                {items.slice(0, 10).map((item) => {
-                                  const data = getLeadNormalizedData(item);
-                                  return (
-                                    <div key={`${statusGroup}-${item.id}`} className="rounded-xl border border-slate-200/80 bg-slate-50/90 p-3 dark:border-white/10 dark:bg-black/25">
-                                      <p className="text-sm font-medium text-foreground">{String(data.nome || item.telefone || "Lead")}</p>
-                                      <p className="mt-1 text-xs text-muted-foreground">{String(data.interesse || data.produto || data.cidade || "-")}</p>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
+                {/* Simplified preview of uploaded leads */}
+                {parsedRows.length > 0 && (
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/40 p-4 dark:border-white/5 dark:bg-slate-900/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-4">
+                        <div>
+                          <p className="text-[10px] uppercase font-bold text-slate-400">Total Leads</p>
+                          <p className="text-base font-bold text-slate-700 dark:text-slate-200">{parsedLeadsStats.total}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase font-bold text-emerald-500">WhatsApp Válidos</p>
+                          <p className="text-base font-bold text-emerald-600 dark:text-emerald-400">{parsedLeadsStats.valid}</p>
+                        </div>
+                        {parsedLeadsStats.invalid > 0 && (
+                          <div>
+                            <p className="text-[10px] uppercase font-bold text-rose-500">Formatos Inválidos</p>
+                            <p className="text-base font-bold text-rose-600 dark:text-rose-400">{parsedLeadsStats.invalid}</p>
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPreviewOpen(!previewOpen)}
+                        className="text-xs h-7 text-indigo-500 hover:text-indigo-600"
+                      >
+                        {previewOpen ? "Esconder Tabela" : "Ver Contatos"}
+                      </Button>
+                    </div>
+
+                    {previewOpen && (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-white/5 dark:bg-black/30">
+                        <Table className="text-[11px]">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="h-8 py-0">Nome</TableHead>
+                              <TableHead className="h-8 py-0">Telefone</TableHead>
+                              <TableHead className="h-8 py-0">Outras Colunas</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {previewRows.map((row, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell className="h-8 py-0.5 font-medium">{getLeadField(row, ["nome", "name"]) || "Sem nome"}</TableCell>
+                                <TableCell className="h-8 py-0.5 font-mono">{getLeadField(row, ["telefone", "phone", "number"]) || "—"}</TableCell>
+                                <TableCell className="h-8 py-0.5 text-muted-foreground truncate max-w-[120px]">
+                                  {Object.keys(row).filter(k => !["nome", "name", "telefone", "phone"].includes(k.toLowerCase())).map(k => `${k}: ${row[k]}`).join(", ") || "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
                       </div>
                     )}
                   </div>
                 )}
               </CardContent>
             </Card>
-          </div>
-        )}
 
-        {activeTab === "campanha" && isInternalUser && (
-          <Card className="rounded-xl border-border/80 bg-card/95 shadow-[0_14px_34px_rgba(0,0,0,0.16)]">
-            <CardContent className="space-y-4 p-4">
-              <div>
-                <h2 className="text-xl font-extrabold tracking-tight text-foreground">Criar Nova Campanha</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Crie a campanha; os disparos ficam no card da campanha em <strong>Campanhas</strong>.
-                </p>
-              </div>
+            {/* STEP 2: Sequence visual timeline & buttons */}
+            <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">2</span>
+                  Timeline de Envio
+                </CardTitle>
+                <CardDescription>Escreva a mensagem. Adicione mais passos de texto ou imagem para criar uma sequência</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <input ref={sequenceImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleSequenceImageChange} />
 
-              {dispatchStatus && (
-                <div
-                  className={cn(
-                    "rounded-xl border p-4 text-sm font-medium",
-                    dispatchStatus.includes("sucesso") || dispatchStatus.includes("agendada")
-                      ? "border-primary/30 bg-primary/10 text-primary"
-                      : "border-destructive/30 bg-destructive/10 text-destructive",
-                  )}
-                >
-                  {dispatchStatus}
-                </div>
-              )}
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Nome da Campanha *</p>
-                  <Input placeholder="Ex: Newsletter Marco 2026" className={darkFieldClass} value={campaignName} onChange={(e) => setCampaignName(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Base de Leads (importacao)</p>
-                  <Select value={selectedImportId} onValueChange={setSelectedImportId}>
-                    <SelectTrigger className={darkFieldClass}>
-                      <SelectValue placeholder="Todas as importacoes" />
-                    </SelectTrigger>
-                    <SelectContent className={darkSelectContentClass}>
-                      <SelectItem value={ALL_IMPORTS_VALUE} className={darkSelectItemClass}>Todas as importacoes</SelectItem>
-                      {imports.map((imp) => (
-                        <SelectItem key={imp.id} value={imp.id} className={darkSelectItemClass}>
-                          {imp.source_name} ({imp.imported_rows} leads)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-                    Lote por disparo
-                    <InfoTip text="Quantos leads cada disparo processa. Máximo 500 por lote nesta versão (o disparo roda em loop síncrono; lotes maiores exigem fila)." />
-                  </p>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={CAMPAIGN_LIMIT_MAX}
-                    step={1}
-                    className={cn("w-40", darkFieldClass)}
-                    placeholder="50"
-                    value={campaignLimitPerRun}
-                    onChange={(e) => setCampaignLimitPerRun(e.target.value)}
-                  />
-                </div>
-
-                {/* Seletor de modo — ocupa linha inteira */}
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-                    Modo da Campanha
-                    <InfoTip text="Define o comportamento do chatbot quando o lead responder ao disparo. O disparo em si é configurado depois, no painel 'Disparos' do card da campanha." />
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCampaignMode("disparo")}
-                      className={cn(
-                        "rounded-lg border p-3 text-left transition-all",
-                        campaignMode === "disparo"
-                          ? "border-primary bg-primary/10"
-                          : "border-border/50 bg-card/40 hover:border-border"
-                      )}
-                    >
-                      <p className="font-semibold text-sm">Só Disparo</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">Resposta vai para o chatbot padrão.</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCampaignMode("agente")}
-                      className={cn(
-                        "rounded-lg border p-3 text-left transition-all",
-                        campaignMode === "agente"
-                          ? "border-sky-500 bg-sky-500/10"
-                          : "border-border/50 bg-card/40 hover:border-border"
-                      )}
-                    >
-                      <p className="font-semibold text-sm">Com Agente IA</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">Resposta usa prompt da campanha.</p>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Período ativo e prompt — só aparecem no modo agente */}
-                <div className="space-y-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03] md:col-span-2">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Tipo de template</p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">
-                        {campaignTemplateStrategy === "ai_variations" ? "Variações IA para WhatsApp" : "Template único"}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Ative variações IA quando a campanha for disparar para muitos leads e precisar alternar o texto dentro do mesmo tema.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 rounded-full border border-primary/45 bg-background/85 px-3 py-2 shadow-sm dark:border-primary/50 dark:bg-black/35">
-                      <span
-                        className={cn(
-                          "text-xs font-medium",
-                          campaignTemplateStrategy === "single" ? "text-foreground" : "text-muted-foreground"
-                        )}
-                      >
-                        Único
+                {/* Vertical Step cards */}
+                <div className="space-y-4 relative border-l border-slate-200/80 dark:border-white/10 ml-3.5 pl-5">
+                  {campaignSequence.map((step, index) => (
+                    <div key={step.id} className="relative space-y-3 rounded-xl border border-slate-200/80 bg-white/70 p-4 dark:border-white/5 dark:bg-black/35 shadow-sm">
+                      {/* Left icon marker */}
+                      <span className="absolute -left-[30px] top-4 flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-800 font-mono text-[9px] font-bold text-slate-500">
+                        {step.order}
                       </span>
-                      <Switch
-                        checked={campaignTemplateStrategy === "ai_variations"}
-                        onCheckedChange={(checked) => {
-                          setCampaignTemplateStrategy(checked ? "ai_variations" : "single");
-                          if (!checked) setCampaignTemplateVariants([]);
-                        }}
-                        className="border-2 border-primary/50 bg-white shadow-[0_0_0_3px_rgba(37,99,235,0.10)] data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=unchecked]:border-slate-400 data-[state=unchecked]:bg-slate-100 dark:bg-black/40 dark:data-[state=unchecked]:border-white/35 dark:data-[state=unchecked]:bg-white/10"
-                      />
-                      <span
-                        className={cn(
-                          "text-xs font-medium",
-                          campaignTemplateStrategy === "ai_variations" ? "text-primary" : "text-muted-foreground"
-                        )}
-                      >
-                        Variações IA
-                      </span>
-                    </div>
-                  </div>
 
-                  {campaignTemplateStrategy === "ai_variations" && (
-                    <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-muted-foreground">
-                          As variações ficam salvas na campanha e todo disparo criado depois usa essa rotação automaticamente.
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void handleGenerateCampaignTemplateVariants()}
-                          disabled={generateCampaignTemplateVariants.isPending}
-                        >
-                          <Sparkles className="h-4 w-4" />
-                          {generateCampaignTemplateVariants.isPending ? "Gerando..." : "Gerar 8 variações"}
-                        </Button>
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider">
+                          Passo {step.order} — {step.type === "image" ? "Imagem" : "Texto"}
+                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => moveCampaignStep(step.id, -1)} disabled={index === 0}>
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => moveCampaignStep(step.id, 1)} disabled={index === campaignSequence.length - 1}>
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-500" onClick={() => removeCampaignStep(step.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      {campaignTemplateVariants.length > 0 && (
-                        <div className="grid gap-2 md:grid-cols-2">
-                          {campaignTemplateVariants.map((variant, index) => (
-                            <div key={`${variant}-${index}`} className="rounded-md border border-border/60 bg-card/70 p-2 text-xs text-muted-foreground">
-                              <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Variação {index + 1}</span>
-                              {variant}
+
+                      {/* Message editor */}
+                      <div className="space-y-2">
+                        <Textarea
+                          placeholder={step.type === "image" ? "Legenda opcional para a imagem" : "Olá {{nome}}, tudo bem? Escreva a mensagem de envio..."}
+                          className="min-h-[96px] text-xs font-sans"
+                          value={step.text}
+                          onChange={(e) => updateCampaignStep(step.id, { text: e.target.value })}
+                        />
+
+                        {/* Variables helper */}
+                        <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                          <span>Variáveis:</span>
+                          <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{nome}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{nome}}"}</button>
+                          <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{telefone}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{telefone}}"}</button>
+                          <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{scheduling_link}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{scheduling_link}}"}</button>
+                        </div>
+                      </div>
+
+                      {/* Image selector */}
+                      {step.type === "image" && (
+                        <div className="space-y-2">
+                          {step.image ? (
+                            <div className="flex items-center gap-3 rounded-lg border border-slate-200/80 bg-slate-50 p-2 dark:border-white/5 dark:bg-slate-900/40">
+                              <img src={step.image.dataUrl} alt={step.image.name} className="h-12 w-12 rounded object-cover" />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">{step.image.name}</p>
+                                <p className="text-[10px] text-slate-500">{Math.round(step.image.size / 1024)} KB</p>
+                              </div>
+                              <Button type="button" variant="ghost" size="sm" onClick={() => updateCampaignStep(step.id, { image: null })} className="text-xs text-rose-500 h-8">Remover</Button>
                             </div>
-                          ))}
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full justify-center gap-1.5 h-9"
+                              onClick={() => {
+                                setSelectedImageStepId(step.id);
+                                sequenceImageInputRef.current?.click();
+                              }}
+                            >
+                              <ImagePlus className="h-4 w-4" />
+                              Carregar Imagem do Computador
+                            </Button>
+                          )}
                         </div>
                       )}
-                    </div>
-                  )}
-                </div>
 
-                {campaignMode === "agente" && (
-                  <>
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-                        Início do período ativo
-                        <InfoTip text="A partir desta data/hora, leads que responderem terão o chatbot respondendo com o prompt de campanha em vez do padrão." />
-                      </p>
-                      <Input type="datetime-local" className={darkFieldClass} value={campaignStartsAt} onChange={(e) => setCampaignStartsAt(e.target.value)} />
-                      <p className="text-xs text-muted-foreground">Chatbot usa prompt de campanha a partir desta data.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1.5">
-                        Fim do período ativo
-                        <InfoTip text="Após esta data o lead volta automaticamente ao fluxo padrão de qualificação, sem precisar de nenhuma ação manual." />
-                      </p>
-                      <Input type="datetime-local" className={darkFieldClass} value={campaignEndsAt} onChange={(e) => setCampaignEndsAt(e.target.value)} />
-                      <p className="text-xs text-muted-foreground">Após esta data o lead volta ao fluxo padrão.</p>
-                    </div>
-                    <CampaignPromptField
-                      clientId={selectedClientId}
-                      campaignPrompts={campaignPrompts}
-                      campaignPromptId={campaignPromptId}
-                      setCampaignPromptId={setCampaignPromptId}
-                      darkFieldClass={darkFieldClass}
-                      darkSelectContentClass={darkSelectContentClass}
-                      darkSelectItemClass={darkSelectItemClass}
-                    />
-                  </>
-                )}
-              </div>
+                      {/* AI Variations inline trigger */}
+                      {step.type === "text" && (
+                        <div className="border-t border-slate-100 dark:border-white/5 pt-2 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <button
+                              type="button"
+                              disabled={generateTemplateVariants.isPending}
+                              onClick={() => handleGenerateStepVariants(step.id, step.text)}
+                              className="text-[11px] font-bold text-violet-500 hover:text-violet-600 flex items-center gap-1 bg-violet-50 dark:bg-violet-950/20 px-2 py-1 rounded-md"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                              {generateTemplateVariants.isPending ? "Processando..." : "🤖 Gerar Variações Humanizadas (Evitar Spam)"}
+                            </button>
+                          </div>
 
-              <div className="space-y-3 rounded-xl border border-slate-200/90 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-                  <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200/80 pb-3 dark:border-white/10">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Conteudo do disparo</p>
-                      <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-                        <span className="rounded-full border border-slate-200/90 bg-white px-2 py-1 dark:border-white/10 dark:bg-black/25">
-                          {campaignPendingLabel}
-                        </span>
-                        {segmentationKpiSummary.length > 0 ? (
-                          segmentationKpiSummary.map((kpi) => (
-                            <span key={kpi.id} className="rounded-full border border-slate-200/90 bg-white px-2 py-1 dark:border-white/10 dark:bg-black/25">
-                              {kpi.label}: {kpi.detail}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="rounded-full border border-slate-200/90 bg-white px-2 py-1 dark:border-white/10 dark:bg-black/25">
-                            KPIs na empresa
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          className="rounded-full border border-slate-200/90 bg-white px-2 py-1 font-medium text-primary hover:bg-primary/5 dark:border-white/10 dark:bg-black/25"
-                          onClick={() => setActiveTab("pendentes")}
-                        >
-                          Conferir leads
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex rounded-lg border border-slate-200/90 bg-white p-1 dark:border-white/10 dark:bg-black/30">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={campaignComposerMode === "simple" ? "secondary" : "ghost"}
-                        onClick={() => setCampaignComposerMode("simple")}
-                      >
-                        Simples
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={campaignComposerMode === "advanced" ? "secondary" : "ghost"}
-                        onClick={() => setCampaignComposerMode("advanced")}
-                      >
-                        Avancado
-                      </Button>
-                    </div>
-                  </div>
-
-                  {campaignAiStatus?.enabled ? (
-                    <div className="space-y-2 rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-2">
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Input
-                          placeholder="Objetivo da campanha"
-                          className={cn("h-9", darkFieldClass)}
-                          value={aiGoal}
-                          onChange={(event) => setAiGoal(event.target.value)}
-                        />
-                        <Input
-                          placeholder="Estilo da copy"
-                          className={cn("h-9", darkFieldClass)}
-                          value={aiStyle}
-                          onChange={(event) => setAiStyle(event.target.value)}
-                        />
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {AI_STYLE_PRESETS.map((preset) => (
-                          <Button
-                            key={preset.label}
-                            type="button"
-                            variant={aiStyle === preset.value ? "secondary" : "outline"}
-                            size="sm"
-                            className="h-8 rounded-full px-3 text-xs"
-                            onClick={() => setAiStyle(preset.value)}
-                          >
-                            {preset.label}
-                          </Button>
-                        ))}
-                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => void handleGenerateCampaignCopy()} disabled={generateCampaignCopy.isPending}>
-                          <Sparkles className="h-4 w-4" />
-                          Gerar copy
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => void handleSuggestCampaignSequence()} disabled={suggestCampaignSequence.isPending}>
-                          <Sparkles className="h-4 w-4" />
-                          Sugerir sequencia
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => void handleSuggestCampaignDelays()} disabled={suggestCampaignDelays.isPending}>
-                          <Clock3 className="h-4 w-4" />
-                          Sugerir atrasos
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {campaignComposerMode === "simple" ? (
-                    <>
-                      <div className="space-y-2">
-                        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Texto de envio</p>
-                        <Textarea
-                          placeholder="Digite a mensagem que sera enviada nesta campanha..."
-                          className={cn("min-h-[142px]", darkFieldClass)}
-                          value={campaignMessage}
-                          onChange={(event) => setCampaignMessage(event.target.value)}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <input ref={campaignImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleCampaignImageChange} />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-full justify-center"
-                          onClick={() => campaignImageInputRef.current?.click()}
-                        >
-                          <ImagePlus className="h-4 w-4" />
-                          {campaignImage ? "Trocar imagem da campanha" : "Anexar imagem da campanha"}
-                        </Button>
-                        {campaignImage ? (
-                          <div className="space-y-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 text-sm dark:border-white/10 dark:bg-black/30">
-                            <div className="flex items-center gap-3">
-                              <img src={campaignImage.dataUrl} alt={campaignImage.name} className="h-14 w-14 rounded-lg object-cover" />
-                              <div className="min-w-0">
-                                <p className="truncate font-medium text-foreground">{campaignImage.name}</p>
-                                <p className="text-xs text-muted-foreground">{Math.round(campaignImage.size / 1024)} KB</p>
+                          {step.textVariants && step.textVariants.length > 0 && (
+                            <div className="rounded-lg border border-violet-100 bg-violet-50/20 p-2.5 dark:border-violet-900/10 dark:bg-violet-950/5 space-y-2">
+                              <p className="text-[10px] font-bold text-violet-600 dark:text-violet-400">Variações Alternativas Ativas:</p>
+                              <div className="grid gap-1.5">
+                                {step.textVariants.map((variant, vIdx) => (
+                                  <textarea
+                                    key={vIdx}
+                                    value={variant}
+                                    onChange={(e) => {
+                                      const updatedVariants = [...(step.textVariants || [])];
+                                      updatedVariants[vIdx] = e.target.value;
+                                      updateCampaignStep(step.id, { textVariants: updatedVariants });
+                                    }}
+                                    className="w-full rounded border border-slate-200 bg-white/80 p-2 text-[10px] dark:border-white/5 dark:bg-black/30 font-sans min-h-[44px] resize-y"
+                                  />
+                                ))}
                               </div>
                             </div>
-                            <Input
-                              className={darkFieldClass}
-                              placeholder="Legenda da imagem opcional"
-                              value={campaignImageCaption}
-                              onChange={(event) => setCampaignImageCaption(event.target.value)}
-                            />
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <Button
-                                type="button"
-                                variant={!campaignImageFirst ? "secondary" : "outline"}
-                                onClick={() => setCampaignImageFirst(false)}
-                              >
-                                Texto primeiro
-                              </Button>
-                              <Button
-                                type="button"
-                                variant={campaignImageFirst ? "secondary" : "outline"}
-                                onClick={() => setCampaignImageFirst(true)}
-                              >
-                                Imagem primeiro
-                              </Button>
-                            </div>
-                          </div>
-                        ) : null}
-                        <ErrorMessage message={campaignImageError} variant="banner" />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="space-y-3">
-                      <input ref={sequenceImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleSequenceImageChange} />
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => addCampaignStep("text")}>
-                          <Megaphone className="h-4 w-4" />
-                          Texto
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => addCampaignStep("image")}>
-                          <ImagePlus className="h-4 w-4" />
-                          Imagem
-                        </Button>
-                      </div>
-
-                      {campaignSequence.map((step, index) => (
-                        <div key={step.id} className="space-y-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <label className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                checked={step.enabled}
-                                onChange={(event) => updateCampaignStep(step.id, { enabled: event.target.checked })}
-                              />
-                              passo {step.order} ativo
-                            </label>
-                            <div className="flex gap-1">
-                              <Button type="button" variant="ghost" size="sm" onClick={() => moveCampaignStep(step.id, -1)} disabled={index === 0}>
-                                <ArrowUp className="h-4 w-4" />
-                              </Button>
-                              <Button type="button" variant="ghost" size="sm" onClick={() => moveCampaignStep(step.id, 1)} disabled={index === campaignSequence.length - 1}>
-                                <ArrowDown className="h-4 w-4" />
-                              </Button>
-                              {campaignAiStatus?.enabled ? (
-                                <Button type="button" variant="ghost" size="sm" onClick={() => void handleRewriteCampaignStep(step)} disabled={rewriteCampaignStep.isPending}>
-                                  <Sparkles className="h-4 w-4" />
-                                </Button>
-                              ) : null}
-                              <Button type="button" variant="ghost" size="sm" onClick={() => removeCampaignStep(step.id)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-
-                          <Select value={step.type} onValueChange={(value) => updateCampaignStep(step.id, { type: value as "text" | "image" })}>
-                            <SelectTrigger className={darkFieldClass}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className={darkSelectContentClass}>
-                              <SelectItem value="text" className={darkSelectItemClass}>Texto</SelectItem>
-                              <SelectItem value="image" className={darkSelectItemClass}>Imagem</SelectItem>
-                            </SelectContent>
-                          </Select>
-
-                          <Textarea
-                            placeholder={step.type === "image" ? "Legenda opcional da imagem" : "Texto do passo"}
-                            className={cn("min-h-[90px]", darkFieldClass)}
-                            value={step.text}
-                            onChange={(event) => updateCampaignStep(step.id, { text: event.target.value })}
-                          />
-
-                          {step.type === "image" ? (
-                            <div className="space-y-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedImageStepId(step.id);
-                                  sequenceImageInputRef.current?.click();
-                                }}
-                              >
-                                <ImagePlus className="h-4 w-4" />
-                                {step.image ? "Trocar imagem" : "Selecionar imagem"}
-                              </Button>
-                              {step.image ? (
-                                <div className="flex items-center gap-3 rounded-lg border border-slate-200/90 bg-white/80 p-2 text-xs dark:border-white/10 dark:bg-black/30">
-                                  <img src={step.image.dataUrl} alt={step.image.name} className="h-12 w-12 rounded-md object-cover" />
-                                  <span className="truncate">{step.image.name}</span>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <div className="space-y-1">
-                              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Quando enviar</p>
-                              <Select
-                                value={step.triggerMode === "after_reply" ? "after_reply" : "immediate"}
-                                onValueChange={(value) =>
-                                  updateCampaignStep(step.id, {
-                                    triggerMode: value === "after_reply" ? "after_reply" : "immediate",
-                                  })
-                                }
-                              >
-                                <SelectTrigger className={darkFieldClass}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className={darkSelectContentClass}>
-                                  <SelectItem value="immediate" className={darkSelectItemClass}>No disparo da campanha</SelectItem>
-                                  <SelectItem value="after_reply" className={darkSelectItemClass}>Quando o lead responder</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Atraso apos passo</p>
-                              <Input
-                                type="number"
-                                min="0"
-                                step="1"
-                                className={darkFieldClass}
-                                value={step.delayAfterSeconds}
-                                onChange={(event) => updateCampaignStep(step.id, { delayAfterSeconds: Math.max(0, Number(event.target.value) || 0) })}
-                              />
-                              <p className="text-[11px] text-muted-foreground">
-                                {step.delayAfterSeconds >= 60
-                                  ? `${(step.delayAfterSeconds / 60).toFixed(step.delayAfterSeconds % 60 === 0 ? 0 : 1)} min`
-                                  : `${step.delayAfterSeconds}s`}
-                              </p>
-                            </div>
-                          </div>
+                          )}
                         </div>
-                      ))}
-                      <ErrorMessage message={campaignImageError} variant="banner" />
-                    </div>
-                  )}
+                      )}
 
-                  <div className="grid gap-3 rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30 sm:grid-cols-2">
-                    <div className="space-y-1 sm:col-span-2">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Evolution do disparo</p>
-                      <Select
-                        value={dispatchOptions.evolutionInstanceId || "tenant-default"}
-                        onValueChange={(value) =>
-                          setDispatchOptions((current) => ({
-                            ...current,
-                            evolutionInstanceId: value === "tenant-default" ? null : value,
-                          }))
-                        }
-                        disabled={evolutionInstanceOptions.length === 0}
-                      >
-                        <SelectTrigger className={darkFieldClass}>
-                          <SelectValue placeholder="Padrao da empresa" />
-                        </SelectTrigger>
-                        <SelectContent className={darkSelectContentClass}>
-                          <SelectItem value="tenant-default" className={darkSelectItemClass}>
-                            Padrao da empresa
-                          </SelectItem>
-                          {evolutionInstanceOptions.map((instance) => (
-                            <SelectItem key={instance.id} value={instance.id} className={darkSelectItemClass}>
-                              {instance.name}{instance.isDefault ? " · padrao" : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-[11px] text-muted-foreground">
-                        {evolutionInstanceOptions.length > 0
-                          ? "Esta campanha usara a Evolution escolhida nos disparos e nos passos apos resposta."
-                          : "Nenhuma instancia Evolution ativa cadastrada; o sistema tentara usar o fallback da empresa."}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Atraso entre leads</p>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="1"
-                        className={darkFieldClass}
-                        value={dispatchOptions.leadDelaySeconds}
-                        onChange={(event) =>
-                          setDispatchOptions((current) => ({
-                            ...current,
-                            leadDelaySeconds: Math.max(0, Number(event.target.value) || 0),
-                          }))
-                        }
-                      />
-                      <p className="text-[11px] text-muted-foreground">
-                        {dispatchOptions.leadDelaySeconds >= 60
-                          ? `${(dispatchOptions.leadDelaySeconds / 60).toFixed(dispatchOptions.leadDelaySeconds % 60 === 0 ? 0 : 1)} min`
-                          : `${dispatchOptions.leadDelaySeconds}s`}
-                      </p>
-                    </div>
-                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={dispatchOptions.stopOnStepFailure}
-                        onChange={(event) =>
-                          setDispatchOptions((current) => ({
-                            ...current,
-                            stopOnStepFailure: event.target.checked,
-                          }))
-                        }
-                      />
-                      cancelar proximos passos se um passo falhar
-                    </label>
-                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(dispatchOptions.waitForReply)}
-                        onChange={(event) =>
-                          setDispatchOptions((current) => ({
-                            ...current,
-                            waitForReply: event.target.checked,
-                          }))
-                        }
-                      />
-                      habilitar passos apos resposta no modo avancado
-                    </label>
-                  </div>
-              </div>
+                      {/* WhatsApp Actions buttons */}
+                      {step.type === "text" && (
+                        <div className="border-t border-slate-100 dark:border-white/5 pt-2 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-semibold text-slate-500">Botões de Ação do WhatsApp (Max 3)</span>
+                            <button
+                              type="button"
+                              onClick={() => handleAddStepButton(step.id)}
+                              className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1"
+                            >
+                              <Plus className="h-3 w-3" /> Adicionar Botão
+                            </button>
+                          </div>
 
-              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-primary">
-                  <Megaphone className="h-4 w-4" />
-                  Fluxo real
+                          {step.buttons && step.buttons.length > 0 && (
+                            <div className="grid gap-2 pt-1">
+                              {step.buttons.map((btn, btnIdx) => (
+                                <div key={btnIdx} className="flex gap-2 items-center bg-slate-50 dark:bg-slate-900/40 p-2 rounded-lg border border-slate-200/60 dark:border-white/5">
+                                  <Input
+                                    value={btn.displayText}
+                                    placeholder="Nome do Botão (Ex: Agendar)"
+                                    className="h-8 text-[11px] max-w-[120px]"
+                                    onChange={(e) => handleUpdateStepButton(step.id, btnIdx, { displayText: e.target.value })}
+                                  />
+                                  <Select
+                                    value={btn.type}
+                                    onValueChange={(val) => handleUpdateStepButton(step.id, btnIdx, { type: val as "url" | "reply" })}
+                                  >
+                                    <SelectTrigger className="h-8 text-[11px] max-w-[100px]">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="url">Link / URL</SelectItem>
+                                      <SelectItem value="reply">Resposta Rápida</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  {btn.type === "url" && (
+                                    <Input
+                                      value={btn.url || ""}
+                                      placeholder="Link (Ex: {{scheduling_link}})"
+                                      className="h-8 text-[11px] flex-1 font-mono"
+                                      onChange={(e) => handleUpdateStepButton(step.id, btnIdx, { url: e.target.value })}
+                                    />
+                                  )}
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => handleRemoveStepButton(step.id, btnIdx)}
+                                    className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  A campanha fica salva em <strong>Campanhas</strong>. Os envios sao criados e acompanhados em <strong>Fila de disparos</strong>.
-                </p>
-              </div>
 
-              <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
-                <Button onClick={() => void handleDispatch()} disabled={isDispatching || createCampaign.isPending || updateCampaign.isPending || !selectedClientId}>
-                  <Megaphone className="mr-2 h-4 w-4" />
-                  {isDispatching || createCampaign.isPending || updateCampaign.isPending
-                    ? "Salvando..."
-                    : editingCampaignId
-                      ? "Salvar alterações"
-                      : "Criar campanha"}
-                </Button>
-                {editingCampaignId && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      resetCampaignForm();
-                      setDispatchStatus(null);
-                    }}
-                    disabled={isDispatching || updateCampaign.isPending}
-                  >
-                    Cancelar edição
+                <div className="flex gap-2 pt-2">
+                  <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => addCampaignStep("text")}>
+                    <Plus className="h-3.5 w-3.5" /> Envio de Texto
                   </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {activeTab === "disparo-direto" && isInternalUser && (
-          <Card className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-            <CardContent className="space-y-6 p-6">
-              <div>
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">Disparo Direto</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Envie uma mensagem avulsa usando a URL Evolution configurada na empresa selecionada.
-                </p>
-              </div>
-
-              {directDispatchStatus ? (
-                <div
-                  className={cn(
-                    "rounded-xl border p-4 text-sm font-medium",
-                    directDispatchStatus.includes("enviada")
-                      ? "border-primary/30 bg-primary/10 text-primary"
-                      : "border-destructive/30 bg-destructive/10 text-destructive",
-                  )}
-                >
-                  {directDispatchStatus}
+                  <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => addCampaignStep("image")}>
+                    <Plus className="h-3.5 w-3.5" /> Envio de Imagem
+                  </Button>
                 </div>
-              ) : null}
+              </CardContent>
+            </Card>
 
-              <div className="grid gap-4 md:grid-cols-[0.7fr_1.3fr]">
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Telefone</p>
-                  <Input
-                    className={darkFieldClass}
-                    inputMode="tel"
-                    placeholder="Ex: 11999999999"
-                    value={directPhone}
-                    onChange={(event) => setDirectPhone(event.target.value)}
-                  />
-                </div>
+            {/* STEP 3: Dispatch & Scheduling parameters */}
+            <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">3</span>
+                  Configurações de Disparo
+                </CardTitle>
+                <CardDescription>Defina a instância do WhatsApp, revezamento de agendas e data de envio</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Instância WhatsApp</p>
+                    <Select
+                      value={dispatchOptions.evolutionInstanceId || "company-default"}
+                      onValueChange={(val) => setDispatchOptions(curr => ({ ...curr, evolutionInstanceId: val === "company-default" ? null : val }))}
+                    >
+                      <SelectTrigger className="h-10 rounded-xl text-xs">
+                        <SelectValue placeholder="Selecione a instância..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="company-default">Padrão da Empresa</SelectItem>
+                        {evolutionInstanceOptions.map((inst) => (
+                          <SelectItem key={inst.id} value={inst.id}>
+                            {inst.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <div className="space-y-2">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Mensagem de texto</p>
-                  <Textarea
-                    className={cn("min-h-[150px]", darkFieldClass)}
-                    placeholder="Digite a mensagem de texto que sera enviada pela Evolution..."
-                    value={directMessage}
-                    onChange={(event) => setDirectMessage(event.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3 rounded-2xl border border-border/80 bg-background/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Imagem opcional</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Envie uma imagem com legenda propria, separada da mensagem de texto.
+                  <div className="space-y-2">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1">
+                      Atraso entre envios (segundos)
+                      <InfoTip text="Tempo de espera sugerido entre contatos para evitar bans no WhatsApp." />
                     </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <input ref={directImageInputRef} type="file" accept="image/*" className="sr-only" onChange={handleDirectImageChange} />
-                    <Button type="button" variant="outline" onClick={() => directImageInputRef.current?.click()}>
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      {directImage ? "Trocar imagem" : "Selecionar imagem"}
-                    </Button>
-                    {directImage ? (
-                      <Button type="button" variant="ghost" onClick={() => setDirectImage(null)}>
-                        Remover
-                      </Button>
-                    ) : null}
+                    <Input
+                      type="number"
+                      min="1"
+                      className="h-10 text-xs rounded-xl"
+                      value={dispatchOptions.leadDelaySeconds}
+                      onChange={(e) => setDispatchOptions(curr => ({ ...curr, leadDelaySeconds: Math.max(1, Number(e.target.value)) }))}
+                    />
                   </div>
                 </div>
 
-                {directImage ? (
-                  <div className="grid gap-3 rounded-xl border border-border/70 bg-card/80 p-3 md:grid-cols-[140px_1fr]">
-                    <img src={directImage.dataUrl} alt={directImage.name} className="h-28 w-full rounded-lg object-cover" />
-                    <div className="space-y-1 text-sm text-muted-foreground">
-                      <p className="font-medium text-foreground">{directImage.name}</p>
-                      <p>{directImage.type || "imagem"} · {(directImage.size / 1024).toFixed(1)} KB</p>
-                      <Input
-                        className={darkFieldClass}
-                        placeholder="Legenda da imagem opcional"
-                        value={directImageCaption}
-                        onChange={(event) => setDirectImageCaption(event.target.value)}
-                      />
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Button
-                          type="button"
-                          variant={!directImageFirst ? "secondary" : "outline"}
-                          onClick={() => setDirectImageFirst(false)}
-                        >
-                          Texto primeiro
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={directImageFirst ? "secondary" : "outline"}
-                          onClick={() => setDirectImageFirst(true)}
-                        >
-                          Imagem primeiro
-                        </Button>
-                      </div>
+                {/* Round-Robin Calendly/Agenda Integration */}
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/20 p-4 dark:border-indigo-950 dark:bg-indigo-950/10 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        Agendamento Integrado (Multi-Agenda)
+                        <InfoTip text="Distribua leads entre links individuais dos consultores da equipe de vendas usando revezamento justo (Round-Robin)." />
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Substitui {"{{scheduling_link}}"} na mensagem de cada lead enviado</p>
                     </div>
+                    <Switch checked={multiAgendaEnabled} onCheckedChange={setMultiAgendaEnabled} />
                   </div>
-                ) : null}
 
-                {directImageError ? <p className="text-sm text-destructive">{directImageError}</p> : null}
-              </div>
-
-              <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
-                Texto envia <code>number</code> + <code>txt</code>. Imagem envia <code>number</code>, <code>caption</code> e base64 pela mesma URL Evolution da empresa.
-              </div>
-
-              <div className="flex flex-wrap gap-3 border-t border-border/70 pt-5">
-                <Button
-                  type="button"
-                  onClick={() => void handleDirectDispatch()}
-                  disabled={directDispatch.isPending || !selectedClientId}
-                >
-                  <Zap className="mr-2 h-4 w-4" />
-                  {directDispatch.isPending ? "Enviando..." : "Disparar agora"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {activeTab === "enviadas" && isInternalUser && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap gap-3">
-              <div className="relative w-full max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={campaignSearch} onChange={(e) => setCampaignSearch(e.target.value)} placeholder="Buscar campanha..." className={cn("pl-9", darkFieldClass)} />
-              </div>
-              <Button variant="outline" onClick={() => refetchCampaigns()} disabled={campaignsLoading}>
-                <RefreshCw className={cn("mr-1 h-4 w-4", campaignsLoading && "animate-spin")} />
-                Atualizar
-              </Button>
-            </div>
-            <ErrorMessage message={campaignsError ? (campaignsError as Error).message : null} variant="banner" />
-            {!campaignsLoading && sentCampaigns.length === 0 ? (
-              <EmptyState
-                title="Nenhuma campanha encontrada"
-                description="Crie uma campanha na aba Nova Campanha para começar."
-              />
-            ) : null}
-            <div className="grid gap-4 xl:grid-cols-3">
-              {sentCampaigns.map((campaign) => (
-                <Card key={campaign.id} className="rounded-2xl border-border/80 bg-card/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-                  <CardContent className="space-y-5 p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xl font-extrabold tracking-tight text-foreground">{campaign.name}</p>
-                        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                          {campaign.last_triggered_at ? formatDate(campaign.last_triggered_at) : "Sem disparo"} · {campaign.client_name ?? campaign.client_id}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", getCampaignStatusView(campaign.status).className)}>
-                          {getCampaignStatusView(campaign.status).label}
-                        </span>
-                        <span className={cn("rounded-md border px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.18em]", campaign.mode === "agente" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" : "border-border/50 text-muted-foreground")}>
-                          {campaign.mode === "agente" ? "Agente IA" : "Só Disparo"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="border-t border-border/70 pt-4">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                        Base: {campaign.import_id || "todas as importacoes"} · Lote: {campaign.limit_per_run}
-                      </p>
-                      <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                        {campaign.scheduled_for ? `Agendada para ${formatDate(campaign.scheduled_for)}` : "Sem data agendada"}
-                      </p>
-                    </div>
-                    {getCampaignPreviewSteps(campaign).length > 0 ? (
-                      <div className="rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-black/30">
-                        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Conteudo da campanha</p>
-                        <div className="mt-2 space-y-2">
-                          {getCampaignPreviewSteps(campaign).slice(0, 4).map((step) => (
-                            <div key={step.id} className="rounded-lg border border-slate-200/80 bg-white/70 p-2 text-sm dark:border-white/10 dark:bg-black/25">
-                              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                                {step.order}. {step.type === "image" ? "imagem" : "texto"}
-                              </p>
-                              {step.text ? <p className="mt-1 line-clamp-2 text-foreground">{step.text}</p> : null}
-                              {step.image ? (
-                                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                  <img src={step.image.dataUrl} alt={step.image.name} className="h-10 w-10 rounded-md object-cover" />
-                                  <span className="truncate">{step.image.name}</span>
+                  {multiAgendaEnabled && (
+                    <div className="space-y-4 animate-fadeIn">
+                      {/* List of consultants */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase font-bold text-slate-500">Equipe de Agendas Cadastradas</label>
+                        {consultants.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic bg-white/50 dark:bg-black/20 p-3 rounded-xl border border-slate-200/50 dark:border-white/5">Nenhum consultor cadastrado para Rotação. Adicione um abaixo.</p>
+                        ) : (
+                          <div className="grid gap-2 max-h-[220px] overflow-y-auto pr-1">
+                            {consultants.map((c) => (
+                              <div key={c.id} className="flex items-center justify-between bg-white dark:bg-black/35 p-2.5 rounded-xl border border-slate-200/80 dark:border-white/5 text-xs shadow-sm">
+                                <div className="min-w-0 flex-1 pr-2">
+                                  <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{c.name}</p>
+                                  <p className="text-[10px] text-muted-foreground truncate font-mono">{c.scheduling_link}</p>
                                 </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
+                                <div className="flex items-center gap-3">
+                                  <Switch
+                                    checked={c.active}
+                                    onCheckedChange={(checked) => {
+                                      updateConsultant.mutate({ id: c.id, clientId: activeClientId, active: checked });
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => deleteConsultant.mutate({ id: c.id, clientId: activeClientId })}
+                                    className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ) : null}
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div>
-                        <p className="font-mono text-[12px] font-bold text-primary">{campaign.client_name ?? campaign.client_id}</p>
-                        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Empresa</p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[12px] font-bold text-sky-300">{campaign.import_id || "todas"}</p>
-                        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Base</p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[12px] font-bold text-amber-300">{campaign.limit_per_run} leads</p>
-                        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">Lote</p>
-                      </div>
-                    </div>
-                    {(campaign.starts_at || campaign.ends_at) && (
-                      <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
-                        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-sky-400">Período ativo do chatbot</p>
-                        <p className="mt-1 font-mono text-xs text-muted-foreground">
-                          {campaign.starts_at ? formatDate(campaign.starts_at) : "Sem início"} → {campaign.ends_at ? formatDate(campaign.ends_at) : "Sem fim"}
-                        </p>
-                        {(() => {
-                          const now = Date.now();
-                          const s = campaign.starts_at ? new Date(campaign.starts_at).getTime() : null;
-                          const e = campaign.ends_at ? new Date(campaign.ends_at).getTime() : null;
-                          const isActive = (!s || now >= s) && (!e || now <= e);
-                          return isActive ? (
-                            <span className="mt-1 inline-block rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-400">● Ativo agora</span>
-                          ) : null;
-                        })()}
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-2 border-t border-border/70 pt-4">
-                      <Button variant="outline" size="sm" onClick={() => setExpandedDispatchCampaignId(expandedDispatchCampaignId === campaign.id ? null : campaign.id)}>
-                        Disparos
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleStartEditCampaign(campaign)}>
-                        <Pencil className="mr-2 h-4 w-4" />
-                        Editar
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setCampaignActionDialog({ action: "archive", campaign })}>
-                        <Archive className="mr-2 h-4 w-4" />
-                        Arquivar
-                      </Button>
-                      <Button variant="destructive" size="sm" onClick={() => setCampaignActionDialog({ action: "delete", campaign })}>
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Apagar
-                      </Button>
-                    </div>
-                    {expandedDispatchCampaignId === campaign.id && (
-                      <CampaignDispatchPanel campaignId={campaign.id} />
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {activeTab === "agendamentos" && isInternalUser && (
-          <DispatchManagerTab
-            campaigns={filteredCampaigns}
-            campaignsLoading={campaignsLoading}
-            selectedClientId={selectedClientId}
-            evolutionInstanceOptions={evolutionInstanceOptions}
-            onNavigateToCampaign={() => setActiveTab("campanha")}
-          />
-        )}
-      </section>
+                      {/* Add new consultant form */}
+                      <div className="border-t border-indigo-100/50 dark:border-white/5 pt-3 space-y-3">
+                        <p className="text-[10px] uppercase font-bold text-slate-500">Cadastrar Novo Consultor na Base</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input
+                            placeholder="Nome do Consultor"
+                            value={newConsultantName}
+                            onChange={e => setNewConsultantName(e.target.value)}
+                            className="h-9 text-xs rounded-xl"
+                          />
+                          <Input
+                            placeholder="Link da Agenda (Ex: https://calendly.com/...)"
+                            value={newConsultantLink}
+                            onChange={e => setNewConsultantLink(e.target.value)}
+                            className="h-9 text-xs font-mono rounded-xl"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleCreateConsultant}
+                          disabled={createConsultant.isPending}
+                          className="w-full h-9 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-sm"
+                        >
+                          <Plus className="h-4 w-4 mr-1" /> {createConsultant.isPending ? "Salvando..." : "Salvar na Base"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Trigger Types */}
+                <div className="space-y-3 border-t border-slate-100 dark:border-white/5 pt-4">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Momento do disparo</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewTriggerType("manual")}
+                      className={cn(
+                        "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-xs font-semibold transition-colors",
+                        newTriggerType === "manual"
+                          ? "border-primary/40 bg-primary/10 text-primary"
+                          : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
+                      )}
+                    >
+                      <Play className="h-4 w-4" />
+                      Disparar Imediatamente
+                      <span className="font-normal text-[10px] opacity-70">Executar após a criação</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewTriggerType("scheduled")}
+                      className={cn(
+                        "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-xs font-semibold transition-colors",
+                        newTriggerType === "scheduled"
+                          ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
+                          : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
+                      )}
+                    >
+                      <Clock3 className="h-4 w-4" />
+                      Disparo Agendado
+                      <span className="font-normal text-[10px] opacity-70">Definir data e hora do lote</span>
+                    </button>
+                  </div>
+
+                  {newTriggerType === "scheduled" && (
+                    <div className="space-y-1.5 animate-fadeIn">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Data e Hora do Agendamento</label>
+                      <Input
+                        type="datetime-local"
+                        value={newScheduledAt}
+                        onChange={(e) => setNewScheduledAt(e.target.value)}
+                        className="h-10 text-xs rounded-xl"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2">
+                  <Button
+                    onClick={handleCreateAndDispatch}
+                    disabled={isSubmitting}
+                    className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow"
+                  >
+                    <Zap className="h-4 w-4" />
+                    {editingCampaignId ? "Salvar Alterações de Campanha" : (newTriggerType === "manual" ? "Salvar e Disparar Lote Agora" : "Salvar e Agendar Disparo")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Interactive Phone Mockup Preview Panel (Right Side) */}
+          <div className="lg:col-span-1 sticky top-6">
+            <Card className="border-slate-200/80 bg-slate-900 shadow-[0_20px_50px_rgba(15,23,42,0.12)] rounded-3xl overflow-hidden text-slate-100">
+              <CardHeader className="bg-slate-950/70 border-b border-white/5 py-4">
+                <CardTitle className="text-xs uppercase font-bold tracking-wider text-slate-400">Simulador de WhatsApp</CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 bg-slate-900/60 min-h-[440px] flex flex-col justify-between">
+                {/* Chat window mockup */}
+                <div className="space-y-4 flex-1">
+                  {campaignSequence.filter(s => s.enabled).map((step, idx) => {
+                    const sampleText = step.text || "(Escreva a mensagem no formulário...)";
+                    const resolvedText = sampleText
+                      .replace(/\{\{\s*nome\s*\}\}/gi, "Maria Silva")
+                      .replace(/\{\{\s*telefone\s*\}\}/gi, "5511999999999")
+                      .replace(/\{\{\s*scheduling_link\s*\}\}/gi, multiAgendaEnabled ? "https://calendly.com/consultor" : "(Link da Agenda)");
+
+                    return (
+                      <div key={idx} className="flex flex-col items-start gap-1 max-w-[85%] animate-fadeIn">
+                        <div className="rounded-2xl rounded-tl-none bg-slate-800 border border-white/5 p-3 text-xs shadow space-y-2 text-slate-200">
+                          {/* Image preview inside simulated balloon */}
+                          {step.type === "image" && (
+                            <div className="rounded-lg overflow-hidden border border-white/10 bg-slate-950/40">
+                              {step.image ? (
+                                <img src={step.image.dataUrl} alt="Preview" className="w-full max-h-[140px] object-cover" />
+                              ) : (
+                                <div className="h-28 w-full flex items-center justify-center text-slate-600 bg-slate-900"><ImagePlus className="h-6 w-6" /></div>
+                              )}
+                            </div>
+                          )}
+
+                          <p className="whitespace-pre-wrap leading-relaxed">{resolvedText}</p>
+                        </div>
+
+                        {/* Interactive WhatsApp buttons mockup */}
+                        {step.type === "text" && step.buttons && step.buttons.length > 0 && (
+                          <div className="grid gap-1 w-full pl-2 mt-1">
+                            {step.buttons.map((btn, bIdx) => (
+                              <div
+                                key={bIdx}
+                                className="w-full bg-slate-800 hover:bg-slate-700/80 border border-white/5 text-center text-[10px] font-bold text-indigo-400 py-1.5 rounded-xl shadow-sm cursor-pointer"
+                              >
+                                🔗 {btn.displayText}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="border-t border-white/5 pt-3 mt-4 text-[10px] text-slate-500 text-center">
+                  * Visualização simplificada das variáveis de lead.
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* 📋 TAB 2: CAMPANHAS CRIADAS (Clean table list) */}
+      {activeTab === "enviadas" && (
+        <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base font-bold">Campanhas Configuradas</CardTitle>
+              <CardDescription>Clique para editar as mensagens ou excluir as réguas</CardDescription>
+            </div>
+            <input
+              className="h-9 w-44 rounded-xl border border-slate-200 bg-white px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-white/10 dark:bg-white/[0.05]"
+              placeholder="Buscar campanha..."
+              onChange={(e) => {
+                // local filter or query triggers could go here
+              }}
+            />
+          </CardHeader>
+          <CardContent className="p-0">
+            {loadingCampaigns ? (
+              <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Carregando dados das campanhas...</div>
+            ) : campaigns.length === 0 ? (
+              <div className="p-8">
+                <EmptyState title="Nenhuma campanha encontrada" description="Use o Novo Disparo para registrar a primeira campanha por planilha." />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-slate-200/60 dark:border-white/5">
+                      <TableHead className="px-6 py-4 text-xs font-semibold uppercase font-display">Campanha</TableHead>
+                      <TableHead className="px-4 py-4 text-xs font-semibold uppercase font-display text-center">Modo</TableHead>
+                      <TableHead className="px-4 py-4 text-xs font-semibold uppercase font-display text-center">Leads por Lote</TableHead>
+                      <TableHead className="px-4 py-4 text-xs font-semibold uppercase font-display">Criada Em</TableHead>
+                      <TableHead className="px-6 py-4 text-xs font-semibold uppercase font-display text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {campaigns.map((c) => (
+                      <TableRow key={c.id} className="border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]">
+                        <TableCell className="px-6 py-4">
+                          <p className="text-sm font-bold text-foreground">{c.name}</p>
+                          <p className="text-xs text-muted-foreground">{c.client_name ?? "Empresa padrão"} · {c.import_id ? "Base importada" : "Geral"}</p>
+                        </TableCell>
+                        <TableCell className="px-4 py-4 text-center">
+                          <span className={cn("inline-block rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold uppercase", c.mode === "agente" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" : "border-border/50 text-slate-500")}>
+                            {c.mode === "agente" ? "Agente IA" : "Disparo Direto"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="px-4 py-4 text-center text-sm font-semibold">{c.limit_per_run}</TableCell>
+                        <TableCell className="px-4 py-4 text-xs text-muted-foreground">{formatDateTime(c.created_at)}</TableCell>
+                        <TableCell className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button size="sm" variant="outline" className="h-8 w-8 p-0" title="Editar" onClick={() => handleEditCampaign(c)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-8 w-8 p-0 text-rose-500 border-rose-200/40 hover:bg-rose-50 dark:hover:bg-rose-950/20" title="Excluir" onClick={() => void handleDeleteCampaign(c)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ⚡ TAB 3: FILA DE ENVIOS (Cross-campaign dispatch executions) */}
+      {activeTab === "agendamentos" && (
+        <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base font-bold">Fila de Disparos em Massa</CardTitle>
+              <CardDescription>Acompanhe e gerencie lotes de disparos criados por planilha diretamente</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                refetchDispatches();
+                toast({ title: "Fila atualizada" });
+              }}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" /> Atualizar
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loadingDispatches ? (
+              <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Carregando lotes de disparo...</div>
+            ) : dispatches.length === 0 ? (
+              <div className="p-8">
+                <EmptyState title="Nenhum lote de disparo" description="Crie um disparo para enfileirar as execuções de envio em massa." />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-slate-200/60 dark:border-white/5">
+                      <TableHead className="px-6 py-4 text-xs font-semibold uppercase font-display">Lote / Origem</TableHead>
+                      <TableHead className="px-4 py-4 text-xs font-semibold uppercase font-display text-center">Status</TableHead>
+                      <TableHead className="px-4 py-4 text-xs font-semibold uppercase font-display text-center">Progresso</TableHead>
+                      <TableHead className="px-4 py-4 text-xs font-semibold uppercase font-display">Criado / Agendado</TableHead>
+                      <TableHead className="px-6 py-4 text-xs font-semibold uppercase font-display text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dispatches.map((disp) => {
+                      const total = (disp.sent_count ?? 0) + (disp.failed_count ?? 0);
+                      return (
+                        <TableRow key={disp.id} className="border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]">
+                          <TableCell className="px-6 py-4">
+                            <p className="text-sm font-bold text-foreground">{disp.name}</p>
+                            <p className="text-xs text-muted-foreground">Campanha: {(disp as any).campaign_name || "Planilha"}</p>
+                          </TableCell>
+                          <TableCell className="px-4 py-4 text-center">
+                            <Badge className={cn("border text-[10px] font-semibold rounded-xl px-2 py-0.5", CAMPAIGN_STATUS_COLORS[disp.status] || "")}>
+                              {CAMPAIGN_STATUS_LABELS[disp.status] || disp.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="px-4 py-4">
+                            <div className="flex flex-col items-center justify-center gap-1 w-28 mx-auto">
+                              <div className="flex items-center justify-between text-[10px] font-bold w-full">
+                                <span className="text-emerald-500">{disp.sent_count} ✓</span>
+                                <span className="text-rose-500">{disp.failed_count} ✗</span>
+                              </div>
+                              {total > 0 && (
+                                <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden">
+                                  <div
+                                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.round((disp.sent_count / total) * 100)}%` }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-4 py-4 text-xs text-muted-foreground">
+                            {formatDateTime(disp.triggered_at || disp.created_at)}
+                          </TableCell>
+                          <TableCell className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {disp.status === "draft" && (
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() => handleTriggerDispatchBatch(disp.id)}
+                                  className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs px-2.5 font-bold shadow-sm"
+                                >
+                                  <Play className="h-3.5 w-3.5 mr-1" /> Iniciar
+                                </Button>
+                              )}
+                              {disp.status === "running" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handlePauseDispatchBatch(disp.id)}
+                                  className="h-8 border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400 rounded-xl text-xs px-2.5 font-bold"
+                                >
+                                  <Pause className="h-3.5 w-3.5 mr-1" /> Pausar
+                                </Button>
+                              )}
+                              {disp.failed_count > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Baixar Relatório de Falhas"
+                                  onClick={() => handleDownloadFailedCsv(disp)}
+                                  className="h-8 w-8 p-0 rounded-xl"
+                                >
+                                  <Download className="h-3.5 w-3.5 text-slate-700 dark:text-white/80" />
+                                </Button>
+                              )}
+                              {(disp.status === "draft" || disp.status === "failed" || disp.status === "done") && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Excluir Lote"
+                                  onClick={() => handleDeleteDispatchBatch(disp.id)}
+                                  className="h-8 w-8 p-0 text-rose-500 border-rose-200/40 hover:bg-rose-50 rounded-xl"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </PageShell>
   );
 }
