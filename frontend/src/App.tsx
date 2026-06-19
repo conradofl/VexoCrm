@@ -8,7 +8,8 @@ import { ClientPortalLayout } from "@/components/ClientPortalLayout";
 import { EmptyState } from "@/components/EmptyState";
 import { MainLayout } from "@/components/MainLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { INTERNAL_PAGE_ORDER, getDefaultClientRoute } from "@/lib/access";
+import { INTERNAL_PAGE_ORDER, getDefaultClientRoute, isInternalPageAllowedForClient } from "@/lib/access";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 import Agente from "./pages/Agente";
@@ -43,20 +44,50 @@ const queryClient = new QueryClient();
 
 function InternalIndexRedirect() {
   const { canAccessInternalPage } = useAuth();
-  const target = INTERNAL_PAGE_ORDER.find((page) => canAccessInternalPage(page));
+  const crmClient = useOptionalCrmClient();
+  const allowedTabs = crmClient?.selectedClient?.n8n_settings?.allowed_tabs;
+
+  const target = INTERNAL_PAGE_ORDER.find(
+    (page) => canAccessInternalPage(page) && isInternalPageAllowedForClient(page, allowedTabs)
+  );
 
   if (!target) {
     return (
       <div className="flex min-h-screen items-center justify-center px-6">
         <EmptyState
-          title="Nenhuma pagina liberada"
-          description="Este usuario interno nao possui paginas liberadas. Ajuste as permissoes no painel para continuar."
+          title="Nenhuma página liberada"
+          description="Este usuário interno não possui páginas liberadas ou a empresa atual não possui abas contratadas. Ajuste as permissões no painel para continuar."
         />
       </div>
     );
   }
 
-  return <Navigate to={target} replace />;
+  const pageToPath: Record<string, string> = {
+    dashboard: "dashboard",
+    leads: "leads",
+    planilhas: "planilhas",
+    whatsapp: "whatsapp",
+    agente: "agente",
+    usuarios: "usuarios",
+    empresas: "empresas",
+    campanhas: "planilhas",
+    "inteligencia-comercial": "inteligencia-comercial",
+    "chatbot-kanban": "chatbot",
+    "chatbot-config": "chatbot-settings",
+    "fila-de-followup": "followup",
+    "followup-empresas": "followup",
+    "followup-campanhas": "followup",
+    "followup-analytics": "followup",
+    "followup-sugestoes": "followup",
+    "chatbot-docs": "chatbot-docs",
+    "onboarding-wizard": "onboarding",
+    conexoes: "conexoes",
+    aquecimento: "aquecimento",
+    relatorios: "relatorios",
+  };
+
+  const path = pageToPath[target] || target;
+  return <Navigate to={path} replace />;
 }
 
 function ClientIndexRedirect() {

@@ -1,6 +1,7 @@
 import { type AccessRole, type AccessView, useAuth } from "@/contexts/AuthContext";
-import { type InternalPage } from "@/lib/access";
+import { type InternalPage, INTERNAL_PAGE_ORDER, isPathAllowedForClient, isInternalPageAllowedForClient } from "@/lib/access";
 import { Navigate, useLocation } from "react-router-dom";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -30,6 +31,9 @@ export default function ProtectedRoute({
   const location = useLocation();
   const isSetPasswordPage = location.pathname === "/set-password";
 
+  const crmClient = useOptionalCrmClient();
+  const allowedTabs = crmClient?.selectedClient?.n8n_settings?.allowed_tabs;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen w-full">
@@ -58,7 +62,41 @@ export default function ProtectedRoute({
     return <Navigate to={defaultRoute} replace />;
   }
 
-  if (requiredInternalPage && !canAccessInternalPage(requiredInternalPage)) {
+  if (requiredInternalPage && (!canAccessInternalPage(requiredInternalPage) || !isInternalPageAllowedForClient(requiredInternalPage, allowedTabs))) {
+    return <Navigate to="/crm" replace />;
+  }
+
+  if (location.pathname.startsWith("/crm") && !isPathAllowedForClient(location.pathname, allowedTabs)) {
+    const targetPage = INTERNAL_PAGE_ORDER.find(
+      (page) => canAccessInternalPage(page) && isInternalPageAllowedForClient(page, allowedTabs)
+    );
+    if (targetPage) {
+      const pageToPath: Record<string, string> = {
+        dashboard: "dashboard",
+        leads: "leads",
+        planilhas: "planilhas",
+        whatsapp: "whatsapp",
+        agente: "agente",
+        usuarios: "usuarios",
+        empresas: "empresas",
+        campanhas: "planilhas",
+        "inteligencia-comercial": "inteligencia-comercial",
+        "chatbot-kanban": "chatbot",
+        "chatbot-config": "chatbot-settings",
+        "fila-de-followup": "followup",
+        "followup-empresas": "followup",
+        "followup-campanhas": "followup",
+        "followup-analytics": "followup",
+        "followup-sugestoes": "followup",
+        "chatbot-docs": "chatbot-docs",
+        "onboarding-wizard": "onboarding",
+        conexoes: "conexoes",
+        aquecimento: "aquecimento",
+        relatorios: "relatorios",
+      };
+      const path = pageToPath[targetPage] || targetPage;
+      return <Navigate to={`/crm/${path}`} replace />;
+    }
     return <Navigate to="/crm" replace />;
   }
 

@@ -48,6 +48,7 @@ export interface LeadClientN8nSettingsPayload {
   chatbotModel?: string;
   segmentationConfig?: LeadClientSegmentationConfig;
   sdrWhatsappNumber?: string | null;
+  allowedTabs?: string[] | null;
 }
 
 export interface LeadClientEvolutionInstancePayload {
@@ -107,6 +108,7 @@ export interface LeadClientN8nSettingsSummary {
   evolution_instances?: LeadClientEvolutionInstance[];
   updated_at: string | null;
   updated_by_email?: string | null;
+  allowed_tabs?: string[] | null;
 }
 
 export function useLeadClients() {

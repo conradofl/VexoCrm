@@ -94,6 +94,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import {
   type CampaignPerformanceItem,
   type CommercialIntelligenceFilters,
@@ -832,7 +833,38 @@ function RankingDetailDialog({
 }
 
 export function CommercialIntelligenceContent({ clientId }: { clientId: string }) {
+  const crmClient = useOptionalCrmClient();
+  const selectedCrmClient = crmClient?.selectedClient;
+  const allowedTabs = selectedCrmClient?.n8n_settings?.allowed_tabs;
+
+  const isSubTabAllowed = (subTabKey: string) => {
+    if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+    return allowedTabs.includes(`inteligencia:${subTabKey}`);
+  };
+
+  const intelligenceSubTabs = [
+    "visao-geral",
+    "metricas",
+    "rankings",
+    "distribuicao",
+    "consultores",
+    "campanhas",
+    "insights",
+    "configuracoes",
+  ] as const;
+  const allowedIntelligenceSubTabs = intelligenceSubTabs.filter(isSubTabAllowed);
+
   const [activeTab, setActiveTab] = useState<TabId>("visao-geral");
+
+  useEffect(() => {
+    if (allowedIntelligenceSubTabs.length > 0) {
+      const isCurrentAllowed = allowedIntelligenceSubTabs.includes(activeTab as any);
+      if (!isCurrentAllowed) {
+        setActiveTab(allowedIntelligenceSubTabs[0] as TabId);
+      }
+    }
+  }, [activeTab, allowedIntelligenceSubTabs]);
+
   const [draftFilters, setDraftFilters] = useState<CommercialIntelligenceFilters>(DEFAULT_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<CommercialIntelligenceFilters>(DEFAULT_FILTERS);
   const [metricSort, setMetricSort] = useState<{ key: keyof CommercialMetricRow; order: SortOrder }>({
@@ -1510,6 +1542,14 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
     return <EmptyState title="Inteligencia comercial indisponivel" description="Nao foi possivel carregar dados operacionais para esta empresa." />;
   }
 
+  if (allowedIntelligenceSubTabs.length === 0) {
+    return (
+      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10 bg-card p-6">
+        <p className="text-sm text-slate-400 text-center">Você não tem permissão para acessar nenhuma sub-aba da Inteligência Comercial.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <DashboardPanel
@@ -1637,31 +1677,47 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="space-y-4">
         <div className="rounded-[1.5rem] border border-slate-200/90 bg-white/75 p-2 dark:border-white/10 dark:bg-white/[0.04]">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 bg-transparent p-0 md:grid-cols-4 xl:grid-cols-8">
-            <TabsTrigger value="visao-geral" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Visao Geral
-            </TabsTrigger>
-            <TabsTrigger value="metricas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Metricas
-            </TabsTrigger>
-            <TabsTrigger value="rankings" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Rankings
-            </TabsTrigger>
-            <TabsTrigger value="distribuicao" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Distribuicao
-            </TabsTrigger>
-            <TabsTrigger value="consultores" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Consultores
-            </TabsTrigger>
-            <TabsTrigger value="campanhas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Campanhas
-            </TabsTrigger>
-            <TabsTrigger value="insights" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Insights
-            </TabsTrigger>
-            <TabsTrigger value="configuracoes" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-              Ajustes
-            </TabsTrigger>
+          <TabsList className="grid h-auto w-full gap-2 bg-transparent p-0" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(110px, 1fr))` }}>
+            {isSubTabAllowed("visao-geral") && (
+              <TabsTrigger value="visao-geral" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Visao Geral
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("metricas") && (
+              <TabsTrigger value="metricas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Metricas
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("rankings") && (
+              <TabsTrigger value="rankings" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Rankings
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("distribuicao") && (
+              <TabsTrigger value="distribuicao" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Distribuicao
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("consultores") && (
+              <TabsTrigger value="consultores" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Consultores
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("campanhas") && (
+              <TabsTrigger value="campanhas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Campanhas
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("insights") && (
+              <TabsTrigger value="insights" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Insights
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("configuracoes") && (
+              <TabsTrigger value="configuracoes" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Ajustes
+              </TabsTrigger>
+            )}
           </TabsList>
         </div>
 

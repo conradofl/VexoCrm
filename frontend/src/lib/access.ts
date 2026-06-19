@@ -550,3 +550,66 @@ export function canAccessInternalPage(
 ): boolean {
   return isAdmin || internalPages.includes(page);
 }
+
+export function isInternalPageAllowedForClient(
+  page: string,
+  allowedTabs: string[] | null | undefined
+): boolean {
+  if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+
+  const pageToTabKey: Record<string, string> = {
+    dashboard: "dashboard",
+    leads: "leads",
+    planilhas: "campanhas",
+    whatsapp: "conversas",
+    usuarios: "usuarios",
+    empresas: "empresas",
+    campanhas: "campanhas",
+    "inteligencia-comercial": "inteligencia",
+    "chatbot-kanban": "chatbot-kanban",
+    "chatbot-config": "chatbot",
+    "fila-de-followup": "followup",
+    "followup-empresas": "followup",
+    "followup-campanhas": "followup",
+    "followup-analytics": "followup",
+    "followup-sugestoes": "followup",
+    "chatbot-docs": "chatbot-docs",
+    "onboarding-wizard": "onboarding",
+    conexoes: "conexoes",
+    aquecimento: "aquecimento",
+    relatorios: "relatorios",
+  };
+
+  const tabKey = pageToTabKey[page];
+  if (!tabKey) return true;
+  if (tabKey === "empresas") return true;
+
+  return allowedTabs.includes(tabKey);
+}
+
+export function isPathAllowedForClient(
+  path: string,
+  allowedTabs: string[] | null | undefined
+): boolean {
+  if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+
+  let tabKey = "";
+  if (path.includes("/crm/dashboard")) tabKey = "dashboard";
+  else if (path.includes("/crm/leads")) tabKey = "leads";
+  else if (path.includes("/crm/whatsapp")) tabKey = "conversas";
+  else if (path.includes("/crm/inteligencia-comercial")) tabKey = "inteligencia";
+  else if (path.includes("/crm/chatbot-settings")) tabKey = "chatbot";
+  else if (path.includes("/crm/chatbot-docs")) tabKey = "chatbot-docs";
+  else if (path.includes("/crm/chatbot")) tabKey = "chatbot-kanban";
+  else if (path.includes("/crm/followup")) tabKey = "followup";
+  else if (path.includes("/crm/conexoes")) tabKey = "conexoes";
+  else if (path.includes("/crm/planilhas")) tabKey = "campanhas";
+  else if (path.includes("/crm/aquecimento")) tabKey = "aquecimento";
+  else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
+  else if (path.includes("/crm/apresentacao")) tabKey = "apresentacao";
+  else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
+  else if (path.includes("/crm/usuarios")) tabKey = "usuarios";
+
+  if (!tabKey) return true;
+  return allowedTabs.includes(tabKey);
+}

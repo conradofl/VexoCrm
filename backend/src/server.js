@@ -1555,6 +1555,7 @@ function maskN8nSettings(row) {
     sdr_whatsapp_number: row.sdr_whatsapp_number || null,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
+    allowed_tabs: Array.isArray(row.allowed_tabs) ? row.allowed_tabs : null,
     // Preserva a lista de instâncias já mascarada por maskEvolutionInstance (server.js:1717).
     // Sem isso a whitelist cortava o campo e a UI mostrava "0 instâncias".
     evolution_instances: Array.isArray(row.evolution_instances) ? row.evolution_instances : [],
@@ -1767,7 +1768,7 @@ async function getLeadClientN8nSettingsStatus(clientId) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, updated_at, updated_by_uid, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, allowed_tabs, updated_at, updated_by_uid, updated_by_email"
     )
     .eq("client_id", clientId)
     .maybeSingle();
@@ -1804,7 +1805,7 @@ async function getLeadClientN8nSettingsMap(clientIds) {
   const { data, error } = await supabase
     .from("lead_client_n8n_settings")
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, allowed_tabs, updated_at, updated_by_email"
     )
     .in("client_id", clientIds);
 
@@ -1845,6 +1846,7 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const chatbotModelProvided = Object.prototype.hasOwnProperty.call(body, "chatbotModel");
   const segmentationConfigProvided = Object.prototype.hasOwnProperty.call(body, "segmentationConfig");
   const sdrWhatsappNumberProvided = Object.prototype.hasOwnProperty.call(body, "sdrWhatsappNumber");
+  const allowedTabsProvided = Object.prototype.hasOwnProperty.call(body, "allowedTabs");
 
   const payload = {
     active: activeProvided ? body.active !== false : existing?.active ?? true,
@@ -1854,6 +1856,9 @@ function buildN8nSettingsPayload(input, authAccess, existing = null) {
       ? sanitizeSegmentationConfig(body.segmentationConfig, body.chatbotModel || existing?.chatbot_model || "generico")
       : sanitizeSegmentationConfig(existing?.segmentation_config, existing?.chatbot_model || body.chatbotModel || "generico"),
     sdr_whatsapp_number: sdrWhatsappNumberProvided ? (normalizeString(body.sdrWhatsappNumber) || null) : existing?.sdr_whatsapp_number ?? null,
+    allowed_tabs: allowedTabsProvided
+      ? (Array.isArray(body.allowedTabs) ? body.allowedTabs : null)
+      : existing?.allowed_tabs ?? null,
     updated_at: new Date().toISOString(),
     updated_by_uid: authAccess?.uid || null,
     updated_by_email: authAccess?.email || null,
@@ -1911,7 +1916,7 @@ async function upsertLeadClientN8nSettings(clientId, input, authAccess, existing
     .from("lead_client_n8n_settings")
     .upsert(payload, { onConflict: "client_id" })
     .select(
-      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, updated_at, updated_by_email"
+      "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, segmentation_config, sdr_whatsapp_number, allowed_tabs, updated_at, updated_by_email"
     )
     .single();
 

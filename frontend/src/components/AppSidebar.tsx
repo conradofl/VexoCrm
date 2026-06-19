@@ -36,7 +36,7 @@ import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
-import { type InternalPage } from "@/lib/access";
+import { type InternalPage, isPathAllowedForClient } from "@/lib/access";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ESTRUTURA GRANULAR DE MÓDULOS — Máquina de Vendas vs Máquina de Disparos
@@ -232,49 +232,64 @@ function ModeSwitcher({
   modo,
   onModoChange,
   collapsed,
+  vendasAllowed,
+  disparosAllowed,
 }: {
   modo: Modo;
   onModoChange: (m: Modo) => void;
   collapsed: boolean;
+  vendasAllowed: boolean;
+  disparosAllowed: boolean;
 }) {
+  if (!vendasAllowed && !disparosAllowed) return null;
+  if (vendasAllowed !== disparosAllowed) return null;
+
   if (collapsed) {
     // Collapsed: duas barras coloridas empilhadas como indicador de modo
     return (
       <div className="mb-3 flex flex-col items-center gap-1.5">
-        {(["vendas", "disparos"] as Modo[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => onModoChange(m)}
-            title={MODULOS[m].labelLongo}
-            className={cn(
-              "h-1.5 w-8 rounded-full transition-all duration-150",
-              modo === m ? "opacity-100" : "opacity-20 hover:opacity-50"
-            )}
-            style={{ backgroundColor: MODULOS[m].cor }}
-          />
-        ))}
+        {(["vendas", "disparos"] as Modo[]).map((m) => {
+          const isAllowed = m === "vendas" ? vendasAllowed : disparosAllowed;
+          if (!isAllowed) return null;
+          return (
+            <button
+              key={m}
+              onClick={() => onModoChange(m)}
+              title={MODULOS[m].labelLongo}
+              className={cn(
+                "h-1.5 w-8 rounded-full transition-all duration-150",
+                modo === m ? "opacity-100" : "opacity-20 hover:opacity-50"
+              )}
+              style={{ backgroundColor: MODULOS[m].cor }}
+            />
+          );
+        })}
       </div>
     );
   }
 
   return (
     <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/60 p-1 dark:border-white/8 dark:bg-white/[0.04]">
-      {(["vendas", "disparos"] as Modo[]).map((m) => (
-        <button
-          key={m}
-          onClick={() => onModoChange(m)}
-          title={MODULOS[m].labelLongo}
-          className={cn(
-            "rounded-lg px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.10em] transition-all duration-150",
-            modo === m
-              ? "text-white shadow-sm"
-              : "text-slate-500 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70"
-          )}
-          style={modo === m ? { backgroundColor: MODULOS[m].cor } : {}}
-        >
-          {MODULOS[m].labelCurto}
-        </button>
-      ))}
+      {(["vendas", "disparos"] as Modo[]).map((m) => {
+        const isAllowed = m === "vendas" ? vendasAllowed : disparosAllowed;
+        if (!isAllowed) return null;
+        return (
+          <button
+            key={m}
+            onClick={() => onModoChange(m)}
+            title={MODULOS[m].labelLongo}
+            className={cn(
+              "rounded-lg px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.10em] transition-all duration-150",
+              modo === m
+                ? "text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70"
+            )}
+            style={modo === m ? { backgroundColor: MODULOS[m].cor } : {}}
+          >
+            {MODULOS[m].labelCurto}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -378,6 +393,26 @@ export function AppSidebar() {
     setIsCustomizerOpen(false);
   };
 
+  const allowedTabs = crmClient?.selectedClient?.n8n_settings?.allowed_tabs;
+
+  const isModoAllowed = (m: Modo) => {
+    const tools = MODULOS[m].ferramentas;
+    return tools.some(
+      (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+    );
+  };
+
+  const vendasAllowed = isModoAllowed("vendas");
+  const disparosAllowed = isModoAllowed("disparos");
+
+  useEffect(() => {
+    if (!vendasAllowed && disparosAllowed && modo === "vendas") {
+      setModo("disparos");
+    } else if (vendasAllowed && !disparosAllowed && modo === "disparos") {
+      setModo("vendas");
+    }
+  }, [vendasAllowed, disparosAllowed, modo]);
+
   const ferramentasVisiveis = MODULOS[modo].ferramentas
     .map((f) => {
       if (f.key === "followup" && suggestionCount > 0) {
@@ -385,9 +420,11 @@ export function AppSidebar() {
       }
       return f;
     })
-    .filter((f) => canAccessInternalPage(f.page));
+    .filter((f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs));
 
-  const visibleSistema = SISTEMA_ITEMS.filter((f) => canAccessInternalPage(f.page));
+  const visibleSistema = SISTEMA_ITEMS.filter(
+    (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+  );
 
   const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
 
@@ -441,7 +478,13 @@ export function AppSidebar() {
 
       <nav className="flex-1 overflow-y-auto px-2 py-3.5">
         {/* ── Alternador de modo: Vendas | Disparos ───────────────────── */}
-        <ModeSwitcher modo={modo} onModoChange={setModo} collapsed={collapsed} />
+        <ModeSwitcher
+          modo={modo}
+          onModoChange={setModo}
+          collapsed={collapsed}
+          vendasAllowed={vendasAllowed}
+          disparosAllowed={disparosAllowed}
+        />
 
         <div className="space-y-1">
           {/* Ferramentas do modo ativo */}

@@ -69,6 +69,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import {
   useFupCompanies,
   useFupCampaigns,
@@ -2232,6 +2233,26 @@ export default function FollowupDashboard() {
   const { canAccessInternalPage } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "fila";
+  const crmClient = useOptionalCrmClient();
+  const selectedCrmClient = crmClient?.selectedClient;
+
+  const allowedTabs = selectedCrmClient?.n8n_settings?.allowed_tabs;
+  const isSubTabAllowed = (subTabKey: string) => {
+    if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+    return allowedTabs.includes(`followup:${subTabKey}`);
+  };
+
+  const followupSubTabs = ["fila", "sugestoes", "campanhas", "metrics", "config"] as const;
+  const allowedFollowupSubTabs = followupSubTabs.filter(isSubTabAllowed);
+
+  useEffect(() => {
+    if (allowedFollowupSubTabs.length > 0) {
+      const isCurrentAllowed = allowedFollowupSubTabs.includes(activeTab as any);
+      if (!isCurrentAllowed) {
+        setSearchParams({ tab: allowedFollowupSubTabs[0] });
+      }
+    }
+  }, [activeTab, allowedFollowupSubTabs, setSearchParams]);
 
   const { data: companies = [], isLoading: loadingCompanies } = useFupCompanies();
 
@@ -2297,50 +2318,77 @@ export default function FollowupDashboard() {
       </Card>
 
       {/* Tabs Layout */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="w-full flex justify-start rounded-xl border border-slate-200/80 bg-slate-100/50 p-1 dark:border-white/10 dark:bg-white/[0.02]">
-          <TabsTrigger value="fila" className="text-xs font-semibold px-4 py-2">
-            Fila de Envio
-          </TabsTrigger>
-          <TabsTrigger value="sugestoes" className="text-xs font-semibold px-4 py-2 gap-1.5">
-            Sugestões da IA
-            {suggestionCount > 0 && (
-              <Badge className="bg-violet-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 hover:bg-violet-700">
-                {suggestionCount}
-              </Badge>
+      {/* Tabs Layout */}
+      {allowedFollowupSubTabs.length === 0 ? (
+        <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10 bg-card">
+          <p className="text-sm text-slate-400">Você não tem permissão para acessar nenhuma sub-aba do Follow-up.</p>
+        </div>
+      ) : (
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="w-full flex justify-start rounded-xl border border-slate-200/80 bg-slate-100/50 p-1 dark:border-white/10 dark:bg-white/[0.02]">
+            {isSubTabAllowed("fila") && (
+              <TabsTrigger value="fila" className="text-xs font-semibold px-4 py-2">
+                Fila de Envio
+              </TabsTrigger>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="campanhas" className="text-xs font-semibold px-4 py-2">
-            Campanhas & Templates
-          </TabsTrigger>
-          <TabsTrigger value="metrics" className="text-xs font-semibold px-4 py-2">
-            Métricas (Analytics)
-          </TabsTrigger>
-          <TabsTrigger value="config" className="text-xs font-semibold px-4 py-2">
-            Configuração
-          </TabsTrigger>
-        </TabsList>
+            {isSubTabAllowed("sugestoes") && (
+              <TabsTrigger value="sugestoes" className="text-xs font-semibold px-4 py-2 gap-1.5">
+                Sugestões da IA
+                {suggestionCount > 0 && (
+                  <Badge className="bg-violet-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 hover:bg-violet-700">
+                    {suggestionCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("campanhas") && (
+              <TabsTrigger value="campanhas" className="text-xs font-semibold px-4 py-2">
+                Campanhas & Templates
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("metrics") && (
+              <TabsTrigger value="metrics" className="text-xs font-semibold px-4 py-2">
+                Métricas (Analytics)
+              </TabsTrigger>
+            )}
+            {isSubTabAllowed("config") && (
+              <TabsTrigger value="config" className="text-xs font-semibold px-4 py-2">
+                Configuração
+              </TabsTrigger>
+            )}
+          </TabsList>
 
-        <TabsContent value="fila" className="space-y-4 outline-none">
-          <FilaTab companyId={companyId} />
-        </TabsContent>
+          {isSubTabAllowed("fila") && (
+            <TabsContent value="fila" className="space-y-4 outline-none">
+              <FilaTab companyId={companyId} />
+            </TabsContent>
+          )}
 
-        <TabsContent value="sugestoes" className="space-y-4 outline-none">
-          <SuggestionsTab companyId={companyId} />
-        </TabsContent>
+          {isSubTabAllowed("sugestoes") && (
+            <TabsContent value="sugestoes" className="space-y-4 outline-none">
+              <SuggestionsTab companyId={companyId} />
+            </TabsContent>
+          )}
 
-        <TabsContent value="campanhas" className="space-y-4 outline-none">
-          <CampaignsTab companyId={companyId} />
-        </TabsContent>
+          {isSubTabAllowed("campanhas") && (
+            <TabsContent value="campanhas" className="space-y-4 outline-none">
+              <CampaignsTab companyId={companyId} />
+            </TabsContent>
+          )}
 
-        <TabsContent value="metrics" className="space-y-4 outline-none">
-          <AnalyticsTab companyId={companyId} />
-        </TabsContent>
+          {isSubTabAllowed("metrics") && (
+            <TabsContent value="metrics" className="space-y-4 outline-none">
+              <AnalyticsTab companyId={companyId} />
+            </TabsContent>
+          )}
 
-        <TabsContent value="config" className="space-y-4 outline-none">
-          <ConfigTab />
-        </TabsContent>
-      </Tabs>
+          {isSubTabAllowed("config") && (
+            <TabsContent value="config" className="space-y-4 outline-none">
+              <ConfigTab />
+            </TabsContent>
+          )}
+        </Tabs>
+      )}
     </PageShell>
   );
 }

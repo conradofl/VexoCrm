@@ -814,6 +814,24 @@ export default function ChatbotSettings() {
 
   const selectedClient = clients.find((c) => c.id === selectedClientId);
 
+  const allowedTabs = selectedClient?.n8n_settings?.allowed_tabs;
+  const isSubTabAllowed = (subTabKey: string) => {
+    if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+    return allowedTabs.includes(`chatbot:${subTabKey}`);
+  };
+
+  const chatbotSubTabs = ["geral", "template", "prompts", "teste"] as const;
+  const allowedChatbotSubTabs = chatbotSubTabs.filter(isSubTabAllowed);
+
+  useEffect(() => {
+    if (selectedClientId && allowedChatbotSubTabs.length > 0) {
+      const isCurrentAllowed = allowedChatbotSubTabs.includes(tab as any);
+      if (!isCurrentAllowed) {
+        setSearchParams({ tab: allowedChatbotSubTabs[0] });
+      }
+    }
+  }, [selectedClientId, tab, allowedChatbotSubTabs, setSearchParams]);
+
   if (!canAccessInternalPage("empresas")) {
     return (
       <PageShell title="Chatbot" subtitle="Acesso restrito">
@@ -845,32 +863,44 @@ export default function ChatbotSettings() {
         <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
           <p className="text-sm text-slate-400">Selecione uma empresa para configurar o chatbot.</p>
         </div>
+      ) : allowedChatbotSubTabs.length === 0 ? (
+        <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+          <p className="text-sm text-slate-400">Você não tem permissão para acessar nenhuma sub-aba desta ferramenta.</p>
+        </div>
       ) : (
         <Tabs value={tab} onValueChange={(v) => setSearchParams({ tab: v })}>
           <TabsList className="h-9">
-            <TabsTrigger value="geral" className="text-sm">Geral</TabsTrigger>
-            <TabsTrigger value="template" className="text-sm">Template</TabsTrigger>
-            <TabsTrigger value="prompts" className="text-sm">Prompts</TabsTrigger>
-            <TabsTrigger value="teste" className="text-sm">Teste</TabsTrigger>
+            {isSubTabAllowed("geral") && <TabsTrigger value="geral" className="text-sm">Geral</TabsTrigger>}
+            {isSubTabAllowed("template") && <TabsTrigger value="template" className="text-sm">Template</TabsTrigger>}
+            {isSubTabAllowed("prompts") && <TabsTrigger value="prompts" className="text-sm">Prompts</TabsTrigger>}
+            {isSubTabAllowed("teste") && <TabsTrigger value="teste" className="text-sm">Teste</TabsTrigger>}
           </TabsList>
 
-          <TabsContent value="geral" className="mt-5">
-            {selectedClient && (
-              <TabGeral clientId={selectedClientId} clientName={selectedClient.name} client={selectedClient} />
-            )}
-          </TabsContent>
+          {isSubTabAllowed("geral") && (
+            <TabsContent value="geral" className="mt-5">
+              {selectedClient && (
+                <TabGeral clientId={selectedClientId} clientName={selectedClient.name} client={selectedClient} />
+              )}
+            </TabsContent>
+          )}
 
-          <TabsContent value="template" className="mt-5">
-            <TabTemplate clientId={selectedClientId} />
-          </TabsContent>
+          {isSubTabAllowed("template") && (
+            <TabsContent value="template" className="mt-5">
+              <TabTemplate clientId={selectedClientId} />
+            </TabsContent>
+          )}
 
-          <TabsContent value="prompts" className="mt-5">
-            <TabPrompts clientId={selectedClientId} />
-          </TabsContent>
+          {isSubTabAllowed("prompts") && (
+            <TabsContent value="prompts" className="mt-5">
+              <TabPrompts clientId={selectedClientId} />
+            </TabsContent>
+          )}
 
-          <TabsContent value="teste" className="mt-5">
-            <TabTeste clientId={selectedClientId} />
-          </TabsContent>
+          {isSubTabAllowed("teste") && (
+            <TabsContent value="teste" className="mt-5">
+              <TabTeste clientId={selectedClientId} />
+            </TabsContent>
+          )}
         </Tabs>
       )}
     </PageShell>

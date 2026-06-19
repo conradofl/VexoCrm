@@ -61,6 +61,109 @@ const CHATBOT_MODEL_OPTIONS = [
   },
 ] as const;
 
+const ALL_TAB_KEYS = [
+  "dashboard",
+  "leads",
+  "conversas",
+  "inteligencia",
+  "inteligencia:visao-geral",
+  "inteligencia:metricas",
+  "inteligencia:rankings",
+  "inteligencia:distribuicao",
+  "inteligencia:consultores",
+  "inteligencia:campanhas",
+  "inteligencia:insights",
+  "inteligencia:configuracoes",
+  "chatbot-kanban",
+  "chatbot",
+  "chatbot:geral",
+  "chatbot:template",
+  "chatbot:prompts",
+  "chatbot:teste",
+  "followup",
+  "followup:fila",
+  "followup:sugestoes",
+  "followup:campanhas",
+  "followup:metrics",
+  "followup:config",
+  "conexoes",
+  "campanhas",
+  "aquecimento",
+  "relatorios",
+  "apresentacao",
+  "onboarding",
+  "chatbot-docs",
+  "usuarios"
+];
+
+const TABS_HIERARCHY = [
+  {
+    key: "vendas",
+    label: "Máquina de Vendas",
+    children: [
+      { key: "dashboard", label: "Dashboard" },
+      { key: "leads", label: "Leads" },
+      { key: "conversas", label: "Conversas" },
+      {
+        key: "inteligencia",
+        label: "Inteligência Comercial",
+        children: [
+          { key: "inteligencia:visao-geral", label: "Visão Geral" },
+          { key: "inteligencia:metricas", label: "Métricas" },
+          { key: "inteligencia:rankings", label: "Rankings" },
+          { key: "inteligencia:distribuicao", label: "Distribuição" },
+          { key: "inteligencia:consultores", label: "Consultores" },
+          { key: "inteligencia:campanhas", label: "Campanhas" },
+          { key: "inteligencia:insights", label: "Insights" },
+          { key: "inteligencia:configuracoes", label: "Ajustes" },
+        ]
+      },
+      { key: "chatbot-kanban", label: "Chatbot Kanban" },
+      {
+        key: "chatbot",
+        label: "Chatbot (Configurações)",
+        children: [
+          { key: "chatbot:geral", label: "Geral" },
+          { key: "chatbot:template", label: "Template" },
+          { key: "chatbot:prompts", label: "Prompts" },
+          { key: "chatbot:teste", label: "Teste" },
+        ]
+      },
+      {
+        key: "followup",
+        label: "Follow-up",
+        children: [
+          { key: "followup:fila", label: "Fila de Envios" },
+          { key: "followup:sugestoes", label: "Sugestões de IA" },
+          { key: "followup:campanhas", label: "Campanhas & Templates" },
+          { key: "followup:metrics", label: "Métricas" },
+          { key: "followup:config", label: "Configuração" },
+        ]
+      }
+    ]
+  },
+  {
+    key: "disparos",
+    label: "Máquina de Disparos",
+    children: [
+      { key: "conexoes", label: "Chips WhatsApp" },
+      { key: "campanhas", label: "Envios por Planilha" },
+      { key: "aquecimento", label: "Aquecimento" },
+      { key: "relatorios", label: "Relatórios" }
+    ]
+  },
+  {
+    key: "sistema",
+    label: "Sistema",
+    children: [
+      { key: "apresentacao", label: "Demonstração Vexo" },
+      { key: "onboarding", label: "Treinamento Vexo" },
+      { key: "chatbot-docs", label: "Chatbot Docs" },
+      { key: "usuarios", label: "Usuários" }
+    ]
+  }
+];
+
 const CREATION_STEPS = [
   "Cria o tenant em leads_clients",
   "Cria a tabela dinamica de leads",
@@ -127,6 +230,7 @@ export default function Tenants() {
         dispatchWebhookToken?: string;
         inboundBearerToken?: string;
         active?: boolean;
+        allowedTabs?: string[] | null;
       }
     >
   >({});
@@ -312,6 +416,7 @@ export default function Tenants() {
       dispatchWebhookToken: draft.dispatchWebhookToken ?? "",
       inboundBearerToken: draft.inboundBearerToken ?? "",
       active: draft.active ?? tenant.n8n_settings?.active ?? true,
+      allowedTabs: draft.allowedTabs ?? tenant.n8n_settings?.allowed_tabs ?? null,
     };
   };
 
@@ -327,6 +432,7 @@ export default function Tenants() {
         dispatchWebhookToken: draft.dispatchWebhookToken.trim() || undefined,
         inboundBearerToken: draft.inboundBearerToken.trim() || undefined,
         active: draft.active,
+        allowedTabs: draft.allowedTabs,
       });
 
       setN8nDrafts((current) => ({
@@ -336,11 +442,12 @@ export default function Tenants() {
           dispatchWebhookToken: "",
           inboundBearerToken: "",
           active: draft.active,
+          allowedTabs: draft.allowedTabs,
         },
       }));
 
       toast({
-        title: "Disparo Evolution atualizado",
+        title: "Configurações da empresa atualizadas",
         description: `As configuracoes da empresa ${tenant.name} foram salvas.`,
       });
     } catch (settingsError) {
@@ -1005,6 +1112,132 @@ export default function Tenants() {
                               {updateN8nSettings.isPending ? "Salvando..." : "Salvar fallback"}
                             </Button>
                           </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Liberação de abas e sub-abas */}
+                    {canManageN8n ? (
+                      <div className="space-y-4 rounded-lg border border-slate-200/80 bg-slate-50/50 p-4 dark:border-white/10 dark:bg-white/[0.01]">
+                        <div className="pb-2 border-b border-slate-200/60 dark:border-white/5 flex flex-wrap justify-between items-center gap-2">
+                          <div>
+                            <h4 className="text-xs font-semibold text-foreground">Liberação de Abas e Telas</h4>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">Defina quais abas e sub-abas os usuários desta empresa terão acesso.</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] px-2 bg-white dark:bg-white/[0.02]"
+                              onClick={() => updateTenantN8nDraft(tenant.id, { allowedTabs: [...ALL_TAB_KEYS] })}
+                            >
+                              Liberar Tudo
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] px-2 text-rose-500 hover:text-rose-600 bg-white dark:bg-white/[0.02]"
+                              onClick={() => updateTenantN8nDraft(tenant.id, { allowedTabs: [] })}
+                            >
+                              Bloquear Tudo
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-3 pt-1">
+                          {TABS_HIERARCHY.map((module) => {
+                            const activeTabs = getTenantN8nDraft(tenant).allowedTabs;
+                            const isSelected = (key: string) => {
+                              if (activeTabs === null) return true;
+                              return activeTabs.includes(key);
+                            };
+
+                            const handleToggleKey = (key: string, isChecked: boolean) => {
+                              let currentTabs = activeTabs ? [...activeTabs] : [...ALL_TAB_KEYS];
+                              if (isChecked) {
+                                if (!currentTabs.includes(key)) currentTabs.push(key);
+                                if (key.includes(":")) {
+                                  const parent = key.split(":")[0];
+                                  if (!currentTabs.includes(parent)) currentTabs.push(parent);
+                                }
+                                const children = ALL_TAB_KEYS.filter(k => k.startsWith(key + ":"));
+                                children.forEach(child => {
+                                  if (!currentTabs.includes(child)) currentTabs.push(child);
+                                });
+                              } else {
+                                currentTabs = currentTabs.filter(k => k !== key);
+                                if (!key.includes(":")) {
+                                  currentTabs = currentTabs.filter(k => !k.startsWith(key + ":"));
+                                }
+                              }
+                              updateTenantN8nDraft(tenant.id, { allowedTabs: currentTabs });
+                            };
+
+                            return (
+                              <div
+                                key={module.key}
+                                className="space-y-3 p-3 rounded-lg border border-slate-200/80 bg-white dark:border-white/5 dark:bg-black/20"
+                              >
+                                <h5 className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                  {module.label}
+                                </h5>
+                                <div className="space-y-3.5">
+                                  {module.children.map((tab) => (
+                                    <div key={tab.key} className="space-y-1.5">
+                                      <label className="inline-flex items-center gap-2 text-xs font-semibold text-foreground cursor-pointer select-none">
+                                        <input
+                                          type="checkbox"
+                                          className="rounded border-slate-300 dark:border-white/10 text-cyan-600 focus:ring-cyan-500"
+                                          checked={isSelected(tab.key)}
+                                          onChange={(e) => handleToggleKey(tab.key, e.target.checked)}
+                                        />
+                                        {tab.label}
+                                      </label>
+
+                                      {tab.children && tab.children.length > 0 && (
+                                        <div className="pl-4 border-l border-slate-100 dark:border-white/5 space-y-1.5 ml-1.5 mt-1">
+                                          {tab.children.map((subTab) => (
+                                            <label
+                                              key={subTab.key}
+                                              className={`inline-flex items-center gap-2 text-[11px] cursor-pointer select-none ${
+                                                isSelected(tab.key)
+                                                  ? "text-muted-foreground"
+                                                  : "text-muted-foreground/40 pointer-events-none"
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                className="rounded border-slate-300 dark:border-white/10 text-cyan-600 focus:ring-cyan-500 size-3"
+                                                disabled={!isSelected(tab.key)}
+                                                checked={isSelected(tab.key) && isSelected(subTab.key)}
+                                                onChange={(e) => handleToggleKey(subTab.key, e.target.checked)}
+                                              />
+                                              {subTab.label}
+                                            </label>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex justify-end pt-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 text-xs font-semibold"
+                            disabled={updateN8nSettings.isPending}
+                            onClick={() => void handleSaveTenantN8n(tenant)}
+                          >
+                            <Save className="h-3.5 w-3.5 mr-1" />
+                            {updateN8nSettings.isPending ? "Salvando..." : "Salvar liberação de abas"}
+                          </Button>
                         </div>
                       </div>
                     ) : null}
