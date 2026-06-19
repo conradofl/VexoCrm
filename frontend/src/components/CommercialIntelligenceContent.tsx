@@ -121,15 +121,7 @@ import {
   useUpdateInsightStatus,
 } from "@/hooks/useCommercialIntelligence";
 
-type TabId =
-  | "visao-geral"
-  | "metricas"
-  | "rankings"
-  | "distribuicao"
-  | "consultores"
-  | "campanhas"
-  | "insights"
-  | "configuracoes";
+type TabId = "performance" | "equipe" | "ia-config";
 type SortOrder = "asc" | "desc";
 
 const DEFAULT_FILTERS: CommercialIntelligenceFilters = {
@@ -839,26 +831,45 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
 
   const isSubTabAllowed = (subTabKey: string) => {
     if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
-    return allowedTabs.includes(`inteligencia:${subTabKey}`);
+
+    // Check consolidated key
+    if (allowedTabs.includes(`inteligencia:${subTabKey}`)) return true;
+
+    // Fallback mappings for backwards compatibility
+    if (subTabKey === "performance") {
+      return (
+        allowedTabs.includes("inteligencia:visao-geral") ||
+        allowedTabs.includes("inteligencia:metricas") ||
+        allowedTabs.includes("inteligencia:rankings") ||
+        allowedTabs.includes("inteligencia:campanhas")
+      );
+    }
+    if (subTabKey === "equipe") {
+      return (
+        allowedTabs.includes("inteligencia:distribuicao") ||
+        allowedTabs.includes("inteligencia:consultores")
+      );
+    }
+    if (subTabKey === "ia-config") {
+      return (
+        allowedTabs.includes("inteligencia:insights") ||
+        allowedTabs.includes("inteligencia:configuracoes")
+      );
+    }
+
+    return false;
   };
 
-  const intelligenceSubTabs = [
-    "visao-geral",
-    "metricas",
-    "rankings",
-    "distribuicao",
-    "consultores",
-    "campanhas",
-    "insights",
-    "configuracoes",
-  ] as const;
+  const intelligenceSubTabs = ["performance", "equipe", "ia-config"] as const;
   const allowedIntelligenceSubTabs = intelligenceSubTabs.filter(isSubTabAllowed);
 
-  const [activeTab, setActiveTab] = useState<TabId>("visao-geral");
+  const [activeTab, setActiveTab] = useState<TabId>("performance");
+  const [showDetailedMetrics, setShowDetailedMetrics] = useState(false);
+  const [showCampaignsPanel, setShowCampaignsPanel] = useState(false);
 
   useEffect(() => {
     if (allowedIntelligenceSubTabs.length > 0) {
-      const isCurrentAllowed = allowedIntelligenceSubTabs.includes(activeTab as any);
+      const isCurrentAllowed = allowedIntelligenceSubTabs.includes(activeTab);
       if (!isCurrentAllowed) {
         setActiveTab(allowedIntelligenceSubTabs[0] as TabId);
       }
@@ -1070,124 +1081,78 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
   const handleExport = () => {
     if (!data) return;
 
-    if (activeTab === "visao-geral") {
-      exportRows("inteligencia-comercial-visao-geral.csv", data.overview.kpis.map((item) => ({
-        indicador: item.title,
-        valor: item.valueLabel,
-        delta: item.delta === null ? "—" : item.delta,
-        tendencia: item.kind,
-      })));
-      return;
-    }
-
-    if (activeTab === "metricas") {
-      exportRows("inteligencia-comercial-metricas.csv", metricsSorted.map((metric) => ({
-        metrica: metric.name,
-        atual: metric.currentLabel,
-        anterior: metric.previousLabel,
-        delta: metric.deltaLabel,
-        direcao: metric.direction,
-      })));
-      return;
-    }
-
-    if (activeTab === "rankings") {
-      exportRows("inteligencia-comercial-rankings.csv", [
-        ...sortedCities.map((item) => ({
-          tipo: "cidade",
-          nome: item.name,
-          qualificacao: formatPercent(item.qualificationRate),
-          conversao: formatPercent(item.conversionRate),
-          receita: formatCurrency(item.revenue),
-          volume: item.volumeLeads,
+    if (activeTab === "performance") {
+      exportRows("inteligencia-comercial-performance.csv", [
+        ...data.overview.kpis.map((item) => ({
+          tipo: "KPI",
+          nome: item.title,
+          valor: item.valueLabel,
+          delta: item.delta === null ? "—" : deltaLabel(item.delta, item.kind),
+          extra: item.kind,
         })),
-        ...sortedCampaigns.map((item) => ({
-          tipo: "campanha",
-          nome: item.name,
-          qualificacao: formatPercent(item.qualificationRate),
-          conversao: formatPercent(item.conversionRate),
-          receita: formatCurrency(item.revenue),
-          resposta: formatPercent(item.responseRate),
+        ...metricsSorted.map((metric) => ({
+          tipo: "Metrica Detalhada",
+          nome: metric.name,
+          valor: metric.currentLabel,
+          delta: metric.deltaLabel,
+          extra: metric.direction,
         })),
-        ...sortedConsultants.map((item) => ({
-          tipo: "consultor",
-          nome: item.name,
-          leads: item.leadsReceived,
-          conversao: formatPercent(item.conversionRate),
-          fechamentos: item.closings,
-          receita: formatCurrency(item.revenue),
+        ...campaignsFiltered.map((campaign) => ({
+          tipo: "Campanha",
+          nome: campaign.name,
+          valor: formatPercent(campaign.qualificationRate),
+          delta: campaign.roiEstimated === null ? "—" : `${campaign.roiEstimated.toFixed(2)}x`,
+          extra: campaign.status,
         })),
       ]);
       return;
     }
 
-    if (activeTab === "distribuicao") {
-      exportRows("inteligencia-comercial-distribuicao.csv", distributionQueue.map((row) => ({
-        lead: row.leadName,
-        campanha: row.campaignName,
-        cidade: row.city,
-        valor_potencial: formatCurrency(row.potentialValue),
-        consultor: row.consultantName,
-        regra: row.ruleApplied,
-        status: row.status,
-        sla: row.slaStatus,
-      })));
+    if (activeTab === "equipe") {
+      exportRows("inteligencia-comercial-equipe.csv", [
+        ...consultantsFiltered.map((consultant) => ({
+          tipo: "Consultor",
+          nome: consultant.name,
+          status: consultant.status,
+          disponivel: consultant.available ? "Sim" : "Nao",
+          conversao: formatPercent(consultant.conversionRate),
+          tempo_resposta: formatHours(consultant.responseTimeHours),
+          leads: `${consultant.leadsReceived}/${consultant.dailyCapacity}`,
+          receita: formatCurrency(consultant.revenue),
+        })),
+        ...distributionQueue.map((row) => ({
+          tipo: "Fila Ativa",
+          nome: row.leadName,
+          status: row.status,
+          disponivel: row.slaStatus,
+          conversao: row.ruleApplied,
+          tempo_resposta: row.city,
+          leads: row.campaignName,
+          receita: formatCurrency(row.potentialValue),
+        })),
+      ]);
       return;
     }
 
-    if (activeTab === "consultores") {
-      exportRows("inteligencia-comercial-consultores.csv", consultantsFiltered.map((consultant) => ({
-        nome: consultant.name,
-        telefone: consultant.phone,
-        email: consultant.email,
-        cidade: consultant.city,
-        estado: consultant.state,
-        taxa_conversao: formatPercent(consultant.conversionRate),
-        tempo_resposta: formatHours(consultant.responseTimeHours),
-        leads_recebidos: consultant.leadsReceived,
-        receita: formatCurrency(consultant.revenue),
-        disponivel: consultant.available ? "Sim" : "Nao",
-      })));
+    if (activeTab === "ia-config") {
+      exportRows("inteligencia-comercial-ia-config.csv", [
+        ...insightsFiltered.map((insight) => ({
+          tipo: "Insight Brain",
+          titulo: insight.title,
+          severidade: insight.severity,
+          impacto: insight.impact,
+          recomendacao: insight.recommendation,
+        })),
+        {
+          tipo: "Ajustes",
+          titulo: "Limiar de qualificacao",
+          severidade: String(settingsDraft.qualificationThreshold),
+          impacto: `SLA Padrao: ${settingsDraft.slaMinutes} min`,
+          recomendacao: `Estrategia: ${settingsDraft.distributionStrategy}`,
+        },
+      ]);
       return;
     }
-
-    if (activeTab === "campanhas") {
-      exportRows("inteligencia-comercial-campanhas.csv", campaignsFiltered.map((campaign) => ({
-        nome: campaign.name,
-        status: campaign.status,
-        leads_importados: campaign.leadsImported,
-        abordados: campaign.leadsApproached,
-        respondidos: campaign.leadsResponded,
-        qualificados: campaign.leadsQualified,
-        taxa_resposta: formatPercent(campaign.responseRate),
-        taxa_qualificacao: formatPercent(campaign.qualificationRate),
-        fechamentos: campaign.closings,
-        receita: formatCurrency(campaign.revenue),
-        custo: formatCurrency(campaign.cost),
-        roi: campaign.roiEstimated === null ? "—" : `${campaign.roiEstimated.toFixed(2)}x`,
-      })));
-      return;
-    }
-
-    if (activeTab === "insights") {
-      exportRows("inteligencia-comercial-insights.csv", insightsFiltered.map((insight) => ({
-        titulo: insight.title,
-        severidade: insight.severity,
-        impacto: insight.impact,
-        recomendacao: insight.recommendation,
-        acao: insight.actionLabel,
-      })));
-      return;
-    }
-
-    exportRows("inteligencia-comercial-configuracoes.csv", [
-      {
-        limiar_qualificacao: settingsDraft.qualificationThreshold,
-        sla_padrao: settingsDraft.slaMinutes,
-        periodo_padrao: settingsDraft.defaultPeriod,
-        estrategia: settingsDraft.distributionStrategy,
-      },
-    ]);
   };
 
   const resetConsultantForm = () => {
@@ -1501,14 +1466,14 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
   const handleInsightAction = async (insight: InsightItem) => {
     if (insight.actionType === "open_campaign") {
       const campaign = campaigns.find((item) => item.id === insight.actionTargetId) || campaigns.find((item) => item.name === insight.actionTargetName);
-      setActiveTab("campanhas");
+      setActiveTab("performance");
       if (campaign) setCampaignDetail(campaign);
     } else if (insight.actionType === "open_consultant") {
       const consultant = consultants.find((item) => item.id === insight.actionTargetId) || consultants.find((item) => item.name === insight.actionTargetName);
-      setActiveTab("consultores");
+      setActiveTab("equipe");
       if (consultant) setConsultantDetail(consultant);
     } else if (insight.actionType === "adjust_rule" || insight.actionType === "redistribute") {
-      setActiveTab("distribuicao");
+      setActiveTab("equipe");
     } else if (insight.actionType === "export_report") {
       handleExport();
     }
@@ -1678,50 +1643,25 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="space-y-4">
         <div className="rounded-[1.5rem] border border-slate-200/90 bg-white/75 p-2 dark:border-white/10 dark:bg-white/[0.04]">
           <TabsList className="grid h-auto w-full gap-2 bg-transparent p-0" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(110px, 1fr))` }}>
-            {isSubTabAllowed("visao-geral") && (
-              <TabsTrigger value="visao-geral" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Visao Geral
+            {isSubTabAllowed("performance") && (
+              <TabsTrigger value="performance" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Performance Comercial
               </TabsTrigger>
             )}
-            {isSubTabAllowed("metricas") && (
-              <TabsTrigger value="metricas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Metricas
+            {isSubTabAllowed("equipe") && (
+              <TabsTrigger value="equipe" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Equipe & Roteamento
               </TabsTrigger>
             )}
-            {isSubTabAllowed("rankings") && (
-              <TabsTrigger value="rankings" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Rankings
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("distribuicao") && (
-              <TabsTrigger value="distribuicao" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Distribuicao
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("consultores") && (
-              <TabsTrigger value="consultores" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Consultores
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("campanhas") && (
-              <TabsTrigger value="campanhas" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Campanhas
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("insights") && (
-              <TabsTrigger value="insights" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Insights
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("configuracoes") && (
-              <TabsTrigger value="configuracoes" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                Ajustes
+            {isSubTabAllowed("ia-config") && (
+              <TabsTrigger value="ia-config" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                Ajustes & Diagnósticos
               </TabsTrigger>
             )}
           </TabsList>
         </div>
 
-        <TabsContent value="visao-geral" className="space-y-4">
+        <TabsContent value="performance" className="space-y-4">
           <KpiGrid cols={4} className="gap-3">
             {data.overview.kpis.map((item) => (
               <KpiCard
@@ -1968,276 +1908,363 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
               </div>
             </DashboardPanel>
           </div>
-        </TabsContent>
 
-        <TabsContent value="metricas" className="space-y-4">
-          <KpiGrid cols={4} className="gap-3">
-            {data.metrics.cards.slice(0, 8).map((metric) => (
-              <KpiCard
-                key={metric.key}
-                title={metric.name}
-                value={metric.currentLabel}
-                trend={deltaLabel(metric.delta, metric.kind)}
-                tone={toneFromAccent(metric.accent)}
-                icon={metric.kind === "hours" ? <TimerReset className="h-4 w-4" /> : <BarChart3 className="h-4 w-4" />}
-              />
-            ))}
-          </KpiGrid>
-
-          <DashboardPanel title="Leitura detalhada das metricas" subtitle="Valor atual, periodo anterior, delta e tendencia operacional" className="p-4">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>
-                      <button type="button" onClick={() => setMetricSort((current) => ({ key: "name", order: current.key === "name" && current.order === "asc" ? "desc" : "asc" }))} className="inline-flex items-center gap-2">
-                        Metrica {metricSort.key === "name" ? metricSort.order === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> : null}
-                      </button>
-                    </TableHead>
-                    <TableHead>Atual</TableHead>
-                    <TableHead>Periodo anterior</TableHead>
-                    <TableHead>
-                      <button type="button" onClick={() => setMetricSort((current) => ({ key: "delta", order: current.key === "delta" && current.order === "asc" ? "desc" : "asc" }))} className="inline-flex items-center gap-2">
-                        Delta {metricSort.key === "delta" ? metricSort.order === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> : null}
-                      </button>
-                    </TableHead>
-                    <TableHead>Tendencia</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {metricsSorted.map((metric) => (
-                    <TableRow key={metric.key}>
-                      <TableCell>
-                        <div>
-                          <p className="font-semibold text-foreground">{metric.name}</p>
-                          <p className="text-xs text-muted-foreground">meta {metric.target === null ? "nao definida" : formatCompact(metric.target, metric.kind)}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-semibold text-foreground">{metric.currentLabel}</TableCell>
-                      <TableCell>{metric.previousLabel}</TableCell>
-                      <TableCell>{metric.deltaLabel}</TableCell>
-                      <TableCell>
-                        <Badge className={cn("border", directionClasses(metric.direction))}>
-                          {metric.direction === "up" ? "Alta" : metric.direction === "down" ? "Queda" : "Estavel"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </DashboardPanel>
-        </TabsContent>
-
-        <TabsContent value="rankings" className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-3">
-            <DashboardPanel title="Ranking de cidades" subtitle="Top 5, bottom 5 e comparativo horizontal" className="p-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <FilterField label="Criterio">
-                  <Select value={rankingCityCriterion} onValueChange={(value) => setRankingCityCriterion(value as keyof CommercialRankingCity)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="qualificationRate">Taxa de qualificacao</SelectItem>
-                      <SelectItem value="conversionRate">Taxa de conversao</SelectItem>
-                      <SelectItem value="avgCloseHours">Tempo medio ate fechamento</SelectItem>
-                      <SelectItem value="volumeLeads">Volume de leads</SelectItem>
-                      <SelectItem value="revenue">Receita gerada</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FilterField>
-                <FilterField label="Ordenacao">
-                  <Select value={rankingCityOrder} onValueChange={(value) => setRankingCityOrder(value as SortOrder)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">Decrescente</SelectItem>
-                      <SelectItem value="asc">Crescente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FilterField>
-              </div>
-
-              {sortedCities.length ? (
-                <>
-                  <ChartContainer config={{ score: { label: "Indicador", color: "#22d3ee" } }} className="h-[260px] w-full">
-                    <BarChart data={sortedCities.slice(0, 5)} layout="vertical">
-                      <CartesianGrid horizontal={false} />
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" width={90} tickLine={false} axisLine={false} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey={rankingCityCriterion} fill="var(--color-score)" radius={[0, 10, 10, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Top 5</p>
-                      {sortedCities.slice(0, 5).map((item) => (
-                        <button key={`top-${item.id}`} type="button" onClick={() => openRankingDetails(item.name, [
-                          { label: "Taxa de qualificacao", value: formatPercent(item.qualificationRate) },
-                          { label: "Taxa de conversao", value: formatPercent(item.conversionRate) },
-                          { label: "Volume", value: formatNumber(item.volumeLeads) },
-                          { label: "Receita", value: formatCurrency(item.revenue) },
-                          { label: "Tempo ate fechamento", value: formatHours(item.avgCloseHours) },
-                        ])} className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-2 text-left dark:border-white/10 dark:bg-white/[0.03]">
-                          <span className="text-sm font-medium text-foreground">{item.name}</span>
-                          <span className="text-xs text-muted-foreground">detalhar</span>
-                        </button>
-                      ))}
+          {/* Campanhas de Marketing Collapsible Section */}
+          <div className="pt-2">
+            <Button 
+              variant="outline" 
+              className="w-full flex items-center justify-between py-5 border-slate-200 dark:border-white/5 bg-white/50 dark:bg-white/[0.02] rounded-2xl"
+              onClick={() => setShowCampaignsPanel(!showCampaignsPanel)}
+            >
+              <span className="text-sm font-semibold text-foreground">
+                {showCampaignsPanel ? "Ocultar Painel de Campanhas" : "Gerenciar & Comparar Campanhas"}
+              </span>
+              <LayoutPanelTop className={cn("h-4 w-4 transition-transform", showCampaignsPanel ? "rotate-90" : "")} />
+            </Button>
+            
+            {showCampaignsPanel && (
+              <div className="mt-3 space-y-4">
+                <KpiGrid cols={4} className="gap-3">
+                  <KpiCard title="Campanhas totais" value={formatNumber(data.campaigns.summary.total)} icon={<LayoutPanelTop className="h-4 w-4" />} tone="cyan" trend="base acompanhada" />
+                  <KpiCard title="Campanhas ativas" value={formatNumber(data.campaigns.summary.active)} icon={<Target className="h-4 w-4" />} tone="teal" trend="em operacao" />
+                  <KpiCard title="Receita atribuida" value={formatCurrency(data.campaigns.summary.revenue)} icon={<HandCoins className="h-4 w-4" />} tone="amber" trend="por campanha" />
+                  <KpiCard title="Qualificados" value={formatNumber(data.campaigns.summary.qualifiedLeads)} icon={<Sparkles className="h-4 w-4" />} tone="purple" trend="no periodo filtrado" />
+                </KpiGrid>
+                
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <DashboardPanel title="Ranking interno" subtitle="Melhores campanhas por resposta, qualificacao e ROI" className="p-4">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior resposta</p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => b.responseRate - a.responseRate)[0]?.name || "—"}</p>
+                      </div>
+                      <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior qualificacao</p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => b.qualificationRate - a.qualificationRate)[0]?.name || "—"}</p>
+                      </div>
+                      <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior ROI</p>
+                        <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => (b.roiEstimated || 0) - (a.roiEstimated || 0))[0]?.name || "—"}</p>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Bottom 5</p>
-                      {sortedCities.slice(-5).reverse().map((item) => (
-                        <button key={`bottom-${item.id}`} type="button" onClick={() => openRankingDetails(item.name, [
-                          { label: "Taxa de qualificacao", value: formatPercent(item.qualificationRate) },
-                          { label: "Taxa de conversao", value: formatPercent(item.conversionRate) },
-                          { label: "Volume", value: formatNumber(item.volumeLeads) },
-                          { label: "Receita", value: formatCurrency(item.revenue) },
-                          { label: "Tempo ate fechamento", value: formatHours(item.avgCloseHours) },
-                        ])} className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-2 text-left dark:border-white/10 dark:bg-white/[0.03]">
-                          <span className="text-sm font-medium text-foreground">{item.name}</span>
-                          <span className="text-xs text-muted-foreground">detalhar</span>
-                        </button>
-                      ))}
+                  </DashboardPanel>
+
+                  <DashboardPanel title="Comparar campanhas" subtitle="Selecione duas campanhas e compare os numeros lado a lado" className="p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <FilterField label="Campanha A">
+                        <Select value={compareCampaignA || "all"} onValueChange={(value) => setCompareCampaignA(value === "all" ? "" : value)}>
+                          <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Selecione</SelectItem>
+                            {campaigns.map((campaign) => (
+                              <SelectItem key={campaign.id} value={campaign.id}>{campaign.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FilterField>
+                      <FilterField label="Campanha B">
+                        <Select value={compareCampaignB || "all"} onValueChange={(value) => setCompareCampaignB(value === "all" ? "" : value)}>
+                          <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Selecione</SelectItem>
+                            {campaigns.map((campaign) => (
+                              <SelectItem key={campaign.id} value={campaign.id}>{campaign.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FilterField>
                     </div>
-                  </div>
-                </>
-              ) : (
-                <EmptyState message="Ainda nao ha dados suficientes para ranquear cidades." />
-              )}
-            </DashboardPanel>
-
-            <DashboardPanel title="Ranking de campanhas" subtitle="Qualidade, resposta, conversao, CPLQ e ROI" className="p-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <FilterField label="Criterio">
-                  <Select value={rankingCampaignCriterion} onValueChange={(value) => setRankingCampaignCriterion(value as keyof CommercialRankingCampaign)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="responseRate">Taxa de resposta</SelectItem>
-                      <SelectItem value="qualificationRate">Taxa de qualificacao</SelectItem>
-                      <SelectItem value="conversionRate">Taxa de conversao</SelectItem>
-                      <SelectItem value="cplq">Custo por lead qualificado</SelectItem>
-                      <SelectItem value="revenue">Receita gerada</SelectItem>
-                      <SelectItem value="roiEstimated">ROI estimado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FilterField>
-                <FilterField label="Ordenacao">
-                  <Select value={rankingCampaignOrder} onValueChange={(value) => setRankingCampaignOrder(value as SortOrder)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">Decrescente</SelectItem>
-                      <SelectItem value="asc">Crescente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FilterField>
-              </div>
-              {sortedCampaigns.length ? (
-                <>
-                  <ChartContainer config={{ score: { label: "Indicador", color: "#a78bfa" } }} className="h-[260px] w-full">
-                    <BarChart data={sortedCampaigns.slice(0, 5)} layout="vertical">
-                      <CartesianGrid horizontal={false} />
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" width={100} tickLine={false} axisLine={false} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey={rankingCampaignCriterion} fill="var(--color-score)" radius={[0, 10, 10, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                  <div className="space-y-2">
-                    {sortedCampaigns.slice(0, 5).map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setCampaignDetail(campaigns.find((campaign) => campaign.id === item.id) || null)}
-                        className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-2 text-left dark:border-white/10 dark:bg-white/[0.03]"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">Resposta {formatPercent(item.responseRate)}</p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {compareCampaignRows.length ? compareCampaignRows.map((campaign) => (
+                        <div key={campaign.id} className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                          <p className="text-sm font-semibold text-foreground">{campaign.name}</p>
+                          <div className="mt-3 grid gap-2 text-sm">
+                            <div className="flex items-center justify-between"><span className="text-muted-foreground">Resposta</span><span>{formatPercent(campaign.responseRate)}</span></div>
+                            <div className="flex items-center justify-between"><span className="text-muted-foreground">Qualificacao</span><span>{formatPercent(campaign.qualificationRate)}</span></div>
+                            <div className="flex items-center justify-between"><span className="text-muted-foreground">Fechamentos</span><span>{formatNumber(campaign.closings)}</span></div>
+                            <div className="flex items-center justify-between"><span className="text-muted-foreground">Receita</span><span>{formatCurrency(campaign.revenue)}</span></div>
+                          </div>
                         </div>
-                        <span className="text-xs text-muted-foreground">ver detalhes</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <EmptyState message="Ainda nao ha campanhas suficientes para montar o ranking." />
-              )}
-            </DashboardPanel>
+                      )) : <EmptyState message="Selecione duas campanhas para comparar." />}
+                    </div>
+                  </DashboardPanel>
+                </div>
 
-            <DashboardPanel title="Ranking de consultores" subtitle="Resposta, fechamentos, receita e aproveitamento regional" className="p-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <FilterField label="Criterio">
-                  <Select value={rankingConsultantCriterion} onValueChange={(value) => setRankingConsultantCriterion(value as keyof CommercialRankingConsultant)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="leadsReceived">Leads recebidos</SelectItem>
-                      <SelectItem value="firstResponseHours">Tempo de primeira resposta</SelectItem>
-                      <SelectItem value="conversionRate">Taxa de conversao</SelectItem>
-                      <SelectItem value="closings">Fechamentos</SelectItem>
-                      <SelectItem value="revenue">Receita</SelectItem>
-                      <SelectItem value="regionalFit">Aproveitamento por regiao</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FilterField>
-                <FilterField label="Ordenacao">
-                  <Select value={rankingConsultantOrder} onValueChange={(value) => setRankingConsultantOrder(value as SortOrder)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">Decrescente</SelectItem>
-                      <SelectItem value="asc">Crescente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FilterField>
+                <DashboardPanel title="Analise de campanhas" subtitle="Visualizacao e comparativo operacional" className="p-4">
+                  {campaignsFiltered.length ? (
+                    <>
+                      <div className="mb-4">
+                        <ChartContainer config={{ qualificados: { label: "Qualificados", color: "#22d3ee" } }} className="h-[280px] w-full">
+                          <BarChart data={campaignsFiltered.slice(0, 8)}>
+                            <CartesianGrid vertical={false} />
+                            <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-15} height={64} />
+                            <YAxis tickLine={false} axisLine={false} />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Bar dataKey="leadsQualified" fill="var(--color-qualificados)" radius={[10, 10, 0, 0]} />
+                          </BarChart>
+                        </ChartContainer>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Campanha</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Periodo</TableHead>
+                              <TableHead>Importados</TableHead>
+                              <TableHead>Abordados</TableHead>
+                              <TableHead>Respondidos</TableHead>
+                              <TableHead>Qualificados</TableHead>
+                              <TableHead>Tx resposta</TableHead>
+                              <TableHead>Tx qualificacao</TableHead>
+                              <TableHead>Fechamentos</TableHead>
+                              <TableHead>Receita</TableHead>
+                              <TableHead>Custo</TableHead>
+                              <TableHead>CPLQ</TableHead>
+                              <TableHead>ROI</TableHead>
+                              <TableHead>Acoes</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {pagedCampaigns.items.map((campaign) => (
+                              <TableRow key={campaign.id}>
+                                <TableCell><p className="font-semibold text-foreground">{campaign.name}</p></TableCell>
+                                <TableCell><Badge className={cn("border-0", statusClasses(campaign.status))}>{campaign.status}</Badge></TableCell>
+                                <TableCell>{campaign.period}</TableCell>
+                                <TableCell>{formatNumber(campaign.leadsImported)}</TableCell>
+                                <TableCell>{formatNumber(campaign.leadsApproached)}</TableCell>
+                                <TableCell>{formatNumber(campaign.leadsResponded)}</TableCell>
+                                <TableCell>{formatNumber(campaign.leadsQualified)}</TableCell>
+                                <TableCell>{formatPercent(campaign.responseRate)}</TableCell>
+                                <TableCell>{formatPercent(campaign.qualificationRate)}</TableCell>
+                                <TableCell>{formatNumber(campaign.closings)}</TableCell>
+                                <TableCell>{formatCurrency(campaign.revenue)}</TableCell>
+                                <TableCell>{formatCurrency(campaign.cost)}</TableCell>
+                                <TableCell>{campaign.cplq === null ? "—" : formatCurrency(campaign.cplq)}</TableCell>
+                                <TableCell>{campaign.roiEstimated === null ? "—" : `${campaign.roiEstimated.toFixed(2)}x`}</TableCell>
+                                <TableCell>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => setCampaignDetail(campaign)}>Ver detalhes</Button>
+                                    <Button variant="outline" size="sm" onClick={() => setActiveTab("performance")}>Comparar</Button>
+                                    <Button variant="outline" size="sm" onClick={() => setCampaignDetail(campaign)}>Abrir leads</Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <PaginationBar page={pagedCampaigns.page} totalPages={pagedCampaigns.totalPages} onChange={setCampaignPage} />
+                    </>
+                  ) : (
+                    <EmptyState title="Nenhuma campanha encontrada" description="Ajuste a busca ou ative campanhas." />
+                  )}
+                </DashboardPanel>
               </div>
-              {sortedConsultants.length ? (
-                <>
-                  <ChartContainer config={{ score: { label: "Indicador", color: "#fb7185" } }} className="h-[260px] w-full">
-                    <BarChart data={sortedConsultants.slice(0, 5)} layout="vertical">
-                      <CartesianGrid horizontal={false} />
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" width={94} tickLine={false} axisLine={false} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey={rankingConsultantCriterion} fill="var(--color-score)" radius={[0, 10, 10, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                  <div className="space-y-2">
-                    {sortedConsultants.slice(0, 5).map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => openRankingDetails(item.name, [
-                          { label: "Leads recebidos", value: formatNumber(item.leadsReceived) },
-                          { label: "Tempo de primeira resposta", value: formatHours(item.firstResponseHours) },
-                          { label: "Taxa de conversao", value: formatPercent(item.conversionRate) },
-                          { label: "Fechamentos", value: formatNumber(item.closings) },
-                          { label: "Receita", value: formatCurrency(item.revenue) },
-                          { label: "Aproveitamento regional", value: formatPercent(item.regionalFit) },
-                        ])}
-                        className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-2 text-left dark:border-white/10 dark:bg-white/[0.03]"
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">Conversao {formatPercent(item.conversionRate)}</p>
-                        </div>
-                        <span className="text-xs text-muted-foreground">ver detalhes</span>
-                      </button>
-                    ))}
+            )}
+          </div>
+
+          {/* Collapsible Detailed Metrics Section */}
+          <div className="pt-2">
+            <Button 
+              variant="outline" 
+              className="w-full flex items-center justify-between py-5 border-slate-200 dark:border-white/5 bg-white/50 dark:bg-white/[0.02] rounded-2xl"
+              onClick={() => setShowDetailedMetrics(!showDetailedMetrics)}
+            >
+              <span className="text-sm font-semibold text-foreground">
+                {showDetailedMetrics ? "Ocultar Métricas Detalhadas" : "Visualizar Todas as Métricas Detalhadas"}
+              </span>
+              <Settings2 className={cn("h-4 w-4 transition-transform", showDetailedMetrics ? "rotate-90" : "")} />
+            </Button>
+            
+            {showDetailedMetrics && (
+              <div className="mt-3">
+                <DashboardPanel title="Leitura detalhada das metricas" subtitle="Valor atual, delta e tendencia operacional" className="p-4">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>
+                            <button type="button" onClick={() => setMetricSort((current) => ({ key: "name", order: current.key === "name" && current.order === "asc" ? "desc" : "asc" }))} className="inline-flex items-center gap-2">
+                              Metrica {metricSort.key === "name" ? metricSort.order === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> : null}
+                            </button>
+                          </TableHead>
+                          <TableHead>Atual</TableHead>
+                          <TableHead>Periodo anterior</TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => setMetricSort((current) => ({ key: "delta", order: current.key === "delta" && current.order === "asc" ? "desc" : "asc" }))} className="inline-flex items-center gap-2">
+                              Delta {metricSort.key === "delta" ? metricSort.order === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> : null}
+                            </button>
+                          </TableHead>
+                          <TableHead>Tendencia</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {metricsSorted.map((metric) => (
+                          <TableRow key={metric.key}>
+                            <TableCell>
+                              <div>
+                                <p className="font-semibold text-foreground">{metric.name}</p>
+                                <p className="text-xs text-muted-foreground">meta {metric.target === null ? "nao definida" : formatCompact(metric.target, metric.kind)}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-semibold text-foreground">{metric.currentLabel}</TableCell>
+                            <TableCell>{metric.previousLabel}</TableCell>
+                            <TableCell>{metric.deltaLabel}</TableCell>
+                            <TableCell>
+                              <Badge className={cn("border", directionClasses(metric.direction))}>
+                                {metric.direction === "up" ? "Alta" : metric.direction === "down" ? "Queda" : "Estavel"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
-                </>
-              ) : (
-                <EmptyState message="Ainda nao ha consultores suficientes para comparar performance." />
-              )}
-            </DashboardPanel>
+                </DashboardPanel>
+              </div>
+            )}
           </div>
         </TabsContent>
 
-        <TabsContent value="distribuicao" className="space-y-4">
-          <KpiGrid cols={3} className="gap-3">
-            <KpiCard title="Consultores totais" value={formatNumber(data.distribution.summary.totalConsultants)} icon={<Users className="h-4 w-4" />} tone="cyan" trend="base operacional" />
-            <KpiCard title="Consultores disponiveis" value={formatNumber(data.distribution.summary.availableConsultants)} icon={<UserCog className="h-4 w-4" />} tone="teal" trend="recebimento ativo" />
-            <KpiCard title="Regras ativas" value={formatNumber(data.distribution.summary.activeRules)} icon={<Route className="h-4 w-4" />} tone="purple" trend="governanca atual" />
+        <TabsContent value="equipe" className="space-y-4">
+          {/* KPI Grid for Consultants */}
+          <KpiGrid cols={4} className="gap-3">
+            <KpiCard title="Consultores ativos" value={formatNumber(consultantSummary.active)} icon={<Users className="h-4 w-4" />} tone="cyan" trend="elegiveis para distribuicao" />
+            <KpiCard title="Disponiveis agora" value={formatNumber(consultantSummary.available)} icon={<UserCog className="h-4 w-4" />} tone="teal" trend="recebimento imediato" />
+            <KpiCard title="Receita atribuida" value={formatCurrency(consultantSummary.revenue)} icon={<HandCoins className="h-4 w-4" />} tone="amber" trend="soma por consultor" />
+            <KpiCard title="Capacidade media" value={consultants.length ? `${Math.round(consultants.reduce((sum, item) => sum + item.dailyCapacity, 0) / consultants.length)}` : "0"} icon={<Gauge className="h-4 w-4" />} tone="purple" trend="leads por dia" />
           </KpiGrid>
 
-          <DashboardPanel title="Estrategia de distribuicao" subtitle="Ative a estrategia principal e acompanhe a fila em execucao" className="p-4">
+          {/* Consultant Management Section */}
+          <DashboardPanel title="Gestao de consultores" subtitle="CRUD real para distribuicao, capacidade e elegibilidade regional" className="p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" value={consultantSearch} onChange={(event) => setConsultantSearch(event.target.value)} placeholder="Buscar por nome, email ou cidade" />
+              </div>
+              <Button
+                onClick={() => {
+                  resetConsultantForm();
+                  setConsultantDialogOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Novo consultor
+              </Button>
+            </div>
+
+            {consultantsFiltered.length ? (
+              <>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {pagedConsultants.items.map((consultant) => (
+                    <div 
+                      key={consultant.id}
+                      className="rounded-2xl border border-slate-100 dark:border-white/5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md p-5 shadow-sm transition hover:shadow-md flex flex-col justify-between"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <div className="h-10 w-10 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-200 flex items-center justify-center font-bold text-sm">
+                              {consultant.name.slice(0, 2).toUpperCase()}
+                            </div>
+                            <span className={cn(
+                              "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-slate-900",
+                              consultant.status === "ativo" ? "bg-emerald-500" : "bg-slate-400"
+                            )} />
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-sm text-foreground">{consultant.name}</h4>
+                            <p className="text-xs text-muted-foreground">{consultant.position || "Consultor"}</p>
+                          </div>
+                        </div>
+                        <Badge className={cn("border-0 text-[10px] px-2 py-0.5", statusClasses(consultant.status))}>
+                          {consultant.status}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-4 space-y-2 text-xs text-muted-foreground border-t border-slate-100 dark:border-white/5 pt-3">
+                        <div className="flex justify-between">
+                          <span>Telefone:</span>
+                          <span className="font-medium text-foreground">{consultant.phone || "—"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Email:</span>
+                          <span className="font-medium text-foreground truncate max-w-[150px]">{consultant.email || "—"}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Cidade/UF:</span>
+                          <span className="font-medium text-foreground">{consultant.city || "—"} / {consultant.state || "—"}</span>
+                        </div>
+                        {consultant.territoryRegions.length > 0 && (
+                          <div className="flex justify-between">
+                            <span>Regiões:</span>
+                            <span className="font-medium text-foreground truncate max-w-[150px]" title={consultant.territoryRegions.join(", ")}>
+                              {consultant.territoryRegions.join(", ")}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-3 gap-2 bg-slate-50/50 dark:bg-white/[0.02] p-2.5 rounded-xl border border-slate-100 dark:border-white/5">
+                        <div className="text-center">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Leads</p>
+                          <p className="font-semibold text-[11px] text-foreground mt-0.5">{consultant.leadsReceived}/{consultant.dailyCapacity}</p>
+                        </div>
+                        <div className="text-center border-x border-slate-200/50 dark:border-white/5">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Conversão</p>
+                          <p className="font-semibold text-[11px] text-foreground mt-0.5">{formatPercent(consultant.conversionRate)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Tempo Resp</p>
+                          <p className="font-semibold text-[11px] text-foreground mt-0.5">{formatHours(consultant.responseTimeHours)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="flex justify-between text-[9px] text-muted-foreground mb-1">
+                          <span>Capacidade Diária</span>
+                          <span>{Math.round((consultant.leadsReceived / (consultant.dailyCapacity || 1)) * 100)}%</span>
+                        </div>
+                        <div className="h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-cyan-500 rounded-full" 
+                            style={{ width: `${Math.min(100, (consultant.leadsReceived / (consultant.dailyCapacity || 1)) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-foreground border-t border-slate-100 dark:border-white/5 pt-3">
+                        <span className="text-muted-foreground">Disponível:</span>
+                        <Switch 
+                          checked={consultant.available} 
+                          onCheckedChange={(checked) => void handleConsultantStatusToggle(consultant, checked)}
+                        />
+                      </div>
+
+                      <div className="mt-4 flex gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                        <Button variant="outline" size="sm" className="flex-1 text-[11px] h-8" onClick={() => openConsultantForEdit(consultant)}>
+                          Editar
+                        </Button>
+                        <Button variant="outline" size="sm" className="flex-1 text-[11px] h-8" onClick={() => setConsultantDetail(consultant)}>
+                          Desempenho
+                        </Button>
+                        <Button variant="outline" size="icon" className="h-8 w-8 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20" onClick={() => void handleDeleteConsultant(consultant)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <PaginationBar page={pagedConsultants.page} totalPages={pagedConsultants.totalPages} onChange={setConsultantPage} />
+              </>
+            ) : (
+              <EmptyState title="Nenhum consultor encontrado" description="Cadastre o primeiro consultor ou ajuste a busca aplicada." />
+            )}
+          </DashboardPanel>
+
+          {/* Distribution Strategy selectors */}
+          <DashboardPanel title="Estrategia de distribuicao de leads" subtitle="Ative a estrategia principal e acompanhe a fila em execucao" className="p-4">
             <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
               {data.distribution.strategies.map((strategy) => {
                 const active = settingsDraft.distributionStrategy === strategy.key || strategy.enabled;
@@ -2261,7 +2288,8 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
             </div>
           </DashboardPanel>
 
-          <DashboardPanel title="Regras de prioridade" subtitle="Cidade, regiao, valor potencial, lead type e SLA com persistencia real" className="p-4">
+          {/* Regras de prioridade */}
+          <DashboardPanel title="Regras de prioridade de Leads" subtitle="Cidade, regiao, valor potencial, tipo de lead e SLA com persistencia real" className="p-4">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">Ajuste criterios para rodizio, peso por performance ou distribuicao hibrida.</p>
               <Button onClick={() => { resetRuleForm(); setRuleDialogOpen(true); }}>
@@ -2333,6 +2361,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
             )}
           </DashboardPanel>
 
+          {/* Fila atual de distribuicao */}
           <DashboardPanel title="Fila atual de distribuicao" subtitle="Reatribua, trave, libere ou envie manualmente lead a lead" className="p-4">
             {distributionQueue.length ? (
               <>
@@ -2343,9 +2372,9 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         <TableHead>Lead</TableHead>
                         <TableHead>Campanha</TableHead>
                         <TableHead>Cidade</TableHead>
-                        <TableHead>Valor potencial</TableHead>
-                        <TableHead>Consultor</TableHead>
-                        <TableHead>Regra aplicada</TableHead>
+                        <TableHead>Valor Potencial</TableHead>
+                        <TableHead>Consultor Vinculado</TableHead>
+                        <TableHead>Regra Aplicada</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>SLA</TableHead>
                         <TableHead>Acoes</TableHead>
@@ -2357,54 +2386,29 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                           <TableCell>
                             <div>
                               <p className="font-semibold text-foreground">{row.leadName}</p>
-                              <p className="text-xs text-muted-foreground">{row.leadPhone}</p>
+                              <p className="text-xs text-muted-foreground">recebido em {new Date(row.receivedAt).toLocaleString("pt-BR")}</p>
                             </div>
                           </TableCell>
                           <TableCell>{row.campaignName}</TableCell>
-                          <TableCell>{row.city || "—"}</TableCell>
-                          <TableCell>{formatCurrency(row.potentialValue)}</TableCell>
-                          <TableCell>{row.consultantName}</TableCell>
+                          <TableCell>{row.city}</TableCell>
+                          <TableCell className="font-semibold">{formatCurrency(row.potentialValue)}</TableCell>
+                          <TableCell>{row.consultantName || "—"}</TableCell>
                           <TableCell>{row.ruleApplied}</TableCell>
                           <TableCell>
-                            <Badge className={cn("border-0", statusClasses(row.status))}>{row.status}</Badge>
+                            <Badge className={cn("border-0", row.status === "atribuido" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200" : "bg-amber-500/10 text-amber-700 dark:text-amber-200")}>
+                              {row.status}
+                            </Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge className={cn("border-0", statusClasses(row.slaStatus))}>{row.slaStatus}</Badge>
+                            <Badge className={cn("border-0", row.slaStatus === "no_prazo" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200" : "bg-rose-500/10 text-rose-700 dark:text-rose-200")}>
+                              {row.slaStatus === "no_prazo" ? "No prazo" : "Atrasado"}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-2">
-                              <Button variant="outline" size="sm" onClick={() => openAssignmentDialog(row)}>
-                                Reatribuir
-                              </Button>
-                              {row.actionLocked ? (
-                                <Button variant="outline" size="sm" onClick={() => void handleAssignmentMutation({ id: row.id, action: "liberar" }, "Lead liberado para distribuicao.")}>
-                                  <Unlock className="h-4 w-4" />
-                                  Liberar
-                                </Button>
-                              ) : (
-                                <Button variant="outline" size="sm" onClick={() => void handleAssignmentMutation({ id: row.id, action: "travar" }, "Lead travado manualmente.")}>
-                                  <Lock className="h-4 w-4" />
-                                  Travar
-                                </Button>
-                              )}
-                              <Button variant="outline" size="sm" onClick={() => void handleAssignmentMutation({ id: row.id, action: "enviar_manual" }, "Lead reenviado manualmente.")}>
-                                Enviar manual
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  openRankingDetails(`Regra aplicada • ${row.leadName}`, [
-                                    { label: "Campanha", value: row.campaignName },
-                                    { label: "Consultor", value: row.consultantName },
-                                    { label: "Regra", value: row.ruleApplied },
-                                    { label: "Status", value: row.status },
-                                    { label: "SLA", value: row.slaStatus },
-                                  ])
-                                }
-                              >
-                                Motivo
-                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openAssignmentDialog(row)}>Reatribuir</Button>
+                              <Button variant="outline" size="sm" onClick={() => void handleAssignmentMutation({ id: row.id, action: "aprovar" }, "Lead aprovado na fila.")}>Aprovar</Button>
+                              <Button variant="outline" size="sm" onClick={() => void handleAssignmentMutation({ id: row.id, action: "rejeitar" }, "Lead rejeitado na fila.")}>Rejeitar</Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -2419,6 +2423,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
             )}
           </DashboardPanel>
 
+          {/* Historico de atribuicoes */}
           <DashboardPanel title="Historico de atribuicoes" subtitle="Rastreabilidade de reatribuicoes manuais e automaticas" className="p-4">
             {distributionHistory.length ? (
               <>
@@ -2458,264 +2463,8 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
           </DashboardPanel>
         </TabsContent>
 
-        <TabsContent value="consultores" className="space-y-4">
-          <KpiGrid cols={4} className="gap-3">
-            <KpiCard title="Consultores ativos" value={formatNumber(consultantSummary.active)} icon={<Users className="h-4 w-4" />} tone="cyan" trend="elegiveis para distribuicao" />
-            <KpiCard title="Disponiveis agora" value={formatNumber(consultantSummary.available)} icon={<UserCog className="h-4 w-4" />} tone="teal" trend="recebimento imediato" />
-            <KpiCard title="Receita atribuida" value={formatCurrency(consultantSummary.revenue)} icon={<HandCoins className="h-4 w-4" />} tone="amber" trend="soma por consultor" />
-            <KpiCard title="Capacidade media" value={consultants.length ? `${Math.round(consultants.reduce((sum, item) => sum + item.dailyCapacity, 0) / consultants.length)}` : "0"} icon={<Gauge className="h-4 w-4" />} tone="purple" trend="leads por dia" />
-          </KpiGrid>
-
-          <DashboardPanel title="Gestao de consultores" subtitle="CRUD real para distribuicao, capacidade e elegibilidade" className="p-4">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="relative w-full max-w-md">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input className="pl-9" value={consultantSearch} onChange={(event) => setConsultantSearch(event.target.value)} placeholder="Buscar por nome, email ou cidade" />
-              </div>
-              <Button
-                onClick={() => {
-                  resetConsultantForm();
-                  setConsultantDialogOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Novo consultor
-              </Button>
-            </div>
-
-            {consultantsFiltered.length ? (
-              <>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nome</TableHead>
-                        <TableHead>Contato</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Cidade</TableHead>
-                        <TableHead>Regioes</TableHead>
-                        <TableHead>Faixa de contrato</TableHead>
-                        <TableHead>Tipos</TableHead>
-                        <TableHead>Capacidade</TableHead>
-                        <TableHead>Peso</TableHead>
-                        <TableHead>Conversao</TableHead>
-                        <TableHead>Tempo resp.</TableHead>
-                        <TableHead>Acoes</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pagedConsultants.items.map((consultant) => (
-                        <TableRow key={consultant.id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-semibold text-foreground">{consultant.name}</p>
-                              <p className="text-xs text-muted-foreground">{consultant.position || "Consultor"}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p>{consultant.phone || "—"}</p>
-                              <p className="text-xs text-muted-foreground">{consultant.email || "—"}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <Badge className={cn("border-0", statusClasses(consultant.status))}>{consultant.status}</Badge>
-                              {consultant.available ? (
-                                <Badge className="border-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200">Disponivel</Badge>
-                              ) : (
-                                <Badge className="border-0 bg-slate-500/10 text-slate-700 dark:text-slate-200">Indisponivel</Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>{consultant.city || "—"} / {consultant.state || "—"}</TableCell>
-                          <TableCell>{consultant.territoryRegions.join(", ") || "—"}</TableCell>
-                          <TableCell>{formatCurrency(consultant.contractValueMin)} - {formatCurrency(consultant.contractValueMax)}</TableCell>
-                          <TableCell>{consultant.leadTypes.join(", ") || "—"}</TableCell>
-                          <TableCell>{consultant.leadsReceived}/{consultant.dailyCapacity}</TableCell>
-                          <TableCell>{consultant.assignmentWeight}</TableCell>
-                          <TableCell>{formatPercent(consultant.conversionRate)}</TableCell>
-                          <TableCell>{formatHours(consultant.responseTimeHours)}</TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              <Button variant="outline" size="sm" onClick={() => openConsultantForEdit(consultant)}>Editar</Button>
-                              <Button variant="outline" size="sm" onClick={() => void handleConsultantStatusToggle(consultant, consultant.status !== "ativo")}>
-                                {consultant.status === "ativo" ? "Desativar" : "Ativar"}
-                              </Button>
-                              <Button variant="outline" size="sm" onClick={() => setConsultantDetail(consultant)}>Ver desempenho</Button>
-                              <Button variant="outline" size="sm" onClick={() => handleEligibilityTest(consultant)}>Testar elegibilidade</Button>
-                              <Button variant="outline" size="sm" onClick={() => void handleDeleteConsultant(consultant)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <PaginationBar page={pagedConsultants.page} totalPages={pagedConsultants.totalPages} onChange={setConsultantPage} />
-              </>
-            ) : (
-              <EmptyState title="Nenhum consultor encontrado" description="Cadastre o primeiro consultor ou ajuste a busca aplicada." />
-            )}
-          </DashboardPanel>
-        </TabsContent>
-
-        <TabsContent value="campanhas" className="space-y-4">
-          <KpiGrid cols={4} className="gap-3">
-            <KpiCard title="Campanhas totais" value={formatNumber(data.campaigns.summary.total)} icon={<LayoutPanelTop className="h-4 w-4" />} tone="cyan" trend="base acompanhada" />
-            <KpiCard title="Campanhas ativas" value={formatNumber(data.campaigns.summary.active)} icon={<Target className="h-4 w-4" />} tone="teal" trend="em operacao" />
-            <KpiCard title="Receita atribuida" value={formatCurrency(data.campaigns.summary.revenue)} icon={<HandCoins className="h-4 w-4" />} tone="amber" trend="por campanha" />
-            <KpiCard title="Qualificados" value={formatNumber(data.campaigns.summary.qualifiedLeads)} icon={<Sparkles className="h-4 w-4" />} tone="purple" trend="no periodo filtrado" />
-          </KpiGrid>
-
-          <DashboardPanel title="Analise operacional das campanhas" subtitle="Compare resposta, qualificacao, conversao, ROI e leads gerados" className="p-4">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="relative w-full max-w-md">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input className="pl-9" value={campaignSearch} onChange={(event) => setCampaignSearch(event.target.value)} placeholder="Buscar campanha" />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={handleExport}>
-                  <Download className="h-4 w-4" />
-                  Exportar
-                </Button>
-              </div>
-            </div>
-
-            <div className="mb-4 grid gap-3 xl:grid-cols-2">
-              <DashboardPanel title="Ranking interno" subtitle="Melhores campanhas por resposta, qualificacao e ROI" className="p-4">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior resposta</p>
-                    <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => b.responseRate - a.responseRate)[0]?.name || "—"}</p>
-                  </div>
-                  <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior qualificacao</p>
-                    <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => b.qualificationRate - a.qualificationRate)[0]?.name || "—"}</p>
-                  </div>
-                  <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior ROI</p>
-                    <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => (b.roiEstimated || 0) - (a.roiEstimated || 0))[0]?.name || "—"}</p>
-                  </div>
-                </div>
-              </DashboardPanel>
-
-              <DashboardPanel title="Comparar campanhas" subtitle="Selecione duas campanhas e compare os numeros lado a lado" className="p-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <FilterField label="Campanha A">
-                    <Select value={compareCampaignA || "all"} onValueChange={(value) => setCompareCampaignA(value === "all" ? "" : value)}>
-                      <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Selecione</SelectItem>
-                        {campaigns.map((campaign) => (
-                          <SelectItem key={campaign.id} value={campaign.id}>{campaign.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </FilterField>
-                  <FilterField label="Campanha B">
-                    <Select value={compareCampaignB || "all"} onValueChange={(value) => setCompareCampaignB(value === "all" ? "" : value)}>
-                      <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Selecione</SelectItem>
-                        {campaigns.map((campaign) => (
-                          <SelectItem key={campaign.id} value={campaign.id}>{campaign.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </FilterField>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {compareCampaignRows.length ? compareCampaignRows.map((campaign) => (
-                    <div key={campaign.id} className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                      <p className="text-sm font-semibold text-foreground">{campaign.name}</p>
-                      <div className="mt-3 grid gap-2 text-sm">
-                        <div className="flex items-center justify-between"><span className="text-muted-foreground">Resposta</span><span>{formatPercent(campaign.responseRate)}</span></div>
-                        <div className="flex items-center justify-between"><span className="text-muted-foreground">Qualificacao</span><span>{formatPercent(campaign.qualificationRate)}</span></div>
-                        <div className="flex items-center justify-between"><span className="text-muted-foreground">Fechamentos</span><span>{formatNumber(campaign.closings)}</span></div>
-                        <div className="flex items-center justify-between"><span className="text-muted-foreground">Receita</span><span>{formatCurrency(campaign.revenue)}</span></div>
-                      </div>
-                    </div>
-                  )) : <EmptyState message="Selecione duas campanhas para comparar." />}
-                </div>
-              </DashboardPanel>
-            </div>
-
-            {campaignsFiltered.length ? (
-              <>
-                <div className="mb-4">
-                  <ChartContainer config={{ qualificados: { label: "Qualificados", color: "#22d3ee" } }} className="h-[280px] w-full">
-                    <BarChart data={campaignsFiltered.slice(0, 8)}>
-                      <CartesianGrid vertical={false} />
-                      <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-15} height={64} />
-                      <YAxis tickLine={false} axisLine={false} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey="leadsQualified" fill="var(--color-qualificados)" radius={[10, 10, 0, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                </div>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Campanha</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Periodo</TableHead>
-                        <TableHead>Importados</TableHead>
-                        <TableHead>Abordados</TableHead>
-                        <TableHead>Respondidos</TableHead>
-                        <TableHead>Qualificados</TableHead>
-                        <TableHead>Tx resposta</TableHead>
-                        <TableHead>Tx qualificacao</TableHead>
-                        <TableHead>Fechamentos</TableHead>
-                        <TableHead>Receita</TableHead>
-                        <TableHead>Custo</TableHead>
-                        <TableHead>CPLQ</TableHead>
-                        <TableHead>ROI</TableHead>
-                        <TableHead>Acoes</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pagedCampaigns.items.map((campaign) => (
-                        <TableRow key={campaign.id}>
-                          <TableCell><p className="font-semibold text-foreground">{campaign.name}</p></TableCell>
-                          <TableCell><Badge className={cn("border-0", statusClasses(campaign.status))}>{campaign.status}</Badge></TableCell>
-                          <TableCell>{campaign.period}</TableCell>
-                          <TableCell>{formatNumber(campaign.leadsImported)}</TableCell>
-                          <TableCell>{formatNumber(campaign.leadsApproached)}</TableCell>
-                          <TableCell>{formatNumber(campaign.leadsResponded)}</TableCell>
-                          <TableCell>{formatNumber(campaign.leadsQualified)}</TableCell>
-                          <TableCell>{formatPercent(campaign.responseRate)}</TableCell>
-                          <TableCell>{formatPercent(campaign.qualificationRate)}</TableCell>
-                          <TableCell>{formatNumber(campaign.closings)}</TableCell>
-                          <TableCell>{formatCurrency(campaign.revenue)}</TableCell>
-                          <TableCell>{formatCurrency(campaign.cost)}</TableCell>
-                          <TableCell>{campaign.cplq === null ? "—" : formatCurrency(campaign.cplq)}</TableCell>
-                          <TableCell>{campaign.roiEstimated === null ? "—" : `${campaign.roiEstimated.toFixed(2)}x`}</TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              <Button variant="outline" size="sm" onClick={() => setCampaignDetail(campaign)}>Ver detalhes</Button>
-                              <Button variant="outline" size="sm" onClick={() => setActiveTab("visao-geral")}>Comparar</Button>
-                              <Button variant="outline" size="sm" onClick={() => setCampaignDetail(campaign)}>Abrir leads</Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <PaginationBar page={pagedCampaigns.page} totalPages={pagedCampaigns.totalPages} onChange={setCampaignPage} />
-              </>
-            ) : (
-              <EmptyState title="Nenhuma campanha encontrada" description="Ajuste a busca ou ative campanhas para acompanhar performance aqui." />
-            )}
-          </DashboardPanel>
-        </TabsContent>
-
-        <TabsContent value="insights" className="space-y-4">
-          <DashboardPanel title="Inteligencia automatica acionavel" subtitle="Alertas dinamicos sobre campanhas, cidades, consultores e distribuicao" className="p-4">
+        <TabsContent value="ia-config" className="space-y-4">
+          <DashboardPanel title="Diagnósticos de IA (Vexo Brain)" subtitle="Alertas automáticos e insights preditivos gerados a partir do histórico operacional" className="p-4">
             <div className="mb-4 grid gap-3 lg:grid-cols-5">
               <FilterField label="Severidade">
                 <Select value={insightSeverity} onValueChange={setInsightSeverity}>
@@ -2808,10 +2557,8 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
               <EmptyState title="Nenhum insight encontrado" description="Ajuste os filtros ou aguarde novos sinais operacionais da base." />
             )}
           </DashboardPanel>
-        </TabsContent>
 
-        <TabsContent value="configuracoes" className="space-y-4">
-          <DashboardPanel title="Parametros da inteligencia comercial" subtitle="Limiar, SLA, regras de ranking, alertas e permissoes com persistencia real" className="p-4">
+          <DashboardPanel title="Parâmetros Operacionais & SLAs" subtitle="Limiar de qualificação, tempos de SLA de atendimento, regras de ranking e permissões" className="p-4">
             <div className="grid gap-4 xl:grid-cols-2">
               <div className="space-y-4 rounded-[1.35rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <p className="text-sm font-semibold text-foreground">Metricas e janelas</p>
