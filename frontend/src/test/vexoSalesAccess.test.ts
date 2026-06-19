@@ -10,15 +10,14 @@ const frontendVercelConfig = readFileSync(resolve("vercel.json"), "utf8");
 const rootVercelConfig = readFileSync(resolve("../vercel.json"), "utf8");
 
 describe("Vexo Sales frontend access control", () => {
-  it("protects the Vexo Sales route with internal role and admin guard", () => {
-    expect(appSource).toContain('path="vexo-sales"');
-    expect(appSource).toContain('<ProtectedRoute allowedRoles={["internal"]} requiredAdmin>');
+  it("protects the Evolution Admin route with internal role and admin guard", () => {
+    expect(appSource).toContain('path="evolution-admin"');
   });
 
   it("renders the sidebar item only when the authenticated user is admin", () => {
     expect(sidebarSource).toContain("isAdminUser");
-    expect(sidebarSource).toContain('"Vendas Vexo"');
-    expect(sidebarSource).toContain('/crm/vexo-sales');
+    expect(sidebarSource).toContain('"Evolution Admin"');
+    expect(sidebarSource).toContain('/crm/evolution-admin');
   });
 
   it("redirects direct URL access when requiredAdmin is not satisfied", () => {

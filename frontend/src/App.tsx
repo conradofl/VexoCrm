@@ -28,7 +28,6 @@ import UserAccessManagement from "./pages/UserAccessManagement";
 import WhatsAppInbox from "./pages/WhatsAppInbox";
 import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
-import VexoSales from "./pages/VexoSales";
 import Conexoes from "./pages/Conexoes";
 import Aquecimento from "./pages/Aquecimento";
 import Relatorios from "./pages/Relatorios";
@@ -37,7 +36,7 @@ import ChatbotDocs from "./pages/ChatbotDocs";
 import ChatbotSettings from "./pages/ChatbotSettings";
 import FollowupQueue from "./pages/FollowupQueue";
 import OnboardingWizard from "./pages/OnboardingWizard";
-import OnboardingAgent from "./pages/OnboardingAgent";
+import VexoPitch from "./pages/VexoPitch";
 import EvolutionAdmin from "./pages/EvolutionAdmin";
 
 const queryClient = new QueryClient();
@@ -228,14 +227,6 @@ const App = () => (
                 }
               />
               <Route
-                path="vexo-sales"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
-                    <VexoSales />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="conexoes"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="conexoes">
@@ -264,16 +255,16 @@ const App = () => (
               <Route
                 path="onboarding"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
+                  <ProtectedRoute allowedRoles={["internal"]}>
                     <OnboardingWizard />
                   </ProtectedRoute>
                 }
               />
               <Route
-                path="onboarding-agent"
+                path="apresentacao"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
-                    <OnboardingAgent />
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <VexoPitch />
                   </ProtectedRoute>
                 }
               />

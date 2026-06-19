@@ -227,6 +227,7 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "disparos",
       "aquecimento",
       "relatorios",
+      "onboarding-wizard",
     ],
     allowedViews: [],
   },
@@ -241,7 +242,7 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "whatsapp.view",
       "whatsapp.reply",
     ],
-    internalPages: ["dashboard", "leads", "whatsapp"],
+    internalPages: ["dashboard", "leads", "whatsapp", "onboarding-wizard"],
     allowedViews: [],
   },
   parceiro: {

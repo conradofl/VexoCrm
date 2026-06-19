@@ -52,7 +52,7 @@ function parseSslConfigFromConnectionString(connectionString) {
  */
 export function createDatabasePool(connectionString) {
   const ssl = parseSslConfigFromConnectionString(connectionString);
-  return new Pool({
+  const pool = new Pool({
     connectionString,
     max: Number(process.env.PG_POOL_MAX || 10),
     idleTimeoutMillis: 30_000,
@@ -72,6 +72,10 @@ export function createDatabasePool(connectionString) {
     ssl,
     application_name: process.env.PG_APPLICATION_NAME || "vexoapi",
   });
+  pool.on("error", (err) => {
+    console.error("[database] pg pool error (idle client):", err?.message || err);
+  });
+  return pool;
 }
 
 /**

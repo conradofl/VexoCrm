@@ -98,17 +98,16 @@ const MODULOS: Record<Modo, Modulo> = {
 // Sistema: FIXO, fora dos modos, não é módulo vendável.
 // Visível para quem tiver canAccessInternalPage para a page correspondente.
 const SISTEMA_ITEMS = [
-  { key: "chatbot-docs", label: "Chatbot Docs", url: "/crm/chatbot-docs", icon: BookOpen,    page: "chatbot-docs" as InternalPage },
-  { key: "empresas",     label: "Empresas",     url: "/crm/empresas",     icon: Building2,   page: "empresas" as InternalPage },
-  { key: "usuarios",     label: "Usuários",     url: "/crm/usuarios",     icon: ShieldCheck, page: "usuarios" as InternalPage },
+  { key: "apresentacao", label: "Demonstração Vexo", url: "/crm/apresentacao", icon: Sparkles,    page: "onboarding-wizard" as InternalPage },
+  { key: "onboarding",   label: "Treinamento Vexo",   url: "/crm/onboarding",   icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
+  { key: "chatbot-docs", label: "Chatbot Docs",     url: "/crm/chatbot-docs", icon: BookOpen,    page: "chatbot-docs" as InternalPage },
+  { key: "empresas",     label: "Empresas",         url: "/crm/empresas",     icon: Building2,   page: "empresas" as InternalPage },
+  { key: "usuarios",     label: "Usuários",         url: "/crm/usuarios",     icon: ShieldCheck, page: "usuarios" as InternalPage },
 ];
 
 // Configuração + admin tools — FIXO, somente para isAdminUser.
 const ADMIN_ITEMS = [
-  { key: "vexo-sales",      label: "Vendas Vexo",     url: "/crm/vexo-sales",      icon: Briefcase },
   { key: "evolution-admin", label: "Evolution Admin",  url: "/crm/evolution-admin", icon: Database },
-  { key: "onboarding",      label: "Onboarding",       url: "/crm/onboarding",       icon: UserPlus },
-  { key: "onboarding-agent",label: "Criar com IA",     url: "/crm/onboarding-agent", icon: Sparkles },
 ];
 
 // ─── NavItem ──────────────────────────────────────────────────────────────────
