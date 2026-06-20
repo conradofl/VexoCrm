@@ -1356,7 +1356,7 @@ export default function LeadImports({
       )}
 
       {/* Tabs Navigation */}
-      <div className="w-full flex justify-start rounded-xl border border-slate-200/80 bg-slate-100/50 p-1 dark:border-white/10 dark:bg-white/[0.02]">
+      <div className="w-full flex justify-start rounded-xl border border-border bg-muted/30 p-1 dark:bg-muted/10">
         <button
           onClick={() => setActiveTab("campanha")}
           className={cn(
@@ -1405,7 +1405,7 @@ export default function LeadImports({
           {/* Main Wizard Form */}
           <div className="lg:col-span-2 space-y-6">
             {/* STEP 1: Leads Base configuration */}
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <Card className="border-border bg-card shadow-sm text-card-foreground rounded-2xl">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">1</span>
@@ -1691,7 +1691,7 @@ export default function LeadImports({
             </Card>
 
             {/* STEP 2: Sequence visual timeline & buttons */}
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <Card className="border-border bg-card shadow-sm text-card-foreground rounded-2xl">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">2</span>
@@ -1887,7 +1887,7 @@ export default function LeadImports({
             </Card>
 
             {/* STEP 3: Dispatch & Scheduling parameters */}
-            <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+            <Card className="border-border bg-card shadow-sm text-card-foreground rounded-2xl">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">3</span>
@@ -2188,14 +2188,14 @@ export default function LeadImports({
 
       {/* 📋 TAB 2: CAMPANHAS CRIADAS (Clean table list) */}
       {activeTab === "enviadas" && (
-        <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+        <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-base font-bold">Campanhas Configuradas</CardTitle>
               <CardDescription>Clique para editar as mensagens ou excluir as réguas</CardDescription>
             </div>
             <input
-              className="h-9 w-44 rounded-xl border border-slate-200 bg-white px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-white/10 dark:bg-white/[0.05]"
+              className="h-9 w-44 rounded-xl border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
               placeholder="Buscar campanha..."
               onChange={(e) => {
                 // local filter or query triggers could go here
@@ -2223,7 +2223,7 @@ export default function LeadImports({
                   </TableHeader>
                   <TableBody>
                     {campaigns.map((c) => (
-                      <TableRow key={c.id} className="border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]">
+                      <TableRow key={c.id} className="border-border hover:bg-muted/10">
                         <TableCell className="px-6 py-4">
                           <p className="text-sm font-bold text-foreground">{c.name}</p>
                           <p className="text-xs text-muted-foreground">{c.client_name ?? "Empresa padrão"} · {c.import_id ? "Base importada" : "Geral"}</p>
@@ -2257,7 +2257,7 @@ export default function LeadImports({
 
       {/* ⚡ TAB 3: FILA DE ENVIOS (Cross-campaign dispatch executions) */}
       {activeTab === "agendamentos" && (
-        <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+        <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-base font-bold">Fila de Disparos em Massa</CardTitle>
@@ -2298,7 +2298,7 @@ export default function LeadImports({
                     {dispatches.map((disp) => {
                       const total = (disp.sent_count ?? 0) + (disp.failed_count ?? 0);
                       return (
-                        <TableRow key={disp.id} className="border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]">
+                        <TableRow key={disp.id} className="border-border hover:bg-muted/10">
                           <TableCell className="px-6 py-4">
                             <p className="text-sm font-bold text-foreground">{disp.name}</p>
                             <p className="text-xs text-muted-foreground">Campanha: {(disp as any).campaign_name || "Planilha"}</p>
@@ -2649,7 +2649,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
     switch (status) {
       case "draft":
         return (
-          <Badge className="border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65 rounded-xl text-[10px]">
+          <Badge className="border border-border bg-muted/30 text-muted-foreground rounded-xl text-[10px]">
             Rascunho
           </Badge>
         );
@@ -2685,13 +2685,13 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
         );
       case "cancelled":
         return (
-          <Badge className="border border-slate-300/80 bg-white/90 text-slate-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/50 rounded-xl text-[10px]">
+          <Badge className="border border-border bg-muted/20 text-muted-foreground/60 rounded-xl text-[10px]">
             Cancelado
           </Badge>
         );
       default:
         return (
-          <Badge className="border border-slate-300/80 bg-white/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-white/65 rounded-xl text-[10px]">
+          <Badge className="border border-border bg-muted/30 text-muted-foreground rounded-xl text-[10px]">
             {status}
           </Badge>
         );
@@ -2909,7 +2909,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
 
         {/* KPI Dashboard Cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+          <Card className="border-border bg-card text-card-foreground shadow-sm rounded-2xl">
             <CardContent className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
@@ -2925,7 +2925,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+          <Card className="border-border bg-card text-card-foreground shadow-sm rounded-2xl">
             <CardContent className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
@@ -2941,7 +2941,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+          <Card className="border-border bg-card text-card-foreground shadow-sm rounded-2xl">
             <CardContent className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
@@ -2957,7 +2957,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200/80 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.04)] dark:border-white/5 dark:bg-white/[0.02] rounded-2xl">
+          <Card className="border-border bg-card text-card-foreground shadow-sm rounded-2xl">
             <CardContent className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
@@ -2976,7 +2976,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Chart Column */}
-          <Card className="lg:col-span-1 border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+          <Card className="lg:col-span-1 border-border bg-card text-card-foreground shadow-lg rounded-2xl">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-bold">Desempenho dos Lotes</CardTitle>
               <CardDescription>Envios com sucesso vs falhas nos últimos 8 lotes.</CardDescription>
@@ -3007,7 +3007,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
           </Card>
 
           {/* List Table Column */}
-          <Card className="lg:col-span-2 border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+          <Card className="lg:col-span-2 border-border bg-card text-card-foreground shadow-lg rounded-2xl">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <div>
                 <CardTitle className="text-base font-bold">Histórico de Execuções</CardTitle>
@@ -3015,7 +3015,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
               </div>
               <div className="flex items-center gap-2">
                 <input
-                  className="h-9 w-44 rounded-xl border border-slate-200 bg-white px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-white/10 dark:bg-white/[0.05]"
+                  className="h-9 w-44 rounded-xl border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   placeholder="Buscar lote..."
                   value={dispatchesSearchTerm}
                   onChange={(e) => setDispatchesSearchTerm(e.target.value)}
@@ -3023,7 +3023,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-9 rounded-xl border-slate-200/80 dark:border-white/10 px-2.5"
+                  className="h-9 rounded-xl border-border px-2.5"
                   onClick={() => void refetchDispatches()}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -3041,7 +3041,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
               ) : (
                 <div className="overflow-x-auto">
                   <Table className="text-xs">
-                    <TableHeader className="bg-slate-50/50 dark:bg-white/[0.01]">
+                    <TableHeader className="bg-muted/20 dark:bg-muted/10">
                       <TableRow className="border-slate-200/60 dark:border-white/5">
                         <TableHead className="px-4 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Lote / Campanha</TableHead>
                         <TableHead className="px-3 py-3 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Status</TableHead>
@@ -3058,7 +3058,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                         const isDownloading = downloadingId === d.id;
 
                         return (
-                          <TableRow key={d.id} className="border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]">
+                          <TableRow key={d.id} className="border-border hover:bg-muted/10">
                             <TableCell className="px-4 py-3">
                               <div className="space-y-0.5">
                                 <p className="font-semibold text-foreground">{d.name}</p>
@@ -3118,7 +3118,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-7 w-7 rounded-lg p-0 border-slate-200/80 hover:bg-slate-100 dark:border-white/10 dark:hover:bg-white/[0.05]"
+                                    className="h-7 w-7 rounded-lg p-0 border-border hover:bg-muted/10"
                                     title="Baixar falhas"
                                     disabled={isDownloading}
                                     onClick={() => void handleDownloadFailedCsv(d)}
@@ -3162,7 +3162,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
       </div>
 
       {/* ── SEÇÃO 2: DETALHES DE AUDITORIA DA PLANILHA SELECIONADA ────────── */}
-      <Card className="border-slate-200/80 bg-white/90 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] rounded-2xl">
+      <Card className="border-border bg-card text-card-foreground shadow-lg rounded-2xl">
         <CardHeader className="pb-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
@@ -3175,9 +3175,9 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                 <SelectTrigger className="h-9 w-56 rounded-xl">
                   <SelectValue placeholder="Selecione a planilha..." />
                 </SelectTrigger>
-                <SelectContent className="border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-white/10 dark:bg-[#0b0e1a] dark:text-white">
+                <SelectContent className="border-border bg-card text-card-foreground shadow-2xl">
                   {imports.map((imp) => (
-                    <SelectItem key={imp.id} value={imp.id} className="rounded-md focus:bg-slate-100 dark:focus:bg-white/10">
+                    <SelectItem key={imp.id} value={imp.id} className="rounded-md focus:bg-muted dark:focus:bg-white/10">
                       {imp.source_name} ({imp.imported_rows} leads)
                     </SelectItem>
                   ))}
@@ -3189,7 +3189,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
 
         <CardContent className="space-y-4">
           {imports.length > 0 && selectedImport && !loading && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50/50 dark:bg-white/[0.02] p-4 rounded-2xl border border-slate-200/60 dark:border-white/5 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-2xl border border-border text-xs">
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300">
                   <FileSpreadsheet className="h-4 w-4 text-indigo-500" />
@@ -3350,9 +3350,9 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
               {filteredItems.length === 0 ? (
                 <p className="text-center text-xs text-muted-foreground italic py-6">Nenhum lead correspondente aos filtros atuais.</p>
               ) : (
-                <div className="overflow-x-auto rounded-2xl border border-slate-200/60 dark:border-white/5">
+                <div className="overflow-x-auto rounded-2xl border border-border">
                   <Table className="text-xs">
-                    <TableHeader className="bg-slate-50/50 dark:bg-white/[0.01]">
+                    <TableHeader className="bg-muted/30 dark:bg-muted/10">
                       <TableRow className="border-slate-200/60 dark:border-white/5">
                         <TableHead className="w-12 text-center h-10 py-0">
                           <input
@@ -3392,7 +3392,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
                           <TableRow
                             key={item.lead_import_item_id}
                             className={cn(
-                              "border-slate-200/60 hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.01]",
+                              "border-border hover:bg-muted/10",
                               isSelected ? "bg-indigo-50/10 dark:bg-indigo-950/5" : ""
                             )}
                           >

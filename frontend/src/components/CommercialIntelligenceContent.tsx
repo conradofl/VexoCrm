@@ -340,7 +340,7 @@ function FilterField({
 
 function EmptyChart({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex h-[260px] items-center justify-center rounded-[1.25rem] border border-dashed border-slate-200/80 bg-white/70 px-6 text-center dark:border-white/10 dark:bg-white/[0.03]">
+    <div className="flex h-[260px] items-center justify-center rounded-[1.25rem] border border-dashed border-border bg-card px-6 text-center text-card-foreground">
       <div className="space-y-2">
         <p className="text-sm font-semibold text-foreground">{title}</p>
         <p className="text-xs text-muted-foreground">{description}</p>
@@ -386,7 +386,7 @@ function LoadingState() {
     >
       <div className="grid gap-3 md:grid-cols-4">
         {["Metricas", "Rankings", "Distribuicao", "Insights"].map((label) => (
-          <div key={label} className="rounded-2xl border border-slate-200/80 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.04]">
+          <div key={label} className="rounded-2xl border border-border bg-card p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
               {label}
@@ -431,7 +431,7 @@ function ConsultantFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto rounded-[1.5rem] border-slate-200/90 bg-white dark:border-white/10 dark:bg-[rgba(10,12,24,0.98)]">
+      <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto rounded-[1.5rem] border-border bg-card text-card-foreground">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>Configure criterios reais de distribuicao e atendimento do consultor.</DialogDescription>
@@ -483,7 +483,7 @@ function ConsultantFormDialog({
                       "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
                       active
                         ? "border-cyan-400/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200"
-                        : "border-slate-200/90 bg-white/80 text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/70",
+                        : "border-border bg-card text-muted-foreground",
                     )}
                   >
                     {option}
@@ -523,7 +523,7 @@ function ConsultantFormDialog({
                       "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
                       active
                         ? "border-fuchsia-400/50 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-200"
-                        : "border-slate-200/90 bg-white/80 text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/70",
+                        : "border-border bg-card text-muted-foreground",
                     )}
                   >
                     {option}
@@ -621,7 +621,7 @@ function DistributionRuleDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-[1.5rem] border-slate-200/90 bg-white dark:border-white/10 dark:bg-[rgba(10,12,24,0.98)]">
+      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-[1.5rem] border-border bg-card text-card-foreground shadow-2xl">
         <DialogHeader>
           <DialogTitle>Regra de distribuicao</DialogTitle>
           <DialogDescription>Configure prioridade, SLA e elegibilidade de forma persistente.</DialogDescription>
@@ -750,7 +750,7 @@ function AssignmentDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg rounded-[1.5rem] border-slate-200/90 bg-white dark:border-white/10 dark:bg-[rgba(10,12,24,0.98)]">
+      <DialogContent className="max-w-lg rounded-[1.5rem] border-border bg-card text-card-foreground shadow-2xl">
         <DialogHeader>
           <DialogTitle>Reatribuir lead</DialogTitle>
           <DialogDescription>
@@ -806,14 +806,14 @@ function RankingDetailDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg rounded-[1.5rem] border-slate-200/90 bg-white dark:border-white/10 dark:bg-[rgba(10,12,24,0.98)]">
+      <DialogContent className="max-w-lg rounded-[1.5rem] border-border bg-card text-card-foreground shadow-2xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>Breakdown operacional do item selecionado.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           {rows.map((row) => (
-            <div key={row.label} className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+            <div key={row.label} className="flex items-center justify-between rounded-xl border border-border bg-card/60 px-4 py-3">
               <span className="text-sm text-muted-foreground">{row.label}</span>
               <span className="text-sm font-semibold text-foreground">{row.value}</span>
             </div>
@@ -1509,7 +1509,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
 
   if (allowedIntelligenceSubTabs.length === 0) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10 bg-card p-6">
+      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-border bg-card p-6">
         <p className="text-sm text-slate-400 text-center">Você não tem permissão para acessar nenhuma sub-aba da Inteligência Comercial.</p>
       </div>
     );
@@ -1641,7 +1641,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
       </DashboardPanel>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="space-y-4">
-        <div className="rounded-[1.5rem] border border-slate-200/90 bg-white/75 p-2 dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="rounded-[1.5rem] border border-border bg-card/60 p-2 backdrop-blur-md">
           <TabsList className="grid h-auto w-full gap-2 bg-transparent p-0" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(110px, 1fr))` }}>
             {isSubTabAllowed("performance") && (
               <TabsTrigger value="performance" className="rounded-2xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
@@ -1811,7 +1811,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
               <div className="space-y-3">
                 {data.overview.alerts.length ? (
                   data.overview.alerts.slice(0, 4).map((insight) => (
-                    <div key={`${insight.title}-${insight.generatedAt}`} className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                    <div key={`${insight.title}-${insight.generatedAt}`} className="rounded-[1.2rem] border border-border bg-card p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-foreground">{insight.title}</p>
@@ -1850,7 +1850,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         { label: "Tempo medio ate fechamento", value: formatHours(item.avgCloseHours) },
                       ])
                     }
-                    className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-3 text-left transition hover:border-cyan-300/50 dark:border-white/10 dark:bg-white/[0.03]"
+                    className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:border-cyan-500/50 hover:bg-cyan-500/5"
                   >
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.name}</p>
@@ -1877,7 +1877,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         { label: "Receita", value: formatCurrency(item.revenue) },
                       ])
                     }
-                    className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-3 text-left transition hover:border-violet-300/50 dark:border-white/10 dark:bg-white/[0.03]"
+                    className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:border-violet-500/50 hover:bg-violet-500/5"
                   >
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.name}</p>
@@ -1896,7 +1896,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                     key={item.id}
                     type="button"
                     onClick={() => setConsultantDetail(item)}
-                    className="flex w-full items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-3 text-left transition hover:border-fuchsia-300/50 dark:border-white/10 dark:bg-white/[0.03]"
+                    className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:border-fuchsia-500/50 hover:bg-fuchsia-500/5"
                   >
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.name}</p>
@@ -1913,7 +1913,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
           <div className="pt-2">
             <Button 
               variant="outline" 
-              className="w-full flex items-center justify-between py-5 border-slate-200 dark:border-white/5 bg-white/50 dark:bg-white/[0.02] rounded-2xl"
+              className="w-full flex items-center justify-between py-5 border-border bg-card/50 rounded-2xl backdrop-blur-md"
               onClick={() => setShowCampaignsPanel(!showCampaignsPanel)}
             >
               <span className="text-sm font-semibold text-foreground">
@@ -1934,15 +1934,15 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 <div className="grid gap-3 xl:grid-cols-2">
                   <DashboardPanel title="Ranking interno" subtitle="Melhores campanhas por resposta, qualificacao e ROI" className="p-4">
                     <div className="grid gap-3 md:grid-cols-3">
-                      <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                      <div className="rounded-[1.2rem] border border-border bg-card p-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior resposta</p>
                         <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => b.responseRate - a.responseRate)[0]?.name || "—"}</p>
                       </div>
-                      <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                      <div className="rounded-[1.2rem] border border-border bg-card p-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior qualificacao</p>
                         <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => b.qualificationRate - a.qualificationRate)[0]?.name || "—"}</p>
                       </div>
-                      <div className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                      <div className="rounded-[1.2rem] border border-border bg-card p-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Maior ROI</p>
                         <p className="mt-2 text-sm font-semibold text-foreground">{[...campaigns].sort((a, b) => (b.roiEstimated || 0) - (a.roiEstimated || 0))[0]?.name || "—"}</p>
                       </div>
@@ -1976,7 +1976,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                     </div>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       {compareCampaignRows.length ? compareCampaignRows.map((campaign) => (
-                        <div key={campaign.id} className="rounded-[1.2rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                        <div key={campaign.id} className="rounded-[1.2rem] border border-border bg-card p-4">
                           <p className="text-sm font-semibold text-foreground">{campaign.name}</p>
                           <div className="mt-3 grid gap-2 text-sm">
                             <div className="flex items-center justify-between"><span className="text-muted-foreground">Resposta</span><span>{formatPercent(campaign.responseRate)}</span></div>
@@ -2068,7 +2068,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
           <div className="pt-2">
             <Button 
               variant="outline" 
-              className="w-full flex items-center justify-between py-5 border-slate-200 dark:border-white/5 bg-white/50 dark:bg-white/[0.02] rounded-2xl"
+              className="w-full flex items-center justify-between py-5 border-border bg-card/50 rounded-2xl backdrop-blur-md"
               onClick={() => setShowDetailedMetrics(!showDetailedMetrics)}
             >
               <span className="text-sm font-semibold text-foreground">
@@ -2160,7 +2160,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                   {pagedConsultants.items.map((consultant) => (
                     <div 
                       key={consultant.id}
-                      className="rounded-2xl border border-slate-100 dark:border-white/5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md p-5 shadow-sm transition hover:shadow-md flex flex-col justify-between"
+                      className="rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:shadow-md flex flex-col justify-between"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
@@ -2183,7 +2183,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         </Badge>
                       </div>
 
-                      <div className="mt-4 space-y-2 text-xs text-muted-foreground border-t border-slate-100 dark:border-white/5 pt-3">
+                      <div className="mt-4 space-y-2 text-xs text-muted-foreground border-t border-border pt-3">
                         <div className="flex justify-between">
                           <span>Telefone:</span>
                           <span className="font-medium text-foreground">{consultant.phone || "—"}</span>
@@ -2206,12 +2206,12 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         )}
                       </div>
 
-                      <div className="mt-4 grid grid-cols-3 gap-2 bg-slate-50/50 dark:bg-white/[0.02] p-2.5 rounded-xl border border-slate-100 dark:border-white/5">
+                      <div className="mt-4 grid grid-cols-3 gap-2 bg-muted/30 p-2.5 rounded-xl border border-border">
                         <div className="text-center">
                           <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Leads</p>
                           <p className="font-semibold text-[11px] text-foreground mt-0.5">{consultant.leadsReceived}/{consultant.dailyCapacity}</p>
                         </div>
-                        <div className="text-center border-x border-slate-200/50 dark:border-white/5">
+                        <div className="text-center border-x border-border">
                           <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Conversão</p>
                           <p className="font-semibold text-[11px] text-foreground mt-0.5">{formatPercent(consultant.conversionRate)}</p>
                         </div>
@@ -2226,7 +2226,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                           <span>Capacidade Diária</span>
                           <span>{Math.round((consultant.leadsReceived / (consultant.dailyCapacity || 1)) * 100)}%</span>
                         </div>
-                        <div className="h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-cyan-500 rounded-full" 
                             style={{ width: `${Math.min(100, (consultant.leadsReceived / (consultant.dailyCapacity || 1)) * 100)}%` }}
@@ -2234,7 +2234,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         </div>
                       </div>
 
-                      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-foreground border-t border-slate-100 dark:border-white/5 pt-3">
+                      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-foreground border-t border-border pt-3">
                         <span className="text-muted-foreground">Disponível:</span>
                         <Switch 
                           checked={consultant.available} 
@@ -2242,7 +2242,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                         />
                       </div>
 
-                      <div className="mt-4 flex gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                      <div className="mt-4 flex gap-2 pt-2 border-t border-border">
                         <Button variant="outline" size="sm" className="flex-1 text-[11px] h-8" onClick={() => openConsultantForEdit(consultant)}>
                           Editar
                         </Button>
@@ -2269,7 +2269,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
               {data.distribution.strategies.map((strategy) => {
                 const active = settingsDraft.distributionStrategy === strategy.key || strategy.enabled;
                 return (
-                  <div key={strategy.key} className={cn("rounded-[1.35rem] border p-4 transition-colors", active ? "border-cyan-400/40 bg-cyan-500/10" : "border-slate-200/90 bg-white/85 dark:border-white/10 dark:bg-white/[0.03]")}>
+                  <div key={strategy.key} className={cn("rounded-[1.35rem] border p-4 transition-colors", active ? "border-cyan-500/30 bg-cyan-500/5 text-cyan-600 dark:text-cyan-300" : "border-border bg-card text-foreground")}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-foreground">{strategy.label}</p>
@@ -2515,7 +2515,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 </Select>
               </FilterField>
               <FilterField label="Periodo">
-                <div className="rounded-md border border-slate-200/90 bg-white/80 px-3 py-2 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
                   {PERIOD_OPTIONS.find((option) => option.value === appliedFilters.period)?.label || "30 dias"}
                 </div>
               </FilterField>
@@ -2524,7 +2524,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
             {insightsFiltered.length ? (
               <div className="grid gap-3 xl:grid-cols-2">
                 {insightsFiltered.map((insight) => (
-                  <div key={`${insight.id || insight.title}-${insight.generatedAt || ""}`} className="rounded-[1.35rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                  <div key={`${insight.id || insight.title}-${insight.generatedAt || ""}`} className="rounded-[1.35rem] border border-border bg-card p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-base font-semibold text-foreground">{insight.title}</p>
@@ -2533,11 +2533,11 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                       <Badge className={cn("border-0", severityClasses(insight.severity))}>{insight.severity}</Badge>
                     </div>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <div className="rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.02]">
+                      <div className="rounded-xl border border-border bg-card/50 p-3">
                         <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Impacto estimado</p>
                         <p className="mt-1 text-sm font-medium text-foreground">{insight.impact}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200/90 bg-white/80 p-3 dark:border-white/10 dark:bg-white/[0.02]">
+                      <div className="rounded-xl border border-border bg-card/50 p-3">
                         <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Recomendacao</p>
                         <p className="mt-1 text-sm font-medium text-foreground">{insight.recommendation}</p>
                       </div>
@@ -2560,7 +2560,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
 
           <DashboardPanel title="Parâmetros Operacionais & SLAs" subtitle="Limiar de qualificação, tempos de SLA de atendimento, regras de ranking e permissões" className="p-4">
             <div className="grid gap-4 xl:grid-cols-2">
-              <div className="space-y-4 rounded-[1.35rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="space-y-4 rounded-[1.35rem] border border-border bg-card p-4">
                 <p className="text-sm font-semibold text-foreground">Metricas e janelas</p>
                 <div className="grid gap-4 md:grid-cols-2">
                   <FilterField label="Limiar de qualificacao">
@@ -2592,7 +2592,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-[1.35rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="space-y-4 rounded-[1.35rem] border border-border bg-card p-4">
                 <p className="text-sm font-semibold text-foreground">Regras de ranking</p>
                 <div className="grid gap-4 md:grid-cols-3">
                   <FilterField label="Cidades">
@@ -2628,7 +2628,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-[1.35rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="space-y-4 rounded-[1.35rem] border border-border bg-card p-4">
                 <p className="text-sm font-semibold text-foreground">Alertas e limiares</p>
                 <div className="grid gap-4 md:grid-cols-2">
                   <FilterField label="Baixa resposta (%)">
@@ -2646,18 +2646,18 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-[1.35rem] border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="space-y-4 rounded-[1.35rem] border border-border bg-card p-4">
                 <p className="text-sm font-semibold text-foreground">Permissoes e governanca</p>
                 <div className="space-y-3">
-                  <label className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white/80 px-3 py-3 text-sm dark:border-white/10 dark:bg-white/[0.02]">
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-card/50 px-3 py-3 text-sm">
                     <span>Permitir editar configuracoes</span>
                     <Switch checked={Boolean(settingsDraft.permissions?.canEditSettings)} onCheckedChange={(checked) => setSettingsDraft((current) => ({ ...current, permissions: { ...current.permissions, canEditSettings: checked } }))} />
                   </label>
-                  <label className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white/80 px-3 py-3 text-sm dark:border-white/10 dark:bg-white/[0.02]">
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-card/50 px-3 py-3 text-sm">
                     <span>Permitir gerenciar consultores</span>
                     <Switch checked={Boolean(settingsDraft.permissions?.canManageConsultants)} onCheckedChange={(checked) => setSettingsDraft((current) => ({ ...current, permissions: { ...current.permissions, canManageConsultants: checked } }))} />
                   </label>
-                  <label className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white/80 px-3 py-3 text-sm dark:border-white/10 dark:bg-white/[0.02]">
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-card/50 px-3 py-3 text-sm">
                     <span>Permitir gerenciar distribuicao</span>
                     <Switch checked={Boolean(settingsDraft.permissions?.canManageDistribution)} onCheckedChange={(checked) => setSettingsDraft((current) => ({ ...current, permissions: { ...current.permissions, canManageDistribution: checked } }))} />
                   </label>
@@ -2716,30 +2716,30 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
       <RankingDetailDialog title={rankingDetailTitle} open={rankingDetailOpen} onOpenChange={setRankingDetailOpen} rows={rankingDetailRows} />
 
       <Dialog open={Boolean(consultantDetail)} onOpenChange={(open) => !open && setConsultantDetail(null)}>
-        <DialogContent className="max-w-2xl rounded-[1.5rem] border-slate-200/90 bg-white dark:border-white/10 dark:bg-[rgba(10,12,24,0.98)]">
+        <DialogContent className="max-w-2xl rounded-[1.5rem] border-border bg-card text-card-foreground shadow-2xl">
           <DialogHeader>
             <DialogTitle>{consultantDetail?.name}</DialogTitle>
             <DialogDescription>Desempenho e elegibilidade operacional do consultor selecionado.</DialogDescription>
           </DialogHeader>
           {consultantDetail ? (
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="rounded-xl border border-border bg-card/60 p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Receita</p>
                 <p className="mt-2 text-2xl font-bold text-foreground">{formatCurrency(consultantDetail.revenue)}</p>
               </div>
-              <div className="rounded-xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="rounded-xl border border-border bg-card/60 p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Conversao</p>
                 <p className="mt-2 text-2xl font-bold text-foreground">{formatPercent(consultantDetail.conversionRate)}</p>
               </div>
-              <div className="rounded-xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="rounded-xl border border-border bg-card/60 p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Leads recebidos</p>
                 <p className="mt-2 text-2xl font-bold text-foreground">{formatNumber(consultantDetail.leadsReceived)}</p>
               </div>
-              <div className="rounded-xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="rounded-xl border border-border bg-card/60 p-4">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tempo medio de resposta</p>
                 <p className="mt-2 text-2xl font-bold text-foreground">{formatHours(consultantDetail.responseTimeHours)}</p>
               </div>
-              <div className="rounded-xl border border-slate-200/90 bg-white/80 p-4 dark:border-white/10 dark:bg-white/[0.03] md:col-span-2">
+              <div className="rounded-xl border border-border bg-card/60 p-4 md:col-span-2">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cobertura operacional</p>
                 <p className="mt-2 text-sm text-foreground">{consultantDetail.territoryRegions.join(", ") || "Sem regiao configurada"}</p>
                 <p className="mt-2 text-sm text-muted-foreground">{consultantDetail.notes || "Sem observacoes operacionais."}</p>
@@ -2750,7 +2750,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
       </Dialog>
 
       <Dialog open={Boolean(campaignDetail)} onOpenChange={(open) => !open && setCampaignDetail(null)}>
-        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto rounded-[1.5rem] border-slate-200/90 bg-white dark:border-white/10 dark:bg-[rgba(10,12,24,0.98)]">
+        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto rounded-[1.5rem] border-border bg-card text-card-foreground shadow-2xl">
           <DialogHeader>
             <DialogTitle>{campaignDetail?.name}</DialogTitle>
             <DialogDescription>Evolucao temporal, consultores, cidades, gargalos e preview dos leads da campanha.</DialogDescription>
@@ -2758,19 +2758,19 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
           {campaignDetail ? (
             <div className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-4">
-                <div className="rounded-xl border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-xl border border-border bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Taxa de resposta</p>
                   <p className="mt-2 text-2xl font-bold text-foreground">{formatPercent(campaignDetail.responseRate)}</p>
                 </div>
-                <div className="rounded-xl border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-xl border border-border bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Taxa de qualificacao</p>
                   <p className="mt-2 text-2xl font-bold text-foreground">{formatPercent(campaignDetail.qualificationRate)}</p>
                 </div>
-                <div className="rounded-xl border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-xl border border-border bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Receita</p>
                   <p className="mt-2 text-2xl font-bold text-foreground">{formatCurrency(campaignDetail.revenue)}</p>
                 </div>
-                <div className="rounded-xl border border-slate-200/90 bg-white/85 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="rounded-xl border border-border bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">ROI estimado</p>
                   <p className="mt-2 text-2xl font-bold text-foreground">{campaignDetail.roiEstimated === null ? "—" : `${campaignDetail.roiEstimated.toFixed(2)}x`}</p>
                 </div>
@@ -2815,7 +2815,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 <DashboardPanel title="Cidades com melhor resultado" subtitle="Melhor desempenho geografico" className="p-4">
                   <div className="space-y-2">
                     {campaignDetail.topCities.length ? campaignDetail.topCities.map((item) => (
-                      <div key={item.city} className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                      <div key={item.city} className="flex items-center justify-between rounded-xl border border-border bg-card/60 px-3 py-3">
                         <span className="text-sm font-medium text-foreground">{item.city}</span>
                         <span className="text-xs text-muted-foreground">{formatPercent(item.qualificationRate)}</span>
                       </div>
@@ -2826,7 +2826,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
                 <DashboardPanel title="Consultores que mais converteram" subtitle="Conversao e receita por campanha" className="p-4">
                   <div className="space-y-2">
                     {campaignDetail.topConsultants.length ? campaignDetail.topConsultants.map((item) => (
-                      <div key={item.consultantId} className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white/85 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                      <div key={item.consultantId} className="flex items-center justify-between rounded-xl border border-border bg-card/60 px-3 py-3">
                         <div>
                           <p className="text-sm font-medium text-foreground">{item.consultantName}</p>
                           <p className="text-xs text-muted-foreground">{item.converted} fechamentos</p>

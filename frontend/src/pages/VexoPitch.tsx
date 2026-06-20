@@ -1226,12 +1226,125 @@ export default function VexoPitch() {
               </div>
             )}
 
-            {/* SLIDE 3: O SIMULADOR LIVE MULTITURNO */}
+            {/* SLIDE 3: FOLLOW-UPS E REENGAJAMENTO */}
             {activeSlide === 3 && (
+              <div className="max-w-5xl w-full space-y-8 animate-fade-in-up">
+                <div className="text-center space-y-4">
+                  <Badge className="bg-orange-500/10 border-orange-500/20 text-orange-400 text-sm px-4 py-1.5 uppercase tracking-wider font-mono">
+                    SLIDE 03 · FOLLOW-UP & REENGAJAMENTO
+                  </Badge>
+                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-white leading-tight">
+                    Persistência Sem Esforço: Follow-ups Inteligentes
+                  </h1>
+                  <p className="text-lg md:text-xl text-slate-300 max-w-4xl mx-auto">
+                    Não dependa de planilhas ou da memória do vendedor. Automatize a persistência comercial de forma de cadência ativa com pausa automática.
+                  </p>
+                </div>
+
+                <div className="grid gap-6 md:grid-cols-3 mt-4">
+                  <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6 space-y-4 relative overflow-hidden group hover:border-orange-500/30 transition-all duration-300 shadow-2xl">
+                    <div className="absolute top-0 right-0 h-32 w-32 bg-orange-500/5 rounded-full blur-2xl" />
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
+                      <Clock className="h-7 w-7" />
+                    </div>
+                    <h3 className="text-xl font-bold text-orange-400">Cadências Prontas</h3>
+                    <ul className="space-y-2.5 text-xs text-slate-300">
+                      <li className="flex items-start gap-2">
+                        <Check className="h-4 w-4 shrink-0 text-orange-400 mt-0.5" />
+                        <span><strong>Lembrete Pré-Reunião (No-Show)</strong>: Envia mensagens automáticas antes do agendamento, diminuindo faltas em até 70%.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <Check className="h-4 w-4 shrink-0 text-orange-400 mt-0.5" />
+                        <span><strong>Cobrança de Proposta</strong>: Relembra o lead sobre a proposta de forma automática e sutil.</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <Check className="h-4 w-4 shrink-0 text-orange-400 mt-0.5" />
+                        <span><strong>Reativação de Frios</strong>: Resgata contatos antigos ou inativos de meses atrás de maneira prática.</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/10 p-6 space-y-4 relative overflow-hidden group shadow-[inset_0_0_30px_rgba(99,102,241,0.15)] md:col-span-2">
+                    <div className="absolute -right-16 -top-16 h-36 w-36 bg-indigo-500/10 rounded-full blur-2xl" />
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400">
+                      <Bot className="h-7 w-7" />
+                    </div>
+                    <h3 className="text-xl font-bold text-indigo-400">Pausa Automática Pós-Resposta</h3>
+                    <p className="text-sm text-slate-300 leading-relaxed">
+                      O maior risco das automações é continuar mandando mensagens após o cliente responder. O Vexo OS resolve isso nativamente:
+                    </p>
+                    <div className="rounded-xl bg-slate-950/50 p-4 border border-white/5 space-y-2">
+                      <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                        <strong>Detecção em tempo real:</strong>
+                      </p>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Assim que o lead responde (ex: "Gostei, vamos marcar"), a cadência de follow-up é pausada no mesmo segundo. O Closer recebe uma notificação instantânea e assume o atendimento de forma 100% humanizada.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 4: INTELIGÊNCIA COMERCIAL & ROTEAMENTO */}
+            {activeSlide === 4 && (
+              <div className="max-w-5xl w-full space-y-8 animate-fade-in-up">
+                <div className="text-center space-y-4">
+                  <Badge className="bg-emerald-500/10 border-emerald-500/20 text-emerald-400 text-sm px-4 py-1.5 uppercase tracking-wider font-mono">
+                    SLIDE 04 · INTELIGÊNCIA & ROTEAMENTO DE LEADS
+                  </Badge>
+                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-white leading-tight">
+                    Roteamento Inteligente & Governança da Operação
+                  </h1>
+                  <p className="text-lg md:text-xl text-slate-300 max-w-4xl mx-auto">
+                    Distribua leads de forma otimizada para o vendedor certo no timing exato e identifique gargalos comerciais instantaneamente.
+                  </p>
+                </div>
+
+                <div className="grid gap-6 md:grid-cols-3 mt-4">
+                  <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6 space-y-4 hover:border-emerald-500/30 transition-all duration-300 relative overflow-hidden group shadow-2xl">
+                    <div className="absolute top-0 right-0 h-32 w-32 bg-emerald-500/5 rounded-full blur-2xl" />
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                      <Users className="h-7 w-7" />
+                    </div>
+                    <h3 className="text-xl font-bold text-emerald-400">Distribuição Round Robin</h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Distribuição automática de leads baseada no status de atividade do vendedor. Permite configurar pesos e regras baseados em conversão histórica de cada consultor da equipe.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6 space-y-4 hover:border-emerald-500/30 transition-all duration-300 relative overflow-hidden group shadow-2xl">
+                    <div className="absolute top-0 right-0 h-32 w-32 bg-emerald-500/5 rounded-full blur-2xl" />
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                      <Bell className="h-7 w-7" />
+                    </div>
+                    <h3 className="text-xl font-bold text-emerald-400">Alertas de SLA Estrito</h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Tempo é dinheiro. Se o lead qualificado pela IA não for atendido pelo vendedor humano em até 10 minutos, o Vexo OS gera alertas visuais e reencaminha o lead na hora para salvar a venda.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6 space-y-4 hover:border-emerald-500/30 transition-all duration-300 relative overflow-hidden group shadow-2xl">
+                    <div className="absolute top-0 right-0 h-32 w-32 bg-emerald-500/5 rounded-full blur-2xl" />
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                      <Sparkles className="h-7 w-7" />
+                    </div>
+                    <h3 className="text-xl font-bold text-emerald-400">Diagnósticos da IA</h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Tenha um analista de dados integrado. O Vexo Brain analisa conversas inteiras e sintetiza relatórios diários de dores dos clientes, objeções mais comuns e sugestões práticas de melhoria.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 5: O SIMULADOR LIVE MULTITURNO */}
+            {activeSlide === 5 && (
               <div className="max-w-[1400px] w-full space-y-6 animate-fade-in-up">
                 <div className="text-center space-y-1">
                   <Badge className="bg-indigo-500/10 border-indigo-500/20 text-indigo-400 text-xs px-3 py-1 uppercase tracking-wider font-mono">
-                    SLIDE 03 · SIMULADOR LIVE VEXO OS
+                    SLIDE 05 · SIMULADOR LIVE VEXO OS
                   </Badge>
                   <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white">
                     Simulação Interativa de Atendimento Automático
@@ -1512,12 +1625,12 @@ export default function VexoPitch() {
               </div>
             )}
 
-            {/* SLIDE 4: ROI E RESULTADOS */}
-            {activeSlide === 4 && (
+            {/* SLIDE 6: ROI E RESULTADOS */}
+            {activeSlide === 6 && (
               <div className="max-w-5xl w-full space-y-8 animate-fade-in-up">
                 <div className="text-center space-y-4">
                   <Badge className="bg-emerald-500/10 border-emerald-500/20 text-emerald-400 text-sm px-4 py-1.5 uppercase tracking-wider font-mono">
-                    SLIDE 04 · PROJEÇÃO DE RETORNO DO INVESTIMENTO (R.O.I.)
+                    SLIDE 06 · PROJEÇÃO DE RETORNO DO INVESTIMENTO (R.O.I.)
                   </Badge>
                   <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-white leading-tight">
                     Resultados Esperados para {prospectName}
@@ -1582,7 +1695,7 @@ export default function VexoPitch() {
 
             {/* Indicadores de slides */}
             <div className="flex gap-2">
-              {[1, 2, 3, 4].map((slideNum) => (
+              {[1, 2, 3, 4, 5, 6].map((slideNum) => (
                 <div
                   key={slideNum}
                   onClick={() => setActiveSlide(slideNum)}
@@ -1595,7 +1708,7 @@ export default function VexoPitch() {
             </div>
 
             <div className="flex gap-2">
-              {activeSlide < 4 ? (
+              {activeSlide < 6 ? (
                 <Button
                   size="sm"
                   className="h-9 bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white px-5"

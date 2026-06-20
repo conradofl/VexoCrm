@@ -66,16 +66,30 @@ const CHECKLIST_ITEMS: ChecklistItem[] = [
     title: "4. Ativar Cadência de Follow-ups",
     desc: "Garanta que nenhum lead interessado morra por falta de acompanhamento ativo do comercial.",
     howTo: [
-      "Vá em 'Follow-up' no menu lateral (Modo Vendas).",
-      "Defina a cadência de mensagens: Lembrete 1 dia antes da reunião, e mensagem de cobrança caso o cliente pare de responder.",
-      "Estruture templates curtos e envolvendo variáveis dinâmicas (ex: '{{lead_name}}, tudo pronto para nossa conversa amanhã?')."
+      "Acesse a página 'Follow-up' no painel lateral.",
+      "Configure cadências personalizadas baseadas no status do lead: 'No-show' (quem faltou à reunião), 'Proposta Enviada' (para tomada de decisão) e 'Reengajamento' (leads frios).",
+      "Configure a regra de pausa automática: o fluxo de follow-ups é interrompido no mesmo segundo em que o lead responder no WhatsApp para preservar o toque humano.",
+      "Crie templates curtos e dinâmicos de até 3 parágrafos usando variáveis como {{lead_name}} e evite soar robótico."
     ],
-    benefit: "Reduz a taxa de faltas (no-show) em reuniões agendadas em até 70% e recupera clientes que 'sumiram' após receber o preço ou proposta comercial.",
+    benefit: "Implementa cadências inteligentes que reengajam leads sem parecer spam. A pausa automática na resposta garante que o vendedor assuma o chat na hora certa, aumentando a conversão.",
     screenPath: "/crm/followup"
   },
   {
+    id: "inteligencia-comercial",
+    title: "5. Dominar a Inteligência Comercial",
+    desc: "Acompanhe métricas em tempo real, configure roteamento inteligente de leads e ajuste os parâmetros da IA.",
+    howTo: [
+      "Acesse a tela 'Inteligência Comercial' no menu lateral.",
+      "Explore a aba 'Performance' para analisar taxas de conversão, tempos de resposta médios (SLA) e desempenho por canal.",
+      "Use a aba 'Equipe & Roteamento' para definir a distribuição automática de leads (Round Robin ou carga equilibrada) e SLAs limite.",
+      "Configure a aba 'Ajustes da IA' para ajustar a sensibilidade de qualificação e dar instruções gerais ao Vexo Brain."
+    ],
+    benefit: "Fornece governança em tempo real sobre o gargalo do funil comercial, reduz o tempo de primeiro contato a menos de 5 minutos e garante que leads qualificados caiam na mão do vendedor certo no momento exato.",
+    screenPath: "/crm/inteligencia-comercial"
+  },
+  {
     id: "reports",
-    title: "5. Auditar Resultados nos Relatórios",
+    title: "6. Auditar Resultados nos Relatórios",
     desc: "Acompanhe de forma analítica o desempenho de conversões, taxa de entrega e feedbacks de objeções.",
     howTo: [
       "Clique na aba 'Relatórios' (Modo Disparos).",
@@ -116,7 +130,7 @@ export default function OnboardingWizard() {
     >
       <div className="space-y-6 animate-fade-in-up">
         {/* Card Progresso */}
-        <Card className="border-slate-200/80 bg-white/80 dark:border-white/10 dark:bg-slate-900/40">
+        <Card className="border-border bg-card text-card-foreground shadow-sm">
           <CardHeader className="pb-3 flex flex-row items-center justify-between gap-4">
             <div>
               <CardTitle className="text-base font-bold">Progresso das Configurações</CardTitle>
@@ -124,15 +138,15 @@ export default function OnboardingWizard() {
                 Marque cada etapa como concluída após realizar as configurações correspondentes nas telas do sistema.
               </CardDescription>
             </div>
-            <Badge className="bg-indigo-600 text-white py-1 px-2.5 text-xs font-black shadow-md">
+            <Badge className="bg-primary text-primary-foreground py-1 px-2.5 text-xs font-black shadow-md">
               {completedPercentage}% Concluído
             </Badge>
           </CardHeader>
           <CardContent>
             {/* Barra de Progresso Visual */}
-            <div className="h-2 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
               <div
-                className="h-full bg-indigo-600 transition-all duration-300"
+                className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${completedPercentage}%` }}
               />
             </div>
@@ -149,10 +163,10 @@ export default function OnboardingWizard() {
               <div
                 key={item.id}
                 className={cn(
-                  "rounded-2xl border transition-smooth overflow-hidden bg-white/80 dark:bg-slate-900/40",
+                  "rounded-2xl border transition-all duration-200 overflow-hidden bg-card text-card-foreground",
                   isExpanded
-                    ? "border-indigo-200 dark:border-indigo-950"
-                    : "border-slate-200/80 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10"
+                    ? "border-primary shadow-md"
+                    : "border-border hover:border-muted-foreground/30 shadow-sm"
                 )}
               >
                 {/* Cabeçalho da Linha */}
@@ -167,38 +181,38 @@ export default function OnboardingWizard() {
                         toggleStepCompleted(item.id);
                       }}
                       className={cn(
-                        "h-5.5 w-5.5 rounded-full border-2 flex items-center justify-center transition-smooth",
+                        "h-5.5 w-5.5 rounded-full border-2 flex items-center justify-center transition-all duration-200",
                         isCompleted
-                          ? "bg-indigo-600 border-indigo-600 text-white"
-                          : "border-slate-300 hover:border-indigo-500 dark:border-white/10 dark:hover:border-indigo-400"
+                          ? "bg-primary border-primary text-primary-foreground"
+                          : "border-input hover:border-primary"
                       )}
                     >
                       {isCompleted && <Check className="h-3.5 w-3.5 stroke-[3px]" />}
                     </button>
                     <span className={cn(
-                      "text-sm font-bold text-slate-800 dark:text-slate-200",
-                      isCompleted && "line-through text-slate-400 dark:text-slate-500"
+                      "text-sm font-bold text-foreground",
+                      isCompleted && "line-through text-muted-foreground"
                     )}>
                       {item.title}
                     </span>
                   </div>
-                  <Badge variant="outline" className="text-[10px] bg-slate-50 dark:bg-white/[0.01]">
+                  <Badge variant="outline" className="text-[10px] bg-muted/30">
                     {isExpanded ? "Fechar detalhes" : "Ver instruções"}
                   </Badge>
                 </div>
 
                 {/* Detalhes Expandidos (Como usar + Benefício) */}
                 {isExpanded && (
-                  <div className="px-4 pb-4.5 pt-1 border-t border-slate-100 dark:border-white/5 bg-slate-50/30 dark:bg-white/[0.01] grid gap-4 md:grid-cols-2 animate-fade-in-up">
+                  <div className="px-4 pb-4.5 pt-1 border-t border-border bg-muted/10 grid gap-4 md:grid-cols-2 animate-fade-in-up">
                     
                     {/* Como Operar */}
-                    <div className="space-y-3.5 p-3 rounded-xl border border-slate-200/50 bg-white/90 dark:border-white/5 dark:bg-slate-950/40">
+                    <div className="space-y-3.5 p-3 rounded-xl border border-border bg-card">
                       <div>
-                        <p className="text-[9px] font-bold font-mono text-slate-400 uppercase tracking-wider">Como configurar passo a passo</p>
+                        <p className="text-[9px] font-bold font-mono text-muted-foreground uppercase tracking-wider">Como configurar passo a passo</p>
                         <ul className="mt-2 space-y-2">
                           {item.howTo.map((step, idx) => (
-                            <li key={idx} className="text-xs text-slate-700 dark:text-slate-300 flex items-start gap-1.5 leading-relaxed">
-                              <span className="text-indigo-600 font-extrabold mt-0.5 shrink-0">{idx + 1}.</span>
+                            <li key={idx} className="text-xs text-foreground flex items-start gap-1.5 leading-relaxed">
+                              <span className="text-primary font-extrabold mt-0.5 shrink-0">{idx + 1}.</span>
                               <span>{step}</span>
                             </li>
                           ))}
@@ -216,20 +230,20 @@ export default function OnboardingWizard() {
                     </div>
 
                     {/* Benefício Comercial */}
-                    <div className="p-4 rounded-xl border border-indigo-100 bg-indigo-50/20 dark:border-indigo-950/30 dark:bg-indigo-950/10 flex flex-col justify-between">
+                    <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col justify-between">
                       <div>
-                        <p className="text-[9px] font-bold font-mono text-indigo-700 dark:text-indigo-400 uppercase tracking-wider">Benefício prático para a sua empresa</p>
-                        <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed mt-2.5 font-medium">
+                        <p className="text-[9px] font-bold font-mono text-primary uppercase tracking-wider">Benefício prático para a sua empresa</p>
+                        <p className="text-xs text-foreground/90 leading-relaxed mt-2.5 font-medium">
                           💡 {item.benefit}
                         </p>
                       </div>
-                      <div className="mt-4 pt-3.5 border-t border-indigo-100/50 dark:border-indigo-950/30 flex items-center justify-between text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">
+                      <div className="mt-4 pt-3.5 border-t border-border flex items-center justify-between text-[11px] text-primary font-bold">
                         <span>Status da Tarefa:</span>
                         <button
                           onClick={() => toggleStepCompleted(item.id)}
                           className={cn(
                             "underline cursor-pointer",
-                            isCompleted ? "text-indigo-600 dark:text-indigo-400" : "text-amber-600 dark:text-amber-400"
+                            isCompleted ? "text-primary" : "text-amber-600 dark:text-amber-400"
                           )}
                         >
                           {isCompleted ? "Marcar como pendente" : "Marcar como realizada"}
