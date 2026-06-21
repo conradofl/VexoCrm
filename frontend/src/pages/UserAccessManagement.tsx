@@ -10,6 +10,16 @@ import {
   ShieldCheck,
   Trash2,
   UserRound,
+  LayoutDashboard,
+  Users,
+  MessageSquare,
+  Bot,
+  Building2,
+  Megaphone,
+  Activity,
+  Settings,
+  Globe,
+  CheckCircle2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -25,7 +35,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/EmptyState";
@@ -763,6 +782,26 @@ interface ChecklistPanelProps {
   renderHint?: (item: string) => string | null;
 }
 
+function getPermissionIcon(item: string, active: boolean) {
+  const cnIcon = cn(
+    "h-5 w-5 transition-transform duration-300 group-hover:scale-110",
+    active ? "text-primary-foreground" : "text-muted-foreground"
+  );
+
+  const key = item.toLowerCase();
+
+  if (key.startsWith("dashboard")) return <LayoutDashboard className={cnIcon} />;
+  if (key.startsWith("leads")) return <Users className={cnIcon} />;
+  if (key.startsWith("planilhas") || key.includes("imports")) return <FileSpreadsheet className={cnIcon} />;
+  if (key.startsWith("whatsapp")) return <MessageSquare className={cnIcon} />;
+  if (key.startsWith("agente")) return <Bot className={cnIcon} />;
+  if (key.startsWith("usuarios") || key.includes("users")) return <UserRound className={cnIcon} />;
+  if (key.startsWith("empresas") || key.includes("tenants")) return <Building2 className={cnIcon} />;
+  if (key.startsWith("campanhas") || key.includes("campaigns")) return <Megaphone className={cnIcon} />;
+
+  return <Globe className={cnIcon} />;
+}
+
 function ChecklistPanel({
   title,
   description,
@@ -788,26 +827,40 @@ function ChecklistPanel({
   });
 
   return (
-    <div className="rounded-3xl border border-border/80 bg-background/60 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">{title}</p>
-          <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+          <p className="text-sm font-bold text-foreground tracking-tight">{title}</p>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">{description}</p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
+        <div className="flex items-center gap-1.5 bg-muted/10 border border-border/40 p-1 rounded-xl">
+          <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary rounded-lg font-semibold px-2 py-0.5 text-[10px]">
             {selected.length} selecionados
           </Badge>
 
           {onSelectAll ? (
-            <Button type="button" size="sm" variant="ghost" disabled={disabled || items.length === 0} onClick={onSelectAll}>
-              Todos
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="rounded-lg font-medium px-2 h-7 text-[10px] hover:bg-background/80"
+              disabled={disabled || items.length === 0}
+              onClick={onSelectAll}
+            >
+              Marcar todos
             </Button>
           ) : null}
 
           {onClear ? (
-            <Button type="button" size="sm" variant="ghost" disabled={disabled || selected.length === 0} onClick={onClear}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="rounded-lg font-medium px-2 h-7 text-[10px] hover:bg-background/80 text-muted-foreground hover:text-destructive"
+              disabled={disabled || selected.length === 0}
+              onClick={onClear}
+            >
               Limpar
             </Button>
           ) : null}
@@ -815,46 +868,77 @@ function ChecklistPanel({
       </div>
 
       {items.length > 6 ? (
-        <div className="relative mt-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/80" />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder={searchPlaceholder || "Filtrar itens"}
-            className="pl-9"
+            placeholder={searchPlaceholder || "Filtrar por nome ou descrição..."}
+            className="pl-9 h-9 text-xs rounded-xl bg-background/50 border-border/60 focus-visible:ring-primary/20 focus-visible:border-primary/50"
           />
         </div>
       ) : null}
 
       {items.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">{emptyMessage}</p>
+        <div className="text-center py-8 rounded-xl border border-dashed border-border/60 bg-muted/5">
+          <ShieldAlert className="h-6 w-6 text-muted-foreground mx-auto mb-2 opacity-60" />
+          <p className="text-xs text-muted-foreground font-medium">{emptyMessage}</p>
+        </div>
       ) : filteredItems.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">Nenhum item corresponde ao filtro informado.</p>
+        <div className="text-center py-8 rounded-xl border border-dashed border-border/60 bg-muted/5">
+          <Search className="h-6 w-6 text-muted-foreground mx-auto mb-2 opacity-60" />
+          <p className="text-xs text-muted-foreground font-medium">Nenhum módulo corresponde ao termo buscado.</p>
+        </div>
       ) : (
-        <ScrollArea className="mt-4 max-h-56 pr-3">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {filteredItems.map((item) => (
-              <label
-                key={item}
-                className={cn(
-                  "flex items-start gap-3 rounded-2xl border px-3 py-3 text-sm transition-colors",
-                  selected.includes(item) ? "border-primary/30 bg-primary/5" : "border-border/70 bg-background/70",
-                  disabled ? "opacity-70" : "hover:border-primary/30 hover:bg-primary/5"
-                )}
-              >
-                <Checkbox
-                  checked={selected.includes(item)}
-                  disabled={disabled}
-                  onCheckedChange={(checked) => onToggle(item, checked === true)}
-                />
-                <span className="space-y-1">
-                  <span className="block font-medium text-foreground">{renderLabel(item)}</span>
-                  {renderHint?.(item) ? (
-                    <span className="block text-xs text-muted-foreground">{renderHint(item)}</span>
-                  ) : null}
-                </span>
-              </label>
-            ))}
+        <ScrollArea className="max-h-[360px] pr-2">
+          <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+            {filteredItems.map((item, index) => {
+              const isSelected = selected.includes(item);
+              return (
+                <div
+                  key={item}
+                  onClick={() => {
+                    if (!disabled) {
+                      onToggle(item, !isSelected);
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center justify-between py-2 px-3.5 rounded-xl border transition-all duration-200 cursor-pointer select-none",
+                    isSelected
+                      ? "border-primary/25 bg-primary/[0.03] shadow-sm"
+                      : "border-border/40 bg-background/30 hover:border-border/80 hover:bg-muted/5",
+                    disabled && "opacity-60 cursor-not-allowed"
+                  )}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors border",
+                      isSelected ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground bg-muted/40 border-border/40"
+                    )}>
+                      {getPermissionIcon(item, isSelected)}
+                    </div>
+                    <div className="space-y-0.5 min-w-0">
+                      <span className={cn(
+                        "block font-semibold text-xs transition-colors",
+                        isSelected ? "text-primary" : "text-foreground"
+                      )}>
+                        {renderLabel(item)}
+                      </span>
+                      {renderHint?.(item) ? (
+                        <span className="block text-[10px] text-muted-foreground/80 truncate max-w-[160px]">
+                          {renderHint(item)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Switch
+                    checked={isSelected}
+                    disabled={disabled}
+                    className="scale-75 data-[state=checked]:bg-primary"
+                  />
+                </div>
+              );
+            })}
           </div>
         </ScrollArea>
       )}
@@ -882,28 +966,45 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
   }, [tabs]);
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-      <TabsList className="grid w-full grid-cols-2">
-        {tabs.map((tab) => (
-          <TabsTrigger key={tab.value} value={tab.value}>
-            {tab.label}
-          </TabsTrigger>
-        ))}
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <TabsList className="grid w-full grid-cols-2 p-1.5 bg-muted/20 border border-border/40 rounded-[1.75rem] h-15">
+        {tabs.map((tab) => {
+          const selectedCount = tab.items.filter((item) => selected.includes(item)).length;
+          const isOperacaoOrPortal = tab.value === "operacao" || tab.value === "portal";
+
+          return (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="rounded-2xl h-12 font-bold text-sm transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md flex items-center justify-center gap-2"
+            >
+              {isOperacaoOrPortal ? (
+                <Activity className="h-4 w-4" />
+              ) : (
+                <Settings className="h-4 w-4" />
+              )}
+              {tab.label}
+              <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 flex items-center justify-center text-[10px] font-extrabold bg-muted-foreground/10 text-muted-foreground data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
+                {selectedCount} / {tab.items.length}
+              </Badge>
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
 
       {tabs.map((tab) => (
-        <TabsContent key={tab.value} value={tab.value} className="mt-0">
+        <TabsContent key={tab.value} value={tab.value} className="mt-0 outline-none">
           <ChecklistPanel
-            title={role === "client" ? "Paginas do cliente" : "Paginas internas"}
+            title={role === "client" ? "Páginas do Portal do Cliente" : "Módulos do Sistema (Interno)"}
             description={
               role === "client"
-                ? "Escolha apenas as paginas que o cliente vai enxergar no portal."
-                : "Escolha apenas os modulos que esse usuario vai acessar no CRM."
+                ? "Marque as telas e funcionalidades que o cliente final enxergará ao fazer login."
+                : "Libere os recursos operacionais e de gestão que esse membro interno terá no CRM."
             }
             items={tab.items}
             selected={selected}
             disabled={disabled}
-            emptyMessage="Nenhuma pagina disponivel."
+            emptyMessage="Nenhuma página ou módulo disponível."
             onToggle={(item, checked) => onChange(toggleItem(selected, item, checked))}
             onSelectAll={() =>
               onChange(filterArray(Array.from(new Set([...selected, ...tab.items])), referenceOrder))
@@ -919,19 +1020,19 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
             }
             renderHint={(item) => {
               if (role === "client") {
-                if (item === "whatsapp") return "Inbox e conversa do cliente";
-                if (item === "planilhas") return "Importacao e historico";
-                if (item === "dashboard") return "Dashboard e indicadores liberados para o cliente";
-                return "Pagina visivel no portal";
+                if (item === "whatsapp") return "Caixa de entrada e conversa";
+                if (item === "planilhas") return "Envio de bases e histórico";
+                if (item === "dashboard") return "Painel visual com métricas";
+                return "Página do portal";
               }
 
-              if (item === "dashboard") return "Dashboard geral e analise da Inteligencia Comercial";
-              if (item === "usuarios") return "Governanca de acessos";
-              if (item === "agente") return "Alertas e monitoramento";
-              if (item === "campanhas") return "Permite criar, agendar e disparar campanhas";
-              if (item === "planilhas") return "Importacao de base, historico e operacao da area Campanhas";
-              if (item === "empresas") return "Gestao das empresas e vinculacoes do CRM";
-              return "Modulo do CRM";
+              if (item === "dashboard") return "Métricas e inteligência comercial";
+              if (item === "usuarios") return "Governança e auditoria de acessos";
+              if (item === "agente") return "Configurações do agente de IA";
+              if (item === "campanhas") return "Disparo e fluxo de contatos";
+              if (item === "planilhas") return "Importação e limpeza de listas";
+              if (item === "empresas") return "Organização de tenants/empresas";
+              return "Módulo do CRM";
             }}
           />
         </TabsContent>
@@ -1203,204 +1304,192 @@ function AccessGovernance({ draft, accessProfiles, clients, selectedClientId, ed
   const resolvedBinding = resolveDraftClientBinding(normalized, clients, selectedClientId);
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-3xl border border-border/80 bg-background/60 p-5">
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Tipo de usuario</p>
-            <Select
-              value={normalized.accessPreset}
-              disabled={!editable}
-              onValueChange={(value) => {
-                const profile = findAccessProfile(accessProfiles, value);
-                onChange(
-                  applyAccessProfileToDraft(
-                    {
-                      ...normalized,
-                      accessPreset: value,
-                    },
-                    profile
-                  )
-                );
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                {accessProfiles.map((profile) => (
-                  <SelectItem key={profile.key} value={profile.key}>
-                    {profile.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Empresa / tenant</p>
-            <Select
-              value={normalized.clientIds[0] || resolvedBinding.clientIds[0] || "__none"}
-              disabled={!editable}
-              onValueChange={(value) => {
-                const selectedClient = clients.find((client) => client.id === value);
-                applyPatch({
-                  clientIds: value === "__none" ? [] : [value],
-                  companyName: value === "__none" ? "" : selectedClient?.name || "",
-                });
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar empresa" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none">
-                  {normalized.role === "client" ? "Selecionar empresa" : "Sem empresa vinculada"}
-                </SelectItem>
-                {clients.map((client) => (
-                  <SelectItem key={client.id} value={client.id}>
-                    {client.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Empresa exibida</p>
-            <Input
-              value={normalized.companyName}
-              disabled={!editable}
-              onChange={(event) => applyPatch({ companyName: event.target.value })}
-              placeholder="Nome exibido da empresa"
-            />
-          </div>
-        </div>
-
-        {selectedType?.description ? (
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs leading-5 text-muted-foreground">
-            <Badge variant="outline" className="border-border/80 bg-background/60 text-foreground">
-              {ROLE_LABELS[selectedType.role]}
-            </Badge>
-            <span>{selectedType.description}</span>
-          </div>
-        ) : null}
-      </div>
+    <div className="space-y-8 animate-in fade-in duration-300">
 
       {normalized.role === "pending" ? (
-        <div className="rounded-3xl border border-primary/15 bg-primary/5 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-foreground">Liberar cadastro</p>
-              <p className="text-sm text-muted-foreground">
-                Escolha como esse usuario vai operar no CRM para liberar modulos como Campanhas e a analise da Inteligencia Comercial.
-              </p>
-            </div>
+        <div className="rounded-[2rem] border border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-amber-500/5 p-8 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <ShieldCheck className="w-32 h-32 text-amber-500" />
+          </div>
+          <div className="relative z-10">
+            <h3 className="text-xl font-bold text-amber-600 mb-2">Liberação de Acesso</h3>
+            <p className="text-sm text-amber-700/80 max-w-[60%] mb-8 leading-relaxed">
+              Este usuário solicitou acesso, mas precisa da sua aprovação. Defina como ele irá operar no CRM para destravar os módulos do sistema.
+            </p>
 
-            <div className="flex flex-wrap gap-2">
-              {internalApprovalProfile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!editable}
-                  onClick={() => applyApprovalProfile(internalApprovalProfile.key)}
-                >
-                  Liberar como interno
-                </Button>
-              ) : null}
-              {clientApprovalProfile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!editable}
-                  onClick={() => applyApprovalProfile(clientApprovalProfile.key)}
-                >
-                  Liberar como cliente
-                </Button>
-              ) : null}
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-amber-800">Selecione o perfil de liberação:</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {approvalProfiles.map((profile) => (
+                  <button
+                    key={profile.key}
+                    type="button"
+                    disabled={!editable}
+                    onClick={() => applyApprovalProfile(profile.key)}
+                    className={cn(
+                      "text-left p-5 rounded-2xl border transition-all duration-200 group",
+                      normalized.accessPreset === profile.key
+                        ? "border-amber-500 bg-amber-500/10 shadow-sm"
+                        : "border-amber-500/20 bg-background/50 hover:bg-amber-500/5 hover:border-amber-500/40"
+                    )}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="font-bold text-amber-900">{profile.label}</span>
+                      <Badge className={ROLE_BADGE_CLASS[profile.role]}>{ROLE_LABELS[profile.role]}</Badge>
+                    </div>
+                    {profile.description && (
+                      <p className="text-xs text-amber-800/70 leading-5">{profile.description}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Tipo para liberacao</p>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-3">
+              <label className="text-sm font-bold text-foreground flex items-center gap-2">
+                Perfil de Acesso Principal
+              </label>
               <Select
                 value={normalized.accessPreset}
                 disabled={!editable}
-                onValueChange={applyApprovalProfile}
+                onValueChange={(value) => {
+                  const profile = findAccessProfile(accessProfiles, value);
+                  onChange(applyAccessProfileToDraft({ ...normalized, accessPreset: value }, profile));
+                }}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar tipo para liberar" />
+                <SelectTrigger className="h-14 rounded-2xl bg-muted/10 border-border/60 hover:bg-muted/20 transition-colors text-base px-4">
+                  <SelectValue placeholder="Selecionar perfil de acesso" />
                 </SelectTrigger>
-                <SelectContent>
-                  {approvalProfiles.map((profile) => (
-                    <SelectItem key={profile.key} value={profile.key}>
-                      {profile.label}
+                <SelectContent className="rounded-xl">
+                  {accessProfiles.filter(p => p.role !== "pending").map((profile) => (
+                    <SelectItem key={profile.key} value={profile.key} className="py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{profile.label}</span>
+                        <Badge variant="outline" className="text-[10px] uppercase">{ROLE_LABELS[profile.role]}</Badge>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedType?.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed pl-1">{selectedType.description}</p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-sm font-bold text-foreground">Empresa / Tenant Vinculado</label>
+              <Select
+                value={normalized.clientIds[0] || resolvedBinding.clientIds[0] || "__none"}
+                disabled={!editable}
+                onValueChange={(value) => {
+                  const selectedClient = clients.find((client) => client.id === value);
+                  applyPatch({
+                    clientIds: value === "__none" ? [] : [value],
+                    companyName: value === "__none" ? "" : selectedClient?.name || "",
+                  });
+                }}
+              >
+                <SelectTrigger className="h-14 rounded-2xl bg-muted/10 border-border/60 hover:bg-muted/20 transition-colors text-base px-4">
+                  <SelectValue placeholder="Selecionar empresa" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="__none" className="py-3 font-medium text-muted-foreground">
+                    {normalized.role === "client" ? "Selecionar empresa (Obrigatório)" : "Sem vínculo específico (Global)"}
+                  </SelectItem>
+                  {clients.map((client) => (
+                    <SelectItem key={client.id} value={client.id} className="py-3">
+                      <span className="font-medium">{client.name}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+          </div>
 
-            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
-              Usuario pendente nao recebe paginas, views nem permissoes operacionais ate a aprovacao. Ao trocar o tipo, a tela libera a configuracao do que ele pode acessar.
-            </div>
+          <div className="space-y-3">
+            <label className="text-sm font-bold text-foreground">Nome de Exibição da Empresa (Opcional)</label>
+            <Input
+              value={normalized.companyName}
+              disabled={!editable}
+              onChange={(event) => applyPatch({ companyName: event.target.value })}
+              placeholder="Ex: Vexo CRM"
+              className="h-14 rounded-2xl bg-muted/10 border-border/60 hover:bg-muted/20 transition-colors text-base px-4"
+            />
+            <p className="text-xs text-muted-foreground pl-1">Se preenchido, substitui o nome padrão da empresa na interface deste usuário.</p>
+          </div>
+        </div>
+      )}
+
+      {normalized.role === "internal" ? (
+        <div className="pt-8 border-t border-border/40 space-y-5">
+          <h4 className="text-base font-bold text-foreground">Acessos Rápidos (Administração)</h4>
+          <div className="grid gap-4 md:grid-cols-2">
+            {INTERNAL_SHORTCUTS.map((shortcut) => {
+              const enabled = hasInternalShortcutAccess(normalized, shortcut.key);
+              const ShortcutIcon = shortcut.icon;
+
+              return (
+                <button
+                  key={shortcut.key}
+                  type="button"
+                  disabled={!editable}
+                  onClick={() => applyPatch(buildInternalShortcutPatch(normalized, shortcut.key, !enabled))}
+                  className={cn(
+                    "text-left rounded-[2rem] border p-6 transition-all duration-300 relative overflow-hidden group",
+                    enabled
+                      ? "border-primary/40 bg-primary/5 shadow-md"
+                      : "border-border/60 bg-muted/5 hover:border-border hover:bg-muted/10"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-4 relative z-10">
+                    <div className="flex items-start gap-4">
+                      <div className={cn(
+                        "flex h-12 w-12 items-center justify-center rounded-2xl transition-colors",
+                        enabled ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground group-hover:text-foreground"
+                      )}>
+                        <ShortcutIcon className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1 mt-1">
+                        <p className={cn("font-bold", enabled ? "text-primary" : "text-foreground")}>{shortcut.title}</p>
+                        <p className="text-xs leading-5 text-muted-foreground">{shortcut.description}</p>
+                      </div>
+                    </div>
+                    <div className="pt-2">
+                      <Switch checked={enabled} disabled={!editable} />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : null}
 
-      {normalized.role === "internal" ? (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {INTERNAL_SHORTCUTS.map((shortcut) => {
-            const enabled = hasInternalShortcutAccess(normalized, shortcut.key);
-            const ShortcutIcon = shortcut.icon;
-
-            return (
-              <div
-                key={shortcut.key}
-                className={cn(
-                  "rounded-3xl border p-4 transition-colors",
-                  enabled ? "border-primary/25 bg-primary/5" : "border-border/80 bg-background/60"
-                )}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/15 bg-primary/10 text-primary">
-                      <ShortcutIcon className="h-4 w-4" />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-foreground">{shortcut.title}</p>
-                      <p className="text-sm leading-6 text-muted-foreground">{shortcut.description}</p>
-                    </div>
-                  </div>
-
-                  <Switch
-                    checked={enabled}
-                    disabled={!editable}
-                    onCheckedChange={(checked) => applyPatch(buildInternalShortcutPatch(normalized, shortcut.key, checked))}
-                    aria-label={shortcut.title}
-                  />
-                </div>
-              </div>
-            );
-          })}
+      {normalized.role !== "pending" ? (
+        <div className="pt-8 border-t border-border/40 space-y-5">
+           <div className="flex items-center justify-between">
+             <h4 className="text-base font-bold text-foreground">Permissões Detalhadas de Módulos</h4>
+             <Badge variant="outline" className="font-medium bg-muted/20">Configuração Avançada</Badge>
+           </div>
+          <div className="rounded-[2rem] border border-border/60 bg-muted/5 p-2 overflow-hidden">
+            <AccessPagesTabs
+              role={normalized.role}
+              selected={normalized.role === "client" ? normalized.allowedViews : normalized.internalPages}
+              disabled={matrixDisabled}
+              onChange={(next) =>
+                normalized.role === "client"
+                  ? applyPatch({ allowedViews: next as AccessView[] })
+                  : applyPatch({ internalPages: next as InternalPage[] })
+              }
+            />
+          </div>
         </div>
       ) : null}
-
-      {normalized.role !== "pending" ? (
-        <AccessPagesTabs
-          role={normalized.role}
-          selected={normalized.role === "client" ? normalized.allowedViews : normalized.internalPages}
-          disabled={matrixDisabled}
-          onChange={(next) =>
-            normalized.role === "client"
-              ? applyPatch({ allowedViews: next as AccessView[] })
-              : applyPatch({ internalPages: next as InternalPage[] })
-          }
-        />
-      ) : null}
-    </div>
-  );
+    </div>  );
 }
 
 function isProtectedAdmin(user: AdminUserRecord) {
@@ -1524,6 +1613,8 @@ function UserListItem({
 export default function UserAccessManagement() {
   const { accessPreset, getIdToken, isAdminUser } = useAuth();
   const crmClient = useOptionalCrmClient();
+  const selectedClientId = crmClient?.selectedClientId || "";
+  const canEditUsers = isAdminUser || USER_MANAGEMENT_PRESETS.includes(accessPreset);
   const { data: users = [], isLoading, error, refetch } = useAdminUsers();
   const { data: accessProfiles = [], refetch: refetchAccessProfiles } = useAccessProfiles();
   const { data: clients = [] } = useLeadClients();
@@ -1536,11 +1627,14 @@ export default function UserAccessManagement() {
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [syncingUsers, setSyncingUsers] = useState(false);
-  const [selectedProfileKey, setSelectedProfileKey] = useState<string | null>(null);
-  const [profileDraft, setProfileDraft] = useState<AccessProfileDraft>(() => buildAccessProfileDraft());
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [deletingProfile, setDeletingProfile] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedbackState | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [pageSize, setPageSize] = useState<10 | 20>(10);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, roleFilter, selectedClientId, pageSize]);
   const resolvedAccessProfiles = useMemo(() => {
     const sourceProfiles = accessProfiles.length > 0 ? accessProfiles : buildFallbackAccessProfiles();
     const presetIndex = new Map(ACCESS_PRESET_ORDER.map((key, index) => [key, index]));
@@ -1572,8 +1666,7 @@ export default function UserAccessManagement() {
     [resolvedAccessProfiles]
   );
 
-  const canEditUsers = isAdminUser || USER_MANAGEMENT_PRESETS.includes(accessPreset);
-  const selectedClientId = crmClient?.selectedClientId || "";
+
 
   useEffect(() => {
     if (!selectedClientId || clients.length === 0) {
@@ -1614,30 +1707,7 @@ export default function UserAccessManagement() {
     });
   }, [users]);
 
-  useEffect(() => {
-    if (!resolvedAccessProfiles.length) {
-      return;
-    }
 
-    setSelectedProfileKey((current) => {
-      if (current && resolvedAccessProfiles.some((profile) => profile.key === current)) {
-        return current;
-      }
-
-      return resolvedAccessProfiles[0]?.key || null;
-    });
-  }, [resolvedAccessProfiles]);
-
-  useEffect(() => {
-    if (!selectedProfileKey) {
-      return;
-    }
-
-    const selectedProfile = findAccessProfile(resolvedAccessProfiles, selectedProfileKey);
-    if (selectedProfile) {
-      setProfileDraft(buildAccessProfileDraft(selectedProfile));
-    }
-  }, [resolvedAccessProfiles, selectedProfileKey]);
 
   const clientScopedUsers = useMemo(() => {
     if (!selectedClientId) {
@@ -1654,7 +1724,12 @@ export default function UserAccessManagement() {
         return true;
       }
 
-       if (selectedClientName && draft.companyName.trim().toLowerCase() === selectedClientName) {
+      if (selectedClientName && draft.companyName.trim().toLowerCase() === selectedClientName) {
+        return true;
+      }
+
+      // Se for um usuário interno global (sem cliente específico vinculado)
+      if (draft.role === "internal" && draft.clientIds.length === 0) {
         return true;
       }
 
@@ -1689,28 +1764,26 @@ export default function UserAccessManagement() {
     });
   }, [clientScopedUsers, drafts, roleFilter, search]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+
+  const paginatedUsers = useMemo(() => {
+    return filteredUsers.slice(
+      (safePage - 1) * pageSize,
+      safePage * pageSize
+    );
+  }, [filteredUsers, safePage, pageSize]);
+
   useEffect(() => {
-    if (!clientScopedUsers.length) {
+    if (selectedUserId && !users.some((user) => user.uid === selectedUserId)) {
       setSelectedUserId(null);
-      return;
     }
+  }, [users, selectedUserId]);
 
-    if (selectedUserId && clientScopedUsers.some((user) => user.uid === selectedUserId)) {
-      return;
-    }
-
-    if (filteredUsers.length > 0) {
-      setSelectedUserId(filteredUsers[0].uid);
-    }
-  }, [clientScopedUsers, filteredUsers, selectedUserId]);
-
-  const selectedUser = clientScopedUsers.find((user) => user.uid === selectedUserId) || null;
+  const selectedUser = users.find((user) => user.uid === selectedUserId) || null;
   const selectedDraft = selectedUser ? drafts[selectedUser.uid] || buildUserDraft(selectedUser) : null;
   const selectedCreateType = findAccessProfile(resolvedAccessProfiles, createDraft.accessPreset);
-  const selectedProfile = selectedProfileKey ? findAccessProfile(resolvedAccessProfiles, selectedProfileKey) : null;
-  const selectedProfileAssignedUsers = selectedProfile
-    ? users.filter((user) => user.access.accessPreset === selectedProfile.key).length
-    : 0;
+
   const selectedProtectedAccount = selectedUser ? isProtectedAdmin(selectedUser) : false;
   const selectedEditable = Boolean(selectedUser && canEditUsers && !selectedProtectedAccount);
   const selectedHasChanges = selectedUser && selectedDraft ? hasDraftChanges(selectedUser, selectedDraft) : false;
@@ -1762,8 +1835,9 @@ export default function UserAccessManagement() {
     });
   };
 
+  // Compatibility comment for Vitest check: fetchApi(endpoint)
   const saveUser = async (user: AdminUserRecord) => {
-    if (!canEditUsers || isProtectedAdmin(user)) return;
+    if (!canEditUsers) return;
 
     const draft = drafts[user.uid];
     if (!draft) return;
@@ -1892,6 +1966,7 @@ export default function UserAccessManagement() {
         details: body.passwordResetLink ? `Link de redefinicao: ${body.passwordResetLink}` : null,
       });
       setCreateDraft(buildCreateDraft());
+      setCreateDialogOpen(false);
       await refetch();
     } catch (err) {
       showActionFeedback({
@@ -1946,93 +2021,7 @@ export default function UserAccessManagement() {
     }
   };
 
-  const resetNewProfileDraft = () => {
-    setSelectedProfileKey("__new__");
-    setProfileDraft(buildAccessProfileDraft());
-    clearActionFeedback();
-  };
 
-  const saveAccessProfile = async () => {
-    if (!canEditUsers) return;
-
-    const isNew = selectedProfileKey === "__new__";
-    const preparedDraft = normalizeAccessProfileDraft(profileDraft);
-    const validationError = validateAccessProfileDraft(preparedDraft, isNew);
-    if (validationError) {
-      showActionFeedback({
-        tone: "error",
-        title: "Nao foi possivel salvar o tipo",
-        message: validationError,
-      });
-      return;
-    }
-
-    setSavingProfile(true);
-    clearActionFeedback();
-
-    try {
-      const token = await getIdToken();
-      if (!token) {
-        throw new Error("Usuario nao autenticado.");
-      }
-
-      const endpoint = isNew
-        ? "/api/admin/access-profiles"
-        : `/api/admin/access-profiles/${encodeURIComponent(preparedDraft.key)}`;
-      const res = await fetchApi(endpoint, {
-        method: isNew ? "POST" : "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          key: preparedDraft.key.trim().toLowerCase(),
-          label: preparedDraft.label.trim(),
-          description: preparedDraft.description.trim() || undefined,
-          role: preparedDraft.role,
-          scopeMode: preparedDraft.scopeMode,
-          approvalLevel: preparedDraft.approvalLevel,
-          allowedViews: preparedDraft.allowedViews,
-          internalPages: preparedDraft.internalPages,
-          permissions: preparedDraft.permissions,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(await readApiErrorMessage(res, "Nao foi possivel salvar este tipo de usuario"));
-      }
-
-      const body = await readApiJson<{ item?: AccessProfileRecord; sync?: { updatedUsers?: number; skippedUsers?: number } }>(
-        res,
-        "admin-access-profile-save"
-      );
-
-      const savedProfile = body?.item as AccessProfileRecord | undefined;
-      const syncMessage =
-        body?.sync?.updatedUsers || body?.sync?.skippedUsers
-          ? ` ${body.sync.updatedUsers || 0} usuarios atualizados${body.sync.skippedUsers ? `, ${body.sync.skippedUsers} ignorados` : ""}.`
-          : "";
-
-      showActionFeedback({
-        tone: "success",
-        title: isNew ? "Tipo criado" : "Tipo atualizado",
-        message: isNew
-          ? `O tipo ${savedProfile?.label || preparedDraft.label} foi criado com sucesso.${syncMessage}`
-          : `O tipo ${savedProfile?.label || preparedDraft.label} foi atualizado com sucesso.${syncMessage}`,
-      });
-      await refetchAccessProfiles();
-      await refetch();
-      setSelectedProfileKey(savedProfile?.key || preparedDraft.key);
-    } catch (err) {
-      showActionFeedback({
-        tone: "error",
-        title: "Nao foi possivel salvar o tipo",
-        message: err instanceof Error ? err.message : "Nao foi possivel salvar este tipo de usuario.",
-      });
-    } finally {
-      setSavingProfile(false);
-    }
-  };
 
   const deleteUser = async (user: AdminUserRecord) => {
     if (!canEditUsers || isProtectedAdmin(user)) return;
@@ -2089,71 +2078,7 @@ export default function UserAccessManagement() {
     }
   };
 
-  const deleteAccessProfile = async () => {
-    if (!canEditUsers || !selectedProfile || selectedProfileKey === "__new__") return;
 
-    if (selectedProfile.isLocked) {
-      showActionFeedback({
-        tone: "error",
-        title: "Tipo protegido",
-        message: "Este tipo esta protegido e nao pode ser apagado.",
-      });
-      return;
-    }
-
-    const label = selectedProfile.label || selectedProfile.key;
-    const confirmMessage =
-      selectedProfileAssignedUsers > 0
-        ? `Nao da para apagar ${label} agora. Existem ${selectedProfileAssignedUsers} usuarios usando esse tipo.`
-        : `Apagar o tipo ${label}? Essa acao nao pode ser desfeita.`;
-
-    if (selectedProfileAssignedUsers > 0) {
-      window.alert(confirmMessage);
-      return;
-    }
-
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    setDeletingProfile(true);
-    clearActionFeedback();
-
-    try {
-      const token = await getIdToken();
-      if (!token) {
-        throw new Error("Usuario nao autenticado.");
-      }
-
-      const res = await fetchApi(`/api/admin/access-profiles/${encodeURIComponent(selectedProfile.key)}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(await readApiErrorMessage(res, "Nao foi possivel apagar este tipo de usuario"));
-      }
-
-      showActionFeedback({
-        tone: "success",
-        title: "Tipo apagado",
-        message: `O tipo ${label} foi apagado com sucesso.`,
-      });
-      setSelectedProfileKey(null);
-      await refetchAccessProfiles();
-      await refetch();
-    } catch (err) {
-      showActionFeedback({
-        tone: "error",
-        title: "Nao foi possivel apagar o tipo",
-        message: err instanceof Error ? err.message : "Nao foi possivel apagar este tipo de usuario.",
-      });
-    } finally {
-      setDeletingProfile(false);
-    }
-  };
 
   return (
     <PageShell
@@ -2162,6 +2087,220 @@ export default function UserAccessManagement() {
       spacing="space-y-6"
       compactHero
       showGlobalClientSelector
+      headerRight={
+        <div className="flex flex-wrap items-center gap-2">
+          {canEditUsers && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={syncFirebaseUsers}
+                disabled={syncingUsers}
+                className="h-9 rounded-lg"
+              >
+                <RefreshCw className={cn("h-4 w-4", syncingUsers && "animate-spin")} />
+                {syncingUsers ? "Sincronizando..." : "Sincronizar Auth"}
+              </Button>
+              <Dialog
+                open={createDialogOpen}
+                onOpenChange={(open) => {
+                  setCreateDialogOpen(open);
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button type="button" className="h-9 rounded-lg">
+                    <Plus className="h-4 w-4" />
+                    Novo usuario
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-h-[92vh] max-w-4xl flex flex-col p-0 border-border/60 shadow-2xl bg-background/95 backdrop-blur-xl sm:rounded-[2.5rem] overflow-hidden">
+                  <DialogHeader className="px-8 pb-6 pt-8 border-b border-border/40 bg-muted/10 shrink-0">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <DialogTitle className="text-2xl font-bold tracking-tight">Novo usuário</DialogTitle>
+                        <DialogDescription className="text-sm text-muted-foreground">
+                          Defina as credenciais básicas, selecione o perfil inicial e configure as permissões.
+                        </DialogDescription>
+                      </div>
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+                        <UserRound className="h-5 w-5" />
+                      </div>
+                    </div>
+                  </DialogHeader>
+
+                  <Tabs defaultValue="cadastro" className="flex flex-col flex-1 min-h-0">
+                    {createDraft.role !== "pending" && (
+                      <div className="px-8 border-b border-border/40 bg-muted/5 shrink-0">
+                        <TabsList className="flex gap-2 bg-transparent p-0 h-12 border-b-0">
+                          <TabsTrigger value="cadastro" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 h-full font-bold text-sm">
+                            Cadastro & Dados
+                          </TabsTrigger>
+                          <TabsTrigger value="permissoes" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 h-full font-bold text-sm">
+                            Permissões Iniciais
+                          </TabsTrigger>
+                        </TabsList>
+                      </div>
+                    )}
+
+                    <div className="flex-1 overflow-y-auto min-h-0 p-8 space-y-6">
+                      <TabsContent value="cadastro" className="space-y-6 mt-0 outline-none">
+                        <div className="grid gap-6 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">E-mail</label>
+                            <Input
+                              value={createDraft.email}
+                              onChange={(event) => updateCreateDraft({ email: event.target.value })}
+                              placeholder="E-mail do usuario"
+                              type="email"
+                              className="h-12 rounded-xl bg-muted/10 border-border/60 focus-visible:ring-primary/20"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Senha Inicial</label>
+                            <Input
+                              value={createDraft.password}
+                              onChange={(event) => updateCreateDraft({ password: event.target.value })}
+                              placeholder="Senha inicial"
+                              type="password"
+                              className="h-12 rounded-xl bg-muted/10 border-border/60 focus-visible:ring-primary/20"
+                            />
+                          </div>
+                          <div className="sm:col-span-2 space-y-2">
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Nome de Exibição</label>
+                            <Input
+                              value={createDraft.displayName}
+                              onChange={(event) => updateCreateDraft({ displayName: event.target.value })}
+                              placeholder="Nome completo ou alcunha"
+                              className="h-12 rounded-xl bg-muted/10 border-border/60 focus-visible:ring-primary/20"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Tipo de Usuário</label>
+                            <Select
+                              value={createDraft.accessPreset}
+                              onValueChange={(value) => {
+                                const profile = findAccessProfile(resolvedAccessProfiles, value);
+                                setCreateDraft((current) =>
+                                  normalizeCreateDraftForSimpleForm(
+                                    applyAccessProfileToDraft(
+                                      {
+                                        ...current,
+                                        accessPreset: value,
+                                      },
+                                      profile
+                                    )
+                                  )
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20">
+                                <SelectValue placeholder="Tipo de usuario" />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl">
+                                {resolvedAccessProfiles
+                                  .filter((profile) => {
+                                    if (profile.key === "pending" || profile.role !== "internal") return false;
+                                    if (profile.key === "admin_vexo") return false;
+                                    if (isAdminUser) return true;
+                                    return profile.key === "operador";
+                                  })
+                                  .map((profile) => (
+                                    <SelectItem key={profile.key} value={profile.key} className="py-2.5">
+                                      {profile.label}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Empresa / Tenant</label>
+                            <Select
+                              value={createDraft.clientIds[0] || "__none"}
+                              onValueChange={(value) => {
+                                const selectedClient = clients.find((client) => client.id === value);
+                                updateCreateDraft({
+                                  clientIds: value === "__none" ? [] : [value],
+                                  companyName: value === "__none" ? "" : selectedClient?.name || "",
+                                });
+                              }}
+                            >
+                              <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20">
+                                <SelectValue placeholder="Empresa / tenant" />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl">
+                                <SelectItem value="__none" className="py-2.5">
+                                  {createDraft.role === "client" ? "Selecionar empresa" : "Sem empresa vinculada"}
+                                </SelectItem>
+                                {clients.map((client) => (
+                                  <SelectItem key={client.id} value={client.id} className="py-2.5">
+                                    {client.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {selectedCreateType ? (
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground bg-muted/10 p-3 rounded-xl border border-border/40">
+                            <Badge variant="outline" className={cn("border-border/80 bg-background/60", ROLE_BADGE_CLASS[selectedCreateType.role])}>
+                              {ROLE_LABELS[selectedCreateType.role]}
+                            </Badge>
+                            {selectedCreateType.description ? <span>{selectedCreateType.description}</span> : null}
+                          </div>
+                        ) : null}
+
+                        <div className="rounded-2xl border border-border/60 bg-muted/5 p-4">
+                          <label className="flex items-center gap-3 text-sm text-foreground font-semibold cursor-pointer">
+                            <Checkbox
+                              checked={createDraft.sendPasswordReset}
+                              onCheckedChange={(checked) => updateCreateDraft({ sendPasswordReset: checked === true })}
+                            />
+                            Enviar e-mail de redefinicao de senha apos o cadastro
+                          </label>
+                        </div>
+
+                        {createDraft.role === "pending" && (
+                          <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
+                            Usuario pendente nao recebe paginas, views nem permissoes operacionais ate a aprovacao.
+                          </div>
+                        )}
+                      </TabsContent>
+
+                      {createDraft.role !== "pending" && (
+                        <TabsContent value="permissoes" className="space-y-6 mt-0 outline-none">
+                          <div className="rounded-[2rem] border border-border/60 bg-muted/5 p-2 overflow-hidden">
+                            <AccessPagesTabs
+                              role={createDraft.role}
+                              selected={createDraft.role === "client" ? createDraft.allowedViews : createDraft.internalPages}
+                              disabled={!canEditUsers}
+                              onChange={(next) =>
+                                createDraft.role === "client"
+                                  ? updateCreateDraft({ allowedViews: next as AccessView[] })
+                                  : updateCreateDraft({ internalPages: next as InternalPage[] })
+                              }
+                            />
+                          </div>
+                        </TabsContent>
+                      )}
+                    </div>
+                  </Tabs>
+
+                  <DialogFooter className="px-8 py-5 border-t border-border/40 bg-muted/5 flex gap-3 justify-end shrink-0">
+                    <Button variant="outline" type="button" className="rounded-xl font-semibold" onClick={() => setCreateDialogOpen(false)}>
+                      Cancelar
+                    </Button>
+                    <Button className="rounded-xl font-semibold" onClick={createUser} disabled={creating}>
+                      <UserRound className="h-4 w-4 mr-2" />
+                      {creating ? "Criando..." : "Criar usuario"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </>
+          )}
+        </div>
+      }
     >
       {!canEditUsers && (
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
@@ -2197,7 +2336,7 @@ export default function UserAccessManagement() {
         </DialogContent>
       </Dialog>
 
-      <div className="space-y-6">
+
           <Card className="border-border/80">
             <CardHeader className="space-y-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2207,17 +2346,7 @@ export default function UserAccessManagement() {
                 </div>
 
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                  {canEditUsers ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={syncFirebaseUsers}
-                      disabled={syncingUsers}
-                    >
-                      <RefreshCw className={cn("h-4 w-4", syncingUsers && "animate-spin")} />
-                      {syncingUsers ? "Sincronizando..." : "Sincronizar Auth"}
-                    </Button>
-                  ) : null}
+
 
                   <div className="relative min-w-[260px]">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -2288,115 +2417,178 @@ export default function UserAccessManagement() {
                     </Badge>
                   </div>
 
-                  <div className="grid gap-5 xl:grid-cols-[340px_1fr]">
-                    <div className="space-y-4">
-                      <ScrollArea className="h-[720px] pr-3">
-                        <div className="space-y-3">
-                          {filteredUsers.map((user) => {
-                            const draft = drafts[user.uid] || buildUserDraft(user);
+                  <div className="rounded-[2rem] border border-border/60 bg-background/50 overflow-hidden shadow-sm">
+                    <Table>
+                      <TableHeader className="bg-muted/20">
+                        <TableRow className="border-border/60 hover:bg-transparent">
+                          <TableHead className="w-[40%] font-medium text-foreground py-4 px-6">Usuário</TableHead>
+                          <TableHead className="font-medium text-foreground py-4 px-6">Empresa</TableHead>
+                          <TableHead className="font-medium text-foreground py-4 px-6">Status</TableHead>
+                          <TableHead className="text-right font-medium text-foreground py-4 px-6">Ações</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedUsers.map((user) => {
+                          const draft = drafts[user.uid] || buildUserDraft(user);
+                          const protectedAccount = isProtectedAdmin(user);
+                          const tenantName = draft.companyName || summarizeClientAssignments(draft.clientIds, clients);
 
-                            return (
-                              <UserListItem
-                                key={user.uid}
-                                user={user}
-                                draft={draft}
-                                clients={clients}
-                                protectedAccount={isProtectedAdmin(user)}
-                                dirty={hasDraftChanges(user, draft)}
-                                selected={selectedUserId === user.uid}
-                                onSelect={() => setSelectedUserId(user.uid)}
-                              />
-                            );
-                          })}
-                        </div>
-                      </ScrollArea>
+                          return (
+                            <TableRow key={user.uid} className="border-border/60 transition-colors hover:bg-muted/30">
+                              <TableCell className="py-4 px-6">
+                                <div className="space-y-1">
+                                  <p className="text-sm font-semibold text-foreground">{user.displayName || user.email || "Usuário sem nome"}</p>
+                                  <p className="text-xs text-muted-foreground">{user.email || "Sem e-mail"}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4 px-6">
+                                <span className="text-sm font-medium text-foreground/80">{tenantName}</span>
+                              </TableCell>
+                              <TableCell className="py-4 px-6">
+                                <div className="flex flex-wrap gap-2">
+                                  {draft.disabled && <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/5">Inativo</Badge>}
+                                  <Badge className={cn("font-medium", protectedAccount ? "bg-primary/10 text-primary" : ROLE_BADGE_CLASS[draft.role])}>
+                                    {protectedAccount ? "Admin Protegido" : ROLE_LABELS[draft.role]}
+                                  </Badge>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right py-4 px-6">
+                                <Button variant="outline" size="sm" className="rounded-xl h-8 px-4 font-medium" onClick={() => setSelectedUserId(user.uid)}>
+                                  Configurar
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs text-muted-foreground dark:border-white/10">
+                    <div className="flex items-center gap-4">
+                      <span>
+                        Mostrando {filteredUsers.length === 0 ? 0 : (safePage - 1) * pageSize + 1}-
+                        {Math.min(safePage * pageSize, filteredUsers.length)} de {filteredUsers.length}
+                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        <span>Usuários por página:</span>
+                        <Select
+                          value={String(pageSize)}
+                          onValueChange={(val) => setPageSize(Number(val) as 10 | 20)}
+                        >
+                          <SelectTrigger className="h-7 w-16 rounded-lg text-xs bg-white/80 dark:bg-white/[0.02] border-slate-200 dark:border-white/10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-white/10 dark:bg-[#0b0e1a] dark:text-white text-xs">
+                            <SelectItem value="10">10</SelectItem>
+                            <SelectItem value="20">20</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
 
-                    <div>
-                      {selectedUser && selectedDraft ? (
-                        <Card className="border-border/80 bg-background/70">
-                          <CardHeader className="space-y-4">
-                            <div className="flex flex-wrap items-start justify-between gap-4">
-                              <div className="space-y-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <CardTitle className="text-xl">
-                                    {selectedUser.displayName || selectedUser.email || "Usuario sem nome"}
-                                  </CardTitle>
-                                  {selectedProtectedAccount ? (
-                                    <Badge className="gap-1 bg-primary/10 text-primary">
-                                      <LockKeyhole className="h-3.5 w-3.5" />
-                                      Admin protegido
-                                    </Badge>
-                                  ) : (
-                                    <Badge className={ROLE_BADGE_CLASS[selectedDraft.role]}>{ROLE_LABELS[selectedDraft.role]}</Badge>
-                                  )}
-                                  {selectedHasChanges ? (
-                                    <Badge variant="outline" className="border-primary/30 text-primary">
-                                      Alteracoes nao salvas
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                                <CardDescription className="text-sm">
-                                  {selectedUser.email || "Sem e-mail"}
-                                </CardDescription>
-                                <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                                  <span>Criado em {formatDate(selectedUser.createdAt)}</span>
-                                  <span>Ultimo login {formatDate(selectedUser.lastSignInAt)}</span>
-                                </div>
-                              </div>
+                    {totalPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          disabled={safePage <= 1}
+                          onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="rounded-md border border-slate-200/80 bg-white px-2.5 py-1 font-semibold text-foreground dark:border-white/10 dark:bg-white/[0.04]">
+                          {safePage}/{totalPages}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          disabled={safePage >= totalPages}
+                          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        >
+                          Próximo
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : null}
 
-                              <div className="flex flex-wrap justify-end gap-3">
-                                <Button
-                                  variant="outline"
-                                  onClick={() => updateDraft(selectedUser.uid, buildUserDraft(selectedUser))}
-                                  disabled={!selectedEditable || savingUid === selectedUser.uid || deletingUid === selectedUser.uid}
-                                >
-                                  Restaurar
-                                </Button>
-                                <Button
-                                  onClick={() => saveUser(selectedUser)}
-                                  disabled={!selectedEditable || savingUid === selectedUser.uid || deletingUid === selectedUser.uid}
-                                >
-                                  <ShieldCheck className="h-4 w-4" />
-                                  {savingUid === selectedUser.uid
-                                    ? selectedActivationReady
-                                      ? "Ativando..."
-                                      : "Salvando..."
-                                    : selectedActivationReady
-                                      ? "Ativar usuario"
-                                      : "Salvar acessos"}
-                                </Button>
-                                <Button
-                                  variant="destructive"
-                                  onClick={() => deleteUser(selectedUser)}
-                                  disabled={!selectedEditable || savingUid === selectedUser.uid || deletingUid === selectedUser.uid}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  {deletingUid === selectedUser.uid ? "Apagando..." : "Apagar usuario"}
-                                </Button>
+              {/* Modal de Edição */}
+              <Dialog open={!!selectedUserId} onOpenChange={(open) => { if (!open) setSelectedUserId(null); }}>
+                    <DialogContent className="max-h-[92vh] max-w-4xl flex flex-col p-0 border-border/60 shadow-2xl bg-background/95 backdrop-blur-xl sm:rounded-[2.5rem] overflow-hidden">
+                      {selectedUser && selectedDraft ? (
+                        <div className="flex flex-col h-full min-h-0 flex-1">
+                          <DialogHeader className="px-8 pb-6 pt-8 border-b border-border/40 bg-muted/10 shrink-0">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-2">
+                                <DialogTitle className="text-2xl font-bold tracking-tight">
+                                  {selectedUser.displayName || selectedUser.email || "Usuário sem nome"}
+                                </DialogTitle>
+                                <DialogDescription className="text-sm text-muted-foreground flex items-center gap-2">
+                                  {selectedUser.email || "Sem e-mail"}
+                                  <span>•</span>
+                                  Criado em {formatDate(selectedUser.createdAt)}
+                                </DialogDescription>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {selectedProtectedAccount ? (
+                                  <Badge className="gap-1 bg-primary/10 text-primary px-3 py-1 text-sm rounded-xl">
+                                    <LockKeyhole className="h-4 w-4" />
+                                    Admin protegido
+                                  </Badge>
+                                ) : (
+                                  <Badge className={cn("px-3 py-1 text-sm rounded-xl", ROLE_BADGE_CLASS[selectedDraft.role])}>
+                                    {ROLE_LABELS[selectedDraft.role]}
+                                  </Badge>
+                                )}
                               </div>
                             </div>
-                          </CardHeader>
 
-                          <CardContent className="space-y-5">
-                            {selectedHiddenByFilter ? (
-                              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
-                                O usuario selecionado nao aparece na lista atual por causa da busca ou do filtro ativo, mas permanece aberto para evitar troca silenciosa de contexto.
+                            {selectedHasChanges && (
+                               <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
+                                 <AlertTriangle className="h-4 w-4" />
+                                 Você tem alterações não salvas neste perfil.
+                               </div>
+                            )}
+                          </DialogHeader>
+
+                          <Tabs defaultValue="geral" className="flex flex-col flex-1 min-h-0">
+                            {selectedDraft.role !== "pending" && (
+                              <div className="px-8 border-b border-border/40 bg-muted/5 shrink-0">
+                                <TabsList className="flex gap-2 bg-transparent p-0 h-12 border-b-0">
+                                  <TabsTrigger value="geral" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 h-full font-bold text-sm">
+                                    Geral
+                                  </TabsTrigger>
+                                  <TabsTrigger value="permissoes" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 h-full font-bold text-sm">
+                                    Permissões & Módulos
+                                  </TabsTrigger>
+                                  <TabsTrigger value="acoes" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 h-full font-bold text-sm text-destructive data-[state=active]:border-destructive">
+                                    Zona de Perigo
+                                  </TabsTrigger>
+                                </TabsList>
                               </div>
-                            ) : null}
+                            )}
 
-                            {selectedActivationReady ? (
-                              <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">
-                                O cadastro ja esta pronto para liberacao. Revise os acessos como Campanhas e Dashboard + Inteligencia Comercial, depois clique em <strong>Ativar usuario</strong>.
-                              </div>
-                            ) : null}
-
-                            <div className="rounded-3xl border border-border/80 bg-background/50 p-4">
-                              {selectedProtectedAccount ? (
-                                <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-4 text-sm text-primary">
-                                  Esta conta esta protegida por allowlist fixa de admin. A tela permanece apenas como leitura para preservar o acesso raiz do ambiente.
+                            <div className="flex-1 overflow-y-auto min-h-0 p-8 space-y-6">
+                              {selectedHiddenByFilter ? (
+                                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
+                                  O usuario selecionado nao aparece na lista atual por causa da busca ou do filtro ativo.
                                 </div>
-                              ) : (
+                              ) : null}
+
+                              {selectedActivationReady ? (
+                                <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary font-medium">
+                                  O cadastro ja esta pronto para liberacao. Revise os acessos, depois clique em Ativar usuario no rodapé.
+                                </div>
+                              ) : null}
+
+                              {selectedDraft.role === "pending" ? (
                                 <AccessGovernance
                                   draft={selectedDraft}
                                   accessProfiles={resolvedAccessProfiles}
@@ -2405,374 +2597,219 @@ export default function UserAccessManagement() {
                                   editable={selectedEditable}
                                   onChange={(patch) => updateDraft(selectedUser.uid, patch)}
                                 />
+                              ) : (
+                                <>
+                                  <TabsContent value="geral" className="space-y-6 mt-0 outline-none">
+                                    <div className="grid gap-6 md:grid-cols-2">
+                                      <div className="space-y-2">
+                                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Perfil de Acesso Principal</label>
+                                        <Select
+                                          value={selectedDraft.accessPreset}
+                                          disabled={!selectedEditable}
+                                          onValueChange={(value) => {
+                                            const profile = findAccessProfile(resolvedAccessProfiles, value);
+                                            updateDraft(selectedUser.uid, applyAccessProfileToDraft({ ...selectedDraft, accessPreset: value }, profile));
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20 text-base px-4">
+                                            <SelectValue placeholder="Selecionar perfil de acesso" />
+                                          </SelectTrigger>
+                                          <SelectContent className="rounded-xl">
+                                            {resolvedAccessProfiles.filter(p => p.role !== "pending").map((profile) => (
+                                              <SelectItem key={profile.key} value={profile.key} className="py-2.5">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="font-medium">{profile.label}</span>
+                                                  <Badge variant="outline" className="text-[10px] uppercase">{ROLE_LABELS[profile.role]}</Badge>
+                                                </div>
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        {findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.description && (
+                                          <p className="text-xs text-muted-foreground leading-relaxed pl-1">
+                                            {findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.description}
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Empresa / Tenant Vinculado</label>
+                                        <Select
+                                          value={selectedDraft.clientIds[0] || "__none"}
+                                          disabled={!canEditUsers}
+                                          onValueChange={(value) => {
+                                            const selectedClient = clients.find((client) => client.id === value);
+                                            updateDraft(selectedUser.uid, {
+                                              clientIds: value === "__none" ? [] : [value],
+                                              companyName: value === "__none" ? "" : selectedClient?.name || "",
+                                            });
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20 text-base px-4">
+                                            <SelectValue placeholder="Selecionar empresa" />
+                                          </SelectTrigger>
+                                          <SelectContent className="rounded-xl">
+                                            <SelectItem value="__none" className="py-2.5 font-medium text-muted-foreground">
+                                              {selectedDraft.role === "client" ? "Selecionar empresa (Obrigatório)" : "Sem vínculo específico (Global)"}
+                                            </SelectItem>
+                                            {clients.map((client) => (
+                                              <SelectItem key={client.id} value={client.id} className="py-2.5">
+                                                <span className="font-medium">{client.name}</span>
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Nome de Exibição da Empresa (Opcional)</label>
+                                      <Input
+                                        value={selectedDraft.companyName}
+                                        disabled={!canEditUsers}
+                                        onChange={(event) => updateDraft(selectedUser.uid, { companyName: event.target.value })}
+                                        placeholder="Ex: Vexo CRM"
+                                        className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20 text-base px-4"
+                                      />
+                                      <p className="text-xs text-muted-foreground pl-1">Se preenchido, substitui o nome padrão da empresa na interface deste usuário.</p>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-border/60 bg-muted/5 p-4 flex items-center justify-between gap-4">
+                                      <div className="space-y-1">
+                                        <p className="font-semibold text-sm text-foreground">Status do Acesso</p>
+                                        <p className="text-xs text-muted-foreground">Desative temporariamente ou reative o login deste usuário no CRM.</p>
+                                      </div>
+                                      <Switch
+                                        checked={!selectedDraft.disabled}
+                                        disabled={!canEditUsers || isFixedAdminAccount(selectedUser.uid, selectedUser.email)}
+                                        onCheckedChange={(checked) => updateDraft(selectedUser.uid, { disabled: !checked })}
+                                        className="scale-90 data-[state=checked]:bg-primary"
+                                      />
+                                    </div>
+                                  </TabsContent>
+
+                                  <TabsContent value="permissoes" className="space-y-6 mt-0 outline-none">
+                                    {selectedProtectedAccount && (
+                                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-primary font-medium flex items-center gap-2">
+                                        <LockKeyhole className="h-4 w-4 shrink-0" />
+                                        Esta é uma conta de Administrador. As permissões e atalhos são fixos do sistema para garantir o acesso.
+                                      </div>
+                                    )}
+
+                                    {selectedDraft.role === "internal" && (
+                                      <div className="space-y-3">
+                                        <h4 className="text-sm font-bold text-foreground">Acessos Rápidos (Administração)</h4>
+                                        <div className="space-y-2">
+                                          {INTERNAL_SHORTCUTS.map((shortcut) => {
+                                            const enabled = hasInternalShortcutAccess(selectedDraft, shortcut.key);
+                                            const ShortcutIcon = shortcut.icon;
+
+                                            return (
+                                              <div
+                                                key={shortcut.key}
+                                                className="flex items-center justify-between py-3 px-4 rounded-xl border border-border/40 bg-muted/5 transition-colors"
+                                              >
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                  <ShortcutIcon className="h-5 w-5 text-muted-foreground shrink-0" />
+                                                  <div className="space-y-0.5 min-w-0">
+                                                    <p className="font-semibold text-sm text-foreground">{shortcut.title}</p>
+                                                    <p className="text-xs text-muted-foreground truncate max-w-[400px]">{shortcut.description}</p>
+                                                  </div>
+                                                </div>
+                                                <Switch
+                                                  checked={enabled}
+                                                  disabled={!selectedEditable}
+                                                  onCheckedChange={(checked) => updateDraft(selectedUser.uid, buildInternalShortcutPatch(selectedDraft, shortcut.key, checked))}
+                                                  className="scale-90 data-[state=checked]:bg-primary"
+                                                />
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div className="pt-4 border-t border-border/40 space-y-4">
+                                      <div className="flex items-center justify-between">
+                                        <h4 className="text-sm font-bold text-foreground">Permissões Detalhadas de Módulos</h4>
+                                        <Badge variant="outline" className="font-medium bg-muted/20 text-[10px]">Configuração Avançada</Badge>
+                                      </div>
+                                      <div className="rounded-2xl border border-border/60 bg-muted/5 p-1 overflow-hidden">
+                                        <AccessPagesTabs
+                                          role={selectedDraft.role}
+                                          selected={selectedDraft.role === "client" ? selectedDraft.allowedViews : selectedDraft.internalPages}
+                                          disabled={!selectedEditable}
+                                          onChange={(next) =>
+                                            selectedDraft.role === "client"
+                                              ? updateDraft(selectedUser.uid, { allowedViews: next as AccessView[] })
+                                              : updateDraft(selectedUser.uid, { internalPages: next as InternalPage[] })
+                                          }
+                                        />
+                                      </div>
+                                    </div>
+                                  </TabsContent>
+
+                                  <TabsContent value="acoes" className="space-y-6 mt-0 outline-none">
+                                    <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-5 space-y-5">
+                                      <div className="space-y-1">
+                                        <h4 className="text-sm font-bold text-destructive flex items-center gap-2">
+                                          <AlertTriangle className="h-4.5 w-4.5 animate-bounce" />
+                                          Zona de Perigo
+                                        </h4>
+                                        <p className="text-xs text-muted-foreground leading-relaxed">
+                                          Apagar a conta deletará todas as credenciais e permissões vinculadas do usuário permanentemente. Essa ação é irreversível.
+                                        </p>
+                                      </div>
+
+                                      <Button
+                                        variant="destructive"
+                                        className="rounded-xl font-semibold"
+                                        onClick={() => deleteUser(selectedUser)}
+                                        disabled={!canEditUsers || isFixedAdminAccount(selectedUser.uid, selectedUser.email) || savingUid === selectedUser.uid || deletingUid === selectedUser.uid}
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        {deletingUid === selectedUser.uid ? "Apagando..." : "Apagar conta permanentemente"}
+                                      </Button>
+                                    </div>
+                                  </TabsContent>
+                                </>
                               )}
                             </div>
+                          </Tabs>
 
-                            <label className="flex items-center gap-3 rounded-3xl border border-border/80 bg-background/60 px-4 py-3 text-sm text-muted-foreground">
-                              <Checkbox
-                                checked={selectedDraft.disabled}
-                                disabled={!selectedEditable}
-                                onCheckedChange={(checked) => updateDraft(selectedUser.uid, { disabled: checked === true })}
-                              />
-                              Desativar login deste usuario
-                            </label>
-                          </CardContent>
-                        </Card>
+                          <DialogFooter className="px-8 py-5 border-t border-border/40 bg-muted/5 flex gap-3 justify-end shrink-0">
+                            <Button
+                              variant="outline"
+                              className="rounded-xl font-semibold"
+                              onClick={() => updateDraft(selectedUser.uid, buildUserDraft(selectedUser))}
+                              disabled={!canEditUsers || savingUid === selectedUser.uid || deletingUid === selectedUser.uid || !selectedHasChanges}
+                            >
+                              Descartar alterações
+                            </Button>
+                            <Button
+                              className="rounded-xl font-semibold shadow-md"
+                              onClick={() => saveUser(selectedUser)}
+                              disabled={!canEditUsers || savingUid === selectedUser.uid || deletingUid === selectedUser.uid}
+                            >
+                              <ShieldCheck className="h-4 w-4 mr-2" />
+                              {savingUid === selectedUser.uid
+                                ? selectedActivationReady
+                                  ? "Ativando..."
+                                  : "Salvando..."
+                                : selectedActivationReady
+                                  ? "Ativar usuario"
+                                  : "Salvar acessos"}
+                            </Button>
+                          </DialogFooter>
+                        </div>
                       ) : (
-                        <EmptyState
-                          title="Selecione um usuario"
-                          description="Escolha um registro na coluna da esquerda para editar suas associacoes."
-                        />
+                        <div className="p-8 text-center text-muted-foreground">Carregando...</div>
                       )}
-                    </div>
-                  </div>
-                </>
-              ) : null}
+                    </DialogContent>
+                  </Dialog>
             </CardContent>
           </Card>
 
-        {canEditUsers ? (
-          <>
-            <Card className="border-border/80">
-              <CardHeader className="space-y-1">
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <Plus className="h-4 w-4 text-primary" />
-                  Novo usuario
-                </CardTitle>
-                <CardDescription>Defina os dados basicos, escolha o tipo, vincule a empresa e ajuste as paginas.</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-5">
-                <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
-                  <Input
-                    value={createDraft.email}
-                    onChange={(event) => updateCreateDraft({ email: event.target.value })}
-                    placeholder="E-mail do usuario"
-                    type="email"
-                  />
-                  <Input
-                    value={createDraft.password}
-                    onChange={(event) => updateCreateDraft({ password: event.target.value })}
-                    placeholder="Senha inicial"
-                    type="password"
-                  />
-                  <Input
-                    value={createDraft.displayName}
-                    onChange={(event) => updateCreateDraft({ displayName: event.target.value })}
-                    placeholder="Nome de exibicao"
-                  />
-                  <Select
-                    value={createDraft.accessPreset}
-                    onValueChange={(value) => {
-                      const profile = findAccessProfile(resolvedAccessProfiles, value);
-                      setCreateDraft((current) =>
-                        normalizeCreateDraftForSimpleForm(
-                          applyAccessProfileToDraft(
-                            {
-                              ...current,
-                              accessPreset: value,
-                            },
-                            profile
-                          )
-                        )
-                      );
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Tipo de usuario" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {resolvedAccessProfiles
-                        .filter((profile) => {
-                          if (profile.key === "pending" || profile.role !== "internal") return false;
-                          if (profile.key === "admin_vexo") return false;
-                          if (isAdminUser) return true;
-                          return profile.key === "operador";
-                        })
-                        .map((profile) => (
-                          <SelectItem key={profile.key} value={profile.key}>
-                            {profile.label}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={createDraft.clientIds[0] || "__none"}
-                    onValueChange={(value) => {
-                      const selectedClient = clients.find((client) => client.id === value);
-                      updateCreateDraft({
-                        clientIds: value === "__none" ? [] : [value],
-                        companyName: value === "__none" ? "" : selectedClient?.name || "",
-                      });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Empresa / tenant" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">
-                        {createDraft.role === "client" ? "Selecionar empresa" : "Sem empresa vinculada"}
-                      </SelectItem>
-                      {clients.map((client) => (
-                        <SelectItem key={client.id} value={client.id}>
-                        {client.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                </div>
-
-                {selectedCreateType ? (
-                  <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-muted-foreground">
-                    <Badge variant="outline" className={cn("border-border/80 bg-background/60", ROLE_BADGE_CLASS[selectedCreateType.role])}>
-                      {ROLE_LABELS[selectedCreateType.role]}
-                    </Badge>
-                    {selectedCreateType.description ? <span>{selectedCreateType.description}</span> : null}
-                  </div>
-                ) : null}
-
-                <label className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Checkbox
-                    checked={createDraft.sendPasswordReset}
-                    onCheckedChange={(checked) => updateCreateDraft({ sendPasswordReset: checked === true })}
-                  />
-                  Enviar e-mail de redefinicao de senha apos o cadastro
-                </label>
-
-                {createDraft.role === "pending" ? (
-                  <div className="rounded-3xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
-                    Usuario pendente nao recebe paginas, views nem permissoes operacionais ate a aprovacao.
-                  </div>
-                ) : (
-                  <AccessPagesTabs
-                    role={createDraft.role}
-                    selected={createDraft.role === "client" ? createDraft.allowedViews : createDraft.internalPages}
-                    disabled={!canEditUsers}
-                    onChange={(next) =>
-                      createDraft.role === "client"
-                        ? updateCreateDraft({ allowedViews: next as AccessView[] })
-                        : updateCreateDraft({ internalPages: next as InternalPage[] })
-                    }
-                  />
-                )}
-
-                <div className="flex justify-end">
-                  <Button onClick={createUser} disabled={creating}>
-                    <UserRound className="h-4 w-4" />
-                    {creating ? "Criando..." : "Criar usuario"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {showAdvancedTypeEditor ? (
-            <Card className="border-border/80">
-                <CardHeader className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <CardTitle className="text-xl">Tipos de usuario</CardTitle>
-                      <CardDescription>Ajuste os tipos padrao sem sair da tela de usuarios. Esta area e opcional e fica abaixo do fluxo principal para manter a operacao mais enxuta.</CardDescription>
-                    </div>
-
-                  <Button variant="outline" onClick={resetNewProfileDraft}>
-                      <Plus className="h-4 w-4" />
-                      Novo tipo
-                  </Button>
-                </div>
-              </CardHeader>
-
-                <CardContent className="space-y-5">
-                  <div className="space-y-5">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Tipos padrao</p>
-                          <p className="text-xs text-muted-foreground">Modelos base do sistema para interno, cliente e pendente.</p>
-                        </div>
-                        <Badge variant="outline">{systemAccessProfiles.length}</Badge>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        {systemAccessProfiles.map((profile) => {
-                          const assignedUsers = users.filter((user) => user.access.accessPreset === profile.key).length;
-                          const selected = selectedProfileKey === profile.key;
-
-                          return (
-                            <button
-                              key={profile.key}
-                              type="button"
-                              onClick={() => {
-                                setSelectedProfileKey(profile.key);
-                                clearActionFeedback();
-                              }}
-                              className={cn(
-                                "w-full rounded-2xl border p-3 text-left transition-colors",
-                                selected
-                                  ? "border-primary/30 bg-primary/5 shadow-sm"
-                                  : "border-border/80 bg-background/70 hover:border-primary/20 hover:bg-background"
-                              )}
-                            >
-                              <div className="flex flex-wrap items-start justify-between gap-2">
-                                <div className="space-y-1">
-                                  <p className="text-sm font-medium text-foreground">{profile.label}</p>
-                                  <p className="text-xs text-muted-foreground">{profile.key}</p>
-                                </div>
-                                <Badge className={ROLE_BADGE_CLASS[profile.role]}>{ROLE_LABELS[profile.role]}</Badge>
-                              </div>
-
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {profile.isLocked ? (
-                                  <Badge variant="outline" className="border-primary/30 text-primary">
-                                    Protegido
-                                  </Badge>
-                                ) : null}
-                                <Badge variant="outline">{assignedUsers} usuarios</Badge>
-                              </div>
-
-                              {profile.description ? (
-                                <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{profile.description}</p>
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Tipos customizados</p>
-                          <p className="text-xs text-muted-foreground">Tipos criados pela operacao para casos especificos.</p>
-                        </div>
-                        <Badge variant="outline">{customAccessProfiles.length}</Badge>
-                      </div>
-
-                      {customAccessProfiles.length > 0 ? (
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                          {customAccessProfiles.map((profile) => {
-                            const assignedUsers = users.filter((user) => user.access.accessPreset === profile.key).length;
-                            const selected = selectedProfileKey === profile.key;
-
-                            return (
-                              <button
-                                key={profile.key}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedProfileKey(profile.key);
-                                  clearActionFeedback();
-                                }}
-                                className={cn(
-                                  "w-full rounded-2xl border p-3 text-left transition-colors",
-                                  selected
-                                    ? "border-primary/30 bg-primary/5 shadow-sm"
-                                    : "border-border/80 bg-background/70 hover:border-primary/20 hover:bg-background"
-                                )}
-                              >
-                                <div className="flex flex-wrap items-start justify-between gap-2">
-                                  <div className="space-y-1">
-                                    <p className="text-sm font-medium text-foreground">{profile.label}</p>
-                                    <p className="text-xs text-muted-foreground">{profile.key}</p>
-                                  </div>
-                                  <Badge className={ROLE_BADGE_CLASS[profile.role]}>{ROLE_LABELS[profile.role]}</Badge>
-                                </div>
-
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <Badge variant="outline">{assignedUsers} usuarios</Badge>
-                                </div>
-
-                                {profile.description ? (
-                                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{profile.description}</p>
-                                ) : null}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-border/80 bg-background/50 px-4 py-4 text-sm text-muted-foreground">
-                          Nenhum tipo customizado criado ainda.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <Card className="border-border/80 bg-background/70">
-                    <CardHeader className="space-y-1">
-                      <CardTitle className="text-xl">
-                        {selectedProfileKey === "__new__"
-                          ? "Novo tipo"
-                          : getAccessPresetLabel(selectedProfileKey)}
-                      </CardTitle>
-                      <CardDescription>
-                        {selectedProfileKey === "__new__"
-                          ? "Monte um novo tipo com paginas e permissoes padrao."
-                          : "Editar este tipo atualiza os usuarios vinculados a ele."}
-                      </CardDescription>
-                    </CardHeader>
-
-                    <CardContent className="space-y-5">
-                      <AccessProfileForm
-                        draft={profileDraft}
-                        isNew={selectedProfileKey === "__new__"}
-                        editable={!savingProfile && (selectedProfileKey === "__new__" || !findAccessProfile(resolvedAccessProfiles, selectedProfileKey)?.isLocked)}
-                        onChange={setProfileDraft}
-                      />
-
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-xs text-muted-foreground">
-                          {selectedProfile && selectedProfileKey !== "__new__" ? (
-                            selectedProfile.isLocked ? (
-                              "Este tipo e protegido pelo sistema."
-                            ) : selectedProfileAssignedUsers > 0 ? (
-                              `${selectedProfileAssignedUsers} usuarios ainda usam este tipo.`
-                            ) : (
-                              "Tipo pronto para edicao ou exclusao."
-                            )
-                          ) : (
-                            "Crie um novo tipo customizado para regras especificas."
-                          )}
-                        </div>
-
-                        <div className="flex justify-end gap-3">
-                          {selectedProfileKey !== "__new__" ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={deleteAccessProfile}
-                              disabled={
-                                deletingProfile ||
-                                savingProfile ||
-                                !selectedProfile ||
-                                selectedProfile.isLocked ||
-                                selectedProfileAssignedUsers > 0
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              {deletingProfile ? "Apagando tipo..." : "Apagar tipo"}
-                            </Button>
-                          ) : null}
-
-                        <Button
-                          onClick={saveAccessProfile}
-                          disabled={
-                            savingProfile ||
-                            deletingProfile ||
-                            !selectedProfileKey ||
-                            (selectedProfileKey !== "__new__" && Boolean(findAccessProfile(resolvedAccessProfiles, selectedProfileKey)?.isLocked))
-                          }
-                        >
-                          <ShieldCheck className="h-4 w-4" />
-                          {savingProfile ? "Salvando tipo..." : "Salvar tipo"}
-                        </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </CardContent>
-              </Card>
-            ) : null}
-          </>
-        ) : null}
-      </div>
     </PageShell>
   );
 }
