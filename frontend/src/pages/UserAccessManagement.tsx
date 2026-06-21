@@ -787,9 +787,9 @@ function getPermissionIcon(item: string, active: boolean) {
     "h-5 w-5 transition-transform duration-300 group-hover:scale-110",
     active ? "text-primary-foreground" : "text-muted-foreground"
   );
-  
+
   const key = item.toLowerCase();
-  
+
   if (key.startsWith("dashboard")) return <LayoutDashboard className={cnIcon} />;
   if (key.startsWith("leads")) return <Users className={cnIcon} />;
   if (key.startsWith("planilhas") || key.includes("imports")) return <FileSpreadsheet className={cnIcon} />;
@@ -798,7 +798,7 @@ function getPermissionIcon(item: string, active: boolean) {
   if (key.startsWith("usuarios") || key.includes("users")) return <UserRound className={cnIcon} />;
   if (key.startsWith("empresas") || key.includes("tenants")) return <Building2 className={cnIcon} />;
   if (key.startsWith("campanhas") || key.includes("campaigns")) return <Megaphone className={cnIcon} />;
-  
+
   return <Globe className={cnIcon} />;
 }
 
@@ -971,7 +971,7 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
         {tabs.map((tab) => {
           const selectedCount = tab.items.filter((item) => selected.includes(item)).length;
           const isOperacaoOrPortal = tab.value === "operacao" || tab.value === "portal";
-          
+
           return (
             <TabsTrigger
               key={tab.value}
@@ -1305,7 +1305,7 @@ function AccessGovernance({ draft, accessProfiles, clients, selectedClientId, ed
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-      
+
       {normalized.role === "pending" ? (
         <div className="rounded-[2rem] border border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-amber-500/5 p-8 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10">
@@ -1316,7 +1316,7 @@ function AccessGovernance({ draft, accessProfiles, clients, selectedClientId, ed
             <p className="text-sm text-amber-700/80 max-w-[60%] mb-8 leading-relaxed">
               Este usuário solicitou acesso, mas precisa da sua aprovação. Defina como ele irá operar no CRM para destravar os módulos do sistema.
             </p>
-            
+
             <div className="space-y-4">
               <p className="text-sm font-semibold text-amber-800">Selecione o perfil de liberação:</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1328,8 +1328,8 @@ function AccessGovernance({ draft, accessProfiles, clients, selectedClientId, ed
                     onClick={() => applyApprovalProfile(profile.key)}
                     className={cn(
                       "text-left p-5 rounded-2xl border transition-all duration-200 group",
-                      normalized.accessPreset === profile.key 
-                        ? "border-amber-500 bg-amber-500/10 shadow-sm" 
+                      normalized.accessPreset === profile.key
+                        ? "border-amber-500 bg-amber-500/10 shadow-sm"
                         : "border-amber-500/20 bg-background/50 hover:bg-amber-500/5 hover:border-amber-500/40"
                     )}
                   >
@@ -1440,8 +1440,8 @@ function AccessGovernance({ draft, accessProfiles, clients, selectedClientId, ed
                   onClick={() => applyPatch(buildInternalShortcutPatch(normalized, shortcut.key, !enabled))}
                   className={cn(
                     "text-left rounded-[2rem] border p-6 transition-all duration-300 relative overflow-hidden group",
-                    enabled 
-                      ? "border-primary/40 bg-primary/5 shadow-md" 
+                    enabled
+                      ? "border-primary/40 bg-primary/5 shadow-md"
                       : "border-border/60 bg-muted/5 hover:border-border hover:bg-muted/10"
                   )}
                 >
@@ -2549,7 +2549,7 @@ export default function UserAccessManagement() {
                                 )}
                               </div>
                             </div>
-                            
+
                             {selectedHasChanges && (
                                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
                                  <AlertTriangle className="h-4 w-4" />
