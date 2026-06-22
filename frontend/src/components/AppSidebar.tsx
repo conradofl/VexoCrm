@@ -99,6 +99,7 @@ const MODULOS: Record<Modo, Modulo> = {
 // Visível para quem tiver canAccessInternalPage para a page correspondente.
 const SISTEMA_ITEMS = [
   { key: "apresentacao", label: "Demonstração Vexo", url: "/crm/apresentacao", icon: Sparkles,    page: "onboarding-wizard" as InternalPage },
+  { key: "apresentacao-gd", label: "Apresentação GD", url: "/crm/apresentacao-gd", icon: Briefcase, page: "apresentacao-gd" as InternalPage },
   { key: "onboarding",   label: "Treinamento Vexo",   url: "/crm/onboarding",   icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
   { key: "chatbot-docs", label: "Chatbot Docs",     url: "/crm/chatbot-docs", icon: BookOpen,    page: "chatbot-docs" as InternalPage },
   { key: "empresas",     label: "Empresas",         url: "/crm/empresas",     icon: Building2,   page: "empresas" as InternalPage },

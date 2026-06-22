@@ -38,6 +38,7 @@ import ChatbotSettings from "./pages/ChatbotSettings";
 import FollowupQueue from "./pages/FollowupQueue";
 import OnboardingWizard from "./pages/OnboardingWizard";
 import VexoPitch from "./pages/VexoPitch";
+import GeracaoDigitalPitch from "./pages/GeracaoDigitalPitch";
 import EvolutionAdmin from "./pages/EvolutionAdmin";
 
 const queryClient = new QueryClient();
@@ -296,6 +297,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
                     <VexoPitch />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="apresentacao-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalPitch />
                   </ProtectedRoute>
                 }
               />

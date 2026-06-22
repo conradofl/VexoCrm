@@ -161,6 +161,7 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   "chatbot-config": "Configuracao do Chatbot",
   "fila-de-followup": "Fila de Followup",
   "chatbot-docs": "Chatbot Docs",
+  "apresentacao-gd": "Apresentacao GD",
 };
 
 const CLIENT_PAGE_TABS = [

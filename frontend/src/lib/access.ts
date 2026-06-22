@@ -22,6 +22,7 @@ export const INTERNAL_PAGE_ORDER = [
   "disparos",
   "aquecimento",
   "relatorios",
+  "apresentacao-gd",
 ] as const;
 
 export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];
@@ -606,6 +607,7 @@ export function isPathAllowedForClient(
   else if (path.includes("/crm/planilhas")) tabKey = "campanhas";
   else if (path.includes("/crm/aquecimento")) tabKey = "aquecimento";
   else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
+  else if (path.includes("/crm/apresentacao-gd")) tabKey = "apresentacao-gd";
   else if (path.includes("/crm/apresentacao")) tabKey = "apresentacao";
   else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
   else if (path.includes("/crm/usuarios")) tabKey = "usuarios";
