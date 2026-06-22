@@ -4,10 +4,12 @@
 > Base: `Contrato_Vexo_LivPub.docx` (escopo fechado, Cl. 2.2) + deck `index.html`.
 > Mapa de origem: ver seção "Mapa atual" abaixo e `CONTRACT.md`.
 >
-> **PRÉ-REQUISITO (✅ núcleo feito 2026-06-21):** segmentação unificada — ver `docs/PLANO-SEGMENTACAO.md`.
-> Catálogo dinâmico por empresa (`segmentation_config` v2: `fields[]`+`featuredKpis`), shape único
-> `{filters:[{field,operator,value}]}`, matcher único no backend. `perfil_musical` da Liv agora é
-> só uma entrada no catálogo — zero motor de filtro novo.
+> **PRÉ-REQUISITO (✅ núcleo feito — PR #127):** segmentação unificada. Antes havia 3 mecanismos
+> separados (filtro de planilha client-side · `meta.segmentation` hardcoded no disparo ·
+> `segmentation_config` por empresa). Foram fundidos em **um só**: catálogo dinâmico por empresa
+> (`segmentation_config` v2: `fields[]`+`featuredKpis`), shape único `{filters:[{field,operator,value}]}`,
+> matcher único no backend e endpoint de preview. Resultado para a Liv: `perfil_musical` vira só uma
+> entrada no catálogo — **zero motor de filtro novo**.
 
 ---
 
