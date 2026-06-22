@@ -55,6 +55,13 @@ import { routeDeps } from "./http/routeDeps.js";
 import { registerAllDomainRoutes } from "./domains/registerAllDomainRoutes.js";
 import { startFollowupWorker } from "./followup/worker.js";
 import { startAutomationEngine } from "./followup/automationEngine.js";
+import {
+  getSegmentationCatalog,
+  normalizeSegmentationCatalog,
+  isFilterShape,
+  normalizeFilters,
+  leadMatchesSegmentation,
+} from "./segmentation.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -1589,30 +1596,21 @@ function buildDefaultSegmentationConfig(model = "generico") {
 }
 
 function sanitizeSegmentationConfig(input, model = "generico") {
-  const fallback = buildDefaultSegmentationConfig(model);
-  const source = input && typeof input === "object" ? input : fallback;
-  const rawKpis = Array.isArray(source.kpis) ? source.kpis : fallback.kpis;
-  const kpis = rawKpis
-    .slice(0, 6)
-    .map((item, index) => {
-      const label = normalizeString(item?.label).slice(0, 40) || `KPI ${index + 1}`;
-      const field = normalizeTenantKey(item?.field || item?.key || label).replace(/-/g, "_").slice(0, 64);
-      if (!field) return null;
-      const rawType = normalizeTenantKey(item?.type);
-      return {
-        id: normalizeTenantKey(item?.id || field || label).slice(0, 48) || `kpi-${index + 1}`,
-        label,
-        field,
-        type: ["money", "number", "category", "date"].includes(rawType) ? rawType : "category",
-        enabled: item?.enabled !== false,
-      };
-    })
-    .filter(Boolean);
+  // Catálogo unificado v2 (fields[] sem cap + featuredKpis cap 6). Compat: lê v1 (kpis[]).
+  const hasContent =
+    input && typeof input === "object" && (Array.isArray(input.fields) || Array.isArray(input.kpis));
+  const source = hasContent ? input : buildDefaultSegmentationConfig(model);
+  const catalog = normalizeSegmentationCatalog(source);
 
-  return {
-    version: 1,
-    kpis: kpis.length ? kpis : fallback.kpis,
-  };
+  // Espelho legado kpis[] derivado de featuredKpis — mantém leitores antigos do front
+  // funcionando durante a transição (removível quando o front migrar 100%).
+  const fieldsByName = new Map(catalog.fields.map((f) => [f.field, f]));
+  const kpis = catalog.featuredKpis.map((field) => {
+    const f = fieldsByName.get(field);
+    return { id: field, label: f?.label || field, field, type: f?.type || "category", enabled: true };
+  });
+
+  return { ...catalog, kpis };
 }
 
 function maskEvolutionInstance(row) {
@@ -5177,8 +5175,36 @@ async function getClientName(clientId) {
   return data?.name || clientId;
 }
 
+// Catálogo de segmentação (fields[] + featuredKpis) do tenant. Leitura leve.
+async function getSegmentationCatalogForClient(clientId) {
+  const empty = { version: 2, fields: [], featuredKpis: [] };
+  if (!supabase || !clientId) return empty;
+  const { data, error } = await supabase
+    .from("lead_client_n8n_settings")
+    .select("segmentation_config")
+    .eq("client_id", clientId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingSchemaError(error)) return empty;
+    throw error;
+  }
+  return getSegmentationCatalog(data?.segmentation_config);
+}
+
 async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null }) {
   if (!supabase) return [];
+
+  // Roteamento de segmentação unificada:
+  //  - shape novo { filters:[...] } → catálogo do tenant + matcher genérico.
+  //  - shape legado { gender, productType, ... } → matcher hardcoded (compat, não muda campanha antiga).
+  let segMatcher;
+  if (isFilterShape(segmentation)) {
+    const catalog = await getSegmentationCatalogForClient(clientId);
+    const filters = normalizeFilters(segmentation, catalog);
+    segMatcher = (item) => leadMatchesSegmentation(item, catalog.fields, filters);
+  } else {
+    segMatcher = (item) => leadMatchesCampaignSegmentation(item, segmentation);
+  }
 
   let query = supabase
     .from("lead_import_items")
@@ -5229,7 +5255,7 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, off
           };
         })
         .filter((item) => !!item.telefone)
-        .filter((item) => leadMatchesCampaignSegmentation(item, segmentation))
+        .filter((item) => segMatcher(item))
         .map((item) => [item.telefone, item])
     ).values()
   );

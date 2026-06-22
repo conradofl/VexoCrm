@@ -95,15 +95,6 @@ import { API_BASE_URL } from "@/lib/api";
 type SheetTab = "campanha" | "enviadas" | "agendamentos" | "relatorios";
 type CampaignTemplateStrategy = "single" | "ai_variations";
 
-interface CampaignSegmentationState {
-  gender: string;
-  productType: string;
-  ticket: string;
-  ticketThreshold: string;
-  interest: string;
-  campaignTag: string;
-}
-
 interface LeadImportsProps {
   fixedClientId?: string;
   fixedClientName?: string;
@@ -119,18 +110,8 @@ interface StepActionButton {
 }
 
 const ALL_IMPORTS_VALUE = "__all__";
-const ALL_SEGMENT_VALUE = "__all__";
 const CAMPAIGN_LIMIT_MAX = 500;
 const CAMPAIGN_TIME_ZONE = "America/Sao_Paulo";
-
-const defaultSegmentation: CampaignSegmentationState = {
-  gender: ALL_SEGMENT_VALUE,
-  productType: ALL_SEGMENT_VALUE,
-  ticket: ALL_SEGMENT_VALUE,
-  ticketThreshold: "",
-  interest: "",
-  campaignTag: "",
-};
 
 const defaultDispatchOptions: CampaignDispatchOptions = {
   leadDelaySeconds: 2,
@@ -388,43 +369,12 @@ function formatDateTime(dateStr: string | null): string {
   }
 }
 
-function normalizeLooseText(value: unknown) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
 function getLeadField(data: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = data[key];
     if (value !== undefined && value !== null && String(value).trim()) return String(value);
   }
   return "";
-}
-
-function leadMatchesSegmentation(data: Record<string, unknown>, filters: CampaignSegmentationState) {
-  if (filters.gender !== ALL_SEGMENT_VALUE) {
-    const gender = normalizeLooseText(getLeadField(data, ["genero", "gênero", "sexo"]));
-    if (!gender.includes(filters.gender)) return false;
-  }
-  if (filters.productType !== ALL_SEGMENT_VALUE) {
-    const product = normalizeLooseText(getLeadField(data, ["tipo_produto", "produto", "perfil"]));
-    if (!product.includes(filters.productType)) return false;
-  }
-  return true;
-}
-
-function toCampaignSegmentationPayload(filters: CampaignSegmentationState) {
-  return {
-    gender: filters.gender === ALL_SEGMENT_VALUE ? "" : filters.gender,
-    productType: filters.productType === ALL_SEGMENT_VALUE ? "" : filters.productType,
-    ticket: "",
-    ticketThreshold: null,
-    interest: "",
-    campaignTag: "",
-  };
 }
 
 function getLeadNormalizedData(item: { normalized_data?: Record<string, unknown> | null }) {
@@ -686,7 +636,6 @@ export default function LeadImports({
   ]);
   const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useState<CampaignTemplateStrategy>("single");
   const [dispatchOptions, setDispatchOptions] = useState<CampaignDispatchOptions>(defaultDispatchOptions);
-  const [segmentation, setSegmentation] = useState<CampaignSegmentationState>(defaultSegmentation);
 
   // Scheduling & parameters states
   const [multiAgendaEnabled, setMultiAgendaEnabled] = useState(false);
@@ -1107,7 +1056,13 @@ export default function LeadImports({
         startsAt: null,
         endsAt: null,
         analyticsMeta: {
-          segmentation: toCampaignSegmentationPayload(segmentation),
+          // Segmentação unificada: as regras dinâmicas (coluna/operador/valor) viram o
+          // filtro de disparo. Mesmo shape do catálogo da empresa e do matcher do backend.
+          segmentation: {
+            filters: filterRules
+              .filter((rule) => rule.column && String(rule.value ?? "").trim() !== "")
+              .map((rule) => ({ field: rule.column, operator: rule.operator, value: rule.value })),
+          },
           message: campaignSequence.find(s => s.type === "text")?.text || "",
           image: campaignSequence.find(s => s.type === "image")?.image,
           sequence: campaignSequence,

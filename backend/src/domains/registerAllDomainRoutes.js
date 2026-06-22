@@ -1411,6 +1411,56 @@ export function registerAllDomainRoutes(app) {
     }
   );
 
+  // Dry-run de segmentação: preview unificado (mesma lógica do disparo).
+  // Front usa pra mostrar "X leads casam" antes de disparar — sem duplicar matcher.
+  app.post(
+    "/api/lead-clients/:tenantId/segmentation/preview",
+    requireFirebaseAuth,
+    requireInternalPageAccess("planilhas"),
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      if (!tenantId) {
+        sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+        return;
+      }
+
+      const filters = Array.isArray(req.body?.filters) ? req.body.filters : [];
+      const importId = req.body?.importId ? String(req.body.importId) : null;
+
+      try {
+        const { data: tenant, error: tenantError } = await supabase
+          .from("leads_clients")
+          .select("id")
+          .eq("id", tenantId)
+          .maybeSingle();
+        if (tenantError) throw tenantError;
+        if (!tenant) {
+          sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
+          return;
+        }
+
+        // buildDispatchLeads já filtra por client_id e aplica o matcher unificado.
+        const leads = await buildDispatchLeads({
+          clientId: tenantId,
+          importId,
+          segmentation: { filters },
+        });
+
+        const sample = leads.slice(0, 10).map((lead) => ({
+          telefone: lead.telefone,
+          nome: lead.nome || null,
+        }));
+
+        res.json({ matchedCount: leads.length, sample });
+      } catch (error) {
+        console.error("segmentation preview error:", error);
+        sendError(res, 500, "SEGMENTATION_PREVIEW_FAILED", "Failed to preview segmentation");
+      }
+    }
+  );
+
   async function ensureTenantExistsForEvolutionRoute(tenantId, res) {
     const { data: tenant, error: tenantError } = await supabase
       .from("leads_clients")
