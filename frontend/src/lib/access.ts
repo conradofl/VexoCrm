@@ -579,6 +579,7 @@ export function isInternalPageAllowedForClient(
     conexoes: "conexoes",
     aquecimento: "aquecimento",
     relatorios: "relatorios",
+    "apresentacao-gd": "apresentacao-gd",
   };
 
   const tabKey = pageToTabKey[page];

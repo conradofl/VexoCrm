@@ -86,6 +86,7 @@ const ALL_TAB_KEYS = [
   "aquecimento",
   "relatorios",
   "apresentacao",
+  "apresentacao-gd",
   "onboarding",
   "chatbot-docs",
   "usuarios"
@@ -147,6 +148,7 @@ const TABS_HIERARCHY = [
     label: "Sistema",
     children: [
       { key: "apresentacao", label: "Demonstração Vexo" },
+      { key: "apresentacao-gd", label: "Apresentação GD" },
       { key: "onboarding", label: "Treinamento Vexo" },
       { key: "chatbot-docs", label: "Chatbot Docs" },
       { key: "usuarios", label: "Usuários" }
