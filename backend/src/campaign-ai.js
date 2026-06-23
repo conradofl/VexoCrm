@@ -48,9 +48,29 @@ function normalizeString(value) {
   return String(value).trim();
 }
 
+const SEGMENT_OPERATOR_LABELS = {
+  equals: "igual a",
+  contains: "contém",
+  gt: "maior que",
+  lt: "menor que",
+};
+
 function sanitizeSegmentContext(segmentation = {}) {
   if (!segmentation || typeof segmentation !== "object") return {};
 
+  // Shape novo unificado: { filters:[{field,operator,value}] }.
+  if (Array.isArray(segmentation.filters)) {
+    const filters = segmentation.filters
+      .filter((f) => f && f.field && (f.value ?? "") !== "")
+      .map((f) => ({
+        campo: normalizeString(f.field),
+        condicao: SEGMENT_OPERATOR_LABELS[f.operator] || normalizeString(f.operator) || "igual a",
+        valor: normalizeString(f.value),
+      }));
+    return { filtros: filters };
+  }
+
+  // Shape legado (campanhas antigas) — mantido p/ compat.
   return {
     gender: normalizeString(segmentation.gender),
     productType: normalizeString(segmentation.productType),

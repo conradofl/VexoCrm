@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { isFilterShape, normalizeFilters } from "./segmentation.js";
 
 export const DEFAULT_LEAD_DELAY_SECONDS = 2;
 export const DEFAULT_STEP_DELAY_SECONDS = 5;
@@ -204,10 +205,18 @@ export function normalizeCampaignAnalyticsMeta(rawMeta = {}) {
   const firstTextStep = sequence.find((step) => step.enabled && step.type === "text" && step.text);
   const firstImageStep = sequence.find((step) => step.enabled && step.type === "image" && step.image);
 
+  // Segmentação: shape novo { filters:[...] } é limpo aqui (sem catálogo — a validação
+  // por campo do tenant ocorre no disparo). Shape legado passa intacto p/ compat.
+  let segmentation = {};
+  if (isFilterShape(meta.segmentation)) {
+    segmentation = { filters: normalizeFilters(meta.segmentation) };
+  } else if (meta.segmentation && typeof meta.segmentation === "object") {
+    segmentation = meta.segmentation;
+  }
+
   return {
     ...meta,
-    segmentation:
-      meta.segmentation && typeof meta.segmentation === "object" ? meta.segmentation : {},
+    segmentation,
     message: normalizeString(meta.message) || firstTextStep?.text || "",
     image: normalizeImageAsset(meta.image) || firstImageStep?.image || null,
     sequence,

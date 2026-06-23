@@ -97,7 +97,19 @@ export interface CampaignDispatchOptions {
   replyPollIntervalSeconds?: number;
 }
 
+export type SegmentationOperator = "equals" | "contains" | "gt" | "lt";
+
+export interface SegmentationFilter {
+  field: string;
+  operator: SegmentationOperator;
+  value: string | number;
+}
+
+// Shape unificado: filters[] dinâmico (campos do catálogo da empresa).
+// Keys legadas mantidas opcionais p/ leitura de campanhas antigas (compat).
 export interface CampaignSegmentation {
+  filters?: SegmentationFilter[];
+  // legado (somente leitura de campanhas antigas):
   gender?: string;
   productType?: string;
   ticket?: string;
