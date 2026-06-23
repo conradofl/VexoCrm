@@ -1,263 +1,324 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import {
   BookOpen,
+  Smartphone,
+  Bot,
+  Send,
   ListChecks,
+  BarChart3,
   ArrowRight,
-  CheckCircle2,
-  Check,
+  Lightbulb,
+  CheckCircle2
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-interface ChecklistItem {
-  id: string;
-  title: string;
-  desc: string;
-  howTo: string[];
-  benefit: string;
-  screenPath: string;
-}
-
-const CHECKLIST_ITEMS: ChecklistItem[] = [
-  {
-    id: "chips",
-    title: "1. Conectar seus Chips de WhatsApp",
-    desc: "Vincule os números que farão as abordagens frias ou o suporte de qualificação automática.",
-    howTo: [
-      "Acesse a aba 'Chips WhatsApp' no menu (Modo Disparos).",
-      "Clique no botão 'Adicionar Instância' e dê um nome claro (ex: 'vendas-1').",
-      "Abra o WhatsApp no seu aparelho celular físico, vá em 'Aparelhos Conectados' e escaneie o QR Code gerado na tela.",
-      "Mantenha o celular conectado à internet para garantir a estabilidade do sinal."
-    ],
-    benefit: "Permite enviar mensagens em escala rotacionando entre vários chips. Isso dilui o volume de disparos e blinda seus números contra bloqueios de spam do WhatsApp.",
-    screenPath: "/crm/conexoes"
-  },
-  {
-    id: "chatbot",
-    title: "2. Personalizar as Regras do Chatbot",
-    desc: "Treine a IA com as particularidades da sua oferta, tabelas de preço e contornos de objeções.",
-    howTo: [
-      "Vá em 'Chatbot Settings' no menu (Modo Vendas).",
-      "Na aba 'Prompt Editor', descreva a sua empresa, seu produto e o objetivo principal do bot (ex: 'conseguir o agendamento de uma consultoria').",
-      "Escreva as respostas de contorno para as maiores objeções de seus clientes (como preço, parcelamento ou equipe).",
-      "Use a caixa de testes na própria tela para simular perguntas e validar se a IA responde de acordo."
-    ],
-    benefit: "Garante um atendimento qualificado e humanizado 24 horas por dia, 7 dias por semana. Nenhum lead esfria ou fica sem resposta em finais de semana ou feriados.",
-    screenPath: "/crm/chatbot-settings"
-  },
-  {
-    id: "imports",
-    title: "3. Importar a Planilha de Leads",
-    desc: "Envie contatos inativos, listas antigas de leads ou cadastros do CRM direto para o motor de disparos.",
-    howTo: [
-      "No Modo Disparos, acesse a aba 'Envios por Planilha'.",
-      "Clique em 'Nova Campanha' e selecione o arquivo Excel (XLSX) ou CSV do seu computador.",
-      "O sistema detectará e descartará linhas de cabeçalho duplicadas automaticamente.",
-      "Defina o texto do template (ex: 'Olá {{nome}}!') e a velocidade de envio para evitar picos suspeitos de rede."
-    ],
-    benefit: "Ativa bases de contatos frios ou esquecidos em menos de 5 minutos, resgatando leads inativos que seriam jogados fora sem esforço manual da equipe.",
-    screenPath: "/crm/planilhas"
-  },
-  {
-    id: "followup",
-    title: "4. Ativar Cadência de Follow-ups",
-    desc: "Garanta que nenhum lead interessado morra por falta de acompanhamento ativo do comercial.",
-    howTo: [
-      "Acesse a página 'Follow-up' no painel lateral.",
-      "Configure cadências personalizadas baseadas no status do lead: 'No-show' (quem faltou à reunião), 'Proposta Enviada' (para tomada de decisão) e 'Reengajamento' (leads frios).",
-      "Configure a regra de pausa automática: o fluxo de follow-ups é interrompido no mesmo segundo em que o lead responder no WhatsApp para preservar o toque humano.",
-      "Crie templates curtos e dinâmicos de até 3 parágrafos usando variáveis como {{lead_name}} e evite soar robótico."
-    ],
-    benefit: "Implementa cadências inteligentes que reengajam leads sem parecer spam. A pausa automática na resposta garante que o vendedor assuma o chat na hora certa, aumentando a conversão.",
-    screenPath: "/crm/followup"
-  },
-  {
-    id: "inteligencia-comercial",
-    title: "5. Dominar a Inteligência Comercial",
-    desc: "Acompanhe métricas em tempo real, configure roteamento inteligente de leads e ajuste os parâmetros da IA.",
-    howTo: [
-      "Acesse a tela 'Inteligência Comercial' no menu lateral.",
-      "Explore a aba 'Performance' para analisar taxas de conversão, tempos de resposta médios (SLA) e desempenho por canal.",
-      "Use a aba 'Equipe & Roteamento' para definir a distribuição automática de leads (Round Robin ou carga equilibrada) e SLAs limite.",
-      "Configure a aba 'Ajustes da IA' para ajustar a sensibilidade de qualificação e dar instruções gerais ao Vexo Brain."
-    ],
-    benefit: "Fornece governança em tempo real sobre o gargalo do funil comercial, reduz o tempo de primeiro contato a menos de 5 minutos e garante que leads qualificados caiam na mão do vendedor certo no momento exato.",
-    screenPath: "/crm/inteligencia-comercial"
-  },
-  {
-    id: "reports",
-    title: "6. Auditar Resultados nos Relatórios",
-    desc: "Acompanhe de forma analítica o desempenho de conversões, taxa de entrega e feedbacks de objeções.",
-    howTo: [
-      "Clique na aba 'Relatórios' (Modo Disparos).",
-      "Avalie os indicadores visuais (Sucessos, Falhas de rede, Entrega global).",
-      "Use os filtros para baixar apenas os leads que falharam no envio e crie uma nova campanha de reativação imediata."
-    ],
-    benefit: "Fornece controle absoluto da qualidade da sua base. Você passa a ter dados reais do motivo de os clientes não estarem respondendo ou de estarem recusando a proposta.",
-    screenPath: "/crm/relatorios"
-  }
-];
-
 export default function OnboardingWizard() {
-  const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>(() => {
-    if (typeof window === "undefined") return {};
-    const saved = localStorage.getItem("vexo_onboarding_completed");
-    return saved ? JSON.parse(saved) : {};
-  });
-  
-  const [expandedChecklistItem, setExpandedChecklistItem] = useState<string | null>("chips");
-
-  const toggleStepCompleted = (id: string) => {
-    const updated = { ...completedSteps, [id]: !completedSteps[id] };
-    setCompletedSteps(updated);
-    localStorage.setItem("vexo_onboarding_completed", JSON.stringify(updated));
-  };
-
-  const completedPercentage = useMemo(() => {
-    const total = CHECKLIST_ITEMS.length;
-    const completed = Object.values(completedSteps).filter(Boolean).length;
-    return Math.round((completed / total) * 100);
-  }, [completedSteps]);
+  const [activeTab, setActiveTab] = useState("modulo-1");
 
   return (
     <PageShell
-      title="Treinamento & Onboarding Vexo"
-      subtitle="Siga o checklist de 5 passos para configurar a sua operação e iniciar a qualificação automática de leads."
+      title="Vexo Academy"
+      subtitle="Domine o sistema de ponta a ponta. Aprenda as estratégias por trás de cada ferramenta para escalar suas vendas e qualificações."
       icon={BookOpen}
     >
-      <div className="space-y-6 animate-fade-in-up">
-        {/* Card Progresso */}
-        <Card className="border-border bg-card text-card-foreground shadow-sm">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between gap-4">
-            <div>
-              <CardTitle className="text-base font-bold">Progresso das Configurações</CardTitle>
-              <CardDescription>
-                Marque cada etapa como concluída após realizar as configurações correspondentes nas telas do sistema.
-              </CardDescription>
+      <div className="flex flex-col lg:flex-row gap-6 animate-fade-in-up">
+        {/* Menu Lateral de Módulos */}
+        <div className="lg:w-1/4 shrink-0">
+          <Tabs value={activeTab} onValueChange={setActiveTab} orientation="vertical" className="w-full">
+            <div className="sticky top-6">
+              <Card className="border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                <CardHeader className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 pb-4">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Trilha de Aprendizado
+                  </CardTitle>
+                </CardHeader>
+                <TabsList className="flex-col items-stretch h-auto bg-transparent p-0">
+                  <TabsTrigger
+                    value="modulo-1"
+                    className="justify-start gap-3 rounded-none border-b border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                  >
+                    <Smartphone className="h-4 w-4" />
+                    <span className="text-left font-semibold">1. Conexões WhatsApp</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="modulo-2"
+                    className="justify-start gap-3 rounded-none border-b border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                  >
+                    <Bot className="h-4 w-4" />
+                    <span className="text-left font-semibold">2. Assistentes Inbound</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="modulo-3"
+                    className="justify-start gap-3 rounded-none border-b border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                  >
+                    <Send className="h-4 w-4" />
+                    <span className="text-left font-semibold">3. Disparos Ativos</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="modulo-4"
+                    className="justify-start gap-3 rounded-none border-b border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                  >
+                    <ListChecks className="h-4 w-4" />
+                    <span className="text-left font-semibold">4. Maestria em Follow-up</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="modulo-5"
+                    className="justify-start gap-3 rounded-none border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    <span className="text-left font-semibold">5. Inteligência Comercial</span>
+                  </TabsTrigger>
+                </TabsList>
+              </Card>
             </div>
-            <Badge className="bg-primary text-primary-foreground py-1 px-2.5 text-xs font-black shadow-md">
-              {completedPercentage}% Concluído
-            </Badge>
-          </CardHeader>
-          <CardContent>
-            {/* Barra de Progresso Visual */}
-            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${completedPercentage}%` }}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Lista de Passos de Configuração */}
-        <div className="space-y-3">
-          {CHECKLIST_ITEMS.map((item) => {
-            const isCompleted = !!completedSteps[item.id];
-            const isExpanded = expandedChecklistItem === item.id;
-
-            return (
-              <div
-                key={item.id}
-                className={cn(
-                  "rounded-2xl border transition-all duration-200 overflow-hidden bg-card text-card-foreground",
-                  isExpanded
-                    ? "border-primary shadow-md"
-                    : "border-border hover:border-muted-foreground/30 shadow-sm"
-                )}
-              >
-                {/* Cabeçalho da Linha */}
-                <div
-                  onClick={() => setExpandedChecklistItem(isExpanded ? null : item.id)}
-                  className="flex items-center justify-between p-4 cursor-pointer select-none"
-                >
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleStepCompleted(item.id);
-                      }}
-                      className={cn(
-                        "h-5.5 w-5.5 rounded-full border-2 flex items-center justify-center transition-all duration-200",
-                        isCompleted
-                          ? "bg-primary border-primary text-primary-foreground"
-                          : "border-input hover:border-primary"
-                      )}
-                    >
-                      {isCompleted && <Check className="h-3.5 w-3.5 stroke-[3px]" />}
-                    </button>
-                    <span className={cn(
-                      "text-sm font-bold text-foreground",
-                      isCompleted && "line-through text-muted-foreground"
-                    )}>
-                      {item.title}
-                    </span>
-                  </div>
-                  <Badge variant="outline" className="text-[10px] bg-muted/30">
-                    {isExpanded ? "Fechar detalhes" : "Ver instruções"}
-                  </Badge>
-                </div>
-
-                {/* Detalhes Expandidos (Como usar + Benefício) */}
-                {isExpanded && (
-                  <div className="px-4 pb-4.5 pt-1 border-t border-border bg-muted/10 grid gap-4 md:grid-cols-2 animate-fade-in-up">
-                    
-                    {/* Como Operar */}
-                    <div className="space-y-3.5 p-3 rounded-xl border border-border bg-card">
-                      <div>
-                        <p className="text-[9px] font-bold font-mono text-muted-foreground uppercase tracking-wider">Como configurar passo a passo</p>
-                        <ul className="mt-2 space-y-2">
-                          {item.howTo.map((step, idx) => (
-                            <li key={idx} className="text-xs text-foreground flex items-start gap-1.5 leading-relaxed">
-                              <span className="text-primary font-extrabold mt-0.5 shrink-0">{idx + 1}.</span>
-                              <span>{step}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs font-bold gap-1.5"
-                        onClick={() => window.location.href = item.screenPath}
-                      >
-                        Ir para esta tela
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-
-                    {/* Benefício Comercial */}
-                    <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col justify-between">
-                      <div>
-                        <p className="text-[9px] font-bold font-mono text-primary uppercase tracking-wider">Benefício prático para a sua empresa</p>
-                        <p className="text-xs text-foreground/90 leading-relaxed mt-2.5 font-medium">
-                          💡 {item.benefit}
-                        </p>
-                      </div>
-                      <div className="mt-4 pt-3.5 border-t border-border flex items-center justify-between text-[11px] text-primary font-bold">
-                        <span>Status da Tarefa:</span>
-                        <button
-                          onClick={() => toggleStepCompleted(item.id)}
-                          className={cn(
-                            "underline cursor-pointer",
-                            isCompleted ? "text-primary" : "text-amber-600 dark:text-amber-400"
-                          )}
-                        >
-                          {isCompleted ? "Marcar como pendente" : "Marcar como realizada"}
-                        </button>
-                      </div>
-                    </div>
-
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          </Tabs>
         </div>
 
+        {/* Conteúdo do Módulo */}
+        <div className="lg:w-3/4">
+          <Tabs value={activeTab}>
+            {/* MÓDULO 1: CONEXÕES */}
+            <TabsContent value="modulo-1" className="m-0 space-y-6 animate-fade-in-up">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl text-indigo-700 dark:text-indigo-400">
+                    Módulo 1: Conexões WhatsApp
+                  </CardTitle>
+                  <CardDescription className="text-base">
+                    Como plugar o seu número de WhatsApp no Vexo e deixá-lo pronto para o trabalho.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 text-slate-700 dark:text-slate-300">
+                  <p>
+                    O primeiro passo no Vexo é conectar os "Chips" que farão o disparo de campanhas, os follow-ups e os atendimentos de inbound. 
+                  </p>
+                  
+                  <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                    <h3 className="font-bold text-lg mb-3">Passo a Passo:</h3>
+                    <ul className="space-y-3 list-disc list-inside">
+                      <li>Acesse o menu <strong>Chips WhatsApp</strong> (Dentro do modo Disparos).</li>
+                      <li>Clique em <strong>Adicionar Instância</strong> e dê um nome claro (ex: "WhatsApp Comercial 1").</li>
+                      <li>Aguarde gerar o QR Code na tela.</li>
+                      <li>Abra o WhatsApp no celular, vá em "Aparelhos Conectados" e escaneie.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-5 flex gap-4">
+                    <Lightbulb className="h-6 w-6 text-amber-500 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-amber-800 dark:text-amber-500 mb-1">Dica de Ouro: Blindagem contra Spam</h4>
+                      <p className="text-sm text-amber-700 dark:text-amber-400">
+                        Sempre matenha o celular da conexão com internet estável. Para escalar muito, conecte VÁRIOS chips. O Vexo sabe rotacionar o envio entre eles automaticamente, o que evita que o WhatsApp bloqueie o seu número.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button onClick={() => window.location.href = "/crm/conexoes"} className="w-full sm:w-auto mt-4 bg-indigo-600 hover:bg-indigo-700">
+                    Ir para Conexões <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* MÓDULO 2: INBOUND */}
+            <TabsContent value="modulo-2" className="m-0 space-y-6 animate-fade-in-up">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl text-indigo-700 dark:text-indigo-400">
+                    Módulo 2: Assistentes Inbound & Coleta SPIN
+                  </CardTitle>
+                  <CardDescription className="text-base">
+                    Transforme seu WhatsApp em uma máquina automática de atendimento e qualificação.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 text-slate-700 dark:text-slate-300">
+                  <p>
+                    O Módulo Inbound serve para clientes que <strong>entram em contato com você</strong> de forma receptiva (ex: campanhas no Google Ads, Meta Ads, links na bio). Em vez de você responder manualmente, a Inteligência Artificial qualifica e agenda a reunião pra você.
+                  </p>
+
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                      <h3 className="font-bold text-lg mb-2 text-indigo-600 dark:text-indigo-400">1. O Prompt (Cérebro da IA)</h3>
+                      <p className="text-sm">
+                        Na aba <strong>Identidade & Prompt</strong>, descreva exatamente quem é a sua empresa e quais são as objeções mais comuns. Seja específico: <em>"Se o cliente achar caro, explique que o nosso valor entrega qualidade superior e parcelamento em 12x"</em>.
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                      <h3 className="font-bold text-lg mb-2 text-indigo-600 dark:text-indigo-400">2. A Coleta SPIN</h3>
+                      <p className="text-sm">
+                        É aqui que a mágica acontece. Defina quais dados o robô <strong>é obrigado</strong> a coletar antes de terminar a conversa (Ex: Nome, Quantidade de pessoas, Data da reserva). O robô vai conduzir a conversa para arrancar essas respostas do lead.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-5 flex gap-4">
+                    <CheckCircle2 className="h-6 w-6 text-emerald-500 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-emerald-800 dark:text-emerald-500 mb-1">Integração Mágica: Webhook de Finalização</h4>
+                      <p className="text-sm text-emerald-700 dark:text-emerald-400">
+                        Quando a Coleta SPIN for finalizada, o Vexo não deixa a informação presa no chat. Ele envia os dados coletados (via JSON) diretamente para o <strong>Webhook de Finalização</strong> (que pode ser seu N8N ou sistema de reservas), agendando a mesa ou reunião de forma 100% autônoma.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button onClick={() => window.location.href = "/crm/inbound-agents"} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700">
+                    Configurar Inbound <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* MÓDULO 3: DISPAROS */}
+            <TabsContent value="modulo-3" className="m-0 space-y-6 animate-fade-in-up">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl text-indigo-700 dark:text-indigo-400">
+                    Módulo 3: Disparos Ativos
+                  </CardTitle>
+                  <CardDescription className="text-base">
+                    Como reativar bases inativas e fazer campanhas de captação em massa.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 text-slate-700 dark:text-slate-300">
+                  <p>
+                    Com as campanhas ativas por planilha, você pode subir listas de centenas de leads e o Vexo irá abordar um por um de forma humanizada.
+                  </p>
+
+                  <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                    <h3 className="font-bold text-lg mb-3">Passo a Passo:</h3>
+                    <ul className="space-y-3 list-disc list-inside">
+                      <li>Prepare sua planilha de Excel ou CSV contendo as colunas mínimas: <strong>nome</strong> e <strong>telefone</strong>.</li>
+                      <li>Acesse <strong>Envios por Planilha</strong> e clique em Nova Campanha.</li>
+                      <li>Crie o texto de abordagem inicial. Você pode usar a variável <code>{"{{nome}}"}</code> para chamar o cliente pelo nome.</li>
+                      <li>Evite abordagens "vendedoras". O ideal é despertar curiosidade: <em>"Olá {"{{nome}}"}, tudo bem? Vi seu contato aqui e lembrei de algo, posso te mandar?"</em></li>
+                    </ul>
+                  </div>
+
+                  <Button onClick={() => window.location.href = "/crm/planilhas"} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700">
+                    Ir para Disparos <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* MÓDULO 4: FOLLOW-UP (Principal) */}
+            <TabsContent value="modulo-4" className="m-0 space-y-6 animate-fade-in-up">
+              <Card className="border-indigo-200 shadow-md">
+                <CardHeader className="bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-100 dark:border-indigo-900/50">
+                  <CardTitle className="text-2xl text-indigo-700 dark:text-indigo-400 flex items-center gap-3">
+                    <ListChecks className="h-7 w-7" />
+                    Módulo 4: Maestria em Follow-up
+                  </CardTitle>
+                  <CardDescription className="text-base font-medium text-indigo-600/80 dark:text-indigo-400/80">
+                    Nenhum lead vai esfriar. Entenda o motor de cadências automáticas que multiplica as suas vendas.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-8 pt-6 text-slate-700 dark:text-slate-300">
+                  
+                  <div>
+                    <h3 className="text-xl font-bold mb-2">O Conceito: O que é o Follow-up do Vexo?</h3>
+                    <p>
+                      O maior erro comercial é achar que um lead perdeu interesse apenas porque não respondeu de primeira. O Follow-up do Vexo é um <strong>motor de insistência inteligente</strong>. Ele dispara mensagens automáticas em datas programadas até o cliente responder.
+                    </p>
+                  </div>
+
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-5">
+                    <h4 className="font-bold text-red-800 dark:text-red-500 mb-1 flex items-center gap-2">
+                      <Bot className="h-5 w-5" /> A Regra de Ouro: A Pausa Automática
+                    </h4>
+                    <p className="text-sm text-red-700 dark:text-red-400 font-medium">
+                      Assim que o cliente responde ao WhatsApp (qualquer mensagem), o robô INTERROMPE toda a sequência de follow-up automaticamente naquele mesmo segundo. A partir dali, o vendedor humano assume o chat. O sistema nunca fará você parecer um robô ou mandar mensagens desconexas para quem já está interagindo.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xl font-bold mb-4 border-b border-slate-200 dark:border-slate-800 pb-2">Como configurar sua Máquina:</h3>
+                    
+                    <div className="space-y-6">
+                      <div className="flex gap-4">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold dark:bg-indigo-900 dark:text-indigo-300">1</div>
+                        <div>
+                          <h4 className="font-bold text-lg">Crie uma Regra de Cadência</h4>
+                          <p className="text-sm mt-1">
+                            Vá em <strong>Regras de Cadência</strong> (dentro de Follow-up). Defina a condição. Por exemplo, uma regra chamada "Proposta Enviada".
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-4">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold dark:bg-indigo-900 dark:text-indigo-300">2</div>
+                        <div>
+                          <h4 className="font-bold text-lg">Adicione os Estágios (Mensagens)</h4>
+                          <p className="text-sm mt-1">
+                            Dentro da regra, você vai criar as mensagens que serão engatilhadas nos dias subsequentes:<br/><br/>
+                            • <strong>Dia 1:</strong> <em>"Olá {"{{nome}}"}, você conseguiu olhar a proposta que te enviei ontem?"</em><br/>
+                            • <strong>Dia 3:</strong> <em>"Ei {"{{nome}}"}, alguma dúvida sobre o documento?"</em><br/>
+                            • <strong>Dia 7 (Despedida):</strong> <em>"Como não tive retorno, estou fechando seu atendimento. Se precisar no futuro, me chame."</em>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-4">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold dark:bg-indigo-900 dark:text-indigo-300">3</div>
+                        <div>
+                          <h4 className="font-bold text-lg">Injete os Leads na Fila</h4>
+                          <p className="text-sm mt-1">
+                            Sempre que um vendedor seu enviar uma proposta, ele pega o contato e clica em "Adicionar ao Follow-up", escolhendo a regra "Proposta Enviada". Pronto. O motor assume daqui pra frente e o vendedor pode esquecer aquele lead até ele responder.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button onClick={() => window.location.href = "/crm/followup"} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700">
+                    Ir para Fila de Follow-up <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* MÓDULO 5: INTELIGÊNCIA COMERCIAL */}
+            <TabsContent value="modulo-5" className="m-0 space-y-6 animate-fade-in-up">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl text-indigo-700 dark:text-indigo-400">
+                    Módulo 5: Inteligência Comercial
+                  </CardTitle>
+                  <CardDescription className="text-base">
+                    Para quem é gestor: domine os números e a distribuição de leads da sua operação.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 text-slate-700 dark:text-slate-300">
+                  <p>
+                    O módulo de Inteligência não apenas fornece gráficos bonitos, ele age ativamente na sua operação distribuindo o jogo.
+                  </p>
+
+                  <div className="space-y-4">
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                      <h4 className="font-bold">Performance e SLAs</h4>
+                      <p className="text-sm mt-1">Acompanhe qual é o "Tempo Médio de Primeiro Contato" da sua equipe. Em vendas, responder em 5 minutos multiplica a chance de conversão por 10x.</p>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                      <h4 className="font-bold">Equipe & Roteamento (Round Robin)</h4>
+                      <p className="text-sm mt-1">
+                        Se você tem mais de um vendedor, cadastre-os aqui. O Vexo pode roletar os leads qualificados (1 para o vendedor A, 1 para o vendedor B, e assim por diante), garantindo que todos tenham chances justas e que nenhum lead fique perdido.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button onClick={() => window.location.href = "/crm/inteligencia"} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700">
+                    Acessar Dashboard <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </PageShell>
   );
