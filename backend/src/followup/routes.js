@@ -136,7 +136,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_companies")
-        .select("id, name, evolution_instance, webhook_url, panel_access, created_at")
+        .select("id, name, evolution_instance, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at")
         .is("archived_at", null)
         .order("name", { ascending: true });
       if (error) throw error;
@@ -168,7 +168,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
 
   // POST /api/followup/companies
   router.post("/companies", requireFirebaseAuth, async (req, res) => {
-    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access } =
+    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled } =
       req.body || {};
     if (!str(name) || !str(evolution_instance)) {
       return sendErr(res, 400, "MISSING_FIELDS", "name e evolution_instance são obrigatórios");
@@ -183,6 +183,13 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
           webhook_url: str(webhook_url),
           calendly_webhook_secret: str(calendly_webhook_secret),
           panel_access: Boolean(panel_access),
+          inbound_enabled: Boolean(inbound_enabled),
+          inbound_model: str(inbound_model) || 'gpt-4o',
+          inbound_prompt: str(inbound_prompt),
+          inbound_spin_fields: Array.isArray(inbound_spin_fields) ? inbound_spin_fields : [],
+          inbound_webhook_url: str(inbound_webhook_url),
+          sdr_whatsapp_number: str(sdr_whatsapp_number),
+          sdr_transfer_enabled: Boolean(sdr_transfer_enabled),
         })
         .select()
         .maybeSingle();
@@ -197,7 +204,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   router.patch("/companies/:id", requireFirebaseAuth, async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
-    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access } =
+    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled } =
       req.body || {};
     try {
       const patch = { updated_at: new Date().toISOString() };
@@ -207,6 +214,13 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
       if ("calendly_webhook_secret" in req.body)
         patch.calendly_webhook_secret = str(calendly_webhook_secret);
       if ("panel_access" in req.body) patch.panel_access = Boolean(panel_access);
+      if ("inbound_enabled" in req.body) patch.inbound_enabled = Boolean(inbound_enabled);
+      if ("inbound_model" in req.body) patch.inbound_model = str(inbound_model);
+      if ("inbound_prompt" in req.body) patch.inbound_prompt = str(inbound_prompt);
+      if ("inbound_spin_fields" in req.body) patch.inbound_spin_fields = Array.isArray(inbound_spin_fields) ? inbound_spin_fields : [];
+      if ("inbound_webhook_url" in req.body) patch.inbound_webhook_url = str(inbound_webhook_url);
+      if ("sdr_whatsapp_number" in req.body) patch.sdr_whatsapp_number = str(sdr_whatsapp_number);
+      if ("sdr_transfer_enabled" in req.body) patch.sdr_transfer_enabled = Boolean(sdr_transfer_enabled);
 
       const supabase = getSupabase();
       const { data, error } = await supabase

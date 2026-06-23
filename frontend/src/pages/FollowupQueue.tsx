@@ -2417,11 +2417,11 @@ export default function FollowupDashboard() {
             <div className="flex items-center gap-2">
               <ListChecks className="h-5 w-5 text-indigo-500 shrink-0" />
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                Selecione o Perfil de Disparo (Empresa) para gerenciar fila, cadências e métricas.
+                Selecione o Número do WhatsApp (Empresa) para gerenciar fila, cadências e métricas.
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0 max-w-xs w-full sm:w-auto">
-              <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">Perfil de Disparo:</Label>
+              <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">Número do WhatsApp:</Label>
               <Select value={companyId} onValueChange={setCompanyId} disabled={loadingCompanies}>
                 <SelectTrigger className="h-8 text-xs bg-white dark:bg-slate-900 border-indigo-100 dark:border-indigo-950">
                   <SelectValue placeholder={loadingCompanies ? "Carregando..." : "Selecionar Empresa"} />
