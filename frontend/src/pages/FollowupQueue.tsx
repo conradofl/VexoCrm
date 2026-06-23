@@ -2353,6 +2353,13 @@ export default function FollowupDashboard() {
   const allowedTabs = selectedCrmClient?.n8n_settings?.allowed_tabs;
   const isSubTabAllowed = (subTabKey: string) => {
     if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+    
+    // Migração de permissões de UI
+    if (subTabKey === "journeys") {
+      if (allowedTabs.includes("followup:journeys")) return true;
+      if (allowedTabs.includes("followup:regras") || allowedTabs.includes("followup:fila")) return true;
+    }
+    
     return allowedTabs.includes(`followup:${subTabKey}`);
   };
 
