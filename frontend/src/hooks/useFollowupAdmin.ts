@@ -10,6 +10,21 @@ export interface FupCompany {
   evolution_instance: string;
   webhook_url: string | null;
   panel_access: boolean;
+  auto_pause_on_reply?: boolean;
+  auto_pause_on_calendly?: boolean;
+  sending_window_start?: string;
+  sending_window_end?: string;
+  sending_days?: string;
+  webhook_url?: string;
+  calendly_webhook_secret?: string;
+  panel_access?: boolean;
+  inbound_enabled?: boolean;
+  inbound_model?: string;
+  inbound_prompt?: string;
+  inbound_spin_fields?: any[];
+  inbound_webhook_url?: string;
+  sdr_whatsapp_number?: string;
+  sdr_transfer_enabled?: boolean;
   activeCampaigns: number;
   created_at: string;
 }

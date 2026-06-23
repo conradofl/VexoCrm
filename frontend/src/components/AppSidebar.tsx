@@ -80,6 +80,7 @@ const MODULOS: Record<Modo, Modulo> = {
       { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
       { key: "chatbot",        label: "Chatbot",            url: "/crm/chatbot-settings",       icon: Settings2,       page: "chatbot-config" },
       { key: "followup",       label: "Follow-up",          url: "/crm/followup",               icon: ListChecks,      page: "fila-de-followup" },
+      { key: "inbound-agents", label: "Assistentes Inbound", url: "/crm/inbound-agents",         icon: Bot,             page: "agente" },
     ],
   },
   disparos: {

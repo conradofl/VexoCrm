@@ -172,15 +172,25 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   planilhas: "Planilhas",
   whatsapp: "WhatsApp",
   agente: "Agente",
-  usuarios: "Usuarios",
+  usuarios: "Usuários",
   empresas: "Empresas",
   campanhas: "Campanhas",
-  "inteligencia-comercial": "Inteligencia Comercial",
+  "inteligencia-comercial": "Inteligência Comercial",
   "chatbot-kanban": "Chatbot Kanban",
-  "chatbot-config": "Configuracao do Chatbot",
+  "chatbot-config": "Configuração do Chatbot",
   "fila-de-followup": "Fila de Followup",
+  "followup-empresas": "Followup Empresas",
+  "followup-campanhas": "Followup Campanhas",
+  "followup-analytics": "Followup Analytics",
+  "followup-sugestoes": "Followup Sugestões",
   "chatbot-docs": "Chatbot Docs",
-  "apresentacao-gd": "Apresentacao GD",
+  "onboarding-wizard": "Treinamento & Demonstração",
+  "onboarding-agent": "Agente de Onboarding",
+  conexoes: "Chips WhatsApp",
+  disparos: "Disparos",
+  aquecimento: "Aquecimento",
+  relatorios: "Relatórios",
+  "apresentacao-gd": "Apresentação GD",
 };
 
 const CLIENT_PAGE_TABS = [
@@ -189,8 +199,42 @@ const CLIENT_PAGE_TABS = [
 ];
 
 const INTERNAL_PAGE_TABS = [
-  { value: "operacao", label: "Operacao", items: ["dashboard", "leads", "planilhas", "whatsapp"] as InternalPage[] },
-  { value: "gestao", label: "Gestao", items: ["agente", "usuarios", "empresas", "campanhas"] as InternalPage[] },
+  {
+    value: "operacao",
+    label: "Operacao",
+    items: [
+      "dashboard",
+      "leads",
+      "planilhas",
+      "whatsapp",
+      "inteligencia-comercial",
+      "chatbot-kanban",
+      "chatbot-config",
+      "fila-de-followup",
+      "followup-empresas",
+      "followup-campanhas",
+      "followup-analytics",
+      "followup-sugestoes",
+      "conexoes",
+      "disparos",
+      "aquecimento",
+      "relatorios",
+    ] as InternalPage[],
+  },
+  {
+    value: "gestao",
+    label: "Gestao",
+    items: [
+      "agente",
+      "usuarios",
+      "empresas",
+      "campanhas",
+      "chatbot-docs",
+      "onboarding-wizard",
+      "onboarding-agent",
+      "apresentacao-gd",
+    ] as InternalPage[],
+  },
 ];
 
 type InternalShortcutKey = "campaigns" | "commercial";
@@ -1033,6 +1077,16 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
               if (item === "campanhas") return "Disparo e fluxo de contatos";
               if (item === "planilhas") return "Importação e limpeza de listas";
               if (item === "empresas") return "Organização de tenants/empresas";
+              if (item === "inteligencia-comercial") return "Performance e equipe de vendas";
+              if (item === "chatbot-kanban") return "Painel de leads do chatbot";
+              if (item === "chatbot-config") return "Configurações e prompts do chatbot";
+              if (item === "fila-de-followup") return "Fila e sugestões de follow-up";
+              if (item === "chatbot-docs") return "Documentação do chatbot";
+              if (item === "onboarding-wizard") return "Demonstração e Treinamento Vexo";
+              if (item === "conexoes") return "Painel de chips de WhatsApp";
+              if (item === "aquecimento") return "Aquecimento de números";
+              if (item === "relatorios") return "Relatórios de consumo e uso";
+              if (item === "apresentacao-gd") return "Apresentação de Onboarding Geração Digital";
               return "Módulo do CRM";
             }}
           />
@@ -2114,7 +2168,7 @@ export default function UserAccessManagement() {
                     Novo usuario
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-h-[92vh] max-w-4xl flex flex-col p-0 border-border/60 shadow-2xl bg-background/95 backdrop-blur-xl sm:rounded-[2.5rem] overflow-hidden">
+                <DialogContent className="max-h-[85vh] max-w-4xl flex flex-col p-0 border-border/60 shadow-2xl bg-background/95 backdrop-blur-xl sm:rounded-[2.5rem] overflow-hidden">
                   <DialogHeader className="px-8 pb-6 pt-8 border-b border-border/40 bg-muted/10 shrink-0">
                     <div className="flex items-start justify-between gap-4">
                       <div className="space-y-2">
@@ -2326,7 +2380,7 @@ export default function UserAccessManagement() {
               {actionFeedback?.message}
             </DialogDescription>
             {actionFeedback?.details ? (
-              <div className="rounded-2xl border border-border/80 bg-background/60 px-4 py-3 text-xs leading-5 text-muted-foreground">
+              <div className="rounded-2xl border border-border/80 bg-background/60 px-4 py-3 text-xs leading-5 text-muted-foreground break-all">
                 {actionFeedback.details}
               </div>
             ) : null}
@@ -2522,7 +2576,7 @@ export default function UserAccessManagement() {
 
               {/* Modal de Edição */}
               <Dialog open={!!selectedUserId} onOpenChange={(open) => { if (!open) setSelectedUserId(null); }}>
-                    <DialogContent className="max-h-[92vh] max-w-4xl flex flex-col p-0 border-border/60 shadow-2xl bg-background/95 backdrop-blur-xl sm:rounded-[2.5rem] overflow-hidden">
+                    <DialogContent className="max-h-[85vh] max-w-4xl flex flex-col p-0 border-border/60 shadow-2xl bg-background/95 backdrop-blur-xl sm:rounded-[2.5rem] overflow-hidden">
                       {selectedUser && selectedDraft ? (
                         <div className="flex flex-col h-full min-h-0 flex-1">
                           <DialogHeader className="px-8 pb-6 pt-8 border-b border-border/40 bg-muted/10 shrink-0">

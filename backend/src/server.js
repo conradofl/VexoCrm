@@ -356,7 +356,18 @@ const INTERNAL_PAGE_KEYS = [
   "chatbot-kanban",
   "chatbot-config",
   "fila-de-followup",
+  "followup-empresas",
+  "followup-campanhas",
+  "followup-analytics",
+  "followup-sugestoes",
   "chatbot-docs",
+  "onboarding-wizard",
+  "onboarding-agent",
+  "conexoes",
+  "disparos",
+  "aquecimento",
+  "relatorios",
+  "apresentacao-gd",
 ];
 const ACCESS_SCOPE_KEYS = ["all_clients", "assigned_clients", "no_client_access"];
 const APPROVAL_LEVEL_KEYS = ["none", "operator", "supervisor", "manager", "director"];
@@ -431,11 +442,10 @@ const ACCESS_PRESET_DEFAULTS = {
       "whatsapp.reply",
       "campaigns.manage",
       "agente.view",
-      "tenants.manage",
       "users.view",
       "users.manage",
     ],
-    internalPages: [...INTERNAL_PAGE_KEYS],
+    internalPages: INTERNAL_PAGE_KEYS.filter((p) => p !== "empresas"),
     allowedViews: [],
   },
   operador: {
@@ -872,22 +882,6 @@ function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
       rawClaims.userType ??
       rawClaims.tipo_usuario
   );
-  const accessPreset = normalizeAccessPreset(rawClaims.accessPreset, requestedRole);
-  const isAdmin = requestedRole === "internal" && (
-    rawClaims.isAdmin ||
-    rawClaims.admin ||
-    rawClaims.is_admin ||
-    accessPreset === "admin_vexo" ||
-    isFixedAdminIdentity(identity)
-  );
-  const role = isAdmin ? "internal" : requestedRole;
-  const normalizedPreset = isAdmin ? "admin_vexo" : normalizeAccessPreset(accessPreset, role);
-  const scopeMode = isAdmin
-    ? "all_clients"
-    : normalizeScopeMode(rawClaims.scopeMode ?? rawClaims.tenantScope, role);
-  const approvalLevel = isAdmin
-    ? "director"
-    : normalizeApprovalLevel(rawClaims.approvalLevel, role);
   const directClientId = normalizeString(
     rawClaims.clientId ??
       rawClaims.client_id ??
@@ -895,6 +889,17 @@ function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
       rawClaims.empresaId ??
       rawClaims.tenantId
   );
+  const isVexoUser = directClientId === "vexo" || isFixedAdminIdentity(identity);
+  const isAdmin = isVexoUser;
+  const role = isAdmin ? "internal" : requestedRole;
+  const accessPreset = normalizeAccessPreset(rawClaims.accessPreset, role);
+  const normalizedPreset = isAdmin ? "admin_vexo" : normalizeAccessPreset(accessPreset, role);
+  const scopeMode = isAdmin
+    ? "all_clients"
+    : normalizeScopeMode(rawClaims.scopeMode ?? rawClaims.tenantScope, role);
+  const approvalLevel = isAdmin
+    ? "director"
+    : normalizeApprovalLevel(rawClaims.approvalLevel, role);
   const clientIds = Array.from(
     new Set([
       directClientId,

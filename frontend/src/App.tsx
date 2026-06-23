@@ -40,6 +40,7 @@ import OnboardingWizard from "./pages/OnboardingWizard";
 import VexoPitch from "./pages/VexoPitch";
 import GeracaoDigitalPitch from "./pages/GeracaoDigitalPitch";
 import EvolutionAdmin from "./pages/EvolutionAdmin";
+import InboundAgentConfig from "./pages/InboundAgentConfig";
 
 const queryClient = new QueryClient();
 
@@ -85,6 +86,7 @@ function InternalIndexRedirect() {
     conexoes: "conexoes",
     aquecimento: "aquecimento",
     relatorios: "relatorios",
+    "inbound-agents": "inbound-agents",
   };
 
   const path = pageToPath[target] || target;
@@ -203,6 +205,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
                     <ChatbotKanban />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="inbound-agents"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
+                    <InboundAgentConfig />
                   </ProtectedRoute>
                 }
               />

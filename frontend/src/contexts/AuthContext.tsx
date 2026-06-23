@@ -130,11 +130,16 @@ function buildAccessProfile(user: User, claims: Record<string, unknown> = {}): A
   );
   const accessPreset = normalizeAccessPreset(claims.accessPreset, requestedRole);
   const permissions = normalizePermissions(claims.permissions, requestedRole, accessPreset);
+  const rawClientId =
+    claims.clientId ??
+    claims.client_id ??
+    claims.companyId ??
+    claims.empresaId ??
+    claims.tenantId ??
+    null;
+  const directClientId = normalizeString(rawClientId);
   const isAdmin = Boolean(
-    claims.isAdmin ||
-      claims.admin ||
-      claims.is_admin ||
-      accessPreset === "admin_vexo" ||
+    directClientId === "vexo" ||
       isFixedAdminAccount(user.uid, user.email || claims.email || null)
   );
   const role = isAdmin ? "internal" : requestedRole;
@@ -144,14 +149,6 @@ function buildAccessProfile(user: User, claims: Record<string, unknown> = {}): A
     role
   );
   const approvalLevel = normalizeApprovalLevel(claims.approvalLevel, role);
-  const rawClientId =
-    claims.clientId ??
-    claims.client_id ??
-    claims.companyId ??
-    claims.empresaId ??
-    claims.tenantId ??
-    null;
-  const directClientId = normalizeString(rawClientId);
   const clientIds = Array.from(
     new Set([
       directClientId,
@@ -293,26 +290,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isPendingUser = accessRole === "pending";
   const canAccessClient = useCallback(
     (targetClientId: string) => {
+      const isVexo = clientId === "vexo" || isFixedAdminAccount(firebaseUser?.uid, firebaseUser?.email);
+      if (!isVexo) {
+        return clientIds.includes(targetClientId);
+      }
       if (isAdminUser) return true;
       if (isInternalUser && scopeMode === "all_clients") return true;
       return clientIds.includes(targetClientId);
     },
-    [clientIds, isAdminUser, isInternalUser, scopeMode]
+    [clientIds, isAdminUser, isInternalUser, scopeMode, clientId, firebaseUser]
   );
   const canAccessView = useCallback(
     (view: AccessView) => isInternalUser || allowedViews.includes(view),
     [allowedViews, isInternalUser]
   );
   const canAccessInternalPage = useCallback(
-    (page: InternalPage) =>
-      isInternalUser &&
-      (isAdminUser || internalPages.includes(page)),
-    [internalPages, isAdminUser, isInternalUser]
+    (page: InternalPage) => {
+      if (!isInternalUser) return false;
+      if (page === "empresas") {
+        const isVexo = clientId === "vexo" || isFixedAdminAccount(firebaseUser?.uid, firebaseUser?.email);
+        if (!isVexo) return false;
+      }
+      return isAdminUser || internalPages.includes(page);
+    },
+    [internalPages, isAdminUser, isInternalUser, clientId, firebaseUser]
   );
   const hasPermission = useCallback(
-    (permission: AccessPermission) =>
-      isAdminUser || permissions.includes(permission),
-    [isAdminUser, permissions]
+    (permission: AccessPermission) => {
+      if (permission === "tenants.manage") {
+        const isVexo = clientId === "vexo" || isFixedAdminAccount(firebaseUser?.uid, firebaseUser?.email);
+        if (!isVexo) return false;
+      }
+      return isAdminUser || permissions.includes(permission);
+    },
+    [isAdminUser, permissions, clientId, firebaseUser]
   );
   const defaultRoute = isPendingUser
     ? "/aguardando-aprovacao"

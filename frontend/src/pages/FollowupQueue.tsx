@@ -404,13 +404,22 @@ function FilaTab({ companyId }: { companyId: string }) {
               <Filter className="h-4 w-4 text-slate-400" />
               Filtros da Fila
             </CardTitle>
-            <Button
-              variant="ghost" size="sm" className="h-7 gap-1.5 text-xs"
-              onClick={() => refetch()} disabled={isFetching}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-              Atualizar
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline" size="sm" className="h-7 gap-1.5 text-xs border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
+                onClick={() => {}} 
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Importar CSV
+              </Button>
+              <Button
+                variant="ghost" size="sm" className="h-7 gap-1.5 text-xs"
+                onClick={() => refetch()} disabled={isFetching}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+                Atualizar
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -1125,19 +1134,40 @@ function labelForTemplate(t: FupTemplate) {
   return match?.label || `${t.trigger_type} ${t.trigger_value} ${t.trigger_unit}`;
 }
 
-const TEMPLATE_EXAMPLE_DATA = { lead_name: "Maria Silva", meeting_date: "20/06/2026", meeting_time: "14:00" };
+const SEGMENT_VARS: Record<string, string[]> = {
+  geral: ["{{lead_name}}", "{{meeting_date}}", "{{meeting_time}}"],
+  b2b: ["{{lead_name}}", "{{company_name}}", "{{role}}", "{{meeting_date}}", "{{meeting_time}}"],
+  restaurante: ["{{lead_name}}", "{{reservation_date}}", "{{number_of_guests}}"],
+  turismo: ["{{lead_name}}", "{{destination}}", "{{travel_date}}"],
+};
 
-function renderPreview(msg: string) {
-  return msg
-    .replace(/\{\{lead_name\}\}/gi, TEMPLATE_EXAMPLE_DATA.lead_name)
-    .replace(/\{\{meeting_date\}\}/gi, TEMPLATE_EXAMPLE_DATA.meeting_date)
-    .replace(/\{\{meeting_time\}\}/gi, TEMPLATE_EXAMPLE_DATA.meeting_time);
+const TEMPLATE_EXAMPLE_DATA: Record<string, Record<string, string>> = {
+  geral: { lead_name: "Maria Silva", meeting_date: "20/06/2026", meeting_time: "14:00" },
+  b2b: { lead_name: "João Silva", company_name: "Tech Corp", role: "CEO", meeting_date: "20/06/2026", meeting_time: "14:00" },
+  restaurante: { lead_name: "Carlos", reservation_date: "20/06/2026 às 20:00", number_of_guests: "4 pessoas" },
+  turismo: { lead_name: "Ana", destination: "Paris", travel_date: "15/08/2026" },
+};
+
+function renderPreview(msg: string, segment?: string) {
+  let output = msg;
+  let data = TEMPLATE_EXAMPLE_DATA.geral;
+  if (segment && TEMPLATE_EXAMPLE_DATA[segment]) {
+    data = TEMPLATE_EXAMPLE_DATA[segment];
+  } else {
+    data = { ...TEMPLATE_EXAMPLE_DATA.geral, ...TEMPLATE_EXAMPLE_DATA.b2b, ...TEMPLATE_EXAMPLE_DATA.restaurante, ...TEMPLATE_EXAMPLE_DATA.turismo };
+  }
+  for (const [key, value] of Object.entries(data)) {
+    const regex = new RegExp(`\\{\\{${key}\\}\\}`, "gi");
+    output = output.replace(regex, value);
+  }
+  return output;
 }
 
 const EMPTY_TEMPLATE_FORM = {
   name: "",
   message: "",
   triggerKey: optionKey(TRIGGER_OPTIONS[0]),
+  segment: "geral",
   is_active: true,
 };
 
@@ -1176,10 +1206,26 @@ function TemplateForm({
 
   return (
     <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-      <div className="space-y-1.5">
-        <Label className="text-xs">Nome do template *</Label>
-        <Input value={form.name} onChange={(e) => set("name", e.target.value)}
-          placeholder="Ex: Confirmação imediata" className="h-8 text-sm" />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Nome do template *</Label>
+          <Input value={form.name} onChange={(e) => set("name", e.target.value)}
+            placeholder="Ex: Confirmação imediata" className="h-8 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Segmento (Variáveis)</Label>
+          <Select value={form.segment} onValueChange={(v) => set("segment", v)}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="geral" className="text-xs">Geral</SelectItem>
+              <SelectItem value="b2b" className="text-xs">B2B</SelectItem>
+              <SelectItem value="restaurante" className="text-xs">Restaurante</SelectItem>
+              <SelectItem value="turismo" className="text-xs">Turismo</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="space-y-1.5">
@@ -1222,18 +1268,18 @@ function TemplateForm({
         </div>
         {showPreview ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 text-xs text-slate-700 dark:border-white/10 dark:bg-slate-900/30 dark:text-slate-300 whitespace-pre-wrap min-h-[100px]">
-            {renderPreview(form.message) || <span className="text-slate-400 italic">Nenhuma mensagem</span>}
+            {renderPreview(form.message, form.segment) || <span className="text-slate-400 italic">Nenhuma mensagem</span>}
           </div>
         ) : (
           <Textarea
             value={form.message}
             onChange={(e) => set("message", e.target.value)}
-            placeholder="Olá {{lead_name}}, sua reunião é em {{meeting_date}} às {{meeting_time}}..."
+            placeholder="Olá {{lead_name}}, sua reunião..."
             className="text-sm min-h-[100px] font-mono"
           />
         )}
         <div className="flex flex-wrap gap-1.5">
-          {["{{lead_name}}", "{{meeting_date}}", "{{meeting_time}}"].map((v) => (
+          {(SEGMENT_VARS[form.segment] || SEGMENT_VARS.geral).map((v) => (
             <button key={v}
               onClick={() => insertVar(v)}
               className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] text-indigo-600 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-400 dark:hover:bg-indigo-900/40">
@@ -1360,8 +1406,16 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
       ) : (
         <div className="space-y-2">
           {localOrder.map((t, idx) => (
-            <div key={t.id}
-              className={`flex items-start gap-3 rounded-xl border p-3 transition-opacity ${t.is_active ? "border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900/40" : "border-slate-100 bg-slate-50/50 opacity-60 dark:border-white/5 dark:bg-slate-900/20"}`}>
+            <div key={t.id} className="relative">
+              {idx > 0 && (
+                <div className="absolute -top-3 left-6 flex items-center justify-center w-full max-w-[200px]">
+                  <div className="h-6 w-px bg-slate-200 dark:bg-white/10 absolute left-0" />
+                  <div className="bg-slate-50 border dark:bg-slate-900 dark:border-white/10 rounded-full px-2 py-0.5 text-[9px] font-medium text-slate-500 shadow-sm z-10 flex items-center gap-1 -translate-y-2">
+                    <Clock className="w-3 h-3 text-indigo-400" /> Esperar 1 Dia
+                  </div>
+                </div>
+              )}
+              <div className={`flex items-start gap-3 rounded-xl border p-3 transition-opacity ${t.is_active ? "border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900/40" : "border-slate-100 bg-slate-50/50 opacity-60 dark:border-white/5 dark:bg-slate-900/20"} ${idx > 0 ? "mt-4" : ""}`}>
               <div className="flex flex-col gap-0.5 pt-0.5">
                 <button onClick={() => moveUp(idx)} disabled={idx === 0}
                   className="text-slate-300 hover:text-slate-600 disabled:opacity-0 transition-colors">
@@ -1385,6 +1439,9 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
                   {!t.is_active && (
                     <Badge variant="outline" className="text-[10px] text-slate-400">Inativo</Badge>
                   )}
+                  <span className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-sm bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400 border border-green-100 dark:border-green-900/30">
+                    <MessageSquare className="w-3 h-3" /> WhatsApp
+                  </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 font-mono">
                   {renderPreview(t.message)}
@@ -1404,6 +1461,7 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
                 </Button>
               </div>
             </div>
+          </div>
           ))}
         </div>
       )}
@@ -1945,6 +2003,11 @@ const EMPTY_COMPANY_FORM = {
   webhook_url: "",
   calendly_webhook_secret: "",
   panel_access: false,
+  auto_pause_on_reply: false,
+  auto_pause_on_calendly: false,
+  sending_window_start: "08:00",
+  sending_window_end: "18:00",
+  sending_days: "1,2,3,4,5",
 };
 
 function CompanyForm({
@@ -1998,19 +2061,76 @@ function CompanyForm({
             value={form.calendly_webhook_secret}
             onChange={(e) => set("calendly_webhook_secret", e.target.value)}
             placeholder="secret_..."
-            className="h-8 text-sm"
           />
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        <Switch
-          checked={form.panel_access}
-          onCheckedChange={(v) => set("panel_access", v)}
-          id="panel-access"
-        />
-        <Label htmlFor="panel-access" className="text-sm cursor-pointer">
-          Acesso ao painel de analytics
-        </Label>
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 border-b pb-1">Horários de Disparo</h4>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500">Dias de Envio</Label>
+            <Select value={form.sending_days} onValueChange={(v) => set("sending_days", v)}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Selecione..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1,2,3,4,5" className="text-xs">Segunda a Sexta</SelectItem>
+                <SelectItem value="0,1,2,3,4,5,6" className="text-xs">Todos os dias</SelectItem>
+                <SelectItem value="1,2,3,4" className="text-xs">Segunda a Quinta</SelectItem>
+                <SelectItem value="1" className="text-xs">Somente Segunda</SelectItem>
+                <SelectItem value="2" className="text-xs">Somente Terça</SelectItem>
+                <SelectItem value="3" className="text-xs">Somente Quarta</SelectItem>
+                <SelectItem value="4" className="text-xs">Somente Quinta</SelectItem>
+                <SelectItem value="5" className="text-xs">Somente Sexta</SelectItem>
+                <SelectItem value="6" className="text-xs">Somente Sábado</SelectItem>
+                <SelectItem value="0" className="text-xs">Somente Domingo</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">Início</Label>
+              <Input type="time" className="h-8 text-xs" value={form.sending_window_start} onChange={(e) => set("sending_window_start", e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-500">Término</Label>
+              <Input type="time" className="h-8 text-xs" value={form.sending_window_end} onChange={(e) => set("sending_window_end", e.target.value)} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 border-b pb-1">Regras de Saída (Proteção)</h4>
+        
+        <div className="flex items-center justify-between gap-3 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+          <div className="flex flex-col">
+            <Label htmlFor="auto-pause" className="text-sm cursor-pointer font-medium text-amber-800 dark:text-amber-400">
+              Pausar cadência se o lead responder (Auto-pause)
+            </Label>
+            <span className="text-[10px] text-amber-700/70 dark:text-amber-500/70">A IA interrompe mensagens programadas para atendimento humano.</span>
+          </div>
+          <Switch checked={form.auto_pause_on_reply} onCheckedChange={(v) => set("auto_pause_on_reply", v)} id="auto-pause" />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-lg border border-slate-200 dark:border-white/10">
+          <div className="flex flex-col">
+            <Label htmlFor="calendly-pause" className="text-sm cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+              Pausar cadência se agendar reunião (Calendly)
+            </Label>
+            <span className="text-[10px] text-slate-500">Requer o Webhook Secret do Calendly preenchido acima.</span>
+          </div>
+          <Switch checked={form.auto_pause_on_calendly} onCheckedChange={(v) => set("auto_pause_on_calendly", v)} id="calendly-pause" />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-slate-100 dark:border-white/5 pt-3">
+        <div className="flex flex-col">
+          <Label htmlFor="panel-access" className="text-sm cursor-pointer">
+            Acesso ao painel de analytics
+          </Label>
+        </div>
+        <Switch checked={form.panel_access} onCheckedChange={(v) => set("panel_access", v)} id="panel-access" />
       </div>
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={onCancel} disabled={isLoading}>
@@ -2178,7 +2298,7 @@ function ConfigTab() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? "Editar empresa" : "Nova empresa"}</DialogTitle>
+            <DialogTitle>{editing ? "Editar empresa" : "Nova empresa (WhatsApp)"}</DialogTitle>
           </DialogHeader>
           <CompanyForm
             initial={
@@ -2189,6 +2309,7 @@ function ConfigTab() {
                     webhook_url: editing.webhook_url || "",
                     calendly_webhook_secret: "",
                     panel_access: editing.panel_access,
+                    auto_pause_on_reply: editing.auto_pause_on_reply || false,
                   }
                 : EMPTY_COMPANY_FORM
             }
@@ -2230,7 +2351,7 @@ function ConfigTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function FollowupDashboard() {
-  const { canAccessInternalPage } = useAuth();
+  const { canAccessInternalPage, currentTenant } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "fila";
   const crmClient = useOptionalCrmClient();
@@ -2264,7 +2385,7 @@ export default function FollowupDashboard() {
     if (companies.length > 0 && companyId === "all") {
       setCompanyId(companies[0].id);
     }
-  }, [companies]);
+  }, [companies, companyId]);
 
   // Suggestions count for badge
   const { data: suggestionCount = 0 } = useFollowupSuggestionCount(
@@ -2296,17 +2417,17 @@ export default function FollowupDashboard() {
             <div className="flex items-center gap-2">
               <ListChecks className="h-5 w-5 text-indigo-500 shrink-0" />
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                Selecione a empresa para filtrar a fila, sugestões de IA, campanhas e métricas de forma integrada.
+                Selecione o Número do WhatsApp (Empresa) para gerenciar fila, cadências e métricas.
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0 max-w-xs w-full sm:w-auto">
-              <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">Empresa:</Label>
+              <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">Número do WhatsApp:</Label>
               <Select value={companyId} onValueChange={setCompanyId} disabled={loadingCompanies}>
                 <SelectTrigger className="h-8 text-xs bg-white dark:bg-slate-900 border-indigo-100 dark:border-indigo-950">
                   <SelectValue placeholder={loadingCompanies ? "Carregando..." : "Selecionar Empresa"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all" className="text-xs">Todas as empresas</SelectItem>
+                  <SelectItem value="all" className="text-xs">Todos os Perfis</SelectItem>
                   {companies.map((c) => (
                     <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
                   ))}
@@ -2343,7 +2464,7 @@ export default function FollowupDashboard() {
             )}
             {isSubTabAllowed("campanhas") && (
               <TabsTrigger value="campanhas" className="text-xs font-semibold px-4 py-2">
-                Campanhas & Templates
+                Cadências por Status
               </TabsTrigger>
             )}
             {isSubTabAllowed("metrics") && (
