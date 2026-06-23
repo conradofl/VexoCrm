@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS public.fup_journeys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id UUID NOT NULL REFERENCES public.fup_companies(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES public.followup_companies(id) ON DELETE CASCADE,
     trigger_event VARCHAR(50) NOT NULL,
     is_active BOOLEAN DEFAULT false,
     channel VARCHAR(20) DEFAULT 'whatsapp',
