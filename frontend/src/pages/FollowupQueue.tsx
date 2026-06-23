@@ -107,6 +107,7 @@ import {
   useApproveSuggestionBatch,
   type FollowupSuggestion,
 } from "@/hooks/useFollowupSuggestions";
+import { FollowUpJourneys } from "@/components/followup/FollowUpJourneys";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS & HELPERS COMUNS
@@ -1089,49 +1090,12 @@ function CampaignCard({
 // COMPONENTES DE GERENCIAMENTO DE TEMPLATES (EMBUTIDO NAS CAMPANHAS)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const TRIGGER_OPTIONS: {
-  label: string;
-  trigger_type: FupTemplate["trigger_type"];
-  trigger_value: number;
-  trigger_unit: FupTemplate["trigger_unit"];
-  trigger_direction: "before" | "after" | null;
-}[] = [
-  { label: "Assim que o webhook for disparado", trigger_type: "on_schedule", trigger_value: 0, trigger_unit: "minutes", trigger_direction: null },
-  { label: "5 minutos antes", trigger_type: "before_meeting", trigger_value: 5, trigger_unit: "minutes", trigger_direction: "before" },
-  { label: "15 minutos antes", trigger_type: "before_meeting", trigger_value: 15, trigger_unit: "minutes", trigger_direction: "before" },
-  { label: "30 minutos antes", trigger_type: "before_meeting", trigger_value: 30, trigger_unit: "minutes", trigger_direction: "before" },
-  { label: "1 hora antes", trigger_type: "before_meeting", trigger_value: 1, trigger_unit: "hours", trigger_direction: "before" },
-  { label: "3 horas antes", trigger_type: "before_meeting", trigger_value: 3, trigger_unit: "hours", trigger_direction: "before" },
-  { label: "6 horas antes", trigger_type: "before_meeting", trigger_value: 6, trigger_unit: "hours", trigger_direction: "before" },
-  { label: "12 horas antes", trigger_type: "before_meeting", trigger_value: 12, trigger_unit: "hours", trigger_direction: "before" },
-  { label: "1 dia antes", trigger_type: "before_meeting", trigger_value: 1, trigger_unit: "days", trigger_direction: "before" },
-  { label: "2 dias antes", trigger_type: "before_meeting", trigger_value: 2, trigger_unit: "days", trigger_direction: "before" },
-  { label: "30 minutos depois", trigger_type: "after_meeting", trigger_value: 30, trigger_unit: "minutes", trigger_direction: "after" },
-  { label: "1 hora depois", trigger_type: "after_meeting", trigger_value: 1, trigger_unit: "hours", trigger_direction: "after" },
-  { label: "3 horas depois", trigger_type: "after_meeting", trigger_value: 3, trigger_unit: "hours", trigger_direction: "after" },
-  { label: "6 horas depois", trigger_type: "after_meeting", trigger_value: 6, trigger_unit: "hours", trigger_direction: "after" },
-  { label: "12 horas depois", trigger_type: "after_meeting", trigger_value: 12, trigger_unit: "hours", trigger_direction: "after" },
-  { label: "1 dia depois", trigger_type: "after_meeting", trigger_value: 1, trigger_unit: "days", trigger_direction: "after" },
-  { label: "2 dias depois", trigger_type: "after_meeting", trigger_value: 2, trigger_unit: "days", trigger_direction: "after" },
-  { label: "3 dias depois", trigger_type: "after_meeting", trigger_value: 3, trigger_unit: "days", trigger_direction: "after" },
-  { label: "7 dias depois", trigger_type: "after_meeting", trigger_value: 7, trigger_unit: "days", trigger_direction: "after" },
-  { label: "Se não respondeu em 1 hora", trigger_type: "no_reply", trigger_value: 1, trigger_unit: "hours", trigger_direction: null },
-  { label: "Se não respondeu em 3 horas", trigger_type: "no_reply", trigger_value: 3, trigger_unit: "hours", trigger_direction: null },
-  { label: "Se não respondeu em 6 horas", trigger_type: "no_reply", trigger_value: 6, trigger_unit: "hours", trigger_direction: null },
-  { label: "Se não respondeu em 12 horas", trigger_type: "no_reply", trigger_value: 12, trigger_unit: "hours", trigger_direction: null },
-  { label: "Se não respondeu em 1 dia", trigger_type: "no_reply", trigger_value: 1, trigger_unit: "days", trigger_direction: null },
-  { label: "Se não respondeu em 2 dias", trigger_type: "no_reply", trigger_value: 2, trigger_unit: "days", trigger_direction: null },
-];
-
-function optionKey(o: { trigger_type: FupTemplate["trigger_type"]; trigger_value: number; trigger_unit: FupTemplate["trigger_unit"] }) {
-  return `${o.trigger_type}:${o.trigger_value}:${o.trigger_unit}`;
-}
-
 function labelForTemplate(t: FupTemplate) {
-  const match = TRIGGER_OPTIONS.find(
-    (o) => o.trigger_type === t.trigger_type && o.trigger_value === t.trigger_value && o.trigger_unit === t.trigger_unit
-  );
-  return match?.label || `${t.trigger_type} ${t.trigger_value} ${t.trigger_unit}`;
+  if (t.trigger_type === "on_schedule") return "Envio Imediato";
+  if (t.trigger_type === "no_reply") return `Após Inatividade (${t.trigger_value} ${t.trigger_unit === "days" ? "Dias" : t.trigger_unit === "hours" ? "Horas" : "Minutos"})`;
+  if (t.trigger_type === "before_meeting") return `${t.trigger_value} ${t.trigger_unit === "days" ? "Dias" : t.trigger_unit === "hours" ? "Horas" : "Minutos"} Antes do Agendamento`;
+  if (t.trigger_type === "after_meeting") return `${t.trigger_value} ${t.trigger_unit === "days" ? "Dias" : t.trigger_unit === "hours" ? "Horas" : "Minutos"} Depois do Agendamento`;
+  return `${t.trigger_type} ${t.trigger_value} ${t.trigger_unit}`;
 }
 
 const SEGMENT_VARS: Record<string, string[]> = {
@@ -1166,7 +1130,9 @@ function renderPreview(msg: string, segment?: string) {
 const EMPTY_TEMPLATE_FORM = {
   name: "",
   message: "",
-  triggerKey: optionKey(TRIGGER_OPTIONS[0]),
+  trigger_type: "no_reply" as FupTemplate["trigger_type"],
+  trigger_value: 1,
+  trigger_unit: "days" as FupTemplate["trigger_unit"],
   segment: "geral",
   is_active: true,
 };
@@ -1187,18 +1153,15 @@ function TemplateForm({
 
   const insertVar = (v: string) => set("message", form.message + v);
 
-  const selectedOption = TRIGGER_OPTIONS.find((o) => optionKey(o) === form.triggerKey) || TRIGGER_OPTIONS[0];
-
   const handleSave = () => {
-    if (!selectedOption) return;
     onSave({
       campaign_id: campaignId,
       name: form.name,
       message: form.message,
-      trigger_type: selectedOption.trigger_type,
-      trigger_value: selectedOption.trigger_value,
-      trigger_unit: selectedOption.trigger_unit,
-      trigger_direction: selectedOption.trigger_direction,
+      trigger_type: form.trigger_type,
+      trigger_value: form.trigger_type === "on_schedule" ? 0 : form.trigger_value,
+      trigger_unit: form.trigger_type === "on_schedule" ? "minutes" : form.trigger_unit,
+      trigger_direction: form.trigger_type === "before_meeting" ? "before" : form.trigger_type === "after_meeting" ? "after" : null,
       is_active: form.is_active,
       order_index: orderIndex,
     });
@@ -1208,9 +1171,9 @@ function TemplateForm({
     <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-xs">Nome do template *</Label>
+          <Label className="text-xs">Nome do Estágio *</Label>
           <Input value={form.name} onChange={(e) => set("name", e.target.value)}
-            placeholder="Ex: Confirmação imediata" className="h-8 text-sm" />
+            placeholder="Ex: Mensagem Dia 1" className="h-8 text-sm" />
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Segmento (Variáveis)</Label>
@@ -1228,38 +1191,52 @@ function TemplateForm({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs">Gatilho de envio *</Label>
-        <Select value={form.triggerKey} onValueChange={(v) => set("triggerKey", v)}>
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={optionKey(TRIGGER_OPTIONS[0])} className="text-xs font-medium text-slate-500">
-              — IMEDIATO —
-            </SelectItem>
-            {TRIGGER_OPTIONS.slice(0, 1).map((o) => (
-              <SelectItem key={optionKey(o)} value={optionKey(o)} className="text-xs pl-4">{o.label}</SelectItem>
-            ))}
-            <SelectItem value="__sep1__" disabled className="text-xs font-medium text-slate-500">— ANTES DA REUNIÃO —</SelectItem>
-            {TRIGGER_OPTIONS.filter((o) => o.trigger_type === "before_meeting").map((o) => (
-              <SelectItem key={optionKey(o)} value={optionKey(o)} className="text-xs pl-4">{o.label}</SelectItem>
-            ))}
-            <SelectItem value="__sep2__" disabled className="text-xs font-medium text-slate-500">— DEPOIS DA REUNIÃO —</SelectItem>
-            {TRIGGER_OPTIONS.filter((o) => o.trigger_type === "after_meeting").map((o) => (
-              <SelectItem key={optionKey(o)} value={optionKey(o)} className="text-xs pl-4">{o.label}</SelectItem>
-            ))}
-            <SelectItem value="__sep3__" disabled className="text-xs font-medium text-slate-500">— SEM RESPOSTA —</SelectItem>
-            {TRIGGER_OPTIONS.filter((o) => o.trigger_type === "no_reply").map((o) => (
-              <SelectItem key={optionKey(o)} value={optionKey(o)} className="text-xs pl-4">{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="p-3 border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-lg space-y-3">
+        <Label className="text-xs font-bold text-indigo-800 dark:text-indigo-300">Regra de Disparo</Label>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="col-span-3 sm:col-span-1 space-y-1.5">
+            <Label className="text-[10px] text-slate-500">Tipo de Gatilho</Label>
+            <Select value={form.trigger_type} onValueChange={(v) => set("trigger_type", v)}>
+              <SelectTrigger className="h-8 text-xs bg-white dark:bg-slate-900">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="on_schedule" className="text-xs">Envio Imediato</SelectItem>
+                <SelectItem value="no_reply" className="text-xs">Após Inatividade</SelectItem>
+                <SelectItem value="before_meeting" className="text-xs">Antes do Agendamento</SelectItem>
+                <SelectItem value="after_meeting" className="text-xs">Depois do Agendamento</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          {form.trigger_type !== "on_schedule" && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-500">Quantidade</Label>
+                <Input type="number" min={1} value={form.trigger_value} onChange={(e) => set("trigger_value", parseInt(e.target.value) || 1)}
+                  className="h-8 text-sm bg-white dark:bg-slate-900" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-500">Unidade de Tempo</Label>
+                <Select value={form.trigger_unit} onValueChange={(v) => set("trigger_unit", v)}>
+                  <SelectTrigger className="h-8 text-xs bg-white dark:bg-slate-900">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes" className="text-xs">Minutos</SelectItem>
+                    <SelectItem value="hours" className="text-xs">Horas</SelectItem>
+                    <SelectItem value="days" className="text-xs">Dias</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label className="text-xs">Mensagem *</Label>
+          <Label className="text-xs">Texto da Mensagem *</Label>
           <button onClick={() => setShowPreview(!showPreview)}
             className="flex items-center gap-1 text-[10px] text-indigo-500 hover:text-indigo-700">
             <Eye className="h-3 w-3" />
@@ -1274,11 +1251,11 @@ function TemplateForm({
           <Textarea
             value={form.message}
             onChange={(e) => set("message", e.target.value)}
-            placeholder="Olá {{lead_name}}, sua reunião..."
+            placeholder="Olá {{lead_name}}, conseguimos falar sobre a proposta?"
             className="text-sm min-h-[100px] font-mono"
           />
         )}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 mt-2">
           {(SEGMENT_VARS[form.segment] || SEGMENT_VARS.geral).map((v) => (
             <button key={v}
               onClick={() => insertVar(v)}
@@ -1291,14 +1268,14 @@ function TemplateForm({
 
       <div className="flex items-center gap-3">
         <Switch checked={form.is_active} onCheckedChange={(v) => set("is_active", v)} id="tpl-active" />
-        <Label htmlFor="tpl-active" className="text-sm cursor-pointer">Template ativo</Label>
+        <Label htmlFor="tpl-active" className="text-sm cursor-pointer">Estágio ativo (Pronto para envio)</Label>
       </div>
 
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={onCancel} disabled={isLoading}>Cancelar</Button>
-        <Button size="sm" onClick={handleSave}
+        <Button size="sm" onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700"
           disabled={isLoading || !form.name.trim() || !form.message.trim()}>
-          {isLoading ? "Salvando..." : "Salvar"}
+          {isLoading ? "Salvando..." : "Salvar Estágio"}
         </Button>
       </DialogFooter>
     </div>
@@ -1381,13 +1358,23 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
       <div className="flex items-center justify-between border-b pb-3 border-slate-100 dark:border-white/5">
         <div className="space-y-0.5">
           <button onClick={onBack} className="text-xs font-semibold text-indigo-500 hover:text-indigo-700 flex items-center gap-1">
-            ← Voltar para Campanhas
+            ← Voltar para Regras de Cadência
           </button>
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Templates — {campaign.name}</h3>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Estágios da Cadência — {campaign.name}</h3>
         </div>
-        <Button size="sm" className="gap-2" onClick={openCreate}>
-          <Plus className="h-4 w-4" /> Adicionar Mensagem
+        <Button size="sm" className="gap-2 bg-indigo-600 hover:bg-indigo-700" onClick={openCreate}>
+          <Plus className="h-4 w-4" /> Adicionar Estágio
         </Button>
+      </div>
+
+      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 flex gap-4">
+        <Bot className="h-6 w-6 text-amber-500 shrink-0" />
+        <div>
+          <h4 className="font-bold text-amber-800 dark:text-amber-500 mb-1 text-sm">Atenção: A Regra da Pausa Automática</h4>
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Qualquer mensagem configurada aqui será disparada na ordem e data corretas. Porém, <strong>se o cliente responder a qualquer momento</strong>, a cadência inteira será pausada e este lead sairá do fluxo de Follow-up para ser assumido por você.
+          </p>
+        </div>
       </div>
 
       {isLoading ? (
@@ -1410,8 +1397,8 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
               {idx > 0 && (
                 <div className="absolute -top-3 left-6 flex items-center justify-center w-full max-w-[200px]">
                   <div className="h-6 w-px bg-slate-200 dark:bg-white/10 absolute left-0" />
-                  <div className="bg-slate-50 border dark:bg-slate-900 dark:border-white/10 rounded-full px-2 py-0.5 text-[9px] font-medium text-slate-500 shadow-sm z-10 flex items-center gap-1 -translate-y-2">
-                    <Clock className="w-3 h-3 text-indigo-400" /> Esperar 1 Dia
+                  <div className="bg-slate-50 border dark:bg-slate-900 dark:border-white/10 rounded-full px-3 py-1 text-[10px] font-medium text-slate-600 shadow-sm z-10 flex items-center gap-1.5 -translate-y-2">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500" /> ⏱️ {labelForTemplate(t)}
                   </div>
                 </div>
               )}
@@ -1469,7 +1456,7 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editing ? "Editar template" : "Nova mensagem"}</DialogTitle>
+            <DialogTitle>{editing ? "Editar Estágio" : "Novo Estágio da Cadência"}</DialogTitle>
           </DialogHeader>
           <TemplateForm
             campaignId={campaign.id}
@@ -1479,7 +1466,10 @@ function CampaignTemplatesView({ campaign, onBack }: { campaign: FupCampaign; on
                 ? {
                     name: editing.name,
                     message: editing.message,
-                    triggerKey: optionKey(editing as any),
+                    trigger_type: editing.trigger_type,
+                    trigger_value: editing.trigger_value,
+                    trigger_unit: editing.trigger_unit,
+                    segment: "geral",
                     is_active: editing.is_active,
                   }
                 : EMPTY_TEMPLATE_FORM
@@ -1551,9 +1541,9 @@ function CampaignsTab({ companyId }: { companyId: string }) {
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-        <Button size="sm" className="gap-2 h-8" onClick={openCreate}>
+        <Button size="sm" className="gap-2 h-8 bg-indigo-600 hover:bg-indigo-700" onClick={openCreate}>
           <Plus className="h-3.5 w-3.5" />
-          Nova Campanha
+          Nova Regra de Cadência
         </Button>
       </div>
 
@@ -1567,10 +1557,10 @@ function CampaignsTab({ companyId }: { companyId: string }) {
         <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 dark:border-white/10">
           <Megaphone className="h-8 w-8 text-slate-300 dark:text-slate-600" />
           <p className="text-sm text-slate-400">
-            A empresa selecionada ainda não tem campanhas.
+            A empresa selecionada ainda não possui regras de cadência ativas.
           </p>
           <Button size="sm" variant="outline" onClick={openCreate} className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" /> Criar primeira campanha
+            <Plus className="h-3.5 w-3.5" /> Criar primeira regra de cadência
           </Button>
         </div>
       ) : (
@@ -1590,7 +1580,10 @@ function CampaignsTab({ companyId }: { companyId: string }) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? "Editar campanha" : "Nova campanha"}</DialogTitle>
+            <DialogTitle>{editing ? "Editar Regra de Cadência" : "Nova Regra de Cadência"}</DialogTitle>
+            {!editing && (
+              <p className="text-sm text-slate-500">Defina o nome desta regra (ex: Lead Frio, Proposta Enviada) para poder jogar os leads nela.</p>
+            )}
           </DialogHeader>
           <CampaignForm
             initial={
@@ -2363,7 +2356,7 @@ export default function FollowupDashboard() {
     return allowedTabs.includes(`followup:${subTabKey}`);
   };
 
-  const followupSubTabs = ["fila", "sugestoes", "campanhas", "metrics", "config"] as const;
+  const followupSubTabs = ["journeys", "metrics", "config"] as const;
   const allowedFollowupSubTabs = followupSubTabs.filter(isSubTabAllowed);
 
   useEffect(() => {
@@ -2386,11 +2379,6 @@ export default function FollowupDashboard() {
       setCompanyId(companies[0].id);
     }
   }, [companies, companyId]);
-
-  // Suggestions count for badge
-  const { data: suggestionCount = 0 } = useFollowupSuggestionCount(
-    companyId !== "all" ? companyId : undefined
-  );
 
   const setActiveTab = (tab: string) => {
     setSearchParams({ tab });
@@ -2439,7 +2427,6 @@ export default function FollowupDashboard() {
       </Card>
 
       {/* Tabs Layout */}
-      {/* Tabs Layout */}
       {allowedFollowupSubTabs.length === 0 ? (
         <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-white/10 bg-card">
           <p className="text-sm text-slate-400">Você não tem permissão para acessar nenhuma sub-aba do Follow-up.</p>
@@ -2447,29 +2434,14 @@ export default function FollowupDashboard() {
       ) : (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="w-full flex justify-start rounded-xl border border-slate-200/80 bg-slate-100/50 p-1 dark:border-white/10 dark:bg-white/[0.02]">
-            {isSubTabAllowed("fila") && (
-              <TabsTrigger value="fila" className="text-xs font-semibold px-4 py-2">
-                Fila de Envio
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("sugestoes") && (
-              <TabsTrigger value="sugestoes" className="text-xs font-semibold px-4 py-2 gap-1.5">
-                Sugestões da IA
-                {suggestionCount > 0 && (
-                  <Badge className="bg-violet-600 text-white font-mono text-[9px] font-bold px-1.5 py-0.5 hover:bg-violet-700">
-                    {suggestionCount}
-                  </Badge>
-                )}
-              </TabsTrigger>
-            )}
-            {isSubTabAllowed("campanhas") && (
-              <TabsTrigger value="campanhas" className="text-xs font-semibold px-4 py-2">
-                Cadências por Status
+            {isSubTabAllowed("journeys") && (
+              <TabsTrigger value="journeys" className="text-xs font-semibold px-4 py-2">
+                Jornadas Automatizadas
               </TabsTrigger>
             )}
             {isSubTabAllowed("metrics") && (
               <TabsTrigger value="metrics" className="text-xs font-semibold px-4 py-2">
-                Métricas (Analytics)
+                Estatísticas
               </TabsTrigger>
             )}
             {isSubTabAllowed("config") && (
@@ -2479,21 +2451,9 @@ export default function FollowupDashboard() {
             )}
           </TabsList>
 
-          {isSubTabAllowed("fila") && (
-            <TabsContent value="fila" className="space-y-4 outline-none">
-              <FilaTab companyId={companyId} />
-            </TabsContent>
-          )}
-
-          {isSubTabAllowed("sugestoes") && (
-            <TabsContent value="sugestoes" className="space-y-4 outline-none">
-              <SuggestionsTab companyId={companyId} />
-            </TabsContent>
-          )}
-
-          {isSubTabAllowed("campanhas") && (
-            <TabsContent value="campanhas" className="space-y-4 outline-none">
-              <CampaignsTab companyId={companyId} />
+          {isSubTabAllowed("journeys") && (
+            <TabsContent value="journeys" className="space-y-4 outline-none">
+              <FollowUpJourneys companyId={companyId} />
             </TabsContent>
           )}
 
