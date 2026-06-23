@@ -10,6 +10,11 @@ export interface FupCompany {
   evolution_instance: string;
   webhook_url: string | null;
   panel_access: boolean;
+  auto_pause_on_reply?: boolean;
+  auto_pause_on_calendly?: boolean;
+  sending_window_start?: string;
+  sending_window_end?: string;
+  sending_days?: string;
   activeCampaigns: number;
   created_at: string;
 }

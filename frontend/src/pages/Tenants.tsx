@@ -45,21 +45,83 @@ import { createTenantSchema } from "@/lib/validationSchemas";
 
 const CHATBOT_MODEL_OPTIONS = [
   {
-    value: "outlier",
-    title: "Consorcio / credito",
-    description: "Campos e filtros para credito, parcela, FGTS, lance e objetivo de compra.",
+    value: "energia-solar",
+    title: "Energia Solar",
+    description: "Foco em faturas de energia, local de instalação, padrão monofásico/trifásico e economia estimada.",
   },
   {
-    value: "infinie",
-    title: "Energia solar",
-    description: "Campos e filtros para instalacao, conta de luz, localidade e prazo.",
+    value: "consorcio-credito",
+    title: "Consórcio & Crédito",
+    description: "Foco em valor de crédito desejado, parcelas pretendidas, FGTS e tipo de bem (imóvel/automóvel).",
   },
   {
-    value: "generico",
-    title: "Modelo generico",
-    description: "Campos basicos para empresas que ainda nao tem segmentacao propria.",
+    value: "imobiliaria",
+    title: "Imobiliária & Corretores",
+    description: "Foco em interesse de compra ou locação, tipo de imóvel, dormitórios, localização e orçamento.",
+  },
+  {
+    value: "clinicas-saude",
+    title: "Clínicas & Saúde",
+    description: "Foco em agendamentos de consultas, especialidades médicas/odontológicas, convênios e sintomas principais.",
+  },
+  {
+    value: "estetica-beleza",
+    title: "Estética & Beleza",
+    description: "Foco em tratamentos estéticos de interesse, agendamento de procedimentos, avaliação e cuidados pessoais.",
+  },
+  {
+    value: "escolas-cursos",
+    title: "Escolas & Cursos",
+    description: "Foco em matrículas de novos alunos, cursos de interesse (idiomas, preparatórios, graduação) e período.",
+  },
+  {
+    value: "academias-fitness",
+    title: "Academias & Fitness",
+    description: "Foco em planos de assinatura, modalidade de interesse (musculação, pilates, lutas) e objetivos físicos.",
+  },
+  {
+    value: "restaurantes-delivery",
+    title: "Restaurantes & Delivery",
+    description: "Foco em pedidos recorrentes, reserva de mesas, cardápio digital e área de entrega.",
+  },
+  {
+    value: "lojas-ecommerce",
+    title: "Lojas & E-commerce",
+    description: "Foco em vendas de produtos físicos, vestuário, eletrônicos, catálogo de produtos e cupons de desconto.",
+  },
+  {
+    value: "advocacia-juridico",
+    title: "Advocacia & Jurídico",
+    description: "Foco em consultas jurídicas, área do direito (trabalhista, cível, família), andamento processual e prazos.",
+  },
+  {
+    value: "contabilidade",
+    title: "Contabilidade & Assessoria",
+    description: "Foco em abertura de empresas, migração de MEI/Simples, assessoria fiscal, trabalhista e declarações.",
+  },
+  {
+    value: "automotivo-concessionarias",
+    title: "Automotivo & Concessionárias",
+    description: "Foco em venda de veículos novos/seminovos, test drive, financiamento, troca com troco e revisões.",
+  },
+  {
+    value: "seguros",
+    title: "Seguros & Corretoras",
+    description: "Foco em cotação de seguros (auto, vida, residencial, empresarial), vigência e sinistros.",
+  },
+  {
+    value: "eventos",
+    title: "Eventos & Cerimonial",
+    description: "Foco em orçamento de festas, masamentos, buffet, decoração, data estimada e número de convidados.",
+  },
+  {
+    value: "tecnologia-saas",
+    title: "Tecnologia & SaaS",
+    description: "Foco em demonstração de software (SaaS), suporte técnico, planos corporativos e integrações.",
   },
 ] as const;
+
+type ChatbotModelValue = typeof CHATBOT_MODEL_OPTIONS[number]["value"];
 
 const ALL_TAB_KEYS = [
   "dashboard",
@@ -206,7 +268,7 @@ export default function Tenants() {
   const [search, setSearch] = useState("");
   const [formError, setFormError] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [chatbotModel, setChatbotModel] = useState<"outlier" | "infinie" | "generico">("outlier");
+  const [chatbotModel, setChatbotModel] = useState<ChatbotModelValue>("energia-solar");
   const [tenantsPage, setTenantsPage] = useState(1);
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const [tenantPendingDelete, setTenantPendingDelete] = useState<string | null>(null);
@@ -232,7 +294,7 @@ export default function Tenants() {
   const selectedModel = CHATBOT_MODEL_OPTIONS.find((option) => option.value === chatbotModel) || CHATBOT_MODEL_OPTIONS[0];
   const canSubmitTenant = canManageTenants && Boolean(name.trim()) && Boolean(tenantId.trim()) && !createTenant.isPending;
 
-  const handleModelChange = (value: "outlier" | "infinie" | "generico") => {
+  const handleModelChange = (value: ChatbotModelValue) => {
     setChatbotModel(value);
   };
 
@@ -367,7 +429,7 @@ export default function Tenants() {
       setDispatchWebhookUrl("");
       setDispatchWebhookToken("");
       setInboundBearerToken("");
-      setChatbotModel("outlier");
+      setChatbotModel("energia-solar");
       setTenantIdEdited(false);
       setCreateDialogOpen(false);
     } catch (submissionError) {
@@ -671,7 +733,7 @@ export default function Tenants() {
                       </div>
                       <Select
                         value={chatbotModel}
-                        onValueChange={(v) => handleModelChange(v as "outlier" | "infinie" | "generico")}
+                        onValueChange={(v) => handleModelChange(v as ChatbotModelValue)}
                         disabled={!canManageTenants || createTenant.isPending}
                       >
                         <SelectTrigger>

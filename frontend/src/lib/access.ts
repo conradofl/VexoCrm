@@ -213,7 +213,6 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "agente.view",
       "users.view",
       "users.manage",
-      "tenants.manage",
     ],
     internalPages: [
       "dashboard",
@@ -222,7 +221,6 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "whatsapp",
       "agente",
       "usuarios",
-      "empresas",
       "campanhas",
       "conexoes",
       "disparos",
