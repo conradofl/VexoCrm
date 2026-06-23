@@ -6,8 +6,10 @@
 //  - trigger no_reply    → verifica followup_replies; se respondeu → skipped
 //  - 3 tentativas com backoff de 30s; após todas: status "failed"
 import { Worker } from "bullmq";
-import { query } from "./db.js";
+import { query, getSupabase } from "./db.js";
 import { QUEUE_NAME, getRedisConnection, getFollowupQueue } from "./queue.js";
+import Groq from "groq-sdk";
+import { ResendProvider } from "../providers/ResendProvider.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -116,12 +118,91 @@ async function processJob(job) {
   console.log(log, "mensagem enviada via Evolution API");
 }
 
+async function processEventJourneyJob(job) {
+  const { companyId, leadId, eventName, journeyId, channel, aiPrompt, context } = job.data;
+  const log = `[event-journey][${eventName}][${leadId}]`;
+
+  console.log(log, "Processando disparo de jornada...");
+
+  try {
+    const supabase = getSupabase();
+
+    // Buscar dados do Lead
+    const { data: leadData } = await supabase
+      .from('leads_infinie') // Usando tabela base de leads ou a view, vamos puxar da base principal
+      .select('name, phone, email, status')
+      .eq('id', leadId)
+      .maybeSingle();
+      
+    // Buscar config da empresa
+    const { data: companyData } = await supabase
+      .from('followup_companies')
+      .select('evolution_instance, name')
+      .eq('id', companyId)
+      .maybeSingle();
+
+    if (!leadData) {
+      console.log(log, "Lead não encontrado. Ignorando.");
+      return;
+    }
+
+    let finalMessage = "";
+
+    // Gerar mensagem com IA se houver prompt
+    if (aiPrompt && process.env.GROQ_API_KEY) {
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+      const systemMsg = "Você é um especialista em vendas B2C. Escreva uma mensagem persuasiva baseada na diretriz fornecida. Apenas o texto da mensagem final.";
+      const userMsg = `Diretriz: ${aiPrompt}\n\nContexto do Lead:\nNome: ${leadData.name}\nStatus atual: ${leadData.status}\n\nEscreva a mensagem (sem aspas ou explicações extras):`;
+      
+      const completion = await groq.chat.completions.create({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: systemMsg },
+          { role: "user", content: userMsg },
+        ],
+        temperature: 0.5,
+        max_tokens: 512,
+      });
+
+      finalMessage = completion.choices[0]?.message?.content?.trim() || "";
+    } else {
+      // Fallback sem IA
+      finalMessage = aiPrompt || `Olá ${leadData.name}, estamos passando para checar como as coisas estão.`;
+    }
+
+    // Envio pelo Canal
+    if (channel === "email" && leadData.email) {
+      await ResendProvider.sendEmail(
+        leadData.email,
+        `Sobre nosso contato na ${companyData?.name || 'Vexo'}`,
+        `<div style="font-family: sans-serif; font-size: 14px; white-space: pre-wrap;">${finalMessage}</div>`
+      );
+      console.log(log, "Email disparado com sucesso via Resend!");
+    } else {
+      // Fallback pra WhatsApp (Evolution)
+      if (companyData && companyData.evolution_instance && leadData.phone) {
+        await sendViaEvolution(companyData.evolution_instance, leadData.phone, finalMessage);
+        console.log(log, "WhatsApp disparado com sucesso via Evolution!");
+      } else {
+        console.log(log, "Faltam dados de instância ou telefone para WhatsApp.");
+      }
+    }
+  } catch (err) {
+    console.error(log, "Falha ao processar jornada:", err);
+    throw err;
+  }
+}
+
 export function startFollowupWorker() {
   const worker = new Worker(
     QUEUE_NAME,
     async (job) => {
       try {
-        await processJob(job);
+        if (job.name === "process-event-journey") {
+          await processEventJourneyJob(job);
+        } else {
+          await processJob(job);
+        }
       } catch (err) {
         const { jobId } = job.data || {};
         const msg = err instanceof Error ? err.message : String(err);

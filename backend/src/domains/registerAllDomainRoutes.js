@@ -74,6 +74,7 @@ import {
 
 import { routeDeps } from "../http/routeDeps.js";
 import { registerFollowupRoutes } from "../followup/routes.js";
+import { registerJourneysRoutes } from "../followup/journeysRoutes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { query as fupQuery } from "../followup/db.js";
 import { getFollowupQueue } from "../followup/queue.js";
@@ -8415,6 +8416,7 @@ export function registerAllDomainRoutes(app) {
 
   // ─── Módulo de Follow-up (BullMQ + campanhas independentes) ───────────────
   registerFollowupRoutes(app, requireFirebaseAuth);
+  registerJourneysRoutes(app, requireFirebaseAuth);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth);
