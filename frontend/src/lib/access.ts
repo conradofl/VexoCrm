@@ -23,6 +23,9 @@ export const INTERNAL_PAGE_ORDER = [
   "aquecimento",
   "relatorios",
   "apresentacao-gd",
+  "eventos",
+  "relacionamento",
+  "livpub",
 ] as const;
 
 export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];
@@ -227,6 +230,9 @@ const PRESET_DEFAULTS: Record<SystemAccessPreset, PresetDefaults> = {
       "aquecimento",
       "relatorios",
       "onboarding-wizard",
+      "eventos",
+      "relacionamento",
+      "livpub",
     ],
     allowedViews: [],
   },
@@ -578,6 +584,9 @@ export function isInternalPageAllowedForClient(
     aquecimento: "aquecimento",
     relatorios: "relatorios",
     "apresentacao-gd": "apresentacao-gd",
+    eventos: "eventos",
+    relacionamento: "relacionamento",
+    livpub: "livpub",
   };
 
   const tabKey = pageToTabKey[page];
@@ -608,6 +617,9 @@ export function isPathAllowedForClient(
   else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
   else if (path.includes("/crm/apresentacao-gd")) tabKey = "apresentacao-gd";
   else if (path.includes("/crm/apresentacao")) tabKey = "apresentacao";
+  else if (path.includes("/crm/eventos")) tabKey = "eventos";
+  else if (path.includes("/crm/relacionamento")) tabKey = "relacionamento";
+  else if (path.includes("/crm/livpub")) tabKey = "livpub";
   else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
   else if (path.includes("/crm/usuarios")) tabKey = "usuarios";
 
