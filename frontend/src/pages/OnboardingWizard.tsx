@@ -236,15 +236,15 @@ export default function OnboardingWizard() {
                   </div>
 
                   <div>
-                    <h3 className="text-xl font-bold mb-4 border-b border-slate-200 dark:border-slate-800 pb-2">Como configurar sua Máquina:</h3>
+                    <h3 className="text-xl font-bold mb-4 border-b border-slate-200 dark:border-slate-800 pb-2">Como configurar sua Máquina (Event-Driven):</h3>
                     
                     <div className="space-y-6">
                       <div className="flex gap-4">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold dark:bg-indigo-900 dark:text-indigo-300">1</div>
                         <div>
-                          <h4 className="font-bold text-lg">Crie uma Regra de Cadência</h4>
+                          <h4 className="font-bold text-lg">Ative as Jornadas Automatizadas</h4>
                           <p className="text-sm mt-1">
-                            Vá em <strong>Regras de Cadência</strong> (dentro de Follow-up). Defina a condição. Por exemplo, uma regra chamada "Proposta Enviada".
+                            Acesse a aba <strong>Jornadas Automatizadas</strong> no Módulo de Follow-up. Lá você encontra gatilhos prontos como "Novo Lead", "Agendamento", "Proposta Enviada" ou "No-Show". Ligue os interruptores das jornadas que fazem sentido para o seu funil.
                           </p>
                         </div>
                       </div>
@@ -252,12 +252,10 @@ export default function OnboardingWizard() {
                       <div className="flex gap-4">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold dark:bg-indigo-900 dark:text-indigo-300">2</div>
                         <div>
-                          <h4 className="font-bold text-lg">Adicione os Estágios (Mensagens)</h4>
+                          <h4 className="font-bold text-lg">Treine a IA da Jornada</h4>
                           <p className="text-sm mt-1">
-                            Dentro da regra, você vai criar as mensagens que serão engatilhadas nos dias subsequentes:<br/><br/>
-                            • <strong>Dia 1:</strong> <em>"Olá {"{{nome}}"}, você conseguiu olhar a proposta que te enviei ontem?"</em><br/>
-                            • <strong>Dia 3:</strong> <em>"Ei {"{{nome}}"}, alguma dúvida sobre o documento?"</em><br/>
-                            • <strong>Dia 7 (Despedida):</strong> <em>"Como não tive retorno, estou fechando seu atendimento. Se precisar no futuro, me chame."</em>
+                            Clique em <strong>Configurar</strong> ao lado da jornada. Defina quanto tempo o sistema deve aguardar após o evento e escreva o "Prompt" que a IA usará para gerar a mensagem. <br/><br/>
+                            A vantagem da IA é que as mensagens nunca serão genéricas. O robô criará uma cobrança humanizada e contextualizada.
                           </p>
                         </div>
                       </div>
@@ -265,9 +263,9 @@ export default function OnboardingWizard() {
                       <div className="flex gap-4">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold dark:bg-indigo-900 dark:text-indigo-300">3</div>
                         <div>
-                          <h4 className="font-bold text-lg">Injete os Leads na Fila</h4>
+                          <h4 className="font-bold text-lg">Acompanhe na Fila Unificada</h4>
                           <p className="text-sm mt-1">
-                            Sempre que um vendedor seu enviar uma proposta, ele pega o contato e clica em "Adicionar ao Follow-up", escolhendo a regra "Proposta Enviada". Pronto. O motor assume daqui pra frente e o vendedor pode esquecer aquele lead até ele responder.
+                            Quando o evento ocorrer (ex: mover o card do lead para "Proposta Enviada" no Kanban), a jornada entra em ação. Se o cliente responder a qualquer momento, a jornada é pausada instantaneamente para você assumir o chat!
                           </p>
                         </div>
                       </div>
