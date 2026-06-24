@@ -65,6 +65,7 @@ A planilha é compartilhada com o **time de marketing** (tráfego, criativos, ca
 - Configuração da estrutura base do sistema (fundação técnica)
 - Criação do módulo de Eventos (banco de dados e back-end)
 - Preparação dos campos de segmentação do lead (nascimento, perfil, visita)
+- Configuração da segmentação por perfil musical no catálogo
 - Setup do WhatsApp centralizador (instância Evolution)
 - Coleta de acessos, chaves e credenciais
 - Coleta da base de dados inicial (21k leads)
@@ -73,7 +74,6 @@ A planilha é compartilhada com o **time de marketing** (tráfego, criativos, ca
 - WhatsApp central ativa e validada no CRM
 - Importação e limpeza da base de 21.000 contatos
 - Esteira 1: Pré-venda de eventos
-- Segmentação por perfil musical no catálogo
 - Início da esteira de Reativação
 
 **Semana 03 — Esteiras Restantes + IA:**
