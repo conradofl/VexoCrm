@@ -411,7 +411,7 @@ export function AppSidebar() {
   const isModoAllowed = (m: Modo) => {
     const tools = MODULOS[m].ferramentas;
     return tools.some(
-      (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+      (f) => canAccessInternalPage(f.page) && (user?.role === "internal" || isPathAllowedForClient(f.url, allowedTabs))
     );
   };
 
@@ -433,14 +433,14 @@ export function AppSidebar() {
       }
       return f;
     })
-    .filter((f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs));
+    .filter((f) => canAccessInternalPage(f.page) && (user?.role === "internal" || isPathAllowedForClient(f.url, allowedTabs)));
 
   const visibleConfig = CONFIG_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+    (f) => canAccessInternalPage(f.page) && (user?.role === "internal" || isPathAllowedForClient(f.url, allowedTabs))
   );
 
   const visibleAjuda = AJUDA_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+    (f) => canAccessInternalPage(f.page) && (user?.role === "internal" || isPathAllowedForClient(f.url, allowedTabs))
   );
 
   const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
