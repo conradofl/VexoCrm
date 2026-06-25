@@ -27,6 +27,8 @@ import {
   Sparkles,
   UserPlus,
   Wifi,
+  Calendar,
+  Heart,
   Send,
   Flame,
   BarChart2,
@@ -80,6 +82,10 @@ const MODULOS: Record<Modo, Modulo> = {
       { key: "inteligencia",   label: "Int. Comercial",     url: "/crm/inteligencia-comercial", icon: LineChart,       page: "inteligencia-comercial" },
       { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
       { key: "followup",       label: "Follow-up",          url: "/crm/followup",               icon: ListChecks,      page: "fila-de-followup" },
+      { key: "inbound-agents", label: "Assistentes Inbound", url: "/crm/inbound-agents",         icon: Bot,             page: "agente" },
+      { key: "livpub",         label: "Painel LivPub",      url: "/crm/livpub",                 icon: Sparkles,        page: "livpub",              badge: "LIV" },
+      { key: "eventos",        label: "Eventos",            url: "/crm/eventos",                icon: Calendar,        page: "eventos" },
+      { key: "relacionamento", label: "Relacionamento",     url: "/crm/relacionamento",         icon: Heart,           page: "relacionamento" },
     ],
   },
   disparos: {
@@ -107,7 +113,7 @@ const CONFIG_ITEMS = [
 // ─── Educação & Ajuda ──────────────────────────────────────────────────────────
 const AJUDA_ITEMS = [
   { key: "onboarding",     label: "Treinamento Vexo",    url: "/crm/onboarding",       icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
-  { key: "apresentacao",   label: "Demonstração Vexo",   url: "/crm/apresentacao",     icon: Sparkles,    page: "onboarding-wizard" as InternalPage },
+  { key: "apresentacao",   label: "Demonstração Vexo",   url: "/crm/apresentacao",     icon: Sparkles,    page: "apresentacao" as InternalPage },
   { key: "apresentacao-gd",label: "Apresentação GD",     url: "/crm/apresentacao-gd",  icon: Briefcase,   page: "apresentacao-gd" as InternalPage },
   { key: "chatbot-docs",   label: "Chatbot Docs",        url: "/crm/chatbot-docs",     icon: BookOpen,    page: "chatbot-docs" as InternalPage },
 ];
@@ -311,7 +317,7 @@ const COLOR_PRESETS = {
 
 // ─── AppSidebar ───────────────────────────────────────────────────────────────
 export function AppSidebar() {
-  const { logout, canAccessInternalPage, isAdminUser, user, accessProfile } = useAuth();
+  const { logout, canAccessInternalPage, isAdminUser, user, accessProfile, isInternalUser } = useAuth();
   const crmClient = useOptionalCrmClient();
   const selectedClientId = crmClient?.selectedClientId || "global";
 
@@ -405,7 +411,7 @@ export function AppSidebar() {
   const isModoAllowed = (m: Modo) => {
     const tools = MODULOS[m].ferramentas;
     return tools.some(
-      (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+      (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
     );
   };
 
@@ -427,14 +433,14 @@ export function AppSidebar() {
       }
       return f;
     })
-    .filter((f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs));
+    .filter((f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs)));
 
   const visibleConfig = CONFIG_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+    (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
   );
 
   const visibleAjuda = AJUDA_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+    (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
   );
 
   const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;

@@ -120,7 +120,10 @@ export async function ensureLeadClientTable(pgClientOrPool, tenantId, schemaType
       mensagem TEXT,
       finalizado BOOLEAN DEFAULT false,
       spin_fase TEXT CHECK (spin_fase IS NULL OR spin_fase IN ('situacao', 'problema', 'implicacao', 'necessidade')),
-      dados JSONB NOT NULL DEFAULT '{}'::jsonb,${extraColumns}
+      dados JSONB NOT NULL DEFAULT '{}'::jsonb,
+      data_nascimento DATE,
+      ultima_visita DATE,
+      perfil_musical TEXT,${extraColumns}
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now(),
       UNIQUE (client_id, telefone)

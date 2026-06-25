@@ -5,6 +5,7 @@
 import cron from "node-cron";
 import Groq from "groq-sdk";
 import { query } from "./db.js";
+import { buildDefaultSegmentationConfig } from "../server.js";
 
 // ─── Groq client (lazy — só instanciado se GROQ_API_KEY existir) ──────────────
 
@@ -17,6 +18,45 @@ function getGroq() {
 }
 
 // ─── Busca candidatos por empresa/campanha ────────────────────────────────────
+
+async function findLivPubCandidates(companyId) {
+  const config = buildDefaultSegmentationConfig("livpub");
+  const hasVisita = config.kpis.some(k => k.field === 'ultima_visita' && k.enabled);
+  const hasNascimento = config.kpis.some(k => k.field === 'data_nascimento' && k.enabled);
+
+  if (!hasVisita && !hasNascimento) return [];
+
+  const { rows: tables } = await query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'leads_%'`);
+  
+  let candidates = [];
+  for (const { tablename } of tables) {
+    try {
+      if (hasNascimento) {
+        const { rows: bday } = await query(`
+          SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime
+            FROM ${tablename}
+           WHERE data_nascimento IS NOT NULL
+             AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE)
+             AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)
+        `);
+        candidates.push(...bday.map(r => ({ ...r, reasonType: "livpub_aniversario" })));
+      }
+
+      if (hasVisita) {
+        const { rows: inativos } = await query(`
+          SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime
+            FROM ${tablename}
+           WHERE ultima_visita IS NOT NULL 
+             AND ultima_visita < NOW() - INTERVAL '6 months'
+        `);
+        candidates.push(...inativos.map(r => ({ ...r, reasonType: "livpub_inativo" })));
+      }
+    } catch (e) {
+      // Ignora erro caso a tabela ainda não tenha as colunas migrada
+    }
+  }
+  return candidates;
+}
 
 async function findCandidates(companyId, campaignId) {
   // 1. Leads que entraram na campanha mas NUNCA receberam nenhum job
@@ -87,12 +127,16 @@ const REASON_LABELS = {
   never_contacted: "Lead sem contato inicial desde a entrada na campanha",
   no_reply_48h:    "Sem resposta há mais de 48h após os envios",
   jobs_failed:     "Envios anteriores falharam — reabordagem sugerida",
+  livpub_aniversario: "Esteira 3: Aniversariante do dia",
+  livpub_inativo:     "Esteira 4: Cliente inativo (> 6 meses)",
 };
 
 const REASON_CONTEXT = {
   never_contacted: "Este lead entrou na campanha mas ainda não recebeu nenhuma mensagem.",
   no_reply_48h:    "Este lead recebeu mensagens há mais de 48 horas e não respondeu.",
   jobs_failed:     "As tentativas de envio anteriores falharam para este lead.",
+  livpub_aniversario: "Este cliente faz aniversário hoje. Ofereça um drink ou cortesia.",
+  livpub_inativo:     "Este cliente não frequenta os eventos há mais de 6 meses. Tente reativá-lo.",
 };
 
 async function generateSuggestion(lead, templates, reasonType) {
@@ -179,8 +223,10 @@ async function runAutomationEngine() {
         if (!templates.length) continue;
 
         const candidates = await findCandidates(company_id, campaign_id);
+        const livpubCandidates = await findLivPubCandidates(company_id);
+        const allCandidates = [...candidates, ...livpubCandidates];
 
-        for (const lead of candidates) {
+        for (const lead of allCandidates) {
           // Deduplicação: já existe sugestão pendente para este telefone nas últimas 24h?
           const { rows: existing } = await query(
             `SELECT id FROM followup_suggestions

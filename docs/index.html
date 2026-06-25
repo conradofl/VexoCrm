@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Liv Pub × Geração Digital — Plano de Crescimento</title>
+<meta name="description" content="De 16 mil contatos a uma máquina de faturamento. Proposta de crescimento da Liv Pub.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#08080C; --bg-soft:#0E0E18; --surface:#15151F; --surface-2:#1D1D2B; --line:#2A2A3D;
+  --txt:#F5F5FA; --muted:#9B9BB2; --accent:#FF2D8E; --accent-2:#FF6FB0;
+  --money:#2EE6A6; --danger:#FF4D5E;
+  --disp:'Space Grotesk',sans-serif; --body:'Inter',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:var(--body); color:var(--txt); background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+}
+/* glows de fundo */
+.bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+   radial-gradient(900px 520px at 82% -8%,rgba(255,45,142,.16),transparent 60%),
+   radial-gradient(760px 480px at -8% 108%,rgba(255,111,176,.10),transparent 60%),
+   var(--bg);}
+.grain{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+/* topbar */
+.topbar{position:fixed;top:0;left:0;right:0;z-index:30;display:flex;align-items:center;justify-content:space-between;
+  padding:16px 26px;background:linear-gradient(180deg,rgba(8,8,12,.85),transparent);}
+.lockup{display:flex;align-items:center;gap:14px}
+.lockup .logo-img{height:26px;width:auto;display:block}
+.lockup .x{color:var(--muted);font-size:13px}
+.lockup .gd{display:flex;align-items:center;gap:7px;font-family:var(--disp);font-size:13px;letter-spacing:.5px;color:var(--muted)}
+.lockup .gd b{color:var(--accent-2);font-weight:600}
+.liv-word{font-family:var(--disp);font-weight:700;font-size:22px;letter-spacing:.5px;line-height:1;display:flex;align-items:baseline;gap:6px}
+.liv-word small{font-size:10px;letter-spacing:4px;color:var(--muted);font-weight:600}
+.counter{font-family:var(--disp);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.counter b{color:var(--txt)}
+
+/* deck */
+.deck{position:relative;z-index:5;height:100%}
+.track{display:flex;height:100%;transition:transform .7s cubic-bezier(.7,0,.2,1)}
+.slide{min-width:100vw;height:100%;overflow-y:auto;display:flex;
+  padding:90px 26px 110px;position:relative}
+.inner{width:100%;max-width:920px;margin:auto}
+.slide.soft{background:var(--bg-soft)}
+
+/* labels & headings */
+.kick{color:var(--accent);font-family:var(--disp);font-size:13px;font-weight:600;letter-spacing:3px;text-transform:uppercase;margin-bottom:18px}
+.kick.danger{color:var(--danger)} .kick.money{color:var(--money)}
+h1.hero{font-family:var(--disp);font-weight:700;font-size:clamp(34px,6vw,68px);line-height:1.04;letter-spacing:-1px}
+h2.title{font-family:var(--disp);font-weight:700;font-size:clamp(26px,4vw,40px);line-height:1.1;letter-spacing:-.5px}
+.lead{color:var(--muted);font-size:clamp(16px,2.2vw,20px);line-height:1.5;margin-top:18px;max-width:680px}
+.accent{color:var(--accent)} .money{color:var(--money)} .white{color:var(--txt)}
+.under{background:linear-gradient(transparent 62%,rgba(255,45,142,.35) 0);}
+
+/* entrance animations */
+.anim{opacity:0;transform:translateY(26px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1)}
+.slide.active .anim{opacity:1;transform:none}
+.slide.active .anim.d1{transition-delay:.08s}
+.slide.active .anim.d2{transition-delay:.18s}
+.slide.active .anim.d3{transition-delay:.30s}
+.slide.active .anim.d4{transition-delay:.42s}
+.slide.active .anim.d5{transition-delay:.54s}
+.slide.active .anim.d6{transition-delay:.66s}
+
+/* capa */
+.cover{text-align:center}
+.cover .biglogo{margin-bottom:30px}
+.cover .liv-hero{font-family:var(--disp);font-weight:700;font-size:clamp(60px,14vw,150px);line-height:.9;letter-spacing:-2px;display:inline-flex;align-items:baseline;gap:14px}
+.cover .liv-hero small{font-size:clamp(16px,3vw,30px);letter-spacing:10px;color:var(--muted);font-weight:600}
+.cover .logo-img-hero{max-height:170px;width:auto;filter:drop-shadow(0 0 36px rgba(255,45,142,.30))}
+.pill{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);background:rgba(255,255,255,.03);
+  padding:9px 16px;border-radius:100px;font-size:13px;color:var(--muted);margin-bottom:26px}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--money);box-shadow:0 0 10px var(--money)}
+
+/* contador gigante */
+.numbig{font-family:var(--disp);font-weight:700;font-size:clamp(80px,20vw,220px);line-height:.85;letter-spacing:-4px;
+  background:linear-gradient(180deg,#fff,#bdbdcf);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  text-shadow:0 0 60px rgba(255,45,142,.25)}
+.numsub{font-size:clamp(16px,2.5vw,22px);color:var(--muted);margin-top:8px}
+.chips{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:34px}
+.chip{display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 16px;font-size:14px}
+.chip i{font-style:normal;font-size:18px}
+
+/* grid de cards */
+.cards{display:grid;gap:16px;margin-top:30px}
+.cards.c2{grid-template-columns:repeat(2,1fr)}
+.cards.c3{grid-template-columns:repeat(3,1fr)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px;transition:.25s}
+.card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.card .ic{font-size:26px;margin-bottom:12px}
+.card h3{font-family:var(--disp);font-size:18px;margin-bottom:7px}
+.card p{color:var(--muted);font-size:14px;line-height:1.45}
+.card.dor{border-color:rgba(255,77,94,.25)}
+.card.dor:hover{border-color:var(--danger);box-shadow:0 20px 50px rgba(255,77,94,.12)}
+
+/* esteiras */
+.esteira{display:flex;align-items:center;gap:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:11px;transition:.2s}
+.esteira:hover{transform:translateX(6px);border-color:var(--accent)}
+.esteira .ic{font-size:24px;flex:none;width:42px;height:42px;display:grid;place-items:center;background:rgba(255,45,142,.1);border-radius:11px}
+.esteira .tx{flex:1}
+.esteira .tx b{font-family:var(--disp);font-size:15px}
+.esteira .tx span{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+.esteira .res{color:var(--money);font-size:13px;font-weight:600;text-align:right;flex:none;max-width:160px}
+
+/* jornada whatsapp */
+.phone{max-width:380px;margin:24px auto 0;background:#0b141a;border:1px solid var(--line);border-radius:26px;padding:14px;box-shadow:0 30px 70px rgba(0,0,0,.55)}
+.phone .wahead{display:flex;align-items:center;gap:10px;padding:6px 6px 12px;border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:12px}
+.phone .av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:14px}
+.phone .wahead b{font-size:14px} .phone .wahead small{display:block;color:var(--money);font-size:11px}
+.bubbles{display:flex;flex-direction:column;gap:9px;min-height:330px}
+.bub{max-width:80%;padding:9px 13px;border-radius:14px;font-size:13.5px;line-height:1.4;opacity:0;transform:translateY(12px) scale(.97);transition:.45s}
+.bub.show{opacity:1;transform:none}
+.bub.in{align-self:flex-start;background:#202c33;border-top-left-radius:4px}
+.bub.out{align-self:flex-end;background:#005c4b;border-top-right-radius:4px}
+.bub .t{display:block;text-align:right;font-size:10px;color:rgba(255,255,255,.5);margin-top:3px}
+.journey-cap{text-align:center;color:var(--muted);font-size:15px;margin-top:16px;min-height:46px}
+/* jornada multi-conversa */
+.convo{display:none}.convo.on{display:block}
+.convo-nav{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:16px}
+.mini-arrow{width:36px;height:36px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--txt);cursor:pointer;display:grid;place-items:center;font-size:17px;transition:.2s}
+.mini-arrow:hover{border-color:var(--accent);color:var(--accent);box-shadow:0 0 14px rgba(255,45,142,.3)}
+.convo-label{font-family:var(--disp);font-size:13px;color:var(--muted);min-width:185px;text-align:center}
+.convo-label b{color:var(--accent-2)}
+.bub.tmpl{max-width:90%}
+.tmpl-btn{display:block;width:100%;margin-top:9px;padding:8px;background:transparent;border:none;border-top:1px solid rgba(255,255,255,.14);color:#53bdeb;font-size:13.5px;font-weight:600;cursor:pointer;font-family:var(--body)}
+.tmpl-btn:hover{color:var(--accent-2)}
+.guestcard{align-self:flex-start;background:#202c33;border-radius:14px;border-top-left-radius:4px;padding:11px 13px;max-width:82%;font-size:13px;opacity:0;transform:translateY(12px) scale(.97);transition:.45s}
+.guestcard.show{opacity:1;transform:none}
+.guestcard .gtitle{font-weight:600;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.guestrow{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:14px;opacity:0;transform:translateX(-8px);transition:.35s}
+.guestrow.show{opacity:1;transform:none}
+.guestrow .chk{color:var(--money);font-weight:700}
+.compose{display:flex;gap:8px;margin-top:11px}
+.compose input{flex:1;background:#0c0c16;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:9px 11px;font-size:13px;font-family:var(--body)}
+.compose input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(255,45,142,.2)}
+.compose button{width:38px;flex:none;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:18px;font-weight:700;cursor:pointer;font-family:var(--body);transition:.2s}
+.compose button:hover{box-shadow:0 0 12px rgba(255,45,142,.5)}
+.guest-done{display:block;width:100%;margin-top:9px;background:transparent;border:1px solid var(--money);color:var(--money);border-radius:10px;padding:8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--body);transition:.2s}
+.guest-done:hover{background:rgba(46,230,166,.12)}
+
+/* calculadora */
+.calc{display:grid;grid-template-columns:340px 1fr;gap:20px;margin-top:8px}
+@media(max-width:860px){.calc{grid-template-columns:1fr}}
+.cpanel{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px}
+.cpanel h4{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:16px}
+.fld{margin-bottom:15px}
+.fld label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:6px}
+.fld label b{color:var(--txt);font-variant-numeric:tabular-nums}
+.iw{position:relative}.iw .pre{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:15px}
+input[type=number]{width:100%;background:#0C0C16;border:1px solid var(--line);border-radius:11px;color:var(--txt);padding:12px 13px 12px 32px;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;font-family:var(--body)}
+input[type=number].np{padding-left:13px}
+input[type=number]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,45,142,.2)}
+input[type=range]{width:100%;accent-color:var(--accent);margin-top:5px}
+.scn-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:9px}
+.scn{background:#0C0C16;border:1px solid var(--line);border-radius:11px;padding:10px 5px;text-align:center;cursor:pointer;transition:.15s}
+.scn small{display:block;color:var(--muted);font-size:10px;margin-bottom:2px}
+.scn b{font-size:15px}.scn:hover{border-color:var(--accent-2)}
+.scn.active{border-color:var(--accent);background:rgba(255,45,142,.12)}
+.note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
+details.adv{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+details.adv summary{cursor:pointer;font-size:12px;color:var(--accent-2);list-style:none}
+details.adv summary::-webkit-details-marker{display:none}
+.adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.toggle{display:flex;align-items:center;justify-content:space-between;background:#0C0C16;border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-top:9px}
+.toggle span{font-size:12.5px}.toggle small{display:block;color:var(--muted);font-size:10px;margin-top:1px}
+.sw{position:relative;width:42px;height:24px;flex:none}.sw input{opacity:0;width:0;height:0}
+.sw .sl{position:absolute;inset:0;background:#2A2A3D;border-radius:20px;transition:.2s;cursor:pointer}
+.sw .sl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked + .sl{background:var(--accent)}.sw input:checked + .sl:before{transform:translateX(18px)}
+.cres .hero-num{background:linear-gradient(135deg,rgba(255,45,142,.16),rgba(255,111,176,.08));border:1px solid var(--accent);border-radius:18px;padding:24px;text-align:center;margin-bottom:14px}
+.cres .hero-num .l{color:var(--accent-2);font-size:12px;text-transform:uppercase;letter-spacing:2px;font-weight:700}
+.cres .hero-num .v{font-family:var(--disp);font-weight:800;font-size:clamp(40px,7vw,58px);margin:6px 0 2px;font-variant-numeric:tabular-nums}
+.cres .hero-num .s{color:var(--muted);font-size:13px}.cres .hero-num .s b{color:var(--money)}
+.cstats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:14px}
+.cstat{background:#0C0C16;border:1px solid var(--line);border-radius:13px;padding:14px}
+.cstat .k{color:var(--muted);font-size:11px;margin-bottom:5px}.cstat .v{font-family:var(--disp);font-size:23px;font-weight:700;font-variant-numeric:tabular-nums}
+.cstat .v.money{color:var(--money)}.cstat .v.acc{color:var(--accent-2)}
+.cbox{background:#0C0C16;border:1px solid var(--line);border-radius:13px;padding:15px}
+.cbox h5{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:10px}
+.crow{display:flex;justify-content:space-between;padding:6px 0;font-size:13.5px;border-bottom:1px dashed var(--line)}
+.crow:last-child{border:none}.crow span{color:var(--muted)}.crow b{font-variant-numeric:tabular-nums}
+.crow.tt{margin-top:5px;padding-top:10px;border-top:1px solid var(--line)}.crow.tt b{color:var(--accent)}
+.cbar{height:12px;border-radius:7px;background:#0C0C16;border:1px solid var(--line);margin:13px 0 5px;overflow:hidden;display:flex}
+.cbar .f{background:linear-gradient(90deg,var(--money),#19e3ff);height:100%}.cbar .c{background:linear-gradient(90deg,#5a2a3a,var(--accent));height:100%}
+
+/* cenários */
+.scen3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:30px}
+.scol{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px;text-align:center;min-width:0}
+.scol.mid{border-color:var(--accent);box-shadow:0 0 30px rgba(255,45,142,.12);transform:scale(1.04)}
+.scol .nm{font-family:var(--disp);font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.scol .pc{font-size:13px;color:var(--accent-2);margin:4px 0 14px}
+.scol .v{font-family:var(--disp);font-weight:800;font-size:32px;color:var(--money);font-variant-numeric:tabular-nums}
+.scol .vy{font-size:13px;color:var(--muted);margin-top:6px}
+
+/* fases / timeline */
+.timeline{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:30px}
+@media(max-width:760px){.timeline{grid-template-columns:1fr}}
+.phase{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px;position:relative}
+.phase .badge{display:inline-block;font-family:var(--disp);font-size:12px;font-weight:700;color:var(--accent);border:1px solid var(--accent);border-radius:100px;padding:4px 12px;margin-bottom:14px}
+.phase h3{font-family:var(--disp);font-size:20px;margin-bottom:10px}
+.phase ul{list-style:none;display:flex;flex-direction:column;gap:8px}
+.phase li{font-size:14px;color:var(--muted);padding-left:22px;position:relative}
+.phase li:before{content:"›";position:absolute;left:6px;color:var(--accent);font-weight:700}
+.phase .when{margin-top:14px;font-size:12px;color:var(--accent-2);font-weight:600}
+
+/* investimento */
+.invest{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+@media(max-width:760px){.invest{grid-template-columns:1fr}}
+.icard{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:26px}
+.icard .t{font-family:var(--disp);font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+.icard .v{font-family:var(--disp);font-weight:800;font-size:clamp(30px,5vw,44px)}
+.icard .v small{font-size:18px;color:var(--muted);font-weight:500}
+.icard p{color:var(--muted);font-size:14px;margin-top:8px}
+.icard.hot{border-color:var(--accent);background:linear-gradient(180deg,rgba(255,45,142,.08),var(--surface))}
+.anchor{text-align:center;margin-top:24px;font-family:var(--disp);font-size:clamp(18px,3vw,26px);font-weight:600}
+
+/* cta */
+.cta-steps{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin:30px 0}
+.cstep{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 22px;text-align:center;min-width:170px}
+.cstep .n{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-family:var(--disp);font-weight:700;margin:0 auto 10px}
+.cstep b{font-size:14px}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--accent);color:#fff;border:none;border-radius:13px;padding:16px 30px;font-family:var(--disp);font-size:17px;font-weight:600;cursor:pointer;transition:.2s;text-decoration:none}
+.btn:hover{box-shadow:0 0 30px rgba(255,45,142,.55);transform:translateY(-2px)}
+/* selo de parceria (fechamento) */
+.sealed{position:fixed;inset:0;z-index:60;background:rgba(8,8,12,.96);display:none;align-items:center;justify-content:center;text-align:center;padding:30px;overflow:hidden}
+.sealed.on{display:flex;animation:fadein .45s ease}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.seal-inner{position:relative;z-index:2;max-width:720px;animation:sealpop .6s cubic-bezier(.2,.8,.2,1)}
+@keyframes sealpop{from{opacity:0;transform:translateY(24px) scale(.96)}to{opacity:1;transform:none}}
+.seal-logos{display:flex;align-items:center;justify-content:center;gap:28px;margin-bottom:30px;flex-wrap:wrap}
+.seal-logos img{max-height:96px;width:auto;filter:drop-shadow(0 0 26px rgba(255,45,142,.32))}
+.seal-logos .x{font-family:var(--disp);font-size:36px;color:var(--accent);text-shadow:0 0 24px rgba(255,45,142,.6)}
+.sealed h2{font-family:var(--disp);font-weight:700;font-size:clamp(28px,5vw,46px);line-height:1.1}
+.sealed p{color:var(--muted);font-size:clamp(15px,2.2vw,19px);margin-top:14px}
+.seal-close{margin-top:30px;background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:10px 20px;font-size:13px;cursor:pointer;font-family:var(--body);transition:.2s}
+.seal-close:hover{border-color:var(--accent);color:var(--txt)}
+.confetti{position:absolute;top:-24px;width:9px;height:15px;border-radius:1px;z-index:1;animation:confall linear forwards}
+@keyframes confall{to{transform:translateY(106vh) rotate(720deg);opacity:.6}}
+
+/* nav */
+.nav{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;align-items:center;justify-content:space-between;padding:16px 26px;
+  background:linear-gradient(0deg,rgba(8,8,12,.9),transparent)}
+.dots{display:flex;gap:7px;align-items:center}
+.dot-n{width:8px;height:8px;border-radius:50%;background:var(--line);border:none;cursor:pointer;transition:.2s;padding:0}
+.dot-n.active{background:var(--accent);width:22px;border-radius:5px}
+.arrows{display:flex;gap:10px}
+.arrow{width:44px;height:44px;border-radius:12px;background:var(--surface);border:1px solid var(--line);color:var(--txt);font-size:18px;cursor:pointer;transition:.2s;display:grid;place-items:center}
+.arrow:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.arrow:disabled{opacity:.3;cursor:default}
+.hint{font-size:11px;color:var(--muted)}
+.progress{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--accent-2));z-index:40;transition:width .7s cubic-bezier(.7,0,.2,1)}
+@media(max-width:600px){.hint{display:none}.lockup .x,.lockup .gd{display:none}}
+/* ===== MOBILE ===== */
+@media(max-width:680px){
+  .slide{padding:72px 14px 132px}
+  h1.hero{font-size:clamp(27px,7.6vw,40px)}
+  h2.title{font-size:clamp(22px,6vw,30px)}
+  .lead{font-size:15px}
+  .kick{margin-bottom:14px}
+  .cards.c2,.cards.c3{grid-template-columns:1fr}
+  .scen3{grid-template-columns:1fr;gap:12px}
+  .scol{padding:18px 20px}
+  .scol.mid{transform:none}
+  .scol .v{font-size:30px}
+  .invest,.timeline,.calc{grid-template-columns:1fr}
+  .cpanel{padding:16px}
+  .esteira{flex-wrap:wrap}
+  .esteira .res{max-width:none;text-align:left;flex:1 0 100%;margin-top:4px;padding-left:58px}
+  .cta-steps{gap:10px}
+  .cstep{min-width:0;flex:1 1 42%;padding:16px 14px}
+  .seal-logos{gap:18px}
+  .seal-logos img{max-height:64px}
+  .seal-logos .x{font-size:26px}
+  .chips{gap:9px}
+  .phone{max-width:100%}
+}
+@media(max-width:380px){
+  .cstats{grid-template-columns:1fr}
+  .scol .v{font-size:26px}
+}
+</style>
+</head>
+<body>
+<div class="bgfx"></div><div class="grain"></div>
+<div class="progress" id="progress"></div>
+
+<div class="topbar">
+  <div class="lockup">
+    <img class="logo-img" src="assets/livpub.png" alt="Liv Pub" onerror="this.outerHTML='<span class=&quot;liv-word&quot;>liv<small>PUB</small></span>'">
+    <span class="x">×</span>
+    <span class="gd"><img class="logo-img" src="assets/geracaodigital.png" alt="" style="height:20px" onerror="this.style.display='none'"><b>Geração Digital</b></span>
+  </div>
+  <div class="counter"><b id="cur">01</b> / <span id="tot">12</span></div>
+</div>
+
+<div class="deck">
+  <div class="track" id="track">
+
+    <!-- 1 CAPA -->
+    <section class="slide">
+      <div class="inner cover">
+        <div class="biglogo anim">
+          <img class="logo-img-hero" src="assets/livpub.png" alt="Liv Pub" onerror="this.outerHTML='<span class=&quot;liv-hero&quot;>liv<small>PUB</small></span>'">
+        </div>
+        <h1 class="hero anim d1">De <span class="accent">16 mil contatos</span><br>a uma máquina de faturamento.</h1>
+        <p class="lead anim d2" style="margin-left:auto;margin-right:auto">Plano de crescimento da Liv Pub via WhatsApp + automação.<br>Uma parceria <b class="white">Geração Digital</b>.</p>
+        <div class="anim d3" style="margin-top:34px"><span class="hint">use as setas → ou clique para avançar</span></div>
+      </div>
+    </section>
+
+    <!-- 2 O ATIVO -->
+    <section class="slide soft">
+      <div class="inner" style="text-align:center">
+        <div class="kick anim">o que vocês já têm</div>
+        <div class="numbig anim d1" id="count16">0</div>
+        <div class="numsub anim d2">clientes que <b class="white">já vieram</b>. Já pagos. Hoje, <span class="accent">parados</span>.</div>
+        <div class="chips anim d3">
+          <span class="chip"><i>📱</i> Base WhatsApp</span>
+          <span class="chip"><i>📊</i> Dados Zig</span>
+          <span class="chip"><i>🎟️</i> Compradores Sympla</span>
+        </div>
+        <p class="lead anim d4" style="margin:24px auto 0">O ativo mais caro do marketing já é de vocês. Falta a <span class="under">engenharia</span> pra ele trabalhar.</p>
+      </div>
+    </section>
+
+    <!-- 3 A DOR -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kick danger anim">onde o dinheiro escapa hoje</div>
+        <h2 class="title anim d1">Não é falta de cliente.<br>É falta de <span class="accent">sistema</span>.</h2>
+        <div class="cards c2 anim d2">
+          <div class="card dor"><div class="ic">📣</div><h3>Mensagem igual pra todos</h3><p>Pouca resposta e o número queima como spam.</p></div>
+          <div class="card dor"><div class="ic">📲</div><h3>Reserva e camarote na mão</h3><p>Tudo passa por uma pessoa — existe um teto invisível de vendas.</p></div>
+          <div class="card dor"><div class="ic">📉</div><h3>Refém do Instagram</h3><p>Alcance orgânico cai todo ano. Instável e caro.</p></div>
+          <div class="card dor"><div class="ic">🔁</div><h3>Quem veio, não volta</h3><p>Ninguém chama de volta. Sem recompra, sem recorrência.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 A VIRADA -->
+    <section class="slide soft">
+      <div class="inner" style="text-align:center">
+        <div class="kick anim">a virada de chave</div>
+        <h1 class="hero anim d1">Sair do <span style="color:var(--danger)">disparo</span>.<br>Entrar no <span class="accent">relacionamento</span> que vende.</h1>
+        <p class="lead anim d2" style="margin:22px auto 0">Balada forte hoje não trabalha com cartaz. Trabalha com CRM — conversa certa, pra pessoa certa, na hora certa.</p>
+      </div>
+    </section>
+
+    <!-- 5 O QUE FAZEMOS -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kick anim">o que vamos fazer</div>
+        <h2 class="title anim d1">Quatro peças. Um motor de receita.</h2>
+        <div class="cards c2 anim d2">
+          <div class="card"><div class="ic">🔗</div><h3>Central única</h3><p>Zig e Sympla conversando com o WhatsApp. Tudo num lugar só.</p></div>
+          <div class="card"><div class="ic">🤖</div><h3>Vendas no automático</h3><p>Reserva, lista e camarote o cliente resolve sozinho, 24h por dia.</p></div>
+          <div class="card"><div class="ic">🎯</div><h3>Filas inteligentes</h3><p>Cada cliente entra na esteira certa, pelo que ele curte.</p></div>
+          <div class="card"><div class="ic">💜</div><h3>Relacionamento que volta</h3><p>Régua automática que reativa, lembra e faz recomprar.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6 ESTEIRAS -->
+    <section class="slide soft">
+      <div class="inner">
+        <div class="kick anim">o mecanismo, sem complicação</div>
+        <h2 class="title anim d1" style="margin-bottom:8px">As esteiras de venda</h2>
+        <div class="anim d2">
+          <div class="esteira"><div class="ic">🎟️</div><div class="tx"><b>Pré-venda de evento</b><span>Convite segmentado por estilo + link de compra</span></div><div class="res">Vende antes do dia</div></div>
+          <div class="esteira"><div class="ic">🥂</div><div class="tx"><b>Camarote / VIP</b><span>Trilha dedicada com atendimento assistido</span></div><div class="res">Aumenta o ticket alto</div></div>
+          <div class="esteira"><div class="ic">🎂</div><div class="tx"><b>Aniversariante</b><span>Oferta automática no mês do aniversário</span></div><div class="res">Traz grupo e consumo</div></div>
+          <div class="esteira"><div class="ic">🔁</div><div class="tx"><b>Reativação</b><span>"Sumiu? Volta que tem novidade" pra quem não vem há X</span></div><div class="res">Recupera cliente parado</div></div>
+          <div class="esteira"><div class="ic">💬</div><div class="tx"><b>Pós-evento</b><span>Agradecimento + foto + cupom de retorno</span></div><div class="res">Gera a próxima visita</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7 JORNADA -->
+    <section class="slide" id="journey">
+      <div class="inner">
+        <div class="kick anim" style="text-align:center">como funciona na prática</div>
+        <h2 class="title anim d1" id="jTitle" style="text-align:center">A Júlia curte pagode.</h2>
+        <div class="phone anim d2">
+          <div class="wahead"><div class="av">L</div><div><b>Liv Pub</b><small>online</small></div></div>
+
+          <div class="convo on" data-title="A Júlia curte pagode." data-tag="Convite → presença" data-cap="Ela virou cliente recorrente — <b class='white'>sem ninguém digitar nada</b>. Agora multiplique por milhares.">
+            <div class="bubbles">
+              <div class="bub in step">Fala Júlia! Hoje tem pagode + DJ na Liv 😮‍💨 quer a lista promocional?<span class="t">22:14</span></div>
+              <div class="bub out step">quero simm<span class="t">22:15</span></div>
+              <div class="bub in step">Prontinho ✅ tua mesa tá reservada e teu nome na lista. Te espero hoje! 🎶<span class="t">22:15</span></div>
+              <div class="bub in step">Que noite, Júlia! 📸 já tá rolando foto no perfil. Sábado tem sertanejo — guardo teu lugar?<span class="t">Sáb 11:02</span></div>
+              <div class="bub out step">guarda sim! 🙌<span class="t">Sáb 11:03</span></div>
+            </div>
+          </div>
+
+          <div class="convo" data-title="O Netto quer um camarote." data-tag="Cliente chama → IA vende → link" data-cap="De madrugada, a IA <b class='white'>fecha a venda e manda o link</b> — sem acordar ninguém.">
+            <div class="bubbles">
+              <div class="bub out step">opa, vcs têm camarote pra sábado?<span class="t">23:48</span></div>
+              <div class="bub in step">Temos sim, Netto! 🥂 Pra sábado tenho camarote pra até 8 pessoas com open de espumante. Quer que eu já garanta o seu?<span class="t">23:48</span></div>
+              <div class="bub out step">quero! como faço?<span class="t">23:49</span></div>
+              <div class="bub in step">Fechado ✅ é só garantir aqui 👇<br>🔗 pay.livpub/camarote-sab<br>Assim que cair, fica reservado no nome Netto. 🍾<span class="t">23:49</span></div>
+              <div class="bub out step">pago agora 🙌<span class="t">23:50</span></div>
+            </div>
+          </div>
+
+          <div class="convo" data-title="Aniversário da Marcela." data-tag="Template de aniversário → lista" data-cap="Um template carinhoso vira <b class='white'>uma mesa cheia</b> de gente que talvez nunca tinha vindo.">
+            <div class="bubbles">
+              <div class="bub in tmpl step">🎉 Feliz aniversário, <b>Marcela</b>! 🎂<br>Seu rolê é por nossa conta — monta tua lista e comemora aqui na Liv. 🥂
+                <button class="tmpl-btn" onclick="revealList(this)">🎟️ Pegar lista</button>
+                <span class="t">09:00</span>
+              </div>
+              <div class="bub out step afterclick">aee quero siimm 🥳<span class="t">09:01</span></div>
+              <div class="bub in step afterclick">Boa! 🥳 Me manda os nomes que eu já garanto todo mundo na lista 👇<span class="t">09:01</span></div>
+              <div class="guestcard step afterclick">
+                <div class="gtitle">Lista de convidados · Marcela</div>
+                <div id="guestList"></div>
+                <div class="compose">
+                  <input id="guestInput" type="text" placeholder="Digite um convidado..." autocomplete="off">
+                  <button id="guestAdd" aria-label="Adicionar convidado">＋</button>
+                </div>
+                <button id="guestDone" class="guest-done">Confirmar lista ✅</button>
+              </div>
+              <div class="bub in" id="guestConfirm"><span class="txt">Prontinho ✅ lista garantida! Te espero no seu dia, Marcela 🎈</span><span class="t">09:02</span></div>
+            </div>
+          </div>
+
+        </div>
+        <div class="convo-nav anim d3">
+          <button class="mini-arrow" id="jPrev" aria-label="Conversa anterior">‹</button>
+          <span class="convo-label" id="jLabel">1/3 · <b>Convite → presença</b></span>
+          <button class="mini-arrow" id="jNext" aria-label="Próxima conversa">›</button>
+        </div>
+        <p class="journey-cap anim d3" id="jCap">Ela virou cliente recorrente — <b class="white">sem ninguém digitar nada</b>. Agora multiplique por milhares.</p>
+      </div>
+    </section>
+
+    <!-- 8 CALCULADORA -->
+    <section class="slide soft">
+      <div class="inner" style="max-width:980px">
+        <div class="kick money anim" style="text-align:center">a conta, com o SEU número</div>
+        <h2 class="title anim d1" style="text-align:center;margin-bottom:18px">Quanto a base já pode faturar</h2>
+        <div class="calc anim d2">
+          <div class="cpanel">
+            <h4>Os números da casa</h4>
+            <div class="fld"><label>Ticket médio por pessoa <b id="lT">R$ 100</b></label><div class="iw"><span class="pre">R$</span><input type="number" id="ticket" value="100" min="0" step="5"></div></div>
+            <div class="fld"><label>Eventos por mês <b id="lE">4</b></label><div class="iw"><input type="number" class="np" id="eventos" value="4" min="1" step="1"></div></div>
+            <div class="fld"><label>Contatos por campanha <b id="lB">5.000</b></label><div class="iw"><input type="number" class="np" id="base" value="5000" min="0" step="500"></div><div class="note">Base total: <b>16.000</b> contatos.</div></div>
+            <div class="fld"><label>Conversão <b id="lC">2,0%</b></label>
+              <div class="scn-row">
+                <div class="scn" data-v="1"><small>Pessimista</small><b>1%</b></div>
+                <div class="scn active" data-v="2"><small>Conservador</small><b>2%</b></div>
+                <div class="scn" data-v="3"><small>Realista</small><b>3%</b></div>
+              </div>
+              <input type="range" id="conv" min="0.5" max="8" step="0.1" value="2">
+              <div class="note">% da base contatada que vira presença. Mercado segmentado: 8–18%. Usamos faixas bem conservadoras.</div>
+            </div>
+            <details class="adv">
+              <summary>⚙ Premissas de custo (editáveis)</summary>
+              <div class="adv-grid">
+                <div class="fld" style="margin:8px 0 0"><label>Custo/msg mkt</label><div class="iw"><span class="pre">R$</span><input type="number" id="cMsg" value="0.35" min="0" step="0.01"></div></div>
+                <div class="fld" style="margin:8px 0 0"><label>Custo/conversa IA</label><div class="iw"><span class="pre">R$</span><input type="number" id="cIAu" value="0.20" min="0" step="0.01"></div></div>
+                <div class="fld" style="margin:8px 0 0"><label>% que responde</label><div class="iw"><input type="number" class="np" id="tResp" value="20" min="0" max="100"></div></div>              </div>
+              <div class="toggle"><span>Usar IA no atendimento<small>~15 mil tokens/conversa ≈ R$ 0,20</small></span><label class="sw"><input type="checkbox" id="usarIA" checked><span class="sl"></span></label></div>            </details>
+          </div>
+          <div class="cres">
+            <div class="hero-num"><div class="l">Faturamento extra por mês</div><div class="v money" id="heroMes">R$ 40.000</div><div class="s">ou <b id="heroAno">R$ 480.000</b> por ano — só de quem vocês já têm.</div></div>
+            <div class="cstats">
+              <div class="cstat"><div class="k">Pessoas a mais / evento</div><div class="v acc" id="pE">100</div></div>
+              <div class="cstat"><div class="k">Ganho líquido / mês</div><div class="v money" id="liq">R$ 32.200</div></div>
+            </div>
+            <div class="cbox">
+              <h5>Custo operacional do canal / mês</h5>
+              <div class="crow"><span>WhatsApp (<b id="qD">20.000</b> msgs)</span><b id="cW">R$ 7.000</b></div>
+              <div class="crow" id="rIA"><span>Atendimento IA (<b id="qR">4.000</b> conversas)</span><b id="cI">R$ 800</b></div>              <div class="crow tt"><span>Custo total / mês</span><b id="cT">R$ 7.800</b></div>
+              <div class="cbar"><div class="f" id="bF" style="width:84%"></div><div class="c" id="bC" style="width:16%"></div></div>
+              <div class="note" id="resumo">Cada R$ 1 na operação retorna R$ 5,10 em faturamento.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 CENÁRIOS -->
+    <section class="slide">
+      <div class="inner" style="text-align:center">
+        <div class="kick money anim">o que esperar</div>
+        <h2 class="title anim d1">Três cenários. Todos no positivo.</h2>
+        <div class="scen3 anim d2">
+          <div class="scol"><div class="nm">Pessimista</div><div class="pc">1% de conversão</div><div class="v">R$ 240 mil</div><div class="vy">por ano · R$ 20 mil/mês</div></div>
+          <div class="scol mid"><div class="nm">Conservador</div><div class="pc">2% de conversão</div><div class="v">R$ 480 mil</div><div class="vy">por ano · R$ 40 mil/mês</div></div>
+          <div class="scol"><div class="nm">Realista</div><div class="pc">3% de conversão</div><div class="v">R$ 720 mil</div><div class="vy">por ano · R$ 60 mil/mês</div></div>
+        </div>
+        <p class="lead anim d3" style="margin:26px auto 0">E isso é só de quem vocês <span class="under">já têm</span> — sem contar cliente novo.</p>
+      </div>
+    </section>
+
+    <!-- 10 FASES -->
+    <section class="slide soft">
+      <div class="inner">
+        <div class="kick anim">o caminho</div>
+        <h2 class="title anim d1">Método, não improviso.</h2>
+        <div class="timeline anim d2">
+          <div class="phase"><span class="badge">FASE 1 · SETUP</span><h3>Montagem do sistema</h3><ul><li>Integração WhatsApp + Zig + Sympla</li><li>Organização e segmentação da base de 16k</li><li>Esteiras e régua de relacionamento</li><li>Primeiras campanhas no ar</li></ul><div class="when">⏱ 4 a 6 semanas</div></div>
+          <div class="phase"><span class="badge">FASE 2 · OPERAÇÃO</span><h3>Máquina rodando</h3><ul><li>Campanhas segmentadas toda semana</li><li>Régua automática (pré, pós, aniversário, reativação)</li><li>Otimização contínua</li><li>Relatório mensal de receita gerada</li></ul><div class="when">♾ Recorrente</div></div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 12 AUTORIDADE -->
+    <section class="slide soft">
+      <div class="inner" style="text-align:center">
+        <div class="kick anim">por que com a gente</div>
+        <h2 class="title anim d1" style="max-width:760px;margin:0 auto">Já tiramos o teto do atendimento manual<br>e <span class="accent">aumentamos o faturamento</span> em um setor muito mais difícil.</h2>
+        <p class="lead anim d2" style="margin:22px auto 0">Cartórios de protesto: integramos o sistema ao WhatsApp e o cliente resolvia tudo sozinho. Balada é mais fácil que isso — e vocês já têm a base na mão.</p>
+      </div>
+    </section>
+
+    <!-- 13 CTA -->
+    <section class="slide">
+      <div class="inner" style="text-align:center">
+        <div class="kick money anim">próximos passos</div>
+        <h1 class="hero anim d1" style="font-size:clamp(30px,5vw,52px)">Vamos colocar seus<br>16 mil clientes pra <span class="accent">trabalhar?</span></h1>
+        <p class="anim d2" style="margin:20px auto 0;max-width:720px;font-family:var(--disp);font-weight:500;font-size:clamp(17px,2.6vw,25px);line-height:1.35;color:var(--txt)">“A pergunta não é se vale a pena. É <span class="accent">quanto vocês estão deixando na mesa</span> a cada mês sem isso rodando.”</p>
+        <div class="cta-steps anim d3">
+          <div class="cstep"><div class="n">1</div><b>Aprovação</b></div>
+          <div class="cstep"><div class="n">2</div><b>Acesso à base e sistemas</b></div>
+          <div class="cstep"><div class="n">3</div><b>Início do setup</b></div>
+        </div>
+        <a class="btn anim d4" href="#" onclick="openSeal();return false">Começar essa semana →</a>
+        <p class="anim d5" style="color:var(--muted);font-size:12px;margin-top:30px">Liv Pub × Geração Digital · Plano de Crescimento</p>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<div class="nav">
+  <div class="hint">← → navegar · clique nos pontos</div>
+  <div class="dots" id="dots"></div>
+  <div class="arrows">
+    <button class="arrow" id="prev" aria-label="Anterior">‹</button>
+    <button class="arrow" id="next" aria-label="Próximo">›</button>
+  </div>
+</div>
+
+<div class="sealed" id="sealed">
+  <div class="seal-inner">
+    <div class="seal-logos">
+      <img src="assets/livpub.png" alt="Liv Pub" onerror="this.outerHTML='<span class=&quot;liv-hero&quot; style=&quot;font-size:50px&quot;>liv<small style=&quot;font-size:14px&quot;>PUB</small></span>'">
+      <span class="x">×</span>
+      <img src="assets/geracaodigital.png" alt="Geração Digital" onerror="this.outerHTML='<span style=&quot;font-family:var(--disp);font-weight:600;font-size:23px;color:var(--accent-2)&quot;>Geração Digital</span>'">
+    </div>
+    <h2>Bora fazer história juntos. 🚀</h2>
+    <p>Liv Pub × Geração Digital — parceria fechada.</p>
+    <button class="seal-close" id="sealClose">← voltar</button>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const BRL=n=>n.toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
+const NUM=n=>Math.round(n).toLocaleString('pt-BR');
+
+/* ---------- DECK NAV ---------- */
+const slides=[...document.querySelectorAll('.slide')];
+const track=$('track'), dotsWrap=$('dots');
+let idx=0;
+$('tot').textContent=String(slides.length).padStart(2,'0');
+slides.forEach((s,i)=>{const b=document.createElement('button');b.className='dot-n';b.onclick=()=>go(i);dotsWrap.appendChild(b);});
+const dots=[...dotsWrap.children];
+
+function go(i){
+  idx=Math.max(0,Math.min(slides.length-1,i));
+  track.style.transform=`translateX(-${idx*100}vw)`;
+  slides.forEach((s,k)=>s.classList.toggle('active',k===idx));
+  dots.forEach((d,k)=>d.classList.toggle('active',k===idx));
+  $('cur').textContent=String(idx+1).padStart(2,'0');
+  $('progress').style.width=((idx+1)/slides.length*100)+'%';
+  $('prev').disabled=idx===0; $('next').disabled=idx===slides.length-1;
+  onSlide(idx);
+}
+$('next').onclick=()=>go(idx+1);
+$('prev').onclick=()=>go(idx-1);
+document.addEventListener('keydown',e=>{
+  if(/^(input|textarea)$/i.test(e.target.tagName))return; // não navegar enquanto digita
+  const sld=document.getElementById('sealed');
+  if(sld&&sld.classList.contains('on')){if(e.key==='Escape')sld.classList.remove('on');return;}
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(idx+1);}
+  if(e.key==='ArrowLeft'){go(idx-1);}
+});
+// clique avança (ignora inputs/links/dots)
+document.addEventListener('click',e=>{
+  if(e.target.closest('input,button,a,label,details,summary,.scn,.nav,.dots,.phone,.convo-nav,.sealed'))return;
+  // só avança em clique na metade direita
+  if(e.clientX>window.innerWidth*0.55)go(idx+1);
+});
+// swipe
+let tx=0;
+addEventListener('touchstart',e=>tx=e.touches[0].clientX,{passive:true});
+addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>60)go(idx+(dx<0?1:-1));},{passive:true});
+
+/* ---------- ANIMAÇÕES POR SLIDE ---------- */
+let count16done=false;
+function animCount(el,to,dur,fmt){
+  const t0=performance.now();
+  (function step(t){
+    const p=Math.min(1,(t-t0)/dur);
+    const e=1-Math.pow(1-p,3);
+    el.textContent=fmt(Math.round(to*e));
+    if(p<1)requestAnimationFrame(step);
+  })(t0);
+}
+/* jornada multi-conversa (slide 7) */
+const journeyEl=$('journey');
+const convos=journeyEl?[...journeyEl.querySelectorAll('.convo')]:[];
+let convoIdx=0;
+function playConvo(c){
+  c.querySelectorAll('.step,.guestrow').forEach(b=>b.classList.remove('show'));
+  const gl=c.querySelector('#guestList'); if(gl)gl.innerHTML='';
+  const gi=c.querySelector('#guestInput'); if(gi)gi.value='';
+  const gc=c.querySelector('#guestConfirm'); if(gc)gc.classList.remove('show');
+  [...c.querySelectorAll('.step')].filter(b=>!b.classList.contains('afterclick'))
+    .forEach((b,k)=>setTimeout(()=>b.classList.add('show'),400+k*850));
+  const btn=c.querySelector('.tmpl-btn'); if(btn){btn.disabled=false;btn.style.opacity=1;}
+}
+function showConvo(i){
+  if(!convos.length)return;
+  convoIdx=(i+convos.length)%convos.length;
+  convos.forEach((c,k)=>c.classList.toggle('on',k===convoIdx));
+  const c=convos[convoIdx];
+  $('jTitle').textContent=c.dataset.title;
+  $('jCap').innerHTML=c.dataset.cap;
+  $('jLabel').innerHTML=(convoIdx+1)+'/'+convos.length+' · <b>'+c.dataset.tag+'</b>';
+  playConvo(c);
+}
+function revealList(btn){
+  const c=btn.closest('.convo');
+  [...c.querySelectorAll('.step.afterclick')].forEach((b,k)=>setTimeout(()=>{
+    b.classList.add('show');
+    if(b.classList.contains('guestcard'))[...b.querySelectorAll('.guestrow')].forEach((g,j)=>setTimeout(()=>g.classList.add('show'),250+j*380));
+  },k*750));
+  btn.disabled=true;btn.style.opacity=.5;
+}
+if($('jPrev'))$('jPrev').onclick=()=>showConvo(convoIdx-1);
+if($('jNext'))$('jNext').onclick=()=>showConvo(convoIdx+1);
+
+/* convidados interativos (Marcela) */
+function addGuest(){
+  const gi=$('guestInput'); const v=(gi.value||'').trim(); if(!v)return;
+  const row=document.createElement('div'); row.className='guestrow';
+  row.innerHTML='<span class="chk">✓</span> '+v.replace(/[<>&]/g,'');
+  $('guestList').appendChild(row);
+  requestAnimationFrame(()=>row.classList.add('show'));
+  gi.value=''; gi.focus();
+}
+function confirmGuests(){
+  const names=[...$('guestList').querySelectorAll('.guestrow')].map(r=>r.textContent.replace('✓','').trim()).filter(Boolean);
+  let txt='Prontinho ✅ lista garantida! Te espero no seu dia, Marcela 🎈';
+  if(names.length){const list=names.length===1?names[0]:names.slice(0,-1).join(', ')+' e '+names[names.length-1];txt='Prontinho ✅ '+list+' na lista! Te espero no seu dia, Marcela 🎈';}
+  const cb=$('guestConfirm'); cb.querySelector('.txt').textContent=txt; cb.classList.add('show');
+  cb.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+if($('guestAdd'))$('guestAdd').onclick=addGuest;
+if($('guestInput'))$('guestInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addGuest();}});
+if($('guestDone'))$('guestDone').onclick=confirmGuests;
+
+/* selo de parceria (fechamento) */
+function openSeal(){
+  const s=$('sealed'); if(!s)return; s.classList.add('on');
+  const colors=['#FF2D8E','#FF6FB0','#ffffff','#2EE6A6'];
+  for(let i=0;i<44;i++){const c=document.createElement('div');c.className='confetti';c.style.left=(Math.random()*96)+'vw';c.style.background=colors[i%colors.length];c.style.animationDuration=(2.4+Math.random()*2)+'s';c.style.animationDelay=(Math.random()*0.5)+'s';s.appendChild(c);}
+  setTimeout(()=>s.querySelectorAll('.confetti').forEach(c=>c.remove()),5200);
+}
+function closeSeal(){const s=$('sealed'); if(s)s.classList.remove('on');}
+if($('sealClose'))$('sealClose').onclick=closeSeal;
+
+function onSlide(i){
+  const s=slides[i];
+  if(s.querySelector('#count16')&&!count16done){count16done=true;animCount($('count16'),16000,1400,NUM);}
+  if(s.id==='journey')showConvo(convoIdx);
+}
+
+/* ---------- CALCULADORA ---------- */
+function calc(){
+  const ticket=+$('ticket').value||0, eventos=+$('eventos').value||0, base=+$('base').value||0,
+        conv=+$('conv').value||0, cMsg=+$('cMsg').value||0, cIAu=+$('cIAu').value||0,
+        tResp=(+$('tResp').value||0)/100, usarIA=$('usarIA').checked;
+  const pE=base*conv/100, pM=pE*eventos, fatMes=pM*ticket, fatAno=fatMes*12;
+  const disp=base*eventos, cW=disp*cMsg, resp=disp*tResp, cI=usarIA?resp*cIAu:0, cTot=cW+cI;
+  const liq=fatMes-cTot, ret=cTot>0?fatMes/cTot:0;
+  $('lT').textContent=BRL(ticket);$('lE').textContent=NUM(eventos);$('lB').textContent=NUM(base);
+  $('lC').textContent=conv.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+  $('heroMes').textContent=BRL(fatMes);$('heroAno').textContent=BRL(fatAno);
+  $('pE').textContent=NUM(pE);$('liq').textContent=BRL(liq);$('liq').style.color=liq>=0?'var(--money)':'var(--accent)';
+  $('qD').textContent=NUM(disp);$('cW').textContent=BRL(cW);
+  $('rIA').style.display=usarIA?'flex':'none';$('qR').textContent=NUM(resp);$('cI').textContent=BRL(cI);
+  $('cT').textContent=BRL(cTot);
+  const tot=fatMes+cTot,pf=tot>0?fatMes/tot*100:50;$('bF').style.width=pf+'%';$('bC').style.width=(100-pf)+'%';
+  $('resumo').textContent=ret>0?`Cada R$ 1 na operação retorna ${BRL(ret)} em faturamento.`:'Ajuste os números.';
+  document.querySelectorAll('.scn').forEach(x=>x.classList.toggle('active',Math.abs(+x.dataset.v-conv)<0.001));
+}
+['ticket','eventos','base','conv','cMsg','cIAu','tResp'].forEach(id=>$(id).addEventListener('input',calc));
+['usarIA'].forEach(id=>$(id).addEventListener('change',calc));
+document.querySelectorAll('.scn').forEach(x=>x.addEventListener('click',()=>{$('conv').value=x.dataset.v;calc();}));
+
+calc();
+go(0);
+</script>
+</body>
+</html>

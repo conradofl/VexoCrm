@@ -20,6 +20,8 @@ import {
   Settings,
   Globe,
   CheckCircle2,
+  Monitor,
+  Rocket,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -184,12 +186,13 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   "followup-analytics": "Followup Analytics",
   "followup-sugestoes": "Followup Sugestões",
   "chatbot-docs": "Chatbot Docs",
-  "onboarding-wizard": "Treinamento & Demonstração",
+  "onboarding-wizard": "Treinamento Vexo",
   "onboarding-agent": "Agente de Onboarding",
   conexoes: "Chips WhatsApp",
   disparos: "Disparos",
   aquecimento: "Aquecimento",
   relatorios: "Relatórios",
+  apresentacao: "Demonstração Vexo",
   "apresentacao-gd": "Apresentação GD",
 };
 
@@ -201,7 +204,7 @@ const CLIENT_PAGE_TABS = [
 const INTERNAL_PAGE_TABS = [
   {
     value: "vendas",
-    label: "Vendas & Gestão",
+    label: "Máquina de Vendas",
     items: [
       "dashboard",
       "leads",
@@ -214,19 +217,11 @@ const INTERNAL_PAGE_TABS = [
       "followup-campanhas",
       "followup-analytics",
       "followup-sugestoes",
-      "agente",
-      "usuarios",
-      "empresas",
-      "chatbot-docs",
-      "onboarding-wizard",
-      "apresentacao",
-      "onboarding-agent",
-      "apresentacao-gd",
     ] as InternalPage[],
   },
   {
     value: "disparos",
-    label: "Disparos",
+    label: "Máquina de Disparos",
     items: [
       "planilhas",
       "campanhas",
@@ -234,6 +229,26 @@ const INTERNAL_PAGE_TABS = [
       "disparos",
       "aquecimento",
       "relatorios",
+    ] as InternalPage[],
+  },
+  {
+    value: "sistema",
+    label: "Sistema",
+    items: [
+      "apresentacao",
+      "apresentacao-gd",
+      "onboarding-wizard",
+      "chatbot-docs",
+      "usuarios",
+      "empresas",
+    ] as InternalPage[],
+  },
+  {
+    value: "configuracoes",
+    label: "Configurações Extras",
+    items: [
+      "agente",
+      "onboarding-agent",
     ] as InternalPage[],
   },
 ];
@@ -1013,10 +1028,17 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-      <TabsList className="grid w-full grid-cols-2 p-1.5 bg-muted/20 border border-border/40 rounded-[1.75rem] h-15">
+      <TabsList 
+        className={cn(
+          "w-full p-1.5 bg-muted/20 border border-border/40 rounded-[1.75rem] h-auto flex flex-wrap sm:grid",
+          tabs.length === 4 ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-2"
+        )}
+      >
         {tabs.map((tab) => {
           const selectedCount = tab.items.filter((item) => selected.includes(item)).length;
           const isOperacaoOrPortal = tab.value === "vendas" || tab.value === "portal";
+          const isDisparosOrComunicacao = tab.value === "disparos" || tab.value === "comunicacao";
+          const isSistema = tab.value === "sistema";
 
           return (
             <TabsTrigger
@@ -1026,10 +1048,14 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
             >
               {isOperacaoOrPortal ? (
                 <Activity className="h-4 w-4" />
+              ) : isDisparosOrComunicacao ? (
+                <Rocket className="h-4 w-4" />
+              ) : isSistema ? (
+                <Monitor className="h-4 w-4" />
               ) : (
                 <Settings className="h-4 w-4" />
               )}
-              {tab.label}
+              <span className="truncate">{tab.label}</span>
               <Badge variant="secondary" className="ml-1 h-5 min-w-5 rounded-full px-1.5 flex items-center justify-center text-[10px] font-extrabold bg-muted-foreground/10 text-muted-foreground data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
                 {selectedCount} / {tab.items.length}
               </Badge>
@@ -1083,7 +1109,8 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
               if (item === "chatbot-config") return "Configurações e prompts do chatbot";
               if (item === "fila-de-followup") return "Fila e sugestões de follow-up";
               if (item === "chatbot-docs") return "Documentação do chatbot";
-              if (item === "onboarding-wizard") return "Demonstração e Treinamento Vexo";
+              if (item === "onboarding-wizard") return "Vídeos e tutoriais da plataforma";
+              if (item === "apresentacao") return "Apresentação comercial e demo";
               if (item === "conexoes") return "Painel de chips de WhatsApp";
               if (item === "aquecimento") return "Aquecimento de números";
               if (item === "relatorios") return "Relatórios de consumo e uso";

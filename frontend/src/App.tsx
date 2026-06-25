@@ -41,8 +41,10 @@ import VexoPitch from "./pages/VexoPitch";
 import GeracaoDigitalPitch from "./pages/GeracaoDigitalPitch";
 import EvolutionAdmin from "./pages/EvolutionAdmin";
 import InboundAgentConfig from "./pages/InboundAgentConfig";
-import Eventos from "./pages/Eventos";
 import WebhooksIntegrations from "./pages/WebhooksIntegrations";
+import LivPub from "./pages/LivPub";
+import Eventos from "./pages/Eventos";
+import Relacionamento from "./pages/Relacionamento";
 
 const queryClient = new QueryClient();
 
@@ -311,6 +313,30 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="relatorios">
                     <Relatorios />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="livpub"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="livpub">
+                    <LivPub />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="eventos"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="eventos">
+                    <Eventos />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="relacionamento"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="relacionamento">
+                    <Relacionamento />
                   </ProtectedRoute>
                 }
               />

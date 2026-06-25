@@ -1589,6 +1589,11 @@ function buildDefaultSegmentationConfig(model = "generico") {
       { id: "cidade", label: "Cidade", field: "cidade", type: "category", enabled: true },
       { id: "prazo", label: "Prazo", field: "prazo_instalacao", type: "category", enabled: true },
     ],
+    livpub: [
+      { id: "perfil", label: "Perfil Musical", field: "perfil_musical", type: "category", enabled: true },
+      { id: "visita", label: "Última Visita", field: "ultima_visita", type: "date", enabled: true },
+      { id: "nascimento", label: "Nascimento", field: "data_nascimento", type: "date", enabled: true }
+    ],
     generico: [
       { id: "origem", label: "Origem", field: "origem", type: "category", enabled: true },
       { id: "interesse", label: "Interesse", field: "interesse", type: "category", enabled: true },
