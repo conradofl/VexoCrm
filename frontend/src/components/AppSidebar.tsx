@@ -79,9 +79,7 @@ const MODULOS: Record<Modo, Modulo> = {
       { key: "conversas",      label: "Conversas",          url: "/crm/whatsapp",               icon: MessageCircle,   page: "whatsapp" },
       { key: "inteligencia",   label: "Int. Comercial",     url: "/crm/inteligencia-comercial", icon: LineChart,       page: "inteligencia-comercial" },
       { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
-      { key: "chatbot",        label: "Chatbot",            url: "/crm/chatbot-settings",       icon: Settings2,       page: "chatbot-config" },
       { key: "followup",       label: "Follow-up",          url: "/crm/followup",               icon: ListChecks,      page: "fila-de-followup" },
-      { key: "inbound-agents", label: "Assistentes Inbound", url: "/crm/inbound-agents",         icon: Bot,             page: "agente" },
     ],
   },
   disparos: {
@@ -89,7 +87,6 @@ const MODULOS: Record<Modo, Modulo> = {
     labelLongo: "Máquina de Disparos",
     cor: "#ff7a1a", // Laranja marca — demo-liv-pub.html (--accent, botão primário + logo)
     ferramentas: [
-      { key: "conexoes",    label: "Chips WhatsApp", url: "/crm/conexoes",    icon: Wifi,            page: "conexoes" },
       { key: "campanhas",   label: "Envios por Planilha", url: "/crm/planilhas",   icon: FileSpreadsheet, page: "planilhas" },
       { key: "aquecimento", label: "Aquecimento", url: "/crm/aquecimento", icon: Flame,           page: "aquecimento" },
       { key: "relatorios",  label: "Relatórios",  url: "/crm/relatorios",  icon: BarChart2,       page: "relatorios" },
@@ -97,16 +94,22 @@ const MODULOS: Record<Modo, Modulo> = {
   },
 } satisfies Record<Modo, Modulo>;
 
-// Sistema: FIXO, fora dos modos, não é módulo vendável.
-// Visível para quem tiver canAccessInternalPage para a page correspondente.
-const SISTEMA_ITEMS = [
-  { key: "apresentacao", label: "Demonstração Vexo", url: "/crm/apresentacao", icon: Sparkles,    page: "onboarding-wizard" as InternalPage },
-  { key: "apresentacao-gd", label: "Apresentação GD", url: "/crm/apresentacao-gd", icon: Briefcase, page: "apresentacao-gd" as InternalPage },
-  { key: "onboarding",   label: "Treinamento Vexo",   url: "/crm/onboarding",   icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
-  { key: "chatbot-docs", label: "Chatbot Docs",     url: "/crm/chatbot-docs", icon: BookOpen,    page: "chatbot-docs" as InternalPage },
-  { key: "empresas",     label: "Empresas",         url: "/crm/empresas",     icon: Building2,   page: "empresas" as InternalPage },
-  { key: "integracoes",  label: "Integrações",      url: "/crm/integracoes",  icon: Server,      page: "empresas" as InternalPage },
-  { key: "usuarios",     label: "Usuários",         url: "/crm/usuarios",     icon: ShieldCheck, page: "usuarios" as InternalPage },
+// ─── Configurações ─────────────────────────────────────────────────────────────
+const CONFIG_ITEMS = [
+  { key: "inbound-agents", label: "Assistentes Inbound", url: "/crm/inbound-agents",   icon: Bot,         page: "agente" as InternalPage },
+  { key: "chatbot",        label: "Chatbot Settings",    url: "/crm/chatbot-settings", icon: Settings2,   page: "chatbot-config" as InternalPage },
+  { key: "conexoes",       label: "Chips WhatsApp",      url: "/crm/conexoes",         icon: Wifi,        page: "conexoes" as InternalPage },
+  { key: "empresas",       label: "Empresas",            url: "/crm/empresas",         icon: Building2,   page: "empresas" as InternalPage },
+  { key: "integracoes",    label: "Integrações",         url: "/crm/integracoes",      icon: Server,      page: "empresas" as InternalPage },
+  { key: "usuarios",       label: "Usuários",            url: "/crm/usuarios",         icon: ShieldCheck, page: "usuarios" as InternalPage },
+];
+
+// ─── Educação & Ajuda ──────────────────────────────────────────────────────────
+const AJUDA_ITEMS = [
+  { key: "onboarding",     label: "Treinamento Vexo",    url: "/crm/onboarding",       icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
+  { key: "apresentacao",   label: "Demonstração Vexo",   url: "/crm/apresentacao",     icon: Sparkles,    page: "onboarding-wizard" as InternalPage },
+  { key: "apresentacao-gd",label: "Apresentação GD",     url: "/crm/apresentacao-gd",  icon: Briefcase,   page: "apresentacao-gd" as InternalPage },
+  { key: "chatbot-docs",   label: "Chatbot Docs",        url: "/crm/chatbot-docs",     icon: BookOpen,    page: "chatbot-docs" as InternalPage },
 ];
 
 // Configuração + admin tools — FIXO, somente para isAdminUser.
@@ -426,7 +429,11 @@ export function AppSidebar() {
     })
     .filter((f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs));
 
-  const visibleSistema = SISTEMA_ITEMS.filter(
+  const visibleConfig = CONFIG_ITEMS.filter(
+    (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
+  );
+
+  const visibleAjuda = AJUDA_ITEMS.filter(
     (f) => canAccessInternalPage(f.page) && isPathAllowedForClient(f.url, allowedTabs)
   );
 
@@ -499,28 +506,44 @@ export function AppSidebar() {
 
         </div>
 
-        {/* ── Sistema — FIXO, fora dos modos ─────────────────────────── */}
-        {visibleSistema.length > 0 && (
+        {/* ── Configuração — FIXO, fora dos modos ─────────────────────────── */}
+        {visibleConfig.length > 0 && (
           <>
             {!collapsed && (
               <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-                Sistema
+                Configuração
               </p>
             )}
             <div className="space-y-1">
-              {visibleSistema.map((item) => (
+              {visibleConfig.map((item) => (
                 <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
             </div>
           </>
         )}
 
-        {/* ── Configuração — admin only, FIXO ────────────────────────── */}
+        {/* ── Ajuda & Educação — FIXO ─────────────────────────── */}
+        {visibleAjuda.length > 0 && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Ajuda
+              </p>
+            )}
+            <div className="space-y-1">
+              {visibleAjuda.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── Admin only, FIXO ────────────────────────── */}
         {isAdminUser && (
           <>
             {!collapsed && (
               <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-                Configuração
+                Administrador
               </p>
             )}
             <div className="space-y-1">

@@ -12,11 +12,9 @@ ALTER TABLE public.webhook_settings ENABLE ROW LEVEL SECURITY;
 -- Read: authenticated can read
 CREATE POLICY "Allow read webhook_settings"
   ON public.webhook_settings FOR SELECT
-  TO anon, authenticated
   USING (true);
 
 -- Insert/Update: authenticated users can manage
 CREATE POLICY "Allow all webhook_settings"
   ON public.webhook_settings FOR ALL
-  TO authenticated
   USING (true);

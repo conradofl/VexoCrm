@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import PageShell from "../components/PageShell";
+import { PageShell } from "../components/PageShell";
 import { DashboardEsteiras, EsteirasStatus } from "../components/DashboardEsteiras";
 
 interface EventoMock {

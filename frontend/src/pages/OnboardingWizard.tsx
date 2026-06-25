@@ -8,7 +8,8 @@ import {
   BarChart3,
   ArrowRight,
   Lightbulb,
-  CheckCircle2
+  CheckCircle2,
+  Server
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -67,10 +68,17 @@ export default function OnboardingWizard() {
                   </TabsTrigger>
                   <TabsTrigger
                     value="modulo-5"
-                    className="justify-start gap-3 rounded-none border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                    className="justify-start gap-3 rounded-none border-b border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
                   >
                     <BarChart3 className="h-4 w-4" />
                     <span className="text-left font-semibold">5. Inteligência Comercial</span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="modulo-6"
+                    className="justify-start gap-3 rounded-none border-slate-100 dark:border-slate-800 px-4 py-3 data-[state=active]:bg-indigo-50 dark:data-[state=active]:bg-indigo-900/20 data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400"
+                  >
+                    <Server className="h-4 w-4" />
+                    <span className="text-left font-semibold">6. Integrações Webhooks</span>
                   </TabsTrigger>
                 </TabsList>
               </Card>
@@ -311,6 +319,58 @@ export default function OnboardingWizard() {
 
                   <Button onClick={() => window.location.href = "/crm/inteligencia"} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700">
                     Acessar Dashboard <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* MÓDULO 6: INTEGRAÇÕES & WEBHOOKS */}
+            <TabsContent value="modulo-6" className="m-0 space-y-6 animate-fade-in-up">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-2xl text-indigo-700 dark:text-indigo-400">
+                    Módulo 6: Integrações & Webhooks
+                  </CardTitle>
+                  <CardDescription className="text-base">
+                    Como plugar o Vexo no resto do mundo digital para capturar leads e vendas automaticamente.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 text-slate-700 dark:text-slate-300">
+                  <p>
+                    Com o módulo de <strong>Integrações</strong>, você não precisa ficar importando planilhas de leads todos os dias ou atualizando fechamentos manualmente. Tudo pode ser feito em tempo real, conectando os Webhooks em plataformas de automação como Zapier, Make, ou na sua fonte de tráfego.
+                  </p>
+
+                  <div className="space-y-4">
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                      <h4 className="font-bold text-lg mb-2 text-indigo-600 dark:text-indigo-400">1. Inbound Leads (Entrada)</h4>
+                      <p className="text-sm">
+                        Use o <strong>Webhook de Inbound Leads</strong> para registrar contatos instantaneamente. Quando alguém preencher um Typeform, um Lead Ads no Facebook, ou se cadastrar na sua Landing Page (ActiveCampaign, RD Station), o Vexo pode receber esses dados e colocar o lead no Kanban na hora!
+                      </p>
+                      <p className="text-sm mt-2 text-slate-500 italic">
+                        Basta disparar um POST (via automação) enviando no mínimo o telefone do lead no corpo da requisição (JSON).
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5">
+                      <h4 className="font-bold text-lg mb-2 text-indigo-600 dark:text-indigo-400">2. Conversões (Vendas)</h4>
+                      <p className="text-sm">
+                        Use o <strong>Webhook de Conversões</strong> para atualizar o status do lead para "Vendido" (WON) e registrar o valor do contrato faturado. Configure seu gateway (Hotmart, Kiwify, Asaas) ou ERP (Bling, Omie) para disparar o webhook quando um pagamento for confirmado.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-5 flex gap-4">
+                    <Lightbulb className="h-6 w-6 text-amber-500 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-amber-800 dark:text-amber-500 mb-1">Dica de Ouro: Identificador</h4>
+                      <p className="text-sm text-amber-700 dark:text-amber-400">
+                        Sempre que disparar para o Webhook de Conversões, o sistema usará o <strong>número do telefone</strong> para cruzar e encontrar o lead na base do CRM. Portanto, certifique-se de capturar o telefone no seu checkout de pagamento e enviá-lo no JSON para o Vexo!
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button onClick={() => window.location.href = "/crm/integracoes"} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700">
+                    Ir para Integrações <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </CardContent>
               </Card>
