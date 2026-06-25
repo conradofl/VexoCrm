@@ -578,6 +578,9 @@ export function isInternalPageAllowedForClient(
     aquecimento: "aquecimento",
     relatorios: "relatorios",
     "apresentacao-gd": "apresentacao-gd",
+    "inbound-agents": "inbound-agents",
+    integracoes: "integracoes",
+    eventos: "eventos",
   };
 
   const tabKey = pageToTabKey[page];
@@ -610,6 +613,9 @@ export function isPathAllowedForClient(
   else if (path.includes("/crm/apresentacao")) tabKey = "apresentacao";
   else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
   else if (path.includes("/crm/usuarios")) tabKey = "usuarios";
+  else if (path.includes("/crm/inbound-agents")) tabKey = "inbound-agents";
+  else if (path.includes("/crm/integracoes")) tabKey = "integracoes";
+  else if (path.includes("/crm/eventos")) tabKey = "eventos";
 
   if (!tabKey) return true;
   return allowedTabs.includes(tabKey);

@@ -151,7 +151,10 @@ const ALL_TAB_KEYS = [
   "apresentacao-gd",
   "onboarding",
   "chatbot-docs",
-  "usuarios"
+  "usuarios",
+  "inbound-agents",
+  "integracoes",
+  "eventos"
 ];
 
 const TABS_HIERARCHY = [
@@ -214,6 +217,15 @@ const TABS_HIERARCHY = [
       { key: "onboarding", label: "Treinamento Vexo" },
       { key: "chatbot-docs", label: "Chatbot Docs" },
       { key: "usuarios", label: "Usuários" }
+    ]
+  },
+  {
+    key: "configuracoes",
+    label: "Configurações Extras",
+    children: [
+      { key: "inbound-agents", label: "Assistentes Inbound" },
+      { key: "integracoes", label: "Integrações" },
+      { key: "eventos", label: "Eventos" }
     ]
   }
 ];
