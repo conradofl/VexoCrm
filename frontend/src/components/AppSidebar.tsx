@@ -31,6 +31,7 @@ import {
   Flame,
   BarChart2,
   Database,
+  Server,
 } from "lucide-react";
 import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
@@ -104,6 +105,7 @@ const SISTEMA_ITEMS = [
   { key: "onboarding",   label: "Treinamento Vexo",   url: "/crm/onboarding",   icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
   { key: "chatbot-docs", label: "Chatbot Docs",     url: "/crm/chatbot-docs", icon: BookOpen,    page: "chatbot-docs" as InternalPage },
   { key: "empresas",     label: "Empresas",         url: "/crm/empresas",     icon: Building2,   page: "empresas" as InternalPage },
+  { key: "integracoes",  label: "Integrações",      url: "/crm/integracoes",  icon: Server,      page: "empresas" as InternalPage },
   { key: "usuarios",     label: "Usuários",         url: "/crm/usuarios",     icon: ShieldCheck, page: "usuarios" as InternalPage },
 ];
 

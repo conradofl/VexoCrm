@@ -53,6 +53,8 @@ import {
 
 import { routeDeps } from "./http/routeDeps.js";
 import { registerAllDomainRoutes } from "./domains/registerAllDomainRoutes.js";
+import { registerEventosRoutes } from "./domains/eventos/routes.js";
+import { registerWebhooksRoutes } from "./webhooks/routes.js";
 import { startFollowupWorker } from "./followup/worker.js";
 import { startAutomationEngine } from "./followup/automationEngine.js";
 import {
@@ -7384,6 +7386,7 @@ Object.assign(routeDeps, {
   validateN8nInboundBearer,
 });
 registerAllDomainRoutes(app);
+registerWebhooksRoutes(app);
 
 app.use((error, req, res, _next) => {
   if (error?.type === "entity.too.large" || error?.status === 413) {

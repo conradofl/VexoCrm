@@ -78,6 +78,7 @@ import { registerJourneysRoutes } from "../followup/journeysRoutes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { query as fupQuery } from "../followup/db.js";
 import { getFollowupQueue } from "../followup/queue.js";
+import { registerEventosRoutes } from "./eventos/routes.js";
 
 let _evolutionDailyUsageSchemaEnsured = false;
 let _dispatchRunsClaimSchemaEnsured = false;
@@ -8470,4 +8471,7 @@ export function registerAllDomainRoutes(app) {
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth);
+
+  // ─── Módulo de Eventos ───
+  app.use("/api/eventos", registerEventosRoutes(routeDeps));
 }

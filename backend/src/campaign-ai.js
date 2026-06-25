@@ -15,6 +15,20 @@ const CURIOSITY_NAME_TECHNIQUE = {
     "Oi, {{nome}}, rapidinho... antes de voce decidir, deixa eu te mostrar um ponto que talvez mude sua visao.",
 };
 
+const VIP_SALES_TECHNIQUE = {
+  name: "vip_high_ticket",
+  label: "Venda VIP / High-ticket",
+  summary:
+    "Foque em exclusividade, benefícios premium e status. Evite parecer desesperado por vendas. Demonstre escassez real e atendimento personalizado.",
+  useCases: [
+    "Vendas High-ticket",
+    "Lançamentos VIP",
+    "Produtos de Luxo e Exclusivos",
+  ],
+  example:
+    "Olá, {{nome}}. Como você está no nosso grupo seleto, reservei uma oportunidade exclusiva para você.",
+};
+
 // Groq was returning unrealistic gaps (e.g. 172800s = 48h) for WhatsApp steps; AI assist stays within chat-like ranges.
 const MAX_AI_STEP_DELAY_SECONDS = 3600;
 const MAX_AI_LEAD_DELAY_SECONDS = 3600;
@@ -100,6 +114,14 @@ function sanitizeSequence(sequence = []) {
 
 function buildTechniqueContext(style = "") {
   const normalizedStyle = normalizeString(style).toLowerCase();
+  
+  if (normalizedStyle.includes("vip") || normalizedStyle.includes("high") || normalizedStyle.includes("premium")) {
+    return {
+      activeTechnique: VIP_SALES_TECHNIQUE,
+      priority: "high",
+    };
+  }
+
   const shouldPrioritizeTechnique =
     !normalizedStyle ||
     normalizedStyle.includes("curios") ||

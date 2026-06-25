@@ -1,6 +1,5 @@
 import { query, getSupabase } from "./db.js";
 import { getFollowupQueue } from "./queue.js";
-import { generateFollowupMessage } from "./automationEngine.js"; // Supondo que tenha uma funçao de geracao ou adaptaremos
 import { ResendProvider } from "../providers/ResendProvider.js";
 
 /**

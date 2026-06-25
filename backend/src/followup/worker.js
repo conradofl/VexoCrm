@@ -152,7 +152,11 @@ async function processEventJourneyJob(job) {
     if (aiPrompt && process.env.GROQ_API_KEY) {
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
       const systemMsg = "Você é um especialista em vendas B2C. Escreva uma mensagem persuasiva baseada na diretriz fornecida. Apenas o texto da mensagem final.";
-      const userMsg = `Diretriz: ${aiPrompt}\n\nContexto do Lead:\nNome: ${leadData.name}\nStatus atual: ${leadData.status}\n\nEscreva a mensagem (sem aspas ou explicações extras):`;
+      let userMsg = `Diretriz: ${aiPrompt}\n\nContexto do Lead:\nNome: ${leadData.name}\nStatus atual: ${leadData.status}`;
+      if (context && Object.keys(context).length > 0) {
+        userMsg += `\n\nContexto Adicional (Eventos/Pagamentos/Cupons):\n${JSON.stringify(context, null, 2)}`;
+      }
+      userMsg += `\n\nEscreva a mensagem (sem aspas ou explicações extras):`;
       
       const completion = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
@@ -168,6 +172,12 @@ async function processEventJourneyJob(job) {
     } else {
       // Fallback sem IA
       finalMessage = aiPrompt || `Olá ${leadData.name}, estamos passando para checar como as coisas estão.`;
+      if (context?.paymentUrl) {
+        finalMessage = finalMessage.replace(/\{\{paymentUrl\}\}/gi, context.paymentUrl);
+      }
+      if (context?.couponCode) {
+        finalMessage = finalMessage.replace(/\{\{couponCode\}\}/gi, context.couponCode);
+      }
     }
 
     // Envio pelo Canal
