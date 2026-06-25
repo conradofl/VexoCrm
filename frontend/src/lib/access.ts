@@ -587,6 +587,8 @@ export function isInternalPageAllowedForClient(
     eventos: "eventos",
     relacionamento: "relacionamento",
     livpub: "livpub",
+    "inbound-agents": "inbound-agents",
+    integracoes: "integracoes",
   };
 
   const tabKey = pageToTabKey[page];
@@ -622,6 +624,9 @@ export function isPathAllowedForClient(
   else if (path.includes("/crm/livpub")) tabKey = "livpub";
   else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
   else if (path.includes("/crm/usuarios")) tabKey = "usuarios";
+  else if (path.includes("/crm/inbound-agents")) tabKey = "inbound-agents";
+  else if (path.includes("/crm/integracoes")) tabKey = "integracoes";
+  else if (path.includes("/crm/eventos")) tabKey = "eventos";
 
   if (!tabKey) return true;
   return allowedTabs.includes(tabKey);
