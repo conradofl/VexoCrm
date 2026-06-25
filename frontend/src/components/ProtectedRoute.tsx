@@ -62,13 +62,15 @@ export default function ProtectedRoute({
     return <Navigate to={defaultRoute} replace />;
   }
 
-  if (requiredInternalPage && (!canAccessInternalPage(requiredInternalPage) || !isInternalPageAllowedForClient(requiredInternalPage, allowedTabs))) {
+  const isInternalUser = accessRole === "internal";
+
+  if (requiredInternalPage && (!canAccessInternalPage(requiredInternalPage) || (!isInternalUser && !isInternalPageAllowedForClient(requiredInternalPage, allowedTabs)))) {
     return <Navigate to="/crm" replace />;
   }
 
-  if (location.pathname.startsWith("/crm") && !isPathAllowedForClient(location.pathname, allowedTabs)) {
+  if (location.pathname.startsWith("/crm") && (!isInternalUser && !isPathAllowedForClient(location.pathname, allowedTabs))) {
     const targetPage = INTERNAL_PAGE_ORDER.find(
-      (page) => canAccessInternalPage(page) && isInternalPageAllowedForClient(page, allowedTabs)
+      (page) => canAccessInternalPage(page) && (isInternalUser || isInternalPageAllowedForClient(page, allowedTabs))
     );
     if (targetPage) {
       const pageToPath: Record<string, string> = {
@@ -93,6 +95,8 @@ export default function ProtectedRoute({
         conexoes: "conexoes",
         aquecimento: "aquecimento",
         relatorios: "relatorios",
+        apresentacao: "apresentacao",
+        "apresentacao-gd": "apresentacao-gd",
       };
       const path = pageToPath[targetPage] || targetPage;
       return <Navigate to={`/crm/${path}`} replace />;
