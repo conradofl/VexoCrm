@@ -200,12 +200,11 @@ const CLIENT_PAGE_TABS = [
 
 const INTERNAL_PAGE_TABS = [
   {
-    value: "operacao",
-    label: "Operacao",
+    value: "vendas",
+    label: "Vendas & Gestão",
     items: [
       "dashboard",
       "leads",
-      "planilhas",
       "whatsapp",
       "inteligencia-comercial",
       "chatbot-kanban",
@@ -215,24 +214,26 @@ const INTERNAL_PAGE_TABS = [
       "followup-campanhas",
       "followup-analytics",
       "followup-sugestoes",
+      "agente",
+      "usuarios",
+      "empresas",
+      "chatbot-docs",
+      "onboarding-wizard",
+      "apresentacao",
+      "onboarding-agent",
+      "apresentacao-gd",
+    ] as InternalPage[],
+  },
+  {
+    value: "disparos",
+    label: "Disparos",
+    items: [
+      "planilhas",
+      "campanhas",
       "conexoes",
       "disparos",
       "aquecimento",
       "relatorios",
-    ] as InternalPage[],
-  },
-  {
-    value: "gestao",
-    label: "Gestao",
-    items: [
-      "agente",
-      "usuarios",
-      "empresas",
-      "campanhas",
-      "chatbot-docs",
-      "onboarding-wizard",
-      "onboarding-agent",
-      "apresentacao-gd",
     ] as InternalPage[],
   },
 ];
@@ -1015,7 +1016,7 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
       <TabsList className="grid w-full grid-cols-2 p-1.5 bg-muted/20 border border-border/40 rounded-[1.75rem] h-15">
         {tabs.map((tab) => {
           const selectedCount = tab.items.filter((item) => selected.includes(item)).length;
-          const isOperacaoOrPortal = tab.value === "operacao" || tab.value === "portal";
+          const isOperacaoOrPortal = tab.value === "vendas" || tab.value === "portal";
 
           return (
             <TabsTrigger

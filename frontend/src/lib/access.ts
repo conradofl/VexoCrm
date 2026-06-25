@@ -22,6 +22,7 @@ export const INTERNAL_PAGE_ORDER = [
   "disparos",
   "aquecimento",
   "relatorios",
+  "apresentacao",
   "apresentacao-gd",
 ] as const;
 
@@ -574,6 +575,7 @@ export function isInternalPageAllowedForClient(
     "followup-sugestoes": "followup",
     "chatbot-docs": "chatbot-docs",
     "onboarding-wizard": "onboarding",
+    "apresentacao": "apresentacao",
     conexoes: "conexoes",
     aquecimento: "aquecimento",
     relatorios: "relatorios",
