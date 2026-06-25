@@ -1290,8 +1290,17 @@ export function registerAllDomainRoutes(app) {
       results.push(await deleteLeadClientRowsFromTable(tableName, tenantId));
     }
 
-    // Limpar tabela de leads específica do tenant (leads_{clientId})
-    results.push(await deleteLeadClientRowsFromTable(leadsTableName(tenantId), tenantId));
+    // Limpar tabela de leads específica do tenant e dropar a tabela física com CASCADE
+    const leadsTable = leadsTableName(tenantId);
+    results.push(await deleteLeadClientRowsFromTable(leadsTable, tenantId));
+
+    try {
+      await pgDatabasePool.query(`DROP TABLE IF EXISTS public."${leadsTable}" CASCADE`);
+      results.push({ table: leadsTable, deleted: 1, dropped: true });
+    } catch (err) {
+      console.error(`Failed to drop leads table ${leadsTable} for tenant ${tenantId}:`, err);
+      results.push({ table: leadsTable, deleted: 0, dropped: false, error: err.message });
+    }
 
     return results;
   }
