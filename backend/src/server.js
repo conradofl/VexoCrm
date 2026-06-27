@@ -1576,7 +1576,7 @@ function maskN8nSettings(row) {
   };
 }
 
-function buildDefaultSegmentationConfig(model = "generico") {
+export function buildDefaultSegmentationConfig(model = "generico") {
   const normalizedModel = normalizeTenantKey(model) || "generico";
   const defaults = {
     outlier: [
