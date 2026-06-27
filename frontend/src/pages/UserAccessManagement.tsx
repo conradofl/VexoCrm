@@ -2281,7 +2281,9 @@ export default function UserAccessManagement() {
                               }}
                             >
                               <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20">
-                                <SelectValue placeholder="Tipo de usuario" />
+                                <SelectValue placeholder="Tipo de usuario">
+                                  {createDraft.accessPreset ? findAccessProfile(resolvedAccessProfiles, createDraft.accessPreset)?.label : undefined}
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent className="rounded-xl">
                                 {resolvedAccessProfiles
@@ -2710,7 +2712,9 @@ export default function UserAccessManagement() {
                                           }}
                                         >
                                           <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20 text-base px-4">
-                                            <SelectValue placeholder="Selecionar perfil de acesso" />
+                                            <SelectValue placeholder="Selecionar perfil de acesso">
+                                              {selectedDraft.accessPreset ? findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.label : undefined}
+                                            </SelectValue>
                                           </SelectTrigger>
                                           <SelectContent className="rounded-xl">
                                             {resolvedAccessProfiles.filter(p => p.role !== "pending").map((profile) => (
