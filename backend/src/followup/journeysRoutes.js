@@ -10,11 +10,12 @@ function str(v) {
   return typeof v === "string" ? v.trim() || null : null;
 }
 
-export function registerJourneysRoutes(app, requireFirebaseAuth) {
+export function registerJourneysRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess) {
   const router = Router();
+  router.use(requireInternalPageAccess("planilhas"));
 
   // GET /api/followup/journeys?companyId=
-  router.get("/", requireFirebaseAuth, async (req, res) => {
+  router.get("/", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const companyId = str(req.query.companyId);
     if (!companyId) return sendErr(res, 400, "MISSING_COMPANY_ID", "companyId é obrigatório");
 
@@ -34,7 +35,7 @@ export function registerJourneysRoutes(app, requireFirebaseAuth) {
   });
 
   // POST /api/followup/journeys
-  router.post("/", requireFirebaseAuth, async (req, res) => {
+  router.post("/", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const { company_id, trigger_event, is_active, channel, delay_value, delay_unit, ai_prompt } = req.body;
 
     if (!str(company_id) || !str(trigger_event)) {

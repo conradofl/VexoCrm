@@ -31,8 +31,9 @@ function str(v) {
  * @param {import("express").Application} app
  * @param {Function} requireFirebaseAuth — middleware já existente no server.js
  */
-export function registerFollowupRoutes(app, requireFirebaseAuth) {
+export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess) {
   const router = Router();
+  router.use(requireInternalPageAccess("planilhas"));
 
   // ══════════════════════════════════════════════════════════════════════════
   // WEBHOOKS PÚBLICOS (sem auth Firebase)
@@ -101,6 +102,24 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
         campaign_id = rows[0]?.campaign_id || null;
       }
 
+      // Opt-out detection
+      const messageText = str(
+        body.data?.message?.conversation ||
+        body.data?.message?.extendedTextMessage?.text ||
+        ""
+      ).toLowerCase().trim();
+
+      if (phone && messageText.match(/^(sair|parar|cancelar|stop)$/i)) {
+        await query(
+          `INSERT INTO public.lead_optouts (client_id, phone, reason)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (client_id, phone) DO NOTHING`,
+          [companyId, phone, `Opt-out via WhatsApp: ${messageText}`]
+        ).catch((err) => {
+          console.error("[opt-out insertion error]", err);
+        });
+      }
+
       await query(
         `INSERT INTO followup_replies (company_id, campaign_id, phone, payload)
          VALUES ($1,$2,$3,$4)`,
@@ -131,7 +150,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // ── Empresas ──────────────────────────────────────────────────────────────
 
   // GET /api/followup/companies
-  router.get("/companies", requireFirebaseAuth, async (req, res) => {
+  router.get("/companies", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
       const supabase = getSupabase();
       const { data, error } = await supabase
@@ -167,7 +186,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // POST /api/followup/companies
-  router.post("/companies", requireFirebaseAuth, async (req, res) => {
+  router.post("/companies", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled } =
       req.body || {};
     if (!str(name) || !str(evolution_instance)) {
@@ -201,7 +220,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // PATCH /api/followup/companies/:id
-  router.patch("/companies/:id", requireFirebaseAuth, async (req, res) => {
+  router.patch("/companies/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled } =
@@ -238,7 +257,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // DELETE /api/followup/companies/:id — soft-delete (archived_at)
-  router.delete("/companies/:id", requireFirebaseAuth, async (req, res) => {
+  router.delete("/companies/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
@@ -261,7 +280,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // ── Campanhas ─────────────────────────────────────────────────────────────
 
   // GET /api/followup/campaigns?companyId=
-  router.get("/campaigns", requireFirebaseAuth, async (req, res) => {
+  router.get("/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const companyId = str(req.query.companyId);
     if (!companyId) return sendErr(res, 400, "MISSING_COMPANY_ID", "companyId é obrigatório");
     try {
@@ -310,7 +329,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // POST /api/followup/campaigns
-  router.post("/campaigns", requireFirebaseAuth, async (req, res) => {
+  router.post("/campaigns", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const { company_id, name, description, default_origin } = req.body || {};
     if (!str(company_id) || !str(name)) {
       return sendErr(res, 400, "MISSING_FIELDS", "company_id e name são obrigatórios");
@@ -350,7 +369,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // PATCH /api/followup/campaigns/:id
-  router.patch("/campaigns/:id", requireFirebaseAuth, async (req, res) => {
+  router.patch("/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
 
@@ -391,7 +410,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // DELETE /api/followup/campaigns/:id (só draft ou archived)
-  router.delete("/campaigns/:id", requireFirebaseAuth, async (req, res) => {
+  router.delete("/campaigns/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
@@ -416,7 +435,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // ── Templates ─────────────────────────────────────────────────────────────
 
   // GET /api/followup/templates?campaignId=
-  router.get("/templates", requireFirebaseAuth, async (req, res) => {
+  router.get("/templates", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const campaignId = str(req.query.campaignId);
     if (!campaignId) return sendErr(res, 400, "MISSING_CAMPAIGN_ID", "campaignId é obrigatório");
     try {
@@ -434,7 +453,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // POST /api/followup/templates
-  router.post("/templates", requireFirebaseAuth, async (req, res) => {
+  router.post("/templates", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const {
       campaign_id, name, message,
       trigger_type, trigger_value, trigger_unit, trigger_direction,
@@ -469,7 +488,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
 
   // PATCH /api/followup/templates/reorder — DEVE vir ANTES de /templates/:id
   // para que "reorder" não seja capturado como :id pelo Express
-  router.patch("/templates/reorder", requireFirebaseAuth, async (req, res) => {
+  router.patch("/templates/reorder", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const { items } = req.body || {};
     if (!Array.isArray(items) || !items.length) {
       return sendErr(res, 400, "MISSING_ITEMS", "items[] é obrigatório");
@@ -490,7 +509,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // PATCH /api/followup/templates/:id — DEPOIS de /templates/reorder
-  router.patch("/templates/:id", requireFirebaseAuth, async (req, res) => {
+  router.patch("/templates/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
@@ -517,7 +536,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // DELETE /api/followup/templates/:id
-  router.delete("/templates/:id", requireFirebaseAuth, async (req, res) => {
+  router.delete("/templates/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
@@ -533,7 +552,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // ── Fila de schedules (leitura) ───────────────────────────────────────────
 
   // GET /api/followup/schedules?companyId=&campaignId=&status=&from=&to=&page=&limit=
-  router.get("/schedules", requireFirebaseAuth, async (req, res) => {
+  router.get("/schedules", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const companyId = str(req.query.companyId);
     const campaignId = str(req.query.campaignId);
     const status = str(req.query.status);
@@ -580,7 +599,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // ── Analytics ─────────────────────────────────────────────────────────────
 
   // GET /api/followup/analytics?companyId=&campaignId=&from=&to=
-  router.get("/analytics", requireFirebaseAuth, async (req, res) => {
+  router.get("/analytics", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
       const filters = {
         companyId: str(req.query.companyId),
@@ -598,7 +617,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   // ── Suggestions (motor proativo) ─────────────────────────────────────────────
 
   // GET /api/followup/suggestions?companyId=&status=pending
-  router.get("/suggestions", requireFirebaseAuth, async (req, res) => {
+  router.get("/suggestions", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const companyId = str(req.query.companyId);
     const status    = str(req.query.status) ?? "pending";
 
@@ -642,7 +661,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // GET /api/followup/suggestions/count — contagem de pendentes (para badge)
-  router.get("/suggestions/count", requireFirebaseAuth, async (req, res) => {
+  router.get("/suggestions/count", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const companyId = str(req.query.companyId);
     try {
       const params = [];
@@ -662,7 +681,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // PATCH /api/followup/suggestions/:id/approve — cria schedule + job BullMQ
-  router.patch("/suggestions/:id/approve", requireFirebaseAuth, async (req, res) => {
+  router.patch("/suggestions/:id/approve", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
 
@@ -733,7 +752,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // PATCH /api/followup/suggestions/:id/reject
-  router.patch("/suggestions/:id/reject", requireFirebaseAuth, async (req, res) => {
+  router.patch("/suggestions/:id/reject", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
 
@@ -750,7 +769,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth) {
   });
 
   // POST /api/followup/suggestions/approve-batch
-  router.post("/suggestions/approve-batch", requireFirebaseAuth, async (req, res) => {
+  router.post("/suggestions/approve-batch", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const ids  = Array.isArray(body.ids) ? body.ids.filter((i) => typeof i === "string") : [];
     if (!ids.length) return sendErr(res, 400, "INVALID_BODY", "ids must be a non-empty array of strings");

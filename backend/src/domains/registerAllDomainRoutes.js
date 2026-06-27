@@ -2320,6 +2320,9 @@ export function registerAllDomainRoutes(app) {
         return;
       }
 
+      console.log("[DEBUG] /api/admin/users - Payload:", req.body);
+      console.log("[DEBUG] /api/admin/users - Selected Profile:", selectedProfile);
+
       managedClaims = buildManagedClaims({
         role: selectedProfile?.role || role,
         accessPreset: selectedProfile?.key || req.body?.accessPreset,
@@ -2334,6 +2337,8 @@ export function registerAllDomainRoutes(app) {
         companyName: req.body?.companyName,
         internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
       });
+
+      console.log("[DEBUG] /api/admin/users - Generated Managed Claims:", managedClaims);
 
       if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
         sendError(res, 403, "FORBIDDEN_USER_SCOPE", "You cannot assign this user access scope");
@@ -6206,6 +6211,15 @@ export function registerAllDomainRoutes(app) {
           }
         : null;
 
+    const checkOptout = async ({ phone }) => {
+      if (!pgDatabasePool || !phone) return false;
+      const { rows } = await pgDatabasePool.query(
+        `SELECT id FROM public.lead_optouts WHERE client_id = $1 AND phone = $2 LIMIT 1`,
+        [clientId, phone]
+      );
+      return rows.length > 0;
+    };
+
     // Defeito A: claim idempotente por lead. INSERT ... ON CONFLICT DO NOTHING marca o
     // lead como 'claimed' ANTES do envio. Se a linha não foi inserida (conflito), o lead
     // já foi tocado neste disparo → pular (evita duplicidade mesmo em retomada/concorrência).
@@ -8475,11 +8489,11 @@ export function registerAllDomainRoutes(app) {
   });
 
   // ─── Módulo de Follow-up (BullMQ + campanhas independentes) ───────────────
-  registerFollowupRoutes(app, requireFirebaseAuth);
-  registerJourneysRoutes(app, requireFirebaseAuth);
+  registerFollowupRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
+  registerJourneysRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
-  registerOnboardingRoutes(app, requireFirebaseAuth);
+  registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);
 
   // ─── Módulo de Eventos ───
   app.use("/api/eventos", registerEventosRoutes(routeDeps));

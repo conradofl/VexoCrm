@@ -2,7 +2,9 @@ import { Router } from "express";
 
 export function registerEventosRoutes(routeDeps) {
   const router = Router();
-  const { pgDatabasePool, requireFirebaseAuth, sendError } = routeDeps;
+  const { pgDatabasePool, requireFirebaseAuth, requireInternalPageAccess, sendError } = routeDeps;
+  router.use(requireFirebaseAuth);
+  router.use(requireInternalPageAccess("eventos"));
 
   // List events
   router.get("/", requireFirebaseAuth, async (req, res) => {

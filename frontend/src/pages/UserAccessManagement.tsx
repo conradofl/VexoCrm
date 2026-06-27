@@ -355,13 +355,13 @@ function buildAccessProfileDraft(profile?: AccessProfileRecord | null): AccessPr
 }
 
 const FALLBACK_ACCESS_PROFILE_DESCRIPTIONS: Record<string, string> = {
-  admin_vexo: "Acesso total ao CRM. Reservado aos administradores da Vexo.",
-  gestor: "Libera usuarios, organiza empresas e conduz a operacao do CRM.",
-  operador: "Operacao padrao do CRM vinculada a um tenant.",
-  parceiro: "Acompanha a operacao com leitura e conversa limitada no ambiente do cliente.",
-  client_manager: "Tipo de cliente com acesso expandido ao portal.",
-  client_operator: "Tipo de cliente operacional para uso diario.",
-  client_viewer: "Tipo de cliente com acesso de leitura.",
+  admin_vexo: "Acesso total ao CRM (Você e a equipe técnica).",
+  gestor: "Time comercial (interno). Pode ver vários clientes, mas não pode alterar configs sensíveis do sistema.",
+  operador: "Time comercial (interno). Pode ver vários clientes, mas não pode deletar o sistema.",
+  parceiro: "Acompanha a operacao com leitura e conversa limitada.",
+  client_manager: "Pode ver os leads da empresa dele, integrar WhatsApp e gerar API keys.",
+  client_operator: "Um vendedor do cliente. Pode apenas falar com os leads (não pode deletar nada, nem ver configs).",
+  client_viewer: "Acesso apenas de leitura para o cliente.",
   pending: "Conta ainda sem liberacao operacional.",
 };
 
@@ -699,7 +699,7 @@ function buildPayload(draft: AccessDraft) {
     accessPreset: normalized.accessPreset,
     scopeMode: normalized.scopeMode,
     approvalLevel: normalized.approvalLevel,
-    companyName: normalized.companyName.trim() || undefined,
+    companyName: normalized.companyName ? normalized.companyName.trim() : undefined,
     clientIds: normalized.clientIds,
     allowedViews: normalized.allowedViews,
     internalPages: normalized.internalPages,
@@ -2021,6 +2021,10 @@ export default function UserAccessManagement() {
         sendPasswordReset: preparedDraft.sendPasswordReset,
       };
 
+      console.log("[DEBUG] createUser - Draft Original:", createDraft);
+      console.log("[DEBUG] createUser - Prepared Draft:", preparedDraft);
+      console.log("[DEBUG] createUser - Final Payload:", payload);
+
       const res = await fetchApi("/api/admin/users", {
         method: "POST",
         headers: {
@@ -2282,7 +2286,7 @@ export default function UserAccessManagement() {
                               <SelectContent className="rounded-xl">
                                 {resolvedAccessProfiles
                                   .filter((profile) => {
-                                    if (profile.key === "pending" || profile.role !== "internal") return false;
+                                    if (profile.key === "pending") return false;
                                     if (profile.key === "admin_vexo") return false;
                                     if (isAdminUser) return true;
                                     return profile.key === "operador";
