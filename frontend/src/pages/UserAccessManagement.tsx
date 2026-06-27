@@ -2292,8 +2292,19 @@ export default function UserAccessManagement() {
                                     return profile.key === "operador";
                                   })
                                   .map((profile) => (
-                                    <SelectItem key={profile.key} value={profile.key} className="py-2.5">
-                                      {profile.label}
+                                    <SelectItem 
+                                      key={profile.key} 
+                                      value={profile.key} 
+                                      className="py-3 items-start"
+                                    >
+                                      <div className="flex flex-col gap-1 pr-2 max-w-[280px]">
+                                        <span className="font-semibold text-sm leading-none">{profile.label}</span>
+                                        {profile.description && (
+                                          <span className="text-[11px] text-muted-foreground whitespace-normal leading-snug">
+                                            {profile.description}
+                                          </span>
+                                        )}
+                                      </div>
                                     </SelectItem>
                                   ))}
                               </SelectContent>
@@ -2703,10 +2714,21 @@ export default function UserAccessManagement() {
                                           </SelectTrigger>
                                           <SelectContent className="rounded-xl">
                                             {resolvedAccessProfiles.filter(p => p.role !== "pending").map((profile) => (
-                                              <SelectItem key={profile.key} value={profile.key} className="py-2.5">
-                                                <div className="flex items-center gap-2">
-                                                  <span className="font-medium">{profile.label}</span>
-                                                  <Badge variant="outline" className="text-[10px] uppercase">{ROLE_LABELS[profile.role]}</Badge>
+                                              <SelectItem 
+                                                key={profile.key} 
+                                                value={profile.key} 
+                                                className="py-3 items-start"
+                                              >
+                                                <div className="flex flex-col gap-1 pr-2 max-w-[280px]">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-sm leading-none">{profile.label}</span>
+                                                    <Badge variant="outline" className="text-[10px] uppercase">{ROLE_LABELS[profile.role]}</Badge>
+                                                  </div>
+                                                  {profile.description && (
+                                                    <span className="text-[11px] text-muted-foreground whitespace-normal leading-snug">
+                                                      {profile.description}
+                                                    </span>
+                                                  )}
                                                 </div>
                                               </SelectItem>
                                             ))}
