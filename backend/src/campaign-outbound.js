@@ -522,6 +522,7 @@ export async function dispatchCampaignSequence({
   leadDelayProvider = null,
   onLeadClaim = null,
   onLeadFailed = null,
+  onLeadCheckOptout = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -555,6 +556,19 @@ export async function dispatchCampaignSequence({
         reason: "Lead sem telefone valido para disparo.",
       });
       continue;
+    }
+
+    if (typeof onLeadCheckOptout === "function") {
+      const isOptedOut = await onLeadCheckOptout({ lead, phone, leadIndex });
+      if (isOptedOut) {
+        summary.failures.push({
+          phone,
+          stepId: null,
+          stepType: null,
+          reason: "Lead está na lista de Opt-out.",
+        });
+        continue;
+      }
     }
 
     let leadWebhookUrl = webhookUrl;

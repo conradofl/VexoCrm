@@ -355,13 +355,13 @@ function buildAccessProfileDraft(profile?: AccessProfileRecord | null): AccessPr
 }
 
 const FALLBACK_ACCESS_PROFILE_DESCRIPTIONS: Record<string, string> = {
-  admin_vexo: "Acesso total ao CRM. Reservado aos administradores da Vexo.",
-  gestor: "Libera usuarios, organiza empresas e conduz a operacao do CRM.",
-  operador: "Operacao padrao do CRM vinculada a um tenant.",
-  parceiro: "Acompanha a operacao com leitura e conversa limitada no ambiente do cliente.",
-  client_manager: "Tipo de cliente com acesso expandido ao portal.",
-  client_operator: "Tipo de cliente operacional para uso diario.",
-  client_viewer: "Tipo de cliente com acesso de leitura.",
+  admin_vexo: "Acesso total ao CRM (Você e a equipe técnica).",
+  gestor: "Time comercial (interno). Pode ver vários clientes, mas não pode alterar configs sensíveis do sistema.",
+  operador: "Time comercial (interno). Pode ver vários clientes, mas não pode deletar o sistema.",
+  parceiro: "Acompanha a operacao com leitura e conversa limitada.",
+  client_manager: "Pode ver os leads da empresa dele, integrar WhatsApp e gerar API keys.",
+  client_operator: "Um vendedor do cliente. Pode apenas falar com os leads (não pode deletar nada, nem ver configs).",
+  client_viewer: "Acesso apenas de leitura para o cliente.",
   pending: "Conta ainda sem liberacao operacional.",
 };
 
@@ -699,7 +699,7 @@ function buildPayload(draft: AccessDraft) {
     accessPreset: normalized.accessPreset,
     scopeMode: normalized.scopeMode,
     approvalLevel: normalized.approvalLevel,
-    companyName: normalized.companyName.trim() || undefined,
+    companyName: normalized.companyName ? normalized.companyName.trim() : undefined,
     clientIds: normalized.clientIds,
     allowedViews: normalized.allowedViews,
     internalPages: normalized.internalPages,
@@ -1028,7 +1028,7 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-      <TabsList 
+      <TabsList
         className={cn(
           "w-full p-1.5 bg-muted/20 border border-border/40 rounded-[1.75rem] h-auto flex flex-wrap sm:grid",
           tabs.length === 4 ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-2"
@@ -2021,6 +2021,10 @@ export default function UserAccessManagement() {
         sendPasswordReset: preparedDraft.sendPasswordReset,
       };
 
+      console.log("[DEBUG] createUser - Draft Original:", createDraft);
+      console.log("[DEBUG] createUser - Prepared Draft:", preparedDraft);
+      console.log("[DEBUG] createUser - Final Payload:", payload);
+
       const res = await fetchApi("/api/admin/users", {
         method: "POST",
         headers: {
@@ -2277,19 +2281,33 @@ export default function UserAccessManagement() {
                               }}
                             >
                               <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20">
-                                <SelectValue placeholder="Tipo de usuario" />
+                                <SelectValue placeholder="Tipo de usuario">
+                                  {createDraft.accessPreset ? findAccessProfile(resolvedAccessProfiles, createDraft.accessPreset)?.label : undefined}
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent className="rounded-xl">
                                 {resolvedAccessProfiles
                                   .filter((profile) => {
-                                    if (profile.key === "pending" || profile.role !== "internal") return false;
+                                    if (profile.key === "pending") return false;
                                     if (profile.key === "admin_vexo") return false;
                                     if (isAdminUser) return true;
                                     return profile.key === "operador";
                                   })
                                   .map((profile) => (
-                                    <SelectItem key={profile.key} value={profile.key} className="py-2.5">
-                                      {profile.label}
+                                    <SelectItem
+                                      key={profile.key}
+                                      value={profile.key}
+                                      className="py-3 items-start"
+                                      data-testid={`profile-option-${profile.key}`}
+                                    >
+                                      <div className="flex flex-col gap-1 pr-2 max-w-[280px]">
+                                        <span className="font-semibold text-sm leading-none">{profile.label}</span>
+                                        {profile.description && (
+                                          <span className="text-[11px] text-muted-foreground whitespace-normal leading-snug">
+                                            {profile.description}
+                                          </span>
+                                        )}
+                                      </div>
                                     </SelectItem>
                                   ))}
                               </SelectContent>
@@ -2324,14 +2342,6 @@ export default function UserAccessManagement() {
                           </div>
                         </div>
 
-                        {selectedCreateType ? (
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground bg-muted/10 p-3 rounded-xl border border-border/40">
-                            <Badge variant="outline" className={cn("border-border/80 bg-background/60", ROLE_BADGE_CLASS[selectedCreateType.role])}>
-                              {ROLE_LABELS[selectedCreateType.role]}
-                            </Badge>
-                            {selectedCreateType.description ? <span>{selectedCreateType.description}</span> : null}
-                          </div>
-                        ) : null}
 
                         <div className="rounded-2xl border border-border/60 bg-muted/5 p-4">
                           <label className="flex items-center gap-3 text-sm text-foreground font-semibold cursor-pointer">
@@ -2695,24 +2705,33 @@ export default function UserAccessManagement() {
                                           }}
                                         >
                                           <SelectTrigger className="h-12 rounded-xl bg-muted/10 border-border/60 hover:bg-muted/20 text-base px-4">
-                                            <SelectValue placeholder="Selecionar perfil de acesso" />
+                                            <SelectValue placeholder="Selecionar perfil de acesso">
+                                              {selectedDraft.accessPreset ? findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.label : undefined}
+                                            </SelectValue>
                                           </SelectTrigger>
                                           <SelectContent className="rounded-xl">
                                             {resolvedAccessProfiles.filter(p => p.role !== "pending").map((profile) => (
-                                              <SelectItem key={profile.key} value={profile.key} className="py-2.5">
-                                                <div className="flex items-center gap-2">
-                                                  <span className="font-medium">{profile.label}</span>
-                                                  <Badge variant="outline" className="text-[10px] uppercase">{ROLE_LABELS[profile.role]}</Badge>
+                                              <SelectItem
+                                                key={profile.key}
+                                                value={profile.key}
+                                                className="py-3 items-start"
+                                              >
+                                                <div className="flex flex-col gap-1 pr-2 max-w-[280px]">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-sm leading-none">{profile.label}</span>
+                                                    <Badge variant="outline" className="text-[10px] uppercase">{ROLE_LABELS[profile.role]}</Badge>
+                                                  </div>
+                                                  {profile.description && (
+                                                    <span className="text-[11px] text-muted-foreground whitespace-normal leading-snug">
+                                                      {profile.description}
+                                                    </span>
+                                                  )}
                                                 </div>
                                               </SelectItem>
                                             ))}
                                           </SelectContent>
                                         </Select>
-                                        {findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.description && (
-                                          <p className="text-xs text-muted-foreground leading-relaxed pl-1">
-                                            {findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.description}
-                                          </p>
-                                        )}
+
                                       </div>
 
                                       <div className="space-y-2">

@@ -81,8 +81,8 @@ export function validateOnboardingPayload(body) {
   return errors;
 }
 
-export function registerOnboardingRoutes(app, requireFirebaseAuth) {
-  app.post("/api/onboarding/interpret", requireFirebaseAuth, async (req, res) => {
+export function registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess) {
+  app.post("/api/onboarding/interpret", requireFirebaseAuth, requireInternalAccess, async (req, res) => {
     const { prompt } = req.body || {};
     if (!str(prompt)) {
       return sendErr(res, 400, "MISSING_PROMPT", "prompt nao pode estar vazio");
@@ -123,7 +123,7 @@ export function registerOnboardingRoutes(app, requireFirebaseAuth) {
     }
   });
 
-  app.post("/api/onboarding", requireFirebaseAuth, async (req, res) => {
+  app.post("/api/onboarding", requireFirebaseAuth, requireInternalAccess, async (req, res) => {
     const body = req.body || {};
     const errors = validateOnboardingPayload(body);
     if (errors.length > 0) {

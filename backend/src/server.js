@@ -511,7 +511,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "admin_vexo",
     label: ACCESS_PRESET_LABELS.admin_vexo,
-    description: "Acesso total ao CRM. Reservado aos administradores da Vexo.",
+    description: "Acesso total ao CRM (Você e a equipe técnica).",
     role: "internal",
     scopeMode: "all_clients",
     approvalLevel: "director",
@@ -524,7 +524,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "gestor",
     label: ACCESS_PRESET_LABELS.gestor,
-    description: "Libera usuarios, organiza empresas e conduz a operacao do CRM.",
+    description: "Time comercial (interno). Pode ver vários clientes, mas não pode alterar configs sensíveis do sistema.",
     role: "internal",
     scopeMode: "assigned_clients",
     approvalLevel: "manager",
@@ -537,7 +537,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "operador",
     label: ACCESS_PRESET_LABELS.operador,
-    description: "Operacao padrao do CRM vinculada a um tenant.",
+    description: "Time comercial (interno). Pode ver vários clientes, mas não pode deletar o sistema.",
     role: "internal",
     scopeMode: "assigned_clients",
     approvalLevel: "operator",
@@ -550,7 +550,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "parceiro",
     label: ACCESS_PRESET_LABELS.parceiro,
-    description: "Acompanha a operacao com leitura e conversa limitada no ambiente do cliente.",
+    description: "Acompanha a operacao com leitura e conversa limitada.",
     role: "client",
     scopeMode: "assigned_clients",
     approvalLevel: "supervisor",
@@ -563,7 +563,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "client_manager",
     label: ACCESS_PRESET_LABELS.client_manager,
-    description: "Perfil de cliente com acesso expandido ao portal.",
+    description: "Pode ver os leads da empresa dele, integrar WhatsApp e gerar API keys.",
     role: "client",
     scopeMode: "assigned_clients",
     approvalLevel: "manager",
@@ -576,7 +576,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "client_operator",
     label: ACCESS_PRESET_LABELS.client_operator,
-    description: "Perfil de cliente operacional para uso diario.",
+    description: "Um vendedor do cliente. Pode apenas falar com os leads (não pode deletar nada, nem ver configs).",
     role: "client",
     scopeMode: "assigned_clients",
     approvalLevel: "operator",
@@ -589,7 +589,7 @@ const SYSTEM_ACCESS_PROFILES = [
   {
     key: "client_viewer",
     label: ACCESS_PRESET_LABELS.client_viewer,
-    description: "Perfil de cliente com acesso de leitura.",
+    description: "Acesso apenas de leitura para o cliente.",
     role: "client",
     scopeMode: "assigned_clients",
     approvalLevel: "none",
@@ -4811,36 +4811,9 @@ function isMissingAccessProfilesTable(error) {
 async function listAccessProfiles() {
   const systemProfiles = buildSystemAccessProfiles();
 
-  if (!supabase) {
-    return systemProfiles;
-  }
-
-  const { data, error } = await supabase
-    .from("access_profiles")
-    .select("key, label, description, role, scope_mode, approval_level, permissions, internal_pages, allowed_views, is_system, is_locked, created_at, updated_at")
-    .order("is_system", { ascending: false })
-    .order("label", { ascending: true });
-
-  if (error) {
-    if (isMissingAccessProfilesTable(error)) {
-      return systemProfiles;
-    }
-
-    throw error;
-  }
-
-  const mergedProfiles = new Map(systemProfiles.map((profile) => [profile.key, profile]));
-
-  for (const row of data || []) {
-    const normalizedRow = normalizeAccessProfileRecord(row);
-    mergedProfiles.set(normalizedRow.key, normalizedRow);
-  }
-
-  return Array.from(mergedProfiles.values()).sort((left, right) => {
-    if (left.isSystem !== right.isSystem) {
-      return left.isSystem ? -1 : 1;
-    }
-
+  // O usuário solicitou que houvesse apenas UMA fonte de verdade para os perfis.
+  // Como não há UI para gerenciar a tabela access_profiles, usaremos apenas os perfis nativos blindados (hardcoded).
+  return systemProfiles.sort((left, right) => {
     return left.label.localeCompare(right.label, "pt-BR");
   });
 }
