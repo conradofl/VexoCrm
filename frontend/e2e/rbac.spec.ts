@@ -32,7 +32,7 @@ test.describe('Matriz de Permissões (RBAC) e Rotas Privadas', () => {
 
     // Verify successful login by checking URL
     await expect(page).toHaveURL(/.*dashboard.*/, { timeout: 15000 });
-    
+
     // Testar acesso a Empresas (Admin)
     await page.goto('/crm/empresas');
     await expect(page.getByRole('heading', { name: 'Empresas' })).toBeVisible({ timeout: 10000 });
@@ -61,7 +61,7 @@ test.describe('Matriz de Permissões (RBAC) e Rotas Privadas', () => {
     // Preencher o formulário inicial
     await page.fill('input[placeholder="Nome completo ou alcunha"]', 'Usuário Teste Playwright');
     await page.fill('input[placeholder="E-mail do usuario"]', `playwright-${Date.now()}@teste.com`);
-    
+
     // Senha inicial
     await page.fill('input[placeholder="Senha inicial"]', 'Senha123!');
 

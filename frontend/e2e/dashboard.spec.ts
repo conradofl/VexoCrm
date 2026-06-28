@@ -10,10 +10,10 @@ test.describe('Módulo Operacional: Dashboard', () => {
 
     // 2. Aguardar a navegação e sucesso
     await expect(page).toHaveURL(/.*dashboard.*/, { timeout: 15000 });
-    
+
     // 3. Navegar para o Dashboard
     await page.goto('/crm/dashboard');
-    
+
     // 4. Aguardar o carregamento e buscar o H2 principal
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible({ timeout: 15000 });
   });

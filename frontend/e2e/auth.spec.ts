@@ -24,7 +24,7 @@ test.describe.serial('Módulo 1: Autenticação e Gestão de Usuários', () => {
     }
     await page.fill('input[type="email"]', 'luizz.felipe.santos17@gmail.com');
     await page.fill('input[type="password"]', '@Lfs341340');
-    
+
     await page.locator('button[type="submit"]').click();
 
     // Verify successful login by checking URL or a common dashboard element
@@ -34,7 +34,7 @@ test.describe.serial('Módulo 1: Autenticação e Gestão de Usuários', () => {
   test('Deve acessar Configurações > Usuários e listar a tabela', async () => {
     // Navigate to user access management
     await page.goto('/crm/usuarios');
-    
+
     // Wait for the table or header to load
     await expect(page.locator('text=Liberacao e acessos dos usuarios')).toBeVisible({ timeout: 15000 });
   });

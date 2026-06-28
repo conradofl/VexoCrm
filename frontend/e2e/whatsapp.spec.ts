@@ -15,7 +15,7 @@ test.describe('Módulo Operacional: WhatsApp', () => {
   test('Deve renderizar a tela de WhatsApp/Conexões com sucesso', async ({ page }) => {
     // Navegar para WhatsApp / Conexões
     await page.goto('/crm/conexoes');
-    
+
     // Aguardar o carregamento
     await expect(page.locator('text=WhatsApp').first()).toBeVisible({ timeout: 15000 });
   });

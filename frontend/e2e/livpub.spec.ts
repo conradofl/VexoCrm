@@ -18,7 +18,7 @@ test.describe('Módulo Operacional: Integração LivPub', () => {
     // Baseado nas rotas vistas, talvez seja parte de campanhas ou leads.
     // Vamos tentar ir para campanhas e buscar indícios de LivPub.
     await page.goto('/crm/planilhas');
-    
+
     // Teste placeholder para LivPub/Esteiras (já que ainda não vi a rota explícita)
     await expect(page.locator('text=Campanhas').first()).toBeVisible({ timeout: 15000 });
   });

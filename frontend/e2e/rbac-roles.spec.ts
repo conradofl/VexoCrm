@@ -104,7 +104,7 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
 
       // Se for primeiro acesso, ele vai cair na tela de mudar senha
       await expect(page).toHaveURL(/.*(set-password|clientes|crm).*/, { timeout: 15000 });
-      
+
       if (page.url().includes('/set-password')) {
         await page.fill('#current-password', tempPassword);
         await page.fill('#new-password', '@NovaSenha123');

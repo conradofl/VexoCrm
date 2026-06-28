@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { 
-  Heart, 
-  Info, 
-  ArrowLeft, 
-  Gift, 
-  UserMinus, 
+import {
+  Heart,
+  Info,
+  ArrowLeft,
+  Gift,
+  UserMinus,
   Sliders,
   Building2
 } from "lucide-react";
@@ -44,7 +44,7 @@ export default function Relacionamento() {
             </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3 w-full md:w-auto">
           <div className="w-[200px]">
             <Select value={companyId} onValueChange={setCompanyId} disabled={loadingCompanies}>

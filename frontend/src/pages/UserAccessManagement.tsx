@@ -1028,7 +1028,7 @@ function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabs
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-      <TabsList 
+      <TabsList
         className={cn(
           "w-full p-1.5 bg-muted/20 border border-border/40 rounded-[1.75rem] h-auto flex flex-wrap sm:grid",
           tabs.length === 4 ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-2"
@@ -2294,9 +2294,9 @@ export default function UserAccessManagement() {
                                     return profile.key === "operador";
                                   })
                                   .map((profile) => (
-                                    <SelectItem 
-                                      key={profile.key} 
-                                      value={profile.key} 
+                                    <SelectItem
+                                      key={profile.key}
+                                      value={profile.key}
                                       className="py-3 items-start"
                                       data-testid={`profile-option-${profile.key}`}
                                     >
@@ -2711,9 +2711,9 @@ export default function UserAccessManagement() {
                                           </SelectTrigger>
                                           <SelectContent className="rounded-xl">
                                             {resolvedAccessProfiles.filter(p => p.role !== "pending").map((profile) => (
-                                              <SelectItem 
-                                                key={profile.key} 
-                                                value={profile.key} 
+                                              <SelectItem
+                                                key={profile.key}
+                                                value={profile.key}
                                                 className="py-3 items-start"
                                               >
                                                 <div className="flex flex-col gap-1 pr-2 max-w-[280px]">

@@ -4,10 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { 
-  useFollowupSuggestions, 
-  useApproveSuggestion, 
-  useRejectSuggestion 
+import {
+  useFollowupSuggestions,
+  useApproveSuggestion,
+  useRejectSuggestion
 } from "@/hooks/useFollowupSuggestions";
 import { toast } from "sonner";
 
@@ -18,10 +18,10 @@ interface InativosListProps {
 export function InativosList({ companyId }: InativosListProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { 
-    data: suggestions = [], 
-    isLoading, 
-    error 
+  const {
+    data: suggestions = [],
+    isLoading,
+    error
   } = useFollowupSuggestions(companyId === "all" ? undefined : companyId);
 
   const approveMutation = useApproveSuggestion();
@@ -81,8 +81,8 @@ export function InativosList({ companyId }: InativosListProps) {
         <CardContent className="space-y-4">
           <div className="relative">
             <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input 
-              placeholder="Buscar cliente inativo por nome ou telefone..." 
+            <Input
+              placeholder="Buscar cliente inativo por nome ou telefone..."
               className="pl-9"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -110,8 +110,8 @@ export function InativosList({ companyId }: InativosListProps) {
           ) : (
             <div className="space-y-4">
               {inactiveSuggestions.map((s) => (
-                <div 
-                  key={s.id} 
+                <div
+                  key={s.id}
                   className="flex flex-col md:flex-row md:items-center justify-between border border-border p-4 rounded-lg bg-muted/10 hover:bg-muted/20 transition-colors gap-4"
                 >
                   <div className="space-y-2 flex-1">
@@ -126,7 +126,7 @@ export function InativosList({ companyId }: InativosListProps) {
                         </Badge>
                       )}
                     </div>
-                    
+
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Phone className="h-3 w-3" />
                       <span>{s.phone}</span>
@@ -143,17 +143,17 @@ export function InativosList({ companyId }: InativosListProps) {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       onClick={() => handleReject(s.id)}
                       disabled={isMutating}
                       className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
                     >
                       <X className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       onClick={() => handleApprove(s.id, s.suggestedMessage)}
                       disabled={isMutating}
                       className="bg-pink-500 hover:bg-pink-600 text-white font-medium text-xs h-8 gap-1 px-3"

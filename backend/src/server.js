@@ -4810,7 +4810,7 @@ function isMissingAccessProfilesTable(error) {
 
 async function listAccessProfiles() {
   const systemProfiles = buildSystemAccessProfiles();
-  
+
   // O usuário solicitou que houvesse apenas UMA fonte de verdade para os perfis.
   // Como não há UI para gerenciar a tabela access_profiles, usaremos apenas os perfis nativos blindados (hardcoded).
   return systemProfiles.sort((left, right) => {

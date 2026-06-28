@@ -14,10 +14,10 @@ test.describe('Módulo Operacional: Campanhas (Planilhas)', () => {
 
   test('Deve renderizar a tela de Campanhas com sucesso e abrir modais', async ({ page }) => {
     await page.goto('/crm/planilhas');
-    
+
     // Aguardar o carregamento da tabela ou título
     await expect(page.locator('text=Campanhas').first()).toBeVisible({ timeout: 15000 });
-    
+
     // Tenta clicar no botão de Nova Campanha
     const newBtn = page.locator('button:has-text("Nova Campanha")').first();
     if (await newBtn.isVisible()) {

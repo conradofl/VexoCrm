@@ -15,13 +15,13 @@ test.describe('Módulo Operacional: Leads e Contatos', () => {
   test('Deve renderizar a tela de Base de Leads com sucesso e interagir com filtros', async ({ page }) => {
     // Navegar para Leads
     await page.goto('/crm/leads');
-    
+
     // Aguardar o carregamento da tabela ou título
     await expect(page.locator('text=Base de Leads').first()).toBeVisible({ timeout: 15000 });
-    
+
     // Testar filtro de busca
     await page.fill('input[placeholder="Buscar por nome ou telefone..."]', 'Teste de Playwright');
-    
+
     // Aguardar que a tabela reflita (ou debouncer)
     await page.waitForTimeout(1000);
   });

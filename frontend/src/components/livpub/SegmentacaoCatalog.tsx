@@ -29,24 +29,24 @@ export function SegmentacaoCatalog({ companyId }: SegmentacaoCatalogProps) {
   };
 
   const segmentationFields = [
-    { 
-      label: "Perfil Musical", 
-      field: "perfil_musical", 
-      type: "Categoria (Texto)", 
+    {
+      label: "Perfil Musical",
+      field: "perfil_musical",
+      type: "Categoria (Texto)",
       desc: "Estilos preferidos (ex: Funk, Sertanejo, Eletrônico) mapeados a partir do histórico de ingressos e comportamento do cliente.",
       stats: getStats("perfil_musical")
     },
-    { 
-      label: "Última Visita", 
-      field: "ultima_visita", 
-      type: "Data (Date)", 
+    {
+      label: "Última Visita",
+      field: "ultima_visita",
+      type: "Data (Date)",
       desc: "Data do último evento frequentado pelo cliente na casa. Usado na régua de inatividade.",
       stats: getStats("ultima_visita")
     },
-    { 
-      label: "Data de Nascimento", 
-      field: "data_nascimento", 
-      type: "Data (Date)", 
+    {
+      label: "Data de Nascimento",
+      field: "data_nascimento",
+      type: "Data (Date)",
       desc: "Data de nascimento para campanhas automáticas de aniversário.",
       stats: getStats("data_nascimento")
     }
@@ -109,8 +109,8 @@ export function SegmentacaoCatalog({ companyId }: SegmentacaoCatalogProps) {
                     </span>
                   </div>
                   <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                    <div 
-                      className="bg-pink-500 h-1.5 rounded-full transition-all duration-500" 
+                    <div
+                      className="bg-pink-500 h-1.5 rounded-full transition-all duration-500"
                       style={{ width: `${field.stats.pct}%` }}
                     />
                   </div>
