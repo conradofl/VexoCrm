@@ -46,8 +46,11 @@ test.describe('Criação de Usuários para todos os perfis não-admin', () => {
       // Finalizar Criação
       await page.getByRole('button', { name: /Criar usu[aá]rio/i }).click();
 
-      // Confirmar criação
+      // Confirmar criação (o modal de sucesso aparece)
       await expect(page.getByText('sucesso', { exact: false })).toBeVisible({ timeout: 10000 });
+      
+      // Fechar o modal de sucesso para podermos interagir com a tabela
+      await page.getByRole('button', { name: 'Fechar' }).click();
       
       // Abrir a edição do usuário recém criado para checar as permissões
       await page.getByPlaceholder('Buscar por nome, e-mail ou empresa').fill(uniqueEmail);
