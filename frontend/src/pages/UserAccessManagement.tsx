@@ -2298,6 +2298,7 @@ export default function UserAccessManagement() {
                                       key={profile.key} 
                                       value={profile.key} 
                                       className="py-3 items-start"
+                                      data-testid={`profile-option-${profile.key}`}
                                     >
                                       <div className="flex flex-col gap-1 pr-2 max-w-[280px]">
                                         <span className="font-semibold text-sm leading-none">{profile.label}</span>
