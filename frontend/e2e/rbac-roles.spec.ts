@@ -5,30 +5,35 @@ const nonAdminRoles = [
   {
     name: 'Gestor (Interno)',
     key: 'gestor',
+    roleType: 'internal',
     allowedPages: ['dashboard', 'leads', 'whatsapp', 'planilhas'],
     forbiddenPages: ['empresas']
   },
   {
     name: 'Operador (Interno)',
     key: 'operador',
+    roleType: 'internal',
     allowedPages: ['dashboard', 'leads', 'whatsapp'],
     forbiddenPages: ['planilhas', 'empresas', 'usuarios']
   },
   {
     name: 'Gestor do Cliente',
     key: 'client_manager',
+    roleType: 'client',
     allowedPages: ['dashboard', 'leads', 'whatsapp', 'planilhas'],
     forbiddenPages: ['usuarios', 'empresas']
   },
   {
     name: 'Operador do Cliente',
     key: 'client_operator',
+    roleType: 'client',
     allowedPages: ['dashboard', 'leads', 'whatsapp'],
     forbiddenPages: ['planilhas', 'usuarios', 'empresas']
   },
   {
     name: 'Leitura do Cliente',
     key: 'client_viewer',
+    roleType: 'client',
     allowedPages: ['dashboard', 'leads'],
     forbiddenPages: ['whatsapp', 'planilhas', 'usuarios', 'empresas']
   }
@@ -95,7 +100,7 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
       await page.click('button[type="submit"]');
 
       // Se for primeiro acesso, ele vai cair na tela de mudar senha
-      await expect(page).toHaveURL(/.*(set-password|crm).*/, { timeout: 15000 });
+      await expect(page).toHaveURL(/.*(set-password|clientes|crm).*/, { timeout: 15000 });
       
       if (page.url().includes('/set-password')) {
         await page.fill('#current-password', tempPassword);
@@ -104,25 +109,41 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
         await page.click('button[type="submit"]');
       }
 
-      // Esperar entrar no painel / CRM
-      await expect(page).toHaveURL(/.*\/crm.*/, { timeout: 20000 });
+      // Definir o prefixo da URL baseado no tipo de usuário (Client ou Internal)
+      const urlPrefix = role.roleType === 'client' ? '/clientes/teste-2' : '/crm';
+
+      // Esperar entrar no painel / CRM ou Portal do Cliente
+      await expect(page).toHaveURL(new RegExp(`.*${urlPrefix}.*`), { timeout: 20000 });
 
       // 8. Validar os acessos permitidos no menu lateral
       for (const pageName of role.allowedPages) {
-        const link = page.locator(`a[href="/crm/${pageName}"]`);
+        // Se for usuário interno e a página for planilhas, precisa clicar no modo "Disparos" no menu lateral
+        if (role.roleType === 'internal' && pageName === 'planilhas') {
+          await page.getByRole('button', { name: 'Disparos' }).click();
+        } else if (role.roleType === 'internal' && ['dashboard', 'leads', 'whatsapp'].includes(pageName)) {
+          // Voltar para vendas se necessário
+          const salesButton = page.getByRole('button', { name: 'Vendas' });
+          if (await salesButton.isVisible()) {
+            await salesButton.click();
+          }
+        }
+
+        const link = page.locator(`a[href="${urlPrefix}/${pageName}"]`);
         await expect(link).toBeVisible({ timeout: 15000 });
       }
 
       // 9. Validar os bloqueios (páginas que não deve acessar nem ver)
       for (const pageName of role.forbiddenPages) {
         // Não deve ver o link no menu lateral
-        const link = page.locator(`a[href="/crm/${pageName}"]`);
-        await expect(link).not.toBeVisible();
+        const crmLink = page.locator(`a[href="/crm/${pageName}"]`);
+        const clientLink = page.locator(`a[href="/clientes/teste-2/${pageName}"]`);
+        await expect(crmLink).not.toBeVisible();
+        await expect(clientLink).not.toBeVisible();
 
         // Se tentar acessar via URL direta, deve ser redirecionado para longe dali
-        await page.goto(`/crm/${pageName}`);
+        await page.goto(`${urlPrefix}/${pageName}`);
         await page.waitForTimeout(2000); // Esperar o middleware de rotas processar
-        expect(page.url()).not.toContain(`/crm/${pageName}`);
+        expect(page.url()).not.toContain(`${urlPrefix}/${pageName}`);
       }
 
       // 10. Logout do usuário de teste para o próximo loop
