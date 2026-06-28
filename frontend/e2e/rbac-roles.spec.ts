@@ -140,10 +140,19 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
         await expect(crmLink).not.toBeVisible();
         await expect(clientLink).not.toBeVisible();
 
+        // Determinar a URL correta a testar para navegação direta de bloqueio
+        // Se a página for de uso administrativo/interno (como usuarios ou empresas), o path correto é /crm/
+        let testPath = '';
+        if (['usuarios', 'empresas'].includes(pageName)) {
+          testPath = `/crm/${pageName}`;
+        } else {
+          testPath = `${urlPrefix}/${pageName}`;
+        }
+
         // Se tentar acessar via URL direta, deve ser redirecionado para longe dali
-        await page.goto(`${urlPrefix}/${pageName}`);
+        await page.goto(testPath);
         await page.waitForTimeout(2000); // Esperar o middleware de rotas processar
-        expect(page.url()).not.toContain(`${urlPrefix}/${pageName}`);
+        expect(page.url()).not.toContain(testPath);
       }
 
       // 10. Logout do usuário de teste para o próximo loop
