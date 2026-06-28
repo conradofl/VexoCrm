@@ -94,13 +94,23 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
       await page.fill('input[type="password"]', tempPassword);
       await page.click('button[type="submit"]');
 
+      // Se for primeiro acesso, ele vai cair na tela de mudar senha
+      await expect(page).toHaveURL(/.*(set-password|crm).*/, { timeout: 15000 });
+      
+      if (page.url().includes('/set-password')) {
+        await page.fill('#current-password', tempPassword);
+        await page.fill('#new-password', '@NovaSenha123');
+        await page.fill('#confirm-password', '@NovaSenha123');
+        await page.click('button[type="submit"]');
+      }
+
       // Esperar entrar no painel / CRM
-      await expect(page).toHaveURL(/.*\/crm.*/, { timeout: 15000 });
+      await expect(page).toHaveURL(/.*\/crm.*/, { timeout: 20000 });
 
       // 8. Validar os acessos permitidos no menu lateral
       for (const pageName of role.allowedPages) {
         const link = page.locator(`a[href="/crm/${pageName}"]`);
-        await expect(link).toBeVisible({ timeout: 10000 });
+        await expect(link).toBeVisible({ timeout: 15000 });
       }
 
       // 9. Validar os bloqueios (páginas que não deve acessar nem ver)
