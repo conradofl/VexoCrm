@@ -2341,14 +2341,6 @@ export default function UserAccessManagement() {
                           </div>
                         </div>
 
-                        {selectedCreateType ? (
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground bg-muted/10 p-3 rounded-xl border border-border/40">
-                            <Badge variant="outline" className={cn("border-border/80 bg-background/60", ROLE_BADGE_CLASS[selectedCreateType.role])}>
-                              {ROLE_LABELS[selectedCreateType.role]}
-                            </Badge>
-                            {selectedCreateType.description ? <span>{selectedCreateType.description}</span> : null}
-                          </div>
-                        ) : null}
 
                         <div className="rounded-2xl border border-border/60 bg-muted/5 p-4">
                           <label className="flex items-center gap-3 text-sm text-foreground font-semibold cursor-pointer">
@@ -2738,11 +2730,7 @@ export default function UserAccessManagement() {
                                             ))}
                                           </SelectContent>
                                         </Select>
-                                        {findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.description && (
-                                          <p className="text-xs text-muted-foreground leading-relaxed pl-1">
-                                            {findAccessProfile(resolvedAccessProfiles, selectedDraft.accessPreset)?.description}
-                                          </p>
-                                        )}
+
                                       </div>
 
                                       <div className="space-y-2">
