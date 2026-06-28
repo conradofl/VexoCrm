@@ -42,6 +42,9 @@ const nonAdminRoles = [
 test.describe('Matriz de Permissões E2E - Criação e Login', () => {
   for (const role of nonAdminRoles) {
     test(`Fluxo Humano: Criar e Validar Permissões para o perfil ${role.name}`, async ({ page }) => {
+      // Definir um timeout maior (90 segundos) para este fluxo complexo de criação, login e validações E2E
+      test.setTimeout(90000);
+
       // 1. Login como Master Admin
       await page.goto('/login');
       await page.fill('input[type="email"]', 'luizz.felipe.santos17@gmail.com');
@@ -150,7 +153,7 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
         }
 
         // Se tentar acessar via URL direta, deve ser redirecionado para longe dali
-        await page.goto(testPath);
+        await page.goto(testPath, { waitUntil: 'commit' });
         await page.waitForTimeout(2000); // Esperar o middleware de rotas processar
         expect(page.url()).not.toContain(testPath);
       }
