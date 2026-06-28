@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
 
 const nonAdminRoles = [
-  { name: 'Gestor (Interno)', optionRegex: /^Gestor$/i },
-  { name: 'Operador (Interno)', optionRegex: /^Operador$/i },
-  { name: 'Gestor do Cliente', optionRegex: /Gestor do cliente/i },
-  { name: 'Operador do Cliente', optionRegex: /Operador do cliente/i },
-  { name: 'Leitura do Cliente', optionRegex: /Leitura do cliente/i }
+  { name: 'Gestor (Interno)', optionRegex: /^Gestor /i },
+  { name: 'Operador (Interno)', optionRegex: /^Operador /i },
+  { name: 'Gestor do Cliente', optionRegex: /^Gestor do cliente /i },
+  { name: 'Operador do Cliente', optionRegex: /^Operador do cliente /i },
+  { name: 'Leitura do Cliente', optionRegex: /^Leitura do cliente /i }
 ];
 
 test.describe('Criação de Usuários para todos os perfis não-admin', () => {
