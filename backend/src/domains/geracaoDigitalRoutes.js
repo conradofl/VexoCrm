@@ -29,7 +29,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
          (prospect_name, whatsapp_number, theme_preset, briefing_data, status) 
          VALUES ($1, $2, $3, $4, 'pending') 
          RETURNING id`,
-        [prospectName, whatsappNumber || null, themePreset, JSON.stringify(briefingData || {})]
+        [prospectName, whatsappNumber || '', themePreset, JSON.stringify(briefingData || {})]
       );
       const briefingId = result.rows[0].id;
 
