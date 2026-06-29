@@ -24,6 +24,7 @@ export const INTERNAL_PAGE_ORDER = [
   "relatorios",
   "apresentacao",
   "apresentacao-gd",
+  "briefings-gd",
   "integracoes",
   "eventos",
   "relacionamento",

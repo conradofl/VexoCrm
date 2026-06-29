@@ -45,6 +45,7 @@ import WebhooksIntegrations from "./pages/WebhooksIntegrations";
 import LivPub from "./pages/LivPub";
 import Eventos from "./pages/Eventos";
 import Relacionamento from "./pages/Relacionamento";
+import GeracaoDigitalBriefings from "./pages/GeracaoDigitalBriefings";
 
 const queryClient = new QueryClient();
 
@@ -361,6 +362,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
                     <GeracaoDigitalPitch />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="briefings-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="briefings-gd">
+                    <GeracaoDigitalBriefings />
                   </ProtectedRoute>
                 }
               />
