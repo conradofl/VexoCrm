@@ -77,6 +77,8 @@ import {
 } from "@/lib/access";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
+import { useToast } from "@/hooks/use-toast";
+import { InternalPagesHierarchyPanel } from "@/components/InternalPagesHierarchyPanel";
 
 type ManagedRole = AccessRole;
 
@@ -1015,11 +1017,12 @@ interface AccessPagesTabsProps {
 }
 
 function AccessPagesTabs({ role, selected, disabled, onChange }: AccessPagesTabsProps) {
-  const tabs = useMemo(
-    () => (role === "client" ? CLIENT_PAGE_TABS : INTERNAL_PAGE_TABS),
-    [role]
-  );
-  const referenceOrder = role === "client" ? CLIENT_VIEW_ORDER : INTERNAL_PAGE_ORDER;
+  if (role === "internal") {
+    return <InternalPagesHierarchyPanel selected={selected} disabled={disabled} onChange={onChange} />;
+  }
+
+  const tabs = CLIENT_PAGE_TABS;
+  const referenceOrder = CLIENT_VIEW_ORDER;
   const [activeTab, setActiveTab] = useState(tabs[0].value);
 
   useEffect(() => {

@@ -941,12 +941,46 @@ export default function GeracaoDigitalPitch() {
   };
 
   // ─── BRIEFING DISPATCH LOGIC ────────────────────────────────────────────────
-  const handleWhatsappDispatch = () => {
-    toast({
-      title: "WhatsApp Disparado!",
-      description: `Dossiê técnico do briefing enviado para o WhatsApp de ${theme.prospectName} (${theme.whatsappNumber || "número cadastrado"}).`,
-    });
-    playChime();
+  const handleWhatsappDispatch = async () => {
+    try {
+      setIsDispatching(true);
+      
+      const payload = {
+        prospectName: theme.prospectName,
+        whatsappNumber: theme.whatsappNumber,
+        agencyName: theme.agencyName,
+        themePreset: theme.themePreset,
+        briefingData: briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {})
+      };
+
+      const token = localStorage.getItem("auth_token") || "";
+      const response = await fetch("/api/geracao-digital/briefing", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error("Erro ao salvar e disparar o briefing.");
+      }
+
+      toast({
+        title: "WhatsApp Disparado!",
+        description: `Dossiê técnico do briefing enviado para o WhatsApp de ${theme.prospectName} (${theme.whatsappNumber || "número cadastrado"}).`,
+      });
+      playChime();
+    } catch (error: any) {
+      toast({
+        title: "Erro no Disparo",
+        description: error.message || "Ocorreu um erro ao disparar o briefing.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsDispatching(false);
+    }
   };
 
   const handleEmailDispatch = () => {
@@ -2103,7 +2137,7 @@ export default function GeracaoDigitalPitch() {
                                       localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
                                     }}
                                     placeholder="Ex: (11) 98888-7777"
-                                    className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1"
+                                    className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
                                   />
                                 </div>
                               )}
@@ -2131,7 +2165,7 @@ export default function GeracaoDigitalPitch() {
                                     value={prospectEmail}
                                     onChange={(e) => setProspectEmail(e.target.value)}
                                     placeholder="Ex: cliente@empresa.com.br"
-                                    className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1"
+                                    className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
                                   />
                                 </div>
                               )}
@@ -2159,7 +2193,7 @@ export default function GeracaoDigitalPitch() {
                                       value={sectorsWhatsapp}
                                       onChange={(e) => setSectorsWhatsapp(e.target.value)}
                                       placeholder="Ex: (11) 99999-0000"
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1"
+                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
                                     />
                                   </div>
                                   <div className="space-y-1">
@@ -2169,7 +2203,7 @@ export default function GeracaoDigitalPitch() {
                                       value={sectorsEmail}
                                       onChange={(e) => setSectorsEmail(e.target.value)}
                                       placeholder="Ex: operacoes@geracaodigital.com.br"
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1"
+                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
                                     />
                                   </div>
                                 </div>
@@ -2180,11 +2214,40 @@ export default function GeracaoDigitalPitch() {
 
                         <Button
                           disabled={isDispatching}
-                          onClick={() => {
-                            setIsDispatching(true);
-                            setTimeout(() => {
-                              setIsDispatching(false);
+                          onClick={async () => {
+                            try {
+                              setIsDispatching(true);
+                              
+                              const payload = {
+                                prospectName: theme.prospectName,
+                                whatsappNumber: theme.whatsappNumber,
+                                agencyName: theme.agencyName,
+                                themePreset: theme.themePreset,
+                                briefingData: briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {}),
+                                sendToProspectWhatsapp,
+                                sendToProspectEmail,
+                                prospectEmail,
+                                sendToSectors,
+                                sectorsWhatsapp,
+                                sectorsEmail
+                              };
+
+                              const token = localStorage.getItem("auth_token") || "";
+                              const response = await fetch("/api/geracao-digital/briefing", {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                  "Authorization": `Bearer ${token}`
+                                },
+                                body: JSON.stringify(payload)
+                              });
+
+                              if (!response.ok) {
+                                throw new Error("Erro ao salvar e disparar o briefing.");
+                              }
+
                               setDispatchSuccess(true);
+                              
                               if (sendToProspectWhatsapp) {
                                 toast({
                                   title: "WhatsApp Disparado!",
@@ -2204,7 +2267,15 @@ export default function GeracaoDigitalPitch() {
                                 });
                               }
                               playChime();
-                            }, 1500);
+                            } catch (error: any) {
+                              toast({
+                                title: "Erro no Disparo",
+                                description: error.message || "Ocorreu um erro ao disparar o briefing.",
+                                variant: "destructive"
+                              });
+                            } finally {
+                              setIsDispatching(false);
+                            }
                           }}
                           className="w-full bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white h-10 shadow-lg shadow-emerald-600/10 mt-4 flex items-center justify-center gap-2"
                         >

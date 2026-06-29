@@ -132,15 +132,15 @@ async function apiCall<T>(
 
 // ─── Empresas ─────────────────────────────────────────────────────────────────
 
-export function useFupCompanies() {
+export function useFupCompanies(tenantId?: string) {
   const { isAuthenticated, getIdToken } = useAuth();
   return useQuery({
-    queryKey: ["fup-companies"],
+    queryKey: ["fup-companies", tenantId],
     enabled: isAuthenticated,
-    queryFn: () =>
-      apiCall<{ companies: FupCompany[] }>("/api/followup/companies", getIdToken).then(
-        (r) => r.companies
-      ),
+    queryFn: () => {
+      const url = tenantId ? `/api/followup/companies?tenantId=${tenantId}` : "/api/followup/companies";
+      return apiCall<{ companies: FupCompany[] }>(url, getIdToken).then((r) => r.companies);
+    },
     staleTime: 30_000,
   });
 }
@@ -149,7 +149,7 @@ export function useCreateFupCompany() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<FupCompany> & { calendly_webhook_secret?: string }) =>
+    mutationFn: (body: Partial<FupCompany> & { calendly_webhook_secret?: string; tenant_id?: string }) =>
       apiCall<{ company: FupCompany }>("/api/followup/companies", getIdToken, {
         method: "POST",
         body: JSON.stringify(body),

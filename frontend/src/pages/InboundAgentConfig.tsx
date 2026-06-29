@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
+import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useFupCompanies, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
 
 export default function InboundAgentConfig() {
@@ -18,8 +19,9 @@ export default function InboundAgentConfig() {
   const defaultTab = searchParams.get("tab") || "config";
   const [activeTab, setActiveTab] = useState(defaultTab);
   const { toast } = useToast();
+  const { selectedClientId } = useOptionalCrmClient();
 
-  const { data: companies = [], isLoading: loadingCompanies } = useFupCompanies();
+  const { data: companies = [], isLoading: loadingCompanies } = useFupCompanies(selectedClientId);
   const [companyId, setCompanyId] = useState<string>("all");
   const updateCompany = useUpdateFupCompany();
 

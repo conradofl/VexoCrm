@@ -9,7 +9,7 @@ export function hasInternalPageAccess(access, page) {
 
   return (
     page === "empresas" &&
-    access.accessPreset === "internal_manager" &&
+    access.accessPreset === "gestor" &&
     access.internalPages?.includes("usuarios")
   );
 }
@@ -29,7 +29,7 @@ export function hasAccessPermission(access, permission) {
 
   return (
     permission === "tenants.manage" &&
-    access.accessPreset === "internal_manager" &&
+    access.accessPreset === "gestor" &&
     access.internalPages?.includes("usuarios") &&
     access.permissions?.includes("users.view")
   );

@@ -9,7 +9,7 @@ import {
 const tenantManager = {
   role: "internal",
   isAdmin: false,
-  accessPreset: "internal_manager",
+  accessPreset: "gestor",
   scopeMode: "assigned_clients",
   clientIds: ["tenant-a"],
   permissions: ["users.view", "users.manage"],

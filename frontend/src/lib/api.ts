@@ -3,7 +3,7 @@
 // fetches do not target the Vite dev server port (8080) by mistake.
 const rawApiBaseUrl =
   import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? "http://127.0.0.1:3001" : "");
+  (import.meta.env.DEV ? "http://localhost:3001" : "");
 
 if (!rawApiBaseUrl) {
   throw new Error(

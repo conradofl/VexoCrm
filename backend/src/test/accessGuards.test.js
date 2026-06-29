@@ -31,7 +31,7 @@ describe("access guard helpers", () => {
     const managerAccess = {
       role: "internal",
       isAdmin: false,
-      accessPreset: "internal_manager",
+      accessPreset: "gestor",
       internalPages: ["usuarios"],
       permissions: ["users.view"],
     };

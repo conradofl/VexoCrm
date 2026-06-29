@@ -2142,7 +2142,8 @@ function CompanyForm({
 }
 
 function ConfigTab() {
-  const { data: companies = [], isLoading } = useFupCompanies();
+  const { selectedClientId } = useOptionalCrmClient();
+  const { data: companies = [], isLoading } = useFupCompanies(selectedClientId);
   const createMut = useCreateFupCompany();
   const updateMut = useUpdateFupCompany();
   const archiveMut = useArchiveFupCompany();
@@ -2167,7 +2168,7 @@ function ConfigTab() {
         await updateMut.mutateAsync({ id: editing.id, ...form });
         toast({ title: "Empresa atualizada" });
       } else {
-        await createMut.mutateAsync(form);
+        await createMut.mutateAsync({ ...form, tenant_id: selectedClientId });
         toast({ title: "Empresa criada" });
       }
       setDialogOpen(false);

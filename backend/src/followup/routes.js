@@ -152,12 +152,20 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
   // GET /api/followup/companies
   router.get("/companies", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     try {
+      const tenantId = str(req.query.tenantId);
       const supabase = getSupabase();
-      const { data, error } = await supabase
+      
+      let query = supabase
         .from("followup_companies")
-        .select("id, name, evolution_instance, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at")
+        .select("id, name, evolution_instance, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at, tenant_id")
         .is("archived_at", null)
         .order("name", { ascending: true });
+        
+      if (tenantId) {
+        query = query.eq("tenant_id", tenantId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
       // Enriquecer com contagem de campanhas ativas
@@ -187,7 +195,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
 
   // POST /api/followup/companies
   router.post("/companies", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled } =
+    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, tenant_id } =
       req.body || {};
     if (!str(name) || !str(evolution_instance)) {
       return sendErr(res, 400, "MISSING_FIELDS", "name e evolution_instance são obrigatórios");
@@ -197,6 +205,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       const { data, error } = await supabase
         .from("followup_companies")
         .insert({
+          tenant_id: str(tenant_id) || null,
           name: str(name),
           evolution_instance: str(evolution_instance),
           webhook_url: str(webhook_url),

@@ -9,5 +9,9 @@
     "test:frontend": "npm --prefix frontend test -- --run",
     "build:frontend": "npm --prefix frontend run build",
     "diff:check": "git diff --check"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.0.1"
   }
 }

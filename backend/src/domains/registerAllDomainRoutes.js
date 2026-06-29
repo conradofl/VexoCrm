@@ -75,6 +75,7 @@ import {
 import { routeDeps } from "../http/routeDeps.js";
 import { registerFollowupRoutes } from "../followup/routes.js";
 import { registerJourneysRoutes } from "../followup/journeysRoutes.js";
+import { registerGeracaoDigitalRoutes } from "./geracaoDigitalRoutes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { query as fupQuery } from "../followup/db.js";
 import { getFollowupQueue } from "../followup/queue.js";
@@ -1491,7 +1492,7 @@ export function registerAllDomainRoutes(app) {
   app.get(
     "/api/lead-clients/:tenantId/evolution-instances",
     requireFirebaseAuth,
-    requireAdminAccess,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -1838,7 +1839,7 @@ export function registerAllDomainRoutes(app) {
   app.post(
     "/api/lead-clients/:tenantId/evolution-instances",
     requireFirebaseAuth,
-    requireAdminAccess,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -1867,7 +1868,7 @@ export function registerAllDomainRoutes(app) {
   app.post(
     "/api/lead-clients/:tenantId/evolution-instances/provision",
     requireFirebaseAuth,
-    requireAdminAccess,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -1909,7 +1910,7 @@ export function registerAllDomainRoutes(app) {
   app.patch(
     "/api/lead-clients/:tenantId/evolution-instances/:instanceId",
     requireFirebaseAuth,
-    requireAdminAccess,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -1946,7 +1947,7 @@ export function registerAllDomainRoutes(app) {
   app.delete(
     "/api/lead-clients/:tenantId/evolution-instances/:instanceId",
     requireFirebaseAuth,
-    requireAdminAccess,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -8491,6 +8492,7 @@ export function registerAllDomainRoutes(app) {
   // ─── Módulo de Follow-up (BullMQ + campanhas independentes) ───────────────
   registerFollowupRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
   registerJourneysRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
+  registerGeracaoDigitalRoutes(app, pgDatabasePool, requireFirebaseAuth, requireInternalPageAccess);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);
