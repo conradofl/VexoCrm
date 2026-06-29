@@ -2015,7 +2015,7 @@ export function registerAllDomainRoutes(app) {
           return;
         }
 
-        const response = await fetch(`${config.baseUrl}/instance/connectionState/${encodeURIComponent(instanceName)}`, {
+        const response = await fetch(`${config.baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`, {
           method: "GET",
           headers: { apikey: config.apiKey },
         });
@@ -2025,13 +2025,20 @@ export function registerAllDomainRoutes(app) {
            return;
         }
         
-        const payload = await response.json();
-        const connected = payload?.instance?.state === "open" || payload?.state === "open";
+        const payloadList = await response.json();
+        const payload = Array.isArray(payloadList) ? payloadList[0] : payloadList;
+        
+        if (!payload) {
+           res.json({ connected: false });
+           return;
+        }
+
+        const connected = payload?.connectionStatus === "open" || payload?.instance?.state === "open" || payload?.state === "open";
         
         res.json({
           connected,
-          profileName: payload?.instance?.profileName || payload?.profileName || null,
-          ownerJid: payload?.instance?.ownerJid || payload?.ownerJid || null,
+          profileName: payload?.profileName || payload?.instance?.profileName || null,
+          ownerJid: payload?.ownerJid || payload?.instance?.ownerJid || null,
         });
       } catch (error) {
         console.error("Evolution instance status fetch error:", error);
