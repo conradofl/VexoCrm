@@ -85,8 +85,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       if (sendToProspectEmail && prospectEmail && sendEmailFn) {
         try {
           const html = `<h2>Olá ${prospectName}!</h2><p>Seu dossiê/briefing da ${agencyName || 'Vexo'} está pronto e as próximas etapas do cronograma já foram iniciadas.</p><p>Em breve nossa equipe técnica entrará em contato para os próximos passos.</p>`;
-          await sendEmailFn(prospectEmail, `Seu Dossiê da ${agencyName || 'Vexo'} está pronto`, html, agencyName || 'Vexo');
-          emailStatus = "sent";
+          const emailRes = await sendEmailFn(prospectEmail, `Seu Dossiê da ${agencyName || 'Vexo'} está pronto`, html, agencyName || 'Vexo');
+          emailStatus = emailRes ? "sent" : "not_configured";
         } catch (e) {
           emailStatus = "failed";
         }
@@ -105,8 +105,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         if (sectorsEmail && sendEmailFn) {
           try {
             const emHtml = `<h2>Novo Briefing Handoff: ${prospectName}</h2><p><strong>WhatsApp:</strong> ${whatsappNumber || 'N/A'}</p><p>O briefing foi finalizado. Por favor, verifiquem o CRM para acessar as informações detalhadas de Tráfego, Design e Contratos.</p>`;
-            await sendEmailFn(sectorsEmail, `Novo Briefing (Handoff) - ${prospectName}`, emHtml, 'Vexo CRM');
-            emStatus = "sent";
+            const emRes = await sendEmailFn(sectorsEmail, `Novo Briefing (Handoff) - ${prospectName}`, emHtml, 'Vexo CRM');
+            emStatus = emRes ? "sent" : "not_configured";
           } catch (e) {
             emStatus = "failed";
           }

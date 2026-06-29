@@ -440,8 +440,9 @@ export default function GeracaoDigitalPitch() {
   const [prospectEmail, setProspectEmail] = useState<string>("contato@empresa.com.br");
   const [sectorsWhatsapp, setSectorsWhatsapp] = useState<string>("(11) 98888-7777");
   const [sectorsEmail, setSectorsEmail] = useState<string>("operacoes@geracaodigital.com.br");
-  const [dispatchSuccess, setDispatchSuccess] = useState<boolean>(false);
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
+  const [dispatchSuccess, setDispatchSuccess] = useState<boolean>(false);
+  const [dispatchResult, setDispatchResult] = useState<any>(null);
 
   // Team Members list (loaded from localStorage or default)
   const [team, setTeam] = useState<TeamMember[]>([
@@ -2252,6 +2253,8 @@ export default function GeracaoDigitalPitch() {
                                 throw new Error("Erro ao salvar e disparar o briefing.");
                               }
 
+                              const responseData = await response.json();
+                              setDispatchResult(responseData);
                               setDispatchSuccess(true);
                               
                               if (sendToProspectWhatsapp) {
@@ -2310,12 +2313,12 @@ export default function GeracaoDigitalPitch() {
 
                         <div className="p-3.5 bg-slate-950/70 border border-white/5 rounded-xl text-[9.5px] font-mono text-slate-400 text-left space-y-1.5 w-full max-w-sm">
                           <p><span className="text-indigo-400 font-bold">CLIENTE:</span> {theme.prospectName}</p>
-                          {sendToProspectWhatsapp && <p><span className="text-emerald-400 font-bold">WHATSAPP:</span> {theme.whatsappNumber} (Enviado)</p>}
-                          {sendToProspectEmail && <p><span className="text-blue-400 font-bold">E-MAIL:</span> {prospectEmail} (Enviado)</p>}
+                          {sendToProspectWhatsapp && <p><span className="text-emerald-400 font-bold">WHATSAPP:</span> {theme.whatsappNumber} ({dispatchResult?.evolutionStatus === 'sent' ? 'Enviado' : 'Não configurado/Falha'})</p>}
+                          {sendToProspectEmail && <p><span className="text-blue-400 font-bold">E-MAIL:</span> {prospectEmail} ({dispatchResult?.emailStatus === 'sent' ? 'Enviado' : 'Não configurado/Falha'})</p>}
                           {sendToSectors && (
                             <>
-                              <p><span className="text-purple-400 font-bold">WHATSAPP SETORES:</span> {sectorsWhatsapp} (Enviado)</p>
-                              <p><span className="text-pink-400 font-bold">E-MAIL SETORES:</span> {sectorsEmail} (Enviado)</p>
+                              <p><span className="text-purple-400 font-bold">WHATSAPP SETORES:</span> {sectorsWhatsapp} ({dispatchResult?.sectorsStatus?.includes('wpp:sent') ? 'Enviado' : 'Não configurado/Falha'})</p>
+                              <p><span className="text-pink-400 font-bold">E-MAIL SETORES:</span> {sectorsEmail} ({dispatchResult?.sectorsStatus?.includes('email:sent') ? 'Enviado' : 'Não configurado/Falha'})</p>
                               <p><span className="text-indigo-400 font-bold">SETORES INTERNOS:</span> Tráfego, Design, Contratos (Handoff Ativo)</p>
                             </>
                           )}
