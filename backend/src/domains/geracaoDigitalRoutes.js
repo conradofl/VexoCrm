@@ -42,34 +42,36 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       briefingHtml += '</ul>';
 
       // 1.5 Fetch dynamic instance name
-      const clientId = req.user?.client_id;
       let dynamicInstanceName = null;
-      if (clientId) {
-        try {
-          const instRes = await pool.query(
-            `SELECT dispatch_webhook_url, name FROM public.lead_client_evolution_instances WHERE client_id = $1 AND active = true ORDER BY is_default DESC LIMIT 1`,
-            [clientId]
-          );
+      try {
+        let queryStr = `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC`;
+        let queryParams = [];
+        if (req.authAccess && req.authAccess.role !== "internal" && req.authAccess.clientIds && req.authAccess.clientIds.length > 0) {
+            queryStr = `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE client_id = ANY($1) AND active = true ORDER BY is_default DESC`;
+            queryParams = [req.authAccess.clientIds];
+        }
+
+        const instRes = await pool.query(queryStr, queryParams);
           if (instRes.rows.length > 0) {
-            const urlStr = instRes.rows[0].dispatch_webhook_url;
+            let row = instRes.rows.find(r => r.client_id === 'geracao-digital') || instRes.rows[0];
+            const urlStr = row.dispatch_webhook_url;
             if (urlStr) {
                try {
                  const url = new URL(urlStr);
                  const pathParts = url.pathname.split("/").filter(Boolean);
                  const messageIndex = pathParts.findIndex((part) => part === "message");
                  const instance = messageIndex >= 0 ? decodeURIComponent(pathParts[messageIndex + 2] || "") : "";
-                 dynamicInstanceName = instance || instRes.rows[0].name;
+                 dynamicInstanceName = instance || row.name;
                } catch (e) {
-                 dynamicInstanceName = instRes.rows[0].name;
+                 dynamicInstanceName = row.name;
                }
             } else {
-               dynamicInstanceName = instRes.rows[0].name;
+               dynamicInstanceName = row.name;
             }
           }
         } catch (dbErr) {
           console.error("[GeracaoDigital] Error fetching dynamic instance:", dbErr);
         }
-      }
 
       // 2. Evolution config
       const evolutionUrl = process.env.GD_EVOLUTION_URL;
