@@ -420,7 +420,6 @@ const FIXED_ADMIN_UIDS = new Set([
 const FIXED_ADMIN_EMAILS = new Set([
   "luizz.felipe.santos17@gmail.com",
   "conradofl@gmail.com",
-  "mrkgeracaodigital@gmail.com",
 ]);
 
 function isFixedAdminIdentity(identity = {}) {
