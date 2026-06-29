@@ -40,6 +40,7 @@ export const INTERNAL_PAGE_HIERARCHY = [
     children: [
       { key: "apresentacao", label: "Demonstração Vexo" },
       { key: "apresentacao-gd", label: "Apresentação GD" },
+      { key: "briefings-gd", label: "Briefings Salvos" },
       { key: "onboarding-wizard", label: "Treinamento Vexo" },
       { key: "chatbot-docs", label: "Chatbot Docs" },
       { key: "usuarios", label: "Usuários" },

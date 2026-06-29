@@ -10,6 +10,7 @@ export const INTERNAL_PAGE_ORDER = [
   "inteligencia-comercial",
   "chatbot-kanban",
   "chatbot-config",
+  "followup",
   "fila-de-followup",
   "followup-empresas",
   "followup-campanhas",

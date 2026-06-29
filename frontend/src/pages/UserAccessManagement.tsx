@@ -196,6 +196,12 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   relatorios: "Relatórios",
   apresentacao: "Demonstração Vexo",
   "apresentacao-gd": "Apresentação GD",
+  "briefings-gd": "Briefings Salvos",
+  followup: "Follow-up",
+  integracoes: "Integrações",
+  eventos: "Eventos",
+  relacionamento: "Relacionamento",
+  livpub: "LivPub",
 };
 
 const CLIENT_PAGE_TABS = [
