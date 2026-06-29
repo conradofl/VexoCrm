@@ -357,6 +357,7 @@ const INTERNAL_PAGE_KEYS = [
   "inteligencia-comercial",
   "chatbot-kanban",
   "chatbot-config",
+  "followup",
   "fila-de-followup",
   "followup-empresas",
   "followup-campanhas",
@@ -369,7 +370,13 @@ const INTERNAL_PAGE_KEYS = [
   "disparos",
   "aquecimento",
   "relatorios",
+  "apresentacao",
   "apresentacao-gd",
+  "briefings-gd",
+  "integracoes",
+  "eventos",
+  "relacionamento",
+  "livpub",
 ];
 const ACCESS_SCOPE_KEYS = ["all_clients", "assigned_clients", "no_client_access"];
 const APPROVAL_LEVEL_KEYS = ["none", "operator", "supervisor", "manager", "director"];
@@ -413,6 +420,7 @@ const FIXED_ADMIN_UIDS = new Set([
 const FIXED_ADMIN_EMAILS = new Set([
   "luizz.felipe.santos17@gmail.com",
   "conradofl@gmail.com",
+  "mrkgeracaodigital@gmail.com",
 ]);
 
 function isFixedAdminIdentity(identity = {}) {
