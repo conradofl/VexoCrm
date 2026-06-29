@@ -32,6 +32,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       );
       const briefingId = result.rows[0].id;
 
+      let briefingHtml = '<h3>Dados do Briefing:</h3><ul>';
+      let briefingText = '\n\n*Dados do Briefing:*\n';
+      for (const [key, value] of Object.entries(briefingData || {})) {
+          const formattedKey = key.replace(/_/g, ' ').toUpperCase();
+          briefingHtml += `<li><strong>${formattedKey}:</strong> ${value || 'Não preenchido'}</li>`;
+          briefingText += `- *${formattedKey}:* ${value || 'Não preenchido'}\n`;
+      }
+      briefingHtml += '</ul>';
+
       // 2. Evolution config
       const evolutionUrl = process.env.GD_EVOLUTION_URL;
       const evolutionToken = process.env.GD_EVOLUTION_TOKEN;
@@ -48,11 +57,18 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         console.warn("[GeracaoDigital] ResendProvider not loaded", err);
       }
 
+      const normalizeWhatsapp = (num) => {
+          let clean = (num || "").replace(/\D/g, '');
+          if (clean.length === 10 || clean.length === 11) return '55' + clean;
+          return clean;
+      };
+
       // Helper function to send WhatsApp via Evolution
       const sendEvolution = async (number, text) => {
         if (!evolutionUrl || !evolutionToken || !number) return "not_configured";
+        const normalizedNumber = normalizeWhatsapp(number);
         const payload = {
-          number,
+          number: normalizedNumber,
           options: { delay: 1200, presence: "composing" },
           textMessage: { text }
         };
@@ -81,7 +97,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
       };
 
-      const messageText = `Olá ${prospectName}!\n\nSeu dossiê/briefing da ${agencyName || 'Vexo'} está pronto.`;
+      const messageText = `Olá ${prospectName}!\n\nSeu dossiê/briefing da ${agencyName || 'Vexo'} está pronto.${briefingText}`;
       
       // Dispatch WhatsApp Prospect
       if (sendToProspectWhatsapp && whatsappNumber) {
@@ -91,7 +107,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       // Dispatch E-mail Prospect
       if (sendToProspectEmail && prospectEmail && sendEmailFn) {
         try {
-          const html = `<h2>Olá ${prospectName}!</h2><p>Seu dossiê/briefing da ${agencyName || 'Vexo'} está pronto e as próximas etapas do cronograma já foram iniciadas.</p><p>Em breve nossa equipe técnica entrará em contato para os próximos passos.</p>`;
+          const html = `<h2>Olá ${prospectName}!</h2><p>Seu dossiê/briefing da ${agencyName || 'Vexo'} está pronto e as próximas etapas do cronograma já foram iniciadas.</p>${briefingHtml}<p>Em breve nossa equipe técnica entrará em contato para os próximos passos.</p>`;
           const emailRes = await sendEmailFn(prospectEmail, `Seu Dossiê da ${agencyName || 'Vexo'} está pronto`, html, agencyName || 'Vexo');
           emailStatus = emailRes ? "sent" : "not_configured";
         } catch (e) {
@@ -105,13 +121,13 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         let emStatus = "skipped";
 
         if (sectorsWhatsapp) {
-          const wppText = `*Novo Briefing Handoff:*\n*Prospect:* ${prospectName}\n*Tel:* ${whatsappNumber || 'N/A'}\nVerifique o CRM para os detalhes completos (Tráfego, Design, Contratos).`;
+          const wppText = `*Novo Briefing Handoff:*\n*Prospect:* ${prospectName}\n*Tel:* ${whatsappNumber || 'N/A'}\nVerifique o CRM para os detalhes completos.\n${briefingText}`;
           wppStatus = await sendEvolution(sectorsWhatsapp, wppText);
         }
         
         if (sectorsEmail && sendEmailFn) {
           try {
-            const emHtml = `<h2>Novo Briefing Handoff: ${prospectName}</h2><p><strong>WhatsApp:</strong> ${whatsappNumber || 'N/A'}</p><p>O briefing foi finalizado. Por favor, verifiquem o CRM para acessar as informações detalhadas de Tráfego, Design e Contratos.</p>`;
+            const emHtml = `<h2>Novo Briefing Handoff: ${prospectName}</h2><p><strong>WhatsApp:</strong> ${whatsappNumber || 'N/A'}</p><p>O briefing foi finalizado.</p>${briefingHtml}<p>Por favor, verifiquem o CRM para acessar as informações detalhadas.</p>`;
             const emRes = await sendEmailFn(sectorsEmail, `Novo Briefing (Handoff) - ${prospectName}`, emHtml, 'Vexo CRM');
             emStatus = emRes ? "sent" : "not_configured";
           } catch (e) {
