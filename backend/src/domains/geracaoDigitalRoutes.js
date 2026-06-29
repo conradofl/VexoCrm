@@ -56,7 +56,14 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           options: { delay: 1200, presence: "composing" },
           textMessage: { text }
         };
-        const endpoint = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
+        let endpoint = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
+        
+        // Se a URL não contiver a rota de envio, adicionamos a rota com o nome da instância
+        if (!endpoint.includes("/message/sendText")) {
+          const instanceName = process.env.GD_EVOLUTION_INSTANCE || "Teste";
+          endpoint = `${endpoint}/message/sendText/${instanceName}`;
+        }
+
         try {
           const evRes = await fetch(endpoint, {
             method: "POST",
