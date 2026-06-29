@@ -20,7 +20,7 @@ export class ResendProvider {
 
     try {
       const { data, error } = await resend.emails.send({
-        from: `${fromName} <contato@vexo.ai>`, // Ajuste conforme domínio autenticado no Resend
+        from: `${fromName} <contato@vexoia.com>`, // Ajuste conforme domínio autenticado no Resend
         to: [to],
         subject,
         html,
