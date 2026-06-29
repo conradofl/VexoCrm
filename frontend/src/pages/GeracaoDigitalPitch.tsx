@@ -48,6 +48,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 // ─── TYPES & INTERFACES ──────────────────────────────────────────────────────
 
@@ -320,6 +321,7 @@ const ACCENT_PRESETS = {
 };
 
 export default function GeracaoDigitalPitch() {
+  const { user } = useAuth();
   // ─── STATE INITIALIZATION ──────────────────────────────────────────────────
   const [isPresenting, setIsPresenting] = useState<boolean>(false);
   const [activeSlide, setActiveSlide] = useState<number>(1);
@@ -953,7 +955,7 @@ export default function GeracaoDigitalPitch() {
         briefingData: briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {})
       };
 
-      const token = localStorage.getItem("auth_token") || "";
+      const token = (await user?.getIdToken()) || "";
       const response = await fetch("/api/geracao-digital/briefing", {
         method: "POST",
         headers: {
@@ -2129,16 +2131,17 @@ export default function GeracaoDigitalPitch() {
                               {sendToProspectWhatsapp && (
                                 <div className="pl-6 pt-1 animate-fade-in-up">
                                   <Label className="text-[9px] text-slate-400 uppercase font-mono">WhatsApp do Prospect</Label>
-                                  <Input
-                                    value={theme.whatsappNumber}
-                                    onChange={(e) => {
-                                      const updated = { ...theme, whatsappNumber: e.target.value };
-                                      setTheme(updated);
-                                      localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
-                                    }}
-                                    placeholder="Ex: (11) 98888-7777"
-                                    className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
-                                  />
+                                    <Input
+                                      value={theme.whatsappNumber}
+                                      onChange={(e) => {
+                                        const updated = { ...theme, whatsappNumber: e.target.value };
+                                        setTheme(updated);
+                                        localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
+                                      }}
+                                      placeholder="Ex: (11) 98888-7777"
+                                      style={{ WebkitTextFillColor: 'white' }}
+                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
+                                    />
                                 </div>
                               )}
                             </div>
@@ -2160,13 +2163,14 @@ export default function GeracaoDigitalPitch() {
                               {sendToProspectEmail && (
                                 <div className="pl-6 pt-1 animate-fade-in-up">
                                   <Label className="text-[9px] text-slate-400 uppercase font-mono">E-mail do Prospect</Label>
-                                  <Input
-                                    type="email"
-                                    value={prospectEmail}
-                                    onChange={(e) => setProspectEmail(e.target.value)}
-                                    placeholder="Ex: cliente@empresa.com.br"
-                                    className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
-                                  />
+                                    <Input
+                                      type="email"
+                                      value={prospectEmail}
+                                      onChange={(e) => setProspectEmail(e.target.value)}
+                                      placeholder="Ex: cliente@empresa.com.br"
+                                      style={{ WebkitTextFillColor: 'white' }}
+                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
+                                    />
                                 </div>
                               )}
                             </div>
@@ -2193,7 +2197,8 @@ export default function GeracaoDigitalPitch() {
                                       value={sectorsWhatsapp}
                                       onChange={(e) => setSectorsWhatsapp(e.target.value)}
                                       placeholder="Ex: (11) 99999-0000"
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
+                                      style={{ WebkitTextFillColor: 'white' }}
+                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
                                     />
                                   </div>
                                   <div className="space-y-1">
@@ -2203,7 +2208,8 @@ export default function GeracaoDigitalPitch() {
                                       value={sectorsEmail}
                                       onChange={(e) => setSectorsEmail(e.target.value)}
                                       placeholder="Ex: operacoes@geracaodigital.com.br"
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 [-webkit-text-fill-color:white] autofill:[-webkit-text-fill-color:white] autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
+                                      style={{ WebkitTextFillColor: 'white' }}
+                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
                                     />
                                   </div>
                                 </div>
@@ -2232,7 +2238,7 @@ export default function GeracaoDigitalPitch() {
                                 sectorsEmail
                               };
 
-                              const token = localStorage.getItem("auth_token") || "";
+                              const token = (await user?.getIdToken()) || "";
                               const response = await fetch("/api/geracao-digital/briefing", {
                                 method: "POST",
                                 headers: {

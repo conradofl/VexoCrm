@@ -1974,6 +1974,72 @@ export function registerAllDomainRoutes(app) {
     }
   );
 
+  app.get(
+    "/api/lead-clients/:tenantId/evolution-instances/:instanceId/status",
+    requireFirebaseAuth,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      const instanceId = normalizeString(req.params?.instanceId);
+      if (!tenantId || !parseOptionalUuid(instanceId)) {
+        sendError(res, 400, "INVALID_BODY", "Invalid tenant or Evolution instance id");
+        return;
+      }
+
+      try {
+        if (!(await ensureTenantExistsForEvolutionRoute(tenantId, res))) return;
+
+        const { data, error } = await supabase
+          .from("lead_client_evolution_instances")
+          .select("id, name, dispatch_webhook_url")
+          .eq("id", instanceId)
+          .eq("client_id", tenantId)
+          .single();
+
+        if (error || !data) {
+          sendError(res, 404, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found");
+          return;
+        }
+
+        const instanceName = getEvolutionInstanceNameFromDispatchUrl(data.dispatch_webhook_url) || data.name;
+        if (!instanceName) {
+           res.json({ connected: false });
+           return;
+        }
+
+        const config = getEvolutionAdminApiConfig();
+        if (!config.configured) {
+          res.json({ connected: false, error: "EVOLUTION_UNCONFIGURED" });
+          return;
+        }
+
+        const response = await fetch(`${config.baseUrl}/instance/connectionState/${encodeURIComponent(instanceName)}`, {
+          method: "GET",
+          headers: { apikey: config.apiKey },
+        });
+
+        if (!response.ok) {
+           res.json({ connected: false });
+           return;
+        }
+        
+        const payload = await response.json();
+        const connected = payload?.instance?.state === "open" || payload?.state === "open";
+        
+        res.json({
+          connected,
+          profileName: payload?.instance?.profileName || payload?.profileName || null,
+          ownerJid: payload?.instance?.ownerJid || payload?.ownerJid || null,
+        });
+      } catch (error) {
+        console.error("Evolution instance status fetch error:", error);
+        res.json({ connected: false, error: "FAILED" });
+      }
+    }
+  );
+
   async function deleteLeadClientHandler(req, res, explicitTenantId) {
     if (!ensureDb(res)) return;
 

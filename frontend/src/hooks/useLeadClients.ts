@@ -447,6 +447,36 @@ export function useDeleteLeadClientEvolutionInstance() {
   });
 }
 
+export interface EvolutionInstanceStatusResult {
+  connected: boolean;
+  profileName: string | null;
+  ownerJid: string | null;
+  error?: string;
+}
+
+export function useLeadClientEvolutionInstanceStatus(tenantId: string, instanceId: string) {
+  const { isAuthenticated, getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["lead-clients", tenantId, "evolution-instances", instanceId, "status"],
+    enabled: isAuthenticated && !!tenantId && !!instanceId,
+    queryFn: async (): Promise<EvolutionInstanceStatusResult> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}/evolution-instances/${encodeURIComponent(instanceId)}/status`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Falha ao consultar status da Evolution");
+      
+      return await res.json();
+    },
+    staleTime: 60 * 1000,
+    retry: 1,
+  });
+}
+
 export function useVerifyLeadClientTable() {
   const { getIdToken } = useAuth();
 

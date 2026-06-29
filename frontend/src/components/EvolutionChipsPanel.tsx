@@ -19,6 +19,7 @@ import {
   useDeleteLeadClientEvolutionInstance,
   useProvisionLeadClientEvolutionInstance,
   useSaveLeadClientEvolutionInstance,
+  useLeadClientEvolutionInstanceStatus,
   type LeadClient,
   type LeadClientEvolutionInstance,
 } from "@/hooks/useLeadClients";
@@ -32,6 +33,31 @@ function resolveChipLimit(chipState: "cold" | "warm", overrideStr?: string): num
   const parsed = overrideStr ? parseInt(overrideStr, 10) : NaN;
   if (!Number.isNaN(parsed) && parsed > 0) return parsed;
   return chipState === "warm" ? 500 : 100;
+}
+
+function EvolutionInstanceStatusBadge({ tenantId, instanceId }: { tenantId: string; instanceId: string }) {
+  const { data, isLoading } = useLeadClientEvolutionInstanceStatus(tenantId, instanceId);
+
+  if (isLoading) return <Badge variant="outline" className="text-[10px] rounded-xl">Status...</Badge>;
+  if (!data) return null;
+
+  return (
+    <>
+      <Badge variant={data.connected ? "default" : "destructive"} className="text-[10px] rounded-xl">
+        {data.connected ? "Conectado" : "Desconectado"}
+      </Badge>
+      {data.ownerJid && (
+        <Badge variant="outline" className="text-[10px] rounded-xl font-mono text-muted-foreground bg-white/50 dark:bg-black/20">
+          +{data.ownerJid.split('@')[0]}
+        </Badge>
+      )}
+      {data.profileName && (
+        <Badge variant="outline" className="text-[10px] rounded-xl text-muted-foreground bg-white/50 dark:bg-black/20">
+          {data.profileName}
+        </Badge>
+      )}
+    </>
+  );
 }
 
 export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
@@ -306,6 +332,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                       >
                         {instance.active ? "ativa" : "inativa"}
                       </Badge>
+                      <EvolutionInstanceStatusBadge tenantId={tenant.id} instanceId={instance.id} />
                       {instance.has_dispatch_webhook_token ? (
                         <Badge className="border border-violet-400/25 bg-violet-500/10 text-violet-700 rounded-xl dark:text-violet-200 text-[10px]">
                           api key
