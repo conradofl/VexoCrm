@@ -100,7 +100,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         const payload = {
           number: normalizedNumber,
           options: { delay: 1200, presence: "composing" },
-          textMessage: { text }
+          textMessage: { text },
+          text: text
         };
         let endpoint = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
         
