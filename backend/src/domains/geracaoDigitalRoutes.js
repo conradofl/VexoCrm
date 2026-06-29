@@ -212,4 +212,19 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       res.status(500).json({ error: "Erro interno no servidor." });
     }
   });
+
+  // GET /api/geracao-digital/briefings
+  app.get("/api/geracao-digital/briefings", requireFirebaseAuth, requireInternalPageAccess(["apresentacao-gd", "briefings-gd"]), async (req, res) => {
+    try {
+      const result = await pool.query(
+        `SELECT id, prospect_name, whatsapp_number, theme_preset, briefing_data, status, slack_status, created_at
+         FROM public.geracao_digital_briefings
+         ORDER BY created_at DESC`
+      );
+      res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar briefings:", error);
+      res.status(500).json({ error: "Erro interno no servidor ao buscar briefings." });
+    }
+  });
 }

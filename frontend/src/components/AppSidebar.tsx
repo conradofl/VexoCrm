@@ -114,8 +114,13 @@ const CONFIG_ITEMS = [
 const AJUDA_ITEMS = [
   { key: "onboarding",     label: "Treinamento Vexo",    url: "/crm/onboarding",       icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
   { key: "apresentacao",   label: "Demonstração Vexo",   url: "/crm/apresentacao",     icon: Sparkles,    page: "apresentacao" as InternalPage },
-  { key: "apresentacao-gd",label: "Apresentação GD",     url: "/crm/apresentacao-gd",  icon: Briefcase,   page: "apresentacao-gd" as InternalPage },
   { key: "chatbot-docs",   label: "Chatbot Docs",        url: "/crm/chatbot-docs",     icon: BookOpen,    page: "chatbot-docs" as InternalPage },
+];
+
+// ─── Geração Digital ───────────────────────────────────────────────────────────
+const GERACAO_DIGITAL_ITEMS = [
+  { key: "apresentacao-gd",label: "Apresentação GD",     url: "/crm/apresentacao-gd",  icon: Briefcase,   page: "apresentacao-gd" as InternalPage },
+  { key: "briefings-gd",   label: "Briefings Salvos",    url: "/crm/briefings-gd",     icon: ListChecks,  page: "briefings-gd" as InternalPage },
 ];
 
 // Configuração + admin tools — FIXO, somente para isAdminUser.
@@ -443,6 +448,10 @@ export function AppSidebar() {
     (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
   );
 
+  const visibleGeracaoDigital = GERACAO_DIGITAL_ITEMS.filter(
+    (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
+  );
+
   const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
 
   return (
@@ -538,6 +547,22 @@ export function AppSidebar() {
             )}
             <div className="space-y-1">
               {visibleAjuda.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── Geração Digital — FIXO ─────────────────────────── */}
+        {visibleGeracaoDigital.length > 0 && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Geração Digital
+              </p>
+            )}
+            <div className="space-y-1">
+              {visibleGeracaoDigital.map((item) => (
                 <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
             </div>

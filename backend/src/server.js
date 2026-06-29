@@ -2091,7 +2091,7 @@ async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, ex
 }
 
 function getEvolutionAdminConfig() {
-  const baseUrl = normalizeString(process.env.EVOLUTION_API_URL).replace(/\/+$/, "");
+  const baseUrl = (normalizeString(process.env.EVOLUTION_API_URL) || "").replace(/\/+$/, "");
   const apiKey = normalizeString(process.env.EVOLUTION_API_KEY);
 
   return {
