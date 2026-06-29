@@ -41,6 +41,23 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
       briefingHtml += '</ul>';
 
+      // 1.5 Fetch dynamic instance name
+      const clientId = req.user?.client_id;
+      let dynamicInstanceName = null;
+      if (clientId) {
+        try {
+          const instRes = await pool.query(
+            `SELECT name FROM public.lead_client_evolution_instances WHERE client_id = $1 AND active = true ORDER BY is_default DESC LIMIT 1`,
+            [clientId]
+          );
+          if (instRes.rows.length > 0) {
+            dynamicInstanceName = instRes.rows[0].name;
+          }
+        } catch (dbErr) {
+          console.error("[GeracaoDigital] Error fetching dynamic instance:", dbErr);
+        }
+      }
+
       // 2. Evolution config
       const evolutionUrl = process.env.GD_EVOLUTION_URL;
       const evolutionToken = process.env.GD_EVOLUTION_TOKEN;
@@ -76,7 +93,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         
         // Se a URL não contiver a rota de envio, adicionamos a rota com o nome da instância
         if (!endpoint.includes("/message/sendText")) {
-          const instanceName = process.env.GD_EVOLUTION_INSTANCE || "Teste";
+          const instanceName = dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste";
           endpoint = `${endpoint}/message/sendText/${instanceName}`;
         }
 
