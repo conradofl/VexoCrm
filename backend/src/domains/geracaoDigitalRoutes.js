@@ -47,11 +47,24 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       if (clientId) {
         try {
           const instRes = await pool.query(
-            `SELECT name FROM public.lead_client_evolution_instances WHERE client_id = $1 AND active = true ORDER BY is_default DESC LIMIT 1`,
+            `SELECT dispatch_webhook_url, name FROM public.lead_client_evolution_instances WHERE client_id = $1 AND active = true ORDER BY is_default DESC LIMIT 1`,
             [clientId]
           );
           if (instRes.rows.length > 0) {
-            dynamicInstanceName = instRes.rows[0].name;
+            const urlStr = instRes.rows[0].dispatch_webhook_url;
+            if (urlStr) {
+               try {
+                 const url = new URL(urlStr);
+                 const pathParts = url.pathname.split("/").filter(Boolean);
+                 const messageIndex = pathParts.findIndex((part) => part === "message");
+                 const instance = messageIndex >= 0 ? decodeURIComponent(pathParts[messageIndex + 2] || "") : "";
+                 dynamicInstanceName = instance || instRes.rows[0].name;
+               } catch (e) {
+                 dynamicInstanceName = instRes.rows[0].name;
+               }
+            } else {
+               dynamicInstanceName = instRes.rows[0].name;
+            }
           }
         } catch (dbErr) {
           console.error("[GeracaoDigital] Error fetching dynamic instance:", dbErr);
