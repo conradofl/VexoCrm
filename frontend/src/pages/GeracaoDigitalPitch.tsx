@@ -1428,10 +1428,13 @@ export default function GeracaoDigitalPitch() {
                       <div className="flex flex-col items-center">
                         <div className="h-6 w-px bg-cyan-500/40 -mt-6" />
                         <div className="text-[10px] text-slate-500 font-mono tracking-widest uppercase font-bold border-b border-white/5 pb-1 mb-4">Comercial Outbound</div>
-                        <div className="flex flex-col gap-3">
+                        <div className="flex flex-col items-center">
                           {renderMemberNode("conrado", "md")}
+                          <div className="h-4 w-px bg-cyan-500/40" />
                           {renderMemberNode("luiz_felipe", "sm")}
+                          <div className="h-4 w-px bg-cyan-500/40" />
                           {renderMemberNode("priscila", "md")}
+                          <div className="h-4 w-px bg-cyan-500/40" />
                           {renderMemberNode("gabriel", "md")}
                         </div>
                       </div>
@@ -1458,8 +1461,9 @@ export default function GeracaoDigitalPitch() {
                               
                               {/* Sub-line to Traffic Team */}
                               <div className="h-8 w-px bg-blue-500/40" />
-                              <div className="flex flex-col gap-3">
+                              <div className="flex flex-col items-center">
                                 {renderMemberNode("arthur", "sm")}
+                                <div className="h-4 w-px bg-blue-500/40" />
                                 {renderMemberNode("cabalim", "sm")}
                               </div>
                             </div>
@@ -1471,8 +1475,9 @@ export default function GeracaoDigitalPitch() {
                               
                               {/* Sub-line to Design Team */}
                               <div className="h-8 w-px bg-orange-500/40" />
-                              <div className="flex flex-col gap-3">
+                              <div className="flex flex-col items-center">
                                 {renderMemberNode("santana", "sm")}
+                                <div className="h-4 w-px bg-orange-500/40" />
                                 {renderMemberNode("karolina", "sm")}
                               </div>
                             </div>
@@ -1495,9 +1500,11 @@ export default function GeracaoDigitalPitch() {
                           
                           {/* Sub-line to Video Team */}
                           <div className="h-8 w-px bg-rose-500/40" />
-                          <div className="flex flex-col gap-3">
+                          <div className="flex flex-col items-center">
                             {renderMemberNode("eflen", "sm")}
+                            <div className="h-4 w-px bg-rose-500/40" />
                             {renderMemberNode("carlos", "sm")}
+                            <div className="h-4 w-px bg-rose-500/40" />
                             {renderMemberNode("iohan", "sm")}
                           </div>
                         </div>
