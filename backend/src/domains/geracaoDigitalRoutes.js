@@ -227,4 +227,22 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       res.status(500).json({ error: "Erro interno no servidor ao buscar briefings." });
     }
   });
+
+  // DELETE /api/geracao-digital/briefings/:id
+  app.delete("/api/geracao-digital/briefings/:id", requireFirebaseAuth, requireInternalPageAccess(["apresentacao-gd", "briefings-gd"]), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const result = await pool.query(
+        `DELETE FROM public.geracao_digital_briefings WHERE id = $1 RETURNING id`,
+        [id]
+      );
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: "Briefing não encontrado." });
+      }
+      res.status(200).json({ success: true, message: "Briefing deletado com sucesso." });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao deletar briefing:", error);
+      res.status(500).json({ error: "Erro interno ao deletar briefing." });
+    }
+  });
 }

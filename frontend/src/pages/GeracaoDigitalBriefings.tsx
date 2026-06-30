@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Eye, Clock, CheckCircle, XCircle, Search } from "lucide-react";
+import { Eye, Clock, CheckCircle, XCircle, Search, Trash2 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ type BriefingData = {
 
 export default function GeracaoDigitalBriefings() {
   const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBriefing, setSelectedBriefing] = useState<BriefingData | null>(null);
 
@@ -39,6 +40,25 @@ export default function GeracaoDigitalBriefings() {
       const json = await res.json();
       return json.data as BriefingData[];
     },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getIdToken();
+      const res = await fetch(`/api/geracao-digital/briefings/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erro ao deletar briefing");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["geracao-digital-briefings"] });
+    },
+    onError: (error) => {
+      console.error("Erro ao deletar briefing:", error);
+      alert("Não foi possível deletar o briefing.");
+    }
   });
 
   const filteredBriefings = briefings.filter(
@@ -129,14 +149,29 @@ export default function GeracaoDigitalBriefings() {
                       {briefing.theme_preset}
                     </Badge>
                   </div>
-                  <Button 
-                    variant="outline" 
-                    className="w-full mt-2 group-hover:border-primary/50 transition-colors"
-                    onClick={() => setSelectedBriefing(briefing)}
-                  >
-                    <Eye className="h-4 w-4 mr-2 text-slate-400 group-hover:text-primary transition-colors" />
-                    Ver Dossiê Completo
-                  </Button>
+                  <div className="flex gap-2 mt-2">
+                    <Button 
+                      variant="outline" 
+                      className="flex-1 group-hover:border-primary/50 transition-colors"
+                      onClick={() => setSelectedBriefing(briefing)}
+                    >
+                      <Eye className="h-4 w-4 mr-2 text-slate-400 group-hover:text-primary transition-colors" />
+                      Ver Dossiê Completo
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="px-3 text-slate-400 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm("Tem certeza que deseja deletar este briefing?")) {
+                          deleteMutation.mutate(briefing.id);
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
