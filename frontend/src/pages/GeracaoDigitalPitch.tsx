@@ -449,7 +449,7 @@ export default function GeracaoDigitalPitch() {
     {
       id: "caio",
       name: "Caio Almeida",
-      role: "CEO Fundador & Diretor Comercial",
+      role: "Fundador & Diretor Comercial",
       parent: "",
       bio: "Líder estratégico da Geração Digital, especialista em escala de negócios e fechamento comercial de alto valor. Conecta o cliente aos times de entrega operacional.",
       responsibilities: ["Acompanhamento comercial estratégico", "Alineamento de metas e produtos de escala", "Garantia de ROI institucional para parceiros"],
@@ -460,7 +460,7 @@ export default function GeracaoDigitalPitch() {
     {
       id: "priscila",
       name: "Priscila Karina",
-      role: "Hunter Comercial",
+      role: "Prospectora Comercial",
       parent: "caio",
       bio: "Prospecção ativa e mapeamento de leads corporativos altamente qualificados para a carteira de vendas.",
       responsibilities: ["Filtro inicial de fit do lead", "Abordagem ativa por telefone e e-mail", "Agendamento de reuniões para Caio"],
@@ -471,7 +471,7 @@ export default function GeracaoDigitalPitch() {
     {
       id: "gabriel",
       name: "Gabriel Oliveira",
-      role: "Hunter Comercial",
+      role: "Prospector Comercial",
       parent: "caio",
       bio: "Mapeamento de novas oportunidades de negócios em mercados emergentes e automação de cold outbound.",
       responsibilities: ["Scraping de contatos corporativos", "Envio de fluxos automáticos de e-mails", "Auditoria de fit comercial"],
@@ -601,7 +601,7 @@ export default function GeracaoDigitalPitch() {
     {
       id: "eflen",
       name: "Eflen Henrique",
-      role: "Designer & Video Maker",
+      role: "Editor de Vídeo",
       parent: "maria_eduarda",
       bio: "Editor de vídeo especializado em cortes dinâmicos de alta retenção no Instagram e criativos de tráfego.",
       responsibilities: ["Edição profissional de reels e criativos", "Color grading de vídeos captados", "Animações simples em After Effects"],
@@ -612,24 +612,13 @@ export default function GeracaoDigitalPitch() {
     {
       id: "carlos",
       name: "Carlos Arantes",
-      role: "Video Maker Externo",
+      role: "Videomaker Externo",
       parent: "maria_eduarda",
       bio: "Profissional de gravação externa, responsável pela captação presencial de conteúdo nas empresas clientes.",
       responsibilities: ["Operação de câmeras profissionais e drones", "Direção de depoimentos presenciais", "Captação de áudio limpo em lapela"],
       tools: ["Sony A7SIII", "DJI Mavic Pro", "Adobe Premiere"],
       status: "Gravando",
       avatarColor: "from-red-500 to-rose-400"
-    },
-    {
-      id: "iohan",
-      name: "Iohan Lancer",
-      role: "Designer & Video Maker",
-      parent: "maria_eduarda",
-      bio: "Motion designer e criador de vinhetas, transformando logos estáticos em animações tecnológicas impactantes.",
-      responsibilities: ["Criação de motion design para anúncios", "Vinhetas para vídeos do Youtube e Instagram", "Efeitos sonoros e sonoplastia"],
-      tools: ["After Effects", "Premiere", "Audition"],
-      status: "Online",
-      avatarColor: "from-pink-500 to-purple-600"
     }
   ]);
 
@@ -1410,56 +1399,62 @@ export default function GeracaoDigitalPitch() {
                 <div className="relative border border-white/5 bg-slate-950/80 p-8 rounded-3xl overflow-x-auto">
                   <div className="w-full max-w-[1200px] mx-auto pb-32">
                     
-                    {/* Level 0 Node (Centered) */}
-                    <div className="flex flex-col items-center">
-                      {renderMemberNode("caio", "lg")}
-                      <div className="h-8 w-px bg-violet-500/40" />
-                    </div>
-
                     {/* Level 1 Horizontal Connect Bar */}
-                    <div className="relative w-full">
+                    <div className="relative w-full mt-4">
                       <div className="absolute top-0 left-[12.5%] right-[12.5%] h-px bg-gradient-to-r from-cyan-500 via-indigo-500 to-pink-500" />
                     </div>
 
-                    {/* Three Main Columns Grid */}
-                    <div className="grid grid-cols-[1fr_2fr_1fr] gap-12 pt-6">
+                    {/* Four Main Columns Grid */}
+                    <div className="grid grid-cols-4 gap-6 pt-6">
                       
-                      {/* Column 1: Comercial Outbound */}
+                      {/* Column 1: Comercial (Caio) */}
                       <div className="flex flex-col items-center">
                         <div className="h-6 w-px bg-cyan-500/40 -mt-6" />
-                        <div className="text-[10px] text-slate-500 font-mono tracking-widest uppercase font-bold border-b border-white/5 pb-1 mb-4">Comercial Outbound</div>
-                        <div className="flex flex-col items-center">
-                          {renderMemberNode("conrado", "md")}
-                          <div className="h-4 w-px bg-cyan-500/40" />
-                          {renderMemberNode("luiz_felipe", "sm")}
-                          <div className="h-4 w-px bg-cyan-500/40" />
-                          {renderMemberNode("priscila", "md")}
-                          <div className="h-4 w-px bg-cyan-500/40" />
-                          {renderMemberNode("gabriel", "md")}
+                        {renderMemberNode("caio", "md")}
+                        
+                        <div className="h-8 w-px bg-cyan-500/40" />
+                        
+                        <div className="relative w-full">
+                          <div className="absolute top-0 left-[25%] right-[25%] h-px bg-cyan-500/40" />
+                          <div className="grid grid-cols-2 gap-4 pt-6">
+                            <div className="flex flex-col items-center">
+                              <div className="h-6 w-px bg-cyan-500/40 -mt-6" />
+                              {renderMemberNode("priscila", "sm")}
+                            </div>
+                            <div className="flex flex-col items-center">
+                              <div className="h-6 w-px bg-cyan-500/40 -mt-6" />
+                              {renderMemberNode("gabriel", "sm")}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Column 2: Atendimento (Aline) */}
+                      {/* Column 2: IA (Conrado) */}
+                      <div className="flex flex-col items-center">
+                        <div className="h-6 w-px bg-purple-500/40 -mt-6" />
+                        {renderMemberNode("conrado", "md")}
+                        
+                        <div className="h-8 w-px bg-purple-500/40" />
+                        <div className="flex flex-col items-center">
+                          {renderMemberNode("luiz_felipe", "sm")}
+                        </div>
+                      </div>
+
+                      {/* Column 3: Atendimento (Aline) */}
                       <div className="flex flex-col items-center">
                         <div className="h-6 w-px bg-indigo-500/40 -mt-6" />
-                        {renderMemberNode("aline", "lg")}
+                        {renderMemberNode("aline", "md")}
                         
-                        {/* Line down to Aline's sub-directors */}
                         <div className="h-8 w-px bg-indigo-500/40" />
                         
-                        {/* Sub-branches grid wrapper */}
                         <div className="relative w-full">
-                          {/* Horizontal sub-connector */}
                           <div className="absolute top-0 left-[25%] right-[25%] h-px bg-gradient-to-r from-blue-500 to-orange-500" />
                           
-                          <div className="grid grid-cols-2 gap-6 pt-6">
-                            
-                            {/* Sub-branch 1: Humberto (Tráfego) */}
+                          <div className="grid grid-cols-2 gap-4 pt-6">
                             <div className="flex flex-col items-center">
                               <div className="h-6 w-px bg-blue-500/40 -mt-6" />
-                              {renderMemberNode("humberto", "md")}
+                              {renderMemberNode("humberto", "sm")}
                               
-                              {/* Sub-line to Traffic Team */}
                               <div className="h-8 w-px bg-blue-500/40" />
                               <div className="flex flex-col items-center">
                                 {renderMemberNode("arthur", "sm")}
@@ -1468,44 +1463,33 @@ export default function GeracaoDigitalPitch() {
                               </div>
                             </div>
 
-                            {/* Sub-branch 2: Jheyson (Design) */}
                             <div className="flex flex-col items-center">
                               <div className="h-6 w-px bg-orange-500/40 -mt-6" />
-                              {renderMemberNode("jheyson", "md")}
-                              
-                              {/* Sub-line to Design Team */}
-                              <div className="h-8 w-px bg-orange-500/40" />
-                              <div className="flex flex-col items-center">
-                                {renderMemberNode("santana", "sm")}
-                                <div className="h-4 w-px bg-orange-500/40" />
-                                {renderMemberNode("karolina", "sm")}
-                              </div>
+                              {renderMemberNode("jheyson", "sm")}
                             </div>
-
                           </div>
                         </div>
                       </div>
 
-                      {/* Column 3: Diretora Operacional (Raquel) */}
+                      {/* Column 4: Operacional (Raquel) */}
                       <div className="flex flex-col items-center">
                         <div className="h-6 w-px bg-pink-500/40 -mt-6" />
-                        {renderMemberNode("raquel", "lg")}
+                        {renderMemberNode("raquel", "md")}
                         
-                        {/* Line down to Maria Eduarda */}
                         <div className="h-8 w-px bg-pink-500/40" />
                         
-                        {/* Sub-branch Maria Eduarda */}
                         <div className="flex flex-col items-center w-full">
-                          {renderMemberNode("maria_eduarda", "md")}
+                          {renderMemberNode("maria_eduarda", "sm")}
                           
-                          {/* Sub-line to Video Team */}
                           <div className="h-8 w-px bg-rose-500/40" />
                           <div className="flex flex-col items-center">
                             {renderMemberNode("eflen", "sm")}
                             <div className="h-4 w-px bg-rose-500/40" />
                             {renderMemberNode("carlos", "sm")}
                             <div className="h-4 w-px bg-rose-500/40" />
-                            {renderMemberNode("iohan", "sm")}
+                            {renderMemberNode("santana", "sm")}
+                            <div className="h-4 w-px bg-rose-500/40" />
+                            {renderMemberNode("karolina", "sm")}
                           </div>
                         </div>
                       </div>
