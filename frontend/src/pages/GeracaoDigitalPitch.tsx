@@ -1014,46 +1014,48 @@ export default function GeracaoDigitalPitch() {
   const roadmapSteps: RoadmapStep[] = [
     {
       week: "Semana 1",
-      title: "Setup de Infraestrutura & Mapeamento",
-      subtitle: "Foco no alinhamento de canais e triagem comercial",
+      title: "Jornada Comercial",
+      subtitle: "Processo de Onboarding e Setup",
       details: [
-        "Aprovação do Dossiê de Briefing pelo time operacional",
-        "Conexão do WhatsApp Business e blindagem anti-banimento",
-        "Integração do Google Tag Manager e pixels de rastreamento",
-        "Configuração de acessos na Business Manager da Meta"
+        "Abertura de drive do cliente",
+        "Abertura de grupos de whatsapp",
+        "Assinatura do contrato",
+        "Cadastro financeiro",
+        "Recebimento",
+        "Reunião de briefing",
+        "Abertura de quadro do cliente no Trello",
+        "Criação e aprovação de roteiros",
+        "Configuração de tráfego"
       ]
     },
     {
       week: "Semana 2",
-      title: "Planejamento Tático & Copywriting",
-      subtitle: "Humberto e Maria Eduarda desenham o plano estratégico",
+      title: "Produção e Execução",
+      subtitle: "Distribuição e criação de tarefas",
       details: [
-        "Desenvolvimento do Funil de Atração por Humberto de Souza",
-        "Estruturação de 15 roteiros de alta conversão por Maria Eduarda",
-        "Mapeamento de palavras-chaves de alta intenção por Cabalim",
-        "Reunião estratégica de apresentação de cronograma"
+        "Abertura de cards no trello",
+        "Repasse de cards à equipe",
+        "Marcação de gravação de conteúdo",
+        "Criação de conteúdo",
+        "Criativos de tráfego",
+        "Agendamento de conteúdo",
+        "Aprovação de tráfego"
       ]
     },
     {
       week: "Semana 3",
-      title: "Design, Programação & Produção",
-      subtitle: "Jheyson e Conrado aceleram criativos e robôs",
+      title: "Ajustes e Otimizações",
+      subtitle: "Refinamento da operação",
       details: [
-        "Criação dos layouts base e criativos estáticos por Santana e Karolina",
-        "Edição profissional e vinhetas de Reels por Eflen e Iohan",
-        "Construção de Landing Pages de alta conversão por Luiz Felipe",
-        "Treinamento do robô de atendimento integrado à API do Gemini por Conrado"
+        "Ajustes necessários"
       ]
     },
     {
       week: "Semana 4",
-      title: "Lançamento Oficial & Auditoria de ROI",
-      subtitle: "Início dos anúncios e relatórios em tempo real",
+      title: "Sucesso do Cliente",
+      subtitle: "Acompanhamento de resultados",
       details: [
-        "Publicação da Landing Page e ativação oficial de mídia",
-        "Ajuste diário de custos por conversão (CPL) por Arthur",
-        "Ativação do bot de atendimento automatizado em tempo real",
-        "Entrega do primeiro relatório consolidado de vendas no Vexo CRM"
+        "Reunião Sucesso do cliente"
       ]
     }
   ];
@@ -1427,6 +1429,8 @@ export default function GeracaoDigitalPitch() {
                         <div className="h-6 w-px bg-cyan-500/40 -mt-6" />
                         <div className="text-[10px] text-slate-500 font-mono tracking-widest uppercase font-bold border-b border-white/5 pb-1 mb-4">Comercial Outbound</div>
                         <div className="flex flex-col gap-3">
+                          {renderMemberNode("conrado", "md")}
+                          {renderMemberNode("luiz_felipe", "sm")}
                           {renderMemberNode("priscila", "md")}
                           {renderMemberNode("gabriel", "md")}
                         </div>
@@ -1443,9 +1447,9 @@ export default function GeracaoDigitalPitch() {
                         {/* Sub-branches grid wrapper */}
                         <div className="relative w-full">
                           {/* Horizontal sub-connector */}
-                          <div className="absolute top-0 left-[16.66%] right-[16.66%] h-px bg-gradient-to-r from-blue-500 via-purple-500 to-orange-500" />
+                          <div className="absolute top-0 left-[25%] right-[25%] h-px bg-gradient-to-r from-blue-500 to-orange-500" />
                           
-                          <div className="grid grid-cols-3 gap-6 pt-6">
+                          <div className="grid grid-cols-2 gap-6 pt-6">
                             
                             {/* Sub-branch 1: Humberto (Tráfego) */}
                             <div className="flex flex-col items-center">
@@ -1460,20 +1464,7 @@ export default function GeracaoDigitalPitch() {
                               </div>
                             </div>
 
-                            {/* Sub-branch 2: Conrado (IA) */}
-                            <div className="flex flex-col items-center">
-                              <div className="h-6 w-px bg-purple-500/40 -mt-6" />
-                              {renderMemberNode("conrado", "md")}
-                              
-                              {/* Sub-line to Luiz Felipe */}
-                              <div className="h-8 w-px bg-purple-500/40" />
-                              <div className="flex flex-col items-center pt-6">
-                                <div className="h-6 w-px bg-purple-500/40 -mt-6" />
-                                {renderMemberNode("luiz_felipe", "sm")}
-                              </div>
-                            </div>
-
-                            {/* Sub-branch 3: Jheyson (Design) */}
+                            {/* Sub-branch 2: Jheyson (Design) */}
                             <div className="flex flex-col items-center">
                               <div className="h-6 w-px bg-orange-500/40 -mt-6" />
                               {renderMemberNode("jheyson", "md")}
