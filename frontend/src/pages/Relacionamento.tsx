@@ -28,6 +28,9 @@ export default function Relacionamento() {
     }
   }, [companies, companyId]);
 
+  const selectedCompany = companies.find(c => c.id === companyId);
+  const clientId = selectedCompany?.tenant_id || "infinie";
+
   return (
     <PageShell
       title="Relacionamento & Segmentação"
@@ -86,7 +89,7 @@ export default function Relacionamento() {
         </TabsList>
 
         <TabsContent value="segmentacao" className="space-y-4 outline-none">
-          <SegmentacaoCatalog companyId={companyId} />
+          <SegmentacaoCatalog clientId={clientId} />
         </TabsContent>
 
         <TabsContent value="aniversariantes" className="space-y-4 outline-none">
