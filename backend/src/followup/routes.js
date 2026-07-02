@@ -158,17 +158,17 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       const tenantId = str(req.query.tenantId);
       const supabase = getSupabase();
       
-      let query = supabase
+      let sbQuery = supabase
         .from("followup_companies")
         .select("id, name, evolution_instance, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at, tenant_id")
         .is("archived_at", null)
         .order("name", { ascending: true });
         
       if (tenantId) {
-        query = query.eq("tenant_id", tenantId);
+        sbQuery = sbQuery.eq("tenant_id", tenantId);
       }
 
-      const { data, error } = await query;
+      const { data, error } = await sbQuery;
       if (error) throw error;
 
       // Enriquecer com contagem de campanhas ativas
