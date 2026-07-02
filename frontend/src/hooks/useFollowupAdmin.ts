@@ -27,6 +27,7 @@ export interface FupCompany {
   sdr_transfer_enabled?: boolean;
   activeCampaigns: number;
   created_at: string;
+  tenant_id?: string;
 }
 
 export interface FupJourney {

@@ -12,11 +12,11 @@ interface ExtendedLeadRow extends LeadRow {
 }
 
 interface SegmentacaoCatalogProps {
-  companyId: string;
+  clientId: string;
 }
 
-export function SegmentacaoCatalog({ companyId }: SegmentacaoCatalogProps) {
-  const { data: leads = [], isLoading, error } = useLeads(companyId === "all" ? "infinie" : companyId);
+export function SegmentacaoCatalog({ clientId }: SegmentacaoCatalogProps) {
+  const { data: leads = [], isLoading, error } = useLeads(clientId === "all" ? "infinie" : clientId);
 
   const totalLeads = leads.length;
 
