@@ -13,6 +13,7 @@ import {
 } from "./service.js";
 import { getAnalytics } from "./analyticsService.js";
 import { getFollowupQueue } from "./queue.js";
+import { triggerAutomationRun } from "./automationEngine.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,9 @@ function str(v) {
  */
 export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess) {
   const router = Router();
-  router.use(requireInternalPageAccess("planilhas"));
+  // requireInternalPageAccess lê req.authAccess, que só existe depois do
+  // requireFirebaseAuth — sem ele na frente o guard nega tudo com 403.
+  router.use(requireFirebaseAuth, requireInternalPageAccess("planilhas"));
 
   // ══════════════════════════════════════════════════════════════════════════
   // WEBHOOKS PÚBLICOS (sem auth Firebase)
@@ -624,6 +627,16 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
   });
 
   // ── Suggestions (motor proativo) ─────────────────────────────────────────────
+
+  // POST /api/followup/engine/run — disparo manual do motor proativo
+  // (botão "Ativar Esteira 4"). Responde 202 e processa em background.
+  router.post("/engine/run", requireFirebaseAuth, requireInternalPageAccess("planilhas"), (req, res) => {
+    const result = triggerAutomationRun();
+    if (!result.started) {
+      return sendErr(res, 409, "ENGINE_ALREADY_RUNNING", "O motor de automação já está em execução. Aguarde a varredura atual terminar.");
+    }
+    return res.status(202).json({ success: true, started: true });
+  });
 
   // GET /api/followup/suggestions?companyId=&status=pending
   router.get("/suggestions", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {

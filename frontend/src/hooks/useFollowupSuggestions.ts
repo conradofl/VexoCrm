@@ -150,6 +150,28 @@ export function useRejectSuggestion() {
   });
 }
 
+export function useRunAutomationEngine() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (): Promise<void> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const res = await fetchApi("/api/followup/engine/run", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao acionar o motor de reativação"));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["followup-suggestions"] });
+      queryClient.invalidateQueries({ queryKey: ["followup-suggestions-count"] });
+    },
+  });
+}
+
 export function useApproveSuggestionBatch() {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();

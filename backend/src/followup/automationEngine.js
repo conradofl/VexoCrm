@@ -19,6 +19,34 @@ function getGroq() {
 
 // ─── Busca candidatos por empresa/campanha ────────────────────────────────────
 
+// Base LivPub tem ~21k contatos: varrer em lotes para não segurar o banco
+// com uma única query gigante, e limitar sugestões por varredura (cada
+// sugestão gera uma chamada Groq).
+const ENGINE_BATCH_SIZE = Math.max(50, Number(process.env.FOLLOWUP_ENGINE_BATCH_SIZE) || 500);
+const ENGINE_MAX_SUGGESTIONS_PER_RUN = Math.max(1, Number(process.env.FOLLOWUP_ENGINE_MAX_SUGGESTIONS) || 100);
+
+async function fetchLeadsInBatches(tablename, whereSql, reasonType) {
+  const results = [];
+  let offset = 0;
+  let batch = 0;
+  for (;;) {
+    const { rows } = await query(`
+      SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime
+        FROM ${tablename}
+       WHERE ${whereSql}
+       ORDER BY id
+       LIMIT ${ENGINE_BATCH_SIZE} OFFSET ${offset}
+    `);
+    if (!rows.length) break;
+    batch++;
+    console.info(`[followup/engine] ${tablename} (${reasonType}) — lote ${batch}: ${rows.length} leads`);
+    results.push(...rows.map(r => ({ ...r, reasonType })));
+    if (rows.length < ENGINE_BATCH_SIZE) break;
+    offset += ENGINE_BATCH_SIZE;
+  }
+  return results;
+}
+
 async function findLivPubCandidates(companyId) {
   const config = buildDefaultSegmentationConfig("livpub");
   const hasVisita = config.kpis.some(k => k.field === 'ultima_visita' && k.enabled);
@@ -27,29 +55,29 @@ async function findLivPubCandidates(companyId) {
   if (!hasVisita && !hasNascimento) return [];
 
   const { rows: tables } = await query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'leads_%'`);
-  
+
   let candidates = [];
   for (const { tablename } of tables) {
     try {
       if (hasNascimento) {
-        const { rows: bday } = await query(`
-          SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime
-            FROM ${tablename}
-           WHERE data_nascimento IS NOT NULL
+        const bday = await fetchLeadsInBatches(
+          tablename,
+          `data_nascimento IS NOT NULL
              AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE)
-             AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)
-        `);
-        candidates.push(...bday.map(r => ({ ...r, reasonType: "livpub_aniversario" })));
+             AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)`,
+          "livpub_aniversario"
+        );
+        candidates.push(...bday);
       }
 
       if (hasVisita) {
-        const { rows: inativos } = await query(`
-          SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime
-            FROM ${tablename}
-           WHERE ultima_visita IS NOT NULL 
-             AND ultima_visita < NOW() - INTERVAL '6 months'
-        `);
-        candidates.push(...inativos.map(r => ({ ...r, reasonType: "livpub_inativo" })));
+        const inativos = await fetchLeadsInBatches(
+          tablename,
+          `ultima_visita IS NOT NULL
+             AND ultima_visita < NOW() - INTERVAL '6 months'`,
+          "livpub_inativo"
+        );
+        candidates.push(...inativos);
       }
     } catch (e) {
       // Ignora erro caso a tabela ainda não tenha as colunas migrada
@@ -211,6 +239,10 @@ async function runAutomationEngine() {
     `);
 
     for (const { company_id, campaign_id } of pairs) {
+      if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) {
+        console.info(`[followup/engine] limite de ${ENGINE_MAX_SUGGESTIONS_PER_RUN} sugestões por varredura atingido — demais leads ficam para a próxima execução`);
+        break;
+      }
       try {
         // Templates ativos da campanha
         const { rows: templates } = await query(
@@ -227,6 +259,8 @@ async function runAutomationEngine() {
         const allCandidates = [...candidates, ...livpubCandidates];
 
         for (const lead of allCandidates) {
+          if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
+
           // Deduplicação: já existe sugestão pendente para este telefone nas últimas 24h?
           const { rows: existing } = await query(
             `SELECT id FROM followup_suggestions
@@ -273,9 +307,24 @@ async function runAutomationEngine() {
 
 // ─── Export público ───────────────────────────────────────────────────────────
 
+// Disparo manual (botão "Ativar Esteira 4" no frontend). Roda em background:
+// a rota responde 202 e o processamento segue nos logs. Guard evita execuções
+// concorrentes (cron + manual ao mesmo tempo).
+let engineRunning = false;
+
+export function triggerAutomationRun() {
+  if (engineRunning) return { started: false, alreadyRunning: true };
+  engineRunning = true;
+  console.info("[followup/engine] disparo manual recebido — iniciando varredura");
+  runAutomationEngine()
+    .catch((err) => console.error("[followup/engine] erro no disparo manual:", err.message))
+    .finally(() => { engineRunning = false; });
+  return { started: true };
+}
+
 export function startAutomationEngine() {
   // A cada 6 horas: minuto 0, a cada 6h
-  cron.schedule("0 */6 * * *", runAutomationEngine);
+  cron.schedule("0 */6 * * *", () => { triggerAutomationRun(); });
   console.info("[followup/engine] Motor proativo agendado (a cada 6h)");
-  return { runNow: runAutomationEngine };
+  return { runNow: triggerAutomationRun };
 }
