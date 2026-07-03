@@ -286,19 +286,19 @@ export async function generateCampaignTemplateVariants(input = {}) {
       required: ["variants", "rationale"],
       additionalProperties: false,
     },
-    taskPrompt: `Gere ${count} variações humanizadas da mensagem original enviada, mantendo EXATAMENTE o mesmo sentido e o mesmo nível de formalidade/informalidade, para envios de WhatsApp em pt-BR.
+    taskPrompt: `Você é um especialista em comunicação via WhatsApp (pt-BR). Sua tarefa é gerar ${count} variações humanizadas da mensagem fornecida em "baseText", com o objetivo principal de servir como rotação de texto antiban (Spinfold), mantendo 100% o sentido original.
 
 Contexto da mensagem:
 ${JSON.stringify(context, null, 2)}
 
 Regras ABSOLUTAS:
-1. O sentido da mensagem NÃO PODE mudar. Apenas troque a estrutura, palavras e a abertura para criar variações naturais.
-2. NÃO adicione técnicas de vendas (AIDA, PAS), NÃO crie urgência falsa, e NÃO crie curiosidade falsa (ex: "queria compartilhar algo que pode mudar sua perspectiva").
-3. NÃO adicione ganchos se a mensagem original não tiver ganchos. Mantenha a essência do que foi escrito no "baseText".
-4. Se o "baseText" for simples (ex: "Olá, estou fazendo um teste"), as variações devem ser simples (ex: "Oi, tudo bem? Isso é apenas um teste", "Fala pessoal, passando pra testar").
-5. O objetivo principal é a rotação de texto (anti-spam) e humanização leve, e NÃO transformar a mensagem numa carta de vendas.
-6. Use a variável {{nome}} em algumas variações.
-7. Não use markdown, numeração, nem emojis excessivos.`,
+1. O sentido da mensagem, a oferta e o propósito NÃO PODEM mudar. Apenas altere sinônimos, a estrutura da frase, saudações iniciais e a pontuação, criando variações sutis e naturais.
+2. A mensagem precisa ser extramente coesa e alinhada ao "baseText". Mantenha o mesmo tom de voz e nível de formalidade/informalidade da mensagem original.
+3. NÃO adicione técnicas de copywriting persuasivas (AIDA, PAS), não crie falsa urgência e não invente benefícios ou dores que não estejam no texto base.
+4. NÃO invente perguntas se a mensagem original não for uma pergunta. NÃO invente ganchos ou promessas que descaracterizem a mensagem original.
+5. Se o "baseText" for curto e direto, as variações devem ser curtas e diretas.
+6. Preservar rigorosamente as variáveis no formato {{variavel}}, como {{nome}}, {{empresa}}, etc, exatamente como aparecem no texto original.
+7. Não utilize markdown (negrito, itálico), listas numeradas ou emojis excessivos. Entregue mensagens limpas e prontas para envio.`,
   });
 }
 
