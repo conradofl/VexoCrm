@@ -54,34 +54,37 @@ async function findLivPubCandidates(companyId) {
 
   if (!hasVisita && !hasNascimento) return [];
 
-  const { rows: tables } = await query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'leads_%'`);
+  const { rows: companyRows } = await query("SELECT tenant_id FROM followup_companies WHERE id = $1", [companyId]);
+  if (!companyRows.length) return [];
+  const tenantId = companyRows[0].tenant_id;
+  if (!tenantId) return [];
 
   let candidates = [];
-  for (const { tablename } of tables) {
-    try {
-      if (hasNascimento) {
-        const bday = await fetchLeadsInBatches(
-          tablename,
-          `data_nascimento IS NOT NULL
-             AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE)
-             AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)`,
-          "livpub_aniversario"
-        );
-        candidates.push(...bday);
-      }
-
-      if (hasVisita) {
-        const inativos = await fetchLeadsInBatches(
-          tablename,
-          `ultima_visita IS NOT NULL
-             AND ultima_visita < NOW() - INTERVAL '6 months'`,
-          "livpub_inativo"
-        );
-        candidates.push(...inativos);
-      }
-    } catch (e) {
-      // Ignora erro caso a tabela ainda não tenha as colunas migrada
+  try {
+    if (hasNascimento) {
+      const bday = await fetchLeadsInBatches(
+        'leads',
+        `client_id = '${tenantId}'
+           AND data_nascimento IS NOT NULL
+           AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE)
+           AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)`,
+        "livpub_aniversario"
+      );
+      candidates.push(...bday);
     }
+
+    if (hasVisita) {
+      const inativos = await fetchLeadsInBatches(
+        'leads',
+        `client_id = '${tenantId}'
+           AND ultima_visita IS NOT NULL
+           AND ultima_visita < NOW() - INTERVAL '6 months'`,
+        "livpub_inativo"
+      );
+      candidates.push(...inativos);
+    }
+  } catch (e) {
+    console.error("[followup/engine] Erro ao consultar tabela base unificada de leads:", e.message);
   }
   return candidates;
 }

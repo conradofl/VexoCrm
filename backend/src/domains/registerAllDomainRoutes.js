@@ -3770,7 +3770,7 @@ export function registerAllDomainRoutes(app) {
 
     try {
       const { data, error } = await supabase
-        .from(leadsTableName(clientId))
+        .from('leads')
         .select("*")
         .eq("client_id", clientId)
         .order("data_hora", { ascending: false, nullsFirst: false })
