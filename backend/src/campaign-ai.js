@@ -267,8 +267,7 @@ export async function generateCampaignTemplateVariants(input = {}) {
     baseText,
     count,
     segmentation: sanitizeSegmentContext(input.segmentation),
-    sequence: sanitizeSequence(input.sequence),
-    technique: buildTechniqueContext(input.style),
+    sequence: sanitizeSequence(input.sequence)
   };
 
   return callGroqJson({
@@ -287,18 +286,19 @@ export async function generateCampaignTemplateVariants(input = {}) {
       required: ["variants", "rationale"],
       additionalProperties: false,
     },
-    taskPrompt: `Gere ${count} variacoes de mensagem para WhatsApp em pt-BR dentro do mesmo tema da campanha.
-Contexto:
+    taskPrompt: `Gere ${count} variações humanizadas da mensagem original enviada, mantendo EXATAMENTE o mesmo sentido e o mesmo nível de formalidade/informalidade, para envios de WhatsApp em pt-BR.
+
+Contexto da mensagem:
 ${JSON.stringify(context, null, 2)}
 
-Regras:
-- Cada variacao deve comunicar a mesma oferta/tema, mas com estrutura, abertura e palavras diferentes.
-- Objetivo: reduzir repeticao textual em disparos de WhatsApp sem mudar a promessa principal.
-- Use {{nome}} em algumas variacoes quando natural, sem inventar nomes reais.
-- Nao cite telefones, listas, automacao, anti-spam ou bloqueio.
-- Nao use markdown, numeracao, emojis excessivos ou frases agressivas.
-- Evite promessas exageradas, urgencia falsa e linguagem que pareca massa/spam.
-- Cada variacao deve ser pronta para envio direto.`,
+Regras ABSOLUTAS:
+1. O sentido da mensagem NÃO PODE mudar. Apenas troque a estrutura, palavras e a abertura para criar variações naturais.
+2. NÃO adicione técnicas de vendas (AIDA, PAS), NÃO crie urgência falsa, e NÃO crie curiosidade falsa (ex: "queria compartilhar algo que pode mudar sua perspectiva").
+3. NÃO adicione ganchos se a mensagem original não tiver ganchos. Mantenha a essência do que foi escrito no "baseText".
+4. Se o "baseText" for simples (ex: "Olá, estou fazendo um teste"), as variações devem ser simples (ex: "Oi, tudo bem? Isso é apenas um teste", "Fala pessoal, passando pra testar").
+5. O objetivo principal é a rotação de texto (anti-spam) e humanização leve, e NÃO transformar a mensagem numa carta de vendas.
+6. Use a variável {{nome}} em algumas variações.
+7. Não use markdown, numeração, nem emojis excessivos.`,
   });
 }
 
