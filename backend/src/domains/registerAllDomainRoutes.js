@@ -5427,7 +5427,10 @@ export function registerAllDomainRoutes(app) {
       sendError,
     });
     if (!clientId) return;
-    const importId = normalizeString(req.body?.importId) || null;
+    const reqImportId = normalizeString(req.body?.importId) || null;
+    const isCrmSource = reqImportId === "__crm__";
+    const importId = isCrmSource ? null : reqImportId;
+    
     const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
     const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 500);
     const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
@@ -5435,6 +5438,10 @@ export function registerAllDomainRoutes(app) {
       req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
         ? req.body.analyticsMeta
         : {};
+    
+    if (isCrmSource) {
+      analyticsMeta.importSource = "__crm__";
+    }
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
     const lifecycleStatus = scheduledFor ? "scheduled" : "active";
@@ -5575,7 +5582,18 @@ export function registerAllDomainRoutes(app) {
       const v = Number.parseInt(String(req.body.limitPerRun), 10);
       if (!Number.isNaN(v) && v > 0) updates.limit_per_run = Math.min(v, 500);
     }
-    if ("importId" in req.body) updates.import_id = normalizeString(req.body?.importId) || null;
+    
+    let isCrmSourceUpdate = false;
+    if ("importId" in req.body) {
+      const reqImportId = normalizeString(req.body?.importId) || null;
+      if (reqImportId === "__crm__") {
+        updates.import_id = null;
+        isCrmSourceUpdate = true;
+      } else {
+        updates.import_id = reqImportId;
+      }
+    }
+    
     if ("scheduledFor" in req.body) updates.scheduled_for = normalizeString(req.body?.scheduledFor) || null;
     if ("startsAt" in req.body) updates.starts_at = normalizeString(req.body?.startsAt) || null;
     if ("endsAt" in req.body) updates.ends_at = normalizeString(req.body?.endsAt) || null;
@@ -5601,7 +5619,7 @@ export function registerAllDomainRoutes(app) {
     try {
       const { data: current, error: currentError } = await supabase
         .from("campaigns")
-        .select("id, client_id")
+        .select("id, client_id, analytics_meta")
         .eq("id", id)
         .single();
 
@@ -5612,6 +5630,16 @@ export function registerAllDomainRoutes(app) {
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
+      
+      if (isCrmSourceUpdate || ("importId" in req.body && updates.import_id !== null)) {
+         const currentMeta = updates.analytics_meta || current.analytics_meta || {};
+         if (isCrmSourceUpdate) {
+            currentMeta.importSource = "__crm__";
+         } else {
+            delete currentMeta.importSource;
+         }
+         updates.analytics_meta = currentMeta;
+      }
 
       let { data, error } = await supabase
         .from("campaigns")
