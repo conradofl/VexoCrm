@@ -111,6 +111,7 @@ interface StepActionButton {
 }
 
 const ALL_IMPORTS_VALUE = "__all__";
+const CRM_BASE_VALUE = "__crm__";
 const CAMPAIGN_LIMIT_MAX = 500;
 const CAMPAIGN_TIME_ZONE = "America/Sao_Paulo";
 
@@ -997,7 +998,7 @@ export default function LeadImports({
       return;
     }
     if (!selectedFile && selectedImportId === ALL_IMPORTS_VALUE) {
-      toast({ title: "Base de leads ausente", description: "Por favor, carregue uma planilha ou selecione uma base ativa.", variant: "destructive" });
+      toast({ title: "Base de leads ausente", description: "Por favor, carregue uma planilha ou selecione uma base ativa (ou CRM).", variant: "destructive" });
       return;
     }
 
@@ -1465,6 +1466,7 @@ export default function LeadImports({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={ALL_IMPORTS_VALUE}>Todas as bases importadas</SelectItem>
+                        <SelectItem value={CRM_BASE_VALUE}>Todos os leads do CRM</SelectItem>
                         {imports.map((imp) => (
                           <SelectItem key={imp.id} value={imp.id}>
                             {imp.source_name} ({imp.imported_rows} leads)

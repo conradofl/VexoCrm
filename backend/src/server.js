@@ -5196,16 +5196,26 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, off
     segMatcher = (item) => leadMatchesCampaignSegmentation(item, segmentation);
   }
 
-  let query = supabase
-    .from("lead_import_items")
-    .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
-    .eq("client_id", clientId)
-    .eq("imported", true)
-    .not("telefone", "is", null)
-    .order("created_at", { ascending: false });
+  let query;
+  if (importId === "__crm__") {
+    query = supabase
+      .from("leads")
+      .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status")
+      .eq("client_id", clientId)
+      .not("telefone", "is", null)
+      .order("created_at", { ascending: false });
+  } else {
+    query = supabase
+      .from("lead_import_items")
+      .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
+      .eq("client_id", clientId)
+      .eq("imported", true)
+      .not("telefone", "is", null)
+      .order("created_at", { ascending: false });
 
-  if (importId) {
-    query = query.eq("import_id", importId);
+    if (importId) {
+      query = query.eq("import_id", importId);
+    }
   }
 
   if (limit && Number.isInteger(limit) && limit > 0 && !segmentation && !excludeDispatchId && (!offset || offset === 0)) {
@@ -5221,26 +5231,26 @@ async function buildDispatchLeads({ clientId, importId = null, limit = null, off
     new Map(
       (data || [])
         .map((item) => {
-          const normalizedData =
-            item.normalized_data && typeof item.normalized_data === "object"
-              ? item.normalized_data
-              : {};
+          const isCrm = importId === "__crm__";
+          const normalizedData = isCrm
+            ? item
+            : (item.normalized_data && typeof item.normalized_data === "object" ? item.normalized_data : {});
 
           return {
             id: item.id,
-            import_id: item.import_id,
+            import_id: isCrm ? "__crm__" : item.import_id,
             client_id: item.client_id,
-            lead_id: item.lead_id || null,
+            lead_id: isCrm ? item.id : (item.lead_id || null),
             telefone: sanitizePhone(item.telefone),
             normalized_data: normalizedData,
-            nome: normalizeString(normalizedData.nome),
-            tipo_cliente: normalizeString(normalizedData.tipo_cliente),
-            faixa_consumo: normalizeString(normalizedData.faixa_consumo),
-            cidade: normalizeString(normalizedData.cidade),
-            estado: normalizeString(normalizedData.estado),
-            status: normalizeString(normalizedData.status),
-            data_hora: normalizeIsoDate(normalizedData.data_hora),
-            qualificacao: normalizeString(normalizedData.qualificacao),
+            nome: normalizeString(isCrm ? item.nome : normalizedData.nome),
+            tipo_cliente: normalizeString(isCrm ? item.tipo_cliente : normalizedData.tipo_cliente),
+            faixa_consumo: normalizeString(isCrm ? item.faixa_consumo : normalizedData.faixa_consumo),
+            cidade: normalizeString(isCrm ? item.cidade : normalizedData.cidade),
+            estado: normalizeString(isCrm ? item.estado : normalizedData.estado),
+            status: normalizeString(isCrm ? item.status : normalizedData.status),
+            data_hora: normalizeIsoDate(isCrm ? item.created_at : normalizedData.data_hora),
+            qualificacao: normalizeString(isCrm ? item.qualificacao : normalizedData.qualificacao),
             created_at: item.created_at,
           };
         })
