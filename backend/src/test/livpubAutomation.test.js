@@ -7,7 +7,7 @@ const routesSource = readFileSync(resolve("src/followup/routes.js"), "utf8");
 
 describe("LivPub Proactive Followup Automation Rules", () => {
   it("defines the LivPub candidates finder function", () => {
-    expect(engineSource).toContain("async function findLivPubCandidates(companyId)");
+    expect(engineSource).toContain("export async function findLivPubCandidates(companyId)");
   });
 
   it("checks for both birthday and inactive configurations from default presets", () => {
@@ -28,7 +28,7 @@ describe("LivPub Proactive Followup Automation Rules", () => {
   it("contains the appropriate reason labels and context for both triggers", () => {
     expect(engineSource).toContain("livpub_aniversario: \"Esteira 3: Aniversariante do dia\"");
     expect(engineSource).toContain("livpub_inativo:     \"Esteira 4: Cliente inativo (> 6 meses)\"");
-    expect(engineSource).toContain("livpub_aniversario: \"Este cliente faz aniversário hoje. Ofereça um drink ou cortesia.\"");
+    expect(engineSource).toContain("livpub_aniversario: \"Este cliente faz aniversário hoje. Ofereça uma condição especial: cortesia/mesa VIP para o aniversariante e desconto para os convidados que forem junto.\"");
     expect(engineSource).toContain("livpub_inativo:     \"Este cliente não frequenta os eventos há mais de 6 meses. Tente reativá-lo.\"");
   });
 
@@ -36,6 +36,26 @@ describe("LivPub Proactive Followup Automation Rules", () => {
     expect(engineSource).toContain("const candidates = await findCandidates(company_id, campaign_id)");
     expect(engineSource).toContain("const livpubCandidates = await findLivPubCandidates(company_id)");
     expect(engineSource).toContain("const allCandidates = [...candidates, ...livpubCandidates]");
+  });
+});
+
+describe("LivPub Birthday Automation (Esteira 3)", () => {
+  it("selects perfil_musical alongside the lead so the AI can adapt the copy tone", () => {
+    expect(engineSource).toContain("perfil_musical");
+  });
+
+  it("instructs the AI to offer VIP for the birthday lead and a discount for guests", () => {
+    expect(engineSource).toContain("cortesia/mesa VIP para o aniversariante e desconto para os convidados que forem junto");
+  });
+
+  it("adapts the prompt to the lead's perfil_musical when generating the birthday copy", () => {
+    expect(engineSource).toContain("reasonType === \"livpub_aniversario\"");
+    expect(engineSource).toContain("ao perfil musical do cliente (${lead.perfil_musical})");
+  });
+
+  it("deduplicates birthday suggestions per calendar year regardless of prior status", () => {
+    expect(engineSource).toContain("EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)");
+    expect(engineSource).toContain('lead.reasonType === "livpub_aniversario"');
   });
 });
 

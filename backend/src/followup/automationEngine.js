@@ -31,7 +31,8 @@ async function fetchLeadsInBatches(tablename, whereSql, reasonType) {
   let batch = 0;
   for (;;) {
     const { rows } = await query(`
-      SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime
+      SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime,
+             perfil_musical
         FROM ${tablename}
        WHERE ${whereSql}
        ORDER BY id
@@ -47,7 +48,7 @@ async function fetchLeadsInBatches(tablename, whereSql, reasonType) {
   return results;
 }
 
-async function findLivPubCandidates(companyId) {
+export async function findLivPubCandidates(companyId) {
   const config = buildDefaultSegmentationConfig("livpub");
   const hasVisita = config.kpis.some(k => k.field === 'ultima_visita' && k.enabled);
   const hasNascimento = config.kpis.some(k => k.field === 'data_nascimento' && k.enabled);
@@ -166,11 +167,11 @@ const REASON_CONTEXT = {
   never_contacted: "Este lead entrou na campanha mas ainda não recebeu nenhuma mensagem.",
   no_reply_48h:    "Este lead recebeu mensagens há mais de 48 horas e não respondeu.",
   jobs_failed:     "As tentativas de envio anteriores falharam para este lead.",
-  livpub_aniversario: "Este cliente faz aniversário hoje. Ofereça um drink ou cortesia.",
+  livpub_aniversario: "Este cliente faz aniversário hoje. Ofereça uma condição especial: cortesia/mesa VIP para o aniversariante e desconto para os convidados que forem junto.",
   livpub_inativo:     "Este cliente não frequenta os eventos há mais de 6 meses. Tente reativá-lo.",
 };
 
-async function generateSuggestion(lead, templates, reasonType) {
+export async function generateSuggestion(lead, templates, reasonType) {
   const groq = getGroq();
   if (!groq) {
     // Sem GROQ_API_KEY: retorna primeiro template ativo sem personalização
@@ -184,11 +185,20 @@ async function generateSuggestion(lead, templates, reasonType) {
   const meetingStr = lead.meeting_datetime
     ? `, reunião agendada: ${new Date(lead.meeting_datetime).toLocaleDateString("pt-BR")}`
     : "";
+  const perfilStr = lead.perfil_musical ? `, perfil musical: ${lead.perfil_musical}` : "";
+
+  const aniversarioInstruction = reasonType === "livpub_aniversario"
+    ? "\n\nInstruções específicas: escreva como um convite de aniversário. Ofereça cortesia/mesa VIP " +
+      "para o aniversariante e desconto para os convidados que forem junto. Adapte o tom da mensagem " +
+      (lead.perfil_musical
+        ? `ao perfil musical do cliente (${lead.perfil_musical}) — referencie o estilo sem exagero.`
+        : "ao clima de uma casa de shows, de forma calorosa e animada.")
+    : "";
 
   const userPrompt =
     `Lead: ${lead.lead_name || "sem nome"}, telefone: ${lead.phone}` +
-    `${lead.origin ? `, origem: ${lead.origin}` : ""}${meetingStr}.\n\n` +
-    `Situação: ${REASON_CONTEXT[reasonType]}\n\n` +
+    `${lead.origin ? `, origem: ${lead.origin}` : ""}${meetingStr}${perfilStr}.\n\n` +
+    `Situação: ${REASON_CONTEXT[reasonType]}${aniversarioInstruction}\n\n` +
     `Templates disponíveis:\n${templateList}\n\n` +
     `Escolha o melhor template (1-${templates.length}) e personalize a mensagem. ` +
     `Responda APENAS com JSON válido: {"template_index": N, "message": "..."}`;
@@ -264,15 +274,26 @@ async function runAutomationEngine() {
         for (const lead of allCandidates) {
           if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
 
-          // Deduplicação: já existe sugestão pendente para este telefone nas últimas 24h?
-          const { rows: existing } = await query(
-            `SELECT id FROM followup_suggestions
-              WHERE company_id = $1
-                AND phone      = $2
-                AND status     = 'pending'
-                AND created_at > NOW() - INTERVAL '24 hours'`,
-            [company_id, lead.phone]
-          );
+          // Deduplicação: aniversário é anual — não repetir para o mesmo lead
+          // dentro do mesmo ano civil, independente do status da sugestão anterior
+          // (aprovada, rejeitada ou ainda pendente).
+          const existing = lead.reasonType === "livpub_aniversario"
+            ? (await query(
+                `SELECT id FROM followup_suggestions
+                  WHERE company_id = $1
+                    AND phone      = $2
+                    AND reason     = $3
+                    AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`,
+                [company_id, lead.phone, REASON_LABELS.livpub_aniversario]
+              )).rows
+            : (await query(
+                `SELECT id FROM followup_suggestions
+                  WHERE company_id = $1
+                    AND phone      = $2
+                    AND status     = 'pending'
+                    AND created_at > NOW() - INTERVAL '24 hours'`,
+                [company_id, lead.phone]
+              )).rows;
           if (existing.length) { skipped++; continue; }
 
           const { template, message } = await generateSuggestion(lead, templates, lead.reasonType);

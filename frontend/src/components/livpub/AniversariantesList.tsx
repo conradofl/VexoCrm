@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Search, Gift, CalendarDays, Check, X, Loader2, User, Phone, MessageSquare } from "lucide-react";
+import { Search, Gift, CalendarDays, Check, X, Loader2, User, Phone, MessageSquare, Zap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   useFollowupSuggestions,
   useApproveSuggestion,
-  useRejectSuggestion
+  useRejectSuggestion,
+  useRunAutomationEngine
 } from "@/hooks/useFollowupSuggestions";
 import { toast } from "sonner";
 
@@ -26,6 +27,16 @@ export function AniversariantesList({ companyId }: AniversariantesListProps) {
 
   const approveMutation = useApproveSuggestion();
   const rejectMutation = useRejectSuggestion();
+  const runEngineMutation = useRunAutomationEngine();
+
+  const handleRunEngine = async () => {
+    try {
+      await runEngineMutation.mutateAsync();
+      toast.success("Esteira 3 acionada! O motor está varrendo a base — os aniversariantes aparecem aqui em instantes.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao acionar a esteira");
+    }
+  };
 
   const handleApprove = async (id: string, suggestedMessage: string | null) => {
     try {
@@ -184,6 +195,19 @@ export function AniversariantesList({ companyId }: AniversariantesListProps) {
           <p>
             • **Moderação:** Os envios ficam represados nesta tela até que o assessor clique em **Aprovar** para disparar o WhatsApp.
           </p>
+
+          <Button
+            onClick={handleRunEngine}
+            disabled={runEngineMutation.isPending}
+            className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium gap-2 mt-2"
+          >
+            {runEngineMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Zap className="h-4 w-4" />
+            )}
+            {runEngineMutation.isPending ? "Acionando..." : "Ativar Esteira 3"}
+          </Button>
         </CardContent>
       </Card>
     </div>
