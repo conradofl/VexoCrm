@@ -68,14 +68,21 @@ export default function GeracaoDigitalBriefings() {
   );
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "success":
-        return <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-green-200"><CheckCircle className="mr-1 h-3 w-3" /> Enviado</Badge>;
-      case "pending":
-        return <Badge variant="secondary" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200"><Clock className="mr-1 h-3 w-3" /> Pendente</Badge>;
-      default:
-        return <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200"><XCircle className="mr-1 h-3 w-3" /> Falha</Badge>;
+    if (status === "success" || status === "sent") {
+      return <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-green-200"><CheckCircle className="mr-1 h-3 w-3" /> Enviado</Badge>;
     }
+    if (status === "pending") {
+      return <Badge variant="secondary" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200"><Clock className="mr-1 h-3 w-3" /> Pendente</Badge>;
+    }
+    if (status === "not_configured") {
+      return <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200"><XCircle className="mr-1 h-3 w-3" /> Não Configurado</Badge>;
+    }
+    if (status === "skipped") {
+      return <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200"><XCircle className="mr-1 h-3 w-3" /> Ignorado</Badge>;
+    }
+    
+    // Default / any 'failed_' status
+    return <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200"><XCircle className="mr-1 h-3 w-3" /> Falha</Badge>;
   };
 
   return (
