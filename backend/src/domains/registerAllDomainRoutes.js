@@ -2033,7 +2033,13 @@ export function registerAllDomainRoutes(app) {
            return;
         }
 
-        const connected = payload?.connectionStatus === "open" || payload?.instance?.state === "open" || payload?.state === "open";
+        console.info(`[evolution] status check for ${instanceName}:`, JSON.stringify(payload));
+        const st1 = (payload?.connectionStatus || "").toLowerCase();
+        const st2 = (payload?.instance?.state || "").toLowerCase();
+        const st3 = (payload?.state || "").toLowerCase();
+        const st4 = (payload?.instance?.status || "").toLowerCase();
+        
+        const connected = ["open", "connected"].some(s => [st1, st2, st3, st4].includes(s));
         
         res.json({
           connected,
