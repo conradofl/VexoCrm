@@ -21,7 +21,7 @@ function randomDate(start, end) {
 }
 
 async function seedDatabase() {
-  console.log("Iniciando geração de 10.000 leads mockados...");
+  console.log("Iniciando geração de 10.000 leads mockados direto na tabela unificada 'leads'...");
   const leads = [];
 
   // Adiciona a equipe primeiro (Forçando inatividade e aniversário para testes)
@@ -33,7 +33,7 @@ async function seedDatabase() {
       perfil_musical: PERFIS[Math.floor(Math.random() * PERFIS.length)],
       ultima_visita: new Date(hoje.getFullYear(), hoje.getMonth() - 7, 1), // Inativo há 7 meses (Ativa Esteira 4)
       data_nascimento: new Date(1990, hoje.getMonth(), hoje.getDate()), // Aniversário hoje (Ativa Esteira 3)
-      client_id: "liv_pub"
+      client_id: "livpub" // <-- CORRIGIDO PARA O NOME EXATO!
     });
   });
 
@@ -48,7 +48,7 @@ async function seedDatabase() {
       perfil_musical: PERFIS[Math.floor(Math.random() * PERFIS.length)],
       ultima_visita: randomDate(new Date(2025, 0, 1), hoje),
       data_nascimento: randomDate(new Date(1980, 0, 1), new Date(2005, 0, 1)),
-      client_id: "liv_pub"
+      client_id: "livpub" // <-- CORRIGIDO!
     });
   }
 
@@ -56,11 +56,10 @@ async function seedDatabase() {
   const chunkSize = 1000;
   for (let i = 0; i < leads.length; i += chunkSize) {
     const chunk = leads.slice(i, i + chunkSize);
-    // Adapte o nome da tabela abaixo para o nome real da tabela da LivPub no seu DB
     const values = chunk.map(l => `('${l.nome}', '${l.telefone}', '${l.perfil_musical}', '${l.ultima_visita.toISOString()}', '${l.data_nascimento.toISOString()}', '${l.client_id}')`).join(',');
     
     await query(`
-      INSERT INTO leads_liv_pub (nome, telefone, perfil_musical, ultima_visita, data_nascimento, client_id)
+      INSERT INTO leads (nome, telefone, perfil_musical, ultima_visita, data_nascimento, client_id)
       VALUES ${values}
       ON CONFLICT (client_id, telefone) DO NOTHING;
     `);
