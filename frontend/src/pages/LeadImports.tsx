@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useLocalStorage } from "../hooks/useLocalStorage";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
@@ -571,7 +572,7 @@ export default function LeadImports({
   const isInternalUser = useAuth().isInternalUser;
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<SheetTab>("campanha");
+  const [activeTab, setActiveTab] = useLocalStorage<SheetTab>(`vexo_activeTab_${activeClientId}`, "campanha");
 
   // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -628,24 +629,24 @@ export default function LeadImports({
   const [previewOpen, setPreviewOpen] = useState(false);
 
   // Campaign builder states
-  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
-  const [campaignName, setCampaignName] = useState("");
-  const [campaignLimitPerRun, setCampaignLimitPerRun] = useState("50");
-  const [campaignSequence, setCampaignSequence] = useState<Array<CampaignSequenceStep & { buttons?: StepActionButton[] }>>([
+  const [editingCampaignId, setEditingCampaignId] = useLocalStorage<string | null>(`vexo_campaignId_${activeClientId}`, null);
+  const [campaignName, setCampaignName] = useLocalStorage(`vexo_campaignName_${activeClientId}`, "");
+  const [campaignLimitPerRun, setCampaignLimitPerRun] = useLocalStorage(`vexo_campaignLimit_${activeClientId}`, "50");
+  const [campaignSequence, setCampaignSequence] = useLocalStorage<Array<CampaignSequenceStep & { buttons?: StepActionButton[] }>>(`vexo_campaignSequence_${activeClientId}`, [
     createCampaignStep("text", 1),
   ]);
-  const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useState<CampaignTemplateStrategy>("single");
-  const [dispatchOptions, setDispatchOptions] = useState<CampaignDispatchOptions>(defaultDispatchOptions);
+  const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useLocalStorage<CampaignTemplateStrategy>(`vexo_campaignStrategy_${activeClientId}`, "single");
+  const [dispatchOptions, setDispatchOptions] = useLocalStorage<CampaignDispatchOptions>(`vexo_campaignDispatchOpts_${activeClientId}`, defaultDispatchOptions);
 
   // Scheduling & parameters states
-  const [multiAgendaEnabled, setMultiAgendaEnabled] = useState(false);
-  const [newConsultantName, setNewConsultantName] = useState("");
-  const [newConsultantLink, setNewConsultantLink] = useState("");
-  const [newTriggerType, setNewTriggerType] = useState<"manual" | "scheduled">("manual");
-  const [newScheduledAt, setNewScheduledAt] = useState("");
-  const [batchingEnabled, setBatchingEnabled] = useState(false);
-  const [batchSize, setBatchSize] = useState("100");
-  const [batchIntervalHours, setBatchIntervalHours] = useState("1");
+  const [multiAgendaEnabled, setMultiAgendaEnabled] = useLocalStorage(`vexo_multiAgenda_${activeClientId}`, false);
+  const [newConsultantName, setNewConsultantName] = useLocalStorage(`vexo_consultantName_${activeClientId}`, "");
+  const [newConsultantLink, setNewConsultantLink] = useLocalStorage(`vexo_consultantLink_${activeClientId}`, "");
+  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled">(`vexo_triggerType_${activeClientId}`, "manual");
+  const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
+  const [batchingEnabled, setBatchingEnabled] = useLocalStorage(`vexo_batching_${activeClientId}`, false);
+  const [batchSize, setBatchSize] = useLocalStorage(`vexo_batchSize_${activeClientId}`, "100");
+  const [batchIntervalHours, setBatchIntervalHours] = useLocalStorage(`vexo_batchInterval_${activeClientId}`, "1");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
