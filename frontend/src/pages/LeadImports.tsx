@@ -1370,6 +1370,16 @@ export default function LeadImports({
                 <CardDescription>Carregue a planilha XLSX/CSV com contatos ou selecione uma existente</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-500">Nome da Campanha / Disparo <span className="text-red-500">*</span></label>
+                  <Input
+                    placeholder="Ex: Oferta Black Friday"
+                    value={campaignName}
+                    onChange={(e) => setCampaignName(e.target.value)}
+                    className="h-12 rounded-xl border-indigo-100 bg-white dark:border-indigo-900/40 dark:bg-slate-900 focus-visible:ring-indigo-500"
+                  />
+                </div>
+                
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-xs font-semibold text-slate-500">Selecionar Planilha</label>

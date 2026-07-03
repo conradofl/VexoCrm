@@ -296,7 +296,7 @@ Regras ABSOLUTAS:
 2. A mensagem precisa ser extramente coesa e alinhada ao "baseText". Mantenha o mesmo tom de voz e nível de formalidade/informalidade da mensagem original.
 3. NÃO adicione técnicas de copywriting persuasivas (AIDA, PAS), não crie falsa urgência e não invente benefícios ou dores que não estejam no texto base.
 4. NÃO invente perguntas se a mensagem original não for uma pergunta. NÃO invente ganchos ou promessas que descaracterizem a mensagem original.
-5. Se o "baseText" for curto e direto, as variações devem ser curtas e diretas.
+5. Se o "baseText" for curto, as variações devem permanecer curtas, MAS você DEVE ser criativo e variar bastante a saudação inicial (ex: misture "Olá", "Oi", "Opa", "Fala", "Tudo bem?", "Bom dia", "Passando para", etc) para garantir alta diversidade antiban.
 6. Preservar rigorosamente as variáveis no formato {{variavel}}, como {{nome}}, {{empresa}}, etc, exatamente como aparecem no texto original.
 7. Não utilize markdown (negrito, itálico), listas numeradas ou emojis excessivos. Entregue mensagens limpas e prontas para envio.`,
   });
