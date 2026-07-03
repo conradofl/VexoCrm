@@ -15,7 +15,7 @@ const CURIOSITY_NAME_TECHNIQUE = {
     "Oi, {{nome}}, rapidinho... antes de voce decidir, deixa eu te mostrar um ponto que talvez mude sua visao.",
 };
 
-const VIP_SALES_TECHNIQUE = {
+export const VIP_SALES_TECHNIQUE = {
   name: "vip_high_ticket",
   label: "Venda VIP / High-ticket",
   summary:

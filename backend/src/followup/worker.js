@@ -49,6 +49,11 @@ async function sendViaEvolution(instance, phone, text) {
 }
 
 async function processJob(job) {
+  if (job.data.isMock) {
+    console.log(`[followup/worker] Job processado (mock): ${job.id}`);
+    return;
+  }
+
   const { jobId } = job.data;
 
   const { rows: jobRows } = await query(

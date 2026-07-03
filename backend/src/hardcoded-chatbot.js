@@ -42,8 +42,7 @@ export function setSupabaseClient(supabase) {
 }
 
 function leadsTable(clientId) {
-  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
-  return `leads_${safe || "outlier"}`;
+  return "leads";
 }
 
 async function getChatMemoryFromPostgres(phone, clientId) {

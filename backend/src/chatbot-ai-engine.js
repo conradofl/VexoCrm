@@ -1,4 +1,4 @@
-﻿import {
+import {
   normalizeLeadsOutlierDados,
   parseStoredHistorico,
   serializeHistorico,
@@ -655,9 +655,7 @@ export function appendToHistory(history, userText, assistantText) {
  * Carrega histórico do banco, chama IA, salva resultado, retorna mensagem.
  */
 function chatbotLeadsTable(clientId) {
-  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
-  if (!safe || safe.length < 2) throw new Error(`Invalid clientId: "${clientId}"`);
-  return `leads_${safe}`;
+  return "leads";
 }
 
 // Horas de inatividade para considerar lead "abandonado" e reengajar

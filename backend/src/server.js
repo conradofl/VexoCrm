@@ -1317,9 +1317,7 @@ function normalizeTenantKey(value) {
  * Valida estritamente para evitar SQL injection.
  */
 function leadsTableName(clientId) {
-  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
-  if (!safe || safe.length < 2) throw new Error(`Invalid clientId for leads table: "${clientId}"`);
-  return `leads_${safe}`;
+  return "leads";
 }
 
 function normalizeHttpUrl(value) {

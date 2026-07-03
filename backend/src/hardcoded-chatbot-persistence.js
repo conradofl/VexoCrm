@@ -3,9 +3,7 @@
  */
 
 function leadsTable(clientId) {
-  const safe = String(clientId || "").toLowerCase().replace(/-/g, "_").replace(/[^a-z0-9_]/g, "");
-  if (!safe || safe.length < 2) throw new Error(`[chatbot-persistence] clientId inválido: "${clientId}"`);
-  return `leads_${safe}`;
+  return "leads";
 }
 
 export async function persistChatbotProgress({
