@@ -1,4 +1,3 @@
-import { readFileSync, readdirSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { randomUUID } from "crypto";
@@ -6,12 +5,23 @@ import { gunzipSync } from "zlib";
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import { createClient } from "@supabase/supabase-js";
-import { createDatabasePool, createPgSupabaseClient } from "./pgSupabaseCompat.js";
 import { runMigrations } from "./migrate.js";
 import { parseLeadQualificacaoBoolean } from "./leadQualificacaoBoolean.js";
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
+import {
+  initDatabase,
+  shutdownPgPool,
+  getDatabaseHostForLogging,
+  isLikelyIpv4Host,
+  databaseUrl,
+  dataSource,
+  dbDriverEnv,
+  supabaseUrl,
+  supabaseServiceRoleKey,
+  useDirectPostgres,
+  pgDatabasePool,
+  supabase,
+} from "./services/database.js";
+import { initFirebase, getAuth, firebaseConfig, firebaseReady } from "./services/firebase.js";
 import {
   canAccessAppView,
   hasAccessPermission,
@@ -194,113 +204,17 @@ app.use(
   })
 );
 
-const databaseUrl = (process.env.DATABASE_URL || "").trim();
-const dataSource = (process.env.DATA_SOURCE || "").trim().toLowerCase();
-const dbDriverEnv = (process.env.DB_DRIVER || "").trim().toLowerCase();
-const supabaseUrl = process.env.SUPABASE_URL || process.env.URL;
-const supabaseServiceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_KEY;
-
-function getDatabaseHostForLogging(connectionString) {
-  if (!connectionString) return null;
-  try {
-    return new URL(connectionString).hostname || null;
-  } catch {
-    return null;
-  }
-}
-
-function isLikelyIpv4Host(hostname) {
-  return /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(String(hostname || ""));
-}
-
-/**
- * postgres: pg pool + query shim (VPS or any Postgres).
- * supabase: official Supabase JS client (PostgREST).
- * Legacy: DATABASE_URL without DATA_SOURCE=supabase still selects postgres unless DB_DRIVER=supabase.
- */
-const useDirectPostgres =
-  dbDriverEnv === "postgres" ||
-  (dbDriverEnv !== "supabase" && Boolean(databaseUrl) && dataSource !== "supabase");
-
-let pgDatabasePool = null;
-let supabase = null;
+// Inicialização do pool Postgres/cliente Supabase legado (movida para
+// ./services/database.js). Chamada aqui, na mesma posição relativa do bloco
+// original, para preservar a ordem de inicialização (depois de dotenv.config()).
+initDatabase({ isProduction });
 let _evolutionInstancesSchemaEnsured = false;
-
-if (useDirectPostgres) {
-  if (!databaseUrl) {
-    console.error("[database] Postgres selected but DATABASE_URL is empty (set DB_DRIVER=supabase to use Supabase only)");
-    process.exit(1);
-  }
-  const databaseHost = getDatabaseHostForLogging(databaseUrl);
-  pgDatabasePool = createDatabasePool(databaseUrl);
-  pgDatabasePool.on("error", (err) => {
-    console.error("[database] pg pool error (idle client):", err?.message || err);
-  });
-  supabase = createPgSupabaseClient(pgDatabasePool);
-  console.info("[database] Using direct PostgreSQL (pg)", dbDriverEnv ? `(DB_DRIVER=${dbDriverEnv})` : "(DATABASE_URL)");
-  if (isProduction && isLikelyIpv4Host(databaseHost)) {
-    console.warn(
-      `[database] DATABASE_URL is using public host ${databaseHost}. ` +
-        "If API and Postgres run on the same EasyPanel/VPS, prefer the internal service host " +
-        "(for example apps_db-vexo:5432) to avoid NAT/firewall latency and intermittent timeouts."
-    );
-  }
-} else if (supabaseUrl && supabaseServiceRoleKey) {
-  supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
-  console.info("[database] Using Supabase JS client");
-} else {
-  console.warn(
-    "[database] No database client configured. Set DATABASE_URL for VPS Postgres, or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for Supabase."
-  );
-}
-
-function shutdownPgPool() {
-  if (pgDatabasePool) {
-    return pgDatabasePool.end().catch(() => {});
-  }
-  return Promise.resolve();
-}
 // SIGTERM/SIGINT são tratados por gracefulShutdown (fecha HTTP + pool + exit), definido
 // junto ao app.listen — não registrar handlers de sinal aqui para não duplicar.
 
-// Firebase: prefer env vars; fallback to service account JSON in backend dir
-let firebaseConfig = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  privateKey: process.env.FIREBASE_PRIVATE_KEY
-    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
-    : undefined,
-};
-
-if (!firebaseConfig.projectId || !firebaseConfig.clientEmail || !firebaseConfig.privateKey) {
-  const backendDir = join(__dirname, "..");
-  const candidates = readdirSync(backendDir).filter(
-    (f) => f.includes("firebase-adminsdk") && f.endsWith(".json")
-  );
-  const jsonPath = candidates[0] ? join(backendDir, candidates[0]) : null;
-  if (jsonPath && existsSync(jsonPath)) {
-    const sa = JSON.parse(readFileSync(jsonPath, "utf8"));
-    firebaseConfig = {
-      projectId: sa.project_id,
-      clientEmail: sa.client_email,
-      privateKey: sa.private_key,
-    };
-  }
-}
-
-const firebaseReady =
-  !!firebaseConfig.projectId && !!firebaseConfig.clientEmail && !!firebaseConfig.privateKey;
-
-if (firebaseReady && getApps().length === 0) {
-  initializeApp({
-    credential: cert({
-      projectId: firebaseConfig.projectId,
-      clientEmail: firebaseConfig.clientEmail,
-      privateKey: firebaseConfig.privateKey,
-    }),
-  });
-}
+// Inicialização do Firebase Admin (movida para ./services/firebase.js).
+// Chamada aqui, na mesma posição relativa do bloco original.
+initFirebase();
 
 function ensureDb(res) {
   if (!supabase) {
