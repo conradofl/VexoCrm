@@ -101,6 +101,18 @@ export function isValidBase64(value) {
   return /^[A-Za-z0-9+/=]+$/.test(value);
 }
 
+// isMaskedSecretPlaceholder: movido para cá (Onda 3, Run D) em vez de ./n8nSettings.js.
+// Motivo: é consumida tanto por n8nSettings.js (buildN8nSettingsPayload) quanto por
+// evolution.js (upsertLeadClientEvolutionInstance). Se vivesse em n8nSettings.js,
+// evolution.js precisaria importar de lá — e n8nSettings.js já importa de evolution.js
+// (getDefaultLeadClientEvolutionInstance, mergeEvolutionInstanceIntoSettings,
+// getLeadClientEvolutionInstancesMap, maskEvolutionInstance), criando ciclo. Aqui em
+// httpInfra.js (folha do grafo) os dois podem importar sem risco de ciclo.
+export function isMaskedSecretPlaceholder(value) {
+  const text = normalizeString(value);
+  return Boolean(text) && /^[*•]+$/.test(text);
+}
+
 /** Global bearer for n8n-facing routes (POST/GET conversation-memory*, POST n8n-error-webhook). Env overrides; default matches legacy Edge. */
 export function getN8nWebhookBearerSecret() {
   return normalizeString(process.env.N8N_WEBHOOK_SECRET) || "@Vexo2026";
