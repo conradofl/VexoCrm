@@ -8,6 +8,27 @@ import express from "express";
 import { runMigrations } from "./migrate.js";
 import { parseLeadQualificacaoBoolean } from "./leadQualificacaoBoolean.js";
 import {
+  normalizeString,
+  normalizeLooseText,
+  getNormalizedField,
+  parseMoneyLikeValue,
+} from "./textNormalize.js";
+import {
+  sendError,
+  shouldExposeInternalErrorDetails,
+  internalErrorPayloadDetails,
+  ensureDb,
+  getRequestBearerToken,
+  isDuplicateKeyError,
+  normalizeBool,
+  normalizeIsoDate,
+  isValidBase64,
+  getN8nWebhookBearerSecret,
+  requireN8nWebhookSecret,
+  getHealthPostgresPingBudgetMs,
+  postgresHealthPing,
+} from "./services/httpInfra.js";
+import {
   initDatabase,
   shutdownPgPool,
   getDatabaseHostForLogging,
@@ -73,7 +94,18 @@ import {
   isFilterShape,
   normalizeFilters,
   leadMatchesSegmentation,
+  buildDefaultSegmentationConfig,
+  sanitizeSegmentationConfig,
 } from "./segmentation.js";
+import {
+  normalizeTenantKey,
+  leadsTableName,
+  normalizeHttpUrl,
+  getRequestId,
+  maskPhoneForLog,
+  getClientEnvSuffix,
+  parseJsonEnvMap,
+} from "./services/tenant.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -136,45 +168,13 @@ if (isProduction && corsOrigins.length > 0) {
   console.info("[cors] Allowed browser origins:", corsOrigins.join(", "));
 }
 
-function sendError(res, status, code, message, details) {
-  const body = {
-    error: {
-      code,
-      message,
-    },
-  };
-  if (details) {
-    body.error.details = details;
-  }
-  res.status(status).json(body);
-}
+// sendError: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 /** When true, INTERNAL_ERROR responses include a short `details` payload (for staging / temporary prod debugging). */
-function shouldExposeInternalErrorDetails() {
-  const raw = String(process.env.EXPOSE_INTERNAL_ERROR_DETAILS || "").toLowerCase();
-  return process.env.NODE_ENV !== "production" || raw === "1" || raw === "true" || raw === "yes";
-}
+// shouldExposeInternalErrorDetails: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 /** Safe diagnostic object for 500 handlers (no stack traces unless non-production). */
-function internalErrorPayloadDetails(err) {
-  if (!shouldExposeInternalErrorDetails()) return undefined;
-  if (err instanceof Error) {
-    const out = { cause: err.message, name: err.name };
-    if (process.env.NODE_ENV !== "production" && err.stack) {
-      out.stack = err.stack.split("\n").slice(0, 8).join("\n");
-    }
-    return out;
-  }
-  if (err && typeof err === "object") {
-    const out = {};
-    if ("message" in err) out.cause = String(err.message);
-    if ("code" in err) out.code = String(err.code);
-    if ("details" in err && err.details != null) out.pgDetails = err.details;
-    if ("hint" in err && err.hint != null) out.hint = err.hint;
-    if (Object.keys(out).length) return out;
-  }
-  return { cause: String(err) };
-}
+// internalErrorPayloadDetails: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 app.use(
   cors({
@@ -216,21 +216,7 @@ let _evolutionInstancesSchemaEnsured = false;
 // Chamada aqui, na mesma posição relativa do bloco original.
 initFirebase();
 
-function ensureDb(res) {
-  if (!supabase) {
-    sendError(
-      res,
-      500,
-      "DATABASE_NOT_CONFIGURED",
-      "Missing database configuration",
-      useDirectPostgres
-        ? "Set DATABASE_URL for Postgres (DB_DRIVER=postgres or unset DATA_SOURCE=supabase)"
-        : "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, or use DATABASE_URL with DB_DRIVER=postgres"
-    );
-    return false;
-  }
-  return true;
-}
+// ensureDb: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 const MANAGED_CLAIM_KEYS = [
   "role",
@@ -1194,102 +1180,10 @@ function ensureSharedRoutePageAccess(req, res, page) {
   return false;
 }
 
-function normalizeString(value) {
-  if (value === null || value === undefined) return null;
-  const str = String(value).trim();
-  if (!str) return null;
-  return str.startsWith("=") ? str.slice(1).trim() : str;
-}
+// normalizeString: ver ./textNormalize.js (Onda 3, Run A).
 
-function normalizeTenantKey(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-
-  const tenantKey = normalized
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-")
-    .slice(0, 50);
-
-  if (!tenantKey || tenantKey.length < 3) {
-    return null;
-  }
-
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantKey)) {
-    return null;
-  }
-
-  return tenantKey;
-}
-
-/**
- * Retorna o nome da tabela de leads para um clientId.
- * Padrão: leads_{clientId} com underscores (ex: leads_infinie, leads_outlier, leads_teste).
- * Valida estritamente para evitar SQL injection.
- */
-function leadsTableName(clientId) {
-  return "leads";
-}
-
-function normalizeHttpUrl(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-
-  try {
-    const url = new URL(normalized);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function getRequestId(req) {
-  return (
-    normalizeString(req.headers["x-request-id"]) ||
-    normalizeString(req.headers["x-correlation-id"]) ||
-    randomUUID()
-  );
-}
-
-function maskPhoneForLog(phone) {
-  const normalized = normalizeString(phone);
-  if (!normalized) return null;
-  const lastDigits = normalized.slice(-4);
-  return `${"*".repeat(Math.max(normalized.length - 4, 0))}${lastDigits}`;
-}
-
-function getClientEnvSuffix(clientId) {
-  const normalized = normalizeString(clientId);
-  if (!normalized) return null;
-  return normalized
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function parseJsonEnvMap(name) {
-  const raw = normalizeString(process.env[name]);
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch (error) {
-    console.warn("[campaign-direct-dispatch] invalid json env map", {
-      env: name,
-      error: error instanceof Error ? error.message : "invalid json",
-    });
-    return null;
-  }
-}
+// normalizeTenantKey, leadsTableName, normalizeHttpUrl, getRequestId, maskPhoneForLog,
+// getClientEnvSuffix e parseJsonEnvMap foram movidos para ./services/tenant.js (Onda 3, Run A).
 
 function resolveEnvDispatchWebhookSettings(clientId) {
   const suffix = getClientEnvSuffix(clientId);
@@ -1495,54 +1389,8 @@ function maskN8nSettings(row) {
   };
 }
 
-export function buildDefaultSegmentationConfig(model = "generico") {
-  const normalizedModel = normalizeTenantKey(model) || "generico";
-  const defaults = {
-    outlier: [
-      { id: "objetivo", label: "Objetivo", field: "objetivo_compra", type: "category", enabled: true },
-      { id: "credito", label: "Credito", field: "valor_credito", type: "money", enabled: true },
-      { id: "entrada", label: "Entrada/FGTS", field: "fgts_entrada", type: "money", enabled: true },
-    ],
-    infinie: [
-      { id: "consumo", label: "Conta de luz", field: "faixa_consumo", type: "money", enabled: true },
-      { id: "cidade", label: "Cidade", field: "cidade", type: "category", enabled: true },
-      { id: "prazo", label: "Prazo", field: "prazo_instalacao", type: "category", enabled: true },
-    ],
-    livpub: [
-      { id: "perfil", label: "Perfil Musical", field: "perfil_musical", type: "category", enabled: true },
-      { id: "visita", label: "Última Visita", field: "ultima_visita", type: "date", enabled: true },
-      { id: "nascimento", label: "Nascimento", field: "data_nascimento", type: "date", enabled: true }
-    ],
-    generico: [
-      { id: "origem", label: "Origem", field: "origem", type: "category", enabled: true },
-      { id: "interesse", label: "Interesse", field: "interesse", type: "category", enabled: true },
-      { id: "valor", label: "Valor", field: "valor", type: "money", enabled: true },
-    ],
-  };
-
-  return {
-    version: 1,
-    kpis: defaults[normalizedModel] || defaults.generico,
-  };
-}
-
-function sanitizeSegmentationConfig(input, model = "generico") {
-  // Catálogo unificado v2 (fields[] sem cap + featuredKpis cap 6). Compat: lê v1 (kpis[]).
-  const hasContent =
-    input && typeof input === "object" && (Array.isArray(input.fields) || Array.isArray(input.kpis));
-  const source = hasContent ? input : buildDefaultSegmentationConfig(model);
-  const catalog = normalizeSegmentationCatalog(source);
-
-  // Espelho legado kpis[] derivado de featuredKpis — mantém leitores antigos do front
-  // funcionando durante a transição (removível quando o front migrar 100%).
-  const fieldsByName = new Map(catalog.fields.map((f) => [f.field, f]));
-  const kpis = catalog.featuredKpis.map((field) => {
-    const f = fieldsByName.get(field);
-    return { id: field, label: f?.label || field, field, type: f?.type || "category", enabled: true };
-  });
-
-  return { ...catalog, kpis };
-}
+// buildDefaultSegmentationConfig e sanitizeSegmentationConfig foram movidos
+// para ./segmentation.js (Onda 3, Run A) — mata o unico export do server.js.
 
 function maskEvolutionInstance(row) {
   if (!row) return null;
@@ -2200,10 +2048,7 @@ async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
   }
 }
 
-function getRequestBearerToken(req) {
-  const authHeader = req.headers.authorization || "";
-  return authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
-}
+// getRequestBearerToken: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 async function validateN8nInboundBearer(req, res, clientId) {
   const settings = await getLeadClientN8nSettings(clientId);
@@ -2761,28 +2606,11 @@ async function resolveCampaignDispatchSettings(clientId, campaign = {}) {
   };
 }
 
-function isDuplicateKeyError(error) {
-  const code = normalizeString(error?.code);
-  const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+// isDuplicateKeyError: movido para ./services/httpInfra.js (Onda 3, Run A).
 
-  return code === "23505" || message.includes("duplicate key");
-}
+// normalizeBool: movido para ./services/httpInfra.js (Onda 3, Run A).
 
-function normalizeBool(value) {
-  return value === true || value === "true" || value === "TRUE" || value === "1";
-}
-
-function normalizeIsoDate(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toISOString();
-}
+// normalizeIsoDate: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 function sanitizePhone(value) {
   const normalized = normalizeString(value);
@@ -2941,28 +2769,12 @@ async function ensureAuthorizedWhatsAppPhone(req, res, phone) {
   return false;
 }
 
-function isValidBase64(value) {
-  if (!value || typeof value !== "string") return false;
-  if (value.length % 4 !== 0) return false;
-  return /^[A-Za-z0-9+/=]+$/.test(value);
-}
+// isValidBase64: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 /** Global bearer for n8n-facing routes (POST/GET conversation-memory*, POST n8n-error-webhook). Env overrides; default matches legacy Edge. */
-function getN8nWebhookBearerSecret() {
-  return normalizeString(process.env.N8N_WEBHOOK_SECRET) || "@Vexo2026";
-}
+// getN8nWebhookBearerSecret: movido para ./services/httpInfra.js (Onda 3, Run A).
 
-function requireN8nWebhookSecret(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const expectedSecret = getN8nWebhookBearerSecret();
-
-  if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
-    sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
-    return;
-  }
-
-  next();
-}
+// requireN8nWebhookSecret: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 function validateConversationMemoryPayload(req, res, next) {
   const body = req.body || {};
@@ -3384,44 +3196,7 @@ function buildDashboardPayload(client, leads, conversions = [], messages = []) {
   };
 }
 
-function normalizeLooseText(value) {
-  return normalizeString(value)
-    ?.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim() || "";
-}
-
-function getNormalizedField(data = {}, keys = []) {
-  for (const key of keys) {
-    const directValue = data[key];
-    if (directValue !== undefined && directValue !== null && normalizeString(directValue)) {
-      return normalizeString(directValue);
-    }
-  }
-
-  const entries = Object.entries(data || {});
-  for (const [key, value] of entries) {
-    const normalizedKey = normalizeLooseText(key).replace(/[^a-z0-9]/g, "");
-    if (keys.some((candidate) => normalizeLooseText(candidate).replace(/[^a-z0-9]/g, "") === normalizedKey)) {
-      return normalizeString(value);
-    }
-  }
-
-  return "";
-}
-
-function parseMoneyLikeValue(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-
-  const cleaned = normalized
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
-    .replace(",", ".");
-  const parsed = Number.parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
-}
+// normalizeLooseText, getNormalizedField, parseMoneyLikeValue: ver ./textNormalize.js (Onda 3, Run A).
 
 function leadMatchesCampaignSegmentation(lead, segmentation = {}) {
   const normalizedData = lead.normalized_data && typeof lead.normalized_data === "object"
@@ -7049,22 +6824,9 @@ async function hasCampaignLeadReplied({ clientId, lead, phone, dispatchedAt }) {
 }
 
 /** Keep /health fast so Docker HEALTHCHECK does not kill the container when Postgres is slow or unreachable. */
-function getHealthPostgresPingBudgetMs() {
-  const raw = Number.parseInt(String(process.env.HEALTH_PG_PING_TIMEOUT_MS || ""), 10);
-  if (Number.isFinite(raw) && raw >= 500 && raw <= 20_000) return raw;
-  return 12_000;
-}
+// getHealthPostgresPingBudgetMs: movido para ./services/httpInfra.js (Onda 3, Run A).
 
-async function postgresHealthPing(pool) {
-  const budgetMs = getHealthPostgresPingBudgetMs();
-  return await Promise.race([
-    pool.query("select 1 as ok"),
-    new Promise((_, reject) => {
-      const id = setTimeout(() => reject(new Error("health_pg_ping_timeout")), budgetMs);
-      if (typeof id.unref === "function") id.unref();
-    }),
-  ]);
-}
+// postgresHealthPing: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 
 Object.assign(routeDeps, {
