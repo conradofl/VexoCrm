@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 const serverSource = readFileSync(resolve("src/server.js"), "utf8");
 const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
 const campaignsRoutesSource = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
-const routeBundle = `${serverSource}\n${domainRoutesSource}\n${campaignsRoutesSource}`;
+const followupQueueRoutesSource = readFileSync(resolve("src/followup/queueRoutes.js"), "utf8");
+const routeBundle = `${serverSource}\n${domainRoutesSource}\n${campaignsRoutesSource}\n${followupQueueRoutesSource}`;
 const outboundSource = readFileSync(resolve("src/campaign-outbound.js"), "utf8");
 
 describe("campaign reply flow safeguards", () => {
