@@ -1,12 +1,12 @@
 // Helpers puros de HTTP/infra (movidos de server.js — grupo I do mapa, Onda 3 Run A).
 // Movimento puro: corpos idênticos aos de server.js na revisão 0ae005a.
 //
-// NOTA (desvio deliberado do mapa): validateN8nInboundBearer e
-// validateConversationMemoryPayload permanecem em server.js nesta run porque
-// dependem de funções ainda não extraídas (getLeadClientN8nSettings — grupo F,
-// Run D; sanitizePhone — grupo H, Run C). Movê-las agora criaria um novo ciclo
-// server.js <-> httpInfra.js, contrariando a arquitetura "sem ciclos" do mapa.
-// Movê-las junto quando os respectivos grupos forem extraídos.
+// NOTA (desvio deliberado do mapa): validateN8nInboundBearer permanece em server.js
+// porque depende de getLeadClientN8nSettings (grupo F, ainda não extraído — Run D).
+// Movê-la criaria um novo ciclo server.js <-> httpInfra.js. Mover junto quando F for extraído.
+//
+// validateConversationMemoryPayload + MAX_CONVERSATION_BYTES vivem em ./leadImport.js
+// (dependem de sanitizePhone; mantém o grafo de imports acíclico).
 
 import { supabase, useDirectPostgres } from "./database.js";
 import { normalizeString } from "../textNormalize.js";
