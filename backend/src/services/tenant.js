@@ -3,6 +3,7 @@
 
 import { randomUUID } from "crypto";
 import { normalizeString } from "../textNormalize.js";
+import { sendError } from "./httpInfra.js";
 
 export function normalizeTenantKey(value) {
   const normalized = normalizeString(value);
@@ -92,4 +93,86 @@ export function parseJsonEnvMap(name) {
     });
     return null;
   }
+}
+
+// resolveAuthorizedClientId (movido de server.js -- grupo D do mapa Onda 3, Run E).
+// Movimento puro: corpo identico ao de server.js na revisao 0ae005a. Usa sendError de
+// ./httpInfra.js (sem ciclo: httpInfra.js so importa de ./database.js e ../textNormalize.js).
+export function resolveAuthorizedClientId(req, res, requestedClientId) {
+  const authAccess = req.authAccess || {
+    role: "internal",
+    scopeMode: "all_clients",
+    clientId: null,
+    clientIds: [],
+  };
+  const clientIds = authAccess.clientIds || [];
+  const scopeMode =
+    authAccess.scopeMode ||
+    (authAccess.role === "client" ? "assigned_clients" : "all_clients");
+
+  if (authAccess.role === "client") {
+    if (scopeMode === "no_client_access") {
+      sendError(res, 403, "NO_CLIENT_ACCESS", "You do not have access to any client");
+      return null;
+    }
+
+    if (requestedClientId && !clientIds.includes(requestedClientId)) {
+      sendError(
+        res,
+        403,
+        "FORBIDDEN_CLIENT_SCOPE",
+        "You do not have access to this client"
+      );
+      return null;
+    }
+
+    return requestedClientId || authAccess.clientId || clientIds[0] || null;
+  }
+
+  if (authAccess.role === "internal") {
+    if (scopeMode === "no_client_access") {
+      sendError(res, 403, "NO_CLIENT_ACCESS", "You do not have access to any client");
+      return null;
+    }
+
+    // Se requestedClientId é especificado, validar se interno tem acesso
+    if (requestedClientId) {
+      if (authAccess.isAdmin || scopeMode === "all_clients") {
+        return requestedClientId;
+      }
+
+      if (scopeMode === "assigned_clients") {
+        if (clientIds.length === 0) {
+          sendError(res, 403, "NO_CLIENT_ACCESS", "You do not have access to any client");
+          return null;
+        }
+
+        if (!clientIds.includes(requestedClientId)) {
+          sendError(res, 403, "FORBIDDEN_CLIENT_SCOPE", "You do not have access to this client");
+          return null;
+        }
+        return requestedClientId;
+      }
+    }
+
+    if (scopeMode === "assigned_clients" && clientIds.length === 0) {
+      sendError(res, 403, "NO_CLIENT_ACCESS", "You do not have access to any client");
+      return null;
+    }
+
+    return authAccess.clientId || clientIds[0] || null;
+  }
+
+  if (authAccess.role === "pending") {
+    sendError(
+      res,
+      403,
+      "PENDING_APPROVAL",
+      "Your account is waiting for approval"
+    );
+    return null;
+  }
+
+  sendError(res, 403, "FORBIDDEN", "Invalid role");
+  return null;
 }
