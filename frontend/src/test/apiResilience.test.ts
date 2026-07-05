@@ -10,7 +10,6 @@ const adminUsersSource = readFileSync(resolve("src/hooks/useAdminUsers.ts"), "ut
 const notificationBellSource = readFileSync(resolve("src/components/NotificationBell.tsx"), "utf8");
 const agenteSource = readFileSync(resolve("src/pages/Agente.tsx"), "utf8");
 const userAccessManagementSource = readFileSync(resolve("src/pages/UserAccessManagement.tsx"), "utf8");
-const usersTableSource = readFileSync(resolve("src/components/access/UsersTable.tsx"), "utf8");
 
 describe("CRM API resilience", () => {
   it("prefers same-origin API with timeout and external fallback in production", () => {
@@ -32,9 +31,9 @@ describe("CRM API resilience", () => {
 
   it("uses the resilient API wrapper for user access management", () => {
     expect(adminUsersSource).toContain('fetchApi("/api/admin/users"');
-    expect(adminUsersSource).toContain("fetchApi(`/api/admin/users/");
-    expect(adminUsersSource).toContain('fetchApi("/api/admin/users"');
-    expect(adminUsersSource).toContain("fetchApi(endpoint");
+    expect(userAccessManagementSource).toContain("fetchApi(`/api/admin/users/");
+    expect(userAccessManagementSource).toContain('fetchApi("/api/admin/users"');
+    expect(userAccessManagementSource).toContain("fetchApi(endpoint");
     expect(userAccessManagementSource).not.toContain("API_BASE_URL");
   });
 
@@ -52,9 +51,9 @@ describe("CRM API resilience", () => {
   });
 
   it("renders a safe user list fallback instead of infinite loading", () => {
-    expect(usersTableSource).toContain("Nao foi possivel carregar usuarios");
-    expect(usersTableSource).toContain("Tentar novamente");
-    expect(usersTableSource).toContain("Nenhum usuario encontrado");
+    expect(userAccessManagementSource).toContain("Nao foi possivel carregar usuarios");
+    expect(userAccessManagementSource).toContain("Tentar novamente");
+    expect(userAccessManagementSource).toContain("Nenhum usuario encontrado");
     expect(adminUsersSource).toContain("retry: 1");
     expect(adminUsersSource).toContain("[admin-users] invalid_items_payload");
   });
