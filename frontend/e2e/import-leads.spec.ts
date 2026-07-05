@@ -13,9 +13,9 @@ test.describe('Módulo: Importação de Leads', () => {
 
   test('Deve navegar e abrir interface de upload de leads', async ({ page }) => {
     // Navigate to Lead Imports (ajustar a rota correta baseada no router se necessário)
-    await page.goto('/crm/importar-leads');
+    await page.goto('/crm/planilhas');
 
     // Check if page rendered
-    await expect(page.locator('text=Importação de Leads').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=Envios por Planilha').first()).toBeVisible({ timeout: 10000 });
   });
 });

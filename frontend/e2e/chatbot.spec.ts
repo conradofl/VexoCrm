@@ -15,7 +15,7 @@ test.describe('Módulo: Chatbot e Automação Inbound', () => {
     await expect(page.locator('text=Agente').first()).toBeVisible({ timeout: 10000 });
 
     // Switch to Pitch
-    await page.goto('/crm/vexo-pitch');
-    await expect(page.locator('text=Vexo Pitch').first()).toBeVisible({ timeout: 10000 });
+    await page.goto('/crm/apresentacao');
+    await expect(page.locator('text=Demonstração Comercial').first()).toBeVisible({ timeout: 10000 });
   });
 });

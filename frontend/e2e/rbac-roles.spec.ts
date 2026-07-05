@@ -78,8 +78,14 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
       await page.getByRole('option', { name: /Teste 2/i }).first().click();
 
       // 4. Navegar na aba de "Permissões Iniciais" para ver/personalizar
+      // Perfis internos renderizam o painel de hierarquia de páginas; perfis de
+      // cliente renderizam o checklist com contador "N selecionados".
       await page.getByRole('tab', { name: 'Permissões Iniciais' }).click();
-      await expect(page.getByText('selecionados', { exact: false })).toBeVisible();
+      if (role.roleType === 'internal') {
+        await expect(page.getByText('Máquina de Vendas', { exact: false }).first()).toBeVisible();
+      } else {
+        await expect(page.getByText('selecionados', { exact: false })).toBeVisible();
+      }
 
       // Voltar para Cadastro & Dados
       await page.getByRole('tab', { name: 'Cadastro & Dados' }).click();
