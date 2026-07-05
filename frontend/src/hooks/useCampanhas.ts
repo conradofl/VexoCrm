@@ -128,6 +128,28 @@ export type CampaignStatus =
   | "failed"
   | "cancelled";
 
+export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
+  active: "Ativa",
+  paused: "Pausada",
+  draft: "Rascunho",
+  scheduled: "Agendada",
+  processing: "Executando",
+  sent: "Enviada",
+  failed: "Falhou",
+  cancelled: "Cancelada",
+};
+
+export const CAMPAIGN_STATUS_COLORS: Record<CampaignStatus, string> = {
+  active: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+  paused: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400",
+  draft: "border-slate-300 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400",
+  scheduled: "border-sky-300 bg-sky-50 text-sky-600 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-400",
+  processing: "border-cyan-300 bg-cyan-50 text-cyan-600 dark:border-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-400",
+  sent: "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+  failed: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+  cancelled: "border-slate-300 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-500",
+};
+
 export interface CampaignLead {
   id: string;
   client_id: string;
