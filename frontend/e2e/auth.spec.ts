@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from './credentials';
 
 // Use test.describe.serial to ensure tests run sequentially and share the same page/context
 test.describe.serial('Módulo 1: Autenticação e Gestão de Usuários', () => {
@@ -22,8 +23,8 @@ test.describe.serial('Módulo 1: Autenticação e Gestão de Usuários', () => {
       console.log('Page content:', await page.content());
       throw e;
     }
-    await page.fill('input[type="email"]', 'luizz.felipe.santos17@gmail.com');
-    await page.fill('input[type="password"]', '@Lfs341340');
+    await page.fill('input[type="email"]', E2E_ADMIN_EMAIL);
+    await page.fill('input[type="password"]', E2E_ADMIN_PASSWORD);
 
     await page.locator('button[type="submit"]').click();
 

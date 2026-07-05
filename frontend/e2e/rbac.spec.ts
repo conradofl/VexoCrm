@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from './credentials';
 
 // Utilizando os usuários que podem ser criados ou os dados que temos
 // Como estamos num fluxo contínuo, vamos testar primeiro se o sistema proibe corretamente as rotas via URL direta
@@ -26,8 +27,8 @@ test.describe('Matriz de Permissões (RBAC) e Rotas Privadas', () => {
   test('Master Admin deve acessar Rotas Estratégicas', async ({ page }) => {
     // Fazer login como Master
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'luizz.felipe.santos17@gmail.com');
-    await page.fill('input[type="password"]', '@Lfs341340');
+    await page.fill('input[type="email"]', E2E_ADMIN_EMAIL);
+    await page.fill('input[type="password"]', E2E_ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
 
     // Verify successful login by checking URL
@@ -46,8 +47,8 @@ test.describe('Matriz de Permissões (RBAC) e Rotas Privadas', () => {
   test('Criar um usuário para a empresa Teste 2', async ({ page }) => {
     // Fazer login
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'luizz.felipe.santos17@gmail.com');
-    await page.fill('input[type="password"]', '@Lfs341340');
+    await page.fill('input[type="email"]', E2E_ADMIN_EMAIL);
+    await page.fill('input[type="password"]', E2E_ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
     await expect(page).toHaveURL(/.*dashboard.*/, { timeout: 15000 });
 
