@@ -806,3 +806,20 @@ export function useAllDispatches(clientId: string | null) {
     },
   });
 }
+
+export function useDispatchPreviewLeads(dispatchId: string | null) {
+  const { getIdToken } = useAuth();
+  return useQuery<{ leads: { nome: string; telefone: string }[]; total: number }>({
+    queryKey: ["dispatch-preview-leads", dispatchId],
+    enabled: !!dispatchId,
+    queryFn: async () => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/preview-leads`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao buscar preview de leads"));
+      return res.json();
+    },
+  });
+}

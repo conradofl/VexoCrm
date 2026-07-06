@@ -6547,6 +6547,52 @@ export function registerAllDomainRoutes(app) {
     }
   });
 
+  // GET /api/campaigns/dispatches/:dispatchId/preview-leads — Retorna amostra de leads que um dispatch deve atingir
+  app.get("/api/campaigns/dispatches/:dispatchId/preview-leads", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const dispatchId = normalizeString(req.params.dispatchId);
+    if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+
+    try {
+      const { data: dispatch, error: dispatchErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, campaign_id, client_id, limit_per_run, offset, steps")
+        .eq("id", dispatchId)
+        .single();
+
+      if (dispatchErr || !dispatch) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+
+      const authorizedClientId = resolveAuthorizedClientId(req, res, dispatch.client_id);
+      if (!authorizedClientId) return;
+
+      const { data: campaign, error: campaignErr } = await supabase
+        .from("campaigns")
+        .select("import_id")
+        .eq("id", dispatch.campaign_id)
+        .single();
+
+      if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+
+      const { buildDispatchLeads } = await import("../server.js");
+      const previewLeads = await buildDispatchLeads({
+        clientId: authorizedClientId,
+        importId: campaign.import_id,
+        limit: dispatch.limit_per_run,
+        offset: dispatch.offset,
+        segmentation: dispatch.steps?.[0]?.segmentation || null,
+        excludeDispatchId: null,
+      });
+
+      // Retorna no max 100 itens p/ preview, mas informa total no targetCount (caso n estivesse na table)
+      res.json({
+        leads: previewLeads.slice(0, 100).map(l => ({ nome: l.nome, telefone: l.telefone })),
+        total: previewLeads.length
+      });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_PREVIEW_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // GET /api/reports/evolution-usage — Relatórios v1: envios por dia, por chip.
   // Lê direto de evolution_instance_daily_usage (instance_id, date, sent_count),
   // agregação no SQL. JOIN com lead_client_evolution_instances p/ label humano.

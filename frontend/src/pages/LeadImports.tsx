@@ -69,6 +69,7 @@ import {
   useTriggerDispatch,
   useUpdateDispatch,
   useAllDispatches,
+  useDispatchPreviewLeads,
   type Campaign,
   type CampaignDispatch,
   type CampaignStatus,
@@ -85,6 +86,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { PageShell } from "@/components/PageShell";
@@ -628,6 +630,7 @@ export default function LeadImports({
   const [parseError, setParseError] = useState<string | null>(null);
   const [selectedImportId, setSelectedImportId] = useState<string>(ALL_IMPORTS_VALUE);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewDispatchId, setPreviewDispatchId] = useState<string | null>(null);
 
   // Campaign builder states
   const [editingCampaignId, setEditingCampaignId] = useLocalStorage<string | null>(`vexo_campaignId_${activeClientId}`, null);
@@ -659,6 +662,7 @@ export default function LeadImports({
   const { data: imports = [], refetch: refetchImports } = useLeadImports(activeClientId);
   const { data: campaigns = [], isLoading: loadingCampaigns, refetch: refetchCampaigns } = useCampanhas(activeClientId || undefined);
   const { data: dispatches = [], isLoading: loadingDispatches, refetch: refetchDispatches } = useAllDispatches(activeClientId || null);
+  const { data: previewLeadsData, isLoading: loadingPreviewLeads } = useDispatchPreviewLeads(previewDispatchId);
   const { data: consultants = [], refetch: refetchConsultants } = useConsultantSchedules(activeClientId);
   const createConsultant = useCreateConsultantSchedule();
   const updateConsultant = useUpdateConsultantSchedule();
@@ -2106,6 +2110,19 @@ export default function LeadImports({
                       )
                     }
                   </Button>
+                  {editingCampaignId && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingCampaignId(null);
+                        setCampaignName("");
+                        setCampaignSequence([createCampaignStep("text", 1)]);
+                      }}
+                      className="w-full h-11 text-xs font-bold mt-2 rounded-xl"
+                    >
+                      Cancelar Edição / Nova Campanha
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -2298,7 +2315,15 @@ export default function LeadImports({
                               <div className="flex items-center justify-between text-[10px] font-bold w-full">
                                 <span className="text-emerald-500">{disp.sent_count} ✓</span>
                                 <span className="text-rose-500">{disp.failed_count} ✗</span>
-                                {disp.target_count != null && <span className="text-blue-500 ml-1">/ {disp.target_count} 🎯</span>}
+                                {disp.target_count != null && (
+                                  <span 
+                                    className="text-blue-500 ml-1 cursor-pointer hover:underline" 
+                                    title="Ver leads alvo desta campanha"
+                                    onClick={() => setPreviewDispatchId(disp.id)}
+                                  >
+                                    / {disp.target_count} 🎯
+                                  </span>
+                                )}
                               </div>
                               {total > 0 && (
                                 <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden">
@@ -2434,6 +2459,58 @@ export default function LeadImports({
           </div>
         </div>
       )}
+
+      {/* Preview Leads Modal */}
+      <Dialog open={!!previewDispatchId} onOpenChange={(open) => !open && setPreviewDispatchId(null)}>
+        <DialogContent className="max-w-2xl bg-white dark:bg-slate-900 border border-border shadow-2xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold font-display text-foreground">Leads Alvo do Disparo</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              {loadingPreviewLeads 
+                ? "Carregando leads..." 
+                : previewLeadsData 
+                  ? `Mostrando ${previewLeadsData.leads.length} de ${previewLeadsData.total} leads encontrados para as regras desta campanha.`
+                  : "Nenhum lead carregado."}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="max-h-[400px] overflow-y-auto mt-4 rounded-lg border border-border bg-slate-50 dark:bg-slate-900/50 p-2">
+            {loadingPreviewLeads ? (
+              <div className="flex flex-col items-center justify-center h-32 gap-3 text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+                <p className="text-xs font-medium">Buscando leads na base...</p>
+              </div>
+            ) : previewLeadsData?.leads && previewLeadsData.leads.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border/50 hover:bg-transparent">
+                    <TableHead className="text-xs font-semibold uppercase">Nome</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-right">Telefone</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {previewLeadsData.leads.map((l, i) => (
+                    <TableRow key={i} className="border-b border-border/20 last:border-0 hover:bg-slate-100 dark:hover:bg-slate-800">
+                      <TableCell className="font-medium text-sm">{l.nome || "—"}</TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">{l.telefone}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-32 gap-3 text-muted-foreground">
+                <p className="text-sm font-medium">Nenhum lead encontrado para os filtros configurados.</p>
+              </div>
+            )}
+          </div>
+          
+          <DialogFooter className="mt-2">
+            <Button onClick={() => setPreviewDispatchId(null)} variant="outline" className="w-full sm:w-auto text-xs font-bold rounded-xl">
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }
