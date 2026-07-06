@@ -5445,7 +5445,10 @@ export function registerAllDomainRoutes(app) {
     }
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
-    const lifecycleStatus = scheduledFor ? "scheduled" : "active";
+    let lifecycleStatus = scheduledFor ? "scheduled" : "active";
+    if (req.body?.status === "draft") {
+      lifecycleStatus = "draft";
+    }
     const campaignPromptId = normalizeString(req.body?.campaignPromptId) || null;
     if (!["disparo", "agente"].includes(req.body?.mode)) {
       return sendError(res, 400, "INVALID_BODY", "mode é obrigatório e deve ser 'disparo' ou 'agente'");

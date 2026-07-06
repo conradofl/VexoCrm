@@ -643,7 +643,7 @@ export default function LeadImports({
   const [multiAgendaEnabled, setMultiAgendaEnabled] = useLocalStorage(`vexo_multiAgenda_${activeClientId}`, false);
   const [newConsultantName, setNewConsultantName] = useLocalStorage(`vexo_consultantName_${activeClientId}`, "");
   const [newConsultantLink, setNewConsultantLink] = useLocalStorage(`vexo_consultantLink_${activeClientId}`, "");
-  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled">(`vexo_triggerType_${activeClientId}`, "manual");
+  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
   const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
   const [batchingEnabled, setBatchingEnabled] = useLocalStorage(`vexo_batching_${activeClientId}`, false);
   const [batchSize, setBatchSize] = useLocalStorage(`vexo_batchSize_${activeClientId}`, "100");
@@ -1151,6 +1151,7 @@ export default function LeadImports({
             name: `${campaignName.trim()} — Lote Principal`,
             steps: campaignSequence,
             triggerType: newTriggerType,
+            status: newTriggerType === "draft" ? "draft" : undefined,
             scheduledAt: scheduledIso,
             evolutionInstanceId: dispatchOptions.evolutionInstanceId,
           }),
@@ -1167,6 +1168,8 @@ export default function LeadImports({
             headers: { Authorization: `Bearer ${token}` },
           });
           toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+        } else if (newTriggerType === "draft") {
+          toast({ title: "Sucesso!", description: "Campanha salva como rascunho (Stand by)." });
         } else {
           toast({ title: "Sucesso!", description: "Lote de disparos agendado com sucesso." });
         }
@@ -2036,35 +2039,43 @@ export default function LeadImports({
                 {/* Trigger Types */}
                 <div className="space-y-3 border-t border-slate-100 dark:border-white/5 pt-4">
                   <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Momento do disparo</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Button
                       type="button"
+                      variant={newTriggerType === "manual" ? "default" : "outline"}
+                      className={newTriggerType === "manual" ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 h-auto py-2" : "h-auto py-2"}
                       onClick={() => setNewTriggerType("manual")}
-                      className={cn(
-                        "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-xs font-semibold transition-colors",
-                        newTriggerType === "manual"
-                          ? "border-primary/40 bg-primary/10 text-primary"
-                          : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                      )}
                     >
-                      <Play className="h-4 w-4" />
-                      Disparar Imediatamente
-                      <span className="font-normal text-[10px] opacity-70">Executar após a criação</span>
-                    </button>
-                    <button
+                      <Play className="mr-2 h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-semibold">Disparar Agora</div>
+                        <div className="text-[10px] opacity-80">Execução imediata</div>
+                      </div>
+                    </Button>
+                    <Button
                       type="button"
+                      variant={newTriggerType === "scheduled" ? "default" : "outline"}
+                      className={newTriggerType === "scheduled" ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 h-auto py-2" : "h-auto py-2"}
                       onClick={() => setNewTriggerType("scheduled")}
-                      className={cn(
-                        "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-xs font-semibold transition-colors",
-                        newTriggerType === "scheduled"
-                          ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
-                          : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground"
-                      )}
                     >
-                      <Clock3 className="h-4 w-4" />
-                      Disparo Agendado
-                      <span className="font-normal text-[10px] opacity-70">Definir data e hora do lote</span>
-                    </button>
+                      <Clock3 className="mr-2 h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-semibold">Agendado</div>
+                        <div className="text-[10px] opacity-80">Data e hora definida</div>
+                      </div>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={newTriggerType === "draft" ? "default" : "outline"}
+                      className={newTriggerType === "draft" ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 h-auto py-2" : "h-auto py-2"}
+                      onClick={() => setNewTriggerType("draft")}
+                    >
+                      <Pause className="mr-2 h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-semibold">Rascunho</div>
+                        <div className="text-[10px] opacity-80">Salvar em standby</div>
+                      </div>
+                    </Button>
                   </div>
 
                   {newTriggerType === "scheduled" && (
@@ -2087,7 +2098,13 @@ export default function LeadImports({
                     className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow"
                   >
                     <Zap className="h-4 w-4" />
-                    {editingCampaignId ? "Salvar Alterações de Campanha" : (newTriggerType === "manual" ? "Salvar e Disparar Lote Agora" : "Salvar e Agendar Disparo")}
+                    {editingCampaignId 
+                      ? "Salvar Alterações de Campanha" 
+                      : (newTriggerType === "manual" 
+                        ? "Salvar e Disparar Lote Agora" 
+                        : (newTriggerType === "scheduled" ? "Salvar e Agendar Disparo" : "Salvar Campanha em Rascunho")
+                      )
+                    }
                   </Button>
                 </div>
               </CardContent>
