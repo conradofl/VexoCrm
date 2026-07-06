@@ -43,6 +43,7 @@ export interface CampaignDispatch {
   trigger_type: "manual" | "scheduled";
   scheduled_at: string | null;
   status: "draft" | "scheduled" | "running" | "paused" | "done" | "failed" | "cancelled";
+  target_count?: number;
   sent_count: number;
   failed_count: number;
   triggered_at: string | null;

@@ -2298,6 +2298,7 @@ export default function LeadImports({
                               <div className="flex items-center justify-between text-[10px] font-bold w-full">
                                 <span className="text-emerald-500">{disp.sent_count} ✓</span>
                                 <span className="text-rose-500">{disp.failed_count} ✗</span>
+                                {disp.target_count != null && <span className="text-blue-500 ml-1">/ {disp.target_count} 🎯</span>}
                               </div>
                               {total > 0 && (
                                 <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden">
@@ -2898,7 +2899,7 @@ function LeadImportAuditReport({ activeClientId, imports, onSelectImportForFollo
             <CardContent className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
-                  Total de Disparos
+                  Lotes Criados
                 </p>
                 <p className="text-3xl font-bold font-num text-foreground">
                   {dispatchesKpis.total}

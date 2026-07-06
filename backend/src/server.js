@@ -7533,3 +7533,4 @@ process.on("uncaughtException", (err) => {
 runMigrations(pgDatabasePool).finally(() => {
   listenWithRetry();
 });
+export { buildDispatchLeads };

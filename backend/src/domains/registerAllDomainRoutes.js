@@ -6096,7 +6096,8 @@ export function registerAllDomainRoutes(app) {
 
     await pgDatabasePool.query(`
       ALTER TABLE public.campaign_dispatches
-      ADD COLUMN IF NOT EXISTS evolution_instance_id UUID
+      ADD COLUMN IF NOT EXISTS evolution_instance_id UUID,
+      ADD COLUMN IF NOT EXISTS target_count INTEGER DEFAULT 0
     `);
   }
 
@@ -6873,6 +6874,22 @@ export function registerAllDomainRoutes(app) {
 
       const limitPerRun = body.limitPerRun != null ? Number(body.limitPerRun) : null;
       const offset = body.offset != null ? Number(body.offset) : null;
+      
+      let targetCount = 0;
+      try {
+        const { buildDispatchLeads } = await import("../server.js");
+        const previewLeads = await buildDispatchLeads({
+          clientId: authorizedClientId,
+          importId: campaign.import_id,
+          limit: limitPerRun,
+          offset: offset,
+          segmentation: validation.analyticsMeta.sequence?.[0]?.segmentation || null,
+          excludeDispatchId: null
+        });
+        targetCount = previewLeads.length;
+      } catch (err) {
+        console.error("Erro ao calcular target_count:", err);
+      }
 
       const { data, error } = await supabase
         .from("campaign_dispatches")
@@ -6887,6 +6904,7 @@ export function registerAllDomainRoutes(app) {
           status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
           limit_per_run: limitPerRun,
           offset: offset,
+          target_count: targetCount,
         })
         .select("*")
         .single();
