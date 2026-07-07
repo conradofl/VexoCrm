@@ -1089,14 +1089,3 @@ export default function LeadImports({
     </PageShell>
   );
 }
-
-// Test assertions expectations placeholder:
-// [campaigns-ui] create_campaign_start
-// [campaigns-ui] create_campaign_failed
-// await Promise.allSettled([refetch(), refetchPending()])
-// pendingSummaryLabel
-// campaignPendingLabel
-// Falha ao carregar leads pendentes
-// Nao foi possivel carregar os leads
-// Tentar novamente
-// createCampaign.isPending

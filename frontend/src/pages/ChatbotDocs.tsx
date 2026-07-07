@@ -8,8 +8,6 @@ import {
   Clock,
   CheckCircle2,
   Megaphone,
-  Users,
-  TrendingUp,
   FileText,
   Shuffle,
   Activity,
