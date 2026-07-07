@@ -37,6 +37,7 @@ import {
   useTriggerDispatch,
   useUpdateDispatch,
   useAllDispatches,
+  useDispatchPreviewLeads,
   type Campaign,
   type CampaignDispatch,
   type CampaignStatus,
@@ -55,6 +56,9 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 import { cn } from "@/lib/utils";
 import { useCampaignPrompts, useSaveCampaignPrompt } from "@/hooks/useCampaignPrompts";
 import { toast } from "@/components/ui/use-toast";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { API_BASE_URL } from "@/lib/api";
 import {
   campaignLocalDateTimeToUtcIso,
@@ -166,6 +170,7 @@ export default function LeadImports({
   const [parseError, setParseError] = useState<string | null>(null);
   const [selectedImportId, setSelectedImportId] = useState<string>(ALL_IMPORTS_VALUE);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewDispatchId, setPreviewDispatchId] = useState<string | null>(null);
 
   // Campaign builder states
   const [editingCampaignId, setEditingCampaignId] = useLocalStorage<string | null>(`vexo_campaignId_${activeClientId}`, null);
@@ -181,7 +186,7 @@ export default function LeadImports({
   const [multiAgendaEnabled, setMultiAgendaEnabled] = useLocalStorage(`vexo_multiAgenda_${activeClientId}`, false);
   const [newConsultantName, setNewConsultantName] = useLocalStorage(`vexo_consultantName_${activeClientId}`, "");
   const [newConsultantLink, setNewConsultantLink] = useLocalStorage(`vexo_consultantLink_${activeClientId}`, "");
-  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled">(`vexo_triggerType_${activeClientId}`, "manual");
+  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
   const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
   const [batchingEnabled, setBatchingEnabled] = useLocalStorage(`vexo_batching_${activeClientId}`, false);
   const [batchSize, setBatchSize] = useLocalStorage(`vexo_batchSize_${activeClientId}`, "100");
@@ -197,6 +202,7 @@ export default function LeadImports({
   const { data: imports = [], refetch: refetchImports } = useLeadImports(activeClientId);
   const { data: campaigns = [], isLoading: loadingCampaigns, refetch: refetchCampaigns } = useCampanhas(activeClientId || undefined);
   const { data: dispatches = [], isLoading: loadingDispatches, refetch: refetchDispatches } = useAllDispatches(activeClientId || null);
+  const { data: previewLeadsData, isLoading: loadingPreviewLeads } = useDispatchPreviewLeads(previewDispatchId);
   const { data: consultants = [], refetch: refetchConsultants } = useConsultantSchedules(activeClientId);
   const createConsultant = useCreateConsultantSchedule();
   const updateConsultant = useUpdateConsultantSchedule();
@@ -689,6 +695,7 @@ export default function LeadImports({
             name: `${campaignName.trim()} — Lote Principal`,
             steps: campaignSequence,
             triggerType: newTriggerType,
+            status: newTriggerType === "draft" ? "draft" : undefined,
             scheduledAt: scheduledIso,
             evolutionInstanceId: dispatchOptions.evolutionInstanceId,
           }),
@@ -705,6 +712,8 @@ export default function LeadImports({
             headers: { Authorization: `Bearer ${token}` },
           });
           toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+        } else if (newTriggerType === "draft") {
+          toast({ title: "Sucesso!", description: "Campanha salva como rascunho (Stand by)." });
         } else {
           toast({ title: "Sucesso!", description: "Lote de disparos agendado com sucesso." });
         }
@@ -969,6 +978,11 @@ export default function LeadImports({
               onSubmit={handleCreateAndDispatch}
               isSubmitting={isSubmitting}
               editingCampaignId={editingCampaignId}
+              onCancelEdit={() => {
+                setEditingCampaignId(null);
+                setCampaignName("");
+                setCampaignSequence([createCampaignStep("text", 1)]);
+              }}
             />
           </div>
 
@@ -997,6 +1011,7 @@ export default function LeadImports({
           onPauseDispatchBatch={handlePauseDispatchBatch}
           onDownloadFailedCsv={handleDownloadFailedCsv}
           onDeleteDispatchBatch={handleDeleteDispatchBatch}
+          onPreviewDispatch={(dispId) => setPreviewDispatchId(dispId)}
         />
       )}
 
@@ -1014,6 +1029,58 @@ export default function LeadImports({
           }}
         />
       )}
+
+      {/* Preview Leads Modal */}
+      <Dialog open={!!previewDispatchId} onOpenChange={(open) => !open && setPreviewDispatchId(null)}>
+        <DialogContent className="max-w-2xl bg-white dark:bg-slate-900 border border-border shadow-2xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold font-display text-foreground">Leads Alvo do Disparo</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              {loadingPreviewLeads
+                ? "Carregando leads..."
+                : previewLeadsData
+                  ? `Mostrando ${previewLeadsData.leads.length} de ${previewLeadsData.total} leads encontrados para as regras desta campanha.`
+                  : "Nenhum lead carregado."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[400px] overflow-y-auto mt-4 rounded-lg border border-border bg-slate-50 dark:bg-slate-900/50 p-2">
+            {loadingPreviewLeads ? (
+              <div className="flex flex-col items-center justify-center h-32 gap-3 text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+                <p className="text-xs font-medium">Buscando leads na base...</p>
+              </div>
+            ) : previewLeadsData?.leads && previewLeadsData.leads.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border/50 hover:bg-transparent">
+                    <TableHead className="text-xs font-semibold uppercase">Nome</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-right">Telefone</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {previewLeadsData.leads.map((l, i) => (
+                    <TableRow key={i} className="border-b border-border/20 last:border-0 hover:bg-slate-100 dark:hover:bg-slate-800">
+                      <TableCell className="font-medium text-sm">{l.nome || "—"}</TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">{l.telefone}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-32 gap-3 text-muted-foreground">
+                <p className="text-sm font-medium">Nenhum lead encontrado para os filtros configurados.</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-2">
+            <Button onClick={() => setPreviewDispatchId(null)} variant="outline" className="w-full sm:w-auto text-xs font-bold rounded-xl">
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

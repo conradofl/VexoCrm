@@ -770,7 +770,10 @@ export function registerCampaignsRoutes(app, deps) {
     }
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
-    const lifecycleStatus = scheduledFor ? "scheduled" : "active";
+    let lifecycleStatus = scheduledFor ? "scheduled" : "active";
+    if (req.body?.status === "draft") {
+      lifecycleStatus = "draft";
+    }
     const campaignPromptId = normalizeString(req.body?.campaignPromptId) || null;
     if (!["disparo", "agente"].includes(req.body?.mode)) {
       return sendError(res, 400, "INVALID_BODY", "mode é obrigatório e deve ser 'disparo' ou 'agente'");
@@ -1421,7 +1424,8 @@ export function registerCampaignsRoutes(app, deps) {
 
     await pgDatabasePool.query(`
       ALTER TABLE public.campaign_dispatches
-      ADD COLUMN IF NOT EXISTS evolution_instance_id UUID
+      ADD COLUMN IF NOT EXISTS evolution_instance_id UUID,
+      ADD COLUMN IF NOT EXISTS target_count INTEGER DEFAULT 0
     `);
   }
 
@@ -1871,6 +1875,51 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
+  // GET /api/campaigns/dispatches/:dispatchId/preview-leads — Retorna amostra de leads que um dispatch deve atingir
+  app.get("/api/campaigns/dispatches/:dispatchId/preview-leads", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const dispatchId = normalizeString(req.params.dispatchId);
+    if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+
+    try {
+      const { data: dispatch, error: dispatchErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, campaign_id, client_id, limit_per_run, offset, steps")
+        .eq("id", dispatchId)
+        .single();
+
+      if (dispatchErr || !dispatch) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+
+      const authorizedClientId = resolveAuthorizedClientId(req, res, dispatch.client_id);
+      if (!authorizedClientId) return;
+
+      const { data: campaign, error: campaignErr } = await supabase
+        .from("campaigns")
+        .select("import_id")
+        .eq("id", dispatch.campaign_id)
+        .single();
+
+      if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+
+      const previewLeads = await buildDispatchLeads({
+        clientId: authorizedClientId,
+        importId: campaign.import_id,
+        limit: dispatch.limit_per_run,
+        offset: dispatch.offset,
+        segmentation: dispatch.steps?.[0]?.segmentation || null,
+        excludeDispatchId: null,
+      });
+
+      // Retorna no max 100 itens p/ preview, mas informa total no targetCount (caso n estivesse na table)
+      res.json({
+        leads: previewLeads.slice(0, 100).map(l => ({ nome: l.nome, telefone: l.telefone })),
+        total: previewLeads.length
+      });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_PREVIEW_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   // GET /api/campaigns/dispatches/:dispatchId/failed — leads falhados do disparo,
   // exportável para planilha (?format=csv). Defeito A: failed sai do reprocesso e
   // fica disponível para tratamento/exclusão manual.
@@ -2161,6 +2210,21 @@ export function registerCampaignsRoutes(app, deps) {
       const limitPerRun = body.limitPerRun != null ? Number(body.limitPerRun) : null;
       const offset = body.offset != null ? Number(body.offset) : null;
 
+      let targetCount = 0;
+      try {
+        const previewLeads = await buildDispatchLeads({
+          clientId: authorizedClientId,
+          importId: campaign.import_id,
+          limit: limitPerRun,
+          offset: offset,
+          segmentation: validation.analyticsMeta.sequence?.[0]?.segmentation || null,
+          excludeDispatchId: null
+        });
+        targetCount = previewLeads.length;
+      } catch (err) {
+        console.error("Erro ao calcular target_count:", err);
+      }
+
       const { data, error } = await supabase
         .from("campaign_dispatches")
         .insert({
@@ -2174,6 +2238,7 @@ export function registerCampaignsRoutes(app, deps) {
           status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
           limit_per_run: limitPerRun,
           offset: offset,
+          target_count: targetCount,
         })
         .select("*")
         .single();

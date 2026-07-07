@@ -93,40 +93,62 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     segMatcher = (item) => leadMatchesCampaignSegmentation(item, segmentation);
   }
 
-  let query;
-  if (importId === "__crm__") {
-    query = supabase
-      .from("leads")
-      .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status")
-      .eq("client_id", clientId)
-      .not("telefone", "is", null)
-      .order("created_at", { ascending: false });
-  } else {
-    query = supabase
-      .from("lead_import_items")
-      .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
-      .eq("client_id", clientId)
-      .eq("imported", true)
-      .not("telefone", "is", null)
-      .order("created_at", { ascending: false });
+  let allData = [];
+  const PAGE_SIZE = 1000;
+  let from = 0;
+  let hasMore = true;
 
-    if (importId) {
-      query = query.eq("import_id", importId);
+  while (hasMore) {
+    let query;
+    if (importId === "__crm__") {
+      query = supabase
+        .from("leads")
+        .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status")
+        .eq("client_id", clientId)
+        .not("telefone", "is", null)
+        .order("created_at", { ascending: false });
+    } else {
+      query = supabase
+        .from("lead_import_items")
+        .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
+        .eq("client_id", clientId)
+        .eq("imported", true)
+        .not("telefone", "is", null)
+        .order("created_at", { ascending: false });
+
+      if (importId) {
+        query = query.eq("import_id", importId);
+      }
     }
-  }
 
-  if (limit && Number.isInteger(limit) && limit > 0 && !segmentation && !excludeDispatchId && (!offset || offset === 0)) {
-    query = query.limit(limit);
-  }
+    // Optimization: If no segmentation, no exclude, and limit <= PAGE_SIZE, we can just fetch one page.
+    if (limit && Number.isInteger(limit) && limit > 0 && !segmentation && !excludeDispatchId && (!offset || offset === 0) && limit <= PAGE_SIZE) {
+      query = query.limit(limit);
+      const { data, error } = await query;
+      if (error) throw error;
+      allData = data || [];
+      hasMore = false;
+      break;
+    }
 
-  const { data, error } = await query;
-  if (error) {
-    throw error;
+    const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      hasMore = false;
+    } else {
+      allData = allData.concat(data);
+      if (data.length < PAGE_SIZE) {
+        hasMore = false;
+      } else {
+        from += PAGE_SIZE;
+      }
+    }
   }
 
   const leads = Array.from(
     new Map(
-      (data || [])
+      (allData || [])
         .map((item) => {
           const isCrm = importId === "__crm__";
           const normalizedData = isCrm

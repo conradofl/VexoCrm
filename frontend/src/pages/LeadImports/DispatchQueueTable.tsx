@@ -21,6 +21,7 @@ interface DispatchQueueTableProps {
   onPauseDispatchBatch: (dispId: string) => void;
   onDownloadFailedCsv: (disp: CampaignDispatch) => void;
   onDeleteDispatchBatch: (dispId: string) => void;
+  onPreviewDispatch: (dispId: string) => void;
 }
 
 export function DispatchQueueTable({
@@ -31,6 +32,7 @@ export function DispatchQueueTable({
   onPauseDispatchBatch,
   onDownloadFailedCsv,
   onDeleteDispatchBatch,
+  onPreviewDispatch,
 }: DispatchQueueTableProps) {
   return (
     <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
@@ -89,6 +91,15 @@ export function DispatchQueueTable({
                           <div className="flex items-center justify-between text-[10px] font-bold w-full">
                             <span className="text-emerald-500">{disp.sent_count} ✓</span>
                             <span className="text-rose-500">{disp.failed_count} ✗</span>
+                            {disp.target_count != null && (
+                              <span
+                                className="text-blue-500 ml-1 cursor-pointer hover:underline"
+                                title="Ver leads alvo desta campanha"
+                                onClick={() => onPreviewDispatch(disp.id)}
+                              >
+                                / {disp.target_count} 🎯
+                              </span>
+                            )}
                           </div>
                           {total > 0 && (
                             <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden">

@@ -707,7 +707,8 @@ export function registerLeadsRoutes(app, deps) {
         .select("*")
         .eq("client_id", clientId)
         .order("data_hora", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(2000);
 
       if (error) {
         throw error;

@@ -508,7 +508,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
             <CardContent className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider font-display">
-                  Total de Disparos
+                  Lotes Criados
                 </p>
                 <p className="text-3xl font-bold font-num text-foreground">
                   {dispatchesKpis.total}
