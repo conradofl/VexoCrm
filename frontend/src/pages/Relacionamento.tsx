@@ -8,7 +8,8 @@ import {
   UserMinus,
   Sliders,
   Building2,
-  Bot
+  Bot,
+  History
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { SegmentacaoCatalog } from "@/components/livpub/SegmentacaoCatalog";
 import { AniversariantesList } from "@/components/livpub/AniversariantesList";
 import { InativosList } from "@/components/livpub/InativosList";
 import { AITrainingTab } from "@/components/livpub/AITrainingTab";
+import { LivpubHistoryList } from "@/components/livpub/LivpubHistoryList";
 import { useFupCompanies } from "@/hooks/useFollowupAdmin";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -75,7 +77,7 @@ export default function Relacionamento() {
       </div>
 
       <Tabs defaultValue="segmentacao" className="w-full space-y-6">
-        <TabsList className="grid w-full grid-cols-4 max-w-xl bg-muted border border-border h-10 p-1">
+        <TabsList className="grid w-full grid-cols-5 max-w-3xl bg-muted border border-border h-10 p-1">
           <TabsTrigger value="segmentacao" className="text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
             <Sliders className="h-3.5 w-3.5 mr-1.5" />
             Catálogo
@@ -91,6 +93,10 @@ export default function Relacionamento() {
           <TabsTrigger value="treinamento" className="text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
             <Bot className="h-3.5 w-3.5 mr-1.5" />
             Treinamento IA
+          </TabsTrigger>
+          <TabsTrigger value="history" className="text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+            <History className="h-3.5 w-3.5 mr-1.5" />
+            Fila / Histórico
           </TabsTrigger>
         </TabsList>
 
@@ -108,6 +114,9 @@ export default function Relacionamento() {
 
         <TabsContent value="treinamento" className="space-y-4 outline-none">
           <AITrainingTab companyId={companyId} company={selectedCompany} />
+        </TabsContent>
+        <TabsContent value="history" className="space-y-4 outline-none">
+          <LivpubHistoryList companyId={companyId} />
         </TabsContent>
       </Tabs>
     </PageShell>

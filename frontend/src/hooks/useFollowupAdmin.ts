@@ -377,3 +377,49 @@ export function useUpsertFupJourney() {
       qc.invalidateQueries({ queryKey: ["fup-journeys", vars.company_id] }),
   });
 }
+
+
+export function useLivpubHistory(companyId: string) {
+  const { getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["livpub-history", companyId],
+    queryFn: async () => {
+      const qs = new URLSearchParams();
+      if (companyId && companyId !== "all") qs.set("companyId", companyId);
+      const url = `/api/followup/suggestions/history?${qs}`;
+      const data = await apiCall<any>(url, getIdToken);
+      if (!data.success) throw new Error(data.error?.message || "Failed to fetch history");
+      return data.items || [];
+    }
+  });
+}
+
+export function usePlaySuggestion() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const data = await apiCall<any>(`/api/followup/suggestions/${id}/play`, getIdToken, { method: "POST" });
+      if (!data.success) throw new Error(data.error?.message || "Failed to play suggestion");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["livpub-history"] });
+    }
+  });
+}
+
+export function useCancelSuggestion() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const data = await apiCall<any>(`/api/followup/suggestions/${id}/cancel`, getIdToken, { method: "POST" });
+      if (!data.success) throw new Error(data.error?.message || "Failed to cancel suggestion");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["livpub-history"] });
+    }
+  });
+}
