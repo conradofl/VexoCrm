@@ -746,7 +746,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       if (templateId || finalMessage) {
         const { rows: jobRows } = await query(
           `INSERT INTO followup_jobs (schedule_id, template_id, status, scheduled_for)
-           VALUES ($1, $2, 'pending', NOW())
+           VALUES ($1, $2, 'pending', NOW() + interval '5 minutes')
            RETURNING id`,
           [scheduleId, templateId || null]
         );
@@ -755,16 +755,16 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
         await getFollowupQueue().add(
           "send-followup",
           { jobId, customMessage: finalMessage },
-          { delay: 0, jobId: `fup-suggestion-${jobId}` }
+          { delay: 5 * 60 * 1000, jobId: `fup-suggestion-${jobId}` }
         );
       }
 
       const approvedBy = req.user?.uid || "operator";
       await query(
         `UPDATE followup_suggestions
-            SET status = 'approved', approved_by = $2, approved_at = NOW(), executed_at = NOW()
+            SET status = 'approved', approved_by = $2, approved_at = NOW(), executed_at = NOW(), job_id = $3
           WHERE id = $1`,
-        [id, approvedBy]
+        [id, approvedBy, jobId]
       );
 
       return res.json({ success: true, id, scheduleId, jobId });
@@ -787,6 +787,72 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       return res.json({ success: true, id });
     } catch (err) {
       return sendErr(res, 500, "REJECT_FAILED", err.message);
+    }
+  });
+
+  
+
+  // GET /api/followup/suggestions/history
+  router.get("/suggestions/history", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const companyId = str(req.query.companyId);
+    try {
+      const conds = ["s.status IN ('approved', 'rejected')"];
+      const params = [];
+      if (companyId) {
+        params.push(companyId);
+        conds.push(`s.company_id = ${params.length}::uuid`);
+      }
+      const { rows } = await query(
+        `SELECT
+           s.id, s.company_id, s.campaign_id, s.lead_name, s.phone,
+           s.lead_source, s.reason, s.suggested_message, s.status AS suggestion_status,
+           s.approved_by, s.approved_at, s.job_id,
+           j.status AS job_status, j.error_message
+         FROM followup_suggestions s
+         LEFT JOIN followup_jobs j ON j.id = s.job_id
+         WHERE ${conds.join(" AND ")}
+         ORDER BY s.approved_at DESC NULLS LAST, s.created_at DESC
+         LIMIT 100`,
+        params
+      );
+      return res.json({ success: true, items: rows });
+    } catch (err) {
+      return sendErr(res, 500, "HISTORY_FETCH_FAILED", err.message);
+    }
+  });
+
+  // POST /api/followup/suggestions/:id/play
+  router.post("/suggestions/:id/play", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
+    try {
+      const { rows } = await query(`SELECT job_id FROM followup_suggestions WHERE id = // POST /api/followup/suggestions/approve-batch`, [id]);
+      if (!rows.length || !rows[0].job_id) return sendErr(res, 404, "NOT_FOUND", "Suggestion or job not found");
+      const job = await getFollowupQueue().getJob(`fup-suggestion-${rows[0].job_id}`);
+      if (job) {
+        await job.promote();
+      }
+      return res.json({ success: true, message: "Job promoted successfully" });
+    } catch (err) {
+      return sendErr(res, 500, "PLAY_FAILED", err.message);
+    }
+  });
+
+  // POST /api/followup/suggestions/:id/cancel
+  router.post("/suggestions/:id/cancel", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
+    try {
+      const { rows } = await query(`SELECT job_id FROM followup_suggestions WHERE id = // POST /api/followup/suggestions/approve-batch`, [id]);
+      if (!rows.length || !rows[0].job_id) return sendErr(res, 404, "NOT_FOUND", "Suggestion or job not found");
+      const job = await getFollowupQueue().getJob(`fup-suggestion-${rows[0].job_id}`);
+      if (job) {
+        await job.remove();
+      }
+      await query(`UPDATE followup_jobs SET status = 'cancelled' WHERE id = // POST /api/followup/suggestions/approve-batch`, [rows[0].job_id]);
+      return res.json({ success: true, message: "Job cancelled successfully" });
+    } catch (err) {
+      return sendErr(res, 500, "CANCEL_FAILED", err.message);
     }
   });
 
