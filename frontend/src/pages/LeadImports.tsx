@@ -1120,7 +1120,9 @@ export default function LeadImports({
           const offset = i * size;
           const batchDate = new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
           const batchScheduledIso = batchDate.toISOString();
-          const batchTriggerType = (i === 0 && newTriggerType === "manual") ? "manual" : "scheduled";
+          let batchTriggerType = "scheduled";
+          if (newTriggerType === "manual" && i === 0) batchTriggerType = "manual";
+          if (newTriggerType === "draft") batchTriggerType = "draft";
 
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
             method: "POST",
@@ -1129,7 +1131,8 @@ export default function LeadImports({
               name: `${campaignName.trim()} — Lote ${i + 1}/${numBatches}`,
               steps: campaignSequence,
               triggerType: batchTriggerType,
-              scheduledAt: batchTriggerType === "scheduled" ? batchScheduledIso : null,
+              status: batchTriggerType === "draft" ? "draft" : undefined,
+              scheduledAt: (batchTriggerType === "scheduled") ? batchScheduledIso : null,
               evolutionInstanceId: dispatchOptions.evolutionInstanceId,
               limitPerRun: size,
               offset: offset,
