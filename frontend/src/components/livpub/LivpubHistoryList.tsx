@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { useLivpubHistory, usePlaySuggestion, useCancelSuggestion } from "@/hooks/useFollowupAdmin";
 import { format, parseISO } from "date-fns";
-import ptBR from "date-fns/locale/pt-BR";
+import { ptBR } from "date-fns/locale/pt-BR";
 
 export function LivpubHistoryList({ companyId }: { companyId: string }) {
   const [searchQuery, setSearchQuery] = useState("");
