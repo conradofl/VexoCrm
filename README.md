@@ -1,6 +1,11 @@
 # VexoCrm
   
 Monorepo do CRM e da operacao automatizada da Vexo/Infinie.
+
+> **📐 LEIA PRIMEIRO: [docs/GUIA-DESENVOLVIMENTO.md](docs/GUIA-DESENVOLVIMENTO.md)** — documento-pai do projeto.
+> Regras obrigatórias do modelo modular (pós-refatoração 07/2026): arquitetura de domínios no backend,
+> container + subcomponentes + lib + hooks no frontend, validação obrigatória antes de PR e zonas com regra especial.
+> Todo código novo segue esse guia.
  
 Hoje a arquitetura real do projeto e:
 
