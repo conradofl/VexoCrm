@@ -742,14 +742,15 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
 
       // We always create a job now, even if templateId is null, because LivPub suggestions have custom generated text without a template
       const finalMessage = customMessage || sugg.suggested_message || null;
+      let jobId = null;
       if (templateId || finalMessage) {
         const { rows: jobRows } = await query(
           `INSERT INTO followup_jobs (schedule_id, template_id, status, scheduled_for)
            VALUES ($1, $2, 'pending', NOW())
            RETURNING id`,
-          [scheduleId, templateId]
+          [scheduleId, templateId || null]
         );
-        const jobId = jobRows[0].id;
+        jobId = jobRows[0].id;
 
         await getFollowupQueue().add(
           "send-followup",
