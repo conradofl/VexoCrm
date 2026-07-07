@@ -1052,11 +1052,13 @@ export default function LeadImports({
       const hasVariants = campaignSequence.some(s => s.textVariants && s.textVariants.length > 0);
       const templateStrategy: "single" | "ai_variations" = hasVariants ? "ai_variations" : "single";
 
+      const limitForCampaign = batchingEnabled ? (Number.parseInt(batchSize, 10) || 100) : limitPerRun;
+
       const campaignPayload = {
         name: campaignName.trim(),
         clientId: activeClientId,
         importId: finalImportId === ALL_IMPORTS_VALUE ? null : finalImportId,
-        limitPerRun,
+        limitPerRun: limitForCampaign,
         mode: "disparo" as const,
         campaignPromptId: null,
         startsAt: null,
