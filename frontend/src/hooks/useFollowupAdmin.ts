@@ -380,12 +380,14 @@ export function useUpsertFupJourney() {
 
 
 export function useLivpubHistory(companyId: string) {
+  const { getIdToken } = useAuth();
   return useQuery({
     queryKey: ["livpub-history", companyId],
     queryFn: async () => {
       const qs = new URLSearchParams();
       if (companyId && companyId !== "all") qs.set("companyId", companyId);
-      const data = await readApiJson(`/api/followup/suggestions/history?${qs}`);
+      const url = `/api/followup/suggestions/history?${qs}`;
+      const data = await apiCall<any>(url, getIdToken);
       if (!data.success) throw new Error(data.error?.message || "Failed to fetch history");
       return data.items || [];
     }
@@ -393,10 +395,11 @@ export function useLivpubHistory(companyId: string) {
 }
 
 export function usePlaySuggestion() {
+  const { getIdToken } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const data = await readApiJson(`/api/followup/suggestions/${id}/play`, { method: "POST" });
+      const data = await apiCall<any>(`/api/followup/suggestions/${id}/play`, getIdToken, { method: "POST" });
       if (!data.success) throw new Error(data.error?.message || "Failed to play suggestion");
       return data;
     },
@@ -407,10 +410,11 @@ export function usePlaySuggestion() {
 }
 
 export function useCancelSuggestion() {
+  const { getIdToken } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const data = await readApiJson(`/api/followup/suggestions/${id}/cancel`, { method: "POST" });
+      const data = await apiCall<any>(`/api/followup/suggestions/${id}/cancel`, getIdToken, { method: "POST" });
       if (!data.success) throw new Error(data.error?.message || "Failed to cancel suggestion");
       return data;
     },
