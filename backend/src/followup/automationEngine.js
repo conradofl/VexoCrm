@@ -171,7 +171,7 @@ const REASON_CONTEXT = {
   livpub_inativo:     "Este cliente não frequenta os eventos há mais de 6 meses. Tente reativá-lo.",
 };
 
-export async function generateSuggestion(lead, templates, reasonType) {
+export async function generateSuggestion(lead, templates, reasonType, company = null) {
   const groq = getGroq();
   if (!groq) {
     // Sem GROQ_API_KEY: retorna primeiro template ativo sem personalização
@@ -187,18 +187,26 @@ export async function generateSuggestion(lead, templates, reasonType) {
     : "";
   const perfilStr = lead.perfil_musical ? `, perfil musical: ${lead.perfil_musical}` : "";
 
-  const aniversarioInstruction = reasonType === "livpub_aniversario"
-    ? "\n\nInstruções específicas: escreva como um convite de aniversário. Ofereça cortesia/mesa VIP " +
-      "para o aniversariante e desconto para os convidados que forem junto. Adapte o tom da mensagem " +
-      (lead.perfil_musical
-        ? `ao perfil musical do cliente (${lead.perfil_musical}) — referencie o estilo sem exagero.`
-        : "ao clima de uma casa de shows, de forma calorosa e animada.")
-    : "";
+  let customPrompt = "";
+  if (reasonType === "livpub_aniversario" && company?.livpub_aniversario_prompt) {
+    customPrompt = `\n\nDiretrizes da Empresa (Siga estritamente): ${company.livpub_aniversario_prompt}\n`;
+  } else if (reasonType === "livpub_inativo" && company?.livpub_inativo_prompt) {
+    customPrompt = `\n\nDiretrizes da Empresa (Siga estritamente): ${company.livpub_inativo_prompt}\n`;
+  } else {
+    // Fallbacks
+    if (reasonType === "livpub_aniversario") {
+      customPrompt = "\n\nInstruções específicas: escreva como um convite de aniversário. Ofereça cortesia/mesa VIP " +
+        "para o aniversariante e desconto para os convidados que forem junto. Adapte o tom da mensagem " +
+        (lead.perfil_musical
+          ? `ao perfil musical do cliente (${lead.perfil_musical}) — referencie o estilo sem exagero.`
+          : "ao clima de uma casa de shows, de forma calorosa e animada.");
+    }
+  }
 
   const userPrompt =
     `Lead: ${lead.lead_name || "sem nome"}, telefone: ${lead.phone}` +
     `${lead.origin ? `, origem: ${lead.origin}` : ""}${meetingStr}${perfilStr}.\n\n` +
-    `Situação: ${REASON_CONTEXT[reasonType]}${aniversarioInstruction}\n\n` +
+    `Situação: ${REASON_CONTEXT[reasonType]}${customPrompt}\n\n` +
     `Templates disponíveis:\n${templateList}\n\n` +
     `Escolha o melhor template (1-${templates.length}) e personalize a mensagem. ` +
     `Responda APENAS com JSON válido: {"template_index": N, "message": "..."}`;
@@ -211,7 +219,7 @@ export async function generateSuggestion(lead, templates, reasonType) {
           role: "system",
           content:
             "Você é um assistente de vendas B2C em português do Brasil. " +
-            "Escolha o template mais adequado e personalize a mensagem para o lead. " +
+            "Escolha o template mais adequado e personalize a mensagem para o lead de acordo com as diretrizes. " +
             "Responda APENAS com JSON válido no formato: {\"template_index\": N, \"message\": \"texto personalizado\"}",
         },
         { role: "user", content: userPrompt },
@@ -243,7 +251,7 @@ async function runAutomationEngine() {
   let skipped = 0;
 
   try {
-    // Empresas com campanhas ativas
+    // 1. Esteiras 1 e 2: Lógica para empresas com campanhas ativas (Follow-up normal)
     const { rows: pairs } = await query(`
       SELECT DISTINCT fco.id AS company_id, fc.id AS campaign_id
         FROM followup_companies fco
@@ -268,32 +276,19 @@ async function runAutomationEngine() {
         if (!templates.length) continue;
 
         const candidates = await findCandidates(company_id, campaign_id);
-        const livpubCandidates = await findLivPubCandidates(company_id);
-        const allCandidates = [...candidates, ...livpubCandidates];
 
-        for (const lead of allCandidates) {
+        for (const lead of candidates) {
           if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
 
-          // Deduplicação: aniversário é anual — não repetir para o mesmo lead
-          // dentro do mesmo ano civil, independente do status da sugestão anterior
-          // (aprovada, rejeitada ou ainda pendente).
-          const existing = lead.reasonType === "livpub_aniversario"
-            ? (await query(
-                `SELECT id FROM followup_suggestions
-                  WHERE company_id = $1
-                    AND phone      = $2
-                    AND reason     = $3
-                    AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`,
-                [company_id, lead.phone, REASON_LABELS.livpub_aniversario]
-              )).rows
-            : (await query(
-                `SELECT id FROM followup_suggestions
-                  WHERE company_id = $1
-                    AND phone      = $2
-                    AND status     = 'pending'
-                    AND created_at > NOW() - INTERVAL '24 hours'`,
-                [company_id, lead.phone]
-              )).rows;
+          // Deduplicação normal (24h)
+          const existing = (await query(
+            `SELECT id FROM followup_suggestions
+              WHERE company_id = $1
+                AND phone      = $2
+                AND status     = 'pending'
+                AND created_at > NOW() - INTERVAL '24 hours'`,
+            [company_id, lead.phone]
+          )).rows;
           if (existing.length) { skipped++; continue; }
 
           const { template, message } = await generateSuggestion(lead, templates, lead.reasonType);
@@ -320,6 +315,67 @@ async function runAutomationEngine() {
       } catch (campaignErr) {
         // Falha isolada por campanha: log e continua
         console.error(`[followup/engine] erro na campanha ${campaign_id}:`, campaignErr.message);
+      }
+    }
+
+    // 2. Esteiras 3 e 4: Lógica para LivPub (Aniversariantes e Inativos) - Independente de campanha
+    const { rows: companies } = await query(`SELECT id, livpub_aniversario_prompt, livpub_inativo_prompt FROM followup_companies`);
+    const defaultLivPubTemplates = [
+      { id: null, name: "Template Padrão", message: "Olá, temos uma condição especial para você!" }
+    ];
+
+    for (const company of companies) {
+      const company_id = company.id;
+      if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
+      try {
+        const livpubCandidates = await findLivPubCandidates(company_id);
+        
+        for (const lead of livpubCandidates) {
+          if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
+
+          // Deduplicação: aniversário é anual, inativo é 24h pendente
+          const existing = lead.reasonType === "livpub_aniversario"
+            ? (await query(
+                `SELECT id FROM followup_suggestions
+                  WHERE company_id = $1
+                    AND phone      = $2
+                    AND reason     = $3
+                    AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)`,
+                [company_id, lead.phone, REASON_LABELS.livpub_aniversario]
+              )).rows
+            : (await query(
+                `SELECT id FROM followup_suggestions
+                  WHERE company_id = $1
+                    AND phone      = $2
+                    AND status     = 'pending'
+                    AND created_at > NOW() - INTERVAL '24 hours'`,
+                [company_id, lead.phone]
+              )).rows;
+          if (existing.length) { skipped++; continue; }
+
+          const { template, message } = await generateSuggestion(lead, defaultLivPubTemplates, lead.reasonType, company);
+
+          await query(
+            `INSERT INTO followup_suggestions
+               (company_id, campaign_id, lead_name, phone, lead_source, reason,
+                suggested_template_id, suggested_message)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+              company_id,
+              null, // Sem campaign_id obrigatória para LivPub
+              lead.lead_name,
+              lead.phone,
+              lead.origin ?? null,
+              REASON_LABELS[lead.reasonType],
+              null, // Sem template_id obrigatório
+              message,
+            ]
+          );
+          created++;
+          console.info(`[followup/engine] sugestão criada — ${lead.phone} (${lead.reasonType})`);
+        }
+      } catch (compErr) {
+        console.error(`[followup/engine] erro na empresa ${company_id} para LivPub:`, compErr.message);
       }
     }
 

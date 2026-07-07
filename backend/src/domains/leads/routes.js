@@ -802,22 +802,47 @@ export function registerLeadsRoutes(app, deps) {
     const dispatched = req.query.dispatched;
 
     try {
-      let query = supabase
-        .from("lead_import_items")
-        .select("id, import_id, client_id, row_number, telefone, normalized_data, imported, skip_reason, created_at")
-        .eq("client_id", clientId)
-        .eq("imported", true)
-        .not("telefone", "is", null)
-        .order("row_number", { ascending: true });
+      let query;
+      if (importId === "__crm__") {
+        query = supabase
+          .from("leads")
+          .select("id, client_id, telefone, nome, tipo_cliente, created_at")
+          .eq("client_id", clientId)
+          .not("telefone", "is", null)
+          .order("created_at", { ascending: false });
+      } else {
+        query = supabase
+          .from("lead_import_items")
+          .select("id, import_id, client_id, row_number, telefone, normalized_data, imported, skip_reason, created_at")
+          .eq("client_id", clientId)
+          .eq("imported", true)
+          .not("telefone", "is", null)
+          .order("row_number", { ascending: true });
 
-      if (importId) {
-        query = query.eq("import_id", importId);
+        if (importId) {
+          query = query.eq("import_id", importId);
+        }
       }
 
       const { data: items, error } = await query;
       if (error) throw error;
 
-      const allItems = items || [];
+      const allItems = (items || []).map((item, index) => {
+        if (importId === "__crm__") {
+          return {
+            id: item.id,
+            import_id: "__crm__",
+            client_id: item.client_id,
+            row_number: index + 1,
+            telefone: item.telefone,
+            normalized_data: { nome: item.nome, tipo_cliente: item.tipo_cliente },
+            imported: true,
+            skip_reason: null,
+            created_at: item.created_at
+          };
+        }
+        return item;
+      });
 
       const { data: dispatchRuns } = await supabase
         .from("campaign_dispatch_runs")

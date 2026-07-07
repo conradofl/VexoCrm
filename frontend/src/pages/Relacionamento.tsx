@@ -7,7 +7,8 @@ import {
   Gift,
   UserMinus,
   Sliders,
-  Building2
+  Building2,
+  Bot
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SegmentacaoCatalog } from "@/components/livpub/SegmentacaoCatalog";
 import { AniversariantesList } from "@/components/livpub/AniversariantesList";
 import { InativosList } from "@/components/livpub/InativosList";
+import { AITrainingTab } from "@/components/livpub/AITrainingTab";
 import { useFupCompanies } from "@/hooks/useFollowupAdmin";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -73,7 +75,7 @@ export default function Relacionamento() {
       </div>
 
       <Tabs defaultValue="segmentacao" className="w-full space-y-6">
-        <TabsList className="grid w-full grid-cols-3 max-w-md bg-muted border border-border h-10 p-1">
+        <TabsList className="grid w-full grid-cols-4 max-w-xl bg-muted border border-border h-10 p-1">
           <TabsTrigger value="segmentacao" className="text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
             <Sliders className="h-3.5 w-3.5 mr-1.5" />
             Catálogo
@@ -85,6 +87,10 @@ export default function Relacionamento() {
           <TabsTrigger value="inativos" className="text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
             <UserMinus className="h-3.5 w-3.5 mr-1.5" />
             Clientes Inativos
+          </TabsTrigger>
+          <TabsTrigger value="treinamento" className="text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+            <Bot className="h-3.5 w-3.5 mr-1.5" />
+            Treinamento IA
           </TabsTrigger>
         </TabsList>
 
@@ -98,6 +104,10 @@ export default function Relacionamento() {
 
         <TabsContent value="inativos" className="space-y-4 outline-none">
           <InativosList companyId={companyId} />
+        </TabsContent>
+
+        <TabsContent value="treinamento" className="space-y-4 outline-none">
+          <AITrainingTab companyId={companyId} company={selectedCompany} />
         </TabsContent>
       </Tabs>
     </PageShell>

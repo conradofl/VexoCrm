@@ -235,7 +235,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
   router.patch("/companies/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
-    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled } =
+    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, livpub_aniversario_prompt, livpub_inativo_prompt } =
       req.body || {};
     try {
       const patch = { updated_at: new Date().toISOString() };
@@ -252,6 +252,8 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       if ("inbound_webhook_url" in req.body) patch.inbound_webhook_url = str(inbound_webhook_url);
       if ("sdr_whatsapp_number" in req.body) patch.sdr_whatsapp_number = str(sdr_whatsapp_number);
       if ("sdr_transfer_enabled" in req.body) patch.sdr_transfer_enabled = Boolean(sdr_transfer_enabled);
+      if ("livpub_aniversario_prompt" in req.body) patch.livpub_aniversario_prompt = str(livpub_aniversario_prompt);
+      if ("livpub_inativo_prompt" in req.body) patch.livpub_inativo_prompt = str(livpub_inativo_prompt);
 
       const supabase = getSupabase();
       const { data, error } = await supabase
@@ -730,7 +732,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
 
       // Resolver template
       let templateId = sugg.suggested_template_id;
-      if (!templateId) {
+      if (!templateId && sugg.campaign_id) {
         const { rows: tplRows } = await query(
           `SELECT id FROM followup_templates WHERE campaign_id = $1 AND is_active = true ORDER BY order_index ASC LIMIT 1`,
           [sugg.campaign_id]
@@ -738,23 +740,21 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
         if (tplRows.length) templateId = tplRows[0].id;
       }
 
+      // We always create a job now, even if templateId is null, because LivPub suggestions have custom generated text without a template
+      const finalMessage = customMessage || sugg.suggested_message || null;
       let jobId = null;
-      if (templateId) {
-        // Se operador editou a mensagem, criar template temporário não é viável —
-        // armazenamos a mensagem customizada no job via error_log field não — melhor
-        // salvar no suggested_message e o worker usa a da sugestão se existir.
-        // Por simplicidade: inserimos o job normalmente; o worker usa o template.
+      if (templateId || finalMessage) {
         const { rows: jobRows } = await query(
           `INSERT INTO followup_jobs (schedule_id, template_id, status, scheduled_for)
            VALUES ($1, $2, 'pending', NOW())
            RETURNING id`,
-          [scheduleId, templateId]
+          [scheduleId, templateId || null]
         );
         jobId = jobRows[0].id;
 
         await getFollowupQueue().add(
           "send-followup",
-          { jobId, customMessage: customMessage || sugg.suggested_message || null },
+          { jobId, customMessage: finalMessage },
           { delay: 0, jobId: `fup-suggestion-${jobId}` }
         );
       }

@@ -54,20 +54,20 @@ async function processJob(job) {
     return;
   }
 
-  const { jobId } = job.data;
+  const { jobId, customMessage } = job.data;
 
   const { rows: jobRows } = await query(
     `SELECT fj.id, fj.schedule_id, fj.template_id, fj.status as job_status,
             fs.lead_name, fs.phone, fs.meeting_datetime, fs.status as schedule_status,
-            fs.campaign_id,
+            fs.campaign_id, fs.company_id,
             ft.message, ft.trigger_type,
-            fc.status as campaign_status, fc.company_id,
+            fc.status as campaign_status,
             fco.evolution_instance
        FROM followup_jobs       fj
        JOIN followup_schedules  fs  ON fs.id = fj.schedule_id
-       JOIN followup_templates  ft  ON ft.id = fj.template_id
-       JOIN followup_campaigns  fc  ON fc.id = fs.campaign_id
-       JOIN followup_companies  fco ON fco.id = fc.company_id
+       LEFT JOIN followup_templates  ft  ON ft.id = fj.template_id
+       LEFT JOIN followup_campaigns  fc  ON fc.id = fs.campaign_id
+       JOIN followup_companies  fco ON fco.id = fs.company_id
       WHERE fj.id = $1`,
     [jobId]
   );
@@ -78,13 +78,13 @@ async function processJob(job) {
   }
 
   const row = jobRows[0];
-  const log = `[followup/worker][${row.campaign_id}][${row.lead_name}]`;
+  const log = `[followup/worker][${row.campaign_id || 'no-campaign'}][${row.lead_name}]`;
 
   if (row.campaign_status === "paused") {
     // Re-adiciona o mesmo payload com delay de 5 min; job atual termina sem erro
     await getFollowupQueue().add(
       "send-followup",
-      { jobId },
+      { jobId, customMessage },
       { delay: 5 * 60 * 1000, jobId: `fup-pause-${jobId}-${Date.now()}` }
     );
     console.log(log, "campanha pausada — reagendado em 5 min");
@@ -97,7 +97,7 @@ async function processJob(job) {
     return;
   }
 
-  if (row.trigger_type === "no_reply") {
+  if (row.trigger_type === "no_reply" && row.company_id && row.phone) {
     const { rows: replies } = await query(
       `SELECT id FROM followup_replies WHERE company_id=$1 AND phone=$2 LIMIT 1`,
       [row.company_id, row.phone]
@@ -109,7 +109,8 @@ async function processJob(job) {
     }
   }
 
-  const text = renderMessage(row.message, {
+  const rawMessage = customMessage || row.message || "";
+  const text = renderMessage(rawMessage, {
     lead_name: row.lead_name,
     meeting_datetime: row.meeting_datetime,
   });

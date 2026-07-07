@@ -592,11 +592,13 @@ export default function LeadImports({
       const hasVariants = campaignSequence.some(s => s.textVariants && s.textVariants.length > 0);
       const templateStrategy: "single" | "ai_variations" = hasVariants ? "ai_variations" : "single";
 
+      const limitForCampaign = batchingEnabled ? (Number.parseInt(batchSize, 10) || 100) : limitPerRun;
+
       const campaignPayload = {
         name: campaignName.trim(),
         clientId: activeClientId,
         importId: finalImportId === ALL_IMPORTS_VALUE ? null : finalImportId,
-        limitPerRun,
+        limitPerRun: limitForCampaign,
         mode: "disparo" as const,
         campaignPromptId: null,
         startsAt: null,
@@ -658,7 +660,9 @@ export default function LeadImports({
           const offset = i * size;
           const batchDate = new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
           const batchScheduledIso = batchDate.toISOString();
-          const batchTriggerType = (i === 0 && newTriggerType === "manual") ? "manual" : "scheduled";
+          let batchTriggerType = "scheduled";
+          if (newTriggerType === "manual" && i === 0) batchTriggerType = "manual";
+          if (newTriggerType === "draft") batchTriggerType = "draft";
 
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
             method: "POST",
@@ -667,7 +671,8 @@ export default function LeadImports({
               name: `${campaignName.trim()} — Lote ${i + 1}/${numBatches}`,
               steps: campaignSequence,
               triggerType: batchTriggerType,
-              scheduledAt: batchTriggerType === "scheduled" ? batchScheduledIso : null,
+              status: batchTriggerType === "draft" ? "draft" : undefined,
+              scheduledAt: (batchTriggerType === "scheduled") ? batchScheduledIso : null,
               evolutionInstanceId: dispatchOptions.evolutionInstanceId,
               limitPerRun: size,
               offset: offset,

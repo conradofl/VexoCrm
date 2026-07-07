@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { Search, Gift, CalendarDays, Check, X, Loader2, User, Phone, MessageSquare, Zap } from "lucide-react";
+import { Search, Gift, CalendarDays, Check, X, Loader2, User, Phone, MessageSquare, Zap, Pencil } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   useFollowupSuggestions,
   useApproveSuggestion,
@@ -18,6 +19,8 @@ interface AniversariantesListProps {
 
 export function AniversariantesList({ companyId }: AniversariantesListProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editMessage, setEditMessage] = useState("");
 
   const {
     data: suggestions = [],
@@ -42,6 +45,7 @@ export function AniversariantesList({ companyId }: AniversariantesListProps) {
     try {
       await approveMutation.mutateAsync({ id, message: suggestedMessage ?? undefined });
       toast.success("Abordagem de aniversário aprovada com sucesso!");
+      setEditingId(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao aprovar sugestão");
     }
@@ -144,16 +148,43 @@ export function AniversariantesList({ companyId }: AniversariantesListProps) {
                     </div>
 
                     {s.suggestedMessage && (
-                      <div className="bg-muted/30 p-2.5 rounded border border-border/50 mt-1 flex gap-2 items-start">
+                      <div className="bg-muted/30 p-2.5 rounded border border-border/50 mt-1 flex gap-2 items-start w-full">
                         <MessageSquare className="h-3.5 w-3.5 text-pink-400 mt-0.5 shrink-0" />
-                        <p className="text-xs text-foreground font-sans leading-relaxed whitespace-pre-line">
-                          {s.suggestedMessage}
-                        </p>
+                        {editingId === s.id ? (
+                          <div className="flex-1 space-y-2 w-full">
+                            <Textarea 
+                              className="text-xs min-h-[80px]" 
+                              value={editMessage}
+                              onChange={(e) => setEditMessage(e.target.value)}
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setEditingId(null)}>
+                                Cancelar
+                              </Button>
+                              <Button size="sm" className="bg-pink-500 hover:bg-pink-600 text-white h-6 text-xs px-2" onClick={() => handleApprove(s.id, editMessage)} disabled={isMutating}>
+                                Salvar e Aprovar
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-foreground font-sans leading-relaxed whitespace-pre-line break-words flex-1">
+                            {s.suggestedMessage}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => { setEditingId(s.id); setEditMessage(s.suggestedMessage || ""); }}
+                      disabled={isMutating}
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -163,15 +194,17 @@ export function AniversariantesList({ companyId }: AniversariantesListProps) {
                     >
                       <X className="h-4 w-4" />
                     </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleApprove(s.id, s.suggestedMessage)}
-                      disabled={isMutating}
-                      className="bg-pink-500 hover:bg-pink-600 text-white font-medium text-xs h-8 gap-1 px-3"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                      Aprovar
-                    </Button>
+                    {editingId !== s.id && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleApprove(s.id, s.suggestedMessage)}
+                        disabled={isMutating}
+                        className="bg-pink-500 hover:bg-pink-600 text-white font-medium text-xs h-8 gap-1 px-3"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Aprovar
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}

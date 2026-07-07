@@ -726,7 +726,7 @@ export function registerCampaignsRoutes(app, deps) {
       } else {
         items = await buildDispatchLeads({
           clientId: authorizedClientId,
-          importId: campaign.import_id || null,
+          importId: campaign.analytics_meta?.importSource === "__crm__" ? "__crm__" : (campaign.import_id || null),
           limit: campaign.limit_per_run,
           segmentation: campaign.analytics_meta?.segmentation || null,
         });
@@ -758,7 +758,7 @@ export function registerCampaignsRoutes(app, deps) {
     const importId = isCrmSource ? null : reqImportId;
     
     const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
-    const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 500);
+    const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 5000);
     const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
     const analyticsMeta =
       req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
@@ -1571,7 +1571,7 @@ export function registerCampaignsRoutes(app, deps) {
     // (claimed/sent/failed) → segunda execução do mesmo disparo traz 0 leads.
     const leads = await buildDispatchLeads({
       clientId,
-      importId: campaign.import_id || null,
+      importId: campaign.analytics_meta?.importSource === "__crm__" ? "__crm__" : (campaign.import_id || null),
       limit: dispatch.limit_per_run ?? campaign.limit_per_run,
       offset: dispatch.offset ?? 0,
       segmentation: validation.analyticsMeta.segmentation || null,
@@ -1895,7 +1895,7 @@ export function registerCampaignsRoutes(app, deps) {
 
       const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
-        .select("import_id")
+        .select("import_id, analytics_meta")
         .eq("id", dispatch.campaign_id)
         .single();
 
@@ -1903,7 +1903,7 @@ export function registerCampaignsRoutes(app, deps) {
 
       const previewLeads = await buildDispatchLeads({
         clientId: authorizedClientId,
-        importId: campaign.import_id,
+        importId: campaign.analytics_meta?.importSource === "__crm__" ? "__crm__" : (campaign.import_id || null),
         limit: dispatch.limit_per_run,
         offset: dispatch.offset,
         segmentation: dispatch.steps?.[0]?.segmentation || null,
@@ -2214,7 +2214,7 @@ export function registerCampaignsRoutes(app, deps) {
       try {
         const previewLeads = await buildDispatchLeads({
           clientId: authorizedClientId,
-          importId: campaign.import_id,
+          importId: campaign.analytics_meta?.importSource === "__crm__" ? "__crm__" : (campaign.import_id || null),
           limit: limitPerRun,
           offset: offset,
           segmentation: validation.analyticsMeta.sequence?.[0]?.segmentation || null,
