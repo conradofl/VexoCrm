@@ -807,7 +807,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
            s.id, s.company_id, s.campaign_id, s.lead_name, s.phone,
            s.lead_source, s.reason, s.suggested_message, s.status AS suggestion_status,
            s.approved_by, s.approved_at, s.job_id,
-           j.status AS job_status, j.error_message
+           j.status AS job_status, j.error_log AS error_message
          FROM followup_suggestions s
          LEFT JOIN followup_jobs j ON j.id = s.job_id
          WHERE ${conds.join(" AND ")}
