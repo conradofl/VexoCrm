@@ -15,7 +15,7 @@ export const Eventos: React.FC = () => {
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const { hasAppViewAccess, getIdToken } = useAuth();
+  const { getIdToken } = useAuth();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   useEffect(() => {

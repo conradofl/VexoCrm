@@ -15,9 +15,9 @@ export interface FupCompany {
   sending_window_start?: string;
   sending_window_end?: string;
   sending_days?: string;
-  webhook_url?: string;
   calendly_webhook_secret?: string;
-  panel_access?: boolean;
+  livpub_aniversario_prompt?: string;
+  livpub_inativo_prompt?: string;
   inbound_enabled?: boolean;
   inbound_model?: string;
   inbound_prompt?: string;

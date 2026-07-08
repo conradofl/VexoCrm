@@ -35,7 +35,9 @@ describe("LivPub Proactive Followup Automation Rules", () => {
   it("processes standard candidates and LivPub candidates concurrently in the runner", () => {
     expect(engineSource).toContain("const candidates = await findCandidates(company_id, campaign_id)");
     expect(engineSource).toContain("const livpubCandidates = await findLivPubCandidates(company_id)");
-    expect(engineSource).toContain("const allCandidates = [...candidates, ...livpubCandidates]");
+    // Main d104a82 trocou a concatenação (allCandidates) por um loop dedicado
+    // sobre livpubCandidates no runner — asserção acompanha o código real.
+    expect(engineSource).toContain("for (const lead of livpubCandidates)");
   });
 });
 

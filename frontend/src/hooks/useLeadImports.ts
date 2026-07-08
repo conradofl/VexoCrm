@@ -4,6 +4,9 @@ import { API_BASE_URL } from "@/lib/api";
 
 const LEAD_IMPORT_REQUEST_TIMEOUT_MS = 15000;
 
+export const ALL_IMPORTS_VALUE = "__all__";
+export const CRM_BASE_VALUE = "__crm__";
+
 export interface LeadImportItem {
   id: string;
   client_id: string;

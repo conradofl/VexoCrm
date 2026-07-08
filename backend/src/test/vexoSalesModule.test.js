@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const serverSource = readFileSync(resolve("src/server.js"), "utf8");
 const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
-const routeBundle = `${serverSource}\n${domainRoutesSource}`;
+const vexoSalesRoutesSource = readFileSync(resolve("src/domains/vexoSales/routes.js"), "utf8");
+const routeBundle = `${serverSource}\n${domainRoutesSource}\n${vexoSalesRoutesSource}`;
 const migrationSource = readFileSync(
   resolve("../frontend/supabase/migrations/20260506000001_create_vexo_sales_tables.sql"),
   "utf8"
@@ -12,7 +13,7 @@ const migrationSource = readFileSync(
 
 describe("Vexo Sales module backend guards", () => {
   it("protects every Vexo Sales endpoint with Firebase auth and admin access", () => {
-    const routeLines = domainRoutesSource
+    const routeLines = vexoSalesRoutesSource
       .split("\n")
       .filter((line) => line.includes('"/api/vexo-sales/'));
 
@@ -31,10 +32,7 @@ describe("Vexo Sales module backend guards", () => {
   });
 
   it("uses isolated Vexo Sales tables instead of client CRM lead or campaign tables", () => {
-    const vexoSalesBlock = domainRoutesSource.slice(
-      domainRoutesSource.indexOf('app.get("/api/vexo-sales/opportunities"'),
-      domainRoutesSource.indexOf('app.post("/api/client-signup"')
-    );
+    const vexoSalesBlock = vexoSalesRoutesSource;
 
     expect(vexoSalesBlock).toContain('from("vexo_sales_opportunities")');
     expect(vexoSalesBlock).toContain('from("vexo_sales_interactions")');

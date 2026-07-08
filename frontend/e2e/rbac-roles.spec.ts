@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from './credentials';
 
 // Define the role presets, their allowed/forbidden routes and test configuration
 const nonAdminRoles = [
@@ -47,8 +48,8 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
 
       // 1. Login como Master Admin
       await page.goto('/login');
-      await page.fill('input[type="email"]', 'luizz.felipe.santos17@gmail.com');
-      await page.fill('input[type="password"]', '@Lfs341340');
+      await page.fill('input[type="email"]', E2E_ADMIN_EMAIL);
+      await page.fill('input[type="password"]', E2E_ADMIN_PASSWORD);
       await page.click('button[type="submit"]');
       await expect(page).toHaveURL(/.*dashboard.*/, { timeout: 15000 });
 
@@ -77,8 +78,14 @@ test.describe('Matriz de Permissões E2E - Criação e Login', () => {
       await page.getByRole('option', { name: /Teste 2/i }).first().click();
 
       // 4. Navegar na aba de "Permissões Iniciais" para ver/personalizar
+      // Perfis internos renderizam o painel de hierarquia de páginas; perfis de
+      // cliente renderizam o checklist com contador "N selecionados".
       await page.getByRole('tab', { name: 'Permissões Iniciais' }).click();
-      await expect(page.getByText('selecionados', { exact: false })).toBeVisible();
+      if (role.roleType === 'internal') {
+        await expect(page.getByText('Máquina de Vendas', { exact: false }).first()).toBeVisible();
+      } else {
+        await expect(page.getByText('selecionados', { exact: false })).toBeVisible();
+      }
 
       // Voltar para Cadastro & Dados
       await page.getByRole('tab', { name: 'Cadastro & Dados' }).click();

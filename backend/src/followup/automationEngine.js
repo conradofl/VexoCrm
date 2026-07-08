@@ -5,7 +5,7 @@
 import cron from "node-cron";
 import Groq from "groq-sdk";
 import { query } from "./db.js";
-import { buildDefaultSegmentationConfig } from "../server.js";
+import { buildDefaultSegmentationConfig } from "../segmentation.js";
 
 // ─── Groq client (lazy — só instanciado se GROQ_API_KEY existir) ──────────────
 

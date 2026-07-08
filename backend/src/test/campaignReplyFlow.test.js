@@ -4,7 +4,15 @@ import { describe, expect, it } from "vitest";
 
 const serverSource = readFileSync(resolve("src/server.js"), "utf8");
 const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
-const routeBundle = `${serverSource}\n${domainRoutesSource}`;
+const campaignsRoutesSource = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+const followupQueueRoutesSource = readFileSync(resolve("src/followup/queueRoutes.js"), "utf8");
+// src/campaign/{settings,dispatch,scheduler}.js: grupo D (campaign engine) extraido de
+// server.js na Onda 3, Run E. As assercoes abaixo cobrem codigo que mudou de arquivo mas nao
+// de conteudo (movimento puro) -- entram no bundle sem alterar nenhuma asserção.
+const campaignSettingsSource = readFileSync(resolve("src/campaign/settings.js"), "utf8");
+const campaignDispatchSource = readFileSync(resolve("src/campaign/dispatch.js"), "utf8");
+const campaignSchedulerSource = readFileSync(resolve("src/campaign/scheduler.js"), "utf8");
+const routeBundle = `${serverSource}\n${domainRoutesSource}\n${campaignsRoutesSource}\n${followupQueueRoutesSource}\n${campaignSettingsSource}\n${campaignDispatchSource}\n${campaignSchedulerSource}`;
 const outboundSource = readFileSync(resolve("src/campaign-outbound.js"), "utf8");
 
 describe("campaign reply flow safeguards", () => {

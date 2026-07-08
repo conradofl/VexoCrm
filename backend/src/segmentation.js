@@ -17,6 +17,7 @@ import {
   getNormalizedField,
   parseMoneyLikeValue,
 } from "./textNormalize.js";
+import { normalizeTenantKey } from "./services/tenant.js";
 
 export const SEGMENTATION_FIELD_TYPES = ["money", "number", "category", "date"];
 export const SEGMENTATION_OPERATORS = ["equals", "contains", "gt", "lt"];
@@ -181,4 +182,55 @@ export function leadMatchesSegmentation(lead, fields = [], filters = []) {
     if (!applyOperator(leadRaw, filter.operator, filter.value, type)) return false;
   }
   return true;
+}
+
+// ─── Catálogo default por modelo + sanitização (movidos de server.js — Onda 3, Run A) ──
+
+export function buildDefaultSegmentationConfig(model = "generico") {
+  const normalizedModel = normalizeTenantKey(model) || "generico";
+  const defaults = {
+    outlier: [
+      { id: "objetivo", label: "Objetivo", field: "objetivo_compra", type: "category", enabled: true },
+      { id: "credito", label: "Credito", field: "valor_credito", type: "money", enabled: true },
+      { id: "entrada", label: "Entrada/FGTS", field: "fgts_entrada", type: "money", enabled: true },
+    ],
+    infinie: [
+      { id: "consumo", label: "Conta de luz", field: "faixa_consumo", type: "money", enabled: true },
+      { id: "cidade", label: "Cidade", field: "cidade", type: "category", enabled: true },
+      { id: "prazo", label: "Prazo", field: "prazo_instalacao", type: "category", enabled: true },
+    ],
+    livpub: [
+      { id: "perfil", label: "Perfil Musical", field: "perfil_musical", type: "category", enabled: true },
+      { id: "visita", label: "Última Visita", field: "ultima_visita", type: "date", enabled: true },
+      { id: "nascimento", label: "Nascimento", field: "data_nascimento", type: "date", enabled: true }
+    ],
+    generico: [
+      { id: "origem", label: "Origem", field: "origem", type: "category", enabled: true },
+      { id: "interesse", label: "Interesse", field: "interesse", type: "category", enabled: true },
+      { id: "valor", label: "Valor", field: "valor", type: "money", enabled: true },
+    ],
+  };
+
+  return {
+    version: 1,
+    kpis: defaults[normalizedModel] || defaults.generico,
+  };
+}
+
+export function sanitizeSegmentationConfig(input, model = "generico") {
+  // Catálogo unificado v2 (fields[] sem cap + featuredKpis cap 6). Compat: lê v1 (kpis[]).
+  const hasContent =
+    input && typeof input === "object" && (Array.isArray(input.fields) || Array.isArray(input.kpis));
+  const source = hasContent ? input : buildDefaultSegmentationConfig(model);
+  const catalog = normalizeSegmentationCatalog(source);
+
+  // Espelho legado kpis[] derivado de featuredKpis — mantém leitores antigos do front
+  // funcionando durante a transição (removível quando o front migrar 100%).
+  const fieldsByName = new Map(catalog.fields.map((f) => [f.field, f]));
+  const kpis = catalog.featuredKpis.map((field) => {
+    const f = fieldsByName.get(field);
+    return { id: field, label: f?.label || field, field, type: f?.type || "category", enabled: true };
+  });
+
+  return { ...catalog, kpis };
 }
