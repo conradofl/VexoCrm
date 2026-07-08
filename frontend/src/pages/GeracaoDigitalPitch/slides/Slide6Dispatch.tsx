@@ -1,5 +1,6 @@
+import React, { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { RefreshCw, Zap, CheckCircle2, Mail, MessageSquare, Building2, Phone, LayoutDashboard, Users, Briefcase, Share2, Loader2, Plus, Minus } from "lucide-react";
+import { RefreshCw, Zap, CheckCircle2, Mail, MessageSquare, Building2, Phone, LayoutDashboard, Users, Briefcase, Share2, Loader2, Plus, Minus, Hash } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -66,6 +67,42 @@ export function Slide6Dispatch({
   setIsPresenting,
   user,
 }: Slide6DispatchProps) {
+
+  const [slackUsers, setSlackUsers] = useState<any[]>([]);
+  const [slackChannelName, setSlackChannelName] = useState("");
+  const [slackExtraChannels, setSlackExtraChannels] = useState<string[]>([]);
+  const [newExtraChannel, setNewExtraChannel] = useState("");
+  const [slackMembers, setSlackMembers] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Generate default slug for channel
+    const slug = (theme.prospectName || "cliente")
+      .toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 21);
+    setSlackChannelName(`cli-${slug}`);
+  }, [theme.prospectName]);
+
+  useEffect(() => {
+    async function fetchSlackUsers() {
+      try {
+        const token = (await user?.getIdToken()) || "";
+        const response = await fetch(`${API_BASE_URL}/api/geracao-digital/slack-users`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (data.success && data.users) {
+          setSlackUsers(data.users);
+        }
+      } catch (err) {
+        console.error("Erro ao buscar usuários do slack:", err);
+      }
+    }
+    fetchSlackUsers();
+  }, [user]);
+
   return (
               <div className="max-w-5xl w-full space-y-6 animate-fade-in-up">
                 <div className="text-center space-y-3">
@@ -250,6 +287,107 @@ export function Slide6Dispatch({
                           </div>
                         </div>
 
+                        {/* Configuração do Slack */}
+                        <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3 mt-4">
+                          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                            <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Configuração do Workspace (Slack)</h4>
+                          </div>
+                          
+                          <div className="space-y-3 pt-1">
+                            {/* Nome do canal principal */}
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-slate-400 uppercase font-mono">Canal Principal</Label>
+                              <div className="flex items-center bg-slate-900 border border-white/10 rounded-md overflow-hidden focus-within:border-blue-500/50">
+                                <span className="pl-2 pr-1 text-slate-500"><Hash className="w-3 h-3" /></span>
+                                <Input
+                                  value={slackChannelName}
+                                  onChange={(e) => setSlackChannelName(e.target.value)}
+                                  className="h-8 text-[11px] border-none bg-transparent text-white px-1 shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Canais Adicionais */}
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-slate-400 uppercase font-mono">Canais Adicionais a Criar</Label>
+                              <div className="flex gap-2">
+                                <div className="flex-1 flex items-center bg-slate-900 border border-white/10 rounded-md overflow-hidden focus-within:border-blue-500/50">
+                                  <span className="pl-2 pr-1 text-slate-500"><Hash className="w-3 h-3" /></span>
+                                  <Input
+                                    value={newExtraChannel}
+                                    onChange={(e) => setNewExtraChannel(e.target.value)}
+                                    placeholder="Ex: cli-nome-design"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        if (newExtraChannel.trim()) {
+                                          setSlackExtraChannels([...slackExtraChannels, newExtraChannel.trim()]);
+                                          setNewExtraChannel("");
+                                        }
+                                      }
+                                    }}
+                                    className="h-8 text-[11px] border-none bg-transparent text-white px-1 shadow-none focus-visible:ring-0"
+                                  />
+                                </div>
+                                <Button 
+                                  type="button" 
+                                  onClick={() => {
+                                    if (newExtraChannel.trim()) {
+                                      setSlackExtraChannels([...slackExtraChannels, newExtraChannel.trim()]);
+                                      setNewExtraChannel("");
+                                    }
+                                  }}
+                                  className="h-8 px-3 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 text-xs font-bold"
+                                >
+                                  Adicionar
+                                </Button>
+                              </div>
+                              {slackExtraChannels.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {slackExtraChannels.map((ch, idx) => (
+                                    <Badge key={idx} className="bg-slate-800 text-slate-300 text-[9px] font-mono border-white/10 py-0.5 flex items-center gap-1">
+                                      #{ch}
+                                      <button type="button" onClick={() => setSlackExtraChannels(slackExtraChannels.filter((_, i) => i !== idx))} className="text-rose-400 hover:text-rose-300 ml-1">×</button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Membros Responsáveis */}
+                            <div className="space-y-2 pt-1">
+                              <Label className="text-[9px] text-slate-400 uppercase font-mono block">Responsáveis (Membros do Slack)</Label>
+                              {slackUsers.length > 0 ? (
+                                <div className="max-h-24 overflow-y-auto bg-slate-900/50 rounded-md border border-white/5 p-2 grid grid-cols-2 gap-1.5 custom-scrollbar">
+                                  {slackUsers.map((u) => {
+                                    const isSelected = slackMembers.includes(u.id);
+                                    return (
+                                      <label key={u.id} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors ${isSelected ? 'bg-blue-500/10 border border-blue-500/20' : 'hover:bg-white/5 border border-transparent'}`}>
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={(e) => {
+                                            if (e.target.checked) setSlackMembers([...slackMembers, u.id]);
+                                            else setSlackMembers(slackMembers.filter(id => id !== u.id));
+                                          }}
+                                          className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500/50 h-3 w-3"
+                                        />
+                                        <div className="flex items-center gap-1.5 overflow-hidden">
+                                          {u.image && <img src={u.image} alt={u.name} className="w-4 h-4 rounded-full" />}
+                                          <span className="text-[10px] text-slate-300 truncate font-semibold">{u.name}</span>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-slate-500 italic px-2">Buscando usuários do Slack...</div>
+                              )}
+                            </div>
+
+                          </div>
+                        </div>
+
                         <Button
                           disabled={isDispatching}
                           onClick={async () => {
@@ -267,7 +405,10 @@ export function Slide6Dispatch({
                                 prospectEmail,
                                 sendToSectors,
                                 sectorsWhatsapp: sectorsWhatsapp.filter(Boolean).join(", "),
-                                sectorsEmail: sectorsEmail.filter(Boolean).join(", ")
+                                sectorsEmail: sectorsEmail.filter(Boolean).join(", "),
+                                slackChannelName,
+                                slackExtraChannels,
+                                slackMembers
                               };
 
                               const token = (await user?.getIdToken()) || "";

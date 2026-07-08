@@ -177,6 +177,12 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       try {
         const queue = getSlackQueue();
         const bData = briefingData || {};
+        const {
+          slackChannelName,
+          slackExtraChannels,
+          slackMembers
+        } = req.body;
+
         const slackPayload = {
           clientName: prospectName,
           whatsappNumber: whatsappNumber,
@@ -184,7 +190,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           objetivoTrafego: String(bData['objetivo_trafego'] || ''),
           verba: String(bData['verba'] || ''),
           publicoAlvo: String(bData['publico_alvo'] || ''),
-          driveLink: String(bData['logo'] || bData['drive_link'] || '')
+          driveLink: String(bData['logo'] || bData['drive_link'] || ''),
+          slackChannelName,
+          slackExtraChannels,
+          slackMembers
         };
         await queue.add("gd-setup", slackPayload, { removeOnComplete: true, removeOnFail: false });
         slackStatus = "queued";
@@ -266,6 +275,42 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       if (!res.headersSent) {
         res.status(500).json({ error: "Erro interno no servidor." });
       }
+    }
+  });
+
+  // GET /api/geracao-digital/slack-users
+  app.get("/api/geracao-digital/slack-users", requireFirebaseAuth, async (req, res) => {
+    try {
+      const token = process.env.SLACK_BOT_TOKEN;
+      if (!token) {
+        return res.status(400).json({ error: "SLACK_BOT_TOKEN não configurado no servidor." });
+      }
+      
+      const slackRes = await fetch("https://slack.com/api/users.list", {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      const data = await slackRes.json();
+      
+      if (!data.ok) {
+        return res.status(500).json({ error: "Erro ao buscar usuários do Slack", details: data.error });
+      }
+      
+      // Filter out bots and deleted users
+      const users = data.members
+        .filter(m => !m.is_bot && !m.deleted && m.id !== "USLACKBOT")
+        .map(m => ({
+          id: m.id,
+          name: m.real_name || m.name,
+          email: m.profile?.email || "",
+          image: m.profile?.image_48 || ""
+        }));
+        
+      res.json({ success: true, users });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar usuários do Slack:", error);
+      res.status(500).json({ error: "Erro interno ao buscar usuários do Slack." });
     }
   });
 }
