@@ -290,6 +290,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       // Send to Slack Synchronously
       let slackStatus = "not_configured";
+      let slackError = null;
       try {
         const bData = briefingData || {};
         const {
@@ -316,6 +317,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       } catch (e) {
         console.error("[GeracaoDigital] Erro ao processar Slack Sincrono:", e);
         slackStatus = "failed";
+        slackError = e.message;
       }
 
       // Update statuses
@@ -329,6 +331,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         briefingId, 
         evolutionStatus, 
         slackStatus,
+        slackError,
         emailStatus,
         sectorsStatus
       });

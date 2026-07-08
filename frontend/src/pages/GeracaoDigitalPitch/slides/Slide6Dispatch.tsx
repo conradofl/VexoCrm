@@ -427,7 +427,7 @@ export function Slide6Dispatch({
 
                               const responseData = await response.json();
                               if (responseData.slackStatus === "failed") {
-                                throw new Error("O briefing foi salvo, mas houve uma falha ao criar os canais no Slack. Verifique os tokens e permissões do bot.");
+                                throw new Error(responseData.slackError || "Falha ao criar os canais no Slack. Verifique os tokens do bot.");
                               }
                               setDispatchResult(responseData);
                               setDispatchSuccess(true);
