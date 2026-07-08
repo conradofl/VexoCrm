@@ -74,6 +74,11 @@ export function Slide6Dispatch({
   const [newExtraChannel, setNewExtraChannel] = useState("");
   const [slackMembers, setSlackMembers] = useState<string[]>([]);
 
+  // WhatsApp Group State
+  const [createWhatsappGroup, setCreateWhatsappGroup] = useState(false);
+  const [whatsappGroupName, setWhatsappGroupName] = useState("");
+  const [whatsappGroupMembers, setWhatsappGroupMembers] = useState("");
+
   useEffect(() => {
     // Generate default slug for channel
     const slug = (theme.prospectName || "cliente")
@@ -83,6 +88,10 @@ export function Slide6Dispatch({
       .replace(/-+/g, "-")
       .slice(0, 21);
     setSlackChannelName(`cli-${slug}`);
+    
+    // Default WhatsApp Group Name
+    const firstName = (theme.prospectName || "Cliente").split(" ")[0];
+    setWhatsappGroupName(`GD & ${firstName}`);
   }, [theme.prospectName]);
 
   useEffect(() => {
@@ -287,6 +296,49 @@ export function Slide6Dispatch({
                           </div>
                         </div>
 
+                        {/* Configuração de Grupos no WhatsApp */}
+                        <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3 mt-4">
+                          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                            <h4 className="text-[10px] font-bold text-[#25D366] uppercase tracking-wider">Criação de Grupo no WhatsApp</h4>
+                          </div>
+                          <label className="flex items-center gap-2.5 cursor-pointer group">
+                            <input
+                              type="checkbox"
+                              checked={createWhatsappGroup}
+                              onChange={(e) => setCreateWhatsappGroup(e.target.checked)}
+                              className="rounded border-slate-700 bg-slate-950 text-[#25D366] focus:ring-[#25D366]/50 h-4 w-4"
+                            />
+                            <div className="text-left">
+                              <span className="text-xs font-bold text-slate-200 block group-hover:text-[#25D366] transition-colors">Criar Grupo Automaticamente e Convidar Membros</span>
+                            </div>
+                          </label>
+
+                          {createWhatsappGroup && (
+                            <div className="grid md:grid-cols-2 gap-4 pt-2 animate-fade-in-up">
+                              <div className="space-y-1">
+                                <Label className="text-[9px] text-slate-400 uppercase font-mono">Nome do Grupo</Label>
+                                <Input
+                                  value={whatsappGroupName}
+                                  onChange={(e) => setWhatsappGroupName(e.target.value)}
+                                  placeholder="Ex: GD & Nome do Cliente"
+                                  className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-[#25D366]/50 text-white"
+                                />
+                                <p className="text-[9px] text-slate-500 mt-1 leading-tight">O cliente e você serão adicionados automaticamente.</p>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[9px] text-slate-400 uppercase font-mono">Outros Responsáveis (WhatsApp)</Label>
+                                <Input
+                                  value={whatsappGroupMembers}
+                                  onChange={(e) => setWhatsappGroupMembers(e.target.value)}
+                                  placeholder="Ex: 11999999999, 11888888888"
+                                  className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-[#25D366]/50 text-white"
+                                />
+                                <p className="text-[9px] text-slate-500 mt-1 leading-tight">Separe os números adicionais por vírgula.</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {/* Configuração do Slack */}
                         <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3 mt-4">
                           <div className="flex items-center gap-2 border-b border-white/5 pb-2">
@@ -406,6 +458,9 @@ export function Slide6Dispatch({
                                 sendToSectors,
                                 sectorsWhatsapp: sectorsWhatsapp.filter(Boolean).join(", "),
                                 sectorsEmail: sectorsEmail.filter(Boolean).join(", "),
+                                createWhatsappGroup,
+                                whatsappGroupName,
+                                whatsappGroupMembers,
                                 slackChannelName,
                                 slackExtraChannels,
                                 slackMembers
@@ -461,9 +516,12 @@ export function Slide6Dispatch({
                                 agencyName: ""
                               }));
                               setProspectEmail("");
-                              setSlackChannelName("");
                               setSlackExtraChannels([]);
+                              setNewExtraChannel("");
                               setSlackMembers([]);
+                              setCreateWhatsappGroup(false);
+                              setWhatsappGroupMembers("");
+                              // whatsappGroupName is set automatically by prospectName effect
                               
                               playChime();
                             } catch (error: any) {

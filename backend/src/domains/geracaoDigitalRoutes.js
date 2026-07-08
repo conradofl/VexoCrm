@@ -124,20 +124,19 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { 
         prospectName, 
         whatsappNumber, 
+        agencyName, 
         themePreset, 
-        briefingData, 
-        agencyName,
+        briefingData,
         sendToProspectWhatsapp,
         sendToProspectEmail,
         prospectEmail,
         sendToSectors,
         sectorsWhatsapp,
-        sectorsEmail
+        sectorsEmail,
+        createWhatsappGroup,
+        whatsappGroupName,
+        whatsappGroupMembers
       } = req.body;
-
-      if (!prospectName) {
-        return res.status(400).json({ error: "Nome é obrigatório" });
-      }
 
       // 1. Save to DB
       const result = await pool.query(
@@ -247,11 +246,83 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
       };
 
+      // Helper function to create WhatsApp Group via Evolution
+      const createEvolutionGroup = async (subject, membersString) => {
+        if (!evolutionUrl || !evolutionToken) return { status: "not_configured" };
+        let baseUrl = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
+        
+        // Remove everything after the last slash if it's pointing to /message/sendText
+        if (baseUrl.includes("/message/sendText")) {
+          baseUrl = baseUrl.split("/message/sendText")[0];
+        }
+
+        const instanceName = dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste";
+        const endpoint = `${baseUrl}/group/create/${instanceName}`;
+
+        const members = membersString.split(",").map(m => m.trim()).filter(Boolean);
+        const participants = [];
+        if (whatsappNumber) {
+          participants.push(normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net");
+        }
+        members.forEach(m => {
+          participants.push(normalizeWhatsapp(m) + "@s.whatsapp.net");
+        });
+
+        // Unique participants
+        const uniqueParticipants = [...new Set(participants)];
+
+        const payload = {
+          subject: subject.substring(0, 25), // WhatsApp group name limit
+          participants: uniqueParticipants
+        };
+
+        try {
+          const evRes = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: evolutionToken },
+            body: JSON.stringify(payload),
+          });
+          const data = await evRes.json();
+          if (!evRes.ok) {
+            console.error("[GeracaoDigital] Group Create Error:", data);
+            return { status: `failed_${evRes.status}` };
+          }
+          // The API returns the group ID, usually as data.id or data.groupId
+          // Structure varies by Evolution API version, but typically data.id
+          const groupId = data.id || data.groupId || (data.groupMetadata && data.groupMetadata.id);
+          if (groupId) {
+             return { status: "created", groupId };
+          }
+          return { status: "created_no_id", data };
+        } catch (e) {
+          console.error("[GeracaoDigital] Evolution Group Network Error:", e.message);
+          return { status: "failed_network" };
+        }
+      };
+
       const messageText = `Olá ${prospectName}!\n\nSeu dossiê/briefing da ${agencyName || 'Vexo'} está pronto.${briefingText}`;
       
-      // Dispatch WhatsApp Prospect
+      let whatsappGroupStatus = "not_configured";
+      let whatsappGroupId = null;
+
+      // Create WhatsApp Group
+      if (createWhatsappGroup) {
+         const subject = whatsappGroupName || `GD & ${prospectName}`;
+         const groupRes = await createEvolutionGroup(subject, whatsappGroupMembers || sectorsWhatsapp || "");
+         whatsappGroupStatus = groupRes.status;
+         if (groupRes.groupId) {
+           whatsappGroupId = groupRes.groupId;
+           // Mandar o dossiê direto pro grupo também!
+           evolutionStatus = await sendEvolution(groupRes.groupId, messageText);
+         }
+      }
+
+      // Dispatch WhatsApp Prospect (Only if we didn't just send it to their new group, or if they explicitly want both)
       if (sendToProspectWhatsapp && whatsappNumber) {
-        evolutionStatus = await sendEvolution(whatsappNumber, messageText);
+        // If we created a group, we might want to skip sending it directly, but let's just send it if checked.
+        if (!whatsappGroupId) {
+          evolutionStatus = await sendEvolution(whatsappNumber, messageText);
+        }
       }
 
       // Dispatch E-mail Prospect
@@ -323,13 +394,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       // Update statuses
       await pool.query(
         `UPDATE public.geracao_digital_briefings SET status = $1, slack_status = $2 WHERE id = $3`,
-        [evolutionStatus, slackStatus, briefingId]
+        [whatsappGroupId ? 'group_created' : evolutionStatus, slackStatus, briefingId]
       );
 
       res.status(200).json({ 
         success: true, 
         briefingId, 
-        evolutionStatus, 
+        evolutionStatus,
+        whatsappGroupStatus,
+        whatsappGroupId, 
         slackStatus,
         slackError,
         emailStatus,
