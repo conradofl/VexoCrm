@@ -34,50 +34,35 @@ export function BriefingTranscriptPanel({
                       </CardHeader>
                       <CardContent className="space-y-4">
                         
-                        {/* Select Presets */}
-                        <div className="space-y-2">
-                          <Label className="text-[10px] text-slate-400 uppercase font-mono font-bold">Modelos Rápidos (Demos Comerciais)</Label>
-                          <div className="space-y-1.5">
-                            {TRANSCRIPT_OPTIONS.map((o) => (
-                              <button
-                                key={o.id}
-                                onClick={() => selectTranscriptPreset(o.id)}
-                                className="w-full text-left text-xs p-2 rounded-lg border border-white/5 hover:bg-indigo-600/10 hover:border-indigo-500/30 bg-slate-950/40 text-slate-300 font-semibold block transition-all"
-                              >
-                                {o.title}
-                                <span className="block text-[9px] text-slate-500 font-normal">{o.description}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+
 
                         {/* Textarea */}
-                        <div className="space-y-1.5">
-                          <Label className="text-[10px] text-slate-400 uppercase font-mono font-bold" htmlFor="transcript-area">Transcrição do briefing comercial</Label>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-400 uppercase font-mono font-bold" htmlFor="transcript-area">Cole a Transcrição da Reunião Aqui</Label>
                           <textarea
                             id="transcript-area"
                             value={transcriptText}
                             onChange={(e) => setTranscriptText(e.target.value)}
-                            placeholder="Cole aqui o texto da conversa transcrita..."
-                            className="w-full h-44 p-3 text-xs bg-slate-950/80 border border-white/5 rounded-xl text-slate-300 font-sans focus:border-indigo-500/50 outline-none leading-relaxed resize-none"
+                            placeholder="Exemplo: 'O cliente disse que o orçamento é de 5 mil reais mensais para Google Ads...'"
+                            className="w-full h-[400px] p-4 text-sm bg-slate-950/80 border border-white/10 rounded-xl text-slate-200 font-sans focus:border-indigo-500/50 outline-none leading-relaxed resize-none shadow-inner"
                           />
                         </div>
 
                         {/* Run Button */}
                         <Button
                           onClick={processBriefingWithGemini}
-                          disabled={isProcessingAI}
-                          className="w-full bg-indigo-600 hover:bg-indigo-500 font-extrabold text-xs text-white h-10 gap-2 shadow-lg shadow-indigo-600/10"
+                          disabled={isProcessingAI || !transcriptText.trim()}
+                          className="w-full bg-indigo-600 hover:bg-indigo-500 font-black text-sm text-white h-12 gap-2 shadow-lg shadow-indigo-600/20 mt-2"
                         >
                           {isProcessingAI ? (
                             <>
-                              <RefreshCw className="h-4 w-4 animate-spin text-white" />
-                              Processando Briefing...
+                              <RefreshCw className="h-5 w-5 animate-spin text-white" />
+                              Extraindo Dados com Gemini...
                             </>
                           ) : (
                             <>
-                              <Bot className="h-4 w-4 text-white" />
-                              Qualificar com IA
+                              <Bot className="h-5 w-5 text-white" />
+                              Gerar Automação do Briefing
                             </>
                           )}
                         </Button>

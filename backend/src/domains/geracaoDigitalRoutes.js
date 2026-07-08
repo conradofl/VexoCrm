@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { getSlackQueue } from "../geracaoDigital/slackQueue.js";
 
 export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, requireInternalPageAccess) {
   // POST /api/geracao-digital/briefing
@@ -243,6 +244,28 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao deletar briefing:", error);
       res.status(500).json({ error: "Erro interno ao deletar briefing." });
+    }
+  });
+
+  // POST /webhooks/gd/briefing
+  app.post("/webhooks/gd/briefing", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { clientName, whatsappNumber } = req.body;
+      if (!clientName || !whatsappNumber) {
+        return res.status(400).json({ error: "clientName e whatsappNumber são obrigatórios." });
+      }
+
+      // Responde 202 imediatamente
+      res.status(202).json({ success: true, message: "Briefing recebido, processando setup GD Slack..." });
+
+      // Enfileira job
+      const queue = getSlackQueue();
+      await queue.add("gd-setup", req.body, { removeOnComplete: true, removeOnFail: false });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao enfileirar webhook gd/briefing:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Erro interno no servidor." });
+      }
     }
   });
 }

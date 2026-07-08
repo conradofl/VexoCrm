@@ -86,6 +86,7 @@ import { registerAllDomainRoutes } from "./domains/registerAllDomainRoutes.js";
 import { registerEventosRoutes } from "./domains/eventos/routes.js";
 import { registerWebhooksRoutes } from "./webhooks/routes.js";
 import { startFollowupWorker } from "./followup/worker.js";
+import { startSlackWorker } from "./geracaoDigital/slackWorker.js";
 import { startAutomationEngine } from "./followup/automationEngine.js";
 // getSegmentationCatalog, normalizeSegmentationCatalog, isFilterShape, normalizeFilters,
 // leadMatchesSegmentation, buildDefaultSegmentationConfig, sanitizeSegmentationConfig ficaram
@@ -723,11 +724,12 @@ function startBackgroundServices() {
   whatsappSessionManager.restorePersistedSession().catch((error) => {
     console.error("whatsapp startup restore error:", error);
   });
-  // BullMQ worker do módulo de follow-up
+  // BullMQ worker do módulo de follow-up e gd-slack
   if (process.env.REDIS_URL || process.env.REDIS_HOST) {
     startFollowupWorker();
+    startSlackWorker();
   } else {
-    console.warn("[followup/worker] REDIS_URL/REDIS_HOST não configurado — worker não iniciado.");
+    console.warn("[workers] REDIS_URL/REDIS_HOST não configurado — workers não iniciados.");
   }
   // Motor proativo de sugestões (node-cron, a cada 6h)
   startAutomationEngine();

@@ -164,7 +164,7 @@ export function ConfigBoard({ theme, setTheme, handleLogoUpload, onStartPresenti
               </div>
               <div className="p-3 bg-white dark:bg-slate-900/30 rounded-xl border border-slate-200 dark:border-white/5 space-y-1">
                 <span className="font-bold text-indigo-600 dark:text-indigo-400">Slide 6: Ativação</span>
-                <p className="text-slate-500 dark:text-slate-400 leading-relaxed">Fechamento de contrato com simulação de assinatura digital interativa.</p>
+                <p className="text-slate-500 dark:text-slate-400 leading-relaxed">Envio automatizado do briefing qualificado para os setores responsáveis.</p>
               </div>
             </div>
           </div>

@@ -23,10 +23,10 @@ interface Slide6DispatchProps {
   setSendToSectors: Dispatch<SetStateAction<boolean>>;
   prospectEmail: string;
   setProspectEmail: Dispatch<SetStateAction<string>>;
-  sectorsWhatsapp: string;
-  setSectorsWhatsapp: Dispatch<SetStateAction<string>>;
-  sectorsEmail: string;
-  setSectorsEmail: Dispatch<SetStateAction<string>>;
+  sectorsWhatsapp: string[];
+  setSectorsWhatsapp: (val: string[]) => void;
+  sectorsEmail: string[];
+  setSectorsEmail: (val: string[]) => void;
   isDispatching: boolean;
   setIsDispatching: Dispatch<SetStateAction<boolean>>;
   dispatchSuccess: boolean;
@@ -112,104 +112,133 @@ export function Slide6Dispatch({
                             <p className="text-[10px] text-slate-500">Selecione para onde deseja enviar o briefing qualificado.</p>
                           </div>
                           
-                          <div className="space-y-3">
-                            {/* Option 1: WhatsApp Prospect */}
-                            <div className="p-3 rounded-xl border border-white/5 bg-slate-950/30 space-y-2">
-                              <label className="flex items-center gap-2.5 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={sendToProspectWhatsapp}
-                                  onChange={(e) => setSendToProspectWhatsapp(e.target.checked)}
-                                  className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
-                                />
-                                <div className="text-left">
-                                  <span className="text-xs font-bold text-slate-200 block">Enviar para o Prospect via WhatsApp</span>
-                                  <span className="text-[9px] text-slate-500">Dossiê e cronograma no WhatsApp do cliente</span>
-                                </div>
-                              </label>
-                              {sendToProspectWhatsapp && (
-                                <div className="pl-6 pt-1 animate-fade-in-up">
-                                  <Label className="text-[9px] text-slate-400 uppercase font-mono">WhatsApp do Prospect</Label>
-                                    <Input
-                                      value={theme.whatsappNumber}
-                                      onChange={(e) => {
-                                        const updated = { ...theme, whatsappNumber: e.target.value };
-                                        setTheme(updated);
-                                        localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
-                                      }}
-                                      placeholder="Ex: (11) 98888-7777"
-                                      style={{ WebkitTextFillColor: 'white' }}
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
-                                    />
-                                </div>
-                              )}
+                          <div className="space-y-4">
+                            {/* Section 1: Prospect */}
+                            <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3">
+                              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                                <h4 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Para o Cliente (Prospect)</h4>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <label className="flex items-start gap-2.5 cursor-pointer group">
+                                  <input
+                                    type="checkbox"
+                                    checked={sendToProspectWhatsapp}
+                                    onChange={(e) => setSendToProspectWhatsapp(e.target.checked)}
+                                    className="mt-0.5 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
+                                  />
+                                  <div className="text-left flex-1">
+                                    <span className="text-xs font-bold text-slate-200 block group-hover:text-indigo-300 transition-colors">WhatsApp</span>
+                                    {sendToProspectWhatsapp && (
+                                      <Input
+                                        value={theme.whatsappNumber}
+                                        onChange={(e) => {
+                                          const updated = { ...theme, whatsappNumber: e.target.value };
+                                          setTheme(updated);
+                                          localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
+                                        }}
+                                        placeholder="Ex: (11) 98888-7777"
+                                        className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-indigo-500/50 text-white mt-1.5"
+                                      />
+                                    )}
+                                  </div>
+                                </label>
+
+                                <label className="flex items-start gap-2.5 cursor-pointer group">
+                                  <input
+                                    type="checkbox"
+                                    checked={sendToProspectEmail}
+                                    onChange={(e) => setSendToProspectEmail(e.target.checked)}
+                                    className="mt-0.5 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
+                                  />
+                                  <div className="text-left flex-1">
+                                    <span className="text-xs font-bold text-slate-200 block group-hover:text-indigo-300 transition-colors">E-mail</span>
+                                    {sendToProspectEmail && (
+                                      <Input
+                                        type="email"
+                                        value={prospectEmail}
+                                        onChange={(e) => setProspectEmail(e.target.value)}
+                                        placeholder="Ex: cliente@empresa.com"
+                                        className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-indigo-500/50 text-white mt-1.5"
+                                      />
+                                    )}
+                                  </div>
+                                </label>
+                              </div>
                             </div>
 
-                            {/* Option 2: Email Prospect */}
-                            <div className="p-3 rounded-xl border border-white/5 bg-slate-950/30 space-y-2">
-                              <label className="flex items-center gap-2.5 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={sendToProspectEmail}
-                                  onChange={(e) => setSendToProspectEmail(e.target.checked)}
-                                  className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
-                                />
-                                <div className="text-left">
-                                  <span className="text-xs font-bold text-slate-200 block">Enviar para o Prospect via E-mail</span>
-                                  <span className="text-[9px] text-slate-500">Relatório e cronograma em PDF</span>
-                                </div>
-                              </label>
-                              {sendToProspectEmail && (
-                                <div className="pl-6 pt-1 animate-fade-in-up">
-                                  <Label className="text-[9px] text-slate-400 uppercase font-mono">E-mail do Prospect</Label>
-                                    <Input
-                                      type="email"
-                                      value={prospectEmail}
-                                      onChange={(e) => setProspectEmail(e.target.value)}
-                                      placeholder="Ex: cliente@empresa.com.br"
-                                      style={{ WebkitTextFillColor: 'white' }}
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
-                                    />
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Option 3: Sectors */}
-                            <div className="p-3 rounded-xl border border-white/5 bg-slate-950/30 space-y-2">
-                              <label className="flex items-center gap-2.5 cursor-pointer">
+                            {/* Section 2: Handoff Interno */}
+                            <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3">
+                              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                                <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Handoff Interno (Setores Responsáveis)</h4>
+                              </div>
+                              <label className="flex items-center gap-2.5 cursor-pointer group">
                                 <input
                                   type="checkbox"
                                   checked={sendToSectors}
                                   onChange={(e) => setSendToSectors(e.target.checked)}
-                                  className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
+                                  className="rounded border-slate-700 bg-slate-950 text-emerald-600 focus:ring-emerald-500/50 h-4 w-4"
                                 />
                                 <div className="text-left">
-                                  <span className="text-xs font-bold text-slate-200 block">Enviar para os Setores da Geração Digital</span>
-                                  <span className="text-[9px] text-slate-500">Dispara tarefas automáticas para Tráfego, Design e Contratos</span>
+                                  <span className="text-xs font-bold text-slate-200 block group-hover:text-emerald-300 transition-colors">Disparar Tarefas Automáticas e Dossiê (Tráfego, Design, etc)</span>
                                 </div>
                               </label>
+
                               {sendToSectors && (
-                                <div className="pl-6 pt-1 space-y-2 animate-fade-in-up">
-                                  <div className="space-y-1">
-                                    <Label className="text-[9px] text-slate-400 uppercase font-mono">WhatsApp dos Setores (Handoff)</Label>
-                                    <Input
-                                      value={sectorsWhatsapp}
-                                      onChange={(e) => setSectorsWhatsapp(e.target.value)}
-                                      placeholder="Ex: (11) 99999-0000"
-                                      style={{ WebkitTextFillColor: 'white' }}
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
-                                    />
+                                <div className="grid grid-cols-2 gap-4 pt-1 animate-fade-in-up">
+                                  <div className="space-y-2">
+                                    <Label className="text-[9px] text-slate-400 uppercase font-mono flex items-center justify-between">
+                                      <span>WhatsApp (Grupo Setores)</span>
+                                      <button type="button" onClick={() => setSectorsWhatsapp([...sectorsWhatsapp, ""])} className="text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 rounded w-4 h-4 flex items-center justify-center font-bold">
+                                        +
+                                      </button>
+                                    </Label>
+                                    {sectorsWhatsapp.map((val, idx) => (
+                                      <div key={idx} className="flex gap-1">
+                                        <Input
+                                          value={val}
+                                          onChange={(e) => {
+                                            const newArr = [...sectorsWhatsapp];
+                                            newArr[idx] = e.target.value;
+                                            setSectorsWhatsapp(newArr);
+                                          }}
+                                          placeholder="Ex: (11) 99999-0000"
+                                          className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-emerald-500/50 text-white"
+                                        />
+                                        {sectorsWhatsapp.length > 1 && (
+                                          <button type="button" onClick={() => setSectorsWhatsapp(sectorsWhatsapp.filter((_, i) => i !== idx))} className="h-8 w-8 shrink-0 flex items-center justify-center rounded bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-white/5 transition-colors">
+                                            -
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
-                                  <div className="space-y-1">
-                                    <Label className="text-[9px] text-slate-400 uppercase font-mono">E-mail dos Setores (Handoff)</Label>
-                                    <Input
-                                      type="email"
-                                      value={sectorsEmail}
-                                      onChange={(e) => setSectorsEmail(e.target.value)}
-                                      placeholder="Ex: operacoes@geracaodigital.com.br"
-                                      style={{ WebkitTextFillColor: 'white' }}
-                                      className="h-8 text-xs border-white/5 bg-slate-950 focus:border-indigo-500/50 text-white mt-1 autofill:[box-shadow:inset_0_0_0px_1000px_#020617]"
-                                    />
+                                  <div className="space-y-2">
+                                    <Label className="text-[9px] text-slate-400 uppercase font-mono flex items-center justify-between">
+                                      <span>E-mail (Setores)</span>
+                                      <button type="button" onClick={() => setSectorsEmail([...sectorsEmail, ""])} className="text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 rounded w-4 h-4 flex items-center justify-center font-bold">
+                                        +
+                                      </button>
+                                    </Label>
+                                    {sectorsEmail.map((val, idx) => (
+                                      <div key={idx} className="flex gap-1">
+                                        <Input
+                                          type="email"
+                                          value={val}
+                                          onChange={(e) => {
+                                            const newArr = [...sectorsEmail];
+                                            newArr[idx] = e.target.value;
+                                            setSectorsEmail(newArr);
+                                          }}
+                                          placeholder="Ex: operacoes@geracaodigital.com.br"
+                                          className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-emerald-500/50 text-white"
+                                        />
+                                        {sectorsEmail.length > 1 && (
+                                          <button type="button" onClick={() => setSectorsEmail(sectorsEmail.filter((_, i) => i !== idx))} className="h-8 w-8 shrink-0 flex items-center justify-center rounded bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-white/5 transition-colors">
+                                            -
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
                               )}
@@ -233,8 +262,8 @@ export function Slide6Dispatch({
                                 sendToProspectEmail,
                                 prospectEmail,
                                 sendToSectors,
-                                sectorsWhatsapp,
-                                sectorsEmail
+                                sectorsWhatsapp: sectorsWhatsapp.filter(Boolean).join(", "),
+                                sectorsEmail: sectorsEmail.filter(Boolean).join(", ")
                               };
 
                               const token = (await user?.getIdToken()) || "";

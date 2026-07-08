@@ -70,8 +70,8 @@ export default function GeracaoDigitalPitch() {
   const [sendToProspectEmail, setSendToProspectEmail] = useState<boolean>(true);
   const [sendToSectors, setSendToSectors] = useState<boolean>(true);
   const [prospectEmail, setProspectEmail] = useState<string>("contato@empresa.com.br");
-  const [sectorsWhatsapp, setSectorsWhatsapp] = useState<string>("(11) 98888-7777");
-  const [sectorsEmail, setSectorsEmail] = useState<string>("operacoes@geracaodigital.com.br");
+  const [sectorsWhatsapp, setSectorsWhatsapp] = useState<string[]>([""]);
+  const [sectorsEmail, setSectorsEmail] = useState<string[]>([""]);
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchSuccess, setDispatchSuccess] = useState<boolean>(false);
   const [dispatchResult, setDispatchResult] = useState<any>(null);
@@ -216,7 +216,7 @@ export default function GeracaoDigitalPitch() {
 
       {/* ─── FULLSCREEN PRESENTATION MODE (THE PITCH & BRIEFING SPA) ───────── */}
       {isPresenting && (
-        <div className="fixed inset-0 z-50 bg-slate-950 text-white overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
+        <div className="dark fixed inset-0 z-50 bg-slate-950 text-white overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
 
           {/* Neon Grid Overlay Backdrop */}
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0" />
@@ -312,7 +312,32 @@ export default function GeracaoDigitalPitch() {
           <PresentationFooter
             activeSlide={activeSlide}
             setActiveSlide={setActiveSlide}
-            onEndPresenting={() => setIsPresenting(false)}
+            onEndPresenting={async () => {
+              try {
+                const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {});
+                const payload = {
+                  clientName: theme.prospectName,
+                  whatsappNumber: theme.whatsappNumber,
+                  produtosContratados: bData['produtos'] ? String(bData['produtos']).split(',').map((s: string) => s.trim()) : [],
+                  objetivoTrafego: String(bData['objetivo_trafego'] || ''),
+                  verba: String(bData['verba'] || ''),
+                  publicoAlvo: String(bData['publico_alvo'] || ''),
+                  driveLink: String(bData['logo'] || bData['drive_link'] || '')
+                };
+                const token = (await user?.getIdToken()) || "";
+                fetch("/webhooks/gd/briefing", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                  },
+                  body: JSON.stringify(payload)
+                }).catch(e => console.error("Erro ao chamar webhook:", e));
+              } catch (err) {
+                console.error("Erro ao montar payload do webhook:", err);
+              }
+              setIsPresenting(false);
+            }}
           />
 
         </div>
