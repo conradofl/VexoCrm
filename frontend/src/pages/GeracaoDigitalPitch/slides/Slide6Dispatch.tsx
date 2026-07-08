@@ -451,6 +451,17 @@ export function Slide6Dispatch({
                               if (setBriefingFields) {
                                 setBriefingFields(DEFAULT_BRIEFING_FIELDS);
                               }
+                              setTheme(prev => ({
+                                ...prev,
+                                prospectName: "",
+                                whatsappNumber: "",
+                                agencyName: ""
+                              }));
+                              setProspectEmail("");
+                              setSlackChannelName("");
+                              setSlackExtraChannels([]);
+                              setSlackMembers([]);
+                              
                               playChime();
                             } catch (error: any) {
                               toast({

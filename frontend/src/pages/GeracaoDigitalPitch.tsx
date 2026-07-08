@@ -315,10 +315,10 @@ export default function GeracaoDigitalPitch() {
             activeSlide={activeSlide}
             setActiveSlide={setActiveSlide}
             onEndPresenting={async () => {
-              if (dispatchSuccess) {
-                // Já foi enviado pelo Slide6Dispatch
+              if (dispatchSuccess || activeSlide !== 6) {
                 setIsPresenting(false);
                 setBriefingFields(DEFAULT_BRIEFING_FIELDS);
+                setTheme(prev => ({ ...prev, prospectName: "", whatsappNumber: "", agencyName: "" }));
                 setDispatchSuccess(false);
                 return;
               }
@@ -351,6 +351,7 @@ export default function GeracaoDigitalPitch() {
               }
               setIsPresenting(false);
               setBriefingFields(DEFAULT_BRIEFING_FIELDS);
+              setTheme(prev => ({ ...prev, prospectName: "", whatsappNumber: "", agencyName: "" }));
             }}
           />
 

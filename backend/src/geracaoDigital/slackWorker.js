@@ -28,14 +28,13 @@ async function processSlackJob(job) {
   };
   const jid = normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net";
 
-  // Check idempotency
+  // Check se já existe mapeamento para log
   const checkRes = await pool.query(
     `SELECT id FROM public.slack_channel_map WHERE whatsapp_jid = $1`,
     [jid]
   );
   if (checkRes.rows.length > 0) {
-    console.log(`[gd-setup] JID ${jid} já processado. Ignorando.`);
-    return { status: "skipped_idempotent", jid };
+    console.log(`[gd-setup] JID ${jid} já possui canal mapeado. Criando canais no Slack mesmo assim para fins de teste/dossiê.`);
   }
 
   if (!SLACK_BOT_TOKEN) {
