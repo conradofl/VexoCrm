@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PageShell } from "@/components/PageShell";
 import { toast } from "@/components/ui/use-toast";
+import { API_BASE_URL } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Briefcase } from "lucide-react";
 
@@ -303,6 +304,7 @@ export default function GeracaoDigitalPitch() {
                 setDispatchResult={setDispatchResult}
                 setIsPresenting={setIsPresenting}
                 user={user}
+                setBriefingFields={setBriefingFields}
               />
             )}
 
@@ -313,19 +315,30 @@ export default function GeracaoDigitalPitch() {
             activeSlide={activeSlide}
             setActiveSlide={setActiveSlide}
             onEndPresenting={async () => {
+              if (dispatchSuccess) {
+                // Já foi enviado pelo Slide6Dispatch
+                setIsPresenting(false);
+                setBriefingFields(DEFAULT_BRIEFING_FIELDS);
+                setDispatchSuccess(false);
+                return;
+              }
               try {
                 const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {});
                 const payload = {
-                  clientName: theme.prospectName,
+                  prospectName: theme.prospectName,
                   whatsappNumber: theme.whatsappNumber,
-                  produtosContratados: bData['produtos'] ? String(bData['produtos']).split(',').map((s: string) => s.trim()) : [],
-                  objetivoTrafego: String(bData['objetivo_trafego'] || ''),
-                  verba: String(bData['verba'] || ''),
-                  publicoAlvo: String(bData['publico_alvo'] || ''),
-                  driveLink: String(bData['logo'] || bData['drive_link'] || '')
+                  agencyName: theme.agencyName,
+                  themePreset: theme.themePreset,
+                  briefingData: bData,
+                  sendToProspectWhatsapp,
+                  sendToProspectEmail,
+                  prospectEmail,
+                  sendToSectors,
+                  sectorsWhatsapp: sectorsWhatsapp.filter(Boolean).join(", "),
+                  sectorsEmail: sectorsEmail.filter(Boolean).join(", ")
                 };
                 const token = (await user?.getIdToken()) || "";
-                fetch("/webhooks/gd/briefing", {
+                fetch(`${API_BASE_URL}/api/geracao-digital/briefing`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
@@ -337,6 +350,7 @@ export default function GeracaoDigitalPitch() {
                 console.error("Erro ao montar payload do webhook:", err);
               }
               setIsPresenting(false);
+              setBriefingFields(DEFAULT_BRIEFING_FIELDS);
             }}
           />
 

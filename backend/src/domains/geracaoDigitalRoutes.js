@@ -172,25 +172,25 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         sectorsStatus = `wpp:${wppStatus},email:${emStatus}`;
       }
 
-      // Send to Slack
-      const slackWebhook = process.env.SLACK_WEBHOOK_URL_GD;
+      // Send to Slack via BullMQ Worker
       let slackStatus = "not_configured";
-
-      if (slackWebhook) {
-        try {
-          const slackPayload = {
-            text: `*Novo Briefing Geração Digital*\n*Prospect:* ${prospectName}\n*WhatsApp:* ${whatsappNumber || 'N/A'}\n*Status Evol:* ${evolutionStatus}\n*Status Email:* ${emailStatus}\n*Status Setores:* ${sectorsStatus}\n\n*_Aguardando automação de pastas..._*`
-          };
-          const slRes = await fetch(slackWebhook, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(slackPayload)
-          });
-          if (!slRes.ok) slackStatus = `failed_${slRes.status}`;
-          else slackStatus = "sent";
-        } catch (e) {
-          slackStatus = "failed_network";
-        }
+      try {
+        const queue = getSlackQueue();
+        const bData = briefingData || {};
+        const slackPayload = {
+          clientName: prospectName,
+          whatsappNumber: whatsappNumber,
+          produtosContratados: bData['produtos'] ? String(bData['produtos']).split(',').map(s => s.trim()) : [],
+          objetivoTrafego: String(bData['objetivo_trafego'] || ''),
+          verba: String(bData['verba'] || ''),
+          publicoAlvo: String(bData['publico_alvo'] || ''),
+          driveLink: String(bData['logo'] || bData['drive_link'] || '')
+        };
+        await queue.add("gd-setup", slackPayload, { removeOnComplete: true, removeOnFail: false });
+        slackStatus = "queued";
+      } catch (e) {
+        console.error("[GeracaoDigital] Erro ao enfileirar job Slack:", e);
+        slackStatus = "failed_queue";
       }
 
       // Update statuses
