@@ -1,0 +1,205 @@
+import { Worker } from "bullmq";
+import { pgDatabasePool as pool } from "../services/database.js";
+import { QUEUE_NAME, getRedisConnection } from "./slackQueue.js";
+
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+
+const MAX_ATTEMPTS = 3;
+
+async function processSlackJob(job) {
+  const { 
+    clientName, 
+    whatsappNumber, 
+    produtosContratados = [], 
+    objetivoTrafego, 
+    verba, 
+    publicoAlvo, 
+    driveLink 
+  } = job.data;
+
+  // Normaliza o número
+  const normalizeWhatsapp = (num) => {
+    let clean = (num || "").replace(/\D/g, "");
+    if (clean.length === 10 || clean.length === 11) return "55" + clean;
+    return clean;
+  };
+  const jid = normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net";
+
+  // Check idempotency
+  const checkRes = await pool.query(
+    `SELECT id FROM public.slack_channel_map WHERE whatsapp_jid = $1`,
+    [jid]
+  );
+  if (checkRes.rows.length > 0) {
+    console.log(`[gd-setup] JID ${jid} já processado. Ignorando.`);
+    return { status: "skipped_idempotent", jid };
+  }
+
+  if (!SLACK_BOT_TOKEN) {
+    throw new Error("SLACK_BOT_TOKEN não configurado.");
+  }
+
+  // Nome do canal: cli-{slug}
+  const slug = (clientName || "cliente-sem-nome")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 21);
+  const channelName = `cli-${slug}`;
+
+  // 1. Criar canal
+  const createRes = await fetch("https://slack.com/api/conversations.create", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+    },
+    body: JSON.stringify({ name: channelName }),
+  });
+  const createData = await createRes.json();
+  
+  let channelId;
+  if (!createData.ok) {
+    if (createData.error === "name_taken") {
+      // Tentar achar o ID do canal se já existir
+      const listRes = await fetch("https://slack.com/api/conversations.list?types=public_channel,private_channel", {
+        headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` }
+      });
+      const listData = await listRes.json();
+      const existingChannel = listData.channels?.find(c => c.name === channelName);
+      if (!existingChannel) {
+        throw new Error(`Canal ${channelName} existe mas não foi encontrado na listagem.`);
+      }
+      channelId = existingChannel.id;
+    } else {
+      throw new Error(`Erro ao criar canal ${channelName}: ${createData.error}`);
+    }
+  } else {
+    channelId = createData.channel.id;
+  }
+
+  // 2. Post message (Dossiê)
+  const textMsg = `*Novo Dossiê Geração Digital*\n*Cliente:* ${clientName}\n*Whatsapp:* ${whatsappNumber}\n*Produtos:* ${produtosContratados.join(", ")}\n*Objetivo:* ${objetivoTrafego}\n*Verba:* ${verba}\n*Público:* ${publicoAlvo}\n*Drive:* ${driveLink || "Não informado"}`;
+  
+  const blocks = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "📄 Dossiê do Cliente (Geração Digital)" }
+    },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Cliente:*\n${clientName}` },
+        { type: "mrkdwn", text: `*WhatsApp:*\n${whatsappNumber}` },
+        { type: "mrkdwn", text: `*Verba:*\n${verba}` },
+        { type: "mrkdwn", text: `*Produtos:*\n${produtosContratados.join(", ")}` }
+      ]
+    },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Objetivo:*\n${objetivoTrafego}` },
+        { type: "mrkdwn", text: `*Público Alvo:*\n${publicoAlvo}` }
+      ]
+    }
+  ];
+
+  if (driveLink) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*Pasta do Drive:*\n<${driveLink}|Acessar Arquivos>` }
+    });
+  }
+
+  const postRes = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      text: textMsg,
+      blocks: blocks
+    }),
+  });
+  const postData = await postRes.json();
+  if (!postData.ok) {
+    throw new Error(`Erro ao postar mensagem: ${postData.error}`);
+  }
+
+  const messageTs = postData.ts;
+
+  // 3. Pin message
+  const pinRes = await fetch("https://slack.com/api/pins.add", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      timestamp: messageTs
+    }),
+  });
+  const pinData = await pinRes.json();
+  if (!pinData.ok && pinData.error !== "already_pinned") {
+    console.warn(`[gd-setup] Erro ao pinar mensagem (ignorado): ${pinData.error}`);
+  }
+
+  // 4. Salvar no banco
+  await pool.query(
+    `INSERT INTO public.slack_channel_map (client_name, whatsapp_jid, slack_channel_id, drive_folder_id, instance_name, status)
+     VALUES ($1, $2, $3, $4, 'gd-oficial', 'active')
+     ON CONFLICT (whatsapp_jid) DO NOTHING`,
+    [clientName, jid, channelId, driveLink || null]
+  );
+
+  return { status: "success", channelId };
+}
+
+export function startSlackWorker() {
+  const worker = new Worker(
+    QUEUE_NAME,
+    async (job) => {
+      console.log(`[gd-setup] Processando job ${job.id} - Cliente: ${job.data.clientName}`);
+      return processSlackJob(job);
+    },
+    {
+      connection: getRedisConnection(),
+      concurrency: 2,
+    }
+  );
+
+  worker.on("failed", async (job, err) => {
+    console.error(`[gd-setup] Job falhou: ${job?.id} - ${err.message}`);
+    // Se esgotar tentativas, logar em #logs-vexo
+    if (job && job.attemptsMade >= MAX_ATTEMPTS) {
+      if (SLACK_BOT_TOKEN) {
+        try {
+          await fetch("https://slack.com/api/chat.postMessage", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+            },
+            body: JSON.stringify({
+              channel: "logs-vexo",
+              text: `🚨 *Erro crítico no worker gd-setup*\nCliente: ${job.data.clientName}\nErro: ${err.message}`
+            }),
+          });
+        } catch (e) {
+          console.error("[gd-setup] Falha ao enviar log para o slack", e);
+        }
+      }
+    }
+  });
+
+  worker.on("error", (err) => {
+    console.error("[gd-setup] Worker error:", err.message);
+  });
+
+  console.info(`[gd-setup] Worker BullMQ iniciado — fila: ${QUEUE_NAME}`);
+  return worker;
+}
