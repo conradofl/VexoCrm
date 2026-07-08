@@ -800,7 +800,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       const params = [];
       if (companyId) {
         params.push(companyId);
-        conds.push(`s.company_id = ${params.length}::uuid`);
+        conds.push(`s.company_id = $${params.length}::uuid`);
       }
       const { rows } = await query(
         `SELECT
@@ -826,7 +826,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
     try {
-      const { rows } = await query(`SELECT job_id FROM followup_suggestions WHERE id = // POST /api/followup/suggestions/approve-batch`, [id]);
+      const { rows } = await query(`SELECT job_id FROM followup_suggestions WHERE id = $1`, [id]);
       if (!rows.length || !rows[0].job_id) return sendErr(res, 404, "NOT_FOUND", "Suggestion or job not found");
       const job = await getFollowupQueue().getJob(`fup-suggestion-${rows[0].job_id}`);
       if (job) {
@@ -843,7 +843,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "INVALID_PARAM", "Missing id");
     try {
-      const { rows } = await query(`SELECT job_id FROM followup_suggestions WHERE id = // POST /api/followup/suggestions/approve-batch`, [id]);
+      const { rows } = await query(`SELECT job_id FROM followup_suggestions WHERE id = $1`, [id]);
       if (!rows.length || !rows[0].job_id) return sendErr(res, 404, "NOT_FOUND", "Suggestion or job not found");
       const job = await getFollowupQueue().getJob(`fup-suggestion-${rows[0].job_id}`);
       if (job) {
