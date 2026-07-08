@@ -1,11 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
-import { RefreshCw, Zap, CheckCircle2 } from "lucide-react";
+import { RefreshCw, Zap, CheckCircle2, Mail, MessageSquare, Building2, Phone, LayoutDashboard, Users, Briefcase, Share2, Loader2, Plus, Minus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
+import { API_BASE_URL } from "@/lib/api";
+import { DEFAULT_BRIEFING_FIELDS } from "@/lib/geracaoDigital/defaults";
 import { playChime } from "@/lib/geracaoDigital/helpers";
 import type { User } from "@/lib/firebase";
 import type { BriefingField, CustomTheme } from "@/lib/geracaoDigital/types";
@@ -15,6 +17,7 @@ interface Slide6DispatchProps {
   theme: CustomTheme;
   setTheme: Dispatch<SetStateAction<CustomTheme>>;
   briefingFields: BriefingField[];
+  setBriefingFields?: (fields: any[]) => void;
   sendToProspectWhatsapp: boolean;
   setSendToProspectWhatsapp: Dispatch<SetStateAction<boolean>>;
   sendToProspectEmail: boolean;
@@ -32,8 +35,8 @@ interface Slide6DispatchProps {
   dispatchSuccess: boolean;
   setDispatchSuccess: Dispatch<SetStateAction<boolean>>;
   dispatchResult: any;
-  setDispatchResult: Dispatch<SetStateAction<any>>;
-  setIsPresenting: Dispatch<SetStateAction<boolean>>;
+  setDispatchResult: (val: any) => void;
+  setIsPresenting: (val: boolean) => void;
   user: User | null;
 }
 
@@ -41,6 +44,7 @@ export function Slide6Dispatch({
   theme,
   setTheme,
   briefingFields,
+  setBriefingFields,
   sendToProspectWhatsapp,
   setSendToProspectWhatsapp,
   sendToProspectEmail,
@@ -267,7 +271,7 @@ export function Slide6Dispatch({
                               };
 
                               const token = (await user?.getIdToken()) || "";
-                              const response = await fetch("/api/geracao-digital/briefing", {
+                              const response = await fetch(`${API_BASE_URL}/api/geracao-digital/briefing`, {
                                 method: "POST",
                                 headers: {
                                   "Content-Type": "application/json",
@@ -293,7 +297,7 @@ export function Slide6Dispatch({
                               if (sendToProspectEmail) {
                                 toast({
                                   title: "E-mail Enviado!",
-                                  description: `Cópia do briefing enviada para o e-mail: ${prospectEmail}.`,
+                                  description: `Cópia do briefing enviada para a agência em ${theme.agencyName}.`,
                                 });
                               }
                               if (sendToSectors) {
@@ -301,6 +305,10 @@ export function Slide6Dispatch({
                                   title: "Handoff Operacional Ativado!",
                                   description: `Os setores de tráfego, design e contratos foram notificados com sucesso no Vexo OS (WhatsApp: ${sectorsWhatsapp} | E-mail: ${sectorsEmail}).`,
                                 });
+                              }
+                              
+                              if (setBriefingFields) {
+                                setBriefingFields(DEFAULT_BRIEFING_FIELDS);
                               }
                               playChime();
                             } catch (error: any) {
