@@ -7,6 +7,10 @@ import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
+import { createContext, useContext } from "react";
+
+export const PageShellContext = createContext(false);
+
 interface PageShellProps {
   title: string;
   subtitle?: string;
@@ -28,6 +32,11 @@ export function PageShell({
   contentClassName,
   showGlobalClientSelector = true,
 }: PageShellProps) {
+  const isNested = useContext(PageShellContext);
+
+  if (isNested) {
+    return <div className={cn("space-y-4", spacing, contentClassName)}>{children}</div>;
+  }
   const { resolvedTheme, setTheme } = useTheme();
   const { user, accessProfile } = useAuth();
   const crmClient = useOptionalCrmClient();

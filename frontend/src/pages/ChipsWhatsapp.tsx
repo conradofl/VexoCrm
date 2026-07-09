@@ -7,6 +7,7 @@ import Aquecimento from "./Aquecimento";
 import EvolutionAdmin from "./EvolutionAdmin";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { PageShell, PageShellContext } from "@/components/PageShell";
 
 export default function ChipsWhatsapp() {
   const { canAccessInternalPage, isAdminUser } = useAuth();
@@ -36,60 +37,66 @@ export default function ChipsWhatsapp() {
 
   if (!defaultTab) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
-        Você não possui permissão para gerenciar canais de WhatsApp.
-      </div>
+      <PageShell title="Canais & Chips" subtitle="Gerencie instâncias de WhatsApp e rotinas de aquecimento de chips">
+        <div className="p-8 text-center text-muted-foreground">
+          Você não possui permissão para gerenciar canais de WhatsApp.
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="w-full space-y-6">
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <div className="border-b border-slate-200 dark:border-white/10 pb-2">
-          <TabsList className="flex w-full max-w-lg bg-muted border border-border h-10 p-1">
+    <PageShell title="Canais & Chips" subtitle="Gerencie instâncias de WhatsApp e rotinas de aquecimento de chips">
+      <PageShellContext.Provider value={true}>
+        <div className="w-full space-y-6">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+            <div className="border-b border-slate-200 dark:border-white/10 pb-2">
+              <TabsList className="flex w-full max-w-lg bg-muted border border-border h-10 p-1">
+                {hasConexoes && (
+                  <TabsTrigger value="conexoes" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <Wifi className="h-3.5 w-3.5 mr-1.5" />
+                    Conexões
+                  </TabsTrigger>
+                )}
+                {hasAquecimento && (
+                  <TabsTrigger value="aquecimento" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <Flame className="h-3.5 w-3.5 mr-1.5" />
+                    Aquecimento
+                  </TabsTrigger>
+                )}
+                {hasEvolutionAdmin && (
+                  <TabsTrigger value="evolution-admin" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <ShieldAlert className="h-3.5 w-3.5 mr-1.5" />
+                    Evolution Admin
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </div>
+
             {hasConexoes && (
-              <TabsTrigger value="conexoes" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Wifi className="h-3.5 w-3.5 mr-1.5" />
-                Conexões
-              </TabsTrigger>
+              <TabsContent value="conexoes" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <Conexoes />
+                </ErrorBoundary>
+              </TabsContent>
             )}
             {hasAquecimento && (
-              <TabsTrigger value="aquecimento" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Flame className="h-3.5 w-3.5 mr-1.5" />
-                Aquecimento
-              </TabsTrigger>
+              <TabsContent value="aquecimento" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <Aquecimento />
+                </ErrorBoundary>
+              </TabsContent>
             )}
             {hasEvolutionAdmin && (
-              <TabsTrigger value="evolution-admin" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <ShieldAlert className="h-3.5 w-3.5 mr-1.5" />
-                Evolution Admin
-              </TabsTrigger>
+              <TabsContent value="evolution-admin" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <EvolutionAdmin />
+                </ErrorBoundary>
+              </TabsContent>
             )}
-          </TabsList>
+          </Tabs>
         </div>
-
-        {hasConexoes && (
-          <TabsContent value="conexoes" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-            <ErrorBoundary>
-              <Conexoes />
-            </ErrorBoundary>
-          </TabsContent>
-        )}
-        {hasAquecimento && (
-          <TabsContent value="aquecimento" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-            <ErrorBoundary>
-              <Aquecimento />
-            </ErrorBoundary>
-          </TabsContent>
-        )}
-        {hasEvolutionAdmin && (
-          <TabsContent value="evolution-admin" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-            <ErrorBoundary>
-              <EvolutionAdmin />
-            </ErrorBoundary>
-          </TabsContent>
-        )}
-      </Tabs>
-    </div>
+      </PageShellContext.Provider>
+    </PageShell>
   );
 }

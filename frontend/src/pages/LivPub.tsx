@@ -15,7 +15,7 @@ import {
   TrendingUp,
   Sliders
 } from "lucide-react";
-import { PageShell } from "@/components/PageShell";
+import { PageShell, PageShellContext } from "@/components/PageShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -264,36 +264,38 @@ export default function LivPub() {
       title="LivPub"
       subtitle="Módulo específico de inteligência e automação para LivPub"
     >
-      <div className="w-full space-y-6">
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-          <div className="border-b border-slate-200 dark:border-white/10 pb-2 mb-4">
-            <TabsList className="flex w-full max-w-md bg-muted border border-border h-10 p-1">
-              <TabsTrigger value="painel" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                Painel
-              </TabsTrigger>
-              <TabsTrigger value="relacionamento" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Sliders className="h-3.5 w-3.5 mr-1.5" />
-                Relacionamento
-              </TabsTrigger>
-              <TabsTrigger value="eventos" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Calendar className="h-3.5 w-3.5 mr-1.5" />
-                Eventos
-              </TabsTrigger>
-            </TabsList>
-          </div>
+      <PageShellContext.Provider value={true}>
+        <div className="w-full space-y-6">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+            <div className="border-b border-slate-200 dark:border-white/10 pb-2 mb-4">
+              <TabsList className="flex w-full max-w-md bg-muted border border-border h-10 p-1">
+                <TabsTrigger value="painel" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  Painel
+                </TabsTrigger>
+                <TabsTrigger value="relacionamento" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                  <Sliders className="h-3.5 w-3.5 mr-1.5" />
+                  Relacionamento
+                </TabsTrigger>
+                <TabsTrigger value="eventos" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                  <Calendar className="h-3.5 w-3.5 mr-1.5" />
+                  Eventos
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-          <TabsContent value="painel" className="focus-visible:outline-none focus-visible:ring-0">
-            <PainelLivPub />
-          </TabsContent>
-          <TabsContent value="relacionamento" className="focus-visible:outline-none focus-visible:ring-0">
-            <Relacionamento />
-          </TabsContent>
-          <TabsContent value="eventos" className="focus-visible:outline-none focus-visible:ring-0">
-            <Eventos />
-          </TabsContent>
-        </Tabs>
-      </div>
+            <TabsContent value="painel" className="focus-visible:outline-none focus-visible:ring-0">
+              <PainelLivPub />
+            </TabsContent>
+            <TabsContent value="relacionamento" className="focus-visible:outline-none focus-visible:ring-0">
+              <Relacionamento />
+            </TabsContent>
+            <TabsContent value="eventos" className="focus-visible:outline-none focus-visible:ring-0">
+              <Eventos />
+            </TabsContent>
+          </Tabs>
+        </div>
+      </PageShellContext.Provider>
     </PageShell>
   );
 }

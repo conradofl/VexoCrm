@@ -34,7 +34,8 @@ import GeracaoDigitalBriefings from "./pages/GeracaoDigitalBriefings";
 import AgenteIA from "./pages/AgenteIA";
 import ChipsWhatsapp from "./pages/ChipsWhatsapp";
 import AdminPanel from "./pages/AdminPanel";
-import ApresentacaoUnificada from "./pages/ApresentacaoUnificada";
+import VexoPitch from "./pages/VexoPitch";
+import GeracaoDigitalPitch from "./pages/GeracaoDigitalPitch";
 
 const queryClient = new QueryClient();
 
@@ -153,14 +154,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="eventos"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <Eventos />
-                  </ProtectedRoute>
-                }
-              />
+
               <Route
                 path="leads"
                 element={
@@ -279,11 +273,18 @@ const App = () => (
                 path="apresentacao"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
-                    <ApresentacaoUnificada />
+                    <VexoPitch />
                   </ProtectedRoute>
                 }
               />
-              <Route path="apresentacao-gd" element={<Navigate to="/crm/apresentacao?deck=gd" replace />} />
+              <Route
+                path="apresentacao-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalPitch />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="briefings-gd"
                 element={

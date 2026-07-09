@@ -7,6 +7,7 @@ import UserAccessManagement from "./UserAccessManagement";
 import WebhooksIntegrations from "./WebhooksIntegrations";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
+import { PageShell, PageShellContext } from "@/components/PageShell";
 
 export default function AdminPanel() {
   const { canAccessInternalPage } = useAuth();
@@ -37,60 +38,66 @@ export default function AdminPanel() {
 
   if (!defaultTab) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
-        Você não possui permissão para acessar nenhuma ferramenta administrativa.
-      </div>
+      <PageShell title="Administrador" subtitle="Gerencie empresas, usuários e integrações de sistema">
+        <div className="p-8 text-center text-muted-foreground">
+          Você não possui permissão para acessar nenhuma ferramenta administrativa.
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="w-full space-y-6">
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <div className="border-b border-slate-200 dark:border-white/10 pb-2">
-          <TabsList className="flex w-full max-w-lg bg-muted border border-border h-10 p-1">
+    <PageShell title="Administrador" subtitle="Gerencie empresas, usuários e integrações de sistema">
+      <PageShellContext.Provider value={true}>
+        <div className="w-full space-y-6">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+            <div className="border-b border-slate-200 dark:border-white/10 pb-2">
+              <TabsList className="flex w-full max-w-lg bg-muted border border-border h-10 p-1">
+                {hasEmpresas && (
+                  <TabsTrigger value="empresas" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <Building2 className="h-3.5 w-3.5 mr-1.5" />
+                    Empresas
+                  </TabsTrigger>
+                )}
+                {hasUsuarios && (
+                  <TabsTrigger value="usuarios" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                    Usuários
+                  </TabsTrigger>
+                )}
+                {hasIntegracoes && (
+                  <TabsTrigger value="integracoes" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <Server className="h-3.5 w-3.5 mr-1.5" />
+                    Integrações
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </div>
+
             {hasEmpresas && (
-              <TabsTrigger value="empresas" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Building2 className="h-3.5 w-3.5 mr-1.5" />
-                Empresas
-              </TabsTrigger>
+              <TabsContent value="empresas" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <Tenants />
+                </ErrorBoundary>
+              </TabsContent>
             )}
             {hasUsuarios && (
-              <TabsTrigger value="usuarios" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
-                Usuários
-              </TabsTrigger>
+              <TabsContent value="usuarios" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <UserAccessManagement />
+                </ErrorBoundary>
+              </TabsContent>
             )}
             {hasIntegracoes && (
-              <TabsTrigger value="integracoes" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                <Server className="h-3.5 w-3.5 mr-1.5" />
-                Integrações
-              </TabsTrigger>
+              <TabsContent value="integracoes" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <WebhooksIntegrations />
+                </ErrorBoundary>
+              </TabsContent>
             )}
-          </TabsList>
+          </Tabs>
         </div>
-
-        {hasEmpresas && (
-          <TabsContent value="empresas" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-            <ErrorBoundary>
-              <Tenants />
-            </ErrorBoundary>
-          </TabsContent>
-        )}
-        {hasUsuarios && (
-          <TabsContent value="usuarios" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-            <ErrorBoundary>
-              <UserAccessManagement />
-            </ErrorBoundary>
-          </TabsContent>
-        )}
-        {hasIntegracoes && (
-          <TabsContent value="integracoes" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-            <ErrorBoundary>
-              <WebhooksIntegrations />
-            </ErrorBoundary>
-          </TabsContent>
-        )}
-      </Tabs>
-    </div>
+      </PageShellContext.Provider>
+    </PageShell>
   );
 }
