@@ -53,7 +53,8 @@ export async function processSlackMessageToEvolution(pool, event) {
     const payload = {
       number: number,
       options: { delay: 1200, presence: "composing" },
-      textMessage: { text: text }
+      textMessage: { text: text },
+      text: text // Propriedade obrigatória exigida pela Evolution
     };
 
     let attempt = 1;
