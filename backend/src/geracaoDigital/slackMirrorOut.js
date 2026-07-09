@@ -1,0 +1,108 @@
+import fetch from "node-fetch";
+
+// Processar a mensagem de saída do Slack e enviar para a Evolution API (WhatsApp)
+export async function processSlackMessageToEvolution(pool, event) {
+  const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+  
+  if (!event || event.type !== "message") return;
+
+  // 1. Ignorar bots e mensagens de sistema
+  if (event.bot_id || event.subtype) return;
+
+  const text = event.text || "";
+  const channel = event.channel; // slack_channel_id
+
+  // 2. Ignorar mensagens que começam com "//" (mensagens internas)
+  if (text.trim().startsWith("//")) return;
+
+  try {
+    // 3. Lookup reverso na tabela slack_channel_map
+    const resMap = await pool.query(
+      `SELECT whatsapp_jid FROM public.slack_channel_map WHERE slack_channel_id = $1 LIMIT 1`,
+      [channel]
+    );
+
+    if (resMap.rows.length === 0 || !resMap.rows[0].whatsapp_jid) {
+      // Se não achar correspondência, a mensagem pode ser num canal não mapeado. Ignora.
+      return;
+    }
+
+    const targetJid = resMap.rows[0].whatsapp_jid;
+    
+    // 4. Integração Evolution API
+    const evolutionUrl = process.env.GD_EVOLUTION_URL;
+    const evolutionToken = process.env.GD_EVOLUTION_TOKEN;
+    const instanceName = process.env.GD_EVOLUTION_INSTANCE || "gd-oficial";
+
+    if (!evolutionUrl || !evolutionToken) {
+      throw new Error("Evolution URL ou Token não configurados no ambiente.");
+    }
+
+    let baseUrl = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
+    if (baseUrl.includes("/message/sendText")) {
+      baseUrl = baseUrl.split("/message/sendText")[0];
+    }
+    const endpoint = `${baseUrl}/message/sendText/${instanceName}`;
+
+    // Clean JID to number format if needed (e.g. remove @s.whatsapp.net for Evolution)
+    let number = targetJid;
+    if (number.includes("@")) {
+      number = number.split("@")[0];
+    }
+
+    const payload = {
+      number: number,
+      options: { delay: 1200, presence: "composing" },
+      textMessage: { text: text }
+    };
+
+    let attempt = 1;
+    const maxAttempts = 3;
+    let sent = false;
+
+    // 5. Retry loop
+    while (attempt <= maxAttempts && !sent) {
+      try {
+        const evRes = await fetch(endpoint, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json", 
+            "apikey": evolutionToken 
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!evRes.ok) {
+          const bodyTxt = await evRes.text();
+          throw new Error(`Status ${evRes.status}: ${bodyTxt}`);
+        }
+        sent = true;
+      } catch (e) {
+        if (attempt === maxAttempts) {
+          throw e; // Lança para o catch externo
+        }
+        // Espera backoff exponencial: 1s, 2s...
+        await new Promise(r => setTimeout(r, attempt * 1000));
+        attempt++;
+      }
+    }
+
+  } catch (error) {
+    console.error("[gd-mirror-out] Erro ao enviar para Evolution:", error);
+    
+    if (SLACK_BOT_TOKEN) {
+      try {
+        await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_BOT_TOKEN}` },
+          body: JSON.stringify({
+            channel: "#logs-vexo",
+            text: `🚨 *Erro no gd-mirror-out*\nFalha ao enviar mensagem do canal <#${channel}> para o WhatsApp.\n\`\`\`${error.message}\`\`\``
+          })
+        });
+      } catch (e) {
+        // Ignora
+      }
+    }
+  }
+}
