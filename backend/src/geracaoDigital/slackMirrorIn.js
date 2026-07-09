@@ -19,8 +19,8 @@ export async function processEvolutionMessageToSlack(pool, payload) {
   // 1. Ignorar fromMe (anti-loop)
   if (fromMe) return;
 
-  // 2. Ignorar grupos
-  if (remoteJid && remoteJid.endsWith("@g.us")) return;
+  // 2. Trava de Grupos Removida
+  // if (remoteJid && remoteJid.endsWith("@g.us")) return;
 
   // 3. Deduplicação via Redis
   const redis = getGdRedisClient();
