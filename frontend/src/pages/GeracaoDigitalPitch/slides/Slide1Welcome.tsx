@@ -12,44 +12,44 @@ interface Slide1WelcomeProps {
 
 export function Slide1Welcome({ theme, onNext }: Slide1WelcomeProps) {
   return (
-              <div className="max-w-4xl w-full text-center space-y-8 animate-fade-in-up">
-                <div className="space-y-4">
-                  <Badge className="bg-indigo-500/10 border-indigo-500/20 text-indigo-400 text-xs px-4 py-1.5 uppercase tracking-widest font-mono">
+              <div className="max-w-4xl w-full text-center space-y-10 animate-fade-in-up">
+                <div className="space-y-6">
+                  <Badge className="bg-indigo-50 border-indigo-200 text-indigo-700 text-sm px-5 py-2 uppercase tracking-widest font-mono shadow-sm">
                     Slide 01 · Parceria Comercial
                   </Badge>
-                  <h1 className="text-5xl md:text-7xl font-black tracking-tight text-white leading-tight">
-                    Seja muito bem-vindo à <span className="bg-gradient-to-r from-indigo-400 via-cyan-400 to-purple-400 bg-clip-text text-transparent">{theme.agencyName}</span>
+                  <h1 className="text-6xl md:text-8xl font-black tracking-tight text-slate-900 leading-tight">
+                    Seja muito bem-vindo à <span className="bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-800 bg-clip-text text-transparent">{theme.agencyName}</span>
                   </h1>
-                  <p className="text-base md:text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed">
+                  <p className="text-lg md:text-2xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
                     {theme.agencySubtitle}
                   </p>
                 </div>
 
-                <div className="max-w-md mx-auto p-6 rounded-2xl border border-white/5 bg-slate-900/20 backdrop-blur-lg space-y-4">
-                  <p className="text-xs text-slate-400 font-medium">Reunião de Onboarding estruturada para:</p>
-                  <div className="flex items-center justify-center gap-3">
+                <div className="max-w-lg mx-auto p-8 rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 space-y-6">
+                  <p className="text-sm text-slate-500 font-semibold uppercase tracking-wider">Reunião de Onboarding estruturada para:</p>
+                  <div className="flex items-center justify-center gap-4">
                     {theme.prospectLogoUrl ? (
-                      <div className="h-10 w-24 rounded-lg border border-white/10 p-1.5 bg-slate-900/60 flex items-center justify-center overflow-hidden">
+                      <div className="h-14 w-32 rounded-xl border border-slate-100 p-2 bg-slate-50 flex items-center justify-center overflow-hidden shadow-sm">
                         <img src={theme.prospectLogoUrl} alt="Logo Prospect" className="max-h-full max-w-full object-contain" />
                       </div>
                     ) : (
-                      <div className="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center font-black text-emerald-400 text-xs">
+                      <div className="h-12 w-12 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center font-black text-emerald-700 text-lg shadow-sm">
                         {getInitials(theme.prospectName)}
                       </div>
                     )}
-                    <span className="text-lg font-black text-white">{theme.prospectName}</span>
+                    <span className="text-2xl font-black text-slate-900">{theme.prospectName}</span>
                   </div>
-                  <div className="h-px bg-white/5" />
-                  <p className="text-[10px] text-slate-500 font-mono">Status: Pronto para qualificação do plano tático</p>
+                  <div className="h-px bg-slate-100" />
+                  <p className="text-xs text-slate-500 font-mono font-medium">Status: Pronto para qualificação do plano tático</p>
                 </div>
 
-                <div className="pt-4 flex justify-center gap-3">
+                <div className="pt-6 flex justify-center gap-3">
                   <Button
                     onClick={onNext}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold px-8 py-5 text-sm rounded-xl shadow-lg shadow-indigo-600/30 group"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-10 py-7 text-lg rounded-2xl shadow-xl shadow-indigo-600/20 group transition-all"
                   >
                     Avançar para Metodologia
-                    <ArrowRight className="h-4.5 w-4.5 ml-2 group-hover:translate-x-1 transition-transform" />
+                    <ArrowRight className="h-6 w-6 ml-3 group-hover:translate-x-1 transition-transform" />
                   </Button>
                 </div>
               </div>

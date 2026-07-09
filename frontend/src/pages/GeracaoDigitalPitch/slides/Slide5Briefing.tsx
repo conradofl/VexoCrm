@@ -36,13 +36,13 @@ export function Slide5Briefing({
   onGoToClosing,
 }: Slide5BriefingProps) {
   return (
-    <div className="max-w-6xl w-full space-y-4 animate-fade-in-up">
-      <div className="text-center space-y-2">
-        <Badge className="bg-indigo-500/10 border-indigo-500/20 text-indigo-400 text-xs px-4 py-1.5 uppercase tracking-wider font-mono">
+    <div className="max-w-7xl w-full space-y-8 animate-fade-in-up">
+      <div className="text-center space-y-4">
+        <Badge className="bg-indigo-50 border-indigo-200 text-indigo-700 text-sm px-5 py-2 uppercase tracking-widest font-mono shadow-sm">
           Slide 05 · Onboarding Inteligente (Integração com IA)
         </Badge>
-        <h2 className="text-3xl md:text-5xl font-black text-white">Questionário Automatizado por IA</h2>
-        <p className="text-xs md:text-sm text-slate-400 max-w-2xl mx-auto">
+        <h2 className="text-4xl md:text-6xl font-black text-slate-900">Questionário Automatizado por IA</h2>
+        <p className="text-base md:text-lg text-slate-600 max-w-3xl mx-auto">
           Insira a conversa de briefing no campo esquerdo. A IA processará a transcrição de voz/texto, preencherá os 14 requisitos operacionais e preparará o handoff técnico.
         </p>
       </div>

@@ -13,19 +13,19 @@ interface Slide3OrgChartProps {
 
 export function Slide3OrgChart({ team, selectedMember, onSelectMember, onCloseMemberDetail }: Slide3OrgChartProps) {
   return (
-              <div className="max-w-7xl w-full space-y-6 animate-fade-in-up">
-                <div className="text-center space-y-3">
-                  <Badge className="bg-indigo-500/10 border-indigo-500/20 text-indigo-400 text-xs px-4 py-1.5 uppercase tracking-wider font-mono">
+              <div className="max-w-7xl w-full space-y-12 animate-fade-in-up">
+                <div className="text-center space-y-4">
+                  <Badge className="bg-indigo-50 border-indigo-200 text-indigo-700 text-sm px-5 py-2 uppercase tracking-widest font-mono shadow-sm">
                     Slide 03 · Estrutura Organizacional Interativa
                   </Badge>
-                  <h2 className="text-3xl md:text-5xl font-black text-white">Nossa Equipe de Performance</h2>
-                  <p className="text-xs md:text-sm text-slate-400 max-w-2xl mx-auto">
+                  <h2 className="text-4xl md:text-6xl font-black text-slate-900">Nossa Equipe de Performance</h2>
+                  <p className="text-base md:text-lg text-slate-600 max-w-2xl mx-auto">
                     Conheça os especialistas que farão o motor digital da sua empresa rodar. Clique sobre um profissional para inspecionar suas atribuições e ferramentas.
                   </p>
                 </div>
 
                 {/* The Tech Organogram Tree */}
-                <div className="relative border border-white/5 bg-slate-950/80 p-8 rounded-3xl overflow-x-auto">
+                <div className="relative border border-slate-200 bg-white p-10 rounded-3xl overflow-x-auto shadow-xl shadow-slate-200/50">
                   <div className="w-full max-w-[1200px] mx-auto pb-32">
                     
                     {/* Level 1 Horizontal Connect Bar */}

@@ -18,13 +18,13 @@ interface BriefingFormFieldsProps {
 export function BriefingFormFields({ briefingFields, setBriefingFields, handleSendBriefing }: BriefingFormFieldsProps) {
   return (
                   <div className="md:col-span-3">
-                    <Card className="border-white/5 bg-slate-900/30 backdrop-blur-md max-h-[500px] overflow-y-auto">
-                      <CardHeader className="pb-3 border-b border-white/5 flex flex-row items-center justify-between sticky top-0 bg-slate-900/80 backdrop-blur z-20">
+                    <Card className="border-slate-200 bg-white shadow-lg shadow-slate-200/50 rounded-3xl max-h-[600px] overflow-y-auto">
+                      <CardHeader className="pb-4 border-b border-slate-100 flex flex-row items-center justify-between sticky top-0 bg-slate-50 z-20">
                         <div>
-                          <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-400">Requisitos do Briefing da Agência</CardTitle>
-                          <CardDescription className="text-[10px]">20 dados chaves coletados e validados pelo robô.</CardDescription>
+                          <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-700">Requisitos do Briefing da Agência</CardTitle>
+                          <CardDescription className="text-xs text-slate-500">20 dados chaves coletados e validados pelo robô.</CardDescription>
                         </div>
-                        <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-bold font-mono">
+                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 font-bold font-mono px-3 py-1 text-xs">
                           {briefingFields.filter(f => f.value).length} / 20 Completos
                         </Badge>
                       </CardHeader>
@@ -34,24 +34,24 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                           {briefingFields.map((field) => {
                             if (field.id === "publico_alvo") {
                               return (
-                                <div key={field.id} className="sm:col-span-2 p-4 rounded-xl border border-white/5 bg-slate-950/40 space-y-3">
+                                <div key={field.id} className="sm:col-span-2 p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-4">
                                   <div className="flex justify-between items-center">
-                                    <Label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">{field.label}</Label>
+                                    <Label className="text-xs font-bold text-slate-700 uppercase tracking-wider">{field.label}</Label>
                                     {field.status === "completed" ? (
-                                      <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[8px] font-bold flex items-center gap-0.5 px-1 py-0 h-4">
-                                        <Check className="h-2.5 w-2.5 text-emerald-400" />
+                                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold flex items-center gap-1 px-2 py-0.5 h-5 shadow-sm">
+                                        <Check className="h-3 w-3 text-emerald-600" />
                                         IA ({field.confidence}%)
                                       </Badge>
                                     ) : (
-                                      <Badge className="bg-slate-950 text-slate-500 text-[8px] px-1 py-0 h-4 border border-white/5">
+                                      <Badge className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 h-5 border border-slate-300 font-medium">
                                         Pendente
                                       </Badge>
                                     )}
                                   </div>
-                                  <div className="grid gap-3 sm:grid-cols-2">
+                                  <div className="grid gap-4 sm:grid-cols-2">
                                     {field.subfields?.map((sf) => (
-                                      <div key={sf.id} className="space-y-1">
-                                        <Label className="text-[10px] text-slate-400 font-medium">{sf.label}</Label>
+                                      <div key={sf.id} className="space-y-1.5">
+                                        <Label className="text-[11px] text-slate-600 font-semibold">{sf.label}</Label>
                                         <Input
                                           value={sf.value}
                                           onChange={(e) => {
@@ -74,7 +74,7 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                                             );
                                           }}
                                           placeholder={`Defina ${sf.label.toLowerCase()}`}
-                                          className="h-8 text-xs border-white/5 bg-slate-950/60 focus:border-indigo-500/50 text-slate-200"
+                                          className="h-10 text-sm border-slate-300 bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 shadow-sm"
                                         />
                                       </div>
                                     ))}
@@ -118,16 +118,16 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                               };
 
                               return (
-                                <div key={field.id} className="sm:col-span-2 p-4 rounded-xl border border-white/5 bg-slate-950/40 space-y-3">
+                                <div key={field.id} className="sm:col-span-2 p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-4">
                                   <div className="flex justify-between items-center">
-                                    <Label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">{field.label}</Label>
+                                    <Label className="text-xs font-bold text-slate-700 uppercase tracking-wider">{field.label}</Label>
                                     {field.status === "completed" ? (
-                                      <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[8px] font-bold flex items-center gap-0.5 px-1 py-0 h-4">
-                                        <Check className="h-2.5 w-2.5 text-emerald-400" />
+                                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold flex items-center gap-1 px-2 py-0.5 h-5 shadow-sm">
+                                        <Check className="h-3 w-3 text-emerald-600" />
                                         IA ({field.confidence}%)
                                       </Badge>
                                     ) : (
-                                      <Badge className="bg-slate-950 text-slate-500 text-[8px] px-1 py-0 h-4 border border-white/5">
+                                      <Badge className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 h-5 border border-slate-300 font-medium">
                                         Pendente
                                       </Badge>
                                     )}
@@ -155,10 +155,10 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                                             }
                                           }}
                                           className={cn(
-                                            "text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all duration-200",
+                                            "text-xs font-semibold px-3 py-1.5 rounded-full border transition-all duration-200",
                                             isSelected 
-                                              ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-md shadow-indigo-600/10" 
-                                              : "bg-slate-900 border-white/5 text-slate-400 hover:text-slate-300 hover:bg-slate-800"
+                                              ? "bg-indigo-100 border-indigo-300 text-indigo-700 shadow-sm" 
+                                              : "bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-sm"
                                           )}
                                         >
                                           {opt === "Outros ______________" ? "Outros" : opt}
@@ -167,13 +167,13 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                                     })}
                                   </div>
                                   {isProdutos && hasOutros && (
-                                    <div className="space-y-1 mt-2 animate-fade-in-up">
-                                      <Label className="text-[10px] text-slate-400 font-mono">Especifique os outros produtos:</Label>
+                                    <div className="space-y-1.5 mt-3 animate-fade-in-up">
+                                      <Label className="text-xs text-slate-600 font-medium">Especifique os outros produtos:</Label>
                                       <Input
                                         value={outrosText}
                                         onChange={(e) => handleOutrosTextChange(e.target.value)}
                                         placeholder="Ex: Assessoria de imprensa, Tráfego para afiliados..."
-                                        className="h-8 text-xs border-white/5 bg-slate-950/60 focus:border-indigo-500/50 text-slate-200"
+                                        className="h-10 text-sm border-slate-300 bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 shadow-sm"
                                       />
                                     </div>
                                   )}
@@ -183,16 +183,16 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
 
                             if (field.type === "radio") {
                               return (
-                                <div key={field.id} className="space-y-1">
+                                <div key={field.id} className="space-y-1.5">
                                   <div className="flex justify-between items-center">
-                                    <Label className="text-[11px] font-bold text-slate-300 leading-tight">{field.label}</Label>
+                                    <Label className="text-xs font-bold text-slate-700 leading-tight">{field.label}</Label>
                                     {field.status === "completed" ? (
-                                      <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[8px] font-bold flex items-center gap-0.5 px-1 py-0 h-4">
-                                        <Check className="h-2.5 w-2.5 text-emerald-400" />
+                                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold flex items-center gap-1 px-2 py-0.5 h-5 shadow-sm">
+                                        <Check className="h-3 w-3 text-emerald-600" />
                                         IA ({field.confidence}%)
                                       </Badge>
                                     ) : (
-                                      <Badge className="bg-slate-950 text-slate-500 text-[8px] px-1 py-0 h-4 border border-white/5">
+                                      <Badge className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 h-5 border border-slate-300 font-medium">
                                         Pendente
                                       </Badge>
                                     )}
@@ -210,10 +210,10 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                                             );
                                           }}
                                           className={cn(
-                                            "flex-1 text-[10px] font-semibold py-1.5 px-2.5 rounded-lg border transition-all duration-200",
+                                            "flex-1 text-xs font-semibold py-2 px-3 rounded-xl border transition-all duration-200",
                                             isSelected 
-                                              ? "bg-indigo-600/20 border-indigo-500 text-indigo-300" 
-                                              : "bg-slate-950/60 border-white/5 text-slate-400 hover:text-slate-300 hover:bg-slate-900"
+                                              ? "bg-indigo-100 border-indigo-300 text-indigo-700 shadow-sm" 
+                                              : "bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-sm"
                                           )}
                                         >
                                           {opt}
@@ -227,16 +227,16 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
 
                             if (field.type === "textarea") {
                               return (
-                                <div key={field.id} className="sm:col-span-2 space-y-1">
+                                <div key={field.id} className="sm:col-span-2 space-y-1.5">
                                   <div className="flex justify-between items-center">
-                                    <Label className="text-[11px] font-bold text-slate-300" htmlFor={field.id}>{field.label}</Label>
+                                    <Label className="text-xs font-bold text-slate-700" htmlFor={field.id}>{field.label}</Label>
                                     {field.status === "completed" ? (
-                                      <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[8px] font-bold flex items-center gap-0.5 px-1 py-0 h-4">
-                                        <Check className="h-2.5 w-2.5 text-emerald-400" />
+                                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold flex items-center gap-1 px-2 py-0.5 h-5 shadow-sm">
+                                        <Check className="h-3 w-3 text-emerald-600" />
                                         IA ({field.confidence}%)
                                       </Badge>
                                     ) : (
-                                      <Badge className="bg-slate-950 text-slate-500 text-[8px] px-1 py-0 h-4 border border-white/5">
+                                      <Badge className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 h-5 border border-slate-300 font-medium">
                                         Pendente
                                       </Badge>
                                     )}
@@ -252,8 +252,8 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                                     }}
                                     placeholder={field.placeholder}
                                     className={cn(
-                                      "w-full h-20 p-3 text-xs bg-slate-950/80 border border-white/5 rounded-xl text-slate-200 font-sans focus:border-indigo-500/50 outline-none leading-relaxed resize-none",
-                                      field.status === "completed" && "border-emerald-500/20 bg-emerald-950/5 focus:border-emerald-500/50"
+                                      "w-full h-24 p-4 text-sm bg-white border border-slate-200 rounded-2xl text-slate-900 font-sans focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none leading-relaxed resize-none shadow-sm",
+                                      field.status === "completed" && "border-emerald-300 bg-emerald-50 focus:border-emerald-500 focus:ring-emerald-500/10"
                                     )}
                                   />
                                 </div>
@@ -261,16 +261,16 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                             }
 
                             return (
-                              <div key={field.id} className="space-y-1">
+                              <div key={field.id} className="space-y-1.5">
                                 <div className="flex justify-between items-center gap-1.5">
-                                  <Label className="text-[11px] font-bold text-slate-300 leading-tight" htmlFor={field.id}>{field.label}</Label>
+                                  <Label className="text-xs font-bold text-slate-700 leading-tight" htmlFor={field.id}>{field.label}</Label>
                                   {field.status === "completed" ? (
-                                    <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[8px] font-bold flex items-center gap-0.5 px-1 py-0 h-4">
-                                      <Check className="h-2.5 w-2.5 text-emerald-400" />
+                                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px] font-bold flex items-center gap-1 px-2 py-0.5 h-5 shadow-sm">
+                                      <Check className="h-3 w-3 text-emerald-600" />
                                       IA ({field.confidence}%)
                                     </Badge>
                                   ) : (
-                                    <Badge className="bg-slate-950 text-slate-500 text-[8px] px-1 py-0 h-4 border border-white/5">
+                                    <Badge className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 h-5 border border-slate-300 font-medium">
                                       Pendente
                                     </Badge>
                                   )}
@@ -286,8 +286,8 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                                   }}
                                   placeholder={field.placeholder}
                                   className={cn(
-                                    "h-8 text-xs border-white/5 bg-slate-950/60 transition-colors focus:border-indigo-500/50 text-slate-200",
-                                    field.status === "completed" && "border-emerald-500/20 bg-emerald-950/5 focus:border-emerald-500/50"
+                                    "h-10 text-sm border-slate-200 bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 shadow-sm",
+                                    field.status === "completed" && "border-emerald-300 bg-emerald-50 focus:border-emerald-500 focus:ring-emerald-500/10 text-emerald-900"
                                   )}
                                 />
                               </div>
@@ -296,13 +296,13 @@ export function BriefingFormFields({ briefingFields, setBriefingFields, handleSe
                         </div>
 
                         {/* Send Dossier Action */}
-                        <div className="pt-4 border-t border-white/5 flex justify-end">
+                        <div className="pt-6 border-t border-slate-100 sticky bottom-0 bg-white p-4 -mx-6 -mb-6 shadow-[0_-4px_15px_-3px_rgba(0,0,0,0.05)] rounded-b-3xl">
                           <Button
                             onClick={handleSendBriefing}
-                            className="bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white h-9 px-6 gap-2"
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 font-black text-sm text-white h-12 gap-2 shadow-lg shadow-emerald-600/20"
                           >
-                            <FileText className="h-4 w-4" />
-                            Enviar Dossiê & Disparar Handoff
+                            <FileText className="h-5 w-5" />
+                            Avançar e Revisar Handoff
                           </Button>
                         </div>
 

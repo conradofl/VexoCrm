@@ -94,9 +94,13 @@ export function Slide6Dispatch({
     setWhatsappGroupName(`GD & ${firstName}`);
   }, [theme.prospectName]);
 
+  const [isLoadingSlack, setIsLoadingSlack] = useState(true);
+  const [slackError, setSlackError] = useState<string | null>("");
+
   useEffect(() => {
     async function fetchSlackUsers() {
       try {
+        setIsLoadingSlack(true);
         const token = (await user?.getIdToken()) || "";
         const response = await fetch(`${API_BASE_URL}/api/geracao-digital/slack-users`, {
           headers: { "Authorization": `Bearer ${token}` }
@@ -104,13 +108,21 @@ export function Slide6Dispatch({
         const data = await response.json();
         if (data.success && data.users) {
           setSlackUsers(data.users);
+          setSlackError(null);
+        } else if (data.error) {
+          setSlackError(data.error);
         }
       } catch (err) {
         console.error("Erro ao buscar usuários do slack:", err);
+        setSlackError("Erro de conexão ao buscar usuários");
+      } finally {
+        setIsLoadingSlack(false);
       }
     }
     fetchSlackUsers();
   }, [user]);
+
+  const fieldsWithValues = briefingFields.filter(f => f.value && String(f.value).trim() !== "");
 
   return (
               <div className="max-w-5xl w-full space-y-6 animate-fade-in-up">
@@ -125,59 +137,69 @@ export function Slide6Dispatch({
                     Confirme as informações coletadas no briefing e dispare o dossiê para o prospect e para os setores técnicos responsáveis.
                   </p>
                 </div>
-
-                <div className="grid gap-6 md:grid-cols-2 mt-4 items-stretch">
-                  {/* Left Side: Briefing Summary list */}
-                  <Card className="border-white/5 bg-slate-900/20 backdrop-blur-md p-6 flex flex-col justify-between max-h-[460px]">
-                    <div className="space-y-3 overflow-y-auto pr-1">
-                      <span className="font-bold text-slate-400 uppercase text-[9px] font-mono tracking-wider block">Resumo do Briefing Coletado</span>
-                      
-                      <div className="space-y-2">
-                        {briefingFields.map((f) => (
-                          <div key={f.id} className="p-2.5 rounded-lg bg-slate-950/40 border border-white/5 space-y-1">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[10px] font-bold text-indigo-300 uppercase font-mono tracking-wider">{f.label}</span>
-                              {f.value ? (
-                                <Badge className="bg-emerald-500/15 text-emerald-400 text-[8px] font-bold py-0 px-1 border-none">Preenchido</Badge>
-                              ) : (
-                                <Badge className="bg-rose-500/15 text-rose-400 text-[8px] font-bold py-0 px-1 border-none">Vazio</Badge>
-                              )}
-                            </div>
-                            <p className="text-xs text-slate-300 leading-normal break-all font-sans">
-                              {f.value ? f.value : <span className="text-slate-500 italic">Não fornecido</span>}
-                            </p>
+                <div className="grid md:grid-cols-2 gap-6 h-full">
+                    {/* Left Side: Summary */}
+                    <Card className="border-slate-200 bg-white shadow-lg shadow-slate-200/50 rounded-3xl overflow-hidden flex flex-col max-h-[600px]">
+                      <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center sticky top-0 z-10">
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                            Resumo do Briefing Qualificado
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-1">Revise os dados antes de disparar o Handoff.</p>
+                        </div>
+                        <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 font-mono text-xs px-3 py-1 shadow-sm">
+                          {fieldsWithValues.length} Campos Preenchidos
+                        </Badge>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50/50">
+                        {briefingFields.map((field) => (
+                          <div key={field.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm">
+                            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{field.label}</div>
+                            {field.id === "publico_alvo" ? (
+                              <div className="space-y-2">
+                                {(field.subfields?.filter(sf => sf.value) || []).length > 0 ? (field.subfields?.filter(sf => sf.value) || []).map(sf => (
+                                  <div key={sf.id} className="text-sm">
+                                    <span className="font-semibold text-slate-700">{sf.label}:</span> <span className="text-slate-600">{sf.value}</span>
+                                  </div>
+                                )) : <Badge className="bg-rose-100 text-rose-600 text-[10px] font-bold py-0.5 px-2 border-none">Vazio</Badge>}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-700 leading-normal break-all font-sans">
+                                {field.value ? field.value : <span className="text-slate-400 italic">Não fornecido</span>}
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </Card>
+                    </Card>
 
                   {/* Right Side: Dispatch Options */}
-                  <Card className="border-white/5 bg-slate-900/20 backdrop-blur-md p-6 flex flex-col justify-between">
+                  <Card className="border-slate-200 bg-white shadow-lg shadow-slate-200/50 rounded-3xl p-6 flex flex-col justify-between max-h-[600px] overflow-y-auto">
                     {!dispatchSuccess ? (
-                      <div className="space-y-4 flex-1 flex flex-col justify-between">
-                        <div className="space-y-4">
-                          <div className="text-center space-y-1">
-                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Canais de Envio & Handoff</h4>
-                            <p className="text-[10px] text-slate-500">Selecione para onde deseja enviar o briefing qualificado.</p>
+                      <div className="space-y-5 flex-1 flex flex-col justify-between">
+                        <div className="space-y-5">
+                          <div className="text-center space-y-1.5">
+                            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Canais de Envio & Handoff</h4>
+                            <p className="text-xs text-slate-500">Selecione para onde deseja enviar o briefing qualificado.</p>
                           </div>
                           
-                          <div className="space-y-4">
+                          <div className="space-y-5">
                             {/* Section 1: Prospect */}
-                            <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3">
-                              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
-                                <h4 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Para o Cliente (Prospect)</h4>
+                            <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-4 shadow-sm">
+                              <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                                <h4 className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Para o Cliente (Prospect)</h4>
                               </div>
                               <div className="grid grid-cols-2 gap-4">
-                                <label className="flex items-start gap-2.5 cursor-pointer group">
+                                <label className="flex items-start gap-3 cursor-pointer group">
                                   <input
                                     type="checkbox"
                                     checked={sendToProspectWhatsapp}
                                     onChange={(e) => setSendToProspectWhatsapp(e.target.checked)}
-                                    className="mt-0.5 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
+                                    className="mt-1 rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-500 h-4 w-4 shadow-sm"
                                   />
                                   <div className="text-left flex-1">
-                                    <span className="text-xs font-bold text-slate-200 block group-hover:text-indigo-300 transition-colors">WhatsApp</span>
+                                    <span className="text-sm font-bold text-slate-700 block group-hover:text-indigo-600 transition-colors">WhatsApp</span>
                                     {sendToProspectWhatsapp && (
                                       <Input
                                         value={theme.whatsappNumber}
@@ -187,28 +209,28 @@ export function Slide6Dispatch({
                                           localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
                                         }}
                                         placeholder="Ex: (11) 98888-7777"
-                                        className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-indigo-500/50 text-white mt-1.5"
+                                        className="h-10 text-sm border-slate-300 bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 mt-2 shadow-sm"
                                       />
                                     )}
                                   </div>
                                 </label>
 
-                                <label className="flex items-start gap-2.5 cursor-pointer group">
+                                <label className="flex items-start gap-3 cursor-pointer group">
                                   <input
                                     type="checkbox"
                                     checked={sendToProspectEmail}
                                     onChange={(e) => setSendToProspectEmail(e.target.checked)}
-                                    className="mt-0.5 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50 h-4 w-4"
+                                    className="mt-1 rounded border-slate-300 bg-white text-indigo-600 focus:ring-indigo-500 h-4 w-4 shadow-sm"
                                   />
                                   <div className="text-left flex-1">
-                                    <span className="text-xs font-bold text-slate-200 block group-hover:text-indigo-300 transition-colors">E-mail</span>
+                                    <span className="text-sm font-bold text-slate-700 block group-hover:text-indigo-600 transition-colors">E-mail</span>
                                     {sendToProspectEmail && (
                                       <Input
                                         type="email"
                                         value={prospectEmail}
                                         onChange={(e) => setProspectEmail(e.target.value)}
                                         placeholder="Ex: cliente@empresa.com"
-                                        className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-indigo-500/50 text-white mt-1.5"
+                                        className="h-10 text-sm border-slate-300 bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 mt-2 shadow-sm"
                                       />
                                     )}
                                   </div>
@@ -217,33 +239,33 @@ export function Slide6Dispatch({
                             </div>
 
                             {/* Section 2: Handoff Interno */}
-                            <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3">
-                              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
-                                <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Handoff Interno (Setores Responsáveis)</h4>
+                            <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-4 shadow-sm">
+                              <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                                <h4 className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Handoff Interno (Setores Responsáveis)</h4>
                               </div>
-                              <label className="flex items-center gap-2.5 cursor-pointer group">
+                              <label className="flex items-center gap-3 cursor-pointer group">
                                 <input
                                   type="checkbox"
                                   checked={sendToSectors}
                                   onChange={(e) => setSendToSectors(e.target.checked)}
-                                  className="rounded border-slate-700 bg-slate-950 text-emerald-600 focus:ring-emerald-500/50 h-4 w-4"
+                                  className="rounded border-slate-300 bg-white text-emerald-600 focus:ring-emerald-500 h-4 w-4 shadow-sm"
                                 />
                                 <div className="text-left">
-                                  <span className="text-xs font-bold text-slate-200 block group-hover:text-emerald-300 transition-colors">Disparar Tarefas Automáticas e Dossiê (Tráfego, Design, etc)</span>
+                                  <span className="text-sm font-bold text-slate-700 block group-hover:text-emerald-600 transition-colors">Disparar Tarefas Automáticas e Dossiê (Tráfego, Design, etc)</span>
                                 </div>
                               </label>
 
                               {sendToSectors && (
-                                <div className="grid grid-cols-2 gap-4 pt-1 animate-fade-in-up">
+                                <div className="grid grid-cols-2 gap-4 pt-2 animate-fade-in-up">
                                   <div className="space-y-2">
-                                    <Label className="text-[9px] text-slate-400 uppercase font-mono flex items-center justify-between">
+                                    <Label className="text-[10px] text-slate-500 uppercase font-mono flex items-center justify-between">
                                       <span>WhatsApp (Grupo Setores)</span>
-                                      <button type="button" onClick={() => setSectorsWhatsapp([...sectorsWhatsapp, ""])} className="text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 rounded w-4 h-4 flex items-center justify-center font-bold">
+                                      <button type="button" onClick={() => setSectorsWhatsapp([...sectorsWhatsapp, ""])} className="text-emerald-600 hover:text-emerald-700 transition-colors bg-emerald-100 rounded w-5 h-5 flex items-center justify-center font-bold">
                                         +
                                       </button>
                                     </Label>
                                     {sectorsWhatsapp.map((val, idx) => (
-                                      <div key={idx} className="flex gap-1">
+                                      <div key={idx} className="flex gap-2">
                                         <Input
                                           value={val}
                                           onChange={(e) => {
@@ -252,10 +274,10 @@ export function Slide6Dispatch({
                                             setSectorsWhatsapp(newArr);
                                           }}
                                           placeholder="Ex: (11) 99999-0000"
-                                          className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-emerald-500/50 text-white"
+                                          className="h-10 text-sm border-slate-300 bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 text-slate-900 shadow-sm"
                                         />
                                         {sectorsWhatsapp.length > 1 && (
-                                          <button type="button" onClick={() => setSectorsWhatsapp(sectorsWhatsapp.filter((_, i) => i !== idx))} className="h-8 w-8 shrink-0 flex items-center justify-center rounded bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-white/5 transition-colors">
+                                          <button type="button" onClick={() => setSectorsWhatsapp(sectorsWhatsapp.filter((_, i) => i !== idx))} className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-colors shadow-sm">
                                             -
                                           </button>
                                         )}
@@ -263,14 +285,14 @@ export function Slide6Dispatch({
                                     ))}
                                   </div>
                                   <div className="space-y-2">
-                                    <Label className="text-[9px] text-slate-400 uppercase font-mono flex items-center justify-between">
+                                    <Label className="text-[10px] text-slate-500 uppercase font-mono flex items-center justify-between">
                                       <span>E-mail (Setores)</span>
-                                      <button type="button" onClick={() => setSectorsEmail([...sectorsEmail, ""])} className="text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 rounded w-4 h-4 flex items-center justify-center font-bold">
+                                      <button type="button" onClick={() => setSectorsEmail([...sectorsEmail, ""])} className="text-emerald-600 hover:text-emerald-700 transition-colors bg-emerald-100 rounded w-5 h-5 flex items-center justify-center font-bold">
                                         +
                                       </button>
                                     </Label>
                                     {sectorsEmail.map((val, idx) => (
-                                      <div key={idx} className="flex gap-1">
+                                      <div key={idx} className="flex gap-2">
                                         <Input
                                           type="email"
                                           value={val}
@@ -280,10 +302,10 @@ export function Slide6Dispatch({
                                             setSectorsEmail(newArr);
                                           }}
                                           placeholder="Ex: operacoes@geracaodigital.com.br"
-                                          className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-emerald-500/50 text-white"
+                                          className="h-10 text-sm border-slate-300 bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 text-slate-900 shadow-sm"
                                         />
                                         {sectorsEmail.length > 1 && (
-                                          <button type="button" onClick={() => setSectorsEmail(sectorsEmail.filter((_, i) => i !== idx))} className="h-8 w-8 shrink-0 flex items-center justify-center rounded bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-white/5 transition-colors">
+                                          <button type="button" onClick={() => setSectorsEmail(sectorsEmail.filter((_, i) => i !== idx))} className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-colors shadow-sm">
                                             -
                                           </button>
                                         )}
@@ -297,74 +319,74 @@ export function Slide6Dispatch({
                         </div>
 
                         {/* Configuração de Grupos no WhatsApp */}
-                        <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3 mt-4">
-                          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
-                            <h4 className="text-[10px] font-bold text-[#25D366] uppercase tracking-wider">Criação de Grupo no WhatsApp</h4>
+                        <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-4 mt-5 shadow-sm">
+                          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                            <h4 className="text-xs font-bold text-[#25D366] uppercase tracking-wider">Criação de Grupo no WhatsApp</h4>
                           </div>
-                          <label className="flex items-center gap-2.5 cursor-pointer group">
+                          <label className="flex items-center gap-3 cursor-pointer group">
                             <input
                               type="checkbox"
                               checked={createWhatsappGroup}
                               onChange={(e) => setCreateWhatsappGroup(e.target.checked)}
-                              className="rounded border-slate-700 bg-slate-950 text-[#25D366] focus:ring-[#25D366]/50 h-4 w-4"
+                              className="rounded border-slate-300 bg-white text-[#25D366] focus:ring-[#25D366] h-4 w-4 shadow-sm"
                             />
                             <div className="text-left">
-                              <span className="text-xs font-bold text-slate-200 block group-hover:text-[#25D366] transition-colors">Criar Grupo Automaticamente e Convidar Membros</span>
+                              <span className="text-sm font-bold text-slate-700 block group-hover:text-[#25D366] transition-colors">Criar Grupo Automaticamente e Convidar Membros</span>
                             </div>
                           </label>
 
                           {createWhatsappGroup && (
-                            <div className="grid md:grid-cols-2 gap-4 pt-2 animate-fade-in-up">
-                              <div className="space-y-1">
-                                <Label className="text-[9px] text-slate-400 uppercase font-mono">Nome do Grupo</Label>
+                            <div className="grid md:grid-cols-2 gap-5 pt-3 animate-fade-in-up">
+                              <div className="space-y-1.5">
+                                <Label className="text-[10px] text-slate-500 uppercase font-mono">Nome do Grupo</Label>
                                 <Input
                                   value={whatsappGroupName}
                                   onChange={(e) => setWhatsappGroupName(e.target.value)}
                                   placeholder="Ex: GD & Nome do Cliente"
-                                  className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-[#25D366]/50 text-white"
+                                  className="h-10 text-sm border-slate-300 bg-white focus:border-[#25D366] focus:ring-4 focus:ring-[#25D366]/10 text-slate-900 shadow-sm"
                                 />
-                                <p className="text-[9px] text-slate-500 mt-1 leading-tight">O cliente e você serão adicionados automaticamente.</p>
+                                <p className="text-[10px] text-slate-500 mt-1.5 leading-tight">O cliente e você serão adicionados automaticamente.</p>
                               </div>
-                              <div className="space-y-1">
-                                <Label className="text-[9px] text-slate-400 uppercase font-mono">Outros Responsáveis (WhatsApp)</Label>
+                              <div className="space-y-1.5">
+                                <Label className="text-[10px] text-slate-500 uppercase font-mono whitespace-nowrap">Outros Resp. (WhatsApp)</Label>
                                 <Input
                                   value={whatsappGroupMembers}
                                   onChange={(e) => setWhatsappGroupMembers(e.target.value)}
                                   placeholder="Ex: 11999999999, 11888888888"
-                                  className="h-8 text-[11px] border-white/10 bg-slate-900 focus:border-[#25D366]/50 text-white"
+                                  className="h-10 text-sm border-slate-300 bg-white focus:border-[#25D366] focus:ring-4 focus:ring-[#25D366]/10 text-slate-900 shadow-sm"
                                 />
-                                <p className="text-[9px] text-slate-500 mt-1 leading-tight">Separe os números adicionais por vírgula.</p>
+                                <p className="text-[10px] text-slate-500 mt-1.5 leading-tight">Separe os números adicionais por vírgula.</p>
                               </div>
                             </div>
                           )}
                         </div>
 
                         {/* Configuração do Slack */}
-                        <div className="p-4 rounded-xl border border-white/10 bg-slate-950/40 space-y-3 mt-4">
-                          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
-                            <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Configuração do Workspace (Slack)</h4>
+                        <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-4 mt-5 shadow-sm">
+                          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                            <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider">Configuração do Workspace (Slack)</h4>
                           </div>
                           
-                          <div className="space-y-3 pt-1">
+                          <div className="space-y-4 pt-1">
                             {/* Nome do canal principal */}
-                            <div className="space-y-1">
-                              <Label className="text-[9px] text-slate-400 uppercase font-mono">Canal Principal</Label>
-                              <div className="flex items-center bg-slate-900 border border-white/10 rounded-md overflow-hidden focus-within:border-blue-500/50">
-                                <span className="pl-2 pr-1 text-slate-500"><Hash className="w-3 h-3" /></span>
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] text-slate-500 uppercase font-mono">Canal Principal</Label>
+                              <div className="flex items-center bg-white border border-slate-300 rounded-xl overflow-hidden focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-sm transition-all">
+                                <span className="pl-3 pr-2 text-slate-400"><Hash className="w-4 h-4" /></span>
                                 <Input
                                   value={slackChannelName}
                                   onChange={(e) => setSlackChannelName(e.target.value)}
-                                  className="h-8 text-[11px] border-none bg-transparent text-white px-1 shadow-none focus-visible:ring-0"
+                                  className="h-10 text-sm border-none bg-transparent text-slate-900 px-1 shadow-none focus-visible:ring-0"
                                 />
                               </div>
                             </div>
 
                             {/* Canais Adicionais */}
-                            <div className="space-y-1">
-                              <Label className="text-[9px] text-slate-400 uppercase font-mono">Canais Adicionais a Criar</Label>
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] text-slate-500 uppercase font-mono">Canais Adicionais a Criar</Label>
                               <div className="flex gap-2">
-                                <div className="flex-1 flex items-center bg-slate-900 border border-white/10 rounded-md overflow-hidden focus-within:border-blue-500/50">
-                                  <span className="pl-2 pr-1 text-slate-500"><Hash className="w-3 h-3" /></span>
+                                <div className="flex-1 flex items-center bg-white border border-slate-300 rounded-xl overflow-hidden focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-sm transition-all">
+                                  <span className="pl-3 pr-2 text-slate-400"><Hash className="w-4 h-4" /></span>
                                   <Input
                                     value={newExtraChannel}
                                     onChange={(e) => setNewExtraChannel(e.target.value)}
@@ -378,7 +400,7 @@ export function Slide6Dispatch({
                                         }
                                       }
                                     }}
-                                    className="h-8 text-[11px] border-none bg-transparent text-white px-1 shadow-none focus-visible:ring-0"
+                                    className="h-10 text-sm border-none bg-transparent text-slate-900 px-1 shadow-none focus-visible:ring-0"
                                   />
                                 </div>
                                 <Button 
@@ -389,17 +411,17 @@ export function Slide6Dispatch({
                                       setNewExtraChannel("");
                                     }
                                   }}
-                                  className="h-8 px-3 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 text-xs font-bold"
+                                  className="h-10 px-4 bg-blue-100 text-blue-700 hover:bg-blue-200 text-sm font-bold rounded-xl shadow-sm"
                                 >
                                   Adicionar
                                 </Button>
                               </div>
                               {slackExtraChannels.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-2">
+                                <div className="flex flex-wrap gap-2 mt-3">
                                   {slackExtraChannels.map((ch, idx) => (
-                                    <Badge key={idx} className="bg-slate-800 text-slate-300 text-[9px] font-mono border-white/10 py-0.5 flex items-center gap-1">
+                                    <Badge key={idx} className="bg-slate-200 text-slate-700 text-[11px] font-mono border-slate-300 py-1 px-2.5 flex items-center gap-1.5 shadow-sm">
                                       #{ch}
-                                      <button type="button" onClick={() => setSlackExtraChannels(slackExtraChannels.filter((_, i) => i !== idx))} className="text-rose-400 hover:text-rose-300 ml-1">×</button>
+                                      <button type="button" onClick={() => setSlackExtraChannels(slackExtraChannels.filter((_, i) => i !== idx))} className="text-rose-500 hover:text-rose-700 ml-1">×</button>
                                     </Badge>
                                   ))}
                                 </div>
@@ -407,14 +429,18 @@ export function Slide6Dispatch({
                             </div>
 
                             {/* Membros Responsáveis */}
-                            <div className="space-y-2 pt-1">
-                              <Label className="text-[9px] text-slate-400 uppercase font-mono block">Responsáveis (Membros do Slack)</Label>
-                              {slackUsers.length > 0 ? (
-                                <div className="max-h-24 overflow-y-auto bg-slate-900/50 rounded-md border border-white/5 p-2 grid grid-cols-2 gap-1.5 custom-scrollbar">
+                            <div className="space-y-2 pt-2">
+                              <Label className="text-[10px] text-slate-500 uppercase font-mono block">Responsáveis (Membros do Slack)</Label>
+                              {isLoadingSlack ? (
+                                <div className="text-[11px] text-slate-500 italic px-2 py-2">Buscando usuários do Slack...</div>
+                              ) : slackError ? (
+                                <div className="text-[11px] text-rose-500 font-medium px-2 py-2">⚠️ {slackError}</div>
+                              ) : slackUsers.length > 0 ? (
+                                <div className="max-h-32 overflow-y-auto bg-white rounded-xl border border-slate-200 p-3 grid grid-cols-2 gap-2 custom-scrollbar shadow-sm">
                                   {slackUsers.map((u) => {
                                     const isSelected = slackMembers.includes(u.id);
                                     return (
-                                      <label key={u.id} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors ${isSelected ? 'bg-blue-500/10 border border-blue-500/20' : 'hover:bg-white/5 border border-transparent'}`}>
+                                      <label key={u.id} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
                                         <input
                                           type="checkbox"
                                           checked={isSelected}
@@ -422,21 +448,20 @@ export function Slide6Dispatch({
                                             if (e.target.checked) setSlackMembers([...slackMembers, u.id]);
                                             else setSlackMembers(slackMembers.filter(id => id !== u.id));
                                           }}
-                                          className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500/50 h-3 w-3"
+                                          className="rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 h-4 w-4 shadow-sm"
                                         />
-                                        <div className="flex items-center gap-1.5 overflow-hidden">
-                                          {u.image && <img src={u.image} alt={u.name} className="w-4 h-4 rounded-full" />}
-                                          <span className="text-[10px] text-slate-300 truncate font-semibold">{u.name}</span>
+                                        <div className="flex items-center gap-2 overflow-hidden">
+                                          {u.image && <img src={u.image} alt={u.name} className="w-6 h-6 rounded-full" />}
+                                          <span className="text-[11px] text-slate-700 truncate font-semibold">{u.name}</span>
                                         </div>
                                       </label>
                                     );
                                   })}
                                 </div>
                               ) : (
-                                <div className="text-[10px] text-slate-500 italic px-2">Buscando usuários do Slack...</div>
+                                <div className="text-[11px] text-slate-500 italic px-2 py-2">Nenhum usuário encontrado no workspace.</div>
                               )}
                             </div>
-
                           </div>
                         </div>
 
@@ -534,50 +559,55 @@ export function Slide6Dispatch({
                               setIsDispatching(false);
                             }
                           }}
-                          className="w-full bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white h-10 shadow-lg shadow-emerald-600/10 mt-4 flex items-center justify-center gap-2"
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 font-black text-sm text-white h-12 shadow-lg shadow-emerald-600/20 mt-6 flex items-center justify-center gap-2 rounded-xl"
                         >
                           {isDispatching ? (
                             <>
-                              <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                              <RefreshCw className="h-5 w-5 animate-spin text-white" />
                               Disparando Briefing...
                             </>
                           ) : (
                             <>
-                              <Zap className="h-4 w-4 text-white" />
+                              <Zap className="h-5 w-5 text-white" />
                               Enviar Briefing & Disparar Handoff
                             </>
                           )}
                         </Button>
                       </div>
                     ) : (
-                      <div className="text-center space-y-4 animate-fade-in-up py-6 flex-1 flex flex-col justify-center items-center">
-                        <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 animate-bounce">
-                          <CheckCircle2 className="h-7 w-7" />
+                      <div className="text-center space-y-5 animate-fade-in-up py-8 flex-1 flex flex-col justify-center items-center">
+                        <div className="h-16 w-16 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-600 animate-bounce shadow-sm">
+                          <CheckCircle2 className="h-8 w-8" />
                         </div>
-                        <div className="space-y-1">
-                          <h4 className="text-base font-black text-white">Dossiê Enviado com Sucesso!</h4>
-                          <p className="text-[10px] text-slate-500">As informações foram consolidadas e enviadas para os canais ativos.</p>
+                        <div className="space-y-1.5">
+                          <h4 className="text-xl font-black text-slate-800">Dossiê Enviado com Sucesso!</h4>
+                          <p className="text-xs text-slate-500">As informações foram consolidadas e enviadas para os canais ativos.</p>
                         </div>
 
-                        <div className="p-3.5 bg-slate-950/70 border border-white/5 rounded-xl text-[9.5px] font-mono text-slate-400 text-left space-y-1.5 w-full max-w-sm">
-                          <p><span className="text-indigo-400 font-bold">CLIENTE:</span> {theme.prospectName}</p>
-                          {sendToProspectWhatsapp && <p><span className="text-emerald-400 font-bold">WHATSAPP:</span> {theme.whatsappNumber} ({dispatchResult?.evolutionStatus === 'sent' ? 'Enviado' : 'Não configurado/Falha'})</p>}
-                          {sendToProspectEmail && <p><span className="text-blue-400 font-bold">E-MAIL:</span> {prospectEmail} ({dispatchResult?.emailStatus === 'sent' ? 'Enviado' : 'Não configurado/Falha'})</p>}
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-mono text-slate-600 text-left space-y-2 w-full max-w-sm shadow-sm">
+                          <p><span className="text-indigo-600 font-bold">CLIENTE:</span> {theme.prospectName}</p>
+                          {sendToProspectWhatsapp && <p><span className="text-emerald-600 font-bold">WHATSAPP:</span> {theme.whatsappNumber} ({dispatchResult?.evolutionStatus === 'sent' ? 'Enviado' : 'Não configurado/Falha'})</p>}
+                          {sendToProspectEmail && <p><span className="text-blue-600 font-bold">E-MAIL:</span> {prospectEmail} ({dispatchResult?.emailStatus === 'sent' ? 'Enviado' : 'Não configurado/Falha'})</p>}
                           {sendToSectors && (
                             <>
-                              <p><span className="text-purple-400 font-bold">WHATSAPP SETORES:</span> {sectorsWhatsapp} ({dispatchResult?.sectorsStatus?.includes('wpp:sent') ? 'Enviado' : 'Não configurado/Falha'})</p>
-                              <p><span className="text-pink-400 font-bold">E-MAIL SETORES:</span> {sectorsEmail} ({dispatchResult?.sectorsStatus?.includes('email:sent') ? 'Enviado' : 'Não configurado/Falha'})</p>
-                              <p><span className="text-indigo-400 font-bold">SETORES INTERNOS:</span> Tráfego, Design, Contratos (Handoff Ativo)</p>
+                              <p><span className="text-purple-600 font-bold">WHATSAPP SETORES:</span> {sectorsWhatsapp} ({dispatchResult?.sectorsStatus?.includes('wpp:sent') ? 'Enviado' : 'Não configurado/Falha'})</p>
+                              <p><span className="text-pink-600 font-bold">E-MAIL SETORES:</span> {sectorsEmail} ({dispatchResult?.sectorsStatus?.includes('email:sent') ? 'Enviado' : 'Não configurado/Falha'})</p>
                             </>
                           )}
-                          <p><span className="text-slate-500 font-bold">STATUS:</span> ONBOARDING_COMPLETED_SUCCESS</p>
+                          {(createWhatsappGroup || slackChannelName) && (
+                            <div className="pt-2 mt-2 border-t border-slate-200">
+                              <p className="font-bold text-slate-500 mb-1">COMUNICAÇÃO:</p>
+                              {createWhatsappGroup && <p className="text-emerald-600"><span className="font-bold">GRUPO WPP:</span> {whatsappGroupName} ({dispatchResult?.whatsappGroupStatus === 'created' ? 'Criado' : 'Não configurado/Falha'})</p>}
+                              {slackChannelName && <p className="text-blue-600"><span className="font-bold">SLACK CHANNELS:</span> #{slackChannelName} ({dispatchResult?.slackStatus === 'success' ? 'Criados' : 'Não configurado/Falha'})</p>}
+                            </div>
+                          )}
                         </div>
 
-                        <div className="flex gap-2 w-full max-w-sm pt-2">
+                        <div className="flex gap-3 w-full max-w-sm pt-4">
                           <Button
                             variant="outline"
                             onClick={() => setDispatchSuccess(false)}
-                            className="flex-1 border-white/10 hover:bg-white/5 text-slate-300 text-xs font-bold h-9"
+                            className="flex-1 border-slate-200 hover:bg-slate-50 text-slate-600 text-sm font-bold h-11 rounded-xl shadow-sm"
                           >
                             Voltar
                           </Button>
@@ -586,7 +616,7 @@ export function Slide6Dispatch({
                               setIsPresenting(false);
                               setDispatchSuccess(false);
                             }}
-                            className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold h-9"
+                            className="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold h-11 rounded-xl shadow-sm"
                           >
                             Concluir Apresentação
                           </Button>

@@ -217,17 +217,11 @@ export default function GeracaoDigitalPitch() {
 
       {/* ─── FULLSCREEN PRESENTATION MODE (THE PITCH & BRIEFING SPA) ───────── */}
       {isPresenting && (
-        <div className="dark fixed inset-0 z-50 bg-slate-950 text-white overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
+        <div className="fixed inset-0 z-50 bg-slate-50 text-slate-900 overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
 
-          {/* Neon Grid Overlay Backdrop */}
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0" />
-          <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none z-0" />
-
-          {/* Dynamic Floating stars backgound */}
-          <div className="stars-layer absolute inset-0 pointer-events-none z-0">
-            <div className="stars-1 opacity-50" />
-            <div className="stars-2 opacity-30" />
-          </div>
+          {/* Soft Light Grid Overlay Backdrop */}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0 opacity-50" />
+          <div className="absolute top-0 left-0 w-full h-[300px] bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none z-0" />
 
           <PresentationHeader
             theme={theme}
