@@ -849,7 +849,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       if (job) {
         await job.remove();
       }
-      await query(`UPDATE followup_jobs SET status = 'cancelled' WHERE id = // POST /api/followup/suggestions/approve-batch`, [rows[0].job_id]);
+      await query(`UPDATE followup_jobs SET status = 'cancelled' WHERE id = $1`, [rows[0].job_id]);
       return res.json({ success: true, message: "Job cancelled successfully" });
     } catch (err) {
       return sendErr(res, 500, "CANCEL_FAILED", err.message);
