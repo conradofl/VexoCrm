@@ -50,12 +50,50 @@ export async function processSlackMessageToEvolution(pool, event) {
       number = number.split("@")[0];
     }
 
-    const payload = {
+    let isMedia = false;
+    let base64Media = "";
+    let evolutionMediaType = "document";
+    let slackMimetype = "application/octet-stream";
+    let slackFilename = "arquivo";
+
+    if (event.files && event.files.length > 0) {
+      const file = event.files[0];
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error("Arquivo excede limite de segurança de 10MB.");
+      }
+      isMedia = true;
+      slackMimetype = file.mimetype || "application/octet-stream";
+      slackFilename = file.name || "arquivo";
+
+      if (slackMimetype.startsWith("image/")) evolutionMediaType = "image";
+      else if (slackMimetype.startsWith("audio/")) evolutionMediaType = "audio";
+      else if (slackMimetype.startsWith("video/")) evolutionMediaType = "video";
+      else evolutionMediaType = "document";
+
+      const fileRes = await fetch(file.url_private_download, {
+        headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}` }
+      });
+      if (!fileRes.ok) throw new Error(`Erro ao baixar anexo do Slack: ${fileRes.status}`);
+      const buffer = Buffer.from(await fileRes.arrayBuffer());
+      base64Media = buffer.toString("base64");
+    }
+
+    let payload = {
       number: number,
-      options: { delay: 1200, presence: "composing" },
-      textMessage: { text: text },
-      text: text // Propriedade obrigatória exigida pela Evolution
+      options: { delay: 1200, presence: "composing" }
     };
+
+    if (isMedia) {
+      endpoint = `${baseUrl}/message/sendMedia/${instanceName}`;
+      payload.mediatype = evolutionMediaType;
+      payload.mimetype = slackMimetype;
+      payload.media = base64Media;
+      payload.fileName = slackFilename;
+      if (text) payload.caption = text;
+    } else {
+      payload.textMessage = { text: text };
+      payload.text = text; // Propriedade obrigatória
+    }
 
     let attempt = 1;
     const maxAttempts = 3;

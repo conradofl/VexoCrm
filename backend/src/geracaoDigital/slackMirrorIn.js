@@ -88,19 +88,75 @@ export async function processEvolutionMessageToSlack(pool, payload) {
     }
 
     // 6. Enviar para o Slack
-    const postRes = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
-        "Authorization": `Bearer ${SLACK_BOT_TOKEN}` 
-      },
-      body: JSON.stringify({
-        channel: targetChannel,
-        text: slackMsgText
-      })
-    });
+    let uploadedMedia = false;
+    
+    if (isMedia) {
+      try {
+        const EVOLUTION_API_TOKEN = process.env.GD_EVOLUTION_API_TOKEN || "429683C4C977415CAAFCCE10F7D57E11";
+        const b64Res = await fetch(`https://apps-evolution-api.ymqjmy.easypanel.host/chat/getBase64FromMediaMessage/${instance}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "apikey": EVOLUTION_API_TOKEN },
+          body: JSON.stringify({ message: data }) 
+        });
+        
+        const b64Data = await b64Res.json();
+        if (b64Data && b64Data.base64) {
+          const buffer = Buffer.from(b64Data.base64, "base64");
+          
+          // Trava de 10MB
+          if (buffer.length < 10 * 1024 * 1024) {
+            let filename = `media_${messageId}`;
+            if (mediaType === "Imagem") filename += ".jpeg";
+            else if (mediaType === "Áudio") filename += ".ogg";
+            else if (mediaType === "Vídeo") filename += ".mp4";
+            else filename += ".bin";
 
-    const postData = await postRes.json();
+            const resUrl = await fetch("https://slack.com/api/files.getUploadURLExternal", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+              body: `filename=${encodeURIComponent(filename)}&length=${buffer.length}`
+            });
+            const urlData = await resUrl.json();
+            
+            if (urlData.ok) {
+              const uploadRes = await fetch(urlData.upload_url, { method: "POST", body: buffer });
+              if (uploadRes.ok) {
+                const compRes = await fetch("https://slack.com/api/files.completeUploadExternal", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+                  body: JSON.stringify({ 
+                    files: [{ id: urlData.file_id, title: filename }], 
+                    channel_id: targetChannel,
+                    initial_comment: `*${pushName}* enviou uma mídia:\n${text}`
+                  })
+                });
+                const compData = await compRes.json();
+                if (compData.ok) uploadedMedia = true;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[gd-mirror-in] Erro ao baixar ou enviar mídia:", err.message);
+      }
+    }
+
+    let postData = { ok: true }; // se já fez uploadMedia
+    if (!uploadedMedia) {
+      // Fallback pra texto caso seja texto comum ou caso o upload da mídia falhe
+      const postRes = await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "Authorization": `Bearer ${SLACK_BOT_TOKEN}` 
+        },
+        body: JSON.stringify({
+          channel: targetChannel,
+          text: slackMsgText
+        })
+      });
+      postData = await postRes.json();
+    }
     if (!postData.ok) {
       console.error(`[gd-mirror-in] Falha ao enviar pro Slack (${targetChannel}):`, postData.error);
       
