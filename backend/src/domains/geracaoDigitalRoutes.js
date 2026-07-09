@@ -10,8 +10,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     
     async function processSlackJobSync(pool, jobData) {
       const { 
-        clientName, whatsappNumber, produtosContratados = [], 
-        objetivoTrafego, verba, publicoAlvo, driveLink,
+        clientName, whatsappNumber, briefingData = {},
         slackChannelName, slackExtraChannels = [], slackMembers = []
       } = jobData;
 
@@ -80,25 +79,35 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       let membersMentions = "";
       if (slackMembers && slackMembers.length > 0) membersMentions = slackMembers.map(id => `<@${id}>`).join(" ");
 
-      const textMsg = `*Novo Dossiê Geração Digital*\n*Cliente:* ${clientName}\n*Whatsapp:* ${whatsappNumber}\n*Produtos:* ${produtosContratados.join(", ")}\n*Objetivo:* ${objetivoTrafego}\n*Verba:* ${verba}\n*Público:* ${publicoAlvo}\n*Drive:* ${driveLink || "Não informado"}`;
-      const mainFields = [
-        { type: "mrkdwn", text: `*Cliente:*\n${clientName}` },
-        { type: "mrkdwn", text: `*WhatsApp:*\n${whatsappNumber}` },
-        { type: "mrkdwn", text: `*Verba:*\n${verba}` },
-        { type: "mrkdwn", text: `*Produtos:*\n${produtosContratados.join(", ")}` }
-      ];
-      const secondaryFields = [
-        { type: "mrkdwn", text: `*Objetivo:*\n${objetivoTrafego}` },
-        { type: "mrkdwn", text: `*Público Alvo:*\n${publicoAlvo}` }
-      ];
-      if (membersMentions) secondaryFields.push({ type: "mrkdwn", text: `*Responsáveis:*\n${membersMentions}` });
+      const textMsg = `*Novo Dossiê Geração Digital*\n*Cliente:* ${clientName}\n*Whatsapp:* ${whatsappNumber}`;
 
       const blocks = [
         { type: "header", text: { type: "plain_text", text: "📄 Dossiê do Cliente (Geração Digital)" } },
-        { type: "section", fields: mainFields },
-        { type: "section", fields: secondaryFields }
+        { type: "section", fields: [
+            { type: "mrkdwn", text: `*Cliente:*\n${clientName}` },
+            { type: "mrkdwn", text: `*WhatsApp:*\n${whatsappNumber}` }
+        ]}
       ];
-      if (driveLink) blocks.push({ type: "section", text: { type: "mrkdwn", text: `*Pasta do Drive:*\n<${driveLink}|Acessar Arquivos>` } });
+
+      let currentFields = [];
+      for (const [key, value] of Object.entries(briefingData || {})) {
+          const formattedKey = key.replace(/_/g, ' ').toUpperCase();
+          // Truncate to avoid slack limits, but 1900 is safe
+          const valText = value ? String(value).substring(0, 1900) : 'Não preenchido';
+          currentFields.push({ type: "mrkdwn", text: `*${formattedKey}:*\n${valText}` });
+
+          if (currentFields.length === 10) {
+             blocks.push({ type: "section", fields: currentFields });
+             currentFields = [];
+          }
+      }
+      if (currentFields.length > 0) {
+          blocks.push({ type: "section", fields: currentFields });
+      }
+
+      if (membersMentions) {
+         blocks.push({ type: "section", text: { type: "mrkdwn", text: `*Responsáveis:*\n${membersMentions}` } });
+      }
 
       blocks.push({ type: "divider" });
       blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "💡 *Dica de Uso:* Para conversas internas entre a equipe (que não devem ser enviadas ao WhatsApp do cliente), inicie a mensagem com `//`." }] });
@@ -124,7 +133,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         `INSERT INTO public.slack_channel_map (client_name, whatsapp_jid, slack_channel_id, drive_folder_id, instance_name, status)
          VALUES ($1, $2, $3, $4, 'gd-oficial', 'active')
          ON CONFLICT (whatsapp_jid) DO NOTHING`,
-        [clientName, jid, channelId, driveLink || null]
+        [clientName, jid, channelId, briefingData['drive_link'] || null]
       );
     }
     try {
@@ -380,11 +389,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         const slackPayload = {
           clientName: prospectName,
           whatsappNumber: whatsappNumber,
-          produtosContratados: bData['produtos'] ? String(bData['produtos']).split(',').map(s => s.trim()) : [],
-          objetivoTrafego: String(bData['objetivo_trafego'] || ''),
-          verba: String(bData['verba'] || ''),
-          publicoAlvo: String(bData['publico_alvo'] || ''),
-          driveLink: String(bData['logo'] || bData['drive_link'] || ''),
+          briefingData: bData,
           slackChannelName,
           slackExtraChannels,
           slackMembers
