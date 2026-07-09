@@ -43,7 +43,7 @@ export async function processSlackMessageToEvolution(pool, event) {
     if (baseUrl.includes("/message/sendText")) {
       baseUrl = baseUrl.split("/message/sendText")[0];
     }
-    const endpoint = `${baseUrl}/message/sendText/${instanceName}`;
+    let endpoint = `${baseUrl}/message/sendText/${instanceName}`;
 
     // Clean JID to number format if needed (e.g. remove @s.whatsapp.net for Evolution)
     let number = targetJid;
