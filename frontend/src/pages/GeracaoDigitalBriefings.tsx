@@ -68,7 +68,7 @@ export default function GeracaoDigitalBriefings() {
   );
 
   const getStatusBadge = (status: string) => {
-    if (status === "success" || status === "sent") {
+    if (status === "success" || status === "sent" || status === "group_created") {
       return <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-green-200"><CheckCircle className="mr-1 h-3 w-3" /> Enviado</Badge>;
     }
     if (status === "pending") {
