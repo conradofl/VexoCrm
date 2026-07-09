@@ -68,9 +68,7 @@ export const AJUDA_ITEMS: SidebarItem[] = [
 
 // ━━ ADMIN ━━
 export const ADMIN_ITEMS: SidebarItem[] = [
-  { key: "empresas", label: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" },
-  { key: "usuarios", label: "Usuários", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" },
-  { key: "integracoes", label: "Integrações", url: "/crm/integracoes", icon: Server, page: "empresas" },
+  { key: "admin", label: "Administração", url: "/crm/admin", icon: ShieldCheck, page: "empresas" },
   { key: "apresentacao-vexo", label: "Apresentação Vexo", url: "/crm/apresentacao", icon: Sparkles, page: "apresentacao" },
 ];
 
