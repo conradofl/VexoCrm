@@ -17,8 +17,8 @@ export function Slide1Welcome({ theme, onNext }: Slide1WelcomeProps) {
                   <Badge className="bg-indigo-50 border-indigo-200 text-indigo-700 text-sm px-5 py-2 uppercase tracking-widest font-mono shadow-sm">
                     Slide 01 · Parceria Comercial
                   </Badge>
-                  <h1 className="text-6xl md:text-8xl font-black tracking-tight text-slate-900 leading-tight">
-                    Seja muito bem-vindo à <span className="bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-800 bg-clip-text text-transparent">{theme.agencyName}</span>
+                  <h1 className="text-5xl md:text-7xl font-black tracking-tight text-slate-900 leading-tight">
+                    Seja muito bem-vindo à <span className="whitespace-nowrap bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-800 bg-clip-text text-transparent">{theme.agencyName}</span>
                   </h1>
                   <p className="text-lg md:text-2xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
                     {theme.agencySubtitle}
