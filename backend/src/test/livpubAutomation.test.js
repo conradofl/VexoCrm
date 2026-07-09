@@ -7,7 +7,7 @@ const routesSource = readFileSync(resolve("src/followup/routes.js"), "utf8");
 
 describe("LivPub Proactive Followup Automation Rules", () => {
   it("defines the LivPub candidates finder function", () => {
-    expect(engineSource).toContain("export async function findLivPubCandidates(companyId)");
+    expect(engineSource).toContain("export async function findLivPubCandidates(companyId");
   });
 
   it("checks for both birthday and inactive configurations from default presets", () => {
@@ -21,8 +21,8 @@ describe("LivPub Proactive Followup Automation Rules", () => {
     expect(engineSource).toContain("EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)");
   });
 
-  it("implements the inactivity trigger matching leads who did not visit for > 6 months", () => {
-    expect(engineSource).toContain("ultima_visita < NOW() - INTERVAL '6 months'");
+  it("implements the inactivity trigger matching leads who did not visit for > X months", () => {
+    expect(engineSource).toContain("ultima_visita < NOW() - INTERVAL '${months} months'");
   });
 
   it("contains the appropriate reason labels and context for both triggers", () => {
@@ -33,8 +33,8 @@ describe("LivPub Proactive Followup Automation Rules", () => {
   });
 
   it("processes standard candidates and LivPub candidates concurrently in the runner", () => {
-    expect(engineSource).toContain("const candidates = await findCandidates(company_id, campaign_id)");
-    expect(engineSource).toContain("const livpubCandidates = await findLivPubCandidates(company_id)");
+    expect(engineSource).toContain("const candidates = await findCandidates(company_id, campaign_id");
+    expect(engineSource).toContain("const livpubCandidates = await findLivPubCandidates(company_id");
     // Main d104a82 trocou a concatenação (allCandidates) por um loop dedicado
     // sobre livpubCandidates no runner — asserção acompanha o código real.
     expect(engineSource).toContain("for (const lead of livpubCandidates)");
@@ -79,7 +79,7 @@ describe("LivPub Reactivation Manual Trigger (Esteira 4)", () => {
   });
 
   it("schedules the cron through the same guarded trigger", () => {
-    expect(engineSource).toContain("cron.schedule(\"0 */6 * * *\", () => { triggerAutomationRun(); })");
+    expect(engineSource).toContain("cron.schedule(\"0 * * * *\"");
   });
 
   it("exposes the authenticated POST /engine/run route returning 202", () => {

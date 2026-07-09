@@ -160,7 +160,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       
       let sbQuery = supabase
         .from("followup_companies")
-        .select("id, name, evolution_instance, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at, tenant_id")
+        .select("id, name, evolution_instance, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at, tenant_id, engine_scan_interval_hours, never_contacted_delay_hours, no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at")
         .is("archived_at", null)
         .order("name", { ascending: true });
         
@@ -198,8 +198,26 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
 
   // POST /api/followup/companies
   router.post("/companies", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
-    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, tenant_id } =
-      req.body || {};
+    const {
+      name,
+      evolution_instance,
+      webhook_url,
+      calendly_webhook_secret,
+      panel_access,
+      inbound_enabled,
+      inbound_model,
+      inbound_prompt,
+      inbound_spin_fields,
+      inbound_webhook_url,
+      sdr_whatsapp_number,
+      sdr_transfer_enabled,
+      tenant_id,
+      engine_scan_interval_hours,
+      never_contacted_delay_hours,
+      no_reply_delay_hours,
+      livpub_inactive_delay_months,
+    } = req.body || {};
+
     if (!str(name) || !str(evolution_instance)) {
       return sendErr(res, 400, "MISSING_FIELDS", "name e evolution_instance são obrigatórios");
     }
@@ -221,6 +239,10 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
           inbound_webhook_url: str(inbound_webhook_url),
           sdr_whatsapp_number: str(sdr_whatsapp_number),
           sdr_transfer_enabled: Boolean(sdr_transfer_enabled),
+          engine_scan_interval_hours: typeof engine_scan_interval_hours === "number" ? engine_scan_interval_hours : 6,
+          never_contacted_delay_hours: typeof never_contacted_delay_hours === "number" ? never_contacted_delay_hours : 2,
+          no_reply_delay_hours: typeof no_reply_delay_hours === "number" ? no_reply_delay_hours : 48,
+          livpub_inactive_delay_months: typeof livpub_inactive_delay_months === "number" ? livpub_inactive_delay_months : 6,
         })
         .select()
         .maybeSingle();
@@ -235,8 +257,27 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
   router.patch("/companies/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
-    const { name, evolution_instance, webhook_url, calendly_webhook_secret, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, livpub_aniversario_prompt, livpub_inativo_prompt } =
-      req.body || {};
+    const {
+      name,
+      evolution_instance,
+      webhook_url,
+      calendly_webhook_secret,
+      panel_access,
+      inbound_enabled,
+      inbound_model,
+      inbound_prompt,
+      inbound_spin_fields,
+      inbound_webhook_url,
+      sdr_whatsapp_number,
+      sdr_transfer_enabled,
+      livpub_aniversario_prompt,
+      livpub_inativo_prompt,
+      engine_scan_interval_hours,
+      never_contacted_delay_hours,
+      no_reply_delay_hours,
+      livpub_inactive_delay_months,
+    } = req.body || {};
+
     try {
       const patch = { updated_at: new Date().toISOString() };
       if (str(name)) patch.name = str(name);
@@ -254,6 +295,10 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       if ("sdr_transfer_enabled" in req.body) patch.sdr_transfer_enabled = Boolean(sdr_transfer_enabled);
       if ("livpub_aniversario_prompt" in req.body) patch.livpub_aniversario_prompt = str(livpub_aniversario_prompt);
       if ("livpub_inativo_prompt" in req.body) patch.livpub_inativo_prompt = str(livpub_inativo_prompt);
+      if ("engine_scan_interval_hours" in req.body) patch.engine_scan_interval_hours = Number(engine_scan_interval_hours);
+      if ("never_contacted_delay_hours" in req.body) patch.never_contacted_delay_hours = Number(never_contacted_delay_hours);
+      if ("no_reply_delay_hours" in req.body) patch.no_reply_delay_hours = Number(no_reply_delay_hours);
+      if ("livpub_inactive_delay_months" in req.body) patch.livpub_inactive_delay_months = Number(livpub_inactive_delay_months);
 
       const supabase = getSupabase();
       const { data, error } = await supabase

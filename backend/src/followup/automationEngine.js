@@ -48,7 +48,7 @@ async function fetchLeadsInBatches(tablename, whereSql, reasonType) {
   return results;
 }
 
-export async function findLivPubCandidates(companyId) {
+export async function findLivPubCandidates(companyId, inactiveMonths = 6) {
   const config = buildDefaultSegmentationConfig("livpub");
   const hasVisita = config.kpis.some(k => k.field === 'ultima_visita' && k.enabled);
   const hasNascimento = config.kpis.some(k => k.field === 'data_nascimento' && k.enabled);
@@ -75,11 +75,12 @@ export async function findLivPubCandidates(companyId) {
     }
 
     if (hasVisita) {
+      const months = Number(inactiveMonths) || 6;
       const inativos = await fetchLeadsInBatches(
         'leads',
         `client_id = '${tenantId}'
            AND ultima_visita IS NOT NULL
-           AND ultima_visita < NOW() - INTERVAL '6 months'`,
+           AND ultima_visita < NOW() - INTERVAL '${months} months'`,
         "livpub_inativo"
       );
       candidates.push(...inativos);
@@ -90,22 +91,24 @@ export async function findLivPubCandidates(companyId) {
   return candidates;
 }
 
-async function findCandidates(companyId, campaignId) {
+async function findCandidates(companyId, campaignId, neverContactedHours = 2, noReplyHours = 48) {
   // 1. Leads que entraram na campanha mas NUNCA receberam nenhum job
+  const neverHours = Number(neverContactedHours) || 2;
   const { rows: neverContacted } = await query(
     `SELECT fs.id, fs.lead_name, fs.phone, fs.origin, fs.meeting_datetime
        FROM followup_schedules fs
       WHERE fs.campaign_id = $1
         AND fs.company_id  = $2
         AND fs.status      = 'active'
-        AND fs.created_at  < NOW() - INTERVAL '2 hours'
+        AND fs.created_at  < NOW() - INTERVAL '${neverHours} hours'
         AND NOT EXISTS (
           SELECT 1 FROM followup_jobs fj WHERE fj.schedule_id = fs.id
         )`,
     [campaignId, companyId]
   );
 
-  // 2. Todos os jobs enviados há mais de 48h, sem resposta, sem job pendente
+  // 2. Todos os jobs enviados há mais de X horas, sem resposta, sem job pendente
+  const staleHours = Number(noReplyHours) || 48;
   const { rows: stale } = await query(
     `SELECT fs.id, fs.lead_name, fs.phone, fs.origin, fs.meeting_datetime,
             MAX(fj.sent_at) AS last_sent
@@ -123,7 +126,7 @@ async function findCandidates(companyId, campaignId) {
            WHERE fj2.schedule_id = fs.id AND fj2.status = 'pending'
         )
       GROUP BY fs.id
-     HAVING MAX(fj.sent_at) < NOW() - INTERVAL '48 hours'`,
+     HAVING MAX(fj.sent_at) < NOW() - INTERVAL '${staleHours} hours'`,
     [campaignId, companyId]
   );
 
@@ -135,10 +138,10 @@ async function findCandidates(companyId, campaignId) {
         AND fs.company_id  = $2
         AND fs.status      = 'active'
         AND EXISTS (
-          SELECT 1 FROM followup_jobs fj WHERE fj.schedule_id = fs.id AND fj.status = 'failed'
+          SELECT 1 FROM followup_jobs fj WHERE fj.status = 'failed' AND fj.schedule_id = fs.id
         )
         AND NOT EXISTS (
-          SELECT 1 FROM followup_jobs fj WHERE fj.schedule_id = fs.id AND fj.status = 'pending'
+          SELECT 1 FROM followup_jobs fj WHERE fj.status = 'pending' AND fj.schedule_id = fs.id
         )
         AND NOT EXISTS (
           SELECT 1 FROM followup_replies r WHERE r.company_id = $2 AND r.phone = fs.phone
@@ -245,26 +248,77 @@ export async function generateSuggestion(lead, templates, reasonType, company = 
 
 // ─── Engine principal ─────────────────────────────────────────────────────────
 
-async function runAutomationEngine() {
+async function runAutomationEngine(isManual = false) {
   console.info("[followup/engine] iniciando varredura proativa...");
   let created = 0;
   let skipped = 0;
 
   try {
+    // 0. Carregar configurações de todas as empresas
+    const { rows: companiesList } = await query(
+      `SELECT id, engine_scan_interval_hours, never_contacted_delay_hours, 
+              no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at,
+              livpub_aniversario_prompt, livpub_inativo_prompt
+         FROM followup_companies
+        WHERE archived_at IS NULL`
+    );
+
+    const companyMap = new Map();
+    for (const c of companiesList) {
+      companyMap.set(c.id, c);
+    }
+
+    const shouldProcessCompany = (companyId) => {
+      if (isManual) return true;
+      const comp = companyMap.get(companyId);
+      if (!comp) return false;
+      if (!comp.last_engine_run_at) return true;
+      const hoursSinceLastRun = (new Date() - new Date(comp.last_engine_run_at)) / (1000 * 60 * 60);
+      const interval = comp.engine_scan_interval_hours ?? 6;
+      return hoursSinceLastRun >= interval;
+    };
+
+    const markCompanyProcessed = async (companyId) => {
+      try {
+        await query(
+          `UPDATE followup_companies 
+              SET last_engine_run_at = NOW() 
+            WHERE id = $1`,
+          [companyId]
+        );
+        const comp = companyMap.get(companyId);
+        if (comp) comp.last_engine_run_at = new Date().toISOString();
+      } catch (err) {
+        console.warn(`[followup/engine] falha ao atualizar last_engine_run_at para ${companyId}:`, err.message);
+      }
+    };
+
     // 1. Esteiras 1 e 2: Lógica para empresas com campanhas ativas (Follow-up normal)
     const { rows: pairs } = await query(`
       SELECT DISTINCT fco.id AS company_id, fc.id AS campaign_id
         FROM followup_companies fco
         JOIN followup_campaigns fc ON fc.company_id = fco.id
        WHERE fc.status = 'active'
+         AND fco.archived_at IS NULL
     `);
 
+    // Processar campanhas
+    const processedCompanies = new Set();
+
     for (const { company_id, campaign_id } of pairs) {
+      if (!shouldProcessCompany(company_id)) {
+        console.info(`[followup/engine] pulando campanha ${campaign_id} (intervalo da empresa ${company_id} não atingido)`);
+        continue;
+      }
       if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) {
         console.info(`[followup/engine] limite de ${ENGINE_MAX_SUGGESTIONS_PER_RUN} sugestões por varredura atingido — demais leads ficam para a próxima execução`);
         break;
       }
       try {
+        const company = companyMap.get(company_id);
+        const neverContactedHours = company?.never_contacted_delay_hours ?? 2;
+        const noReplyHours = company?.no_reply_delay_hours ?? 48;
+
         // Templates ativos da campanha
         const { rows: templates } = await query(
           `SELECT id, name, message
@@ -275,7 +329,7 @@ async function runAutomationEngine() {
         );
         if (!templates.length) continue;
 
-        const candidates = await findCandidates(company_id, campaign_id);
+        const candidates = await findCandidates(company_id, campaign_id, neverContactedHours, noReplyHours);
 
         for (const lead of candidates) {
           if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
@@ -312,23 +366,28 @@ async function runAutomationEngine() {
           created++;
           console.info(`[followup/engine] sugestão criada — ${lead.phone} (${lead.reasonType})`);
         }
+
+        processedCompanies.add(company_id);
       } catch (campaignErr) {
-        // Falha isolada por campanha: log e continua
         console.error(`[followup/engine] erro na campanha ${campaign_id}:`, campaignErr.message);
       }
     }
 
     // 2. Esteiras 3 e 4: Lógica para LivPub (Aniversariantes e Inativos) - Independente de campanha
-    const { rows: companies } = await query(`SELECT id, livpub_aniversario_prompt, livpub_inativo_prompt FROM followup_companies`);
     const defaultLivPubTemplates = [
       { id: null, name: "Template Padrão", message: "Olá, temos uma condição especial para você!" }
     ];
 
-    for (const company of companies) {
+    for (const company of companiesList) {
       const company_id = company.id;
+      if (!shouldProcessCompany(company_id)) {
+        console.info(`[followup/engine] pulando LivPub para empresa ${company_id} (intervalo não atingido)`);
+        continue;
+      }
       if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
       try {
-        const livpubCandidates = await findLivPubCandidates(company_id);
+        const inactiveMonths = company.livpub_inactive_delay_months ?? 6;
+        const livpubCandidates = await findLivPubCandidates(company_id, inactiveMonths);
         
         for (const lead of livpubCandidates) {
           if (created >= ENGINE_MAX_SUGGESTIONS_PER_RUN) break;
@@ -362,21 +421,28 @@ async function runAutomationEngine() {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [
               company_id,
-              null, // Sem campaign_id obrigatória para LivPub
+              null,
               lead.lead_name,
               lead.phone,
               lead.origin ?? null,
               REASON_LABELS[lead.reasonType],
-              null, // Sem template_id obrigatório
+              null,
               message,
             ]
           );
           created++;
           console.info(`[followup/engine] sugestão criada — ${lead.phone} (${lead.reasonType})`);
         }
+
+        processedCompanies.add(company_id);
       } catch (compErr) {
         console.error(`[followup/engine] erro na empresa ${company_id} para LivPub:`, compErr.message);
       }
+    }
+
+    // Atualizar last_engine_run_at para todas as empresas processadas
+    for (const companyId of processedCompanies) {
+      await markCompanyProcessed(companyId);
     }
 
     console.info(`[followup/engine] varredura concluída — criadas: ${created}, ignoradas: ${skipped}`);
@@ -387,24 +453,27 @@ async function runAutomationEngine() {
 
 // ─── Export público ───────────────────────────────────────────────────────────
 
-// Disparo manual (botão "Ativar Esteira 4" no frontend). Roda em background:
-// a rota responde 202 e o processamento segue nos logs. Guard evita execuções
-// concorrentes (cron + manual ao mesmo tempo).
 let engineRunning = false;
 
 export function triggerAutomationRun() {
   if (engineRunning) return { started: false, alreadyRunning: true };
   engineRunning = true;
   console.info("[followup/engine] disparo manual recebido — iniciando varredura");
-  runAutomationEngine()
+  runAutomationEngine(true)
     .catch((err) => console.error("[followup/engine] erro no disparo manual:", err.message))
     .finally(() => { engineRunning = false; });
   return { started: true };
 }
 
 export function startAutomationEngine() {
-  // A cada 6 horas: minuto 0, a cada 6h
-  cron.schedule("0 */6 * * *", () => { triggerAutomationRun(); });
-  console.info("[followup/engine] Motor proativo agendado (a cada 6h)");
+  // Executar a cada hora
+  cron.schedule("0 * * * *", () => {
+    if (engineRunning) return;
+    engineRunning = true;
+    runAutomationEngine(false)
+      .catch((err) => console.error("[followup/engine] erro no cron de varredura:", err.message))
+      .finally(() => { engineRunning = false; });
+  });
+  console.info("[followup/engine] Motor proativo agendado (a cada 1h)");
   return { runNow: triggerAutomationRun };
 }

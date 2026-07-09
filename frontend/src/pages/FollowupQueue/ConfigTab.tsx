@@ -162,6 +162,52 @@ function CompanyForm({
         </div>
       </div>
 
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 border-b pb-1">Motor de Varredura & Reabordagem</h4>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500">Varredura do Motor (horas)</Label>
+            <Input
+              type="number"
+              className="h-8 text-xs bg-white dark:bg-slate-900"
+              value={form.engine_scan_interval_hours}
+              onChange={(e) => set("engine_scan_interval_hours", Number(e.target.value))}
+            />
+            <span className="text-[9px] text-slate-400">De quanto em quanto tempo o motor analisa os leads.</span>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500">Sem Contato Inicial (horas)</Label>
+            <Input
+              type="number"
+              className="h-8 text-xs bg-white dark:bg-slate-900"
+              value={form.never_contacted_delay_hours}
+              onChange={(e) => set("never_contacted_delay_hours", Number(e.target.value))}
+            />
+            <span className="text-[9px] text-slate-400">Tempo mínimo de espera antes do primeiro follow-up.</span>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500">Sem Resposta de Campanhas (horas)</Label>
+            <Input
+              type="number"
+              className="h-8 text-xs bg-white dark:bg-slate-900"
+              value={form.no_reply_delay_hours}
+              onChange={(e) => set("no_reply_delay_hours", Number(e.target.value))}
+            />
+            <span className="text-[9px] text-slate-400">Tempo sem resposta para disparar nova cobrança.</span>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-slate-500">Inatividade de Leads LivPub (meses)</Label>
+            <Input
+              type="number"
+              className="h-8 text-xs bg-white dark:bg-slate-900"
+              value={form.livpub_inactive_delay_months}
+              onChange={(e) => set("livpub_inactive_delay_months", Number(e.target.value))}
+            />
+            <span className="text-[9px] text-slate-400">Tempo sem visitas para considerar lead inativo.</span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between border-t border-slate-100 dark:border-white/5 pt-3">
         <div className="flex flex-col">
           <Label htmlFor="panel-access" className="text-sm cursor-pointer">
@@ -346,9 +392,17 @@ export function ConfigTab() {
                     name: editing.name,
                     evolution_instance: editing.evolution_instance,
                     webhook_url: editing.webhook_url || "",
-                    calendly_webhook_secret: "",
+                    calendly_webhook_secret: editing.calendly_webhook_secret || "",
                     panel_access: editing.panel_access,
                     auto_pause_on_reply: editing.auto_pause_on_reply || false,
+                    auto_pause_on_calendly: editing.auto_pause_on_calendly || false,
+                    sending_window_start: editing.sending_window_start || "08:00",
+                    sending_window_end: editing.sending_window_end || "18:00",
+                    sending_days: editing.sending_days || "1,2,3,4,5",
+                    engine_scan_interval_hours: editing.engine_scan_interval_hours ?? 6,
+                    never_contacted_delay_hours: editing.never_contacted_delay_hours ?? 2,
+                    no_reply_delay_hours: editing.no_reply_delay_hours ?? 48,
+                    livpub_inactive_delay_months: editing.livpub_inactive_delay_months ?? 6,
                   }
                 : EMPTY_COMPANY_FORM
             }

@@ -18,4 +18,8 @@ export const EMPTY_COMPANY_FORM = {
   sending_window_start: "08:00",
   sending_window_end: "18:00",
   sending_days: "1,2,3,4,5",
+  engine_scan_interval_hours: 6,
+  never_contacted_delay_hours: 2,
+  no_reply_delay_hours: 48,
+  livpub_inactive_delay_months: 6,
 };

@@ -25,6 +25,11 @@ export interface FupCompany {
   inbound_webhook_url?: string;
   sdr_whatsapp_number?: string;
   sdr_transfer_enabled?: boolean;
+  engine_scan_interval_hours?: number;
+  never_contacted_delay_hours?: number;
+  no_reply_delay_hours?: number;
+  livpub_inactive_delay_months?: number;
+  last_engine_run_at?: string | null;
   activeCampaigns: number;
   created_at: string;
   tenant_id?: string;
