@@ -12,7 +12,6 @@ import { INTERNAL_PAGE_ORDER, getDefaultClientRoute, isInternalPageAllowedForCli
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
-import Agente from "./pages/Agente";
 import ClientPortalDashboard from "./pages/ClientPortalDashboard";
 import ClientPortalLeads from "./pages/ClientPortalLeads";
 import ClientPortalPlanilhas from "./pages/ClientPortalPlanilhas";
@@ -25,27 +24,17 @@ import NotFound from "./pages/NotFound";
 import SetPassword from "./pages/SetPassword";
 import PendingApproval from "./pages/PendingApproval";
 import ClientSignup from "./pages/ClientSignup";
-import UserAccessManagement from "./pages/UserAccessManagement";
 import WhatsAppInbox from "./pages/WhatsAppInbox";
-import Tenants from "./pages/Tenants";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
-import Conexoes from "./pages/Conexoes";
-import Aquecimento from "./pages/Aquecimento";
 import Relatorios from "./pages/Relatorios";
-import ChatbotKanban from "./pages/ChatbotKanban";
-import ChatbotDocs from "./pages/ChatbotDocs";
-import ChatbotSettings from "./pages/ChatbotSettings";
 import FollowupQueue from "./pages/FollowupQueue";
 import OnboardingWizard from "./pages/OnboardingWizard";
-import VexoPitch from "./pages/VexoPitch";
-import GeracaoDigitalPitch from "./pages/GeracaoDigitalPitch";
-import EvolutionAdmin from "./pages/EvolutionAdmin";
-import InboundAgentConfig from "./pages/InboundAgentConfig";
-import WebhooksIntegrations from "./pages/WebhooksIntegrations";
 import LivPub from "./pages/LivPub";
-import Eventos from "./pages/Eventos";
-import Relacionamento from "./pages/Relacionamento";
 import GeracaoDigitalBriefings from "./pages/GeracaoDigitalBriefings";
+import AgenteIA from "./pages/AgenteIA";
+import ChipsWhatsapp from "./pages/ChipsWhatsapp";
+import AdminPanel from "./pages/AdminPanel";
+import ApresentacaoUnificada from "./pages/ApresentacaoUnificada";
 
 const queryClient = new QueryClient();
 
@@ -208,45 +197,19 @@ const App = () => (
               <Route
                 path="agente"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
-                    <Agente />
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <AgenteIA />
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="chatbot"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
-                    <ChatbotKanban />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="inbound-agents"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
-                    <InboundAgentConfig />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="chatbot-settings"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="chatbot-config">
-                    <ChatbotSettings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="chatbot-config" element={<Navigate to="/crm/chatbot-settings" replace />} />
-              <Route
-                path="chatbot-docs"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="agente">
-                    <ChatbotDocs />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="prompt-editor" element={<Navigate to="/crm/chatbot-settings?tab=prompts" replace />} />
+              <Route path="chatbot" element={<Navigate to="/crm/agente?tab=operacao" replace />} />
+              <Route path="inbound-agents" element={<Navigate to="/crm/agente?tab=inbound" replace />} />
+              <Route path="chatbot-settings" element={<Navigate to="/crm/agente?tab=settings" replace />} />
+              <Route path="chatbot-config" element={<Navigate to="/crm/agente?tab=settings" replace />} />
+              <Route path="chatbot-docs" element={<Navigate to="/crm/agente?tab=docs" replace />} />
+              <Route path="prompt-editor" element={<Navigate to="/crm/agente?tab=settings" replace />} />
+              <Route path="chatbot-templates" element={<Navigate to="/crm/agente?tab=settings" replace />} />
+
               <Route
                 path="followup"
                 element={
@@ -255,60 +218,36 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-               <Route path="followup-empresas" element={<Navigate to="/crm/followup?tab=config" replace />} />
+              <Route path="followup-empresas" element={<Navigate to="/crm/followup?tab=config" replace />} />
               <Route path="followup-campanhas" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
               <Route path="followup-templates" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
               <Route path="followup-analytics" element={<Navigate to="/crm/followup?tab=metrics" replace />} />
               <Route path="followup-sugestoes" element={<Navigate to="/crm/followup?tab=sugestoes" replace />} />
-              <Route path="chatbot-templates" element={<Navigate to="/crm/chatbot-settings?tab=template" replace />} />
+
               <Route
-                path="usuarios"
+                path="admin"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="usuarios">
-                    <ErrorBoundary>
-                      <UserAccessManagement />
-                    </ErrorBoundary>
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <AdminPanel />
                   </ProtectedRoute>
                 }
               />
+              <Route path="empresas" element={<Navigate to="/crm/admin?tab=empresas" replace />} />
+              <Route path="usuarios" element={<Navigate to="/crm/admin?tab=usuarios" replace />} />
+              <Route path="integracoes" element={<Navigate to="/crm/admin?tab=integracoes" replace />} />
+
               <Route
-                path="empresas"
+                path="chips-whatsapp"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
-                    <ErrorBoundary>
-                      <Tenants />
-                    </ErrorBoundary>
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <ChipsWhatsapp />
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="integracoes"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="empresas">
-                    <ErrorBoundary>
-                      <WebhooksIntegrations />
-                    </ErrorBoundary>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="conexoes"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="conexoes">
-                    <ErrorBoundary>
-                      <Conexoes />
-                    </ErrorBoundary>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="aquecimento"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="aquecimento">
-                    <Aquecimento />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="conexoes" element={<Navigate to="/crm/chips-whatsapp?tab=conexoes" replace />} />
+              <Route path="aquecimento" element={<Navigate to="/crm/chips-whatsapp?tab=aquecimento" replace />} />
+              <Route path="evolution-admin" element={<Navigate to="/crm/chips-whatsapp?tab=evolution-admin" replace />} />
+
               <Route
                 path="relatorios"
                 element={
@@ -325,22 +264,9 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="eventos"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="eventos">
-                    <Eventos />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="relacionamento"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="relacionamento">
-                    <Relacionamento />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="eventos" element={<Navigate to="/crm/livpub?tab=eventos" replace />} />
+              <Route path="relacionamento" element={<Navigate to="/crm/livpub?tab=relacionamento" replace />} />
+
               <Route
                 path="onboarding"
                 element={
@@ -353,31 +279,16 @@ const App = () => (
                 path="apresentacao"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
-                    <VexoPitch />
+                    <ApresentacaoUnificada />
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="apresentacao-gd"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <GeracaoDigitalPitch />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="apresentacao-gd" element={<Navigate to="/crm/apresentacao?deck=gd" replace />} />
               <Route
                 path="briefings-gd"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="briefings-gd">
                     <GeracaoDigitalBriefings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="evolution-admin"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredAdmin>
-                    <EvolutionAdmin />
                   </ProtectedRoute>
                 }
               />

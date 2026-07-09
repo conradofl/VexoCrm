@@ -1,5 +1,5 @@
-// VexoCrm/frontend/src/pages/LivPub.tsx
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { 
   Sparkles, 
@@ -8,21 +8,23 @@ import {
   ChevronRight, 
   Layers, 
   Users, 
-  Settings, 
   Clock, 
   AlertCircle,
   CheckCircle2,
   Play,
   TrendingUp,
-  MessageSquare
+  Sliders
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Eventos } from "./Eventos";
+import Relacionamento from "./Relacionamento";
 
-export default function LivPub() {
-  const [activeStep, setActiveStep] = useState(1);
+function PainelLivPub() {
+  const [activeStep] = useState(1);
 
   const cronograma = [
     { semana: 1, titulo: "Fundação Técnica", descricao: "Banco de dados de leads e catálogo de segmentações.", status: "doing" },
@@ -40,17 +42,7 @@ export default function LivPub() {
   ];
 
   return (
-    <PageShell
-      title="Painel LivPub"
-      subtitle="Hub centralizador de automações, esteiras e segmentação para o ecossistema LivPub"
-      headerRight={
-        <div className="flex items-center gap-2 bg-indigo-500/10 text-indigo-400 px-3 py-1.5 rounded-full border border-indigo-500/20 text-xs font-semibold">
-          <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-          Fase de Setup (VexoCRM Base)
-        </div>
-      }
-      spacing="space-y-6"
-    >
+    <div className="space-y-6">
       {/* Grid Superior: Visão Geral e Atalhos */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="relative overflow-hidden border-border bg-card hover:shadow-md transition-all">
@@ -67,12 +59,6 @@ export default function LivPub() {
                 <span className="text-3xl font-bold tracking-tight">0</span>
                 <span className="text-xs text-muted-foreground ml-2">ativos</span>
               </div>
-              <Button asChild size="sm" variant="ghost" className="gap-1 hover:text-indigo-400 text-xs h-8">
-                <Link to="/crm/eventos">
-                  Configurar
-                  <ChevronRight className="h-3 w-3" />
-                </Link>
-              </Button>
             </div>
           </CardContent>
         </Card>
@@ -91,12 +77,6 @@ export default function LivPub() {
                 <span className="text-3xl font-bold tracking-tight">0</span>
                 <span className="text-xs text-muted-foreground ml-2">rodando</span>
               </div>
-              <Button asChild size="sm" variant="ghost" className="gap-1 hover:text-pink-400 text-xs h-8">
-                <Link to="/crm/relacionamento">
-                  Gerenciar
-                  <ChevronRight className="h-3 w-3" />
-                </Link>
-              </Button>
             </div>
           </CardContent>
         </Card>
@@ -266,6 +246,53 @@ export default function LivPub() {
             </p>
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+export default function LivPub() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "painel";
+
+  const handleTabChange = (val: string) => {
+    setSearchParams({ tab: val });
+  };
+
+  return (
+    <PageShell
+      title="LivPub"
+      subtitle="Módulo específico de inteligência e automação para LivPub"
+    >
+      <div className="w-full space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+          <div className="border-b border-slate-200 dark:border-white/10 pb-2 mb-4">
+            <TabsList className="flex w-full max-w-md bg-muted border border-border h-10 p-1">
+              <TabsTrigger value="painel" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                Painel
+              </TabsTrigger>
+              <TabsTrigger value="relacionamento" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                <Sliders className="h-3.5 w-3.5 mr-1.5" />
+                Relacionamento
+              </TabsTrigger>
+              <TabsTrigger value="eventos" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                <Calendar className="h-3.5 w-3.5 mr-1.5" />
+                Eventos
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          <TabsContent value="painel" className="focus-visible:outline-none focus-visible:ring-0">
+            <PainelLivPub />
+          </TabsContent>
+          <TabsContent value="relacionamento" className="focus-visible:outline-none focus-visible:ring-0">
+            <Relacionamento />
+          </TabsContent>
+          <TabsContent value="eventos" className="focus-visible:outline-none focus-visible:ring-0">
+            <Eventos />
+          </TabsContent>
+        </Tabs>
       </div>
     </PageShell>
   );

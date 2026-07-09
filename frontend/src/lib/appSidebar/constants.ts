@@ -9,100 +9,69 @@ import {
   ShieldCheck,
   FileSpreadsheet,
   MessageCircle,
-  KanbanSquare,
   BookOpen,
   ListChecks,
-  Settings2,
   Sparkles,
   Wifi,
-  Calendar,
-  Heart,
-  Flame,
   BarChart2,
   Server,
 } from "lucide-react";
 import { type InternalPage } from "@/lib/access";
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ESTRUTURA GRANULAR DE MÓDULOS — Máquina de Vendas vs Máquina de Disparos
-//
-// Cada ferramenta tem `key` própria para filtro de permissão por pacote.
-// PASSO 2 (futuro): substituir o filter abaixo por:
-//   ferramentas.filter(f => canAccessInternalPage(f.page) && clienteTemAcesso(f.key))
-//
-// Para adicionar uma ferramenta: inclua o objeto aqui e o InternalPage em access.ts.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export type Modo = "vendas" | "disparos";
-
-export type Ferramenta = {
-  key: string;          // identificador único — usado no Passo 2 para filtro de pacote
+export type SidebarItem = {
+  key: string;
   label: string;
   url: string;
   icon: ComponentType<{ className?: string }>;
   badge?: string;
-  page: InternalPage;   // controla visibilidade via canAccessInternalPage
+  page: InternalPage;
 };
 
-export type Modulo = {
-  labelCurto: string;   // exibido no pill do switcher
-  labelLongo: string;   // exibido em tooltip/collapsed
-  cor: string;          // cor de identidade hex
-  ferramentas: Ferramenta[];
-};
-
-export const MODULOS: Record<Modo, Modulo> = {
-  vendas: {
-    labelCurto: "Vendas",
-    labelLongo: "Máquina de Vendas",
-    cor: "#6366F1", // Electric Indigo — token oficial (tailwind.config.ts:21, index.css:63)
-    ferramentas: [
-      // PASSO 2: filtrar esta lista por clienteTemAcesso(f.key) antes de renderizar
-      { key: "dashboard",      label: "Dashboard",          url: "/crm/dashboard",              icon: LayoutDashboard, page: "dashboard" },
-      { key: "leads",          label: "Leads",              url: "/crm/leads",                  icon: Users,           page: "leads",               badge: "CRM" },
-      { key: "conversas",      label: "Conversas",          url: "/crm/whatsapp",               icon: MessageCircle,   page: "whatsapp" },
-      { key: "inteligencia",   label: "Int. Comercial",     url: "/crm/inteligencia-comercial", icon: LineChart,       page: "inteligencia-comercial" },
-      { key: "chatbot-kanban", label: "Chatbot Kanban",     url: "/crm/chatbot",                icon: KanbanSquare,    page: "chatbot-kanban" },
-      { key: "followup",       label: "Follow-up",          url: "/crm/followup",               icon: ListChecks,      page: "fila-de-followup" },
-      { key: "inbound-agents", label: "Assistentes Inbound", url: "/crm/inbound-agents",         icon: Bot,             page: "agente" },
-      { key: "livpub",         label: "Painel LivPub",      url: "/crm/livpub",                 icon: Sparkles,        page: "livpub",              badge: "LIV" },
-      { key: "eventos",        label: "Eventos",            url: "/crm/eventos",                icon: Calendar,        page: "eventos" },
-      { key: "relacionamento", label: "Relacionamento",     url: "/crm/relacionamento",         icon: Heart,           page: "relacionamento" },
-    ],
-  },
-  disparos: {
-    labelCurto: "Disparos",
-    labelLongo: "Máquina de Disparos",
-    cor: "#ff7a1a", // Laranja marca — demo-liv-pub.html (--accent, botão primário + logo)
-    ferramentas: [
-      { key: "campanhas",   label: "Envios por Planilha", url: "/crm/planilhas",   icon: FileSpreadsheet, page: "planilhas" },
-      { key: "aquecimento", label: "Aquecimento", url: "/crm/aquecimento", icon: Flame,           page: "aquecimento" },
-      { key: "relatorios",  label: "Relatórios",  url: "/crm/relatorios",  icon: BarChart2,       page: "relatorios" },
-    ],
-  },
-} satisfies Record<Modo, Modulo>;
-
-// ─── Configurações ─────────────────────────────────────────────────────────────
-export const CONFIG_ITEMS = [
-  { key: "inbound-agents", label: "Assistentes Inbound", url: "/crm/inbound-agents",   icon: Bot,         page: "agente" as InternalPage },
-  { key: "chatbot",        label: "Chatbot Settings",    url: "/crm/chatbot-settings", icon: Settings2,   page: "chatbot-config" as InternalPage },
-  { key: "conexoes",       label: "Chips WhatsApp",      url: "/crm/conexoes",         icon: Wifi,        page: "conexoes" as InternalPage },
-  { key: "empresas",       label: "Empresas",            url: "/crm/empresas",         icon: Building2,   page: "empresas" as InternalPage },
-  { key: "integracoes",    label: "Integrações",         url: "/crm/integracoes",      icon: Server,      page: "empresas" as InternalPage },
-  { key: "usuarios",       label: "Usuários",            url: "/crm/usuarios",         icon: ShieldCheck, page: "usuarios" as InternalPage },
+// ━━ OPERAÇÃO ━━
+export const OPERACAO_ITEMS: SidebarItem[] = [
+  { key: "dashboard", label: "Dashboard", url: "/crm/dashboard", icon: LayoutDashboard, page: "dashboard" },
+  { key: "conversas", label: "Conversas", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" },
+  { key: "followup", label: "Follow-up", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" },
+  { key: "campanhas", label: "Campanhas", url: "/crm/campanhas", icon: FileSpreadsheet, page: "planilhas" },
 ];
 
-// ─── Educação & Ajuda ──────────────────────────────────────────────────────────
-export const AJUDA_ITEMS = [
-  { key: "onboarding",     label: "Treinamento Vexo",    url: "/crm/onboarding",       icon: ListChecks,  page: "onboarding-wizard" as InternalPage },
-  { key: "apresentacao",   label: "Demonstração Vexo",   url: "/crm/apresentacao",     icon: Sparkles,    page: "apresentacao" as InternalPage },
-  { key: "chatbot-docs",   label: "Chatbot Docs",        url: "/crm/chatbot-docs",     icon: BookOpen,    page: "chatbot-docs" as InternalPage },
+// ━━ INTELIGÊNCIA ━━
+export const INTELIGENCIA_ITEMS: SidebarItem[] = [
+  { key: "inteligencia", label: "Int. Comercial", url: "/crm/inteligencia-comercial", icon: LineChart, page: "inteligencia-comercial" },
+  { key: "relatorios", label: "Relatórios", url: "/crm/relatorios", icon: BarChart2, page: "relatorios" },
 ];
 
-// ─── Geração Digital ───────────────────────────────────────────────────────────
-export const GERACAO_DIGITAL_ITEMS = [
-  { key: "apresentacao-gd",label: "Apresentação GD",     url: "/crm/apresentacao-gd",  icon: Briefcase,   page: "apresentacao-gd" as InternalPage },
-  { key: "briefings-gd",   label: "Briefings Salvos",    url: "/crm/briefings-gd",     icon: ListChecks,  page: "briefings-gd" as InternalPage },
+// ━━ AGENTE IA ━━
+export const AGENTE_IA_ITEMS: SidebarItem[] = [
+  { key: "agente-ia", label: "Agente IA", url: "/crm/agente", icon: Bot, page: "agente" },
+];
+
+// ━━ CANAIS ━━
+export const CANAIS_ITEMS: SidebarItem[] = [
+  { key: "chips-whatsapp", label: "Chips WhatsApp", url: "/crm/chips-whatsapp", icon: Wifi, page: "conexoes" },
+];
+
+// ━━ MÓDULOS ━━
+export const GERACAO_DIGITAL_ITEMS: SidebarItem[] = [
+  { key: "apresentacao-gd", label: "Apresentação GD", url: "/crm/apresentacao-gd", icon: Briefcase, page: "apresentacao-gd" },
+  { key: "briefings-gd", label: "Briefings Salvos", url: "/crm/briefings-gd", icon: ListChecks, page: "briefings-gd" },
+];
+
+export const LIVPUB_ITEMS: SidebarItem[] = [
+  { key: "livpub", label: "Painel LivPub", url: "/crm/livpub", icon: Sparkles, page: "livpub", badge: "LIV" },
+];
+
+// ━━ AJUDA & SETUP ━━
+export const AJUDA_ITEMS: SidebarItem[] = [
+  { key: "onboarding", label: "Treinamento Vexo", url: "/crm/onboarding", icon: ListChecks, page: "onboarding-wizard" },
+];
+
+// ━━ ADMIN ━━
+export const ADMIN_ITEMS: SidebarItem[] = [
+  { key: "empresas", label: "Empresas", url: "/crm/empresas", icon: Building2, page: "empresas" },
+  { key: "usuarios", label: "Usuários", url: "/crm/usuarios", icon: ShieldCheck, page: "usuarios" },
+  { key: "integracoes", label: "Integrações", url: "/crm/integracoes", icon: Server, page: "empresas" },
+  { key: "apresentacao-vexo", label: "Apresentação Vexo", url: "/crm/apresentacao", icon: Sparkles, page: "apresentacao" },
 ];
 
 export const COLOR_PRESETS = {

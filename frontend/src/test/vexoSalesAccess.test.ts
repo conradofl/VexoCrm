@@ -3,7 +3,7 @@ import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(resolve("src/App.tsx"), "utf8");
-const sidebarSource = readFileSync(resolve("src/components/AppSidebar.tsx"), "utf8");
+const chipsWhatsappSource = readFileSync(resolve("src/pages/ChipsWhatsapp.tsx"), "utf8");
 const protectedRouteSource = readFileSync(resolve("src/components/ProtectedRoute.tsx"), "utf8");
 const hookSource = readFileSync(resolve("src/hooks/useVexoSales.ts"), "utf8");
 const frontendVercelConfig = readFileSync(resolve("vercel.json"), "utf8");
@@ -14,10 +14,9 @@ describe("Vexo Sales frontend access control", () => {
     expect(appSource).toContain('path="evolution-admin"');
   });
 
-  it("renders the sidebar item only when the authenticated user is admin", () => {
-    expect(sidebarSource).toContain("isAdminUser");
-    expect(sidebarSource).toContain('"Evolution Admin"');
-    expect(sidebarSource).toContain('/crm/evolution-admin');
+  it("renders the Evolution Admin tab only when the authenticated user is admin", () => {
+    expect(chipsWhatsappSource).toContain("isAdminUser");
+    expect(chipsWhatsappSource).toContain('"evolution-admin"');
   });
 
   it("redirects direct URL access when requiredAdmin is not satisfied", () => {

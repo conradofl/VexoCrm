@@ -594,6 +594,7 @@ export function isInternalPageAllowedForClient(
     livpub: "livpub",
     "inbound-agents": "inbound-agents",
     integracoes: "integracoes",
+    agente: "inbound-agents",
   };
 
   const tabKey = pageToTabKey[page];
@@ -614,24 +615,33 @@ export function isPathAllowedForClient(
   else if (path.includes("/crm/leads")) tabKey = "leads";
   else if (path.includes("/crm/whatsapp")) tabKey = "conversas";
   else if (path.includes("/crm/inteligencia-comercial")) tabKey = "inteligencia";
-  else if (path.includes("/crm/chatbot-settings")) tabKey = "chatbot";
-  else if (path.includes("/crm/chatbot-docs")) tabKey = "chatbot-docs";
-  else if (path.includes("/crm/chatbot")) tabKey = "chatbot-kanban";
+  else if (path.includes("/crm/chatbot-settings") || (path.includes("/crm/agente") && path.includes("tab=settings"))) tabKey = "chatbot";
+  else if (path.includes("/crm/chatbot-docs") || (path.includes("/crm/agente") && path.includes("tab=docs"))) tabKey = "chatbot-docs";
+  else if (path.includes("/crm/inbound-agents") || (path.includes("/crm/agente") && path.includes("tab=inbound"))) tabKey = "inbound-agents";
+  else if (path.includes("/crm/chatbot") || (path.includes("/crm/agente") && (path.includes("tab=operacao") || !path.includes("tab=")))) tabKey = "chatbot-kanban";
   else if (path.includes("/crm/followup")) tabKey = "followup";
-  else if (path.includes("/crm/conexoes")) tabKey = "conexoes";
+  else if (path.includes("/crm/chips-whatsapp") || path.includes("/crm/conexoes") || path.includes("/crm/aquecimento")) {
+    if (path.includes("tab=aquecimento") || path.includes("/crm/aquecimento")) tabKey = "aquecimento";
+    else tabKey = "conexoes";
+  }
   else if (path.includes("/crm/planilhas")) tabKey = "campanhas";
-  else if (path.includes("/crm/aquecimento")) tabKey = "aquecimento";
   else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
   else if (path.includes("/crm/apresentacao-gd")) tabKey = "apresentacao-gd";
-  else if (path.includes("/crm/apresentacao")) tabKey = "apresentacao";
-  else if (path.includes("/crm/eventos")) tabKey = "eventos";
-  else if (path.includes("/crm/relacionamento")) tabKey = "relacionamento";
-  else if (path.includes("/crm/livpub")) tabKey = "livpub";
+  else if (path.includes("/crm/apresentacao")) {
+    if (path.includes("deck=gd")) tabKey = "apresentacao-gd";
+    else tabKey = "apresentacao";
+  }
+  else if (path.includes("/crm/livpub") || path.includes("/crm/eventos") || path.includes("/crm/relacionamento")) {
+    if (path.includes("tab=eventos") || path.includes("/crm/eventos")) tabKey = "eventos";
+    else if (path.includes("tab=relacionamento") || path.includes("/crm/relacionamento")) tabKey = "relacionamento";
+    else tabKey = "livpub";
+  }
   else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
-  else if (path.includes("/crm/usuarios")) tabKey = "usuarios";
-  else if (path.includes("/crm/inbound-agents")) tabKey = "inbound-agents";
-  else if (path.includes("/crm/integracoes")) tabKey = "integracoes";
-  else if (path.includes("/crm/eventos")) tabKey = "eventos";
+  else if (path.includes("/crm/admin") || path.includes("/crm/empresas") || path.includes("/crm/usuarios") || path.includes("/crm/integracoes")) {
+    if (path.includes("tab=usuarios") || path.includes("/crm/usuarios")) tabKey = "usuarios";
+    else if (path.includes("tab=integracoes") || path.includes("/crm/integracoes")) tabKey = "integracoes";
+    else tabKey = "empresas";
+  }
 
   if (!tabKey) return true;
   return allowedTabs.includes(tabKey);

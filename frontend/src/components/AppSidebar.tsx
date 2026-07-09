@@ -1,20 +1,25 @@
 import { useState, useEffect } from "react";
-import { PanelLeftClose, PanelLeft, BarChart3, Megaphone, Landmark, ChevronDown, UserPlus, Send, Database } from "lucide-react";
+import { PanelLeftClose, PanelLeft } from "lucide-react";
 import { useFollowupSuggestionCount } from "@/hooks/useFollowupSuggestions";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { isPathAllowedForClient } from "@/lib/access";
-import { type Modo, MODULOS, CONFIG_ITEMS, AJUDA_ITEMS, GERACAO_DIGITAL_ITEMS, COLOR_PRESETS } from "@/lib/appSidebar/constants";
+import { 
+  OPERACAO_ITEMS, 
+  INTELIGENCIA_ITEMS, 
+  AGENTE_IA_ITEMS, 
+  CANAIS_ITEMS, 
+  GERACAO_DIGITAL_ITEMS, 
+  LIVPUB_ITEMS, 
+  AJUDA_ITEMS, 
+  ADMIN_ITEMS, 
+  COLOR_PRESETS 
+} from "@/lib/appSidebar/constants";
 import { NavItem } from "@/components/appSidebar/NavItem";
-import { AdminNavLink } from "@/components/appSidebar/AdminNavLink";
-import { ModeSwitcher } from "@/components/appSidebar/ModeSwitcher";
 import { SidebarHeader } from "@/components/appSidebar/SidebarHeader";
 import { SidebarFooter } from "@/components/appSidebar/SidebarFooter";
 import { BrandCustomizer } from "@/components/appSidebar/BrandCustomizer";
-
-// Configuração + admin tools — FIXO, somente para isAdminUser.
-const ADMIN_ITEMS = [{ key: "evolution-admin", label: "Evolution Admin",  url: "/crm/evolution-admin", icon: Database }];
 
 export function AppSidebar() {
   const { logout, canAccessInternalPage, isAdminUser, user, accessProfile, isInternalUser } = useAuth();
@@ -54,9 +59,6 @@ export function AppSidebar() {
       window.removeEventListener("vexo-open-brand-customizer", onOpen);
     };
   }, []);
-
-  // Modo ativo: "vendas" por padrão, reseta para "vendas" ao recarregar a página.
-  const [modo, setModo] = useState<Modo>("vendas");
 
   const { data: suggestionCount = 0 } = useFollowupSuggestionCount();
 
@@ -108,44 +110,25 @@ export function AppSidebar() {
 
   const allowedTabs = crmClient?.selectedClient?.n8n_settings?.allowed_tabs;
 
-  const isModoAllowed = (m: Modo) => {
-    const tools = MODULOS[m].ferramentas;
-    return tools.some(
-      (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
-    );
+  const filterItems = (items: typeof OPERACAO_ITEMS) => {
+    return items
+      .map((f) => {
+        if (f.key === "followup" && suggestionCount > 0) {
+          return { ...f, badge: suggestionCount.toString() };
+        }
+        return f;
+      })
+      .filter((f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs)));
   };
 
-  const vendasAllowed = isModoAllowed("vendas");
-  const disparosAllowed = isModoAllowed("disparos");
-
-  useEffect(() => {
-    if (!vendasAllowed && disparosAllowed && modo === "vendas") {
-      setModo("disparos");
-    } else if (vendasAllowed && !disparosAllowed && modo === "disparos") {
-      setModo("vendas");
-    }
-  }, [vendasAllowed, disparosAllowed, modo]);
-
-  const ferramentasVisiveis = MODULOS[modo].ferramentas
-    .map((f) => {
-      if (f.key === "followup" && suggestionCount > 0) {
-        return { ...f, badge: suggestionCount.toString() };
-      }
-      return f;
-    })
-    .filter((f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs)));
-
-  const visibleConfig = CONFIG_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
-  );
-
-  const visibleAjuda = AJUDA_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
-  );
-
-  const visibleGeracaoDigital = GERACAO_DIGITAL_ITEMS.filter(
-    (f) => canAccessInternalPage(f.page) && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs))
-  );
+  const visibleOperacao = filterItems(OPERACAO_ITEMS);
+  const visibleInteligencia = filterItems(INTELIGENCIA_ITEMS);
+  const visibleAgenteIa = filterItems(AGENTE_IA_ITEMS);
+  const visibleCanais = filterItems(CANAIS_ITEMS);
+  const visibleGeracaoDigital = filterItems(GERACAO_DIGITAL_ITEMS);
+  const visibleLivpub = filterItems(LIVPUB_ITEMS);
+  const visibleAjuda = filterItems(AJUDA_ITEMS);
+  const visibleAdmin = filterItems(ADMIN_ITEMS);
 
   const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
 
@@ -161,7 +144,6 @@ export function AppSidebar() {
         "--primary-shadow": selectedPreset.shadow,
       } as React.CSSProperties}
     >
-      {/* Logo / título */}
       <SidebarHeader
         collapsed={collapsed}
         logo={logo}
@@ -171,44 +153,95 @@ export function AppSidebar() {
       />
 
       <nav className="flex-1 overflow-y-auto px-2 py-3.5">
-        {/* ── Alternador de modo: Vendas | Disparos ───────────────────── */}
-        <ModeSwitcher
-          modo={modo}
-          onModoChange={setModo}
-          collapsed={collapsed}
-          vendasAllowed={vendasAllowed}
-          disparosAllowed={disparosAllowed}
-        />
-
-        <div className="space-y-1">
-          {/* Ferramentas do modo ativo */}
-          {ferramentasVisiveis.map((ferramenta) => (
-            <NavItem key={ferramenta.key} item={ferramenta} collapsed={collapsed} />
-          ))}
-        </div>
-
-        {/* ── Configuração — FIXO, fora dos modos ─────────────────────────── */}
-        {visibleConfig.length > 0 && (
+        {/* ── OPERAÇÃO ── */}
+        {visibleOperacao.length > 0 && (
           <>
             {!collapsed && (
-              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-                Configuração
+              <p className="mt-2 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Operação
               </p>
             )}
             <div className="space-y-1">
-              {visibleConfig.map((item) => (
+              {visibleOperacao.map((item) => (
                 <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
             </div>
           </>
         )}
 
-        {/* ── Ajuda & Educação — FIXO ─────────────────────────── */}
+        {/* ── INTELIGÊNCIA ── */}
+        {visibleInteligencia.length > 0 && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Inteligência
+              </p>
+            )}
+            <div className="space-y-1">
+              {visibleInteligencia.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── AGENTE IA ── */}
+        {visibleAgenteIa.length > 0 && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Agente IA
+              </p>
+            )}
+            <div className="space-y-1">
+              {visibleAgenteIa.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── CANAIS ── */}
+        {visibleCanais.length > 0 && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Canais
+              </p>
+            )}
+            <div className="space-y-1">
+              {visibleCanais.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── MÓDULOS ── */}
+        {(visibleGeracaoDigital.length > 0 || visibleLivpub.length > 0) && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
+                Módulos
+              </p>
+            )}
+            <div className="space-y-1">
+              {visibleGeracaoDigital.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+              {visibleLivpub.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── AJUDA & SETUP ── */}
         {visibleAjuda.length > 0 && (
           <>
             {!collapsed && (
               <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-                Ajuda
+                Ajuda & Setup
               </p>
             )}
             <div className="space-y-1">
@@ -219,24 +252,8 @@ export function AppSidebar() {
           </>
         )}
 
-        {/* ── Geração Digital — FIXO ─────────────────────────── */}
-        {visibleGeracaoDigital.length > 0 && (
-          <>
-            {!collapsed && (
-              <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
-                Geração Digital
-              </p>
-            )}
-            <div className="space-y-1">
-              {visibleGeracaoDigital.map((item) => (
-                <NavItem key={item.key} item={item} collapsed={collapsed} />
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* ── Admin only, FIXO ────────────────────────── */}
-        {isAdminUser && (
+        {/* ── ADMIN (visível apenas para admins) ── */}
+        {isAdminUser && visibleAdmin.length > 0 && (
           <>
             {!collapsed && (
               <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
@@ -244,19 +261,14 @@ export function AppSidebar() {
               </p>
             )}
             <div className="space-y-1">
-              {ADMIN_ITEMS.map((item, i) => (
-                <AdminNavLink
-                  key={item.key}
-                  item={item}
-                  collapsed={collapsed}
-                  showAdminBadge={i === 0} // badge "Admin" só no primeiro item
-                />
+              {visibleAdmin.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
             </div>
           </>
         )}
 
-        {/* ── Recolher sidebar ────────────────────────────────────────── */}
+        {/* ── Recolher sidebar ── */}
         <div className="mt-3 space-y-1">
           <button
             onClick={() => setCollapsed(!collapsed)}
@@ -273,7 +285,6 @@ export function AppSidebar() {
         </div>
       </nav>
 
-      {/* Footer: usuário + logout */}
       <SidebarFooter
         collapsed={collapsed}
         userName={userName}
