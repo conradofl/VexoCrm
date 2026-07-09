@@ -6,8 +6,9 @@ export async function processSlackMessageToEvolution(pool, event) {
   
   if (!event || event.type !== "message") return;
 
-  // 1. Ignorar bots e mensagens de sistema
-  if (event.bot_id || event.subtype) return;
+  // 1. Ignorar bots e mensagens de sistema (exceto file_share)
+  if (event.bot_id) return;
+  if (event.subtype && event.subtype !== "file_share") return;
 
   const text = event.text || "";
   const channel = event.channel; // slack_channel_id
