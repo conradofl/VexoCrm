@@ -10,7 +10,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     
     async function processSlackJobSync(pool, jobData) {
       const { 
-        clientName, whatsappNumber, briefingData = {},
+        clientName, whatsappNumber, whatsappGroupId, briefingData = {},
         slackChannelName, slackExtraChannels = [], slackMembers = []
       } = jobData;
 
@@ -22,7 +22,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         if (clean.length === 10 || clean.length === 11) return "55" + clean;
         return clean;
       };
-      const jid = normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net";
+      const jid = whatsappGroupId ? whatsappGroupId : (normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net");
 
       const slug = (clientName || "cliente-sem-nome")
         .toLowerCase()
@@ -389,6 +389,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         const slackPayload = {
           clientName: prospectName,
           whatsappNumber: whatsappNumber,
+          whatsappGroupId: whatsappGroupId,
           briefingData: bData,
           slackChannelName,
           slackExtraChannels,
