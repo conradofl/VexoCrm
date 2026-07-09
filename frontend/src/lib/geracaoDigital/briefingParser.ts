@@ -12,59 +12,185 @@ export function deriveExtractedValues(transcriptText: string): Record<string, st
       // Heuristic parsing on custom transcript text
       const text = transcriptText;
       
-      const whatsappMatch = text.match(/(?:whatsapp|whats|tel|fone|contato|celular|cel)[\s:a-zA-Z]*(\(?\d{2}\)?\s?\d{4,5}[-.\s]?\d{4})/i) || text.match(/(\(?\d{2}\)?\s?\d{4,5}[-.\s]?\d{4})/);
-      const whatsapp = whatsappMatch ? whatsappMatch[1] : "(11) 99999-9999 (Solicitar)";
+      // We split into speaker turns, and then split each turn into sentences
+      const turns = text.split("\n").map(l => l.trim()).filter(Boolean);
+      const sentences: { speaker: string; text: string; turnIdx: number }[] = [];
       
-      const siteMatch = text.match(/(?:site|domain|domínio|web|www)[\s:a-zA-Z]*([a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+)/i) || text.match(/([a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+)/);
-      const site = siteMatch ? siteMatch[1] : "Não citado no briefing";
+      turns.forEach((turn, turnIdx) => {
+        const cleanTurn = turn.replace(/\*/g, "").trim();
+        const speakerMatch = cleanTurn.match(/^(caio|cliente):\s*/i);
+        const speaker = speakerMatch ? speakerMatch[1].toLowerCase() : "";
+        const content = speakerMatch ? cleanTurn.replace(/^(caio|cliente):\s*/i, "") : cleanTurn;
+        
+        // Split content into sentences, keeping the speaker context
+        const parts = content.split(/\.\s+/);
+        parts.forEach(part => {
+          if (part.trim()) {
+            sentences.push({
+              speaker,
+              text: part.trim(),
+              turnIdx
+            });
+          }
+        });
+      });
+
+      const getAnswerForKeywords = (keywords: string[], fallback: string): string => {
+        for (let i = 0; i < sentences.length; i++) {
+          const item = sentences[i];
+          const hasKeyword = keywords.some(kw => item.text.toLowerCase().includes(kw));
+          if (hasKeyword) {
+            // If this is Caio asking, look for the next client sentence
+            if (item.speaker === "caio") {
+              for (let j = i + 1; j < sentences.length; j++) {
+                if (sentences[j].speaker === "cliente") {
+                  const hasKw = keywords.some(kw => sentences[j].text.toLowerCase().includes(kw));
+                  if (hasKw) {
+                    return sentences[j].text;
+                  }
+                }
+              }
+              for (let j = i + 1; j < sentences.length; j++) {
+                if (sentences[j].speaker === "cliente") {
+                  return sentences[j].text;
+                }
+              }
+            }
+            if (item.speaker === "cliente") {
+              return item.text;
+            }
+            return item.text;
+          }
+        }
+        return fallback;
+      };
+
+      // Auto-detect products from text
+      const detectedProds: string[] = [];
+      const lowerText = text.toLowerCase();
+      if (lowerText.includes("google meu negócio") || lowerText.includes("google meu negocio") || lowerText.includes("gmn")) detectedProds.push("Google meu negócio");
+      if (lowerText.includes("google ads") || lowerText.includes("google adwords")) detectedProds.push("Google ads");
+      if (lowerText.includes("instagram") || lowerText.includes("insta")) detectedProds.push("Gestão de redes sociais (Instagram)");
+      if (lowerText.includes("facebook") || lowerText.includes("face")) detectedProds.push("Gestão de redes sociais (Facebook)");
+      if (lowerText.includes("linkedin")) detectedProds.push("Gestão de redes sociais (LinkedIn)");
+      if (lowerText.includes("tiktok")) detectedProds.push("Gestão de redes sociais (TikTok)");
+      if (lowerText.includes("tráfego") || lowerText.includes("trafego") || lowerText.includes("meta ads")) detectedProds.push("Gestão de tráfego google/meta ads");
+      if (lowerText.includes("logomarca") || lowerText.includes("logo")) detectedProds.push("Logomarca");
+      if (lowerText.includes("branding")) detectedProds.push("Branding");
+      if (lowerText.includes("cartão de visitas") || lowerText.includes("cartao de visitas")) detectedProds.push("Cartão de visitas");
+      if (lowerText.includes("arte avulsa")) detectedProds.push("Arte avulsa");
+      if (lowerText.includes("panfletos")) detectedProds.push("Panfletos");
+      if (lowerText.includes("cardápios") || lowerText.includes("cardapios")) detectedProds.push("Cardápios");
+      if (lowerText.includes("fachadas") || lowerText.includes("fachada")) detectedProds.push("Fachadas");
+      if (lowerText.includes("landing page") || lowerText.includes("site")) detectedProds.push("Landing Page\\site");
+      if (lowerText.includes("e-commerce") || lowerText.includes("ecommerce")) detectedProds.push("E-commerce");
+      if (lowerText.includes("cobertura de eventos")) detectedProds.push("Cobertura de eventos");
+      if (lowerText.includes("vídeo avulso") || lowerText.includes("video avulso")) detectedProds.push("Vídeo avulso");
       
-      const igMatch = text.match(/(?:instagram|insta|ig|perfil)[\s:a-zA-Z]*@([a-zA-Z0-9._]+)/i) || text.match(/@([a-zA-Z0-9._]+)/);
-      const instagram = igMatch ? `@${igMatch[1]}` : "@cliente (Pendente)";
+      const produtos = detectedProds.length > 0 ? detectedProds.join(", ") : "Gestão de Tráfego Pago + Social Media";
+
+      const logoAns = getAnswerForKeywords(["logo", "logomarca"], "Não se aplica");
+      const logo = logoAns.toLowerCase().includes("não se aplica") || logoAns.toLowerCase().includes("nao se aplica") ? "Não se aplica" : logoAns;
+
+      const siteAns = getAnswerForKeywords(["site", "www."], "");
+      const siteMatch = siteAns.match(/([a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+)/);
+      const site = siteMatch ? siteMatch[0] : "Não citado no briefing";
+
+      const dnsAns = getAnswerForKeywords(["dns", "domínio", "dominio", "hospedagem"], "Não preenchido");
+      let dominios_dns = dnsAns;
+      if (dnsAns.toLowerCase().includes("hostinger")) dominios_dns = "Hostinger";
+      else if (dnsAns.toLowerCase().includes("cloudflare")) dominios_dns = "Cloudflare";
+      else if (dnsAns.toLowerCase().includes("hostgator")) dominios_dns = "Hostgator";
+      else if (dnsAns.toLowerCase().includes("registro.br")) dominios_dns = "Registro.br";
+
+      const igAns = getAnswerForKeywords(["instagram", "insta"], "");
+      let instagram = "Será enviado no grupo";
+      if (igAns && !igAns.toLowerCase().includes("grupo") && !igAns.toLowerCase().includes("enviado")) {
+        const match = igAns.match(/@([a-zA-Z0-9._]+)/);
+        instagram = match ? `@${match[1]}` : igAns;
+      }
+
+      const fbAns = getAnswerForKeywords(["facebook", "face"], "");
+      let facebook = "Será enviado no grupo";
+      if (fbAns && !fbAns.toLowerCase().includes("grupo") && !fbAns.toLowerCase().includes("enviado")) {
+        facebook = fbAns;
+      }
+
+      const googleAns = getAnswerForKeywords(["google", "ads"], "");
+      let google = "Enviado pelo grupo";
+      if (googleAns && !googleAns.toLowerCase().includes("grupo") && !googleAns.toLowerCase().includes("enviado")) {
+        google = googleAns;
+      }
+
+      let possui_bm = "Não sei";
+      const bmAns = getAnswerForKeywords(["bm", "business manager"], "").toLowerCase();
+      if (bmAns.includes("não") || bmAns.includes("nao")) possui_bm = "Não";
+      if (bmAns.includes("sim")) possui_bm = "Sim";
+
+      const waAns = getAnswerForKeywords(["whatsapp", "whats", "celular", "telefone"], "Não preenchido");
+      let whatsapp = "Não possui";
+      const numMatch = waAns.match(/(\(?\d{2}\)?\s?\d{4,5}[-.\s]?\d{4})/);
+      if (numMatch) {
+        whatsapp = numMatch[1];
+      } else if (waAns.toLowerCase().includes("não possui") || waAns.toLowerCase().includes("nao possui")) {
+        whatsapp = "Não possui";
+      }
+
+      const concorrentes = getAnswerForKeywords(["concorrente", "concorrentes"], "Não preenchido");
+      const inspiracao = getAnswerForKeywords(["inspiração", "inspiracao", "referência", "referencia"], "Não preenchido");
+      const servicos = getAnswerForKeywords(["serviços", "servicos"], "Não preenchido");
       
-      const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})/);
-      const email = emailMatch ? emailMatch[1] : "contato@empresa.com.br";
+      let atuacao = getAnswerForKeywords(["localização", "localizacao", "atuação", "atuacao", "cidade"], "Local");
+      const cityMatch = atuacao.match(/em\s+([A-Z][a-zA-Zãáàâéêíóôúçñ]+)/);
+      if (cityMatch) {
+        atuacao = cityMatch[1];
+      } else {
+        atuacao = atuacao.replace(/A nossa localização principal de atuação é em/i, "").trim();
+      }
+
+      const publico = getAnswerForKeywords(["público", "publico", "persona"], "Não preenchido");
       
-      const passwordMatch = text.match(/(?:senha|password|pass|acesso)[\s:a-zA-Z]*([a-zA-Z0-9@#$_!-]+)/i);
-      const password = passwordMatch ? passwordMatch[1] : "senha123";
+      let bloqueado = getAnswerForKeywords(["bloqueado", "não abordar", "nunca falar"], "Não preenchido");
+      if (bloqueado.toLowerCase().includes("bloqueado a gente deixou não preenchido") || bloqueado.toLowerCase().includes("bloqueado a gente deixou nao preenchido")) {
+        bloqueado = "Não preenchido";
+      }
+
+      const temas = getAnswerForKeywords(["temas", "linha editorial"], "Não preenchido");
       
-      const compMatch = text.match(/(?:concorrentes|concorrente|compete|competidor|rivais)[\s:a-zA-Z]*([^\.]+)/i);
-      const concorrentes = compMatch ? compMatch[1].trim() : "Mapeando concorrência local";
+      let verba = getAnswerForKeywords(["verba", "orçamento", "investimento"], "Não preenchido");
+      if (verba.toLowerCase().includes("verba ainda não foi definida") || verba.toLowerCase().includes("verba ainda nao foi definida")) {
+        verba = "Ainda não foi definido";
+      }
 
-      const inspMatch = text.match(/(?:inspiração|inspirar|referência|gostamos)[\s:a-zA-Z]*([^\.]+)/i);
-      const inspiracao = inspMatch ? inspMatch[1].trim() : "Clean e moderno";
+      let tipo_pagamento = getAnswerForKeywords(["tipo de pagamento", "pagamento", "pix", "boleto"], "Não preenchido");
+      if (tipo_pagamento.toLowerCase().includes("pagamento também deixamos não preenchido") || tipo_pagamento.toLowerCase().includes("pagamento também deixamos nao preenchido")) {
+        tipo_pagamento = "Não preenchido";
+      }
 
-      const geoMatch = text.match(/(?:atuação|cidade|estado|região|localizado|endereço)[\s:a-zA-Z]*([^\.]+)/i);
-      const atuacao = geoMatch ? geoMatch[1].trim() : "Local";
-
-      const targetMatch = text.match(/(?:público|publico|persona|idade)[\s:a-zA-Z]*([^\.]+)/i);
-      const publico = targetMatch ? targetMatch[1].trim() : "Consumidores do segmento";
-
-      const blockMatch = text.match(/(?:bloqueado|não abordar|nunca falar|assuntos)[\s:a-zA-Z]*([^\.]+)/i);
-      const bloqueado = blockMatch ? blockMatch[1].trim() : "Política, religião e polêmicas";
-
-      const themesMatch = text.match(/(?:temas|conteúdo|postagens|linha editorial)[\s:a-zA-Z]*([^\.]+)/i);
-      const temas = themesMatch ? themesMatch[1].trim() : "Dicas úteis, bastidores e depoimentos";
-
-      const prodMatch = text.match(/(?:serviços|produtos|vende|contratamos|fechamos)[\s:a-zA-Z]*([^\.]+)/i);
-      const produtos = prodMatch ? prodMatch[1].trim() : "Gestão de Tráfego Pago + Social Media";
+      const objetivo_trafego = getAnswerForKeywords(["objetivo"], "Não preenchido");
+      const produtos_trafego = getAnswerForKeywords(["produtos de tráfego", "produtos de trafego"], "Não preenchido");
 
       extractedValues = {
-        produtos: produtos.substring(0, 80),
-        logo: text.includes("drive.google") || text.includes("dropbox") 
-          ? "Link de nuvem detectado no áudio" 
-          : "Link de pasta compartilhada pendente",
-        instagram: `User: ${instagram} | Senha: ${password}`,
-        facebook: `Página comercial vinculada a ${instagram}`,
-        google: `User: ${email} | Senha: ${password}`,
-        site,
-        whatsapp,
-        concorrentes: concorrentes.substring(0, 80),
-        inspiracao: inspiracao.substring(0, 80),
-        servicos: text.slice(0, 100) + "...",
-        atuacao: atuacao.substring(0, 80),
-        publico: publico.substring(0, 80),
-        bloqueado: bloqueado.substring(0, 80),
-        temas: temas.substring(0, 80)
+        produtos: produtos.substring(0, 150),
+        logo: logo.substring(0, 100),
+        instagram: instagram.substring(0, 100),
+        facebook: facebook.substring(0, 100),
+        google: google.substring(0, 100),
+        possui_bm,
+        site: site.substring(0, 100),
+        dominios_dns: dominios_dns.substring(0, 100),
+        whatsapp: whatsapp.substring(0, 50),
+        concorrentes: concorrentes.substring(0, 150),
+        inspiracao: inspiracao.substring(0, 150),
+        servicos: servicos.substring(0, 250),
+        localizacao: atuacao.substring(0, 100),
+        publico_alvo: publico.substring(0, 250),
+        bloqueado: bloqueado.substring(0, 150),
+        temas: temas.substring(0, 250),
+        verba: verba.substring(0, 100),
+        tipo_pagamento: tipo_pagamento.substring(0, 100),
+        objetivo_trafego: objetivo_trafego.substring(0, 150),
+        produtos_trafego: produtos_trafego.substring(0, 150)
       };
     }
 
