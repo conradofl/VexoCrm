@@ -626,10 +626,12 @@ export function isPathAllowedForClient(
   }
   else if (path.includes("/crm/planilhas")) tabKey = "campanhas";
   else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
-  else if (path.includes("/crm/apresentacao-gd")) tabKey = "apresentacao-gd";
+  else if (path.includes("/crm/geracao-digital") || path.includes("/crm/apresentacao-gd") || path.includes("/crm/briefings-gd")) {
+    if (path.includes("tab=briefings") || path.includes("/crm/briefings-gd")) tabKey = "briefings-gd";
+    else tabKey = "apresentacao-gd";
+  }
   else if (path.includes("/crm/apresentacao")) {
-    if (path.includes("deck=gd")) tabKey = "apresentacao-gd";
-    else tabKey = "apresentacao";
+    tabKey = "apresentacao";
   }
   else if (path.includes("/crm/livpub") || path.includes("/crm/eventos") || path.includes("/crm/relacionamento")) {
     if (path.includes("tab=eventos") || path.includes("/crm/eventos")) tabKey = "eventos";

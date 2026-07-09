@@ -53,8 +53,7 @@ export const CANAIS_ITEMS: SidebarItem[] = [
 
 // ━━ MÓDULOS ━━
 export const GERACAO_DIGITAL_ITEMS: SidebarItem[] = [
-  { key: "apresentacao-gd", label: "Apresentação GD", url: "/crm/apresentacao-gd", icon: Briefcase, page: "apresentacao-gd" },
-  { key: "briefings-gd", label: "Briefings Salvos", url: "/crm/briefings-gd", icon: ListChecks, page: "briefings-gd" },
+  { key: "geracao-digital", label: "Geração Digital", url: "/crm/geracao-digital", icon: Briefcase, page: "apresentacao-gd" },
 ];
 
 export const LIVPUB_ITEMS: SidebarItem[] = [

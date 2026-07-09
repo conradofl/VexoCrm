@@ -30,12 +30,11 @@ import Relatorios from "./pages/Relatorios";
 import FollowupQueue from "./pages/FollowupQueue";
 import OnboardingWizard from "./pages/OnboardingWizard";
 import LivPub from "./pages/LivPub";
-import GeracaoDigitalBriefings from "./pages/GeracaoDigitalBriefings";
 import AgenteIA from "./pages/AgenteIA";
 import ChipsWhatsapp from "./pages/ChipsWhatsapp";
 import AdminPanel from "./pages/AdminPanel";
 import VexoPitch from "./pages/VexoPitch";
-import GeracaoDigitalPitch from "./pages/GeracaoDigitalPitch";
+import GeracaoDigital from "./pages/GeracaoDigital";
 
 const queryClient = new QueryClient();
 
@@ -278,21 +277,15 @@ const App = () => (
                 }
               />
               <Route
-                path="apresentacao-gd"
+                path="geracao-digital"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
-                    <GeracaoDigitalPitch />
+                    <GeracaoDigital />
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="briefings-gd"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="briefings-gd">
-                    <GeracaoDigitalBriefings />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="apresentacao-gd" element={<Navigate to="/crm/geracao-digital?tab=apresentacao" replace />} />
+              <Route path="briefings-gd" element={<Navigate to="/crm/geracao-digital?tab=briefings" replace />} />
             </Route>
               <Route
                 path="/clientes/:clientId"
