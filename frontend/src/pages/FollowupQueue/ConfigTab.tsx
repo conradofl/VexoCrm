@@ -381,7 +381,7 @@ export function ConfigTab() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Editar empresa" : "Nova empresa (WhatsApp)"}</DialogTitle>
           </DialogHeader>
