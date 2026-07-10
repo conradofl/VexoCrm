@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
 import { LeadClientEvolutionInstance } from "@/hooks/useLeadClients";
 import { EvolutionInstanceStatusBadge } from "./EvolutionInstanceStatusBadge";
 import { resolveChipLimit } from "@/lib/evolutionChips/utils";
@@ -18,6 +19,7 @@ interface EvolutionInstanceCardProps {
   onSaveChip: () => void;
   onToggleDefault: () => void;
   onToggleActive: () => void;
+  onToggleWebhook: () => void;
   onDelete: () => void;
   canEdit: boolean;
   isSavePending: boolean;
@@ -33,6 +35,7 @@ export function EvolutionInstanceCard({
   onSaveChip,
   onToggleDefault,
   onToggleActive,
+  onToggleWebhook,
   onDelete,
   canEdit,
   isSavePending,
@@ -149,6 +152,21 @@ export function EvolutionInstanceCard({
               </Button>
             )}
           </div>
+        </div>
+
+        {/* Integração de Webhook (Inbox / Conversas) */}
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200/50 bg-slate-50/50 p-3.5 text-xs dark:border-white/5 dark:bg-white/[0.01]">
+          <div className="space-y-0.5">
+            <span className="font-semibold text-foreground">Sincronizar Conversas no CRM</span>
+            <p className="text-[10px] text-muted-foreground">
+              Espelha em tempo real as mensagens recebidas e enviadas deste chip na aba "Conversas".
+            </p>
+          </div>
+          <Switch
+            checked={instance.webhook_enabled}
+            onCheckedChange={onToggleWebhook}
+            disabled={!canEdit || isSavePending}
+          />
         </div>
       </div>
 

@@ -87,7 +87,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
   // Instance action helpers
   const handleUpdateEvolutionInstance = async (
     instance: LeadClientEvolutionInstance,
-    patch: { active?: boolean; isDefault?: boolean }
+    patch: { active?: boolean; isDefault?: boolean; webhookEnabled?: boolean }
   ) => {
     try {
       await saveEvolutionInstance.mutateAsync({
@@ -97,9 +97,14 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
         dispatchWebhookUrl: instance.dispatch_webhook_url ?? "",
         active: patch.active ?? instance.active,
         isDefault: patch.isDefault ?? instance.is_default,
+        webhookEnabled: patch.webhookEnabled ?? instance.webhook_enabled,
       });
       toast({
-        title: patch.isDefault ? "Evolution padrao atualizada" : "Evolution atualizada",
+        title: patch.isDefault
+          ? "Evolution padrao atualizada"
+          : patch.webhookEnabled !== undefined
+            ? "Integração de webhook atualizada"
+            : "Evolution atualizada",
         description: `${tenant.name}: ${instance.name}`,
       });
     } catch (err) {
@@ -243,6 +248,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                   onSaveChip={() => void handleSaveChipSettings(instance)}
                   onToggleDefault={() => void handleUpdateEvolutionInstance(instance, { isDefault: true })}
                   onToggleActive={() => void handleUpdateEvolutionInstance(instance, { active: !instance.active })}
+                  onToggleWebhook={() => void handleUpdateEvolutionInstance(instance, { webhookEnabled: !instance.webhook_enabled })}
                   onDelete={() => void handleDeleteEvolutionInstance(instance)}
                   canEdit={canEdit}
                   isSavePending={saveEvolutionInstance.isPending}

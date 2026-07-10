@@ -46,6 +46,7 @@ export function maskEvolutionInstance(row) {
     chip_state: row.chip_state === "warm" ? "warm" : "cold",
     daily_limit_override: row.daily_limit_override != null ? Number(row.daily_limit_override) : null,
     sent_count_today: row.sent_count_today != null ? Number(row.sent_count_today) : 0,
+    webhook_enabled: row.webhook_enabled === true,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     updated_by_email: row.updated_by_email || null,
@@ -84,6 +85,7 @@ export async function ensureLeadClientEvolutionInstancesTable() {
       inbound_bearer_token TEXT,
       active BOOLEAN NOT NULL DEFAULT true,
       is_default BOOLEAN NOT NULL DEFAULT false,
+      webhook_enabled BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_by_uid TEXT,
@@ -110,6 +112,10 @@ export async function ensureLeadClientEvolutionInstancesTable() {
     ALTER TABLE public.lead_client_evolution_instances
     ADD COLUMN IF NOT EXISTS daily_limit_override INTEGER
   `);
+  await pgDatabasePool.query(`
+    ALTER TABLE public.lead_client_evolution_instances
+    ADD COLUMN IF NOT EXISTS webhook_enabled BOOLEAN NOT NULL DEFAULT false
+  `);
 
   _evolutionInstancesSchemaEnsured = true;
   return true;
@@ -122,6 +128,7 @@ export async function getLeadClientEvolutionInstances(clientId) {
     `
       SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
              i.inbound_bearer_token, i.active, i.is_default, i.chip_state, i.daily_limit_override,
+             i.webhook_enabled,
              i.created_at, i.updated_at, i.updated_by_email,
              COALESCE(u.sent_count, 0) AS sent_count_today
       FROM public.lead_client_evolution_instances i
@@ -143,6 +150,7 @@ export async function getLeadClientEvolutionInstancesMap(clientIds) {
     `
       SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
              i.inbound_bearer_token, i.active, i.is_default, i.chip_state, i.daily_limit_override,
+             i.webhook_enabled,
              i.created_at, i.updated_at, i.updated_by_email,
              COALESCE(u.sent_count, 0) AS sent_count_today
       FROM public.lead_client_evolution_instances i
@@ -166,6 +174,47 @@ export async function getDefaultLeadClientEvolutionInstance(clientId) {
   return instances.find((instance) => instance.active !== false && instance.is_default) ||
     instances.find((instance) => instance.active !== false) ||
     null;
+}
+
+export async function configureEvolutionInstanceWebhook(clientId, instanceName, enabled) {
+  const config = getEvolutionAdminConfig();
+  if (!config.configured) {
+    throw new Error("EVOLUTION_ADMIN_UNCONFIGURED");
+  }
+
+  const base =
+    process.env.WEBHOOK_BASE_URL ||
+    process.env.FRONTEND_ORIGIN?.replace(/\/$/, "") ||
+    "";
+  
+  if (!base) {
+    throw new Error("WEBHOOK_BASE_URL_UNDEFINED");
+  }
+
+  const webhookUrl = `${base}/api/hardcoded-chat-webhook?clientId=${encodeURIComponent(clientId)}`;
+
+  const payload = {
+    enabled: Boolean(enabled),
+    url: webhookUrl,
+    byEvents: false,
+    events: enabled ? ["MESSAGES_UPSERT", "SEND_MESSAGE"] : [],
+  };
+
+  const response = await fetch(`${config.baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: config.apiKey,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Evolution Webhook set returned HTTP ${response.status}: ${text}`);
+  }
+
+  return true;
 }
 
 export async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, existing = null) {
@@ -199,6 +248,10 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
   const dailyLimitOverride =
     rawLimit == null ? null : Number.isInteger(Number(rawLimit)) && Number(rawLimit) > 0 ? Number(rawLimit) : null;
 
+  const webhookEnabled = Object.prototype.hasOwnProperty.call(body, "webhookEnabled")
+    ? body.webhookEnabled === true
+    : existing?.webhook_enabled === true;
+
   const payload = {
     client_id: clientId,
     name,
@@ -223,6 +276,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
         : existing?.inbound_bearer_token || null,
     active,
     is_default: isDefault,
+    webhook_enabled: webhookEnabled,
     updated_by_uid: authAccess?.uid || null,
     updated_by_email: authAccess?.email || null,
   };
@@ -251,12 +305,14 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
               is_default = $6,
               chip_state = $7,
               daily_limit_override = $8,
+              webhook_enabled = $9,
               updated_at = now(),
-              updated_by_uid = $9,
-              updated_by_email = $10
-          WHERE id = $11 AND client_id = $12
+              updated_by_uid = $10,
+              updated_by_email = $11
+          WHERE id = $12 AND client_id = $13
           RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
                     inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
+                    webhook_enabled,
                     created_at, updated_at, updated_by_email
         `,
         [
@@ -268,6 +324,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
           payload.is_default,
           payload.chip_state,
           payload.daily_limit_override,
+          payload.webhook_enabled,
           payload.updated_by_uid,
           payload.updated_by_email,
           existing.id,
@@ -292,10 +349,11 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
         `
           INSERT INTO public.lead_client_evolution_instances
             (client_id, name, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token,
-             active, is_default, chip_state, daily_limit_override, updated_by_uid, updated_by_email)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             active, is_default, chip_state, daily_limit_override, webhook_enabled, updated_by_uid, updated_by_email)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
                     inbound_bearer_token, active, is_default, chip_state, daily_limit_override,
+                    webhook_enabled,
                     created_at, updated_at, updated_by_email
         `,
         [
@@ -308,6 +366,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
           shouldDefault,
           payload.chip_state,
           payload.daily_limit_override,
+          payload.webhook_enabled,
           payload.updated_by_uid,
           payload.updated_by_email,
         ]
@@ -315,6 +374,18 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
     }
 
     await client.query("COMMIT");
+
+    // Configure the webhook remotely on Evolution API
+    if (result.rows[0]?.dispatch_webhook_url) {
+      const parts = result.rows[0].dispatch_webhook_url.split("/");
+      const instanceName = parts[parts.length - 1];
+      if (instanceName) {
+        configureEvolutionInstanceWebhook(clientId, instanceName, webhookEnabled).catch((err) => {
+          console.error(`[evolution-webhook] Failed to configure remote webhook for ${instanceName}:`, err.message);
+        });
+      }
+    }
+
     return result.rows[0] || null;
   } catch (error) {
     await client.query("ROLLBACK");
@@ -427,6 +498,7 @@ export async function provisionLeadClientEvolutionInstance(clientId, input, auth
       dispatchWebhookToken: instanceToken,
       active: body.active !== false,
       isDefault: body.isDefault === true,
+      webhookEnabled: body.webhookEnabled !== false,
     },
     authAccess,
     null

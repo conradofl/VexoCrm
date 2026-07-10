@@ -60,6 +60,7 @@ export interface LeadClientEvolutionInstancePayload {
   isDefault?: boolean;
   chipState?: "cold" | "warm";
   dailyLimitOverride?: number | null;
+  webhookEnabled?: boolean;
 }
 
 export interface LeadClientEvolutionInstance {
@@ -74,6 +75,7 @@ export interface LeadClientEvolutionInstance {
   chip_state: "cold" | "warm";
   daily_limit_override: number | null;
   sent_count_today: number;
+  webhook_enabled: boolean;
   created_at?: string | null;
   updated_at?: string | null;
   updated_by_email?: string | null;
