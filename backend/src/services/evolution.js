@@ -176,11 +176,178 @@ export async function getDefaultLeadClientEvolutionInstance(clientId) {
     null;
 }
 
-export async function configureEvolutionInstanceWebhook(clientId, instanceName, enabled) {
-  const config = getEvolutionAdminConfig();
-  if (!config.configured) {
-    throw new Error("EVOLUTION_ADMIN_UNCONFIGURED");
+export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWebhookUrl, dispatchWebhookToken) {
+  try {
+    if (!dispatchWebhookUrl) return;
+
+    const urlObj = new URL(dispatchWebhookUrl);
+    const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+    const parts = urlObj.pathname.split("/");
+    const instanceName = parts[parts.length - 1];
+
+    if (!instanceName) return;
+
+    const apiKey = dispatchWebhookToken || getEvolutionAdminConfig().apiKey;
+
+    console.info(`[sync-evolution] Starting background sync for instance ${instanceName}...`);
+
+    // 1. Fetch chats from Evolution API
+    const chatsResponse = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
+      method: "GET",
+      headers: { apikey: apiKey }
+    });
+
+    if (!chatsResponse.ok) {
+      console.warn(`[sync-evolution] Failed to fetch chats for ${instanceName}: HTTP ${chatsResponse.status}`);
+      return;
+    }
+
+    const chats = await chatsResponse.json();
+    if (!Array.isArray(chats)) {
+      console.warn(`[sync-evolution] Evolution API did not return an array of chats:`, chats);
+      return;
+    }
+
+    console.info(`[sync-evolution] Found ${chats.length} chats. Syncing messages for the top 30 chats...`);
+
+    // Only sync the top 30 chats to avoid excessive API requests
+    const topChats = chats.slice(0, 30);
+
+    for (const chat of topChats) {
+      const remoteJid = chat.id || chat.remoteJid;
+      if (!remoteJid || remoteJid.includes("@g.us") || remoteJid.includes("@broadcast")) {
+        continue;
+      }
+
+      const phone = remoteJid.split("@")[0];
+      if (!phone) continue;
+
+      // 2. Fetch last 15 messages for each of the top chats
+      try {
+        const msgsResponse = await fetch(`${baseUrl}/chat/findMessages/${encodeURIComponent(instanceName)}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: apiKey
+          },
+          body: JSON.stringify({
+            where: {
+              key: {
+                remoteJid: remoteJid
+              }
+            },
+            limit: 15
+          })
+        });
+
+        if (!msgsResponse.ok) {
+          console.warn(`[sync-evolution] Failed to fetch messages for chat ${remoteJid}: HTTP ${msgsResponse.status}`);
+          continue;
+        }
+
+        const msgsData = await msgsResponse.json();
+        const messages = Array.isArray(msgsData) ? msgsData : (msgsData?.records || msgsData?.messages || []);
+
+        if (!Array.isArray(messages)) continue;
+
+        // Resolve lead details once per chat
+        const leadRes = await pgDatabasePool.query(
+          `
+            SELECT id, source_campaign_id 
+            FROM public.leads 
+            WHERE client_id = $1 AND (telefone = $2 OR telefone = $3 OR telefone = $4)
+            ORDER BY created_at DESC 
+            LIMIT 1
+          `,
+          [
+            clientId,
+            phone,
+            phone.replace(/^55/, ""),
+            phone.startsWith("55") ? phone : `55${phone}`
+          ]
+        );
+        const leadId = leadRes.rows[0]?.id || null;
+        const campaignId = leadRes.rows[0]?.source_campaign_id || null;
+
+        for (const msg of messages) {
+          const fromMe = msg.key?.fromMe === true;
+          const messageText = 
+            msg.message?.conversation || 
+            msg.message?.extendedTextMessage?.text || 
+            msg.messageText || 
+            "";
+
+          if (!messageText) continue;
+
+          const timestamp = msg.messageTimestamp 
+            ? new Date(msg.messageTimestamp * 1000) 
+            : new Date();
+
+          // Check if message already exists
+          const checkRes = await pgDatabasePool.query(
+            `
+              SELECT id 
+              FROM public.lead_messages
+              WHERE client_id = $1 AND phone = $2 AND message_text = $3
+                AND created_at >= $4 AND created_at <= $5
+              LIMIT 1
+            `,
+            [
+              clientId,
+              phone,
+              messageText,
+              new Date(timestamp.getTime() - 5000),
+              new Date(timestamp.getTime() + 5000)
+            ]
+          );
+
+          if (checkRes.rows.length === 0) {
+            await pgDatabasePool.query(
+              `
+                INSERT INTO public.lead_messages 
+                  (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, meta)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              `,
+              [
+                clientId,
+                leadId,
+                campaignId,
+                phone,
+                fromMe ? "user" : "lead",
+                fromMe ? "outbound" : "inbound",
+                messageText,
+                timestamp,
+                timestamp,
+                JSON.stringify({})
+              ]
+            );
+          }
+        }
+      } catch (chatErr) {
+        console.error(`[sync-evolution] Error syncing messages for chat ${remoteJid}:`, chatErr.message || chatErr);
+      }
+    }
+    console.info(`[sync-evolution] Background sync for instance ${instanceName} completed!`);
+  } catch (err) {
+    console.error(`[sync-evolution] Background sync error:`, err.message || err);
   }
+}
+
+export async function configureEvolutionInstanceWebhook(clientId, dispatchWebhookUrl, dispatchWebhookToken, enabled) {
+  if (!dispatchWebhookUrl) {
+    throw new Error("INVALID_DISPATCH_WEBHOOK_URL");
+  }
+
+  const urlObj = new URL(dispatchWebhookUrl);
+  const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+  const parts = urlObj.pathname.split("/");
+  const instanceName = parts[parts.length - 1];
+
+  if (!instanceName) {
+    throw new Error("COULD_NOT_PARSE_INSTANCE_NAME");
+  }
+
+  const apiKey = dispatchWebhookToken || getEvolutionAdminConfig().apiKey;
 
   const base =
     process.env.WEBHOOK_BASE_URL ||
@@ -200,11 +367,11 @@ export async function configureEvolutionInstanceWebhook(clientId, instanceName, 
     events: enabled ? ["MESSAGES_UPSERT", "SEND_MESSAGE"] : [],
   };
 
-  const response = await fetch(`${config.baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
+  const response = await fetch(`${baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      apikey: config.apiKey,
+      apikey: apiKey,
     },
     body: JSON.stringify(payload),
   });
@@ -212,6 +379,13 @@ export async function configureEvolutionInstanceWebhook(clientId, instanceName, 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Evolution Webhook set returned HTTP ${response.status}: ${text}`);
+  }
+
+  // Trigger background sync of chats/messages when webhook is enabled
+  if (enabled) {
+    syncEvolutionInstanceChatsAndMessages(clientId, dispatchWebhookUrl, dispatchWebhookToken).catch((err) => {
+      console.error(`[sync-evolution] Background sync initiation failed:`, err.message);
+    });
   }
 
   return true;
