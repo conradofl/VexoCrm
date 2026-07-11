@@ -460,7 +460,7 @@ export default function GeracaoDigitalCommercialSetup() {
                       <Input
                         value={prospectName}
                         onChange={(e) => setProspectName(e.target.value)}
-                        placeholder="Ex: Hostery Tech"
+                        placeholder="Ex: Nome da Empresa"
                         className="bg-white border-slate-200 focus:border-indigo-500/50 text-slate-800 text-xs h-10"
                       />
                     </div>
