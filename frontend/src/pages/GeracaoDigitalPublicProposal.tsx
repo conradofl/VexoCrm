@@ -52,7 +52,18 @@ interface Proposal {
   cobrar_setup?: boolean;
   valor_setup_vexo?: number | null;
   condicoes_pagamento?: ProposalPaymentTerms | null;
+  periodo_plano?: string | null;
+  validade_ate?: string | null;
+  valor_apos_validade?: number | null;
+  observacao_validade?: string | null;
 }
+
+const PERIODO_LABELS: Record<string, string> = {
+  mensal: "Mensal",
+  trimestral: "Trimestral",
+  semestral: "Semestral",
+  anual: "Anual",
+};
 
 export default function GeracaoDigitalPublicProposal() {
   const { id } = useParams<{ id: string }>();
@@ -225,6 +236,8 @@ export default function GeracaoDigitalPublicProposal() {
     ? proposal.condicoes_pagamento!.ofertadas
     : [];
   const chosenTerm = proposal.condicoes_pagamento?.escolhida || null;
+  const validadeDate = proposal.validade_ate ? new Date(proposal.validade_ate) : null;
+  const validadeExpirada = validadeDate ? validadeDate.getTime() < Date.now() : false;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
@@ -266,6 +279,37 @@ export default function GeracaoDigitalPublicProposal() {
             <h1 className="text-3xl md:text-4xl font-black text-white">{proposal.prospect_name}</h1>
             <p className="text-xs text-slate-400 font-mono">Proposta comercial emitida em {new Date(proposal.created_at).toLocaleDateString("pt-BR")}</p>
           </div>
+
+          {/* Validade da proposta (gatilho de urgência) */}
+          {validadeDate && proposal.status !== "aceita" && (
+            <Card
+              className={cn(
+                "p-4 space-y-1 border",
+                validadeExpirada
+                  ? "bg-red-950/40 border-red-900/60"
+                  : "bg-amber-950/30 border-amber-800/50"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Clock className={cn("h-4 w-4 shrink-0", validadeExpirada ? "text-red-400" : "text-amber-400")} />
+                <span className={cn("text-sm font-black", validadeExpirada ? "text-red-300" : "text-amber-300")}>
+                  {validadeExpirada
+                    ? `Proposta expirada em ${validadeDate.toLocaleDateString("pt-BR")}`
+                    : `Proposta válida até ${validadeDate.toLocaleDateString("pt-BR")}`}
+                </span>
+              </div>
+              {(proposal.observacao_validade || proposal.valor_apos_validade) && (
+                <p className="text-[11px] text-slate-300 leading-relaxed pl-6">
+                  {proposal.observacao_validade
+                    ? proposal.observacao_validade
+                    : `Após esta data o valor retorna a R$ ${Number(proposal.valor_apos_validade || 0).toLocaleString("pt-BR")}.`}
+                  {proposal.observacao_validade && proposal.valor_apos_validade
+                    ? ` Após o prazo: R$ ${Number(proposal.valor_apos_validade || 0).toLocaleString("pt-BR")}.`
+                    : ""}
+                </p>
+              )}
+            </Card>
+          )}
 
           {/* List of items */}
           <Card className="bg-slate-900/40 border-slate-900 overflow-hidden shadow-2xl">
@@ -388,6 +432,12 @@ export default function GeracaoDigitalPublicProposal() {
                   R$ {proposal.valor_recorrente?.toLocaleString("pt-BR") || "0,00"}/mês
                 </span>
               </div>
+              {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
+                <div className="flex justify-between items-center text-xs font-mono">
+                  <span className="text-slate-400">Período do Plano:</span>
+                  <span className="text-white font-bold">{PERIODO_LABELS[proposal.periodo_plano]}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center text-xs font-mono pt-2 border-t border-slate-800">
                 <span className="text-slate-300 font-bold">Total da Proposta:</span>
                 <span className="text-white font-black text-sm">R$ {grandTotal.toLocaleString("pt-BR")}</span>
