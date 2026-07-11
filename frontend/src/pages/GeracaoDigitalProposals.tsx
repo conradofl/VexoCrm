@@ -17,17 +17,24 @@ import {
   Share2,
   PenTool,
   ArrowRight,
-  Info
+  Info,
+  Sparkles,
+  X
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
   type PaymentTerm,
+  type PaymentTermTipo,
+  type PaymentTermConfig,
   type ProposalPaymentTerms,
+  type DescontoConcedido,
+  PAYMENT_TERM_TIPOS,
   computePaymentBreakdown,
   SETUP_LABEL,
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
+import { GeracaoDigitalNegotiationBoard } from "@/components/GeracaoDigitalNegotiationBoard";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -60,6 +67,7 @@ interface Proposal {
   validade_ate?: string | null;
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
+  descontos_concedidos?: DescontoConcedido[] | null;
 }
 
 const PERIODO_OPTIONS = [
@@ -92,6 +100,16 @@ export default function GeracaoDigitalProposals() {
   // Condições de pagamento
   const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
   const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
+
+  // Mesa de negociação
+  const [isNegotiating, setIsNegotiating] = useState<boolean>(false);
+
+  // Condição de pagamento criada na hora (sem ir na aba Condições)
+  const [showInlineTerm, setShowInlineTerm] = useState<boolean>(false);
+  const [inlineTerm, setInlineTerm] = useState<{ nome: string; tipo: PaymentTermTipo; config: PaymentTermConfig; salvarTemplate: boolean }>({
+    nome: "", tipo: "avista_desconto", config: {}, salvarTemplate: false
+  });
+  const [adhocTerms, setAdhocTerms] = useState<PaymentTerm[]>([]);
 
   // Período do plano e validade da proposta
   const [periodoPlano, setPeriodoPlano] = useState<string>("");
@@ -178,6 +196,11 @@ export default function GeracaoDigitalProposals() {
         ? prop.condicoes_pagamento!.ofertadas.map((t) => t.id)
         : []
     );
+    setAdhocTerms(
+      Array.isArray(prop.condicoes_pagamento?.ofertadas)
+        ? prop.condicoes_pagamento!.ofertadas.filter((t) => String(t.id).startsWith("adhoc-"))
+        : []
+    );
     setPeriodoPlano(prop.periodo_plano || "");
     setValidadeAte(prop.validade_ate ? prop.validade_ate.slice(0, 10) : "");
     setValorAposValidade(
@@ -200,7 +223,7 @@ export default function GeracaoDigitalProposals() {
   const setupVexoValue = cobrarSetup ? Number(valorSetupVexo || 0) : 0;
   const grandTotal = setupTotal + recurringTotal + setupVexoValue;
 
-  const offeredTerms = availableTerms.filter((t) => offeredTermIds.includes(t.id));
+  const offeredTerms = [...availableTerms, ...adhocTerms].filter((t) => offeredTermIds.includes(t.id));
 
   const toggleOfferedTerm = (termId: string) => {
     setOfferedTermIds((prev) =>
@@ -234,6 +257,90 @@ export default function GeracaoDigitalProposals() {
         return item;
       })
     );
+  };
+
+  // Cria condição na hora: aplica na proposta; salvar como template é opcional
+  const handleCreateInlineTerm = async () => {
+    if (!inlineTerm.nome.trim()) {
+      toast({ title: "Nome obrigatório", description: "Dê um nome à condição.", variant: "destructive" });
+      return;
+    }
+    let created: PaymentTerm | null = null;
+    if (inlineTerm.salvarTemplate) {
+      try {
+        const token = await getIdToken();
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await fetchApi(`/api/gd/payment-terms`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ client_id: clientId, nome: inlineTerm.nome, tipo: inlineTerm.tipo, config: inlineTerm.config })
+        });
+        if (!res.ok) throw new Error("Erro ao salvar condição como template.");
+        const data = await res.json();
+        created = data.data;
+        setAvailableTerms((prev) => [...prev, created!]);
+      } catch (err: any) {
+        console.error(err);
+        toast({ title: "Erro", description: err.message, variant: "destructive" });
+        return;
+      }
+    } else {
+      created = {
+        id: `adhoc-${Date.now()}`,
+        nome: inlineTerm.nome.trim(),
+        tipo: inlineTerm.tipo,
+        config: inlineTerm.config,
+        ativo: true
+      };
+      setAdhocTerms((prev) => [...prev, created!]);
+    }
+    setOfferedTermIds((prev) => [...prev, created!.id]);
+    setShowInlineTerm(false);
+    setInlineTerm({ nome: "", tipo: "avista_desconto", config: {}, salvarTemplate: false });
+    toast({ title: "Condição aplicada", description: created.nome });
+  };
+
+  const updateInlineConfig = (field: keyof PaymentTermConfig, value: any) => {
+    setInlineTerm((prev) => ({ ...prev, config: { ...prev.config, [field]: value } }));
+  };
+
+  // Fecha a negociação: grava concessões e abre a proposta pública final
+  const handleFinalizeNegotiation = async (result: { descontos: DescontoConcedido[]; valorSetupVexoFinal: number }) => {
+    if (!selectedProposal) return;
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const isento = result.descontos.some((d) => d.tipo === "isencao_setup");
+      const body = {
+        client_id: clientId,
+        itens: items,
+        cobrar_setup: cobrarSetup,
+        valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
+        descontos_concedidos: result.descontos,
+        condicoes_pagamento: {
+          ofertadas: offeredTerms,
+          escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
+        }
+      };
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Erro ao gravar as concessões da negociação.");
+
+      setIsNegotiating(false);
+      if (isento) setValorSetupVexo(0);
+      toast({ title: "Negociação registrada", description: "Concessões gravadas. Abrindo a proposta final..." });
+      window.open(`/proposta/${selectedProposal.id}`, "_blank");
+      loadProposals();
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: "Erro", description: err.message || "Falha ao fechar a negociação.", variant: "destructive" });
+    }
   };
 
   // Save proposal updates
@@ -579,6 +686,16 @@ export default function GeracaoDigitalProposals() {
                   </div>
 
                   <div className="flex gap-2">
+                    {selectedProposal.status !== "aceita" && (
+                      <Button
+                        size="sm"
+                        onClick={() => setIsNegotiating(true)}
+                        className="bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-bold shrink-0"
+                      >
+                        <Sparkles className="h-4 w-4 mr-1.5" />
+                        Abrir Mesa de Negociação
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -855,6 +972,121 @@ export default function GeracaoDigitalProposals() {
                         })}
                       </div>
                     )}
+                    {selectedProposal.status !== "aceita" && (
+                      showInlineTerm ? (
+                        <div className="p-4 rounded-xl bg-slate-50 border border-purple-200 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800">Nova condição (aplicar nesta proposta)</span>
+                            <button onClick={() => setShowInlineTerm(false)} className="text-slate-400 hover:text-slate-600">
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1">
+                              <Label className="text-[10px] text-slate-500 font-mono">Nome</Label>
+                              <Input
+                                value={inlineTerm.nome}
+                                onChange={(e) => setInlineTerm((p) => ({ ...p, nome: e.target.value }))}
+                                placeholder='Ex: "Entrada + 6x sem juros"'
+                                className="bg-white border-slate-200 text-xs h-8"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[10px] text-slate-500 font-mono">Tipo</Label>
+                              <select
+                                value={inlineTerm.tipo}
+                                onChange={(e) => setInlineTerm((p) => ({ ...p, tipo: e.target.value as PaymentTermTipo, config: {} }))}
+                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 h-8"
+                              >
+                                {PAYMENT_TERM_TIPOS.map((t) => (
+                                  <option key={t.value} value={t.value}>{t.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            {inlineTerm.tipo === "avista_desconto" && (
+                              <div className="space-y-1">
+                                <Label className="text-[10px] text-slate-500 font-mono">% de desconto</Label>
+                                <Input
+                                  type="number"
+                                  value={inlineTerm.config.percentual_desconto ?? ""}
+                                  onChange={(e) => updateInlineConfig("percentual_desconto", Number(e.target.value) || 0)}
+                                  className="bg-white border-slate-200 text-xs h-8"
+                                />
+                              </div>
+                            )}
+                            {inlineTerm.tipo === "entrada_parcelas" && (
+                              <>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px] text-slate-500 font-mono">Entrada (R$)</Label>
+                                  <Input
+                                    type="number"
+                                    value={inlineTerm.config.valor_entrada ?? ""}
+                                    onChange={(e) => updateInlineConfig("valor_entrada", Number(e.target.value) || 0)}
+                                    className="bg-white border-slate-200 text-xs h-8"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px] text-slate-500 font-mono">Nº parcelas</Label>
+                                  <Input
+                                    type="number"
+                                    value={inlineTerm.config.num_parcelas ?? ""}
+                                    onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)}
+                                    className="bg-white border-slate-200 text-xs h-8"
+                                  />
+                                </div>
+                              </>
+                            )}
+                            {(inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "boleto_recorrente" || inlineTerm.tipo === "semanal") && (
+                              <div className="space-y-1">
+                                <Label className="text-[10px] text-slate-500 font-mono">Nº parcelas</Label>
+                                <Input
+                                  type="number"
+                                  value={inlineTerm.config.num_parcelas ?? ""}
+                                  onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)}
+                                  className="bg-white border-slate-200 text-xs h-8"
+                                />
+                              </div>
+                            )}
+                            {inlineTerm.tipo === "custom" && (
+                              <div className="space-y-1 md:col-span-3">
+                                <Label className="text-[10px] text-slate-500 font-mono">Descrição</Label>
+                                <Input
+                                  value={inlineTerm.config.descricao ?? ""}
+                                  onChange={(e) => updateInlineConfig("descricao", e.target.value)}
+                                  className="bg-white border-slate-200 text-xs h-8"
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 text-[10px] text-slate-600 font-medium cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={inlineTerm.salvarTemplate}
+                                onChange={(e) => setInlineTerm((p) => ({ ...p, salvarTemplate: e.target.checked }))}
+                                className="accent-purple-600"
+                              />
+                              Salvar como template reutilizável (aba Condições)
+                            </label>
+                            <Button size="xs" onClick={handleCreateInlineTerm} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold">
+                              Criar e aplicar
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => setShowInlineTerm(true)}
+                          className="border-purple-200 text-purple-650 hover:bg-purple-50 text-xs font-bold"
+                        >
+                          <Plus className="h-3.5 w-3.5 mr-1" />
+                          Criar condição na hora
+                        </Button>
+                      )
+                    )}
                     {selectedProposal.condicoes_pagamento?.escolhida && (
                       <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
                         <span className="text-[10px] font-bold text-emerald-700">
@@ -985,6 +1217,22 @@ export default function GeracaoDigitalProposals() {
         )}
 
       </div>
+
+      {/* Mesa de Negociação (tela cheia, compartilhável com o cliente) */}
+      {isNegotiating && selectedProposal && (
+        <GeracaoDigitalNegotiationBoard
+          prospectName={prospectName}
+          items={items}
+          setupItensTotal={setupTotal}
+          recurringTotal={recurringTotal}
+          setupVexoValue={setupVexoValue}
+          periodoPlano={periodoPlano}
+          validadeAte={validadeAte}
+          offeredTerms={offeredTerms}
+          onClose={() => setIsNegotiating(false)}
+          onFinalize={handleFinalizeNegotiation}
+        />
+      )}
     </PageShell>
   );
 }
