@@ -261,7 +261,7 @@ export default function GeracaoDigitalPublicProposal() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
+    <div className="dark min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
 
       {/* Background decoration */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
@@ -555,7 +555,7 @@ export default function GeracaoDigitalPublicProposal() {
                     value={signerName}
                     onChange={(e) => setSignerName(e.target.value)}
                     placeholder="Nome do Responsável Legal"
-                    className="bg-slate-950 border-slate-900 text-xs text-white focus:outline-none h-8"
+                    className="bg-slate-900 border-slate-800 text-xs text-white placeholder:text-slate-500 focus-visible:ring-purple-500/50 h-9"
                   />
                 </div>
 
