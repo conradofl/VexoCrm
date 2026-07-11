@@ -1,0 +1,739 @@
+import { useState, useEffect, useRef } from "react";
+import { PageShell } from "@/components/PageShell";
+import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
+import { toast } from "@/components/ui/use-toast";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { API_BASE_URL, fetchApi } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import {
+  FileText,
+  Plus,
+  Trash2,
+  CheckCircle,
+  Share2,
+  PenTool,
+  ArrowRight,
+  Info
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+
+interface ProposalItem {
+  product_id?: string | null;
+  descricao: string;
+  categoria: "gd" | "hostery" | "vexo";
+  valor: number;
+  recorrencia: "mensal" | "unico";
+}
+
+interface Proposal {
+  id: string;
+  prospect_name: string;
+  itens: ProposalItem[];
+  valor_total: number;
+  valor_setup: number;
+  valor_recorrente: number;
+  condicoes: string;
+  status: "rascunho" | "enviada" | "aceita";
+  payment_link?: string;
+  assinatura?: string;
+  signer_name?: string;
+  signed_at?: string;
+  signer_ip?: string;
+  termo_aceite?: string;
+  created_at: string;
+}
+
+export default function GeracaoDigitalProposals() {
+  const { isAuthenticated, getIdToken, clientId } = useAuth();
+
+  // Proposals State
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Proposal form editor state
+  const [prospectName, setProspectName] = useState<string>("");
+  const [condicoes, setCondicoes] = useState<string>("");
+  const [items, setItems] = useState<ProposalItem[]>([]);
+  const [paymentLink, setPaymentLink] = useState<string>("");
+
+  // Signature form state
+  const [signerName, setSignerName] = useState<string>("");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  // Load proposals
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadProposals();
+    }
+  }, [isAuthenticated, clientId]);
+
+  async function loadProposals() {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const token = await getIdToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetchApi(`/api/gd/proposals?client_id=${clientId || ""}`, { headers });
+      if (!res.ok) {
+        throw new Error(`Falha ao buscar propostas comerciais (Status ${res.status}).`);
+      }
+      const data = await res.json();
+      if (data.success) {
+        setProposals(data.data);
+        if (data.data.length > 0) {
+          selectProposal(data.data[0]);
+        }
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Erro desconhecido ao carregar propostas.");
+      toast({
+        title: "Erro ao Carregar",
+        description: "Não foi possível carregar as propostas de pré-vendas.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  const selectProposal = (prop: Proposal) => {
+    setSelectedProposal(prop);
+    setProspectName(prop.prospect_name);
+    setCondicoes(prop.condicoes);
+    setItems(Array.isArray(prop.itens) ? prop.itens : []);
+    setSignerName(prop.signer_name || "");
+    setPaymentLink(prop.payment_link || "");
+  };
+
+  // Live total calculations
+  const setupTotal = items
+    .filter((i) => i.recorrencia === "unico")
+    .reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+  const recurringTotal = items
+    .filter((i) => i.recorrencia === "mensal")
+    .reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+  // Add Item to editor
+  const handleAddItem = () => {
+    const newItem: ProposalItem = {
+      descricao: "Novo Serviço Comercial",
+      categoria: "gd",
+      valor: 1000.0,
+      recorrencia: "mensal"
+    };
+    setItems((prev) => [...prev, newItem]);
+  };
+
+  // Remove Item from editor
+  const handleRemoveItem = (index: number) => {
+    setItems((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  // Update item field
+  const handleUpdateItemField = (index: number, field: keyof ProposalItem, value: any) => {
+    setItems((prev) =>
+      prev.map((item, idx) => {
+        if (idx === index) {
+          return { ...item, [field]: value };
+        }
+        return item;
+      })
+    );
+  };
+
+  // Save proposal updates
+  const handleSaveProposal = async () => {
+    if (!selectedProposal) return;
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const body = {
+        client_id: clientId,
+        prospect_name: prospectName,
+        itens: items,
+        condicoes,
+        payment_link: paymentLink
+      };
+
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Erro ao atualizar proposta comercial no servidor.");
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        toast({
+          title: "Proposta Salva",
+          description: "Os itens e condições foram atualizados e o faturamento recalculado."
+        });
+        loadProposals();
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro ao Salvar",
+        description: err.message || "Falha de comunicação com o servidor ao salvar proposta.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Delete proposal
+  const handleDeleteProposal = async () => {
+    if (!selectedProposal) return;
+    if (!window.confirm("Tem certeza que deseja excluir este rascunho de proposta comercial? Esta ação não pode ser desfeita.")) {
+      return;
+    }
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}?client_id=${clientId || ""}`, {
+        method: "DELETE",
+        headers
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Erro ao excluir proposta comercial no servidor.");
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        toast({
+          title: "Proposta Excluída",
+          description: "A proposta comercial foi deletada com sucesso."
+        });
+        setSelectedProposal(null);
+        loadProposals();
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro ao Excluir",
+        description: err.message || "Falha de comunicação com o servidor ao excluir proposta.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Canvas drawing handlers
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.strokeStyle = "#ec4899"; // pink-500
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+
+    const rect = canvas.getBoundingClientRect();
+    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
+    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = ('touches' in e) ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
+    const y = ('touches' in e) ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  // Submit Signature/Aceite
+  const handleSignProposal = async () => {
+    if (!selectedProposal) return;
+    if (!signerName.trim()) {
+      toast({
+        title: "Nome Obrigatório",
+        description: "Por favor, preencha o nome do assinante responsável.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    let signatureBase64 = "";
+    const canvas = canvasRef.current;
+    if (canvas) {
+      signatureBase64 = canvas.toDataURL("image/png");
+    }
+
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const body = {
+        assinatura: signatureBase64 || signerName,
+        signer_name: signerName
+      };
+
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}/assinar`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        throw new Error("Erro ao registrar assinatura no servidor.");
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        toast({
+          title: "Proposta Assinada",
+          description: "O aceite comercial foi registrado e a proposta foi fechada com sucesso!"
+        });
+        loadProposals();
+      }
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Erro ao Assinar",
+        description: "Falha de comunicação com o servidor ao assinar a proposta.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Send to client actual trigger
+  const handleSendToClient = async () => {
+    if (!selectedProposal) return;
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}/enviar`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ client_id: clientId })
+      });
+
+      if (!res.ok) {
+        throw new Error("Erro ao marcar proposta como enviada.");
+      }
+
+      const shareLink = `${window.location.origin}/proposta/${selectedProposal.id}`;
+      navigator.clipboard.writeText(shareLink);
+
+      toast({
+        title: "Enviada & Link Copiado",
+        description: "Proposta marcada como 'enviada' e link de acesso copiado!"
+      });
+      loadProposals();
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Erro ao Enviar",
+        description: "Falha ao registrar envio no servidor.",
+        variant: "destructive"
+      });
+    }
+  };
+  return (
+    <PageShell
+      title="Propostas Comerciais GD"
+      subtitle="Editor de itens, termos de aceite comercial e assinatura eletrônica para fechamento de contratos."
+      icon={FileText}
+    >
+      <GeracaoDigitalTabs />
+      <div className="w-full min-h-screen bg-white text-slate-800 rounded-3xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+
+        {/* Glow Effects */}
+        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 rounded-full blur-[100px] pointer-events-none" />
+
+        {/* Loading / Error states */}
+        {isLoading ? (
+          <div className="flex h-64 items-center justify-center">
+            <span className="animate-spin h-8 w-8 border-4 border-purple-600 border-t-transparent rounded-full" />
+          </div>
+        ) : error ? (
+          <Card className="bg-red-50 border-red-200 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
+            <CardContent className="space-y-4">
+              <Info className="h-12 w-12 text-red-500 mx-auto" />
+              <h3 className="text-lg font-bold text-slate-850">Falha na Conexão</h3>
+              <p className="text-xs text-slate-650">
+                {error}
+              </p>
+              <Button onClick={loadProposals} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-6 py-2 rounded-xl">
+                Tentar Novamente
+              </Button>
+            </CardContent>
+          </Card>
+        ) : proposals.length === 0 ? (
+          <Card className="bg-white border-slate-200 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
+            <CardContent className="space-y-4">
+              <FileText className="h-12 w-12 text-slate-400 mx-auto" />
+              <h3 className="text-lg font-bold text-slate-800">Nenhuma Proposta Gerada</h3>
+              <p className="text-xs text-slate-500">
+                Inicie uma apresentação comercial a partir da aba "Geração Digital" e escolha um pacote para gerar rascunho de propostas.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-4 relative z-10">
+
+            {/* Sidebar proposals list */}
+            <div className="space-y-3 lg:col-span-1">
+              <h3 className="text-xs font-mono font-bold text-purple-600 uppercase tracking-widest px-2 mb-2">Simulações Recentes</h3>
+              {proposals.map((prop) => (
+                <button
+                  key={prop.id}
+                  onClick={() => selectProposal(prop)}
+                  className={cn(
+                    "w-full text-left p-4 rounded-xl border transition-all space-y-2 group shadow-sm",
+                    selectedProposal?.id === prop.id
+                      ? "bg-slate-50 border-purple-500/50 shadow-md shadow-purple-600/5"
+                      : "bg-white border-slate-200 hover:border-slate-350"
+                  )}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-xs font-black text-slate-800 group-hover:text-purple-600 transition-colors leading-tight">
+                      {prop.prospect_name}
+                    </span>
+                    <Badge
+                      className={cn(
+                        "text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 border-none",
+                        prop.status === "aceita"
+                          ? "bg-emerald-500 text-white"
+                          : prop.status === "enviada"
+                          ? "bg-blue-600 text-white"
+                          : "bg-amber-600 text-white"
+                      )}
+                    >
+                      {prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho"}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
+                    <span>Total Geral</span>
+                    <span className="text-slate-800 font-bold">R$ {prop.valor_total.toLocaleString("pt-BR")}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Proposal Detail & Editor */}
+            {selectedProposal && (
+              <div className="space-y-6 lg:col-span-3">
+
+                {/* Header overview */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-black text-slate-800">{prospectName}</h2>
+                      {selectedProposal.status === "aceita" && (
+                        <Badge className="bg-emerald-500 text-white font-bold flex items-center gap-1">
+                          <CheckCircle className="h-3 w-3" />
+                          Fechado ✔
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 font-mono">ID: {selectedProposal.id}</p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSendToClient}
+                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
+                    >
+                      <Share2 className="h-4 w-4 mr-1.5" />
+                      Enviar ao Cliente
+                    </Button>
+                    {selectedProposal.status !== "aceita" && (
+                      <>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={handleDeleteProposal}
+                          className="bg-rose-600 hover:bg-rose-500 text-white font-bold shrink-0"
+                        >
+                          <Trash2 className="h-4 w-4 mr-1.5" />
+                          Excluir Rascunho
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleSaveProposal}
+                          className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+                        >
+                          Salvar Alterações
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Items Editor */}
+                <Card className="bg-white border-slate-200 shadow-sm">
+                  <CardHeader className="flex flex-row justify-between items-center space-y-0">
+                    <div>
+                      <CardTitle className="text-base font-bold text-slate-800">Escopo & Valores dos Serviços</CardTitle>
+                      <CardDescription className="text-[11px] text-slate-500">Produtos incluídos no pacote de fechamento.</CardDescription>
+                    </div>
+                    {selectedProposal.status !== "aceita" && (
+                      <Button size="xs" onClick={handleAddItem} className="bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white">
+                        <Plus className="h-3.5 w-3.5 mr-1" />
+                        Adicionar Item
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-3">
+                      {items.map((item, index) => (
+                        <div key={index} className="flex flex-col md:flex-row gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 items-start md:items-center justify-between">
+                          <div className="flex-1 w-full space-y-1">
+                            <Label className="text-[10px] text-slate-500 font-mono">Descrição do Serviço / Pacote</Label>
+                            <Input
+                              value={item.descricao}
+                              disabled={selectedProposal.status === "aceita"}
+                              onChange={(e) => handleUpdateItemField(index, "descricao", e.target.value)}
+                              className="bg-white border-slate-200 text-xs text-slate-800 focus:outline-none h-8"
+                            />
+                          </div>
+                               <div className="w-full md:w-32 space-y-1">
+                            <Label className="text-[10px] text-slate-500 font-mono">Categoria</Label>
+                            <select
+                              value={item.categoria}
+                              disabled={selectedProposal.status === "aceita"}
+                              onChange={(e) => handleUpdateItemField(index, "categoria", e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 focus:outline-none focus:border-indigo-500/50 h-8"
+                            >
+                              <option value="gd">Geração Digital</option>
+                              <option value="vexo">Vexo OS</option>
+                              <option value="hostery">Hostery Tech</option>
+                            </select>
+                          </div>
+
+                          <div className="w-full md:w-32 space-y-1">
+                            <Label className="text-[10px] text-slate-500 font-mono">Recorrência</Label>
+                            <select
+                              value={item.recorrencia}
+                              disabled={selectedProposal.status === "aceita"}
+                              onChange={(e) => handleUpdateItemField(index, "recorrencia", e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 focus:outline-none focus:border-indigo-500/50 h-8"
+                            >
+                              <option value="mensal">Mensal</option>
+                              <option value="unico">Único (Setup)</option>
+                            </select>
+                          </div>
+
+                          <div className="w-full md:w-32 space-y-1">
+                            <Label className="text-[10px] text-slate-500 font-mono">Valor</Label>
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-2 text-[10px] text-slate-500 font-mono">R$</span>
+                              <Input
+                                type="number"
+                                value={item.valor}
+                                disabled={selectedProposal.status === "aceita"}
+                                onChange={(e) => handleUpdateItemField(index, "valor", Number(e.target.value) || 0)}
+                                className="bg-white border-slate-200 text-xs text-slate-800 pl-7 h-8 font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          {selectedProposal.status !== "aceita" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveItem(index)}
+                              className="text-red-500 hover:text-red-650 hover:bg-red-50 h-8 w-8 mt-4 md:mt-0 shrink-0"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Totals Summary */}
+                    <div className="grid gap-4 sm:grid-cols-2 p-4 rounded-xl bg-slate-50 border border-slate-200 mt-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Total Setup (Investimento Único)</span>
+                        <h4 className="text-xl font-black text-slate-800">R$ {setupTotal.toLocaleString("pt-BR")}</h4>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-550 uppercase font-bold tracking-wider">Total Recorrência (Faturamento Mensal)</span>
+                        <h4 className="text-xl font-black text-pink-600">R$ {recurringTotal.toLocaleString("pt-BR")}/mês</h4>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Conditions & Signatures */}
+                <div className="grid gap-6 md:grid-cols-2">
+
+                  {/* Conditions Card */}
+                  <Card className="bg-white border-slate-200 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-base font-bold text-slate-800">Condições Contratuais</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-[10px] text-slate-500 font-mono">Condições e Regras Comerciais</Label>
+                        <textarea
+                          value={condicoes}
+                          disabled={selectedProposal.status === "aceita"}
+                          onChange={(e) => setCondicoes(e.target.value)}
+                          className="w-full min-h-[140px] bg-white border border-slate-200 rounded-lg p-3 text-xs text-slate-800 focus:outline-none focus:border-indigo-500/50"
+                        />
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <Label className="text-[10px] text-slate-500 font-mono">Link de Pagamento (Checkout)</Label>
+                        <Input
+                          value={paymentLink}
+                          disabled={selectedProposal.status === "aceita"}
+                          onChange={(e) => setPaymentLink(e.target.value)}
+                          placeholder="https://checkout.exemplo.com/..."
+                          className="bg-white border-slate-200 text-xs text-slate-800 focus:outline-none"
+                        />
+                        <span className="text-[9px] text-slate-450 block font-light leading-snug">
+                          Deixe vazio para herdar o link de checkout padrão da Geração Digital configurado no tenant.
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Electronic Signature Card */}
+                  <Card className="bg-white border-slate-200 shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-base font-bold text-slate-800">Assinatura de Aceite Comercial</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+
+                      {selectedProposal.status === "aceita" ? (
+                        <div className="space-y-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
+                          <CheckCircle className="h-10 w-10 text-emerald-600 mx-auto" />
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-bold text-slate-800">Contrato Fechado com Sucesso!</h4>
+                            <p className="text-[11px] text-slate-500">Proposta assinada comercialmente por:</p>
+                            <span className="text-xs font-mono font-bold text-emerald-600 block">{selectedProposal.signer_name}</span>
+                          </div>
+
+                          {selectedProposal.assinatura && selectedProposal.assinatura.startsWith("data:image") && (
+                            <div className="h-20 w-full max-w-[200px] bg-white rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden border border-slate-100">
+                              <img src={selectedProposal.assinatura} alt="Assinatura" className="max-h-full max-w-full object-contain" />
+                            </div>
+                          )}
+
+                          <div className="text-[9px] text-slate-500 font-mono space-y-0.5">
+                            <div>Data/Hora: {selectedProposal.signed_at ? new Date(selectedProposal.signed_at).toLocaleString("pt-BR") : ""}</div>
+                            <div>IP do Assinante: {selectedProposal.signer_ip || "Registrado"}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="text-[10px] text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
+                            <span className="font-bold text-slate-800 block mb-1 uppercase font-mono tracking-wider">Termo de Aceite:</span>
+                            "Declaro estar de acordo com os serviços, valores e condições desta proposta e autorizo o início dos trabalhos."
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-[10px] text-slate-500 font-mono">Nome Completo do Assinante</Label>
+                            <Input
+                              value={signerName}
+                              onChange={(e) => setSignerName(e.target.value)}
+                              placeholder="Nome do Responsável Legal"
+                              className="bg-white border-slate-200 text-xs text-slate-800 focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <Label className="text-[10px] text-slate-500 font-mono">Assine com o Mouse ou Dedo</Label>
+                              <button onClick={clearCanvas} className="text-[10px] text-pink-600 hover:text-pink-500 font-semibold font-mono">
+                                Limpar
+                              </button>
+                            </div>
+
+                            <canvas
+                              ref={canvasRef}
+                              width={320}
+                              height={120}
+                              onMouseDown={startDrawing}
+                              onMouseMove={draw}
+                              onMouseUp={stopDrawing}
+                              onMouseLeave={stopDrawing}
+                              onTouchStart={startDrawing}
+                              onTouchMove={draw}
+                              onTouchEnd={stopDrawing}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl cursor-crosshair h-[120px]"
+                            />
+                          </div>
+
+                          <Button
+                            onClick={handleSignProposal}
+                            className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
+                          >
+                            <PenTool className="h-4 w-4 mr-1.5" />
+                            Registrar Assinatura de Aceite
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </PageShell>
+  );
+}

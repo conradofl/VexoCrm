@@ -7,9 +7,9 @@ import { processSlackMessageToEvolution } from "../geracaoDigital/slackMirrorOut
 export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, requireInternalPageAccess) {
   // POST /api/geracao-digital/briefing
   app.post("/api/geracao-digital/briefing", requireFirebaseAuth, async (req, res) => {
-    
+
     async function processSlackJobSync(pool, jobData) {
-      const { 
+      const {
         clientName, whatsappNumber, whatsappGroupId, briefingData = {},
         slackChannelName, slackExtraChannels = [], slackMembers = []
       } = jobData;
@@ -137,11 +137,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       );
     }
     try {
-      const { 
-        prospectName, 
-        whatsappNumber, 
-        agencyName, 
-        themePreset, 
+      const {
+        prospectName,
+        whatsappNumber,
+        agencyName,
+        themePreset,
         briefingData,
         sendToProspectWhatsapp,
         sendToProspectEmail,
@@ -156,9 +156,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       // 1. Save to DB
       const result = await pool.query(
-        `INSERT INTO public.geracao_digital_briefings 
-         (prospect_name, whatsapp_number, theme_preset, briefing_data, status) 
-         VALUES ($1, $2, $3, $4, 'pending') 
+        `INSERT INTO public.geracao_digital_briefings
+         (prospect_name, whatsapp_number, theme_preset, briefing_data, status)
+         VALUES ($1, $2, $3, $4, 'pending')
          RETURNING id`,
         [prospectName, whatsappNumber || '', themePreset, JSON.stringify(briefingData || {})]
       );
@@ -238,7 +238,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           text: text
         };
         let endpoint = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
-        
+
         // Se a URL não contiver a rota de envio, adicionamos a rota com o nome da instância
         if (!endpoint.includes("/message/sendText")) {
           const instanceName = dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste";
@@ -266,7 +266,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const createEvolutionGroup = async (subject, membersString) => {
         if (!evolutionUrl || !evolutionToken) return { status: "not_configured" };
         let baseUrl = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
-        
+
         // Remove everything after the last slash if it's pointing to /message/sendText
         if (baseUrl.includes("/message/sendText")) {
           baseUrl = baseUrl.split("/message/sendText")[0];
@@ -317,7 +317,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       };
 
       const messageText = `Olá ${prospectName}!\n\nSeu dossiê/briefing da ${agencyName || 'Vexo'} está pronto.${briefingText}`;
-      
+
       let whatsappGroupStatus = "not_configured";
       let whatsappGroupId = null;
 
@@ -361,7 +361,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           const wppText = `*Novo Briefing Handoff:*\n*Prospect:* ${prospectName}\n*Tel:* ${whatsappNumber || 'N/A'}\nVerifique o CRM para os detalhes completos.\n${briefingText}`;
           wppStatus = await sendEvolution(sectorsWhatsapp, wppText);
         }
-        
+
         if (sectorsEmail && sendEmailFn) {
           try {
             const emHtml = `<h2>Novo Briefing Handoff: ${prospectName}</h2><p><strong>WhatsApp:</strong> ${whatsappNumber || 'N/A'}</p><p>O briefing foi finalizado.</p>${briefingHtml}<p>Por favor, verifiquem o CRM para acessar as informações detalhadas.</p>`;
@@ -371,7 +371,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             emStatus = "failed";
           }
         }
-        
+
         sectorsStatus = `wpp:${wppStatus},email:${emStatus}`;
       }
 
@@ -395,7 +395,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           slackExtraChannels,
           slackMembers
         };
-        
+
         await processSlackJobSync(pool, slackPayload);
         slackStatus = "success";
       } catch (e) {
@@ -410,12 +410,12 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         [whatsappGroupId ? 'group_created' : evolutionStatus, slackStatus, briefingId]
       );
 
-      res.status(200).json({ 
-        success: true, 
-        briefingId, 
+      res.status(200).json({
+        success: true,
+        briefingId,
         evolutionStatus,
         whatsappGroupStatus,
-        whatsappGroupId, 
+        whatsappGroupId,
         slackStatus,
         slackError,
         emailStatus,
@@ -490,18 +490,18 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       if (!token) {
         return res.status(400).json({ error: "SLACK_BOT_TOKEN não configurado no servidor." });
       }
-      
+
       const slackRes = await fetch("https://slack.com/api/users.list", {
         headers: {
           "Authorization": `Bearer ${token}`
         }
       });
       const data = await slackRes.json();
-      
+
       if (!data.ok) {
         return res.status(500).json({ error: "Erro ao buscar usuários do Slack", details: data.error });
       }
-      
+
       // Filter out bots and deleted users
       const users = data.members
         .filter(m => !m.is_bot && !m.deleted && m.id !== "USLACKBOT")
@@ -511,7 +511,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           email: m.profile?.email || "",
           image: m.profile?.image_48 || ""
         }));
-        
+
       res.json({ success: true, users });
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao buscar usuários do Slack:", error);
@@ -527,7 +527,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const payload = req.body;
       // Responde imediatamente 200 pra Evolution
       res.status(200).send("OK");
-      
+
       // Processa de forma assíncrona o espelho para o Slack
       if (payload && payload.event === "messages.upsert") {
         processEvolutionMessageToSlack(pool, payload).catch(err => {
@@ -546,7 +546,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.post("/webhooks/slack/events", async (req, res) => {
     try {
       const body = req.body;
-      
+
       // 1. Desafio de verificação de URL do Slack
       if (body && body.type === "url_verification") {
         return res.status(200).send(body.challenge);
@@ -571,8 +571,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const rawBody = req.rawBody || JSON.stringify(body);
       const sigBaseString = `v0:${slackRequestTimestamp}:${rawBody}`;
       const mySignature = "v0=" + crypto.createHmac("sha256", slackSigningSecret).update(sigBaseString, "utf8").digest("hex");
-      
-      // Permitimos desvio temporário se as assinaturas divergirem por causa de JSON formating, 
+
+      // Permitimos desvio temporário se as assinaturas divergirem por causa de JSON formating,
       // mas o ideal é usar validação estrita. Num ambiente real, `req.rawBody` deve estar setado.
       if (!crypto.timingSafeEqual(Buffer.from(mySignature, "utf8"), Buffer.from(slackSignature, "utf8"))) {
         console.warn("[GeracaoDigital] Aviso: Slack Signature inválida. Pode ser por falta de req.rawBody no Express. Continuando mesmo assim para garantir a demo/MVP.");
@@ -583,7 +583,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       if (body.event && body.event.type === "message") {
         // Responde ao Slack rapidamente pra não dar Timeout (3 segundos)
         res.status(200).send("OK");
-        
+
         processSlackMessageToEvolution(pool, body.event).catch(err => {
           console.error("[GeracaoDigital] Erro ao processar espelho OUT:", err);
         });
@@ -593,6 +593,790 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     } catch (e) {
       console.error("[GeracaoDigital] Erro ao processar webhook slack/events:", e);
       if (!res.headersSent) res.status(500).send("Error");
+    }
+  });
+
+  // Helper to resolve UUID tenant_id
+  async function resolveTenantUuid(clientKey) {
+    let tenantId = "00000000-0000-0000-0000-000000000000";
+    if (!clientKey) {
+      const firstTenant = await pool.query("SELECT id FROM public.tenants LIMIT 1");
+      if (firstTenant.rows.length > 0) {
+        return firstTenant.rows[0].id;
+      }
+      return tenantId;
+    }
+
+    // Check if clientKey is already a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(clientKey)) {
+      return clientKey;
+    }
+
+    const tenantRes = await pool.query("SELECT id FROM public.tenants WHERE name ILIKE $1 LIMIT 1", [clientKey]);
+    if (tenantRes.rows.length > 0) {
+      return tenantRes.rows[0].id;
+    }
+
+    const firstTenant = await pool.query("SELECT id FROM public.tenants LIMIT 1");
+    if (firstTenant.rows.length > 0) {
+      return firstTenant.rows[0].id;
+    }
+    return tenantId;
+  }
+
+  // GET /api/gd/segments
+  app.get("/api/gd/segments", requireFirebaseAuth, async (req, res) => {
+    try {
+      const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
+      const tenantId = await resolveTenantUuid(clientKey);
+
+      const result = await pool.query(
+        "SELECT id, nome, faturamento_min, ativo FROM public.gd_segments WHERE tenant_id = $1 AND ativo = true ORDER BY nome ASC",
+        [tenantId]
+      );
+      res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar segmentos:", error);
+      res.status(500).json({ error: "Erro ao buscar segmentos." });
+    }
+  });
+
+  // GET /api/gd/products
+  app.get("/api/gd/products", requireFirebaseAuth, async (req, res) => {
+    try {
+      const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
+      const tenantId = await resolveTenantUuid(clientKey);
+
+      const result = await pool.query(
+        "SELECT id, nome, categoria, valor_padrao, recorrencia, ativo FROM public.gd_products WHERE tenant_id = $1 AND ativo = true ORDER BY nome ASC",
+        [tenantId]
+      );
+      res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar produtos:", error);
+      res.status(500).json({ error: "Erro ao buscar produtos." });
+    }
+  });
+
+  // GET /api/gd/packages
+  app.get("/api/gd/packages", requireFirebaseAuth, async (req, res) => {
+    try {
+      const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
+      const tenantId = await resolveTenantUuid(clientKey);
+      const result = await pool.query(
+        "SELECT id, nome, periodo, produtos_incluidos, valor, destaque, ativo, created_at FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true ORDER BY nome ASC",
+        [tenantId]
+      );
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      const data = rows.map((row) => {
+        let produtosIncluidos = row.produtos_incluidos;
+        if (typeof produtosIncluidos === "string") {
+          try {
+            produtosIncluidos = JSON.parse(produtosIncluidos);
+          } catch {
+            produtosIncluidos = [];
+          }
+        }
+        if (!Array.isArray(produtosIncluidos)) produtosIncluidos = [];
+        const valor = Number(row.valor);
+        return {
+          ...row,
+          produtos_incluidos: produtosIncluidos,
+          valor: Number.isFinite(valor) ? valor : 0,
+        };
+      });
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar pacotes:", error?.message || error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Erro ao buscar pacotes.", detail: error?.message || String(error) });
+      }
+    }
+  });
+
+  // POST /api/gd/packages
+  app.post("/api/gd/packages", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { client_id, nome, periodo, produtos_incluidos, valor, destaque = false } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `INSERT INTO public.gd_packages (tenant_id, nome, periodo, produtos_incluidos, valor, destaque)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [tenantId, nome, periodo, JSON.stringify(produtos_incluidos || []), Number(valor || 0), destaque]
+      );
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao criar pacote:", error);
+      res.status(500).json({ error: "Erro ao criar pacote." });
+    }
+  });
+
+  // PUT /api/gd/packages/:id
+  app.put("/api/gd/packages/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id, nome, periodo, produtos_incluidos, valor, destaque, ativo } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `UPDATE public.gd_packages
+         SET nome = COALESCE($1, nome),
+             periodo = COALESCE($2, periodo),
+             produtos_incluidos = COALESCE($3, produtos_incluidos),
+             valor = COALESCE($4, valor),
+             destaque = COALESCE($5, destaque),
+             ativo = COALESCE($6, ativo)
+         WHERE id = $7 AND tenant_id = $8 RETURNING *`,
+        [nome, periodo, produtos_incluidos ? JSON.stringify(produtos_incluidos) : null, valor, destaque, ativo, id, tenantId]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Pacote não encontrado." });
+      }
+      res.status(200).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao atualizar pacote:", error);
+      res.status(500).json({ error: "Erro ao atualizar pacote." });
+    }
+  });
+
+  // DELETE /api/gd/packages/:id
+  app.delete("/api/gd/packages/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `UPDATE public.gd_packages SET ativo = false WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+        [id, tenantId]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Pacote não encontrado." });
+      }
+      res.status(200).json({ success: true, message: "Pacote removido com sucesso." });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao remover pacote:", error);
+      res.status(500).json({ error: "Erro ao remover pacote." });
+    }
+  });
+
+  // POST /api/gd/packages/:id/duplicate
+  app.post("/api/gd/packages/:id/duplicate", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const pkgResult = await pool.query(
+        `SELECT * FROM public.gd_packages WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      if (pkgResult.rows.length === 0) {
+        return res.status(404).json({ error: "Pacote original não encontrado." });
+      }
+
+      const original = pkgResult.rows[0];
+      const newName = `${original.nome} - Cópia`;
+
+      const result = await pool.query(
+        `INSERT INTO public.gd_packages (tenant_id, nome, periodo, produtos_incluidos, valor, destaque, ativo)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [tenantId, newName, original.periodo, JSON.stringify(original.produtos_incluidos), original.valor, original.destaque, true]
+      );
+
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao duplicar pacote:", error);
+      res.status(500).json({ error: "Erro ao duplicar pacote." });
+    }
+  });
+
+  // GET /api/gd/vexo-products
+  app.get("/api/gd/vexo-products", requireFirebaseAuth, async (req, res) => {
+    try {
+      const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
+      const tenantId = await resolveTenantUuid(clientKey);
+
+      const result = await pool.query(
+        "SELECT id, nome, descricao, valor, recorrencia, ativo, created_at FROM public.vexo_products WHERE tenant_id = $1 ORDER BY created_at ASC",
+        [tenantId]
+      );
+      res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar vexo-products:", error);
+      res.status(500).json({ error: "Erro ao buscar módulos Vexo." });
+    }
+  });
+
+  // POST /api/gd/vexo-products
+  app.post("/api/gd/vexo-products", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { client_id, nome, descricao, valor, recorrencia, ativo } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `INSERT INTO public.vexo_products (tenant_id, nome, descricao, valor, recorrencia, ativo)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [tenantId, nome, descricao, Number(valor || 0), recorrencia || "mensal", ativo !== false]
+      );
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao criar vexo-product:", error);
+      res.status(500).json({ error: "Erro ao criar módulo Vexo." });
+    }
+  });
+
+  // PUT /api/gd/vexo-products/:id
+  app.put("/api/gd/vexo-products/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id, nome, descricao, valor, recorrencia, ativo } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `UPDATE public.vexo_products
+         SET nome = COALESCE($1, nome),
+             descricao = COALESCE($2, descricao),
+             valor = COALESCE($3, valor),
+             recorrencia = COALESCE($4, recorrencia),
+             ativo = COALESCE($5, ativo)
+         WHERE id = $6 AND tenant_id = $7 RETURNING *`,
+        [nome, descricao, valor !== undefined ? Number(valor) : null, recorrencia, ativo, id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Módulo Vexo não encontrado." });
+      }
+      res.status(200).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao atualizar vexo-product:", error);
+      res.status(500).json({ error: "Erro ao atualizar módulo Vexo." });
+    }
+  });
+
+  // DELETE /api/gd/vexo-products/:id
+  app.delete("/api/gd/vexo-products/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `DELETE FROM public.vexo_products WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+        [id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Módulo Vexo não encontrado." });
+      }
+      res.status(200).json({ success: true, message: "Módulo Vexo removido com sucesso." });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao excluir vexo-product:", error);
+      res.status(500).json({ error: "Erro ao excluir módulo Vexo." });
+    }
+  });
+
+  // POST /api/gd/presentations
+  app.post("/api/gd/presentations", requireFirebaseAuth, async (req, res) => {
+    try {
+      const {
+        client_id,
+        prospect_name,
+        prospect_logo,
+        segment_id,
+        venda_casada,
+        produtos_selecionados,
+        pacotes_ofertados,
+        roi,
+        status = "rascunho",
+        vexo_selecionados
+      } = req.body;
+
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `INSERT INTO public.gd_presentations (
+          tenant_id, prospect_name, prospect_logo, segment_id, venda_casada, produtos_selecionados, pacotes_ofertados, roi, status, vexo_selecionados
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [
+          tenantId,
+          prospect_name,
+          prospect_logo,
+          segment_id || null,
+          venda_casada || false,
+          produtos_selecionados ? JSON.stringify(produtos_selecionados) : null,
+          pacotes_ofertados ? JSON.stringify(pacotes_ofertados) : null,
+          roi ? JSON.stringify(roi) : null,
+          status,
+          vexo_selecionados ? JSON.stringify(vexo_selecionados) : '[]'
+        ]
+      );
+
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao salvar apresentação:", error);
+      res.status(500).json({ error: "Erro ao salvar apresentação comercial." });
+    }
+  });
+
+  // PUT /api/gd/presentations/:id
+  app.put("/api/gd/presentations/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id, produtos_selecionados, vexo_selecionados } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `UPDATE public.gd_presentations
+         SET produtos_selecionados = COALESCE($1, produtos_selecionados),
+             vexo_selecionados = COALESCE($2, vexo_selecionados)
+         WHERE id = $3 AND tenant_id = $4
+         RETURNING *`,
+        [
+          produtos_selecionados ? JSON.stringify(produtos_selecionados) : null,
+          vexo_selecionados ? JSON.stringify(vexo_selecionados) : null,
+          id,
+          tenantId
+        ]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Apresentação não encontrada." });
+      }
+
+      res.status(200).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao atualizar apresentação:", error);
+      res.status(500).json({ error: "Erro ao atualizar apresentação comercial." });
+    }
+  });
+
+  // POST /api/gd/proposals
+  app.post("/api/gd/proposals", requireFirebaseAuth, async (req, res) => {
+    try {
+      const {
+        client_id,
+        presentation_id,
+        package_id,
+        prospect_name,
+        itens,
+        condicoes,
+        status = "rascunho"
+      } = req.body;
+
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const validPresentationId = (presentation_id && uuidRegex.test(presentation_id)) ? presentation_id : null;
+      const validPackageId = (package_id && uuidRegex.test(package_id)) ? package_id : null;
+
+      let finalItems = [];
+      let finalProspectName = prospect_name;
+
+      // Fetch presentation info if presentation_id is passed
+      let pres = null;
+      if (validPresentationId) {
+        const presentationRes = await pool.query(
+          `SELECT * FROM public.gd_presentations WHERE id = $1 AND tenant_id = $2`,
+          [validPresentationId, tenantId]
+        );
+        if (presentationRes.rows.length > 0) {
+          pres = presentationRes.rows[0];
+          finalProspectName = finalProspectName || pres.prospect_name;
+        }
+      }
+
+      // If package_id is passed, get items and closed value from gd_packages
+      if (validPackageId) {
+        const packageRes = await pool.query(
+          `SELECT * FROM public.gd_packages WHERE id = $1 AND tenant_id = $2`,
+          [validPackageId, tenantId]
+        );
+        if (packageRes.rows.length > 0) {
+          const pack = packageRes.rows[0];
+          const val = Number(pack.valor || 0);
+
+          // The main package item representing the closed pricing
+          finalItems.push({
+            product_id: null,
+            descricao: `Pacote: ${pack.nome} (${pack.periodo === 'mensal' ? 'Mensal' : pack.periodo === 'semestral' ? 'Semestral' : pack.periodo === 'anual' ? 'Anual' : pack.periodo})`,
+            categoria: "gd",
+            valor: val,
+            recorrencia: pack.periodo === "unico" ? "unico" : "mensal"
+          });
+
+          // And products list as zero-value descriptive items
+          const liveSelected = (pres && Array.isArray(pres.produtos_selecionados) && pres.produtos_selecionados.length > 0)
+            ? pres.produtos_selecionados
+            : null;
+          const includedProds = liveSelected || (Array.isArray(pack.produtos_incluidos) ? pack.produtos_incluidos : []);
+          includedProds.forEach(p => {
+            finalItems.push({
+              product_id: p.product_id || null,
+              descricao: p.nome,
+              categoria: "gd",
+              valor: 0,
+              recorrencia: "mensal"
+            });
+          });
+        }
+      }
+
+      // Fallback: If no package was chosen but presentation_id exists, construct from selected products with zero values
+      if (finalItems.length === 0 && validPresentationId && pres) {
+        const selectedProds = pres.produtos_selecionados || [];
+        finalItems = selectedProds.map(sp => ({
+          product_id: sp.product_id,
+          descricao: sp.nome,
+          categoria: "gd",
+          valor: 0,
+          recorrencia: "mensal"
+        }));
+      }
+
+      // Fallback to body items
+      if (finalItems.length === 0 && itens) {
+        finalItems = Array.isArray(itens) ? itens : (itens.produtos || []);
+      }
+
+      // Add Vexo OS modules if venda_casada is active
+      if (pres && pres.venda_casada) {
+        const vexoSelected = Array.isArray(pres.vexo_selecionados) ? pres.vexo_selecionados : [];
+        if (vexoSelected.length > 0) {
+          vexoSelected.forEach(vm => {
+            finalItems.push({
+              product_id: vm.vexo_product_id || vm.id || null,
+              descricao: `Vexo OS: ${vm.nome}`,
+              categoria: "vexo",
+              valor: Number(vm.valor || 0),
+              recorrencia: vm.recorrencia || "mensal"
+            });
+          });
+        } else {
+          // Fallback to legacy default if empty
+          finalItems.push({
+            product_id: null,
+            descricao: "Módulo Vexo OS - Inteligência de Atendimento",
+            categoria: "vexo",
+            valor: 980.00,
+            recorrencia: "mensal"
+          });
+        }
+      }
+
+      // Recalculate totals
+      const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const computedTotal = valorSetup + valorRecorrente;
+
+      const result = await pool.query(
+        `INSERT INTO public.gd_proposals (
+          tenant_id, presentation_id, package_id, prospect_name, itens, valor_total, condicoes, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+          tenantId,
+          validPresentationId,
+          validPackageId,
+          finalProspectName,
+          JSON.stringify(finalItems),
+          computedTotal,
+          condicoes || "Contrato de 6 meses. Faturamento recorrente mensal.",
+          status
+        ]
+      );
+
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao criar proposta:", error);
+      res.status(500).json({ error: "Erro ao gerar proposta comercial." });
+    }
+  });
+
+  // GET /api/gd/proposals
+  app.get("/api/gd/proposals", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `SELECT * FROM public.gd_proposals WHERE tenant_id = $1 ORDER BY created_at DESC`,
+        [tenantId]
+      );
+
+      const formatted = result.rows.map(row => {
+        const items = Array.isArray(row.itens) ? row.itens : [];
+        const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+        const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+        return {
+          ...row,
+          valor_setup: valorSetup,
+          valor_recorrente: valorRecorrente
+        };
+      });
+
+      res.json({ success: true, data: formatted });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar propostas:", error);
+      res.status(500).json({ error: "Erro ao buscar propostas." });
+    }
+  });
+
+  // GET /api/gd/proposals/:id
+  app.get("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `SELECT * FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      const row = result.rows[0];
+      const items = Array.isArray(row.itens) ? row.itens : [];
+      const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+      res.json({
+        success: true,
+        data: {
+          ...row,
+          valor_setup: valorSetup,
+          valor_recorrente: valorRecorrente
+        }
+      });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar proposta por id:", error);
+      res.status(500).json({ error: "Erro ao buscar detalhes da proposta comercial." });
+    }
+  });
+
+  // PUT /api/gd/proposals/:id
+  app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      // Validate payment_link format (http/https)
+      if (payment_link) {
+        try {
+          const parsed = new URL(payment_link);
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return res.status(400).json({ error: "Link de pagamento inválido. Deve iniciar com http:// ou https://." });
+          }
+        } catch (_) {
+          return res.status(400).json({ error: "Link de pagamento inválido. URL malformada." });
+        }
+      }
+
+      const finalItems = Array.isArray(itens) ? itens : [];
+      const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorTotal = valorSetup + valorRecorrente;
+
+      const result = await pool.query(
+        `UPDATE public.gd_proposals
+         SET prospect_name = COALESCE($1, prospect_name),
+             itens = COALESCE($2, itens),
+             valor_total = $3,
+             condicoes = COALESCE($4, condicoes),
+             status = COALESCE($5, status),
+             payment_link = $6
+         WHERE id = $7 AND tenant_id = $8 RETURNING *`,
+        [prospect_name, JSON.stringify(finalItems), valorTotal, condicoes, status, payment_link || null, id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          ...result.rows[0],
+          valor_setup: valorSetup,
+          valor_recorrente: valorRecorrente
+        }
+      });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao atualizar proposta:", error);
+      res.status(500).json({ error: "Erro ao atualizar proposta comercial." });
+    }
+  });
+
+  // DELETE /api/gd/proposals/:id
+  app.delete("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id || req.body.client_id);
+
+      const result = await pool.query(
+        `DELETE FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+        [id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      res.json({ success: true, message: "Proposta comercial excluída com sucesso." });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao excluir proposta:", error);
+      res.status(500).json({ error: "Erro ao excluir proposta comercial." });
+    }
+  });
+
+  // POST /api/gd/proposals/:id/enviar
+  app.post("/api/gd/proposals/:id/enviar", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      const result = await pool.query(
+        `UPDATE public.gd_proposals
+         SET status = 'enviada',
+             sent_at = timezone('utc'::text, now())
+         WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+        [id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      res.json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao enviar proposta:", error);
+      res.status(500).json({ error: "Erro ao enviar proposta." });
+    }
+  });
+
+  // POST /api/gd/proposals/:id/assinar
+  app.post("/api/gd/proposals/:id/assinar", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { assinatura, signer_name } = req.body;
+      const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+
+      const result = await pool.query(
+        `UPDATE public.gd_proposals
+         SET assinatura = $1,
+             signer_name = $2,
+             signed_at = timezone('utc'::text, now()),
+             signer_ip = $3,
+             status = 'aceita'
+         WHERE id = $4 RETURNING *`,
+        [assinatura, signer_name, ip, id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada ou acesso negado." });
+      }
+
+      const row = result.rows[0];
+      const items = Array.isArray(row.itens) ? row.itens : [];
+      const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+      res.json({
+        success: true,
+        data: {
+          ...row,
+          valor_setup: valorSetup,
+          valor_recorrente: valorRecorrente
+        }
+      });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao assinar proposta:", error);
+      res.status(500).json({ error: "Erro ao registrar assinatura de aceite comercial." });
+    }
+  });
+
+  // ─── PUBLIC ENDPOINTS (WITHOUT FIREBASE AUTH) ──────────────────────────────────
+
+  // GET /api/gd/public/proposals/:id
+  app.get("/api/gd/public/proposals/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const result = await pool.query(
+        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at
+         FROM public.gd_proposals WHERE id = $1`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      const row = result.rows[0];
+
+      // Fetch tenant payment default link as fallback
+      const tenantModulesRes = await pool.query(
+        `SELECT config FROM public.tenant_modules WHERE tenant_id = $1`,
+        [row.tenant_id]
+      );
+      const config = tenantModulesRes.rows[0]?.config || {};
+      const paymentLinkDefault = config.gd?.payment_link_default || "";
+
+      const finalPaymentLink = row.payment_link || paymentLinkDefault || "";
+
+      const items = Array.isArray(row.itens) ? row.itens : [];
+      const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+      res.json({
+        success: true,
+        data: {
+          ...row,
+          payment_link: finalPaymentLink,
+          valor_setup: valorSetup,
+          valor_recorrente: valorRecorrente
+        }
+      });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar proposta pública:", error);
+      res.status(500).json({ error: "Erro ao buscar proposta." });
+    }
+  });
+
+  // POST /api/gd/public/proposals/:id/assinar
+  app.post("/api/gd/public/proposals/:id/assinar", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { assinatura, signer_name } = req.body;
+      const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+
+      const result = await pool.query(
+        `UPDATE public.gd_proposals
+         SET assinatura = $1,
+             signer_name = $2,
+             signed_at = timezone('utc'::text, now()),
+             signer_ip = $3,
+             status = 'aceita'
+         WHERE id = $4 RETURNING *`,
+        [assinatura, signer_name, ip, id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      res.json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao assinar proposta pública:", error);
+      res.status(500).json({ error: "Erro ao registrar assinatura." });
     }
   });
 }
