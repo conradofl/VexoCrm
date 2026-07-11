@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Briefcase, ListChecks, FileText, Layers } from "lucide-react";
+import { Briefcase, ListChecks, FileText, Layers, CreditCard } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function GeracaoDigitalTabs() {
@@ -13,6 +13,7 @@ export function GeracaoDigitalTabs() {
   const hasBriefings = canAccessInternalPage("briefings-gd");
   const hasPropostas = canAccessInternalPage("propostas-gd");
   const hasPacotes = canAccessInternalPage("pacotes-gd");
+  const hasCondicoes = canAccessInternalPage("condicoes-gd");
 
   // Determine active tab based on path name
   let activeTab = "";
@@ -20,12 +21,14 @@ export function GeracaoDigitalTabs() {
   else if (location.pathname.includes("geracao-digital")) activeTab = "briefing";
   else if (location.pathname.includes("propostas-gd")) activeTab = "propostas";
   else if (location.pathname.includes("pacotes-gd")) activeTab = "pacotes";
+  else if (location.pathname.includes("condicoes-gd")) activeTab = "condicoes";
 
   const handleTabChange = (val: string) => {
     if (val === "apresentacao") navigate("/crm/apresentacao-gd");
     else if (val === "briefing") navigate("/crm/geracao-digital");
     else if (val === "propostas") navigate("/crm/propostas-gd");
     else if (val === "pacotes") navigate("/crm/pacotes-gd");
+    else if (val === "condicoes") navigate("/crm/condicoes-gd");
   };
 
   return (
@@ -54,6 +57,12 @@ export function GeracaoDigitalTabs() {
             <TabsTrigger value="pacotes" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <Layers className="h-3.5 w-3.5 mr-1.5" />
               Pacotes
+            </TabsTrigger>
+          )}
+          {hasCondicoes && (
+            <TabsTrigger value="condicoes" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+              <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+              Condições
             </TabsTrigger>
           )}
         </TabsList>
