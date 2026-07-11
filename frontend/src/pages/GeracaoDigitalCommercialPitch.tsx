@@ -624,7 +624,6 @@ export default function GeracaoDigitalCommercialPitch({
                         <Check className="h-3 w-3 text-purple-600 shrink-0" />
                         <div className="flex-1 flex justify-between items-center text-[10px]">
                           <span className="font-bold text-purple-900 leading-tight">{p.nome}</span>
-                          <span className="font-mono text-purple-750 font-bold">R$ {Number(p.valor || 0).toLocaleString("pt-BR")}</span>
                         </div>
                       </div>
                     ))}
@@ -670,9 +669,6 @@ export default function GeracaoDigitalCommercialPitch({
                       </p>
                     )}
                   </div>
-                  <span className="text-xs font-black text-purple-600 font-mono block pt-1">
-                    R$ {Number(vm.valor || 0).toLocaleString("pt-BR")}/{vm.recorrencia === "unico" ? "único" : "mês"}
-                  </span>
                 </Card>
               ))}
             </div>

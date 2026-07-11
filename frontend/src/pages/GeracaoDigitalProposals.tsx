@@ -32,7 +32,7 @@ import {
 interface ProposalItem {
   product_id?: string | null;
   descricao: string;
-  categoria: "gd" | "hostery" | "vexo";
+  categoria: "gd" | "vexo";
   valor: number;
   recorrencia: "mensal" | "unico";
 }
@@ -618,7 +618,6 @@ export default function GeracaoDigitalProposals() {
                             >
                               <option value="gd">Geração Digital</option>
                               <option value="vexo">Vexo OS</option>
-                              <option value="hostery">Hostery Tech</option>
                             </select>
                           </div>
 
