@@ -21,6 +21,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   type ProposalPaymentTerms,
+  type DescontoConcedido,
+  DESCONTO_LABELS,
   computePaymentBreakdown,
   SETUP_LABEL,
   SETUP_JUSTIFICATION
@@ -56,6 +58,7 @@ interface Proposal {
   validade_ate?: string | null;
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
+  descontos_concedidos?: DescontoConcedido[] | null;
 }
 
 const PERIODO_LABELS: Record<string, string> = {
@@ -238,6 +241,7 @@ export default function GeracaoDigitalPublicProposal() {
   const chosenTerm = proposal.condicoes_pagamento?.escolhida || null;
   const validadeDate = proposal.validade_ate ? new Date(proposal.validade_ate) : null;
   const validadeExpirada = validadeDate ? validadeDate.getTime() < Date.now() : false;
+  const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
@@ -396,6 +400,29 @@ export default function GeracaoDigitalPublicProposal() {
                   Condição escolhida: {chosenTerm.nome}
                 </p>
               )}
+            </Card>
+          )}
+
+          {/* Condições negociadas na mesa */}
+          {descontosConcedidos.length > 0 && (
+            <Card className="bg-emerald-950/20 border-emerald-900/50 p-6 space-y-3">
+              <h3 className="font-bold text-white text-base">Condições Negociadas</h3>
+              <div className="space-y-2">
+                {descontosConcedidos.map((d, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-4 text-xs">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                      <span className="text-slate-200 font-medium">{d.motivo || DESCONTO_LABELS[d.tipo] || d.tipo}</span>
+                    </div>
+                    {d.tipo !== "parcelamento" && Number(d.valor_original) !== Number(d.valor_final) && (
+                      <span className="font-mono shrink-0">
+                        <span className="text-slate-500 line-through mr-2">R$ {Number(d.valor_original || 0).toLocaleString("pt-BR")}</span>
+                        <span className="text-emerald-400 font-bold">R$ {Number(d.valor_final || 0).toLocaleString("pt-BR")}</span>
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </Card>
           )}
 
