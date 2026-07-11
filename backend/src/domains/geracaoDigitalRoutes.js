@@ -879,6 +879,132 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     }
   });
 
+  // GET /api/gd/payment-terms
+  app.get("/api/gd/payment-terms", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+      const result = await pool.query(
+        "SELECT id, nome, tipo, config, ativo, created_at FROM public.gd_payment_terms WHERE tenant_id = $1 ORDER BY created_at ASC",
+        [tenantId]
+      );
+      const data = (result.rows || []).map((row) => {
+        let config = row.config;
+        if (typeof config === "string") {
+          try {
+            config = JSON.parse(config);
+          } catch {
+            config = {};
+          }
+        }
+        if (!config || typeof config !== "object") config = {};
+        return { ...row, config };
+      });
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao buscar condições de pagamento:", error?.message || error);
+      res.status(500).json({ error: "Erro ao buscar condições de pagamento.", detail: error?.message || String(error) });
+    }
+  });
+
+  // POST /api/gd/payment-terms
+  app.post("/api/gd/payment-terms", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { client_id, nome, tipo = "custom", config = {}, ativo = true } = req.body;
+      if (!nome || !String(nome).trim()) {
+        return res.status(400).json({ error: "Nome da condição é obrigatório." });
+      }
+      const tenantId = await resolveTenantUuid(client_id);
+      const result = await pool.query(
+        `INSERT INTO public.gd_payment_terms (tenant_id, nome, tipo, config, ativo)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [tenantId, String(nome).trim(), tipo, JSON.stringify(config || {}), ativo !== false]
+      );
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao criar condição de pagamento:", error?.message || error);
+      res.status(500).json({ error: "Erro ao criar condição de pagamento." });
+    }
+  });
+
+  // PUT /api/gd/payment-terms/:id
+  app.put("/api/gd/payment-terms/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id, nome, tipo, config, ativo } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+      const result = await pool.query(
+        `UPDATE public.gd_payment_terms
+         SET nome = COALESCE($1, nome),
+             tipo = COALESCE($2, tipo),
+             config = COALESCE($3, config),
+             ativo = COALESCE($4, ativo)
+         WHERE id = $5 AND tenant_id = $6 RETURNING *`,
+        [
+          nome !== undefined ? String(nome).trim() : null,
+          tipo || null,
+          config !== undefined ? JSON.stringify(config || {}) : null,
+          typeof ativo === "boolean" ? ativo : null,
+          id,
+          tenantId
+        ]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Condição de pagamento não encontrada." });
+      }
+      res.json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao atualizar condição de pagamento:", error?.message || error);
+      res.status(500).json({ error: "Erro ao atualizar condição de pagamento." });
+    }
+  });
+
+  // DELETE /api/gd/payment-terms/:id
+  app.delete("/api/gd/payment-terms/:id", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+      const result = await pool.query(
+        `DELETE FROM public.gd_payment_terms WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+        [id, tenantId]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Condição de pagamento não encontrada." });
+      }
+      res.json({ success: true, message: "Condição de pagamento removida com sucesso." });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao excluir condição de pagamento:", error?.message || error);
+      res.status(500).json({ error: "Erro ao excluir condição de pagamento." });
+    }
+  });
+
+  // POST /api/gd/payment-terms/:id/duplicate
+  app.post("/api/gd/payment-terms/:id/duplicate", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id } = req.body;
+      const tenantId = await resolveTenantUuid(client_id);
+      const original = await pool.query(
+        `SELECT * FROM public.gd_payment_terms WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      if (original.rows.length === 0) {
+        return res.status(404).json({ error: "Condição de pagamento não encontrada." });
+      }
+      const term = original.rows[0];
+      const result = await pool.query(
+        `INSERT INTO public.gd_payment_terms (tenant_id, nome, tipo, config, ativo)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [tenantId, `${term.nome} (cópia)`, term.tipo, JSON.stringify(term.config || {}), term.ativo]
+      );
+      res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao duplicar condição de pagamento:", error?.message || error);
+      res.status(500).json({ error: "Erro ao duplicar condição de pagamento." });
+    }
+  });
+
   // POST /api/gd/presentations
   app.post("/api/gd/presentations", requireFirebaseAuth, async (req, res) => {
     try {
@@ -1067,15 +1193,20 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
       }
 
+      // Setup Vexo opcional e condições de pagamento (campos opcionais)
+      const { cobrar_setup = false, valor_setup_vexo = null, condicoes_pagamento = null } = req.body;
+      const setupVexo = cobrar_setup ? Number(valor_setup_vexo || 0) : 0;
+
       // Recalculate totals
       const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const computedTotal = valorSetup + valorRecorrente;
+      const computedTotal = valorSetup + valorRecorrente + setupVexo;
 
       const result = await pool.query(
         `INSERT INTO public.gd_proposals (
-          tenant_id, presentation_id, package_id, prospect_name, itens, valor_total, condicoes, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+          tenant_id, presentation_id, package_id, prospect_name, itens, valor_total, condicoes, status,
+          cobrar_setup, valor_setup_vexo, condicoes_pagamento
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
         [
           tenantId,
           validPresentationId,
@@ -1084,7 +1215,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           JSON.stringify(finalItems),
           computedTotal,
           condicoes || "Contrato de 6 meses. Faturamento recorrente mensal.",
-          status
+          status,
+          cobrar_setup === true,
+          valor_setup_vexo !== null && valor_setup_vexo !== undefined ? Number(valor_setup_vexo) : null,
+          condicoes_pagamento ? JSON.stringify(condicoes_pagamento) : null
         ]
       );
 
@@ -1163,7 +1297,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1178,10 +1312,26 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
       }
 
+      // Load current row so optional fields (setup, condições de pagamento) keep their values
+      const currentRes = await pool.query(
+        `SELECT * FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      if (currentRes.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+      const current = currentRes.rows[0];
+
       const finalItems = Array.isArray(itens) ? itens : [];
+      const finalCobrarSetup = typeof cobrar_setup === "boolean" ? cobrar_setup : current.cobrar_setup === true;
+      const finalValorSetupVexo = valor_setup_vexo !== undefined
+        ? (valor_setup_vexo !== null ? Number(valor_setup_vexo) : null)
+        : (current.valor_setup_vexo !== null ? Number(current.valor_setup_vexo) : null);
+      const setupVexo = finalCobrarSetup ? Number(finalValorSetupVexo || 0) : 0;
+
       const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorTotal = valorSetup + valorRecorrente;
+      const valorTotal = valorSetup + valorRecorrente + setupVexo;
 
       const result = await pool.query(
         `UPDATE public.gd_proposals
@@ -1190,9 +1340,24 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              valor_total = $3,
              condicoes = COALESCE($4, condicoes),
              status = COALESCE($5, status),
-             payment_link = $6
-         WHERE id = $7 AND tenant_id = $8 RETURNING *`,
-        [prospect_name, JSON.stringify(finalItems), valorTotal, condicoes, status, payment_link || null, id, tenantId]
+             payment_link = $6,
+             cobrar_setup = $7,
+             valor_setup_vexo = $8,
+             condicoes_pagamento = COALESCE($9, condicoes_pagamento)
+         WHERE id = $10 AND tenant_id = $11 RETURNING *`,
+        [
+          prospect_name,
+          JSON.stringify(finalItems),
+          valorTotal,
+          condicoes,
+          status,
+          payment_link || null,
+          finalCobrarSetup,
+          finalValorSetupVexo,
+          condicoes_pagamento !== undefined && condicoes_pagamento !== null ? JSON.stringify(condicoes_pagamento) : null,
+          id,
+          tenantId
+        ]
       );
 
       if (result.rows.length === 0) {
@@ -1311,7 +1476,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at
+        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );
@@ -1355,8 +1520,23 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.post("/api/gd/public/proposals/:id/assinar", async (req, res) => {
     try {
       const { id } = req.params;
-      const { assinatura, signer_name } = req.body;
+      const { assinatura, signer_name, condicao_escolhida_id } = req.body;
       const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+
+      // Se o cliente escolheu uma das condições ofertadas, registra a escolha
+      let condicoesPagamentoUpdate = null;
+      if (condicao_escolhida_id) {
+        const currentRes = await pool.query(
+          `SELECT condicoes_pagamento FROM public.gd_proposals WHERE id = $1`,
+          [id]
+        );
+        const cp = currentRes.rows[0]?.condicoes_pagamento;
+        const ofertadas = Array.isArray(cp?.ofertadas) ? cp.ofertadas : [];
+        const escolhida = ofertadas.find((t) => t.id === condicao_escolhida_id) || null;
+        if (escolhida) {
+          condicoesPagamentoUpdate = JSON.stringify({ ...cp, escolhida });
+        }
+      }
 
       const result = await pool.query(
         `UPDATE public.gd_proposals
@@ -1364,9 +1544,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              signer_name = $2,
              signed_at = timezone('utc'::text, now()),
              signer_ip = $3,
-             status = 'aceita'
-         WHERE id = $4 RETURNING *`,
-        [assinatura, signer_name, ip, id]
+             status = 'aceita',
+             condicoes_pagamento = COALESCE($4, condicoes_pagamento)
+         WHERE id = $5 RETURNING *`,
+        [assinatura, signer_name, ip, condicoesPagamentoUpdate, id]
       );
 
       if (result.rows.length === 0) {
