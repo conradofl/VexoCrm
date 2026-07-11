@@ -66,14 +66,23 @@ export function GeracaoDigitalNegotiationBoard({
 }: NegotiationBoardProps) {
   // Concessões ao vivo
   const [setupIsento, setSetupIsento] = useState(false);
-  const [descontoAvistaPct, setDescontoAvistaPct] = useState<number>(0);
+  const [tipoDesconto, setTipoDesconto] = useState<'porcentagem' | 'valor'>('porcentagem');
+  const [valorDesconto, setValorDesconto] = useState<number>(0);
   const [parcelas, setParcelas] = useState<number>(1);
 
   // Entrada = setup dos itens + taxa de implantação Vexo.
   // Parcelamento e descontos incidem SÓ sobre a entrada; a mensalidade é separada.
   const entradaOriginal = setupItensTotal + setupVexoValue;
   const entradaBase = setupItensTotal + (setupIsento ? 0 : setupVexoValue);
-  const entradaFinal = entradaBase * (1 - descontoAvistaPct / 100);
+
+  const entradaFinal = useMemo(() => {
+    if (tipoDesconto === 'porcentagem') {
+      return entradaBase * (1 - (valorDesconto || 0) / 100);
+    } else {
+      return Math.max(0, entradaBase - (valorDesconto || 0));
+    }
+  }, [entradaBase, tipoDesconto, valorDesconto]);
+
   const valorParcela = parcelas > 1 ? entradaFinal / parcelas : entradaFinal;
 
   const descontos = useMemo<DescontoConcedido[]>(() => {
@@ -86,12 +95,16 @@ export function GeracaoDigitalNegotiationBoard({
         motivo: periodoPlano === "anual" ? "Isenção de setup — plano anual" : "Isenção de setup concedida na negociação"
       });
     }
-    if (descontoAvistaPct > 0) {
+    const valorDescontoAbs = entradaBase - entradaFinal;
+    if (valorDescontoAbs > 0) {
+      const pctEquiv = entradaBase > 0 ? Math.round((valorDescontoAbs / entradaBase) * 100) : 0;
       list.push({
         tipo: "desconto_avista",
         valor_original: entradaBase,
         valor_final: entradaFinal,
-        motivo: `Desconto de ${descontoAvistaPct}% no pagamento à vista da entrada`
+        motivo: tipoDesconto === "porcentagem"
+          ? `Desconto de ${valorDesconto}% no pagamento à vista da entrada`
+          : `Desconto de ${brl(valorDesconto)} (equivalente a ${pctEquiv}%) no pagamento à vista da entrada`
       });
     }
     if (parcelas > 1) {
@@ -103,11 +116,12 @@ export function GeracaoDigitalNegotiationBoard({
       });
     }
     return list;
-  }, [setupIsento, descontoAvistaPct, parcelas, setupVexoValue, entradaBase, entradaFinal, valorParcela, periodoPlano]);
+  }, [setupIsento, tipoDesconto, valorDesconto, parcelas, setupVexoValue, entradaBase, entradaFinal, valorParcela, periodoPlano]);
 
   const resetAll = () => {
     setSetupIsento(false);
-    setDescontoAvistaPct(0);
+    setTipoDesconto('porcentagem');
+    setValorDesconto(0);
     setParcelas(1);
   };
 
@@ -190,7 +204,7 @@ export function GeracaoDigitalNegotiationBoard({
             <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-xl shadow-purple-100/50 p-6 space-y-3">
               <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-purple-600">Condições Disponíveis</h3>
               {offeredTerms.map((term) => {
-                const b = computePaymentBreakdown(term, entradaFinal + recurringTotal);
+                const b = computePaymentBreakdown(term, entradaFinal);
                 return (
                   <div key={term.id} className="p-3 rounded-2xl bg-purple-50/60 border border-purple-100 space-y-0.5">
                     <span className="text-xs font-bold text-slate-800 block">{term.nome}</span>
@@ -266,30 +280,61 @@ export function GeracaoDigitalNegotiationBoard({
             </button>
 
             <div className={cn(
-              "rounded-3xl p-5 border-2 bg-white shadow-lg space-y-2 transition-all",
-              descontoAvistaPct > 0 ? "border-pink-400 shadow-pink-100" : "border-transparent shadow-purple-100/60"
+              "rounded-3xl p-5 border-2 bg-white shadow-lg space-y-2.5 transition-all",
+              valorDesconto > 0 ? "border-pink-400 shadow-pink-100" : "border-transparent shadow-purple-100/60"
             )}>
-              <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center", descontoAvistaPct > 0 ? "bg-pink-100 text-pink-600" : "bg-purple-100 text-purple-600")}>
-                <Percent className="h-4 w-4" />
-              </div>
-              <h4 className="text-sm font-black text-slate-800">Desconto à Vista</h4>
-              <div className="flex gap-1.5">
-                {[0, 5, 10, 15].map((pct) => (
+              <div className="flex justify-between items-center">
+                <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center shrink-0", valorDesconto > 0 ? "bg-pink-100 text-pink-600" : "bg-purple-100 text-purple-600")}>
+                  <Percent className="h-4 w-4" />
+                </div>
+                {/* Tipo de desconto switcher */}
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
                   <button
-                    key={pct}
-                    onClick={() => setDescontoAvistaPct(pct)}
+                    type="button"
+                    onClick={() => { setTipoDesconto('porcentagem'); setValorDesconto(0); }}
                     className={cn(
-                      "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
-                      descontoAvistaPct === pct
-                        ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white border-transparent"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
+                      "px-2 py-0.5 text-[9px] font-extrabold rounded-md transition-all",
+                      tipoDesconto === 'porcentagem' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
                     )}
                   >
-                    {pct === 0 ? "—" : `${pct}%`}
+                    %
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => { setTipoDesconto('valor'); setValorDesconto(0); }}
+                    className={cn(
+                      "px-2 py-0.5 text-[9px] font-extrabold rounded-md transition-all",
+                      tipoDesconto === 'valor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                    )}
+                  >
+                    R$
+                  </button>
+                </div>
               </div>
-              <p className="text-[10px] text-slate-500 leading-snug">sobre a entrada, pagamento à vista</p>
+              <h4 className="text-sm font-black text-slate-800">Desconto Livre</h4>
+
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max={tipoDesconto === 'porcentagem' ? 100 : undefined}
+                  placeholder={tipoDesconto === 'porcentagem' ? "Ex: 10" : "Ex: 500"}
+                  value={valorDesconto || ""}
+                  onChange={(e) => {
+                    const val = Number(e.target.value) || 0;
+                    if (tipoDesconto === 'porcentagem') {
+                      setValorDesconto(Math.min(100, Math.max(0, val)));
+                    } else {
+                      setValorDesconto(Math.min(entradaBase, Math.max(0, val)));
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-mono focus:outline-none focus:border-purple-500 text-right pr-6"
+                />
+                <span className="absolute right-2 top-2 text-[10px] font-mono text-slate-400">
+                  {tipoDesconto === 'porcentagem' ? '%' : 'R$'}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-snug font-light">desconto aplicado sobre a entrada (setup)</p>
             </div>
 
             <div className={cn(

@@ -1451,7 +1451,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.post("/api/gd/proposals/:id/assinar", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { assinatura, signer_name } = req.body;
+      const { assinatura, signer_name, assinatura_metodo } = req.body;
       const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
 
       const result = await pool.query(
@@ -1460,9 +1460,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              signer_name = $2,
              signed_at = timezone('utc'::text, now()),
              signer_ip = $3,
-             status = 'aceita'
-         WHERE id = $4 RETURNING *`,
-        [assinatura, signer_name, ip, id]
+             status = 'aceita',
+             assinatura_metodo = COALESCE($4, 'desenho')
+         WHERE id = $5 RETURNING *`,
+        [assinatura, signer_name, ip, assinatura_metodo || 'desenho', id]
       );
 
       if (result.rows.length === 0) {
@@ -1496,7 +1497,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos
+        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );
@@ -1540,7 +1541,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.post("/api/gd/public/proposals/:id/assinar", async (req, res) => {
     try {
       const { id } = req.params;
-      const { assinatura, signer_name, condicao_escolhida_id } = req.body;
+      const { assinatura, signer_name, condicao_escolhida_id, assinatura_metodo } = req.body;
       const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
 
       // Se o cliente escolheu uma das condições ofertadas, registra a escolha
@@ -1565,9 +1566,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              signed_at = timezone('utc'::text, now()),
              signer_ip = $3,
              status = 'aceita',
-             condicoes_pagamento = COALESCE($4, condicoes_pagamento)
-         WHERE id = $5 RETURNING *`,
-        [assinatura, signer_name, ip, condicoesPagamentoUpdate, id]
+             condicoes_pagamento = COALESCE($4, condicoes_pagamento),
+             assinatura_metodo = COALESCE($5, 'desenho')
+         WHERE id = $6 RETURNING *`,
+        [assinatura, signer_name, ip, condicoesPagamentoUpdate, assinatura_metodo || 'desenho', id]
       );
 
       if (result.rows.length === 0) {

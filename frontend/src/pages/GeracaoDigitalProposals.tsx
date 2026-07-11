@@ -19,10 +19,21 @@ import {
   ArrowRight,
   Info,
   Sparkles,
-  X
+  X,
+  Copy,
+  MessageSquare,
+  Mail
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog";
 import {
   type PaymentTerm,
   type PaymentTermTipo,
@@ -103,6 +114,10 @@ export default function GeracaoDigitalProposals() {
 
   // Mesa de negociação
   const [isNegotiating, setIsNegotiating] = useState<boolean>(false);
+
+  // Modal de compartilhamento da proposta
+  const [showSendModal, setShowSendModal] = useState<boolean>(false);
+  const [whatsappNumber, setWhatsappNumber] = useState<string>("");
 
   // Condição de pagamento criada na hora (sem ir na aba Condições)
   const [showInlineTerm, setShowInlineTerm] = useState<boolean>(false);
@@ -573,6 +588,7 @@ export default function GeracaoDigitalProposals() {
         title: "Enviada & Link Copiado",
         description: "Proposta marcada como 'enviada' e link de acesso copiado!"
       });
+      setShowSendModal(true);
       loadProposals();
     } catch (err) {
       console.error(err);
@@ -933,8 +949,8 @@ export default function GeracaoDigitalProposals() {
                 <Card className="bg-white border-slate-200 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base font-bold text-slate-800">Condições de Pagamento Ofertadas</CardTitle>
-                    <CardDescription className="text-[11px] text-slate-500">
-                      Selecione as condições salvas que o cliente poderá escolher. O desdobramento é calculado sobre o total da proposta (R$ {grandTotal.toLocaleString("pt-BR")}).
+                    <CardDescription className="text-[11px] text-slate-500 font-light">
+                      Selecione as condições salvas que o cliente poderá escolher. O desdobramento é calculado sobre o investimento único de setup (R$ {(setupTotal + setupVexoValue).toLocaleString("pt-BR")}).
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -946,7 +962,7 @@ export default function GeracaoDigitalProposals() {
                       <div className="grid gap-2 md:grid-cols-2">
                         {availableTerms.map((term) => {
                           const isOffered = offeredTermIds.includes(term.id);
-                          const breakdown = computePaymentBreakdown(term, grandTotal);
+                          const breakdown = computePaymentBreakdown(term, setupTotal + setupVexoValue);
                           return (
                             <div
                               key={term.id}
@@ -1232,6 +1248,109 @@ export default function GeracaoDigitalProposals() {
           onClose={() => setIsNegotiating(false)}
           onFinalize={handleFinalizeNegotiation}
         />
+      )}
+
+      {/* Modal de Compartilhamento da Proposta */}
+      {selectedProposal && (
+        <Dialog open={showSendModal} onOpenChange={setShowSendModal}>
+          <DialogContent className="max-w-md bg-white border border-slate-200 shadow-2xl rounded-2xl p-6 space-y-4">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <Share2 className="h-5 w-5 text-indigo-600" />
+                Compartilhar Proposta Comercial
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-505 font-light">
+                A proposta de <strong>{selectedProposal.prospect_name}</strong> foi marcada como enviada. Use os canais abaixo para entregar o link de acesso público.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {/* Link Input & Copy Button */}
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-slate-400 font-mono uppercase tracking-wider block">Link Público da Proposta</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={`${window.location.origin}/proposta/${selectedProposal.id}`}
+                    className="bg-slate-50 border-slate-200 text-xs font-mono text-slate-700 h-9 flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 h-9 border border-slate-200"
+                    onClick={() => {
+                      const shareLink = `${window.location.origin}/proposta/${selectedProposal.id}`;
+                      navigator.clipboard.writeText(shareLink);
+                      toast({
+                        title: "Link Copiado",
+                        description: "O link da proposta foi copiado para a área de transferência."
+                      });
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* WhatsApp Share Section */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <Label className="text-[10px] text-slate-400 font-mono uppercase tracking-wider block">Enviar por WhatsApp</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    placeholder="Ex: 5511999999999 (com DDI + DDD)"
+                    value={whatsappNumber}
+                    onChange={(e) => setWhatsappNumber(e.target.value)}
+                    className="bg-white border-slate-200 text-xs text-slate-700 h-9 flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 gap-1.5"
+                    onClick={() => {
+                      const numberClean = whatsappNumber.replace(/\D/g, "");
+                      if (!numberClean) {
+                        toast({
+                          title: "Número inválido",
+                          description: "Por favor, digite o número com DDI (ex: 55 para Brasil) e DDD.",
+                          variant: "destructive"
+                        });
+                        return;
+                      }
+                      const shareLink = `${window.location.origin}/proposta/${selectedProposal.id}`;
+                      const msg = `Olá! Segue o link para visualizar a sua proposta comercial da Geração Digital: ${shareLink}`;
+                      window.open(`https://wa.me/${numberClean}?text=${encodeURIComponent(msg)}`, "_blank");
+                    }}
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Enviar
+                  </Button>
+                </div>
+              </div>
+
+              {/* Email Infrastructure Warning */}
+              <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                <Label className="text-[10px] text-slate-450 font-mono uppercase tracking-wider flex items-center gap-1">
+                  <Mail className="h-3.5 w-3.5 text-slate-400" />
+                  Enviar por E-mail
+                </Label>
+                <div className="p-3 bg-slate-50 border border-slate-150 rounded-lg">
+                  <p className="text-[10.5px] text-slate-500 leading-normal">
+                    ⚠️ <strong>Infraestrutura Indisponível:</strong> O envio automático por e-mail depende de uma infraestrutura de correio de saída (servidor SMTP ou AWS SES) inexistente no sistema Vexo OS neste momento. Por favor, copie o link público acima e envie manualmente por e-mail.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                variant="outline"
+                className="w-full border-slate-200 text-slate-600 hover:bg-slate-50 h-9 font-bold"
+                onClick={() => setShowSendModal(false)}
+              >
+                Fechar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </PageShell>
   );

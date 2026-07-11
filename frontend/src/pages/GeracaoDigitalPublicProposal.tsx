@@ -59,6 +59,7 @@ interface Proposal {
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
   descontos_concedidos?: DescontoConcedido[] | null;
+  assinatura_metodo?: string | null;
 }
 
 const PERIODO_LABELS: Record<string, string> = {
@@ -77,6 +78,7 @@ export default function GeracaoDigitalPublicProposal() {
 
   // Signature state
   const [signerName, setSignerName] = useState<string>("");
+  const [signMethod, setSignMethod] = useState<'desenho' | 'digitado'>('desenho');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -167,17 +169,22 @@ export default function GeracaoDigitalPublicProposal() {
       return;
     }
 
-    let signatureBase64 = "";
-    const canvas = canvasRef.current;
-    if (canvas) {
-      signatureBase64 = canvas.toDataURL("image/png");
+    let signatureValue = "";
+    if (signMethod === 'desenho') {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        signatureValue = canvas.toDataURL("image/png");
+      }
+    } else {
+      signatureValue = signerName;
     }
 
     try {
       const body = {
-        assinatura: signatureBase64 || signerName,
+        assinatura: signatureValue,
         signer_name: signerName,
-        condicao_escolhida_id: chosenTermId
+        condicao_escolhida_id: chosenTermId,
+        assinatura_metodo: signMethod
       };
 
       const res = await fetchApi(`/api/gd/public/proposals/${id}/assinar`, {
@@ -242,6 +249,16 @@ export default function GeracaoDigitalPublicProposal() {
   const validadeDate = proposal.validade_ate ? new Date(proposal.validade_ate) : null;
   const validadeExpirada = validadeDate ? validadeDate.getTime() < Date.now() : false;
   const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
+
+  const setupBaseVal = Number(proposal.valor_setup || 0) + setupVexoValue;
+  const discountConcession = descontosConcedidos.find(d => d.tipo === "desconto_avista");
+  const isentoConcession = descontosConcedidos.find(d => d.tipo === "isencao_setup");
+  const setupIsento = (setupBaseVal === 0) || (isentoConcession && setupBaseVal === setupVexoValue);
+
+  let setupFinalVal = setupIsento ? 0 : setupBaseVal;
+  if (discountConcession && !setupIsento) {
+    setupFinalVal = Number(discountConcession.valor_final);
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
@@ -366,7 +383,7 @@ export default function GeracaoDigitalPublicProposal() {
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {offeredTerms.map((term) => {
-                  const breakdown = computePaymentBreakdown(term, grandTotal);
+                  const breakdown = computePaymentBreakdown(term, setupFinalVal);
                   const isChosen = proposal.status === "aceita"
                     ? chosenTerm?.id === term.id
                     : chosenTermId === term.id;
@@ -444,17 +461,24 @@ export default function GeracaoDigitalPublicProposal() {
 
             <div className="space-y-3">
               <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
-                <span className="text-slate-400">Setup Único:</span>
-                <span className="text-white font-bold">R$ {proposal.valor_setup?.toLocaleString("pt-BR") || "0,00"}</span>
+                <span className="text-slate-400">Investimento único (Setup):</span>
+                <span className="text-purple-300 font-extrabold text-sm">
+                  {setupIsento ? (
+                    <span className="text-emerald-400 font-bold">Isento</span>
+                  ) : (
+                    <>
+                      {setupFinalVal < setupBaseVal && (
+                        <span className="text-slate-500 line-through mr-2 font-normal text-xs">
+                          R$ {setupBaseVal.toLocaleString("pt-BR")}
+                        </span>
+                      )}
+                      R$ {setupFinalVal.toLocaleString("pt-BR")}
+                    </>
+                  )}
+                </span>
               </div>
-              {proposal.cobrar_setup && (
-                <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
-                  <span className="text-slate-400">{SETUP_LABEL}:</span>
-                  <span className="text-purple-300 font-bold">R$ {setupVexoValue.toLocaleString("pt-BR")}</span>
-                </div>
-              )}
-              <div className="flex justify-between items-center text-xs font-mono">
-                <span className="text-slate-400">Faturamento Mensal:</span>
+              <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
+                <span className="text-slate-400">Mensalidade:</span>
                 <span className="text-pink-400 font-extrabold text-sm">
                   R$ {proposal.valor_recorrente?.toLocaleString("pt-BR") || "0,00"}/mês
                 </span>
@@ -465,10 +489,6 @@ export default function GeracaoDigitalPublicProposal() {
                   <span className="text-white font-bold">{PERIODO_LABELS[proposal.periodo_plano]}</span>
                 </div>
               )}
-              <div className="flex justify-between items-center text-xs font-mono pt-2 border-t border-slate-800">
-                <span className="text-slate-300 font-bold">Total da Proposta:</span>
-                <span className="text-white font-black text-sm">R$ {grandTotal.toLocaleString("pt-BR")}</span>
-              </div>
             </div>
 
             {/* Pay Now Button (if link exists) */}
@@ -499,14 +519,26 @@ export default function GeracaoDigitalPublicProposal() {
                   <span className="text-xs font-mono font-bold text-emerald-400 block">{proposal.signer_name}</span>
                 </div>
 
-                {proposal.assinatura && proposal.assinatura.startsWith("data:image") && (
-                  <div className="h-20 w-full max-w-[200px] bg-white rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden">
-                    <img src={proposal.assinatura} alt="Assinatura" className="max-h-full max-w-full object-contain" />
-                  </div>
+                {proposal.assinatura && (
+                  proposal.assinatura.startsWith("data:image") ? (
+                    <div className="h-20 w-full max-w-[200px] bg-white rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden">
+                      <img src={proposal.assinatura} alt="Assinatura" className="max-h-full max-w-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="py-3 text-center">
+                      <span className="font-mono text-lg italic font-bold text-slate-800 bg-white border border-slate-200 rounded-lg px-4 py-1.5 inline-block max-w-xs mx-auto shadow-sm tracking-wider">
+                        {proposal.assinatura}
+                      </span>
+                      <span className="text-[9px] text-slate-500 block mt-1 font-mono uppercase">Assinatura Digitada</span>
+                    </div>
+                  )
                 )}
 
-                <div className="text-[9px] text-slate-500 font-mono space-y-0.5">
+                <div className="text-[9px] text-slate-550 font-mono space-y-0.5 pt-1.5 border-t border-slate-800">
                   <div>Assinado em: {proposal.signed_at ? new Date(proposal.signed_at).toLocaleString("pt-BR") : ""}</div>
+                  {proposal.assinatura_metodo && (
+                    <div>Método de Aceite: {proposal.assinatura_metodo === "digitado" ? "Nome Digitado" : "Desenho Livre"}</div>
+                  )}
                   <div>IP registrado: {proposal.signer_ip || "Registrado"}</div>
                 </div>
               </div>
@@ -527,32 +559,74 @@ export default function GeracaoDigitalPublicProposal() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-[10px] text-slate-400 font-mono">Assine com o Mouse ou Dedo</Label>
-                    <button onClick={clearCanvas} className="text-[10px] text-pink-400 hover:text-pink-300 font-semibold font-mono">
-                      Limpar
+                {/* Seleção do Método de Assinatura */}
+                <div className="space-y-3">
+                  <Label className="text-[10px] text-slate-400 font-mono block">Escolha a Forma de Aceite</Label>
+                  <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-850 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSignMethod('desenho')}
+                      className={cn(
+                        "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
+                        signMethod === 'desenho' ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white" : "text-slate-400 hover:text-white"
+                      )}
+                    >
+                      Desenhar Assinatura
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSignMethod('digitado')}
+                      className={cn(
+                        "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
+                        signMethod === 'digitado' ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white" : "text-slate-400 hover:text-white"
+                      )}
+                    >
+                      Digitar Nome
                     </button>
                   </div>
-
-                  <canvas
-                    ref={canvasRef}
-                    width={320}
-                    height={120}
-                    onMouseDown={startDrawing}
-                    onMouseMove={draw}
-                    onMouseUp={stopDrawing}
-                    onMouseLeave={stopDrawing}
-                    onTouchStart={startDrawing}
-                    onTouchMove={draw}
-                    onTouchEnd={stopDrawing}
-                    className="w-full bg-slate-950 border border-slate-900 rounded-xl cursor-crosshair h-[120px]"
-                  />
                 </div>
+
+                {signMethod === 'desenho' ? (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <Label className="text-[10px] text-slate-400 font-mono">Assine com o Mouse ou Dedo</Label>
+                      <button onClick={clearCanvas} className="text-[10px] text-pink-400 hover:text-pink-300 font-semibold font-mono">
+                        Limpar
+                      </button>
+                    </div>
+
+                    <canvas
+                      ref={canvasRef}
+                      width={320}
+                      height={120}
+                      onMouseDown={startDrawing}
+                      onMouseMove={draw}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                      onTouchStart={startDrawing}
+                      onTouchMove={draw}
+                      onTouchEnd={stopDrawing}
+                      className="w-full bg-slate-950 border border-slate-900 rounded-xl cursor-crosshair h-[120px]"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label className="text-[10px] text-slate-400 font-mono">Visualização da Assinatura Digitada</Label>
+                    <div className="h-[120px] w-full bg-slate-950 border border-slate-900 rounded-xl flex items-center justify-center p-4">
+                      {signerName.trim() ? (
+                        <span className="font-mono text-xl italic text-pink-500 font-extrabold border-b border-dashed border-pink-500/50 pb-1 px-4 tracking-wider select-none">
+                          {signerName}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 italic font-mono">Digite seu nome completo acima para pré-visualizar...</span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <Button
                   onClick={handleSignProposal}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs animate-pulse"
                 >
                   <PenTool className="h-4 w-4 mr-1.5" />
                   Registrar Assinatura de Aceite
