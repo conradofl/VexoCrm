@@ -19,6 +19,12 @@ import {
   ExternalLink
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  type ProposalPaymentTerms,
+  computePaymentBreakdown,
+  SETUP_LABEL,
+  SETUP_JUSTIFICATION
+} from "@/lib/geracaoDigital/paymentTerms";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -42,6 +48,10 @@ interface Proposal {
   signer_name?: string;
   signed_at?: string;
   signer_ip?: string;
+  created_at?: string;
+  cobrar_setup?: boolean;
+  valor_setup_vexo?: number | null;
+  condicoes_pagamento?: ProposalPaymentTerms | null;
 }
 
 export default function GeracaoDigitalPublicProposal() {
@@ -49,6 +59,7 @@ export default function GeracaoDigitalPublicProposal() {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [chosenTermId, setChosenTermId] = useState<string | null>(null);
 
   // Signature state
   const [signerName, setSignerName] = useState<string>("");
@@ -151,7 +162,8 @@ export default function GeracaoDigitalPublicProposal() {
     try {
       const body = {
         assinatura: signatureBase64 || signerName,
-        signer_name: signerName
+        signer_name: signerName,
+        condicao_escolhida_id: chosenTermId
       };
 
       const res = await fetchApi(`/api/gd/public/proposals/${id}/assinar`, {
@@ -207,6 +219,12 @@ export default function GeracaoDigitalPublicProposal() {
   }
 
   const items = Array.isArray(proposal.itens) ? proposal.itens : [];
+  const setupVexoValue = proposal.cobrar_setup ? Number(proposal.valor_setup_vexo || 0) : 0;
+  const grandTotal = Number(proposal.valor_setup || 0) + Number(proposal.valor_recorrente || 0) + setupVexoValue;
+  const offeredTerms = Array.isArray(proposal.condicoes_pagamento?.ofertadas)
+    ? proposal.condicoes_pagamento!.ofertadas
+    : [];
+  const chosenTerm = proposal.condicoes_pagamento?.escolhida || null;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
@@ -274,6 +292,69 @@ export default function GeracaoDigitalPublicProposal() {
             </CardContent>
           </Card>
 
+          {/* Setup / Implantação Vexo OS (só quando cobrado) */}
+          {proposal.cobrar_setup && (
+            <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="font-bold text-white text-base">Taxa de Implantação (Setup)</h3>
+                <span className="text-sm font-black text-purple-300 font-mono shrink-0">
+                  R$ {setupVexoValue.toLocaleString("pt-BR")}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line font-light">
+                {SETUP_JUSTIFICATION}
+              </p>
+            </Card>
+          )}
+
+          {/* Condições de pagamento ofertadas */}
+          {offeredTerms.length > 0 && (
+            <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
+              <h3 className="font-bold text-white text-base">Condições de Pagamento</h3>
+              <p className="text-[11px] text-slate-400">
+                {proposal.status === "aceita"
+                  ? "Condições ofertadas nesta proposta:"
+                  : "Escolha a condição de pagamento de sua preferência antes de assinar:"}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {offeredTerms.map((term) => {
+                  const breakdown = computePaymentBreakdown(term, grandTotal);
+                  const isChosen = proposal.status === "aceita"
+                    ? chosenTerm?.id === term.id
+                    : chosenTermId === term.id;
+                  return (
+                    <button
+                      key={term.id}
+                      type="button"
+                      disabled={proposal.status === "aceita"}
+                      onClick={() => setChosenTermId(term.id)}
+                      className={cn(
+                        "text-left p-4 rounded-xl border transition-all space-y-1.5",
+                        isChosen
+                          ? "bg-purple-600/15 border-purple-500/60"
+                          : "bg-slate-950 border-slate-900 hover:border-slate-700",
+                        proposal.status === "aceita" && "cursor-default"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-white leading-tight">{term.nome}</span>
+                        {isChosen && <CheckCircle className="h-4 w-4 text-purple-400 shrink-0" />}
+                      </div>
+                      {breakdown.linhas.map((linha, idx) => (
+                        <p key={idx} className="text-[10px] text-slate-300 font-medium">{linha}</p>
+                      ))}
+                    </button>
+                  );
+                })}
+              </div>
+              {proposal.status === "aceita" && chosenTerm && (
+                <p className="text-[10px] text-emerald-400 font-bold">
+                  Condição escolhida: {chosenTerm.nome}
+                </p>
+              )}
+            </Card>
+          )}
+
           {/* Contract details and conditions */}
           <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
             <h3 className="font-bold text-white text-base">Condições de Implantação e Contrato</h3>
@@ -295,11 +376,21 @@ export default function GeracaoDigitalPublicProposal() {
                 <span className="text-slate-400">Setup Único:</span>
                 <span className="text-white font-bold">R$ {proposal.valor_setup?.toLocaleString("pt-BR") || "0,00"}</span>
               </div>
+              {proposal.cobrar_setup && (
+                <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
+                  <span className="text-slate-400">{SETUP_LABEL}:</span>
+                  <span className="text-purple-300 font-bold">R$ {setupVexoValue.toLocaleString("pt-BR")}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center text-xs font-mono">
                 <span className="text-slate-400">Faturamento Mensal:</span>
                 <span className="text-pink-400 font-extrabold text-sm">
                   R$ {proposal.valor_recorrente?.toLocaleString("pt-BR") || "0,00"}/mês
                 </span>
+              </div>
+              <div className="flex justify-between items-center text-xs font-mono pt-2 border-t border-slate-800">
+                <span className="text-slate-300 font-bold">Total da Proposta:</span>
+                <span className="text-white font-black text-sm">R$ {grandTotal.toLocaleString("pt-BR")}</span>
               </div>
             </div>
 
