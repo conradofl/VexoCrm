@@ -29,7 +29,7 @@ import {
 interface ProposalItem {
   product_id?: string | null;
   descricao: string;
-  categoria: "gd" | "hostery" | "vexo";
+  categoria: "gd" | "vexo";
   valor: number;
   recorrencia: "mensal" | "unico";
 }
@@ -278,7 +278,7 @@ export default function GeracaoDigitalPublicProposal() {
                   <div className="space-y-1">
                     <h4 className="text-sm font-bold text-white leading-tight">{item.descricao}</h4>
                     <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-800">
-                      {item.categoria === "gd" ? "Geração Digital" : item.categoria === "vexo" ? "Vexo OS" : "Hostery Tech"}
+                      {item.categoria === "vexo" ? "Vexo OS" : "Geração Digital"}
                     </span>
                   </div>
                   <div className="text-right">
