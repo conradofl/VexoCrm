@@ -26,6 +26,8 @@ export const INTERNAL_PAGE_ORDER = [
   "apresentacao",
   "apresentacao-gd",
   "briefings-gd",
+  "propostas-gd",
+  "pacotes-gd",
   "integracoes",
   "eventos",
   "relacionamento",
@@ -589,6 +591,9 @@ export function isInternalPageAllowedForClient(
     aquecimento: "aquecimento",
     relatorios: "relatorios",
     "apresentacao-gd": "apresentacao-gd",
+    "briefings-gd": "briefings-gd",
+    "propostas-gd": "propostas-gd",
+    "pacotes-gd": "pacotes-gd",
     eventos: "eventos",
     relacionamento: "relacionamento",
     livpub: "livpub",
@@ -626,8 +631,10 @@ export function isPathAllowedForClient(
   }
   else if (path.includes("/crm/planilhas")) tabKey = "campanhas";
   else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
-  else if (path.includes("/crm/geracao-digital") || path.includes("/crm/apresentacao-gd") || path.includes("/crm/briefings-gd")) {
+  else if (path.includes("/crm/geracao-digital") || path.includes("/crm/apresentacao-gd") || path.includes("/crm/briefings-gd") || path.includes("/crm/propostas-gd") || path.includes("/crm/pacotes-gd")) {
     if (path.includes("tab=briefings") || path.includes("/crm/briefings-gd")) tabKey = "briefings-gd";
+    else if (path.includes("/crm/propostas-gd")) tabKey = "propostas-gd";
+    else if (path.includes("/crm/pacotes-gd")) tabKey = "pacotes-gd";
     else tabKey = "apresentacao-gd";
   }
   else if (path.includes("/crm/apresentacao")) {

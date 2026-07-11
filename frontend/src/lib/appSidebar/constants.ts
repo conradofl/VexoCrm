@@ -15,6 +15,8 @@ import {
   Wifi,
   BarChart2,
   Server,
+  FileText,
+  Layers,
 } from "lucide-react";
 import { type InternalPage } from "@/lib/access";
 
@@ -53,7 +55,7 @@ export const CANAIS_ITEMS: SidebarItem[] = [
 
 // ━━ MÓDULOS ━━
 export const GERACAO_DIGITAL_ITEMS: SidebarItem[] = [
-  { key: "geracao-digital", label: "Geração Digital", url: "/crm/geracao-digital", icon: Briefcase, page: "apresentacao-gd" },
+  { key: "geracao-digital", label: "Geração Digital", url: "/crm/apresentacao-gd", icon: Briefcase, page: "apresentacao-gd" }
 ];
 
 export const LIVPUB_ITEMS: SidebarItem[] = [

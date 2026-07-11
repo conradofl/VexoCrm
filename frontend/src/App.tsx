@@ -35,6 +35,10 @@ import ChipsWhatsapp from "./pages/ChipsWhatsapp";
 import AdminPanel from "./pages/AdminPanel";
 import VexoPitch from "./pages/VexoPitch";
 import GeracaoDigital from "./pages/GeracaoDigital";
+import GeracaoDigitalCommercialSetup from "./pages/GeracaoDigitalCommercialSetup";
+import GeracaoDigitalProposals from "./pages/GeracaoDigitalProposals";
+import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
+import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
 
 const queryClient = new QueryClient();
 
@@ -284,7 +288,30 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route path="apresentacao-gd" element={<Navigate to="/crm/geracao-digital?tab=apresentacao" replace />} />
+              <Route
+                path="apresentacao-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalCommercialSetup />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="propostas-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalProposals />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="pacotes-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalPackages />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="briefings-gd" element={<Navigate to="/crm/geracao-digital?tab=briefings" replace />} />
             </Route>
               <Route
@@ -335,8 +362,9 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-            </Route>
-            <Route path="*" element={<NotFound />} />
+             </Route>
+             <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
+             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>
