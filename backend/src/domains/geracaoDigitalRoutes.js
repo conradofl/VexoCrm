@@ -1297,7 +1297,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1357,8 +1357,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              periodo_plano = $10,
              validade_ate = $11,
              valor_apos_validade = $12,
-             observacao_validade = $13
-         WHERE id = $14 AND tenant_id = $15 RETURNING *`,
+             observacao_validade = $13,
+             descontos_concedidos = COALESCE($14, descontos_concedidos)
+         WHERE id = $15 AND tenant_id = $16 RETURNING *`,
         [
           prospect_name,
           JSON.stringify(finalItems),
@@ -1373,6 +1374,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalValidadeAte,
           finalValorAposValidade,
           finalObservacaoValidade,
+          descontos_concedidos !== undefined && descontos_concedidos !== null ? JSON.stringify(descontos_concedidos) : null,
           id,
           tenantId
         ]
@@ -1494,7 +1496,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade
+        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );
