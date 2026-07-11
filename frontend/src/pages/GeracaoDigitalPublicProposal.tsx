@@ -626,7 +626,7 @@ export default function GeracaoDigitalPublicProposal() {
 
                 <Button
                   onClick={handleSignProposal}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs animate-pulse"
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
                 >
                   <PenTool className="h-4 w-4 mr-1.5" />
                   Registrar Assinatura de Aceite
