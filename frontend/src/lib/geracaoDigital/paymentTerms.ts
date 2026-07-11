@@ -117,6 +117,20 @@ export interface ProposalPaymentTerms {
   escolhida?: PaymentTerm | null;
 }
 
+// Concessão registrada na mesa de negociação
+export interface DescontoConcedido {
+  tipo: "isencao_setup" | "desconto_avista" | "parcelamento";
+  valor_original: number;
+  valor_final: number;
+  motivo?: string;
+}
+
+export const DESCONTO_LABELS: Record<DescontoConcedido["tipo"], string> = {
+  isencao_setup: "Isenção de setup",
+  desconto_avista: "Desconto à vista",
+  parcelamento: "Parcelamento da entrada",
+};
+
 export const SETUP_LABEL = "Setup / Implantação Vexo OS";
 
 export const SETUP_JUSTIFICATION = `O investimento único de implantação cobre tudo o que é necessário para colocar sua operação no ar com segurança e sem improviso:
