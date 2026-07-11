@@ -20,6 +20,14 @@ import {
   Info
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import {
+  type PaymentTerm,
+  type ProposalPaymentTerms,
+  computePaymentBreakdown,
+  SETUP_LABEL,
+  SETUP_JUSTIFICATION
+} from "@/lib/geracaoDigital/paymentTerms";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -45,6 +53,9 @@ interface Proposal {
   signer_ip?: string;
   termo_aceite?: string;
   created_at: string;
+  cobrar_setup?: boolean;
+  valor_setup_vexo?: number | null;
+  condicoes_pagamento?: ProposalPaymentTerms | null;
 }
 
 export default function GeracaoDigitalProposals() {
@@ -62,6 +73,14 @@ export default function GeracaoDigitalProposals() {
   const [items, setItems] = useState<ProposalItem[]>([]);
   const [paymentLink, setPaymentLink] = useState<string>("");
 
+  // Setup Vexo opcional
+  const [cobrarSetup, setCobrarSetup] = useState<boolean>(false);
+  const [valorSetupVexo, setValorSetupVexo] = useState<number>(0);
+
+  // Condições de pagamento
+  const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
+  const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
+
   // Signature form state
   const [signerName, setSignerName] = useState<string>("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,8 +90,28 @@ export default function GeracaoDigitalProposals() {
   useEffect(() => {
     if (isAuthenticated) {
       loadProposals();
+      loadPaymentTerms();
     }
   }, [isAuthenticated, clientId]);
+
+  async function loadPaymentTerms() {
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetchApi(`/api/gd/payment-terms?client_id=${clientId || ""}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setAvailableTerms((data.data || []).filter((t: PaymentTerm) => t.ativo));
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao carregar condições de pagamento:", err);
+    }
+  }
 
   async function loadProposals() {
     try {
@@ -114,6 +153,13 @@ export default function GeracaoDigitalProposals() {
     setItems(Array.isArray(prop.itens) ? prop.itens : []);
     setSignerName(prop.signer_name || "");
     setPaymentLink(prop.payment_link || "");
+    setCobrarSetup(prop.cobrar_setup === true);
+    setValorSetupVexo(Number(prop.valor_setup_vexo || 0));
+    setOfferedTermIds(
+      Array.isArray(prop.condicoes_pagamento?.ofertadas)
+        ? prop.condicoes_pagamento!.ofertadas.map((t) => t.id)
+        : []
+    );
   };
 
   // Live total calculations
@@ -124,6 +170,17 @@ export default function GeracaoDigitalProposals() {
   const recurringTotal = items
     .filter((i) => i.recorrencia === "mensal")
     .reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+  const setupVexoValue = cobrarSetup ? Number(valorSetupVexo || 0) : 0;
+  const grandTotal = setupTotal + recurringTotal + setupVexoValue;
+
+  const offeredTerms = availableTerms.filter((t) => offeredTermIds.includes(t.id));
+
+  const toggleOfferedTerm = (termId: string) => {
+    setOfferedTermIds((prev) =>
+      prev.includes(termId) ? prev.filter((id) => id !== termId) : [...prev, termId]
+    );
+  };
 
   // Add Item to editor
   const handleAddItem = () => {
@@ -168,7 +225,13 @@ export default function GeracaoDigitalProposals() {
         prospect_name: prospectName,
         itens: items,
         condicoes,
-        payment_link: paymentLink
+        payment_link: paymentLink,
+        cobrar_setup: cobrarSetup,
+        valor_setup_vexo: cobrarSetup ? Number(valorSetupVexo || 0) : selectedProposal.valor_setup_vexo ?? null,
+        condicoes_pagamento: {
+          ofertadas: offeredTerms,
+          escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
+        }
       };
 
       const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
@@ -605,12 +668,111 @@ export default function GeracaoDigitalProposals() {
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Total Setup (Investimento Único)</span>
                         <h4 className="text-xl font-black text-slate-800">R$ {setupTotal.toLocaleString("pt-BR")}</h4>
+                        {cobrarSetup && (
+                          <span className="text-[10px] text-purple-650 font-bold block">
+                            + R$ {setupVexoValue.toLocaleString("pt-BR")} ({SETUP_LABEL})
+                          </span>
+                        )}
                       </div>
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-550 uppercase font-bold tracking-wider">Total Recorrência (Faturamento Mensal)</span>
                         <h4 className="text-xl font-black text-pink-600">R$ {recurringTotal.toLocaleString("pt-BR")}/mês</h4>
                       </div>
                     </div>
+                  </CardContent>
+                </Card>
+
+                {/* Setup Vexo (taxa de implantação opcional) */}
+                <Card className="bg-white border-slate-200 shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="text-base font-bold text-slate-800">Taxa de Implantação (Setup Vexo OS)</CardTitle>
+                    <CardDescription className="text-[11px] text-slate-500">
+                      Investimento único e opcional de implantação, discriminado no total de entrada da proposta.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-bold text-slate-700">Cobrar setup de implantação?</Label>
+                      <Switch
+                        checked={cobrarSetup}
+                        disabled={selectedProposal.status === "aceita"}
+                        onCheckedChange={setCobrarSetup}
+                      />
+                    </div>
+                    {cobrarSetup && (
+                      <div className="space-y-3 border-t border-slate-100 pt-3">
+                        <div className="w-full md:w-48 space-y-1">
+                          <Label className="text-[10px] text-slate-500 font-mono">Valor do Setup (R$)</Label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-[10px] text-slate-500 font-mono">R$</span>
+                            <Input
+                              type="number"
+                              value={valorSetupVexo}
+                              disabled={selectedProposal.status === "aceita"}
+                              onChange={(e) => setValorSetupVexo(Number(e.target.value) || 0)}
+                              className="bg-white border-slate-200 text-xs text-slate-800 pl-7 h-8 font-mono"
+                            />
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-600 leading-relaxed bg-purple-50/60 p-3 rounded-lg border border-purple-100 whitespace-pre-line">
+                          <span className="font-bold text-slate-800 block mb-1">{SETUP_LABEL}</span>
+                          {SETUP_JUSTIFICATION}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Condições de Pagamento ofertadas */}
+                <Card className="bg-white border-slate-200 shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="text-base font-bold text-slate-800">Condições de Pagamento Ofertadas</CardTitle>
+                    <CardDescription className="text-[11px] text-slate-500">
+                      Selecione as condições salvas que o cliente poderá escolher. O desdobramento é calculado sobre o total da proposta (R$ {grandTotal.toLocaleString("pt-BR")}).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {availableTerms.length === 0 ? (
+                      <p className="text-[10px] text-slate-400 italic">
+                        Nenhuma condição de pagamento ativa. Cadastre na aba "Condições" do módulo Geração Digital.
+                      </p>
+                    ) : (
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {availableTerms.map((term) => {
+                          const isOffered = offeredTermIds.includes(term.id);
+                          const breakdown = computePaymentBreakdown(term, grandTotal);
+                          return (
+                            <div
+                              key={term.id}
+                              className={cn(
+                                "p-3 rounded-xl border transition-all space-y-1.5",
+                                isOffered ? "bg-purple-50/50 border-purple-200" : "bg-white border-slate-200"
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-slate-800 leading-tight">{term.nome}</span>
+                                <Switch
+                                  checked={isOffered}
+                                  disabled={selectedProposal.status === "aceita"}
+                                  onCheckedChange={() => toggleOfferedTerm(term.id)}
+                                  className="scale-90"
+                                />
+                              </div>
+                              {isOffered && breakdown.linhas.map((linha, idx) => (
+                                <p key={idx} className="text-[10px] text-purple-700 font-medium">{linha}</p>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {selectedProposal.condicoes_pagamento?.escolhida && (
+                      <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
+                        <span className="text-[10px] font-bold text-emerald-700">
+                          Condição escolhida pelo cliente: {selectedProposal.condicoes_pagamento.escolhida.nome}
+                        </span>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
