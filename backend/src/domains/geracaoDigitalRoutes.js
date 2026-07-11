@@ -1297,7 +1297,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1333,6 +1333,16 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const valorTotal = valorSetup + valorRecorrente + setupVexo;
 
+      const PERIODOS_VALIDOS = ["mensal", "trimestral", "semestral", "anual"];
+      const finalPeriodoPlano = periodo_plano !== undefined
+        ? (PERIODOS_VALIDOS.includes(periodo_plano) ? periodo_plano : null)
+        : current.periodo_plano;
+      const finalValidadeAte = validade_ate !== undefined ? (validade_ate || null) : current.validade_ate;
+      const finalValorAposValidade = valor_apos_validade !== undefined
+        ? (valor_apos_validade !== null && valor_apos_validade !== "" ? Number(valor_apos_validade) : null)
+        : current.valor_apos_validade;
+      const finalObservacaoValidade = observacao_validade !== undefined ? (observacao_validade || null) : current.observacao_validade;
+
       const result = await pool.query(
         `UPDATE public.gd_proposals
          SET prospect_name = COALESCE($1, prospect_name),
@@ -1343,8 +1353,12 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              payment_link = $6,
              cobrar_setup = $7,
              valor_setup_vexo = $8,
-             condicoes_pagamento = COALESCE($9, condicoes_pagamento)
-         WHERE id = $10 AND tenant_id = $11 RETURNING *`,
+             condicoes_pagamento = COALESCE($9, condicoes_pagamento),
+             periodo_plano = $10,
+             validade_ate = $11,
+             valor_apos_validade = $12,
+             observacao_validade = $13
+         WHERE id = $14 AND tenant_id = $15 RETURNING *`,
         [
           prospect_name,
           JSON.stringify(finalItems),
@@ -1355,6 +1369,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalCobrarSetup,
           finalValorSetupVexo,
           condicoes_pagamento !== undefined && condicoes_pagamento !== null ? JSON.stringify(condicoes_pagamento) : null,
+          finalPeriodoPlano,
+          finalValidadeAte,
+          finalValorAposValidade,
+          finalObservacaoValidade,
           id,
           tenantId
         ]
@@ -1476,7 +1494,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento
+        `SELECT id, tenant_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );

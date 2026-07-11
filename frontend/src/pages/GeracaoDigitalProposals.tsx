@@ -56,7 +56,19 @@ interface Proposal {
   cobrar_setup?: boolean;
   valor_setup_vexo?: number | null;
   condicoes_pagamento?: ProposalPaymentTerms | null;
+  periodo_plano?: string | null;
+  validade_ate?: string | null;
+  valor_apos_validade?: number | null;
+  observacao_validade?: string | null;
 }
+
+const PERIODO_OPTIONS = [
+  { value: "", label: "— não definido —" },
+  { value: "mensal", label: "Mensal" },
+  { value: "trimestral", label: "Trimestral" },
+  { value: "semestral", label: "Semestral" },
+  { value: "anual", label: "Anual" },
+];
 
 export default function GeracaoDigitalProposals() {
   const { isAuthenticated, getIdToken, clientId } = useAuth();
@@ -80,6 +92,12 @@ export default function GeracaoDigitalProposals() {
   // Condições de pagamento
   const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
   const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
+
+  // Período do plano e validade da proposta
+  const [periodoPlano, setPeriodoPlano] = useState<string>("");
+  const [validadeAte, setValidadeAte] = useState<string>("");
+  const [valorAposValidade, setValorAposValidade] = useState<string>("");
+  const [observacaoValidade, setObservacaoValidade] = useState<string>("");
 
   // Signature form state
   const [signerName, setSignerName] = useState<string>("");
@@ -160,6 +178,14 @@ export default function GeracaoDigitalProposals() {
         ? prop.condicoes_pagamento!.ofertadas.map((t) => t.id)
         : []
     );
+    setPeriodoPlano(prop.periodo_plano || "");
+    setValidadeAte(prop.validade_ate ? prop.validade_ate.slice(0, 10) : "");
+    setValorAposValidade(
+      prop.valor_apos_validade !== null && prop.valor_apos_validade !== undefined
+        ? String(prop.valor_apos_validade)
+        : ""
+    );
+    setObservacaoValidade(prop.observacao_validade || "");
   };
 
   // Live total calculations
@@ -231,7 +257,11 @@ export default function GeracaoDigitalProposals() {
         condicoes_pagamento: {
           ofertadas: offeredTerms,
           escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
-        }
+        },
+        periodo_plano: periodoPlano || null,
+        validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
+        valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
+        observacao_validade: observacaoValidade || null
       };
 
       const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
@@ -719,6 +749,66 @@ export default function GeracaoDigitalProposals() {
                         </div>
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+
+                {/* Período do Plano e Validade da Proposta */}
+                <Card className="bg-white border-slate-200 shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="text-base font-bold text-slate-800">Período do Plano & Validade da Proposta</CardTitle>
+                    <CardDescription className="text-[11px] text-slate-500">
+                      O período registra o plano fechado (sem desconto automático). A validade cria urgência na proposta pública.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Período do plano</Label>
+                        <select
+                          value={periodoPlano}
+                          disabled={selectedProposal.status === "aceita"}
+                          onChange={(e) => setPeriodoPlano(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 focus:outline-none focus:border-indigo-500/50 h-8"
+                        >
+                          {PERIODO_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Proposta válida até</Label>
+                        <Input
+                          type="date"
+                          value={validadeAte}
+                          disabled={selectedProposal.status === "aceita"}
+                          onChange={(e) => setValidadeAte(e.target.value)}
+                          className="bg-white border-slate-200 text-xs text-slate-800 h-8"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Valor após a validade (R$, opcional)</Label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] text-slate-500 font-mono">R$</span>
+                          <Input
+                            type="number"
+                            value={valorAposValidade}
+                            disabled={selectedProposal.status === "aceita"}
+                            onChange={(e) => setValorAposValidade(e.target.value)}
+                            className="bg-white border-slate-200 text-xs text-slate-800 pl-7 h-8 font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-500 font-mono">Observação após o prazo (opcional)</Label>
+                      <Input
+                        value={observacaoValidade}
+                        disabled={selectedProposal.status === "aceita"}
+                        onChange={(e) => setObservacaoValidade(e.target.value)}
+                        placeholder='Ex: "Após esta data o valor retorna ao preço de tabela" ou "condições sujeitas a reajuste"'
+                        className="bg-white border-slate-200 text-xs text-slate-800 h-8"
+                      />
+                    </div>
                   </CardContent>
                 </Card>
 
