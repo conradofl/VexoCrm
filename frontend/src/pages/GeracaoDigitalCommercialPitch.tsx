@@ -484,42 +484,42 @@ export default function GeracaoDigitalCommercialPitch({
 
         {/* SLIDE 5: METHODOLOGY (METODOLOGIA) */}
         {currentSlideType === "methodology" && (
-          <div className="max-w-4xl w-full text-center space-y-6 animate-fade-in px-4">
+          <div className="max-w-5xl w-full text-center space-y-6 animate-fade-in px-4">
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 05 · A Engrenagem
             </Badge>
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
               A Engrenagem de Geração & Conversão
             </h2>
-            <p className="text-slate-655 text-sm max-w-xl mx-auto font-light">
+            <p className="text-slate-655 text-lg max-w-2xl mx-auto font-light">
               Como aplicamos nossa infraestrutura para obter a aceleração de receita vista no diagnóstico:
             </p>
 
-            <div className="grid gap-6 md:grid-cols-3 text-left pt-6">
-              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-4">
-                <div className="h-10 w-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 font-black text-sm">
+            <div className="grid gap-8 md:grid-cols-3 text-left pt-10">
+              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
+                <div className="h-14 w-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 font-black text-lg">
                   01
                 </div>
-                <h3 className="text-sm font-bold text-slate-850">Atração Segmentada</h3>
-                <p className="text-slate-655 text-[11px] leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850">Atração Segmentada</h3>
+                <p className="text-slate-655 text-base leading-relaxed">
                   Campanhas de tráfego focado construídas com base no perfil ideal de cliente do segmento de {segmentName.toLowerCase()}.
                 </p>
               </Card>
-              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-4">
-                <div className="h-10 w-10 rounded-xl bg-pink-50 flex items-center justify-center text-pink-600 font-black text-sm">
+              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
+                <div className="h-14 w-14 rounded-2xl bg-pink-50 flex items-center justify-center text-pink-600 font-black text-lg">
                   02
                 </div>
-                <h3 className="text-sm font-bold text-slate-850">Captura e Engajamento</h3>
-                <p className="text-slate-655 text-[11px] leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850">Captura e Engajamento</h3>
+                <p className="text-slate-655 text-base leading-relaxed">
                   Landing Pages de alta velocidade integradas a formulários inteligentes que qualificam o lead em tempo real.
                 </p>
               </Card>
-              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-4">
-                <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-sm">
+              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
+                <div className="h-14 w-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-lg">
                   03
                 </div>
-                <h3 className="text-sm font-bold text-slate-850">Régua de Relacionamento</h3>
-                <p className="text-slate-655 text-[11px] leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850">Régua de Relacionamento</h3>
+                <p className="text-slate-655 text-base leading-relaxed">
                   Follow-ups automáticos no WhatsApp e campanhas de remarketing recorrentes para converter oportunidades.
                 </p>
               </Card>
@@ -644,27 +644,27 @@ export default function GeracaoDigitalCommercialPitch({
 
         {/* SLIDE 7: VEXO AI (OPCIONAL) */}
         {currentSlideType === "vexoAI" && (
-          <div className="max-w-4xl w-full text-center space-y-6 animate-fade-in px-4">
+          <div className="max-w-5xl w-full text-center space-y-6 animate-fade-in px-4">
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 07 · Módulos Vexo OS
             </Badge>
             <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight">
               Módulos Vexo OS Selecionados
             </h2>
-            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light">
+            <p className="text-slate-600 text-lg max-w-2xl mx-auto font-light">
               Potencialize sua captação unindo a Inteligência Artificial e automações do Vexo OS ao marketing da Geração Digital:
             </p>
 
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 text-left pt-6 max-h-[360px] overflow-y-auto pr-1">
+            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 text-left pt-10 max-h-[480px] overflow-y-auto pr-1">
               {(vexoSelectedProducts || []).map((vm, vmIdx) => (
-                <Card key={vmIdx} className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
-                  <div className="space-y-3">
-                    <div className="h-10 w-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 font-extrabold text-sm">
+                <Card key={vmIdx} className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[220px] flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="h-14 w-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 font-extrabold text-lg">
                       V
                     </div>
-                    <h3 className="text-sm font-bold text-slate-850">{vm.nome}</h3>
+                    <h3 className="text-xl font-bold text-slate-850">{vm.nome}</h3>
                     {vm.descricao && (
-                      <p className="text-slate-660 text-[11px] leading-relaxed">
+                      <p className="text-slate-660 text-base leading-relaxed">
                         {vm.descricao}
                       </p>
                     )}
@@ -677,35 +677,35 @@ export default function GeracaoDigitalCommercialPitch({
 
         {/* SLIDE 8: TIMELINE (JORNADA / PRIMEIROS 30 DIAS) */}
         {currentSlideType === "timeline" && (
-          <div className="max-w-4xl w-full text-center space-y-6 animate-fade-in px-4">
+          <div className="max-w-6xl w-full text-center space-y-6 animate-fade-in px-4">
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 08 · Implantação e Cronograma
             </Badge>
             <h2 className="text-3xl font-black text-slate-900 leading-tight">O que acontece pós-assinatura?</h2>
-            <p className="text-slate-600 text-sm max-w-md mx-auto">
+            <p className="text-slate-600 text-lg max-w-2xl mx-auto">
               Nossa operação de onboarding reduz seu risco de tempo de espera com um plano ágil de 4 semanas:
             </p>
 
-            <div className="grid gap-6 md:grid-cols-4 text-left pt-6 max-w-4xl mx-auto">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-5 space-y-3">
-                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-[9px] uppercase px-2 py-0.5">Semana 1</Badge>
-                <h4 className="text-xs font-bold text-slate-800">Diagnóstico & Setup</h4>
-                <p className="text-slate-500 text-[10px] leading-relaxed">Auditoria técnica de pixels, integrações e design de landing page.</p>
+            <div className="grid gap-8 md:grid-cols-4 text-left pt-10 max-w-6xl mx-auto">
+              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 1</Badge>
+                <h4 className="text-lg font-bold text-slate-800">Diagnóstico & Setup</h4>
+                <p className="text-slate-600 text-sm leading-relaxed">Auditoria técnica de pixels, integrações e design de landing page.</p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-5 space-y-3">
-                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-[9px] uppercase px-2 py-0.5">Semana 2</Badge>
-                <h4 className="text-xs font-bold text-slate-800">Páginas de Captura</h4>
-                <p className="text-slate-500 text-[10px] leading-relaxed">Publicação das LPs de alta performance voltadas para conversão ativa.</p>
+              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 2</Badge>
+                <h4 className="text-lg font-bold text-slate-800">Páginas de Captura</h4>
+                <p className="text-slate-600 text-sm leading-relaxed">Publicação das LPs de alta performance voltadas para conversão ativa.</p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-5 space-y-3">
-                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-[9px] uppercase px-2 py-0.5">Semana 3</Badge>
-                <h4 className="text-xs font-bold text-slate-800">Campanhas no Ar</h4>
-                <p className="text-slate-500 text-[10px] leading-relaxed">Ativação dos criativos e segmentação qualificada de tráfego pago.</p>
+              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 3</Badge>
+                <h4 className="text-lg font-bold text-slate-800">Campanhas no Ar</h4>
+                <p className="text-slate-600 text-sm leading-relaxed">Ativação dos criativos e segmentação qualificada de tráfego pago.</p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-5 space-y-3">
-                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-[9px] uppercase px-2 py-0.5">Semana 4</Badge>
-                <h4 className="text-xs font-bold text-slate-800">Entrega de Resultados</h4>
-                <p className="text-slate-500 text-[10px] leading-relaxed">Acompanhamento das primeiras conversões e reuniões de otimização.</p>
+              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+                <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 4</Badge>
+                <h4 className="text-lg font-bold text-slate-800">Entrega de Resultados</h4>
+                <p className="text-slate-600 text-sm leading-relaxed">Acompanhamento das primeiras conversões e reuniões de otimização.</p>
               </Card>
             </div>
           </div>
@@ -713,33 +713,33 @@ export default function GeracaoDigitalCommercialPitch({
 
         {/* SLIDE 9: SOCIAL PROOF (PROVAS E RESULTADOS) */}
         {currentSlideType === "proof" && (
-          <div className="max-w-4xl w-full text-center space-y-6 animate-fade-in px-4">
+          <div className="max-w-5xl w-full text-center space-y-6 animate-fade-in px-4">
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 09 · Prova de Performance
             </Badge>
             <h2 className="text-3xl font-black text-slate-900 leading-tight">Resultados Comerciais Reais</h2>
-            <p className="text-slate-600 text-sm max-w-md mx-auto">
+            <p className="text-slate-600 text-lg max-w-2xl mx-auto">
               Casos práticos de empresas parceiras que escalaram receita utilizando a metodologia GD:
             </p>
 
-            <div className="grid gap-6 md:grid-cols-2 text-left pt-6 max-w-3xl mx-auto">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3">
+            <div className="grid gap-8 md:grid-cols-2 text-left pt-10 max-w-5xl mx-auto">
+              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[240px]">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-purple-600 font-bold uppercase font-mono tracking-wider">Setor Imobiliário</span>
-                  <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] px-2 py-0.5">+145% Conversão</Badge>
+                  <span className="text-xs text-purple-600 font-bold uppercase font-mono tracking-wider">Setor Imobiliário</span>
+                  <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-sm px-3 py-1">+145% Conversão</Badge>
                 </div>
-                <h3 className="text-sm font-bold text-slate-850 leading-snug">Vendas dobradas no primeiro trimestre</h3>
-                <p className="text-slate-600 text-[11px] leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 leading-snug">Vendas dobradas no primeiro trimestre</h3>
+                <p className="text-slate-600 text-base leading-relaxed">
                   "Conseguimos gerar um fluxo estável de 450 contatos quentes e otimizar nosso funil de atendimento, fechando 18 contratos novos."
                 </p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3">
+              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[240px]">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-purple-600 font-bold uppercase font-mono tracking-wider">Setor de Clínicas</span>
-                  <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] px-2 py-0.5">-70% Tempo Resposta</Badge>
+                  <span className="text-xs text-purple-600 font-bold uppercase font-mono tracking-wider">Setor de Clínicas</span>
+                  <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-sm px-3 py-1">-70% Tempo Resposta</Badge>
                 </div>
-                <h3 className="text-sm font-bold text-slate-850 leading-snug">Atendimento em segundos no WhatsApp</h3>
-                <p className="text-slate-600 text-[11px] leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 leading-snug">Atendimento em segundos no WhatsApp</h3>
+                <p className="text-slate-600 text-base leading-relaxed">
                   "Eliminamos a perda de leads fora do horário comercial integrando respostas autônomas de IA, gerando 35% mais agendamentos."
                 </p>
               </Card>

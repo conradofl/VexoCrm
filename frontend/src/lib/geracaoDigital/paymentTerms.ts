@@ -18,13 +18,27 @@ export interface PaymentTermConfig {
   descricao?: string;
 }
 
+export type PaymentTermAplicaA = "setup" | "mensalidade";
+
 export interface PaymentTerm {
   id: string;
   nome: string;
   tipo: PaymentTermTipo;
   config: PaymentTermConfig;
   ativo: boolean;
+  // A quê a condição se aplica: entrada/setup ou mensalidade recorrente.
+  // Condições antigas (sem o campo) contam como 'setup'.
+  aplica_a?: PaymentTermAplicaA;
   created_at?: string;
+}
+
+export const APLICA_A_LABELS: Record<PaymentTermAplicaA, string> = {
+  setup: "Setup / Entrada",
+  mensalidade: "Mensalidade",
+};
+
+export function termAplicaA(term: Pick<PaymentTerm, "aplica_a">): PaymentTermAplicaA {
+  return term.aplica_a === "mensalidade" ? "mensalidade" : "setup";
 }
 
 export const PAYMENT_TERM_TIPOS: { value: PaymentTermTipo; label: string }[] = [
