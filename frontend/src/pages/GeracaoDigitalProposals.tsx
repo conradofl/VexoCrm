@@ -22,9 +22,11 @@ import {
   X,
   Copy,
   MessageSquare,
-  Mail
+  Mail,
+  Archive
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -42,6 +44,8 @@ import {
   type DescontoConcedido,
   PAYMENT_TERM_TIPOS,
   computePaymentBreakdown,
+  termAplicaA,
+  APLICA_A_LABELS,
   SETUP_LABEL,
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
@@ -79,6 +83,7 @@ interface Proposal {
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
   descontos_concedidos?: DescontoConcedido[] | null;
+  arquivada?: boolean;
 }
 
 const PERIODO_OPTIONS = [
@@ -115,6 +120,20 @@ export default function GeracaoDigitalProposals() {
   // Mesa de negociação
   const [isNegotiating, setIsNegotiating] = useState<boolean>(false);
 
+  // Arquivadas
+  const [showArchived, setShowArchived] = useState<boolean>(false);
+
+  // Nova proposta direta (sem apresentação)
+  const [showNewForm, setShowNewForm] = useState<boolean>(false);
+  const [availablePackages, setAvailablePackages] = useState<any[]>([]);
+  const [newProspect, setNewProspect] = useState<string>("");
+  const [newPackageId, setNewPackageId] = useState<string>("");
+  const [newCobrarSetup, setNewCobrarSetup] = useState<boolean>(false);
+  const [newValorSetup, setNewValorSetup] = useState<number>(0);
+  const [newPeriodo, setNewPeriodo] = useState<string>("");
+  const [newValidade, setNewValidade] = useState<string>("");
+  const [newCondicoes, setNewCondicoes] = useState<string>("");
+
   // Modal de compartilhamento da proposta
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
   const [whatsappNumber, setWhatsappNumber] = useState<string>("");
@@ -142,8 +161,24 @@ export default function GeracaoDigitalProposals() {
     if (isAuthenticated) {
       loadProposals();
       loadPaymentTerms();
+      loadPackagesCatalog();
     }
   }, [isAuthenticated, clientId]);
+
+  async function loadPackagesCatalog() {
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) setAvailablePackages(data.data || []);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar pacotes:", err);
+    }
+  }
 
   async function loadPaymentTerms() {
     try {
@@ -415,6 +450,71 @@ export default function GeracaoDigitalProposals() {
     }
   };
 
+  // Arquivar / desarquivar (qualquer status — preserva o histórico)
+  const handleArchiveProposal = async (arquivar: boolean) => {
+    if (!selectedProposal) return;
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ client_id: clientId, itens: items, arquivada: arquivar })
+      });
+      if (!res.ok) throw new Error("Erro ao arquivar proposta.");
+      toast({
+        title: arquivar ? "Proposta Arquivada" : "Proposta Restaurada",
+        description: arquivar ? "Ela saiu da lista principal — use 'mostrar arquivadas' para recuperar." : "De volta à lista principal."
+      });
+      setSelectedProposal(null);
+      loadProposals();
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    }
+  };
+
+  // Criar proposta direta, sem passar pela apresentação (presentation_id = null)
+  const handleCreateDirectProposal = async () => {
+    if (!newProspect.trim()) {
+      toast({ title: "Nome obrigatório", description: "Informe o nome do prospect.", variant: "destructive" });
+      return;
+    }
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const body: any = {
+        client_id: clientId,
+        prospect_name: newProspect.trim(),
+        package_id: newPackageId || null,
+        cobrar_setup: newCobrarSetup,
+        valor_setup_vexo: newCobrarSetup ? Number(newValorSetup || 0) : null,
+        periodo_plano: newPeriodo || null,
+        validade_ate: newValidade ? new Date(`${newValidade}T23:59:59`).toISOString() : null,
+        condicoes: newCondicoes || undefined
+      };
+      const res = await fetchApi(`/api/gd/proposals`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Erro ao criar proposta.");
+      }
+      toast({ title: "Proposta Criada", description: `Rascunho para ${newProspect} pronto para edição e negociação.` });
+      setShowNewForm(false);
+      setNewProspect(""); setNewPackageId(""); setNewCobrarSetup(false);
+      setNewValorSetup(0); setNewPeriodo(""); setNewValidade(""); setNewCondicoes("");
+      loadProposals();
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: "Erro ao Criar", description: err.message, variant: "destructive" });
+    }
+  };
+
   // Delete proposal
   const handleDeleteProposal = async () => {
     if (!selectedProposal) return;
@@ -636,17 +736,147 @@ export default function GeracaoDigitalProposals() {
               <FileText className="h-12 w-12 text-slate-400 mx-auto" />
               <h3 className="text-lg font-bold text-slate-800">Nenhuma Proposta Gerada</h3>
               <p className="text-xs text-slate-500">
-                Inicie uma apresentação comercial a partir da aba "Geração Digital" e escolha um pacote para gerar rascunho de propostas.
+                Inicie uma apresentação comercial a partir da aba "Geração Digital" e escolha um pacote — ou crie uma proposta direta abaixo.
               </p>
+              <Button
+                size="sm"
+                onClick={() => { setShowNewForm(true); setProposals([]); }}
+                className="bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-bold text-xs"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Nova Proposta
+              </Button>
             </CardContent>
           </Card>
         ) : (
           <div className="grid gap-6 lg:grid-cols-4 relative z-10">
+            {showNewForm && (
+              <div className="lg:col-span-4">
+                <Card className="bg-white border-purple-200 shadow-md">
+                  <CardHeader className="flex flex-row justify-between items-center space-y-0">
+                    <div>
+                      <CardTitle className="text-base font-bold text-slate-800">Nova Proposta (direta)</CardTitle>
+                      <CardDescription className="text-[11px] text-slate-500">
+                        Cria uma proposta do zero, sem passar pela apresentação. Itens e módulos podem ser ajustados no editor depois.
+                      </CardDescription>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => setShowNewForm(false)} className="h-7 w-7 text-slate-500">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Nome do Prospect *</Label>
+                        <Input
+                          value={newProspect}
+                          onChange={(e) => setNewProspect(e.target.value)}
+                          placeholder="Ex: Nome da Empresa"
+                          className="bg-white border-slate-200 text-xs h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Pacote (opcional)</Label>
+                        <select
+                          value={newPackageId}
+                          onChange={(e) => setNewPackageId(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 h-9"
+                        >
+                          <option value="">— sem pacote (itens manuais) —</option>
+                          {availablePackages.map((pk: any) => (
+                            <option key={pk.id} value={pk.id}>
+                              {pk.nome} ({PKG_PERIOD_LABELS[pk.periodo] || pk.periodo})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Período do plano</Label>
+                        <select
+                          value={newPeriodo}
+                          onChange={(e) => setNewPeriodo(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 h-9"
+                        >
+                          {PERIODO_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3 items-end">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 font-mono">Proposta válida até</Label>
+                        <Input
+                          type="date"
+                          value={newValidade}
+                          onChange={(e) => setNewValidade(e.target.value)}
+                          className="bg-white border-slate-200 text-xs h-9"
+                        />
+                      </div>
+                      <div className="flex items-center gap-3 pb-1">
+                        <Switch checked={newCobrarSetup} onCheckedChange={setNewCobrarSetup} />
+                        <Label className="text-[10px] text-slate-600 font-bold">Cobrar setup de implantação?</Label>
+                      </div>
+                      {newCobrarSetup && (
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-slate-500 font-mono">Valor do Setup (R$)</Label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2.5 text-[10px] text-slate-500 font-mono">R$</span>
+                            <Input
+                              type="number"
+                              value={newValorSetup}
+                              onChange={(e) => setNewValorSetup(Number(e.target.value) || 0)}
+                              className="bg-white border-slate-200 text-xs pl-7 h-9 font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-500 font-mono">Condições contratuais (opcional)</Label>
+                      <Input
+                        value={newCondicoes}
+                        onChange={(e) => setNewCondicoes(e.target.value)}
+                        placeholder="Ex: Contrato de 6 meses. Faturamento recorrente mensal."
+                        className="bg-white border-slate-200 text-xs h-9"
+                      />
+                    </div>
+                    <Button onClick={handleCreateDirectProposal} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs">
+                      Criar Proposta
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
 
             {/* Sidebar proposals list */}
             <div className="space-y-3 lg:col-span-1">
-              <h3 className="text-xs font-mono font-bold text-purple-600 uppercase tracking-widest px-2 mb-2">Simulações Recentes</h3>
-              {proposals.map((prop) => (
+              <div className="flex items-center justify-between px-2 mb-2">
+                <h3 className="text-xs font-mono font-bold text-purple-600 uppercase tracking-widest">Simulações Recentes</h3>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => setShowNewForm(true)}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-bold text-xs mb-1"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Nova Proposta
+              </Button>
+              <label className="flex items-center gap-2 px-2 pb-1 text-[10px] text-slate-500 font-medium cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(e) => { setShowArchived(e.target.checked); setSelectedProposal(null); }}
+                  className="accent-purple-600"
+                />
+                mostrar arquivadas
+              </label>
+              {proposals.filter((p) => (showArchived ? p.arquivada === true : p.arquivada !== true)).length === 0 && (
+                <p className="text-[10px] text-slate-400 italic px-2">
+                  {showArchived ? "Nenhuma proposta arquivada." : "Nenhuma proposta ativa."}
+                </p>
+              )}
+              {proposals.filter((p) => (showArchived ? p.arquivada === true : p.arquivada !== true)).map((prop) => (
                 <button
                   key={prop.id}
                   onClick={() => selectProposal(prop)}
@@ -720,6 +950,15 @@ export default function GeracaoDigitalProposals() {
                     >
                       <Share2 className="h-4 w-4 mr-1.5" />
                       Enviar ao Cliente
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleArchiveProposal(selectedProposal.arquivada !== true)}
+                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
+                    >
+                      <Archive className="h-4 w-4 mr-1.5" />
+                      {selectedProposal.arquivada === true ? "Desarquivar" : "Arquivar"}
                     </Button>
                     {selectedProposal.status !== "aceita" && (
                       <>
@@ -962,7 +1201,9 @@ export default function GeracaoDigitalProposals() {
                       <div className="grid gap-2 md:grid-cols-2">
                         {availableTerms.map((term) => {
                           const isOffered = offeredTermIds.includes(term.id);
-                          const breakdown = computePaymentBreakdown(term, setupTotal + setupVexoValue);
+                          const aplicaA = termAplicaA(term);
+                          const base = aplicaA === "mensalidade" ? recurringTotal : setupTotal + setupVexoValue;
+                          const breakdown = computePaymentBreakdown(term, base);
                           return (
                             <div
                               key={term.id}
@@ -972,7 +1213,15 @@ export default function GeracaoDigitalProposals() {
                               )}
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-bold text-slate-800 leading-tight">{term.nome}</span>
+                                <span className="text-xs font-bold text-slate-800 leading-tight">
+                                  {term.nome}
+                                  <Badge className={cn(
+                                    "text-[8px] font-bold border-none px-1.5 py-0 ml-1.5",
+                                    aplicaA === "mensalidade" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                                  )}>
+                                    {APLICA_A_LABELS[aplicaA]}
+                                  </Badge>
+                                </span>
                                 <Switch
                                   checked={isOffered}
                                   disabled={selectedProposal.status === "aceita"}

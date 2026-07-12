@@ -23,6 +23,8 @@ import {
   type ProposalPaymentTerms,
   type DescontoConcedido,
   DESCONTO_LABELS,
+  termAplicaA,
+  APLICA_A_LABELS,
   computePaymentBreakdown,
   SETUP_LABEL,
   SETUP_JUSTIFICATION
@@ -383,7 +385,8 @@ export default function GeracaoDigitalPublicProposal() {
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {offeredTerms.map((term) => {
-                  const breakdown = computePaymentBreakdown(term, setupFinalVal);
+                  const aplicaA = termAplicaA(term);
+                  const breakdown = computePaymentBreakdown(term, aplicaA === "mensalidade" ? Number(proposal.valor_recorrente || 0) : setupFinalVal);
                   const isChosen = proposal.status === "aceita"
                     ? chosenTerm?.id === term.id
                     : chosenTermId === term.id;
@@ -402,7 +405,12 @@ export default function GeracaoDigitalPublicProposal() {
                       )}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-white leading-tight">{term.nome}</span>
+                        <span className="text-xs font-bold text-white leading-tight">
+                          {term.nome}
+                          <span className={aplicaA === "mensalidade" ? "text-[8px] font-black uppercase text-blue-400 ml-1.5" : "text-[8px] font-black uppercase text-purple-400 ml-1.5"}>
+                            · {APLICA_A_LABELS[aplicaA]}
+                          </span>
+                        </span>
                         {isChosen && <CheckCircle className="h-4 w-4 text-purple-400 shrink-0" />}
                       </div>
                       {breakdown.linhas.map((linha, idx) => (

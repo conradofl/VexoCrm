@@ -17,6 +17,8 @@ import {
   type PaymentTerm,
   type DescontoConcedido,
   computePaymentBreakdown,
+  termAplicaA,
+  APLICA_A_LABELS,
   SETUP_LABEL
 } from "@/lib/geracaoDigital/paymentTerms";
 
@@ -204,10 +206,16 @@ export function GeracaoDigitalNegotiationBoard({
             <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-xl shadow-purple-100/50 p-6 space-y-3">
               <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-purple-600">Condições Disponíveis</h3>
               {offeredTerms.map((term) => {
-                const b = computePaymentBreakdown(term, entradaFinal);
+                const aplicaA = termAplicaA(term);
+                const b = computePaymentBreakdown(term, aplicaA === "mensalidade" ? recurringTotal : entradaFinal);
                 return (
                   <div key={term.id} className="p-3 rounded-2xl bg-purple-50/60 border border-purple-100 space-y-0.5">
-                    <span className="text-xs font-bold text-slate-800 block">{term.nome}</span>
+                    <span className="text-xs font-bold text-slate-800 block">
+                      {term.nome}
+                      <span className={aplicaA === "mensalidade" ? "text-[9px] font-black uppercase text-blue-600 ml-1.5" : "text-[9px] font-black uppercase text-purple-500 ml-1.5"}>
+                        · {APLICA_A_LABELS[aplicaA]}
+                      </span>
+                    </span>
                     {b.linhas.map((l, i) => (
                       <span key={i} className="text-[10px] text-purple-700 font-medium block">{l}</span>
                     ))}
