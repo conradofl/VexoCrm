@@ -16,16 +16,20 @@ import {
   type PaymentTerm,
   type PaymentTermTipo,
   type PaymentTermConfig,
+  type PaymentTermAplicaA,
   PAYMENT_TERM_TIPOS,
+  APLICA_A_LABELS,
+  termAplicaA,
   computePaymentBreakdown
 } from "@/lib/geracaoDigital/paymentTerms";
 
 const EXEMPLO_TOTAL = 10000;
 
-const EMPTY_FORM: { nome: string; tipo: PaymentTermTipo; config: PaymentTermConfig } = {
+const EMPTY_FORM: { nome: string; tipo: PaymentTermTipo; config: PaymentTermConfig; aplica_a: PaymentTermAplicaA } = {
   nome: "",
   tipo: "avista_desconto",
-  config: {}
+  config: {},
+  aplica_a: "setup"
 };
 
 export default function GeracaoDigitalPaymentTerms() {
@@ -82,7 +86,7 @@ export default function GeracaoDigitalPaymentTerms() {
 
   const openEdit = (term: PaymentTerm) => {
     setEditingId(term.id);
-    setForm({ nome: term.nome, tipo: term.tipo, config: term.config || {} });
+    setForm({ nome: term.nome, tipo: term.tipo, config: term.config || {}, aplica_a: termAplicaA(term) });
     setShowForm(true);
   };
 
@@ -97,7 +101,7 @@ export default function GeracaoDigitalPaymentTerms() {
     }
     try {
       const headers = await authHeaders(true);
-      const body = JSON.stringify({ client_id: clientId, nome: form.nome, tipo: form.tipo, config: form.config });
+      const body = JSON.stringify({ client_id: clientId, nome: form.nome, tipo: form.tipo, config: form.config, aplica_a: form.aplica_a });
       const res = editingId
         ? await fetchApi(`/api/gd/payment-terms/${editingId}`, { method: "PUT", headers, body })
         : await fetchApi(`/api/gd/payment-terms`, { method: "POST", headers, body });
@@ -214,6 +218,20 @@ export default function GeracaoDigitalPaymentTerms() {
                       <option key={t.value} value={t.value}>{t.label}</option>
                     ))}
                   </select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-slate-500 font-mono">Aplica-se a</Label>
+                  <select
+                    value={form.aplica_a}
+                    onChange={(e) => setForm((p) => ({ ...p, aplica_a: e.target.value as PaymentTermAplicaA }))}
+                    className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 h-9"
+                  >
+                    <option value="setup">Setup / Entrada (valor único)</option>
+                    <option value="mensalidade">Mensalidade (recorrente)</option>
+                  </select>
+                  <span className="text-[9px] text-slate-450 block">
+                    O desdobramento incide só sobre essa base — setup e mensalidade nunca se somam.
+                  </span>
                 </div>
               </div>
 
@@ -338,8 +356,14 @@ export default function GeracaoDigitalPaymentTerms() {
                         {term.ativo ? "Ativa" : "Inativa"}
                       </Badge>
                     </div>
-                    <CardDescription className="text-[10px] text-slate-500">
+                    <CardDescription className="text-[10px] text-slate-500 flex items-center gap-1.5">
                       {PAYMENT_TERM_TIPOS.find((t) => t.value === term.tipo)?.label || term.tipo}
+                      <Badge className={cn(
+                        "text-[8px] font-bold border-none px-1.5 py-0",
+                        termAplicaA(term) === "mensalidade" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                      )}>
+                        {APLICA_A_LABELS[termAplicaA(term)]}
+                      </Badge>
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
