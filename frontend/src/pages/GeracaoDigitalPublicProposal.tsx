@@ -34,6 +34,10 @@ interface ProposalItem {
   categoria: "gd" | "vexo";
   valor: number;
   recorrencia: "mensal" | "unico";
+  periodo?: string | null;
+  meses?: number | null;
+  total_periodo?: number | null;
+  valor_tabela?: number | null;
 }
 
 interface Proposal {
@@ -347,10 +351,27 @@ export default function GeracaoDigitalPublicProposal() {
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="text-sm font-black text-white font-mono">R$ {item.valor.toFixed(2)}</span>
+                    {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
+                      <span className="text-[10px] text-slate-500 line-through font-mono block">
+                        De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
+                      </span>
+                    )}
+                    <span className="text-sm font-black text-white font-mono">
+                      R$ {Number(item.valor || 0).toFixed(2)}
+                      {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
+                        <span className="text-[10px] text-emerald-400 font-bold ml-1">
+                          ({Math.round((1 - Number(item.total_periodo || 0) / Number(item.valor_tabela || 1)) * 100)}% off)
+                        </span>
+                      )}
+                    </span>
                     <span className="text-[9px] text-slate-400 block uppercase tracking-wider font-mono">
                       {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
                     </span>
+                    {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
+                      <span className="text-[9px] text-slate-500 block font-mono">
+                        total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

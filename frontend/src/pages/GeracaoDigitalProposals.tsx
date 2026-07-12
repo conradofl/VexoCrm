@@ -53,6 +53,10 @@ interface ProposalItem {
   categoria: "gd" | "vexo";
   valor: number;
   recorrencia: "mensal" | "unico";
+  periodo?: string | null;
+  meses?: number | null;
+  total_periodo?: number | null;
+  valor_tabela?: number | null;
 }
 
 interface Proposal {

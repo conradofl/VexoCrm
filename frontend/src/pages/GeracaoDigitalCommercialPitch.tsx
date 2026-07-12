@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL, fetchApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { computeRoi } from "@/lib/vexoPitch/helpers";
+import { computePackagePricing, brlPkg } from "@/lib/geracaoDigital/packagePricing";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,6 +42,8 @@ interface PackageOfertado {
   package_id: string;
   nome: string;
   valor: number;
+  valor_tabela?: number | null;
+  periodo?: string;
   produtos_incluidos?: { product_id: string; nome: string }[];
   destaque?: boolean;
 }
@@ -799,9 +802,31 @@ export default function GeracaoDigitalCommercialPitch({
 
                     <div className="space-y-1 py-2 border-t border-slate-150/60">
                       <span className="text-[9px] text-slate-500 uppercase font-mono">Valor Fechado</span>
-                      <h4 className="text-2xl font-black text-pink-550 font-mono">
-                        R$ {Number(pkg.valor || 0).toLocaleString("pt-BR")}
-                      </h4>
+                      {(() => {
+                        const pr = computePackagePricing(pkg.valor, pkg.periodo, pkg.valor_tabela);
+                        return (
+                          <>
+                            {pr.valorTabela !== null && (
+                              <span className="text-xs text-slate-400 line-through font-bold font-mono block">
+                                De {brlPkg(pr.valorTabela)}
+                              </span>
+                            )}
+                            <h4 className="text-2xl font-black text-pink-550 font-mono">
+                              {brlPkg(pr.totalPeriodo)}
+                              {pr.descontoPct !== null && (
+                                <span className="text-[11px] text-emerald-600 font-bold ml-1.5">({pr.descontoPct}% off)</span>
+                              )}
+                            </h4>
+                            {pr.meses !== null && pr.meses > 1 ? (
+                              <span className="text-[10px] text-slate-600 font-mono block">
+                                total do período · equivale a {pr.aprox ? "aprox. " : ""}{brlPkg(pr.mensalidade || 0)}/mês
+                              </span>
+                            ) : pr.meses === null ? (
+                              <span className="text-[10px] text-slate-600 font-mono block">valor único (setup)</span>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                       {vendaCasada && vexoSubtotal > 0 && (
                         <span className="text-[10px] text-purple-650 font-bold block leading-tight">
                           + R$ {vexoSubtotal.toLocaleString("pt-BR")}/mês (Módulos Vexo OS)

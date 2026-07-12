@@ -75,6 +75,7 @@ interface PackageApi {
   periodo: string;
   produtos_incluidos: { product_id: string; nome: string }[];
   valor: number;
+  valor_tabela?: number | null;
   destaque: boolean;
 }
 
@@ -346,6 +347,8 @@ export default function GeracaoDigitalCommercialSetup() {
           package_id: id,
           nome: pk?.nome || "",
           valor: val,
+          valor_tabela: Number(pk?.valor_tabela || 0) || null,
+          periodo: pk?.periodo || "mensal",
           produtos_incluidos: pk?.produtos_incluidos || [],
           destaque: pk?.destaque || false
         };

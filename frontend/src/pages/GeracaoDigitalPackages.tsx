@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL, fetchApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { computePackagePricing, brlPkg } from "@/lib/geracaoDigital/packagePricing";
 import {
   Layers,
   Plus,
@@ -39,6 +40,7 @@ interface Package {
   periodo: string;
   produtos_incluidos: { product_id: string; nome: string }[];
   valor: number;
+  valor_tabela?: number | null;
   destaque: boolean;
   ativo: boolean;
 }
@@ -68,6 +70,7 @@ export default function GeracaoDigitalPackages() {
   const [packageName, setPackageName] = useState<string>("");
   const [packagePeriod, setPackagePeriod] = useState<string>("mensal");
   const [packageValue, setPackageValue] = useState<number>(0);
+  const [packageTabela, setPackageTabela] = useState<number>(0);
   const [packageDestaque, setPackageDestaque] = useState<boolean>(false);
   const [packageAtivo, setPackageAtivo] = useState<boolean>(true);
   const [packageIncludedProductIds, setPackageIncludedProductIds] = useState<Record<string, boolean>>({});
@@ -184,6 +187,7 @@ export default function GeracaoDigitalPackages() {
     setPackageName(pkg.nome);
     setPackagePeriod(pkg.periodo);
     setPackageValue(pkg.valor);
+    setPackageTabela(Number(pkg.valor_tabela || 0));
     setPackageDestaque(pkg.destaque);
     setPackageAtivo(pkg.ativo);
 
@@ -242,6 +246,7 @@ export default function GeracaoDigitalPackages() {
         periodo: pkg.periodo,
         produtos_incluidos: pkg.produtos_incluidos,
         valor: pkg.valor,
+        valor_tabela: Number(pkg.valor_tabela || 0) || null,
         destaque: pkg.destaque,
         ativo: newStatus
       };
@@ -338,6 +343,7 @@ export default function GeracaoDigitalPackages() {
         periodo: packagePeriod,
         produtos_incluidos: includedList,
         valor: Number(packageValue || 0),
+        valor_tabela: Number(packageTabela || 0) || null,
         destaque: packageDestaque,
         ativo: packageAtivo
       };
@@ -635,17 +641,54 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 items-center">
+                  <div className="grid gap-4 md:grid-cols-2 items-start">
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Valor Fechado do Pacote (R$)</Label>
+                      <Label className="text-xs text-slate-550 font-medium">
+                        {packagePeriod === "unico" ? "Valor Único (R$)" : "Valor Total do Período (R$)"}
+                      </Label>
                       <Input
                         type="number"
                         value={packageValue}
                         onChange={(e) => setPackageValue(Number(e.target.value) || 0)}
-                        placeholder="Ex: 2900"
+                        placeholder={packagePeriod === "unico" ? "Ex: 2900" : "Ex: 48000"}
                         className="bg-white border-slate-200 text-xs text-slate-800 font-mono"
                       />
+                      {(() => {
+                        const pr = computePackagePricing(packageValue, packagePeriod, packageTabela);
+                        if (pr.meses === null) {
+                          return (
+                            <span className="text-[10px] text-slate-500 block">
+                              Valor único (setup) — sem recorrência.
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="text-[10px] text-purple-650 font-medium block">
+                            Total do período ({pr.meses} {pr.meses === 1 ? "mês" : "meses"}): {brlPkg(pr.totalPeriodo)} · Equivale a {pr.aprox ? "aprox. " : ""}{brlPkg(pr.mensalidade || 0)}/mês
+                            {pr.descontoPct !== null && (
+                              <> · <span className="line-through text-slate-400">{brlPkg(pr.valorTabela || 0)}</span> ({pr.descontoPct}% off)</>
+                            )}
+                          </span>
+                        );
+                      })()}
                     </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-slate-550 font-medium">Valor de Tabela (R$, opcional)</Label>
+                      <Input
+                        type="number"
+                        value={packageTabela || ""}
+                        onChange={(e) => setPackageTabela(Number(e.target.value) || 0)}
+                        placeholder="Preço cheio, sem desconto — para exibir riscado"
+                        className="bg-white border-slate-200 text-xs text-slate-800 font-mono"
+                      />
+                      <span className="text-[9px] text-slate-450 block">
+                        Se maior que o valor do período, o desconto aparece riscado na apresentação, mesa e proposta.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2 items-center">
 
                     <div className="grid gap-2 grid-cols-2 mt-4">
                       <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm">
@@ -784,10 +827,33 @@ export default function GeracaoDigitalPackages() {
                       <div className="flex justify-between items-center pt-2 border-t border-slate-100">
                         <div className="space-y-0.5">
                           <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor</span>
-                          <span className="text-base font-black text-pink-600 font-mono">
-                            R$ {pkg.valor.toLocaleString("pt-BR")}
-                            <span className="text-[10px] text-slate-500 font-normal">/{pkg.periodo === "unico" ? "setup" : "mês"}</span>
-                          </span>
+                          {(() => {
+                            const pr = computePackagePricing(pkg.valor, pkg.periodo, pkg.valor_tabela);
+                            if (pr.meses === null) {
+                              return (
+                                <span className="text-base font-black text-pink-600 font-mono">
+                                  {brlPkg(pr.totalPeriodo)}
+                                  <span className="text-[10px] text-slate-500 font-normal">/setup único</span>
+                                </span>
+                              );
+                            }
+                            return (
+                              <>
+                                <span className="text-base font-black text-pink-600 font-mono block">
+                                  {pr.valorTabela !== null && (
+                                    <span className="text-[11px] text-slate-400 line-through font-bold mr-1.5">De {brlPkg(pr.valorTabela)}</span>
+                                  )}
+                                  {pr.valorTabela !== null ? "por " : ""}{brlPkg(pr.totalPeriodo)}
+                                  {pr.descontoPct !== null && (
+                                    <span className="text-[10px] text-emerald-600 font-bold ml-1">({pr.descontoPct}% off)</span>
+                                  )}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono block">
+                                  {pr.meses > 1 ? `total do período · ${pr.aprox ? "aprox. " : ""}${brlPkg(pr.mensalidade || 0)}/mês` : `${brlPkg(pr.mensalidade || 0)}/mês`}
+                                </span>
+                              </>
+                            );
+                          })()}
                         </div>
 
                         <div className="flex gap-1.5">
