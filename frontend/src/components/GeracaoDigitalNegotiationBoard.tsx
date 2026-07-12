@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
 import {
   X,
   Sparkles,
@@ -27,6 +28,11 @@ interface BoardItem {
   categoria: "gd" | "vexo";
   valor: number;
   recorrencia: "mensal" | "unico";
+  // Metadados de ancoragem do pacote (opcionais — presentes no item de pacote)
+  periodo?: string | null;
+  meses?: number | null;
+  total_periodo?: number | null;
+  valor_tabela?: number | null;
 }
 
 interface NegotiationBoardProps {
@@ -126,6 +132,13 @@ export function GeracaoDigitalNegotiationBoard({
     setValorDesconto(0);
     setParcelas(1);
   };
+
+  const anchorItem = items.find((i) => Number(i.total_periodo || 0) > 0) || null;
+  const anchorTabela = anchorItem ? Number(anchorItem.valor_tabela || 0) : 0;
+  const anchorTotal = anchorItem ? Number(anchorItem.total_periodo || 0) : 0;
+  const anchorDescontoPct = anchorItem && anchorTabela > anchorTotal && anchorTotal > 0
+    ? Math.round((1 - anchorTotal / anchorTabela) * 100)
+    : null;
 
   const gdItems = items.filter((i) => i.categoria !== "vexo");
   const vexoItems = items.filter((i) => i.categoria === "vexo");
@@ -228,6 +241,31 @@ export function GeracaoDigitalNegotiationBoard({
 
         {/* Valores + ações ao vivo */}
         <section className="lg:col-span-3 space-y-5">
+          {/* Ancoragem: compromisso do período com valor de tabela riscado */}
+          {anchorItem && (
+            <div className="rounded-3xl bg-white/85 backdrop-blur border border-pink-200 shadow-xl shadow-pink-100/50 p-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-pink-500 w-full">
+                {anchorItem.periodo && PKG_PERIOD_LABELS[anchorItem.periodo]
+                  ? `Compromisso do Período — Plano ${PKG_PERIOD_LABELS[anchorItem.periodo]}`
+                  : "Compromisso do Período"}
+              </span>
+              {anchorDescontoPct !== null && (
+                <span className="text-xl font-bold text-slate-400 line-through">De {brl(anchorTabela)}</span>
+              )}
+              <span className="text-3xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
+                {anchorDescontoPct !== null ? "por " : ""}{brl(anchorTotal)}
+              </span>
+              {anchorDescontoPct !== null && (
+                <Badge className="bg-emerald-100 text-emerald-700 border-none font-black text-xs px-2.5 py-0.5">
+                  {anchorDescontoPct}% OFF
+                </Badge>
+              )}
+              <span className="text-xs font-bold text-slate-500 w-full">
+                diluído em {Number(anchorItem.meses || 1)}x → {brl(Number(anchorItem.valor || 0))}/mês (mensalidade abaixo)
+              </span>
+            </div>
+          )}
+
           {/* Painel de valores */}
           <div className="rounded-3xl bg-gradient-to-r from-purple-600 to-pink-500 p-[2px] shadow-2xl shadow-purple-300/40">
             <div className="rounded-[calc(1.5rem-2px)] bg-white p-8 grid gap-6 sm:grid-cols-2">

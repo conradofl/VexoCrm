@@ -665,7 +665,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
       const tenantId = await resolveTenantUuid(clientKey);
       const result = await pool.query(
-        "SELECT id, nome, periodo, produtos_incluidos, valor, destaque, ativo, created_at FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true ORDER BY nome ASC",
+        "SELECT id, nome, periodo, produtos_incluidos, valor, valor_tabela, destaque, ativo, created_at FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true ORDER BY nome ASC",
         [tenantId]
       );
       const rows = Array.isArray(result?.rows) ? result.rows : [];
@@ -680,10 +680,12 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
         if (!Array.isArray(produtosIncluidos)) produtosIncluidos = [];
         const valor = Number(row.valor);
+        const valorTabela = Number(row.valor_tabela);
         return {
           ...row,
           produtos_incluidos: produtosIncluidos,
           valor: Number.isFinite(valor) ? valor : 0,
+          valor_tabela: Number.isFinite(valorTabela) && valorTabela > 0 ? valorTabela : null,
         };
       });
       res.status(200).json({ success: true, data });
@@ -698,13 +700,13 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   // POST /api/gd/packages
   app.post("/api/gd/packages", requireFirebaseAuth, async (req, res) => {
     try {
-      const { client_id, nome, periodo, produtos_incluidos, valor, destaque = false } = req.body;
+      const { client_id, nome, periodo, produtos_incluidos, valor, valor_tabela, destaque = false } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       const result = await pool.query(
-        `INSERT INTO public.gd_packages (tenant_id, nome, periodo, produtos_incluidos, valor, destaque)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [tenantId, nome, periodo, JSON.stringify(produtos_incluidos || []), Number(valor || 0), destaque]
+        `INSERT INTO public.gd_packages (tenant_id, nome, periodo, produtos_incluidos, valor, valor_tabela, destaque)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [tenantId, nome, periodo, JSON.stringify(produtos_incluidos || []), Number(valor || 0), Number(valor_tabela || 0) || null, destaque]
       );
       res.status(201).json({ success: true, data: result.rows[0] });
     } catch (error) {
@@ -717,7 +719,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/packages/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, nome, periodo, produtos_incluidos, valor, destaque, ativo } = req.body;
+      const { client_id, nome, periodo, produtos_incluidos, valor, valor_tabela, destaque, ativo } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       const result = await pool.query(
@@ -726,10 +728,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              periodo = COALESCE($2, periodo),
              produtos_incluidos = COALESCE($3, produtos_incluidos),
              valor = COALESCE($4, valor),
-             destaque = COALESCE($5, destaque),
-             ativo = COALESCE($6, ativo)
-         WHERE id = $7 AND tenant_id = $8 RETURNING *`,
-        [nome, periodo, produtos_incluidos ? JSON.stringify(produtos_incluidos) : null, valor, destaque, ativo, id, tenantId]
+             valor_tabela = CASE WHEN $5::boolean THEN NULLIF($6::numeric, 0) ELSE valor_tabela END,
+             destaque = COALESCE($7, destaque),
+             ativo = COALESCE($8, ativo)
+         WHERE id = $9 AND tenant_id = $10 RETURNING *`,
+        [nome, periodo, produtos_incluidos ? JSON.stringify(produtos_incluidos) : null, valor, valor_tabela !== undefined, Number(valor_tabela || 0), destaque, ativo, id, tenantId]
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: "Pacote não encontrado." });
@@ -1127,13 +1130,24 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           const pack = packageRes.rows[0];
           const val = Number(pack.valor || 0);
 
+          // Valor do pacote é o TOTAL do período; a mensalidade é derivada.
+          const PERIOD_MONTHS = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
+          const PERIOD_LABELS = { mensal: "Mensal", trimestral: "Trimestral", semestral: "Semestral", anual: "Anual", unico: "Setup Único" };
+          const meses = pack.periodo === "unico" ? null : (PERIOD_MONTHS[pack.periodo] ?? 1);
+          const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
+          const valorTabela = Number(pack.valor_tabela || 0);
+
           // The main package item representing the closed pricing
           finalItems.push({
             product_id: null,
-            descricao: `Pacote: ${pack.nome} (${pack.periodo === 'mensal' ? 'Mensal' : pack.periodo === 'semestral' ? 'Semestral' : pack.periodo === 'anual' ? 'Anual' : pack.periodo})`,
+            descricao: `Pacote: ${pack.nome} (${PERIOD_LABELS[pack.periodo] || pack.periodo || "Mensal"})`,
             categoria: "gd",
-            valor: val,
-            recorrencia: pack.periodo === "unico" ? "unico" : "mensal"
+            valor: mensalidade,
+            recorrencia: meses ? "mensal" : "unico",
+            periodo: pack.periodo || "mensal",
+            meses,
+            total_periodo: meses ? val : null,
+            valor_tabela: valorTabela > val && val > 0 ? valorTabela : null
           });
 
           // And products list as zero-value descriptive items
