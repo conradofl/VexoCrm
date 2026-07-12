@@ -65,6 +65,7 @@ interface Proposal {
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
   descontos_concedidos?: DescontoConcedido[] | null;
+  meio_pagamento?: { setup?: string; mensalidade?: string } | null;
   assinatura_metodo?: string | null;
 }
 
@@ -265,6 +266,21 @@ export default function GeracaoDigitalPublicProposal() {
   if (discountConcession && !setupIsento) {
     setupFinalVal = Number(discountConcession.valor_final);
   }
+  // Última camada de setup (com trilha) sobrescreve cálculo legado
+  const camadasSetupPub = descontosConcedidos.filter((d) => d.trilha === "setup" && d.tipo !== "parcelamento");
+  if (camadasSetupPub.length > 0 && !setupIsento) {
+    setupFinalVal = Number(camadasSetupPub[camadasSetupPub.length - 1].valor_final || 0);
+  }
+
+  const mensalBaseVal = Number(proposal.valor_recorrente || 0);
+  const camadasMensalPub = descontosConcedidos.filter((d) => d.trilha === "mensalidade");
+  const mensalFinalVal = camadasMensalPub.length > 0
+    ? Number(camadasMensalPub[camadasMensalPub.length - 1].valor_final || 0)
+    : mensalBaseVal;
+
+  const MEIO_LABELS_PUB: Record<string, string> = { cartao: "Cartão", boleto: "Boleto", pix: "PIX" };
+  const meioSetupPub = proposal.meio_pagamento?.setup ? MEIO_LABELS_PUB[proposal.meio_pagamento.setup] : null;
+  const meioMensalPub = proposal.meio_pagamento?.mensalidade ? MEIO_LABELS_PUB[proposal.meio_pagamento.mensalidade] : null;
 
   return (
     <div className="dark min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
@@ -509,9 +525,22 @@ export default function GeracaoDigitalPublicProposal() {
               <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
                 <span className="text-slate-400">Mensalidade:</span>
                 <span className="text-pink-400 font-extrabold text-sm">
-                  R$ {proposal.valor_recorrente?.toLocaleString("pt-BR") || "0,00"}/mês
+                  {mensalFinalVal < mensalBaseVal && (
+                    <span className="text-slate-500 line-through mr-2 font-normal text-xs">
+                      R$ {mensalBaseVal.toLocaleString("pt-BR")}
+                    </span>
+                  )}
+                  R$ {mensalFinalVal.toLocaleString("pt-BR")}/mês
                 </span>
               </div>
+              {(meioSetupPub || meioMensalPub) && (
+                <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
+                  <span className="text-slate-400">Meio de pagamento:</span>
+                  <span className="text-white font-bold">
+                    {[meioSetupPub && `Setup: ${meioSetupPub}`, meioMensalPub && `Mensalidade: ${meioMensalPub}`].filter(Boolean).join(" · ")}
+                  </span>
+                </div>
+              )}
               {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
                 <div className="flex justify-between items-center text-xs font-mono">
                   <span className="text-slate-400">Período do Plano:</span>

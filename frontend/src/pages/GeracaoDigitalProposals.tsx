@@ -20,22 +20,11 @@ import {
   Info,
   Sparkles,
   X,
-  Copy,
-  MessageSquare,
-  Mail,
   Archive
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
 import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter
-} from "@/components/ui/dialog";
 import {
   type PaymentTerm,
   type PaymentTermTipo,
@@ -49,7 +38,8 @@ import {
   SETUP_LABEL,
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
-import { GeracaoDigitalNegotiationBoard } from "@/components/GeracaoDigitalNegotiationBoard";
+import { GeracaoDigitalNegotiationBoard, type NegotiationFinalizeResult } from "@/components/GeracaoDigitalNegotiationBoard";
+import { ShareProposalDialog } from "./GeracaoDigitalProposals/ShareProposalDialog";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -140,7 +130,6 @@ export default function GeracaoDigitalProposals() {
 
   // Modal de compartilhamento da proposta
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
-  const [whatsappNumber, setWhatsappNumber] = useState<string>("");
 
   // Condição de pagamento criada na hora (sem ir na aba Condições)
   const [showInlineTerm, setShowInlineTerm] = useState<boolean>(false);
@@ -360,7 +349,7 @@ export default function GeracaoDigitalProposals() {
   };
 
   // Fecha a negociação: grava concessões e abre a proposta pública final
-  const handleFinalizeNegotiation = async (result: { descontos: DescontoConcedido[]; valorSetupVexoFinal: number }) => {
+  const handleFinalizeNegotiation = async (result: NegotiationFinalizeResult) => {
     if (!selectedProposal) return;
     try {
       const token = await getIdToken();
@@ -368,12 +357,22 @@ export default function GeracaoDigitalProposals() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const isento = result.descontos.some((d) => d.tipo === "isencao_setup");
+      // Payload completo: inclui os campos editados na tela (condicoes, prospect,
+      // período, validade) para a negociação não descartar edições pendentes.
       const body = {
         client_id: clientId,
+        prospect_name: prospectName,
         itens: items,
+        condicoes,
+        payment_link: paymentLink,
         cobrar_setup: cobrarSetup,
         valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
         descontos_concedidos: result.descontos,
+        meio_pagamento: result.meioPagamento,
+        periodo_plano: periodoPlano || null,
+        validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
+        valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
+        observacao_validade: observacaoValidade || null,
         condicoes_pagamento: {
           ofertadas: offeredTerms,
           escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
@@ -388,8 +387,8 @@ export default function GeracaoDigitalProposals() {
 
       setIsNegotiating(false);
       if (isento) setValorSetupVexo(0);
-      toast({ title: "Negociação registrada", description: "Concessões gravadas. Abrindo a proposta final..." });
-      window.open(`/proposta/${selectedProposal.id}`, "_blank");
+      toast({ title: "Negociação registrada", description: "Concessões gravadas — compartilhe o link com o cliente." });
+      setShowSendModal(true);
       loadProposals();
     } catch (err: any) {
       console.error(err);
@@ -1027,18 +1026,14 @@ export default function GeracaoDigitalProposals() {
                             </select>
                           </div>
 
-                          <div className="w-full md:w-32 space-y-1">
-                            <Label className="text-[10px] text-slate-500 font-mono">Recorrência</Label>
-                            <select
-                              value={item.recorrencia}
-                              disabled={selectedProposal.status === "aceita"}
-                              onChange={(e) => handleUpdateItemField(index, "recorrencia", e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 focus:outline-none focus:border-indigo-500/50 h-8"
-                            >
-                              <option value="mensal">Mensal</option>
-                              <option value="unico">Único (Setup)</option>
-                            </select>
-                          </div>
+                          {item.recorrencia === "unico" && (
+                            <div className="w-full md:w-24 space-y-1">
+                              <Label className="text-[10px] text-slate-500 font-mono">Cobrança</Label>
+                              <Badge className="bg-slate-100 text-slate-600 border-none text-[10px] font-bold h-8 flex items-center justify-center">
+                                única
+                              </Badge>
+                            </div>
+                          )}
 
                           <div className="w-full md:w-32 space-y-1">
                             <Label className="text-[10px] text-slate-500 font-mono">Valor</Label>
@@ -1505,105 +1500,14 @@ export default function GeracaoDigitalProposals() {
 
       {/* Modal de Compartilhamento da Proposta */}
       {selectedProposal && (
-        <Dialog open={showSendModal} onOpenChange={setShowSendModal}>
-          <DialogContent className="max-w-md bg-white border border-slate-200 shadow-2xl rounded-2xl p-6 space-y-4">
-            <DialogHeader>
-              <DialogTitle className="text-lg font-black text-slate-800 flex items-center gap-2">
-                <Share2 className="h-5 w-5 text-indigo-600" />
-                Compartilhar Proposta Comercial
-              </DialogTitle>
-              <DialogDescription className="text-xs text-slate-505 font-light">
-                A proposta de <strong>{selectedProposal.prospect_name}</strong> foi marcada como enviada. Use os canais abaixo para entregar o link de acesso público.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              {/* Link Input & Copy Button */}
-              <div className="space-y-1.5">
-                <Label className="text-[10px] text-slate-400 font-mono uppercase tracking-wider block">Link Público da Proposta</Label>
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    value={`${window.location.origin}/proposta/${selectedProposal.id}`}
-                    className="bg-slate-50 border-slate-200 text-xs font-mono text-slate-700 h-9 flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 h-9 border border-slate-200"
-                    onClick={() => {
-                      const shareLink = `${window.location.origin}/proposta/${selectedProposal.id}`;
-                      navigator.clipboard.writeText(shareLink);
-                      toast({
-                        title: "Link Copiado",
-                        description: "O link da proposta foi copiado para a área de transferência."
-                      });
-                    }}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* WhatsApp Share Section */}
-              <div className="space-y-2 pt-2 border-t border-slate-100">
-                <Label className="text-[10px] text-slate-400 font-mono uppercase tracking-wider block">Enviar por WhatsApp</Label>
-                <div className="flex gap-2">
-                  <Input
-                    type="text"
-                    placeholder="Ex: 5511999999999 (com DDI + DDD)"
-                    value={whatsappNumber}
-                    onChange={(e) => setWhatsappNumber(e.target.value)}
-                    className="bg-white border-slate-200 text-xs text-slate-700 h-9 flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold h-9 gap-1.5"
-                    onClick={() => {
-                      const numberClean = whatsappNumber.replace(/\D/g, "");
-                      if (!numberClean) {
-                        toast({
-                          title: "Número inválido",
-                          description: "Por favor, digite o número com DDI (ex: 55 para Brasil) e DDD.",
-                          variant: "destructive"
-                        });
-                        return;
-                      }
-                      const shareLink = `${window.location.origin}/proposta/${selectedProposal.id}`;
-                      const msg = `Olá! Segue o link para visualizar a sua proposta comercial da Geração Digital: ${shareLink}`;
-                      window.open(`https://wa.me/${numberClean}?text=${encodeURIComponent(msg)}`, "_blank");
-                    }}
-                  >
-                    <MessageSquare className="h-4 w-4" />
-                    Enviar
-                  </Button>
-                </div>
-              </div>
-
-              {/* Email Infrastructure Warning */}
-              <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                <Label className="text-[10px] text-slate-450 font-mono uppercase tracking-wider flex items-center gap-1">
-                  <Mail className="h-3.5 w-3.5 text-slate-400" />
-                  Enviar por E-mail
-                </Label>
-                <div className="p-3 bg-slate-50 border border-slate-150 rounded-lg">
-                  <p className="text-[10.5px] text-slate-500 leading-normal">
-                    ⚠️ <strong>Infraestrutura Indisponível:</strong> O envio automático por e-mail depende de uma infraestrutura de correio de saída (servidor SMTP ou AWS SES) inexistente no sistema Vexo OS neste momento. Por favor, copie o link público acima e envie manualmente por e-mail.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button
-                variant="outline"
-                className="w-full border-slate-200 text-slate-600 hover:bg-slate-50 h-9 font-bold"
-                onClick={() => setShowSendModal(false)}
-              >
-                Fechar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <ShareProposalDialog
+          open={showSendModal}
+          onOpenChange={setShowSendModal}
+          proposalId={selectedProposal.id}
+          prospectName={selectedProposal.prospect_name}
+          clientId={clientId}
+          getIdToken={getIdToken}
+        />
       )}
     </PageShell>
   );
