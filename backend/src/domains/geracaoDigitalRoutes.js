@@ -885,7 +885,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { client_id } = req.query;
       const tenantId = await resolveTenantUuid(client_id);
       const result = await pool.query(
-        "SELECT id, nome, tipo, config, ativo, created_at FROM public.gd_payment_terms WHERE tenant_id = $1 ORDER BY created_at ASC",
+        "SELECT id, nome, tipo, config, ativo, aplica_a, created_at FROM public.gd_payment_terms WHERE tenant_id = $1 ORDER BY created_at ASC",
         [tenantId]
       );
       const data = (result.rows || []).map((row) => {
@@ -898,7 +898,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           }
         }
         if (!config || typeof config !== "object") config = {};
-        return { ...row, config };
+        return { ...row, config, aplica_a: row.aplica_a === "mensalidade" ? "mensalidade" : "setup" };
       });
       res.status(200).json({ success: true, data });
     } catch (error) {
@@ -910,15 +910,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   // POST /api/gd/payment-terms
   app.post("/api/gd/payment-terms", requireFirebaseAuth, async (req, res) => {
     try {
-      const { client_id, nome, tipo = "custom", config = {}, ativo = true } = req.body;
+      const { client_id, nome, tipo = "custom", config = {}, ativo = true, aplica_a = "setup" } = req.body;
       if (!nome || !String(nome).trim()) {
         return res.status(400).json({ error: "Nome da condição é obrigatório." });
       }
       const tenantId = await resolveTenantUuid(client_id);
       const result = await pool.query(
-        `INSERT INTO public.gd_payment_terms (tenant_id, nome, tipo, config, ativo)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [tenantId, String(nome).trim(), tipo, JSON.stringify(config || {}), ativo !== false]
+        `INSERT INTO public.gd_payment_terms (tenant_id, nome, tipo, config, ativo, aplica_a)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [tenantId, String(nome).trim(), tipo, JSON.stringify(config || {}), ativo !== false, aplica_a === "mensalidade" ? "mensalidade" : "setup"]
       );
       res.status(201).json({ success: true, data: result.rows[0] });
     } catch (error) {
@@ -931,14 +931,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/payment-terms/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, nome, tipo, config, ativo } = req.body;
+      const { client_id, nome, tipo, config, ativo, aplica_a } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
       const result = await pool.query(
         `UPDATE public.gd_payment_terms
          SET nome = COALESCE($1, nome),
              tipo = COALESCE($2, tipo),
              config = COALESCE($3, config),
-             ativo = COALESCE($4, ativo)
+             ativo = COALESCE($4, ativo),
+             aplica_a = COALESCE($7, aplica_a)
          WHERE id = $5 AND tenant_id = $6 RETURNING *`,
         [
           nome !== undefined ? String(nome).trim() : null,
@@ -946,7 +947,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           config !== undefined ? JSON.stringify(config || {}) : null,
           typeof ativo === "boolean" ? ativo : null,
           id,
-          tenantId
+          tenantId,
+          aplica_a === "mensalidade" || aplica_a === "setup" ? aplica_a : null
         ]
       );
       if (result.rows.length === 0) {
@@ -994,9 +996,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
       const term = original.rows[0];
       const result = await pool.query(
-        `INSERT INTO public.gd_payment_terms (tenant_id, nome, tipo, config, ativo)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [tenantId, `${term.nome} (cópia)`, term.tipo, JSON.stringify(term.config || {}), term.ativo]
+        `INSERT INTO public.gd_payment_terms (tenant_id, nome, tipo, config, ativo, aplica_a)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [tenantId, `${term.nome} (cópia)`, term.tipo, JSON.stringify(term.config || {}), term.ativo, term.aplica_a === "mensalidade" ? "mensalidade" : "setup"]
       );
       res.status(201).json({ success: true, data: result.rows[0] });
     } catch (error) {
@@ -1195,6 +1197,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       // Setup Vexo opcional e condições de pagamento (campos opcionais)
       const { cobrar_setup = false, valor_setup_vexo = null, condicoes_pagamento = null } = req.body;
+      const { periodo_plano = null, validade_ate = null, valor_apos_validade = null, observacao_validade = null } = req.body;
+      const PERIODOS_VALIDOS_POST = ["mensal", "trimestral", "semestral", "anual"];
+      const postPeriodoPlano = PERIODOS_VALIDOS_POST.includes(periodo_plano) ? periodo_plano : null;
       const setupVexo = cobrar_setup ? Number(valor_setup_vexo || 0) : 0;
 
       // Recalculate totals
@@ -1205,8 +1210,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const result = await pool.query(
         `INSERT INTO public.gd_proposals (
           tenant_id, presentation_id, package_id, prospect_name, itens, valor_total, condicoes, status,
-          cobrar_setup, valor_setup_vexo, condicoes_pagamento
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+          cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
         [
           tenantId,
           validPresentationId,
@@ -1218,7 +1223,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           status,
           cobrar_setup === true,
           valor_setup_vexo !== null && valor_setup_vexo !== undefined ? Number(valor_setup_vexo) : null,
-          condicoes_pagamento ? JSON.stringify(condicoes_pagamento) : null
+          condicoes_pagamento ? JSON.stringify(condicoes_pagamento) : null,
+          postPeriodoPlano,
+          validade_ate || null,
+          valor_apos_validade !== null && valor_apos_validade !== "" ? Number(valor_apos_validade) : null,
+          observacao_validade || null
         ]
       );
 
@@ -1297,7 +1306,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1358,8 +1367,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              validade_ate = $11,
              valor_apos_validade = $12,
              observacao_validade = $13,
-             descontos_concedidos = COALESCE($14, descontos_concedidos)
-         WHERE id = $15 AND tenant_id = $16 RETURNING *`,
+             descontos_concedidos = COALESCE($14, descontos_concedidos),
+             arquivada = COALESCE($15, arquivada)
+         WHERE id = $16 AND tenant_id = $17 RETURNING *`,
         [
           prospect_name,
           JSON.stringify(finalItems),
@@ -1375,6 +1385,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalValorAposValidade,
           finalObservacaoValidade,
           descontos_concedidos !== undefined && descontos_concedidos !== null ? JSON.stringify(descontos_concedidos) : null,
+          typeof arquivada === "boolean" ? arquivada : null,
           id,
           tenantId
         ]
@@ -1404,6 +1415,17 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
       const { client_id } = req.query;
       const tenantId = await resolveTenantUuid(client_id || req.body.client_id);
+
+      const statusRes = await pool.query(
+        `SELECT status FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      if (statusRes.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+      if (statusRes.rows[0].status === "aceita") {
+        return res.status(400).json({ error: "Proposta fechada é registro de compromisso e não pode ser excluída. Use o arquivamento." });
+      }
 
       const result = await pool.query(
         `DELETE FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2 RETURNING *`,
