@@ -1320,7 +1320,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1382,8 +1382,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              valor_apos_validade = $12,
              observacao_validade = $13,
              descontos_concedidos = COALESCE($14, descontos_concedidos),
-             arquivada = COALESCE($15, arquivada)
-         WHERE id = $16 AND tenant_id = $17 RETURNING *`,
+             arquivada = COALESCE($15, arquivada),
+             meio_pagamento = COALESCE($16, meio_pagamento)
+         WHERE id = $17 AND tenant_id = $18 RETURNING *`,
         [
           prospect_name,
           JSON.stringify(finalItems),
@@ -1400,6 +1401,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalObservacaoValidade,
           descontos_concedidos !== undefined && descontos_concedidos !== null ? JSON.stringify(descontos_concedidos) : null,
           typeof arquivada === "boolean" ? arquivada : null,
+          meio_pagamento !== undefined && meio_pagamento !== null ? JSON.stringify(meio_pagamento) : null,
           id,
           tenantId
         ]
@@ -1454,6 +1456,62 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao excluir proposta:", error);
       res.status(500).json({ error: "Erro ao excluir proposta comercial." });
+    }
+  });
+
+  // POST /api/gd/proposals/:id/enviar-email — envia o link público via ResendProvider (infra do briefing)
+  app.post("/api/gd/proposals/:id/enviar-email", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { client_id, email, base_url } = req.body;
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+        return res.status(400).json({ error: "E-mail de destino inválido." });
+      }
+      const tenantId = await resolveTenantUuid(client_id);
+      const propRes = await pool.query(
+        `SELECT id, prospect_name, valor_total, validade_ate FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      if (propRes.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+      const prop = propRes.rows[0];
+
+      let sendEmailFn = null;
+      try {
+        const { ResendProvider } = await import("../providers/ResendProvider.js");
+        sendEmailFn = ResendProvider.sendEmail;
+      } catch (err) {
+        console.warn("[GeracaoDigital] ResendProvider not loaded", err);
+      }
+      if (!sendEmailFn || !process.env.RESEND_API_KEY) {
+        return res.status(503).json({ error: "Envio de e-mail não configurado no servidor (RESEND_API_KEY)." });
+      }
+
+      const link = `${String(base_url || "").replace(/\/$/, "")}/proposta/${prop.id}`;
+      const validade = prop.validade_ate
+        ? `<p style="color:#b45309;font-weight:bold;">Proposta válida até ${new Date(prop.validade_ate).toLocaleDateString("pt-BR")}.</p>`
+        : "";
+      const html = `
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1e293b;">
+          <h2 style="color:#7c3aed;">Sua proposta comercial está pronta</h2>
+          <p>Olá${prop.prospect_name ? `, <b>${prop.prospect_name}</b>` : ""}!</p>
+          <p>Preparamos sua proposta comercial da Geração Digital. Acesse o link abaixo para revisar o escopo, os valores e assinar online:</p>
+          <p style="margin:24px 0;">
+            <a href="${link}" style="background:linear-gradient(90deg,#7c3aed,#ec4899);color:#fff;padding:12px 24px;border-radius:12px;text-decoration:none;font-weight:bold;">Ver e assinar a proposta</a>
+          </p>
+          ${validade}
+          <p style="font-size:12px;color:#64748b;">Se o botão não funcionar, copie e cole este link no navegador:<br/>${link}</p>
+        </div>`;
+
+      const result = await sendEmailFn(email, "Sua proposta comercial — Geração Digital", html, "Geração Digital");
+      if (!result) {
+        return res.status(503).json({ error: "Envio de e-mail não configurado no servidor (RESEND_API_KEY)." });
+      }
+      res.json({ success: true, message: `Proposta enviada para ${email}.` });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao enviar proposta por e-mail:", error?.message || error);
+      res.status(500).json({ error: "Erro ao enviar a proposta por e-mail." });
     }
   });
 
