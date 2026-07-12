@@ -50,6 +50,7 @@ import {
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
 import { GeracaoDigitalNegotiationBoard } from "@/components/GeracaoDigitalNegotiationBoard";
+import { GenerateContractDialog } from "./GeracaoDigitalContracts/GenerateContractDialog";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -141,6 +142,9 @@ export default function GeracaoDigitalProposals() {
   // Modal de compartilhamento da proposta
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
   const [whatsappNumber, setWhatsappNumber] = useState<string>("");
+  
+  // Modal de geração de contrato jurídico
+  const [showGenerateContract, setShowGenerateContract] = useState<boolean>(false);
 
   // Condição de pagamento criada na hora (sem ir na aba Condições)
   const [showInlineTerm, setShowInlineTerm] = useState<boolean>(false);
@@ -936,6 +940,16 @@ export default function GeracaoDigitalProposals() {
                   </div>
 
                   <div className="flex gap-2">
+                    {selectedProposal.status === "aceita" && (
+                      <Button
+                        size="sm"
+                        onClick={() => setShowGenerateContract(true)}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold shrink-0"
+                      >
+                        <FileText className="h-4 w-4 mr-1.5" />
+                        Gerar Contrato Jurídico
+                      </Button>
+                    )}
                     {selectedProposal.status !== "aceita" && (
                       <Button
                         size="sm"
@@ -1604,6 +1618,19 @@ export default function GeracaoDigitalProposals() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+      {/* Modal de geração de contrato jurídico */}
+      {selectedProposal && showGenerateContract && (
+        <GenerateContractDialog
+          open={showGenerateContract}
+          onOpenChange={setShowGenerateContract}
+          proposalId={selectedProposal.id}
+          initialData={{
+            razao_social: selectedProposal.prospect_name,
+            produtos: selectedProposal.itens.map(i => `- ${i.descricao} (R$ ${i.valor})`).join("\n"),
+            condicoes_pagamento: selectedProposal.condicoes_pagamento?.escolhida?.nome || "",
+          }}
+        />
       )}
     </PageShell>
   );

@@ -40,6 +40,7 @@ import GeracaoDigitalProposals from "./pages/GeracaoDigitalProposals";
 import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
 import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
 import GeracaoDigitalPaymentTerms from "./pages/GeracaoDigitalPaymentTerms";
+import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
 
 const queryClient = new QueryClient();
 
@@ -318,6 +319,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
                     <GeracaoDigitalPaymentTerms />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="contratos-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalContracts />
                   </ProtectedRoute>
                 }
               />

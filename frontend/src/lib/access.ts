@@ -27,6 +27,7 @@ export const INTERNAL_PAGE_ORDER = [
   "apresentacao-gd",
   "briefings-gd",
   "propostas-gd",
+  "contratos-gd",
   "pacotes-gd",
   "condicoes-gd",
   "integracoes",
@@ -594,6 +595,7 @@ export function isInternalPageAllowedForClient(
     "apresentacao-gd": "apresentacao-gd",
     "briefings-gd": "briefings-gd",
     "propostas-gd": "propostas-gd",
+    "contratos-gd": "contratos-gd",
     "pacotes-gd": "pacotes-gd",
     "condicoes-gd": "condicoes-gd",
     eventos: "eventos",
@@ -633,9 +635,10 @@ export function isPathAllowedForClient(
   }
   else if (path.includes("/crm/planilhas")) tabKey = "campanhas";
   else if (path.includes("/crm/relatorios")) tabKey = "relatorios";
-  else if (path.includes("/crm/geracao-digital") || path.includes("/crm/apresentacao-gd") || path.includes("/crm/briefings-gd") || path.includes("/crm/propostas-gd") || path.includes("/crm/pacotes-gd") || path.includes("/crm/condicoes-gd")) {
+  else if (path.includes("/crm/geracao-digital") || path.includes("/crm/apresentacao-gd") || path.includes("/crm/briefings-gd") || path.includes("/crm/propostas-gd") || path.includes("/crm/contratos-gd") || path.includes("/crm/pacotes-gd") || path.includes("/crm/condicoes-gd")) {
     if (path.includes("tab=briefings") || path.includes("/crm/briefings-gd")) tabKey = "briefings-gd";
     else if (path.includes("/crm/propostas-gd")) tabKey = "propostas-gd";
+    else if (path.includes("/crm/contratos-gd")) tabKey = "contratos-gd";
     else if (path.includes("/crm/pacotes-gd")) tabKey = "pacotes-gd";
     else if (path.includes("/crm/condicoes-gd")) tabKey = "condicoes-gd";
     else tabKey = "apresentacao-gd";
