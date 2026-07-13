@@ -31,6 +31,8 @@ export interface NegotiationLayers {
   parcelas: number;
   meioSetup: MeioPagamento;
   meioMensalidade: MeioPagamento;
+  // Carência do 1º vencimento da mensalidade (dias). Não altera valores.
+  carenciaDias: number | null;
 }
 
 export const EMPTY_LAYERS: NegotiationLayers = {
@@ -42,6 +44,7 @@ export const EMPTY_LAYERS: NegotiationLayers = {
   parcelas: 1,
   meioSetup: "",
   meioMensalidade: "",
+  carenciaDias: null,
 };
 
 export interface CamadaEfeito {
@@ -183,6 +186,15 @@ export function computeNegotiation(
       trilha: "mensalidade",
     });
   });
+  if (layers.carenciaDias && layers.carenciaDias > 0) {
+    descontos.push({
+      tipo: "carencia",
+      valor_original: mensalidadeOriginal,
+      valor_final: mensal,
+      motivo: `Primeira mensalidade em ${layers.carenciaDias} dias (carência — sem alteração de valores)`,
+      trilha: "mensalidade",
+    });
+  }
   if (layers.parcelas > 1) {
     descontos.push({
       tipo: "parcelamento",
