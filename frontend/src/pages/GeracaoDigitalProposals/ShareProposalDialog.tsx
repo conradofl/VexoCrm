@@ -45,15 +45,19 @@ export function ShareProposalDialog({
   };
 
   const handleWhatsApp = () => {
-    const numberClean = whatsappNumber.replace(/\D/g, "");
-    if (!numberClean) {
+    let phone = whatsappNumber.trim().replace(/[^\d+]/g, "");
+    if (!phone) {
       toast({
         title: "Número inválido",
-        description: "Por favor, digite o número com DDI (ex: 55 para Brasil) e DDD.",
+        description: "Por favor, informe um número de WhatsApp válido.",
         variant: "destructive"
       });
       return;
     }
+    if (!phone.startsWith("+") && !phone.startsWith("55")) {
+      phone = "55" + phone;
+    }
+    const numberClean = phone.replace(/\D/g, "");
     const msg = `Olá! Segue o link para visualizar a sua proposta comercial da Geração Digital: ${shareLink}`;
     window.open(`https://wa.me/${numberClean}?text=${encodeURIComponent(msg)}`, "_blank");
   };

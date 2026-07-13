@@ -36,31 +36,51 @@ import { computeRoi } from "@/lib/vexoPitch/helpers";
 const DEFAULT_SEGMENTS = [
   { id: "1", nome: "Energia solar", faturamento_min: 50000 },
   { id: "2", nome: "Consórcios", faturamento_min: 30000 },
-  { id: "3", nome: "Imobiliário e incorporadoras", faturamento_min: 80000 },
-  { id: "4", nome: "Clínicas de estética e odontologia", faturamento_min: 40000 },
-  { id: "5", nome: "E-commerce e varejo escalável", faturamento_min: 60000 },
-  { id: "6", nome: "Automotivo (concessionárias e seminovos)", faturamento_min: 100000 },
-  { id: "7", nome: "Advocacia e contabilidade", faturamento_min: 20000 },
-  { id: "8", nome: "Educação (cursos e escolas)", faturamento_min: 35000 },
-  { id: "9", nome: "Saúde (clínicas e laboratórios)", faturamento_min: 50000 },
-  { id: "10", nome: "Franquias e redes multiunidade", faturamento_min: 150000 },
-  { id: "11", nome: "Turismo e hospitalidade", faturamento_min: 45000 },
-  { id: "12", nome: "Food service premium e delivery", faturamento_min: 30000 }
+  { id: "3", nome: "Imobiliário", faturamento_min: 80000 },
+  { id: "4", nome: "Incorporadoras", faturamento_min: 100000 },
+  { id: "5", nome: "Clínicas de Estética", faturamento_min: 40000 },
+  { id: "6", nome: "Odontologia", faturamento_min: 40000 },
+  { id: "7", nome: "E-commerce", faturamento_min: 60000 },
+  { id: "8", nome: "Varejo Escalável", faturamento_min: 60000 },
+  { id: "9", nome: "Automotivo (Concessionárias)", faturamento_min: 100000 },
+  { id: "10", nome: "Automotivo (Seminovos)", faturamento_min: 80000 },
+  { id: "11", nome: "Advocacia", faturamento_min: 20000 },
+  { id: "12", nome: "Contabilidade", faturamento_min: 20000 },
+  { id: "13", nome: "Educação (Cursos)", faturamento_min: 35000 },
+  { id: "14", nome: "Educação (Escolas)", faturamento_min: 40000 },
+  { id: "15", nome: "Saúde (Clínicas)", faturamento_min: 50000 },
+  { id: "16", nome: "Saúde (Laboratórios)", faturamento_min: 60000 },
+  { id: "17", nome: "Franquias", faturamento_min: 150000 },
+  { id: "18", nome: "Redes Multiunidade", faturamento_min: 150000 },
+  { id: "19", nome: "Turismo", faturamento_min: 45000 },
+  { id: "20", nome: "Hospitalidade", faturamento_min: 50000 },
+  { id: "21", nome: "Food Service Premium", faturamento_min: 30000 },
+  { id: "22", nome: "Delivery", faturamento_min: 25000 }
 ];
 
 const SEGMENT_MAPPING: Record<string, string> = {
   "Energia solar": "b2b",
   "Consórcios": "b2b",
-  "Imobiliário e incorporadoras": "b2b",
-  "Clínicas de estética e odontologia": "academia",
-  "E-commerce e varejo escalável": "restaurante",
-  "Automotivo (concessionárias e seminovos)": "b2b",
-  "Advocacia e contabilidade": "b2b",
-  "Educação (cursos e escolas)": "b2b",
-  "Saúde (clínicas e laboratórios)": "b2b",
-  "Franquias e redes multiunidade": "b2b",
-  "Turismo e hospitalidade": "turismo",
-  "Food service premium e delivery": "restaurante",
+  "Imobiliário": "b2b",
+  "Incorporadoras": "b2b",
+  "Clínicas de Estética": "academia",
+  "Odontologia": "academia",
+  "E-commerce": "restaurante",
+  "Varejo Escalável": "restaurante",
+  "Automotivo (Concessionárias)": "b2b",
+  "Automotivo (Seminovos)": "b2b",
+  "Advocacia": "b2b",
+  "Contabilidade": "b2b",
+  "Educação (Cursos)": "b2b",
+  "Educação (Escolas)": "b2b",
+  "Saúde (Clínicas)": "b2b",
+  "Saúde (Laboratórios)": "b2b",
+  "Franquias": "b2b",
+  "Redes Multiunidade": "b2b",
+  "Turismo": "turismo",
+  "Hospitalidade": "turismo",
+  "Food Service Premium": "restaurante",
+  "Delivery": "restaurante",
 };
 
 interface SegmentApi {
@@ -400,7 +420,7 @@ export default function GeracaoDigitalCommercialSetup() {
               className={cn(
                 "px-6 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-widest transition-all",
                 activeFlow === "A"
-                  ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-600/20"
+                  ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white shadow-md shadow-indigo-600/20"
                   : "text-slate-500 hover:text-slate-800"
               )}
             >
@@ -411,7 +431,7 @@ export default function GeracaoDigitalCommercialSetup() {
               className={cn(
                 "px-6 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-widest transition-all",
                 activeFlow === "B"
-                  ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-md shadow-purple-600/20"
+                  ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white shadow-md shadow-indigo-600/20"
                   : "text-slate-500 hover:text-slate-800"
               )}
             >
@@ -653,7 +673,7 @@ export default function GeracaoDigitalCommercialSetup() {
                 {/* Iniciar Apresentação Button */}
                 <Button
                   onClick={handleStartPresentation}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 font-extrabold text-sm py-6 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-purple-600/15"
+                  className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-sm py-6 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/15"
                 >
                   <Play className="h-4.5 w-4.5" />
                   Iniciar Apresentação (Tela Cheia)

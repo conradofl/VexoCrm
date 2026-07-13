@@ -543,7 +543,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                 <Button variant="outline" onClick={() => setWizardStep(5)} className="border-slate-200 text-slate-700">
                   Voltar
                 </Button>
-                <Button onClick={handleCreateDirectProposal} className="bg-gradient-to-r from-purple-600 to-pink-500 text-white font-black text-xs px-8">
+                <Button onClick={handleCreateDirectProposal} className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-black text-xs px-8">
                   Confirmar & Criar Proposta
                 </Button>
               </div>

@@ -19,7 +19,7 @@ export function MeioPills({ value, onChange, disabled }: { value: MeioPagamento;
           className={cn(
             "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
             value === m
-              ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white border-transparent"
+              ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-transparent"
               : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
           )}
         >

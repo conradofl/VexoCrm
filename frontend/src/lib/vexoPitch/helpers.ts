@@ -156,7 +156,7 @@ export function computeRoi(leadsCount: number, customTicket: number, customConv:
   const currentSales = Math.round(leadsCount * (customConv / 100));
   const estimatedVexoSales = Math.round(currentSales * 1.30);
   const extraSales = Math.max(1, estimatedVexoSales - currentSales);
-  const additionalRevenue = extraSales * customTicket;
+  const additionalRevenue = (leadsCount * (customConv / 100)) * customTicket;
 
   return { qualifiedLeads, operatorHoursSaved, currentSales, estimatedVexoSales, extraSales, additionalRevenue };
 }

@@ -199,17 +199,13 @@ export function GeracaoDigitalNegotiationBoard({
   }, [condSetupActive, condMensalActive, layers, result, result.entradaOriginal, result.mensalidadeOriginal]);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-gradient-to-br from-purple-50 via-white to-pink-50">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-32 -right-32 h-[420px] w-[420px] rounded-full bg-purple-200/40 blur-[120px]" />
-        <div className="absolute -bottom-32 -left-32 h-[420px] w-[420px] rounded-full bg-pink-200/40 blur-[120px]" />
-      </div>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
 
       {/* Header */}
       <header className="relative z-10 max-w-6xl mx-auto px-8 pt-8 flex items-start justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-r from-purple-600 to-pink-500 flex items-center justify-center">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-600 flex items-center justify-center">
               <Sparkles className="h-4 w-4 text-white" />
             </div>
             <span className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-purple-600 flex items-center gap-1.5">
@@ -288,7 +284,7 @@ export function GeracaoDigitalNegotiationBoard({
             {calc.compromissoFinal < calc.compromissoOriginal && (
               <span className="text-xl font-bold text-slate-400 line-through">De {brl(calc.compromissoOriginal)}</span>
             )}
-            <span className="text-3xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
+            <span className="text-3xl font-black bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
               {calc.compromissoFinal < calc.compromissoOriginal ? "por " : ""}{brl(calc.compromissoFinal)}
             </span>
             {calc.compromissoFinal < calc.compromissoOriginal && (
@@ -302,14 +298,14 @@ export function GeracaoDigitalNegotiationBoard({
           </div>
 
           {/* Painel de valores — trilhas separadas */}
-          <div className="rounded-3xl bg-gradient-to-r from-purple-600 to-pink-500 p-[2px] shadow-2xl shadow-purple-300/40">
+          <div className="rounded-3xl bg-gradient-to-r from-purple-700 to-indigo-600 p-[2px] shadow-2xl shadow-indigo-300/40">
             <div className="rounded-[calc(1.5rem-2px)] bg-white p-8 grid gap-6 sm:grid-cols-2">
               <div className="space-y-1">
                 <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
                   Entrada (Setup)
                 </span>
                 <div className="flex items-baseline gap-2 flex-wrap">
-                  <h2 className="text-4xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
+                  <h2 className="text-4xl font-black bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
                     {layers.parcelas > 1 ? `${layers.parcelas}x ${brl(calc.setupFinal / layers.parcelas)}` : brl(calc.setupFinal)}
                   </h2>
                   {calc.setupFinal < calc.setupOriginal && (
@@ -356,7 +352,7 @@ export function GeracaoDigitalNegotiationBoard({
               meioPagamento: { setup: layers.meioSetup, mensalidade: layers.meioMensalidade },
               carenciaDias: layers.carenciaDias
             })}
-            className="w-full bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-black py-7 rounded-3xl text-sm shadow-2xl shadow-purple-300/50"
+            className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-black py-7 rounded-3xl text-sm shadow-2xl shadow-indigo-300/50"
           >
             Gerar / Fechar Proposta
             <ArrowRight className="h-4 w-4 ml-2" />

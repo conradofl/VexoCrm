@@ -1,13 +1,22 @@
--- Garante que existe pelo menos um tenant para o seed rodar
-INSERT INTO public.tenants (id, name)
-VALUES ('00000000-0000-0000-0000-000000000000', 'Tenant Seed')
-ON CONFLICT (id) DO NOTHING;
+-- Migration to split composite segments in gd_segments table
+-- Deletes the composite ones and inserts the split ones.
 
--- Seeds de segmentos
+DELETE FROM public.gd_segments
+WHERE nome IN (
+  'Imobiliário e incorporadoras',
+  'Clínicas de estética e odontologia',
+  'E-commerce e varejo escalável',
+  'Automotivo (concessionárias e seminovos)',
+  'Advocacia e contabilidade',
+  'Educação (cursos e escolas)',
+  'Saúde (clínicas e laboratórios)',
+  'Franquias e redes multiunidade',
+  'Turismo e hospitalidade',
+  'Food service premium e delivery'
+);
+
 INSERT INTO public.gd_segments (tenant_id, nome, faturamento_min, ativo)
 VALUES
-  ('00000000-0000-0000-0000-000000000000', 'Energia solar', 50000, true),
-  ('00000000-0000-0000-0000-000000000000', 'Consórcios', 30000, true),
   ('00000000-0000-0000-0000-000000000000', 'Imobiliário', 80000, true),
   ('00000000-0000-0000-0000-000000000000', 'Incorporadoras', 100000, true),
   ('00000000-0000-0000-0000-000000000000', 'Clínicas de Estética', 40000, true),

@@ -219,7 +219,7 @@ export const ACCENT_PRESETS = {
     colorHex: "#f59e0b"
   },
   gd: {
-    primary: "from-purple-600 to-pink-500",
+    primary: "from-purple-700 to-indigo-600",
     text: "text-pink-400",
     border: "border-purple-500/30",
     bgGlow: "bg-purple-500/10",
@@ -229,13 +229,13 @@ export const ACCENT_PRESETS = {
     colorHex: "#a855f7"
   },
   "gd-light": {
-    primary: "from-purple-600 to-pink-500",
+    primary: "from-purple-700 to-indigo-600",
     text: "text-purple-600",
     border: "border-purple-100",
     bgGlow: "bg-purple-50",
     shadow: "shadow-purple-100",
     hover: "hover:bg-purple-50",
-    accent: "bg-gradient-to-r from-purple-600 to-pink-500",
+    accent: "bg-gradient-to-r from-purple-700 to-indigo-600",
     colorHex: "#9333ea"
   }
 };
