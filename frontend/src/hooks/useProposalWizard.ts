@@ -63,6 +63,8 @@ export function useProposalWizard({
 
       const finalItems: any[] = [];
 
+      let totalVp = 0;
+
       // 1. Add GD package item
       const selectedGdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
       if (selectedGdPkg) {
@@ -71,12 +73,15 @@ export function useProposalWizard({
         const meses = selectedGdPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedGdPkg.periodo] ?? 1);
         const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
         const valorTabela = Number(selectedGdPkg.valor_tabela || 0);
+        const vp = selectedGdPkg.valor_vp ? Number(selectedGdPkg.valor_vp) : 0;
+        if (vp > 0) totalVp += vp;
 
         finalItems.push({
           product_id: null,
           descricao: `Pacote: ${selectedGdPkg.nome} (${selectedGdPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
           categoria: "gd",
           valor: mensalidade,
+          valor_vp: vp > 0 ? vp : null,
           recorrencia: meses ? "mensal" : "unico",
           periodo: selectedGdPkg.periodo,
           meses,
@@ -105,12 +110,15 @@ export function useProposalWizard({
         const meses = selectedVexoPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedVexoPkg.periodo] ?? 1);
         const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
         const valorTabela = Number(selectedVexoPkg.valor_tabela || 0);
+        const vp = selectedVexoPkg.valor_vp ? Number(selectedVexoPkg.valor_vp) : 0;
+        if (vp > 0) totalVp += vp;
 
         finalItems.push({
           product_id: null,
           descricao: `Pacote Vexo: ${selectedVexoPkg.nome} (${selectedVexoPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
           categoria: "vexo",
           valor: mensalidade,
+          valor_vp: vp > 0 ? vp : null,
           recorrencia: meses ? "mensal" : "unico",
           periodo: selectedVexoPkg.periodo,
           meses,
@@ -136,11 +144,14 @@ export function useProposalWizard({
         if (checked) {
           const prod = vexoProducts.find(p => p.id === id);
           if (prod) {
+            const vp = prod.valor_vp ? Number(prod.valor_vp) : 0;
+            if (vp > 0) totalVp += vp;
             finalItems.push({
               product_id: prod.id,
               descricao: `Vexo OS: ${prod.nome}`,
               categoria: "vexo",
               valor: Number(prod.valor || 0),
+              valor_vp: vp > 0 ? vp : null,
               recorrencia: prod.recorrencia || "mensal"
             });
           }
@@ -152,11 +163,14 @@ export function useProposalWizard({
         if (checked) {
           const prod = gdProducts.find(p => p.id === id);
           if (prod) {
+            const vp = prod.valor_vp ? Number(prod.valor_vp) : 0;
+            if (vp > 0) totalVp += vp;
             finalItems.push({
               product_id: prod.id,
               descricao: `GD: ${prod.nome}`,
               categoria: "gd",
               valor: Number(prod.valor_padrao || 0),
+              valor_vp: vp > 0 ? vp : null,
               recorrencia: prod.recorrencia || "mensal"
             });
           }
@@ -175,7 +189,8 @@ export function useProposalWizard({
         validade_ate: newValidade ? new Date(`${newValidade}T23:59:59`).toISOString() : null,
         condicoes: newCondicoes || undefined,
         payment_link: newPaymentLink || null,
-        carencia_dias: newCarencia !== "" ? Number(newCarencia) : null
+        carencia_dias: newCarencia !== "" ? Number(newCarencia) : null,
+        valor_vp: totalVp > 0 ? totalVp : null
       };
 
       const res = await fetchApi(`/api/gd/proposals`, {

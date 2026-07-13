@@ -48,6 +48,7 @@ interface Proposal {
   prospect_name: string;
   itens: ProposalItem[];
   valor_total: number;
+  valor_vp?: number | null;
   valor_setup: number;
   valor_recorrente: number;
   condicoes: string;
@@ -289,7 +290,7 @@ export default function GeracaoDigitalPublicProposal() {
 
       <header className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 py-8 flex justify-between items-center border-b border-slate-900">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-white font-black text-lg">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 flex items-center justify-center text-white font-black text-lg">
             GD
           </div>
           <div>
@@ -547,6 +548,17 @@ export default function GeracaoDigitalPublicProposal() {
                   </span>
                 )}
               </div>
+              {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
+                <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in">
+                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Permuta Comercial (VP)</span>
+                  <span className="text-purple-400 font-black text-3xl block">
+                    R$ {Number(proposal.valor_vp).toLocaleString("pt-BR")}
+                  </span>
+                  <span className="text-[10px] text-purple-300 block font-light leading-snug">
+                    Acordo realizado via permuta comercial física ou de serviços.
+                  </span>
+                </div>
+              )}
               {(meioSetupPub || meioMensalPub) && (
                 <div className="flex justify-between items-center text-sm font-mono pb-2 border-b border-slate-900">
                   <span className="text-slate-400">Meio de pagamento:</span>
@@ -567,7 +579,7 @@ export default function GeracaoDigitalPublicProposal() {
             {proposal.payment_link && (
               <Button
                 asChild
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-6 rounded-xl text-xs shadow-lg shadow-purple-600/15 flex items-center justify-center gap-1.5"
+                className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-6 rounded-xl text-xs shadow-lg shadow-indigo-600/15 flex items-center justify-center gap-1.5"
               >
                 <a href={proposal.payment_link} target="_blank" rel="noopener noreferrer">
                   Pagar agora
@@ -640,7 +652,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onClick={() => setSignMethod('desenho')}
                       className={cn(
                         "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
-                        signMethod === 'desenho' ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white" : "text-slate-400 hover:text-white"
+                        signMethod === 'desenho' ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white" : "text-slate-400 hover:text-white"
                       )}
                     >
                       Desenhar Assinatura
@@ -650,7 +662,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onClick={() => setSignMethod('digitado')}
                       className={cn(
                         "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
-                        signMethod === 'digitado' ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white" : "text-slate-400 hover:text-white"
+                        signMethod === 'digitado' ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white" : "text-slate-400 hover:text-white"
                       )}
                     >
                       Digitar Nome
@@ -678,6 +690,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onTouchStart={startDrawing}
                       onTouchMove={draw}
                       onTouchEnd={stopDrawing}
+                      style={{ touchAction: "none" }}
                       className="w-full bg-slate-950 border border-slate-900 rounded-xl cursor-crosshair h-[120px]"
                     />
                   </div>
@@ -698,7 +711,7 @@ export default function GeracaoDigitalPublicProposal() {
 
                 <Button
                   onClick={handleSignProposal}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
+                  className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
                 >
                   <PenTool className="h-4 w-4 mr-1.5" />
                   Registrar Assinatura de Aceite

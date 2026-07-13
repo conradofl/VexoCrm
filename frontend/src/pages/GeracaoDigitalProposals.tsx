@@ -50,6 +50,7 @@ interface ProposalItem {
   descricao: string;
   categoria: "gd" | "vexo";
   valor: number;
+  valor_vp?: number | null;
   recorrencia: "mensal" | "unico";
   periodo?: string | null;
   meses?: number | null;
@@ -62,6 +63,7 @@ interface Proposal {
   prospect_name: string;
   itens: ProposalItem[];
   valor_total: number;
+  valor_vp?: number | null;
   valor_setup: number;
   valor_recorrente: number;
   condicoes: string;
@@ -109,6 +111,8 @@ export default function GeracaoDigitalProposals() {
   const [paymentLink, setPaymentLink] = useState<string>("");
   const [editPackageId, setEditPackageId] = useState<string>("");
   const [editPackageVexoId, setEditPackageVexoId] = useState<string>("");
+  const [editValorVp, setEditValorVp] = useState<number>(0);
+  const [vpActive, setVpActive] = useState<boolean>(false);
   const [editVexoAvulsoIds, setEditVexoAvulsoIds] = useState<Record<string, boolean>>({});
   const [editGdAvulsoIds, setEditGdAvulsoIds] = useState<Record<string, boolean>>({});
   const [editCarencia, setEditCarencia] = useState<string>("");
@@ -402,6 +406,8 @@ export default function GeracaoDigitalProposals() {
     setPaymentLink(prop.payment_link || "");
     setCobrarSetup(prop.cobrar_setup === true);
     setValorSetupVexo(Number(prop.valor_setup_vexo || 0));
+    setVpActive(!!prop.valor_vp);
+    setEditValorVp(Number(prop.valor_vp || 0));
     setOfferedTermIds(
       Array.isArray(prop.condicoes_pagamento?.ofertadas)
         ? prop.condicoes_pagamento!.ofertadas.map((t) => t.id)
@@ -728,7 +734,8 @@ export default function GeracaoDigitalProposals() {
         validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
         valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
         observacao_validade: observacaoValidade || null,
-        carencia_dias: result.carenciaDias ?? (editCarencia !== "" ? Number(editCarencia) : null)
+        carencia_dias: result.carenciaDias ?? (editCarencia !== "" ? Number(editCarencia) : null),
+        valor_vp: vpActive ? Number(editValorVp || 0) : null
       };
 
       const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
@@ -1013,7 +1020,7 @@ export default function GeracaoDigitalProposals() {
               <Button
                 size="sm"
                 onClick={() => { setShowNewForm(true); resetWizard(); setProposals([]); }}
-                className="bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-bold text-xs"
+                className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold text-xs"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Nova Proposta
@@ -1043,7 +1050,7 @@ export default function GeracaoDigitalProposals() {
               <Button
                 size="sm"
                 onClick={() => { setShowNewForm(true); resetWizard(); }}
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-bold text-xs mb-1"
+                className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold text-xs mb-1"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Nova Proposta
@@ -1122,7 +1129,7 @@ export default function GeracaoDigitalProposals() {
                       <Button
                         size="sm"
                         onClick={() => setIsNegotiating(true)}
-                        className="bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-bold shrink-0"
+                        className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold shrink-0"
                       >
                         <Sparkles className="h-4 w-4 mr-1.5" />
                         Abrir Mesa de Negociação
@@ -1410,7 +1417,10 @@ export default function GeracaoDigitalProposals() {
                       const calc = calculateProposalValues(tempProposal, availablePackages);
 
                       return (
-                        <div className="grid gap-4 sm:grid-cols-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                        <div className={cn(
+                          "grid gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200",
+                          vpActive ? "sm:grid-cols-4" : "sm:grid-cols-3"
+                        )}>
                           <div className="space-y-1">
                             <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block">1. Taxa de Setup</span>
                             <h4 className="text-lg font-black text-slate-800 font-mono">
@@ -1442,6 +1452,16 @@ export default function GeracaoDigitalProposals() {
                             </h4>
                             <span className="text-[9px] text-slate-450 block">Soma recorrente por {calc.mesesPeriodo} meses</span>
                           </div>
+
+                          {vpActive && (
+                            <div className="space-y-1 border-l border-purple-100 pl-3">
+                              <span className="text-[10px] text-purple-650 uppercase font-black tracking-wider block">4. Permuta Comercial (VP)</span>
+                              <h4 className="text-lg font-black text-purple-700 font-mono">
+                                {editValorVp.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                              </h4>
+                              <span className="text-[9px] text-purple-500 block">Acordado em troca de permuta</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1774,6 +1794,37 @@ export default function GeracaoDigitalProposals() {
                             Deixe vazio para herdar o link de checkout padrão da Geração Digital configurado no tenant.
                           </span>
                         </div>
+
+                        <div className="space-y-2 pt-2 border-t border-slate-100 mt-2">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label className="text-[10px] text-slate-500 font-mono">Ativar VP (Permuta)</Label>
+                              <span className="text-[9px] text-slate-450 block leading-snug">Esta proposta possui permuta associada</span>
+                            </div>
+                            <Switch
+                              checked={vpActive}
+                              disabled={selectedProposal.status === "aceita"}
+                              onCheckedChange={(checked) => {
+                                setVpActive(checked);
+                                if (!checked) setEditValorVp(0);
+                              }}
+                            />
+                          </div>
+
+                          {vpActive && (
+                            <div className="space-y-1.5 pt-1 animate-fade-in">
+                              <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                              <Input
+                                type="number"
+                                value={editValorVp || ""}
+                                disabled={selectedProposal.status === "aceita"}
+                                onChange={(e) => setEditValorVp(Number(e.target.value) || 0)}
+                                placeholder="Valor total para permuta"
+                                className="bg-white border-slate-200 text-xs text-slate-850 font-mono focus:outline-none h-10"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -1842,6 +1893,7 @@ export default function GeracaoDigitalProposals() {
                                 onTouchStart={startDrawing}
                                 onTouchMove={draw}
                                 onTouchEnd={stopDrawing}
+                                style={{ touchAction: "none" }}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl cursor-crosshair h-[120px]"
                               />
                             </div>
@@ -1849,7 +1901,7 @@ export default function GeracaoDigitalProposals() {
 
                           <Button
                             onClick={handleSignProposal}
-                            className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs mt-auto"
+                            className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs mt-auto"
                           >
                             <PenTool className="h-4 w-4 mr-1.5" />
                             Registrar Assinatura de Aceite

@@ -78,12 +78,16 @@ export default function GeracaoDigitalPackages() {
   const [packagePeriod, setPackagePeriod] = useState<string>("mensal");
   const [packageValue, setPackageValue] = useState<number>(0);
   const [packageTabela, setPackageTabela] = useState<number>(0);
+  const [packageVpActive, setPackageVpActive] = useState<boolean>(false);
+  const [packageVpValue, setPackageVpValue] = useState<number>(0);
   const [packageDestaque, setPackageDestaque] = useState<boolean>(false);
   const [packageAtivo, setPackageAtivo] = useState<boolean>(true);
   const [packageIncludedProductIds, setPackageIncludedProductIds] = useState<Record<string, boolean>>({});
 
   // Vexo Products CRUD state
   const [vexoProducts, setVexoProducts] = useState<VexoProduct[]>([]);
+  const [vexoVpActive, setVexoVpActive] = useState<boolean>(false);
+  const [vexoVpValue, setVexoVpValue] = useState<number>(0);
   const [isVexoEditing, setIsVexoEditing] = useState<boolean>(false);
   const [selectedVexoProduct, setSelectedVexoProduct] = useState<VexoProduct | null>(null);
   const [vexoNome, setVexoNome] = useState<string>("");
@@ -180,6 +184,8 @@ export default function GeracaoDigitalPackages() {
     setPackagePeriod("mensal");
     setPackageValue(0);
     setPackageTabela(0);
+    setPackageVpActive(false);
+    setPackageVpValue(0);
     setPackageDestaque(false);
     setPackageAtivo(true);
 
@@ -199,6 +205,8 @@ export default function GeracaoDigitalPackages() {
     setPackagePeriod(pkg.periodo);
     setPackageValue(pkg.valor);
     setPackageTabela(Number(pkg.valor_tabela || 0));
+    setPackageVpActive(!!pkg.valor_vp);
+    setPackageVpValue(Number(pkg.valor_vp || 0));
     setPackageDestaque(pkg.destaque);
     setPackageAtivo(pkg.ativo);
 
@@ -360,6 +368,7 @@ export default function GeracaoDigitalPackages() {
         produtos_incluidos: includedList,
         valor: Number(packageValue || 0),
         valor_tabela: Number(packageTabela || 0) || null,
+        valor_vp: packageVpActive ? Number(packageVpValue || 0) : null,
         destaque: packageDestaque,
         ativo: packageAtivo
       };
@@ -406,6 +415,8 @@ export default function GeracaoDigitalPackages() {
     setVexoNome("");
     setVexoDescricao("");
     setVexoValor(0);
+    setVexoVpActive(false);
+    setVexoVpValue(0);
     setVexoRecorrencia("mensal");
     setVexoAtivo(true);
     setIsVexoEditing(true);
@@ -416,6 +427,8 @@ export default function GeracaoDigitalPackages() {
     setVexoNome(prod.nome);
     setVexoDescricao(prod.descricao || "");
     setVexoValor(prod.valor);
+    setVexoVpActive(!!prod.valor_vp);
+    setVexoVpValue(Number(prod.valor_vp || 0));
     setVexoRecorrencia(prod.recorrencia);
     setVexoAtivo(prod.ativo);
     setIsVexoEditing(true);
@@ -443,6 +456,7 @@ export default function GeracaoDigitalPackages() {
             nome: vexoNome,
             descricao: vexoDescricao,
             valor_padrao: Number(vexoValor || 0),
+            valor_vp: vexoVpActive ? Number(vexoVpValue || 0) : null,
             recorrencia: vexoRecorrencia,
             ativo: vexoAtivo
           }
@@ -451,6 +465,7 @@ export default function GeracaoDigitalPackages() {
             nome: vexoNome,
             descricao: vexoDescricao,
             valor: Number(vexoValor || 0),
+            valor_vp: vexoVpActive ? Number(vexoVpValue || 0) : null,
             recorrencia: vexoRecorrencia,
             ativo: vexoAtivo
           };
@@ -656,7 +671,7 @@ export default function GeracaoDigitalPackages() {
                 </p>
               </div>
               {!isEditing && (
-                <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 font-extrabold text-white text-xs">
+                <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 font-extrabold text-white text-xs">
                   <Plus className="h-4 w-4 mr-1.5" />
                   Novo Pacote
                 </Button>
@@ -765,6 +780,33 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
+                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm h-14">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px] text-slate-700 font-bold">Ativar VP (Permuta)</Label>
+                        <span className="text-[8px] text-slate-500 block">Este pacote aceita permuta</span>
+                      </div>
+                      <Switch checked={packageVpActive} onCheckedChange={setPackageVpActive} />
+                    </div>
+
+                    {packageVpActive ? (
+                      <div className="space-y-1.5 animate-fade-in">
+                        <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                        <Input
+                          type="number"
+                          value={packageVpValue || ""}
+                          onChange={(e) => setPackageVpValue(Number(e.target.value) || 0)}
+                          placeholder="Valor para permuta"
+                          className="bg-white border-slate-200 text-xs text-slate-850 font-mono h-10"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        Permuta desativada para este pacote.
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid gap-4 md:grid-cols-2 items-center">
 
                     <div className="grid gap-2 grid-cols-2 mt-4">
@@ -825,7 +867,7 @@ export default function GeracaoDigitalPackages() {
                     <Button variant="outline" size="sm" onClick={() => setIsEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
                       Cancelar
                     </Button>
-                    <Button onClick={handleSave} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 text-white font-extrabold">
+                    <Button onClick={handleSave} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold">
                       Salvar Modelo de Pacote
                     </Button>
                   </div>
@@ -1024,7 +1066,7 @@ export default function GeracaoDigitalPackages() {
                 </p>
               </div>
               {!isVexoEditing && (
-                <Button onClick={handleOpenVexoCreate} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 font-extrabold text-white text-xs">
+                <Button onClick={handleOpenVexoCreate} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 font-extrabold text-white text-xs">
                   <Plus className="h-4 w-4 mr-1.5" />
                   Novo Módulo
                 </Button>
@@ -1098,11 +1140,38 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
+                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm h-14">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px] text-slate-700 font-bold">Ativar VP (Permuta)</Label>
+                        <span className="text-[8px] text-slate-500 block">Este módulo aceita permuta</span>
+                      </div>
+                      <Switch checked={vexoVpActive} onCheckedChange={setVexoVpActive} />
+                    </div>
+
+                    {vexoVpActive ? (
+                      <div className="space-y-1.5 animate-fade-in">
+                        <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                        <Input
+                          type="number"
+                          value={vexoVpValue || ""}
+                          onChange={(e) => setVexoVpValue(Number(e.target.value) || 0)}
+                          placeholder="Valor para permuta"
+                          className="bg-white border-slate-200 text-xs text-slate-850 font-mono h-10"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        Permuta desativada para este módulo.
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex justify-end gap-2.5 border-t border-slate-200 pt-4 mt-2">
                     <Button variant="outline" size="sm" onClick={() => setIsVexoEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
                       Cancelar
                     </Button>
-                    <Button onClick={handleSaveVexoProduct} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 text-white font-extrabold">
+                    <Button onClick={handleSaveVexoProduct} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold">
                       {moduleOrigin === "gd" ? "Salvar Módulo GD" : "Salvar Módulo Vexo"}
                     </Button>
                   </div>
