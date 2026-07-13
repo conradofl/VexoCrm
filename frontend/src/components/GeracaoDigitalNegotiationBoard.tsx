@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -6,14 +6,10 @@ import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/package
 import {
   X,
   Sparkles,
-  Gift,
-  Percent,
-  Layers,
   CheckCircle,
   ArrowRight,
-  RotateCcw,
   Clock,
-  Wallet
+  Lock
 } from "lucide-react";
 import {
   type PaymentTerm,
@@ -30,8 +26,8 @@ import {
   MEIO_PAGAMENTO_LABELS,
   computeNegotiation
 } from "@/lib/geracaoDigital/negotiation";
-import { MeioPills, DescontoLivreInput } from "@/components/geracaoDigital/NegotiationControls";
-import { ConcessionsPanel } from "@/components/geracaoDigital/ConcessionsPanel";
+import { SellerControlPanel } from "@/components/geracaoDigital/SellerControlPanel";
+import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 
 interface BoardItem {
   descricao: string;
@@ -48,6 +44,7 @@ export interface NegotiationFinalizeResult {
   descontos: DescontoConcedido[];
   valorSetupVexoFinal: number;
   meioPagamento: { setup: MeioPagamento; mensalidade: MeioPagamento };
+  carenciaDias: number | null;
 }
 
 interface NegotiationBoardProps {
@@ -61,6 +58,9 @@ interface NegotiationBoardProps {
   offeredTerms: PaymentTerm[];
   onClose: () => void;
   onFinalize: (result: NegotiationFinalizeResult) => void;
+  packageId?: string | null;
+  packageVexoId?: string | null;
+  availablePackages: any[];
 }
 
 const PERIODO_LABELS: Record<string, string> = {
@@ -82,15 +82,41 @@ export function GeracaoDigitalNegotiationBoard({
   validadeAte,
   offeredTerms,
   onClose,
-  onFinalize
+  onFinalize,
+  packageId,
+  packageVexoId,
+  availablePackages
 }: NegotiationBoardProps) {
   const [layers, setLayers] = useState<NegotiationLayers>(EMPTY_LAYERS);
-  const patch = (p: Partial<NegotiationLayers>) => setLayers((prev) => ({ ...prev, ...p }));
+  const [showSellerPanel, setShowSellerPanel] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        setShowSellerPanel((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const result = useMemo(
     () => computeNegotiation({ setupItensTotal, setupVexoValue, recurringTotal, periodoPlano }, layers, offeredTerms),
     [setupItensTotal, setupVexoValue, recurringTotal, periodoPlano, layers, offeredTerms]
   );
+
+  const calc = useMemo(() => {
+    return calculateProposalValues({
+      cobrar_setup: setupVexoValue > 0,
+      valor_setup_vexo: setupVexoValue,
+      package_id: packageId,
+      package_vexo_id: packageVexoId,
+      periodo_plano: periodoPlano,
+      descontos_concedidos: result.descontos,
+      itens: items
+    }, availablePackages);
+  }, [setupVexoValue, packageId, packageVexoId, periodoPlano, result.descontos, items, availablePackages]);
 
   const anchorItem = items.find((i) => Number(i.total_periodo || 0) > 0) || null;
   const anchorTabela = anchorItem ? Number(anchorItem.valor_tabela || 0) : 0;
@@ -102,15 +128,75 @@ export function GeracaoDigitalNegotiationBoard({
   const gdItems = items.filter((i) => i.categoria !== "vexo");
   const vexoItems = items.filter((i) => i.categoria === "vexo");
   const validadeDate = validadeAte ? new Date(`${validadeAte}T23:59:59`) : null;
-  const temCamadas = result.camadasSetup.length > 0 || result.camadasMensalidade.length > 0 || layers.parcelas > 1;
 
-  const toggleTerm = (term: PaymentTerm) => {
-    if (termAplicaA(term) === "mensalidade") {
-      patch({ condicaoMensalidadeId: layers.condicaoMensalidadeId === term.id ? null : term.id });
-    } else {
-      patch({ condicaoSetupId: layers.condicaoSetupId === term.id ? null : term.id });
+  const condSetupActive = useMemo(() => offeredTerms.find((t) => t.id === layers.condicaoSetupId), [offeredTerms, layers.condicaoSetupId]);
+  const condMensalActive = useMemo(() => offeredTerms.find((t) => t.id === layers.condicaoMensalidadeId), [offeredTerms, layers.condicaoMensalidadeId]);
+
+  const condicaoVigenteEl = useMemo(() => {
+    const hasSetupCond = !!condSetupActive;
+    const hasMensalCond = !!condMensalActive;
+    const hasParcelamento = layers.parcelas > 1;
+    const hasMeioSetup = !!layers.meioSetup;
+    const hasMeioMensal = !!layers.meioMensalidade;
+
+    if (!hasSetupCond && !hasMensalCond && !hasParcelamento && !hasMeioSetup && !hasMeioMensal) {
+      return (
+        <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-xl shadow-purple-100/50 p-6 space-y-3">
+          <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-purple-600">Condição Comercial</h3>
+          <p className="text-xs text-slate-500 font-medium">Condições padrão de faturamento (à vista/mensal).</p>
+        </div>
+      );
     }
-  };
+
+    return (
+      <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-xl shadow-purple-100/50 p-6 space-y-4">
+        <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-purple-600">Condição Comercial Vigente</h3>
+        <div className="space-y-3">
+          {(condSetupActive || hasParcelamento || hasMeioSetup) && (
+            <div className="space-y-1">
+              <span className="text-[9px] font-black uppercase text-purple-500 block">Setup / Entrada</span>
+              <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100 text-xs font-semibold text-slate-700 space-y-1">
+                {condSetupActive ? (
+                  <>
+                    <span className="text-xs font-bold text-slate-800 block">{condSetupActive.nome}</span>
+                    {computePaymentBreakdown(condSetupActive, result.entradaOriginal).linhas.map((l, i) => (
+                      <span key={i} className="text-[10px] text-purple-700 font-medium block">{l}</span>
+                    ))}
+                  </>
+                ) : (
+                  <div>{hasParcelamento ? `Parcelado em ${layers.parcelas}x de ${brl(result.valorParcela)}` : "À vista"}</div>
+                )}
+                {hasMeioSetup && (
+                  <div className="text-[10px] text-purple-600 font-bold">Meio: {MEIO_PAGAMENTO_LABELS[layers.meioSetup]}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(condMensalActive || hasMeioMensal) && (
+            <div className="space-y-1">
+              <span className="text-[9px] font-black uppercase text-blue-500 block">Mensalidade</span>
+              <div className="p-3 rounded-xl bg-blue-50/50 border border-blue-100 text-xs font-semibold text-slate-700 space-y-1">
+                {condMensalActive ? (
+                  <>
+                    <span className="text-xs font-bold text-slate-800 block">{condMensalActive.nome}</span>
+                    {computePaymentBreakdown(condMensalActive, result.mensalidadeOriginal).linhas.map((l, i) => (
+                      <span key={i} className="text-[10px] text-blue-700 font-medium block">{l}</span>
+                    ))}
+                  </>
+                ) : (
+                  <div>Faturamento recorrente</div>
+                )}
+                {hasMeioMensal && (
+                  <div className="text-[10px] text-blue-600 font-bold">Meio: {MEIO_PAGAMENTO_LABELS[layers.meioMensalidade]}</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }, [condSetupActive, condMensalActive, layers, result, result.entradaOriginal, result.mensalidadeOriginal]);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-gradient-to-br from-purple-50 via-white to-pink-50">
@@ -126,8 +212,16 @@ export function GeracaoDigitalNegotiationBoard({
             <div className="h-9 w-9 rounded-xl bg-gradient-to-r from-purple-600 to-pink-500 flex items-center justify-center">
               <Sparkles className="h-4 w-4 text-white" />
             </div>
-            <span className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-purple-600">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-purple-600 flex items-center gap-1.5">
               Mesa de Negociação
+              <button
+                type="button"
+                onClick={() => setShowSellerPanel(true)}
+                className="opacity-20 hover:opacity-100 transition-opacity p-1 text-slate-400 hover:text-slate-650 rounded"
+                title="Painel do Vendedor (Ctrl+Shift+M)"
+              >
+                <Lock className="h-3 w-3" />
+              </button>
             </span>
           </div>
           <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">{prospectName}</h1>
@@ -155,7 +249,7 @@ export function GeracaoDigitalNegotiationBoard({
       </header>
 
       <main className="relative z-10 max-w-6xl mx-auto px-8 py-8 grid gap-8 lg:grid-cols-5">
-        {/* Escopo + condições selecionáveis */}
+        {/* Escopo + condição contratual vigente */}
         <section className="lg:col-span-2 space-y-5">
           <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-xl shadow-purple-100/50 p-6 space-y-4">
             <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-purple-600">Escopo Contratado</h3>
@@ -182,71 +276,30 @@ export function GeracaoDigitalNegotiationBoard({
             )}
           </div>
 
-          {offeredTerms.length > 0 && (
-            <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-xl shadow-purple-100/50 p-6 space-y-3">
-              <h3 className="text-xs font-mono font-bold uppercase tracking-widest text-purple-600">Condições Disponíveis</h3>
-              <p className="text-[10px] text-slate-500">Clique para aplicar à negociação — o efeito entra nas concessões.</p>
-              {offeredTerms.map((term) => {
-                const aplicaA = termAplicaA(term);
-                const selecionada = layers.condicaoSetupId === term.id || layers.condicaoMensalidadeId === term.id;
-                const base = aplicaA === "mensalidade" ? result.mensalidadeOriginal : result.entradaOriginal;
-                const b = computePaymentBreakdown(term, base);
-                return (
-                  <button
-                    key={term.id}
-                    type="button"
-                    onClick={() => toggleTerm(term)}
-                    className={cn(
-                      "w-full text-left p-3 rounded-2xl border space-y-0.5 transition-all",
-                      selecionada
-                        ? "bg-purple-100/80 border-purple-400 shadow-md"
-                        : "bg-purple-50/60 border-purple-100 hover:border-purple-300"
-                    )}
-                  >
-                    <span className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                      <span>
-                        {term.nome}
-                        <span className={aplicaA === "mensalidade" ? "text-[9px] font-black uppercase text-blue-600 ml-1.5" : "text-[9px] font-black uppercase text-purple-500 ml-1.5"}>
-                          · {APLICA_A_LABELS[aplicaA]}
-                        </span>
-                      </span>
-                      {selecionada && <CheckCircle className="h-4 w-4 text-purple-600 shrink-0" />}
-                    </span>
-                    {b.linhas.map((l, i) => (
-                      <span key={i} className="text-[10px] text-purple-700 font-medium block">{l}</span>
-                    ))}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {condicaoVigenteEl}
         </section>
 
-        {/* Valores + alavancas */}
+        {/* Valores */}
         <section className="lg:col-span-3 space-y-5">
-          {anchorItem && (
-            <div className="rounded-3xl bg-white/85 backdrop-blur border border-pink-200 shadow-xl shadow-pink-100/50 p-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-pink-500 w-full">
-                {anchorItem.periodo && PKG_PERIOD_LABELS[anchorItem.periodo]
-                  ? `Compromisso do Período — Plano ${PKG_PERIOD_LABELS[anchorItem.periodo]}`
-                  : "Compromisso do Período"}
-              </span>
-              {anchorDescontoPct !== null && (
-                <span className="text-xl font-bold text-slate-400 line-through">De {brl(anchorTabela)}</span>
-              )}
-              <span className="text-3xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
-                {anchorDescontoPct !== null ? "por " : ""}{brl(anchorTotal)}
-              </span>
-              {anchorDescontoPct !== null && (
-                <Badge className="bg-emerald-100 text-emerald-700 border-none font-black text-xs px-2.5 py-0.5">
-                  {anchorDescontoPct}% OFF
-                </Badge>
-              )}
-              <span className="text-xs font-bold text-slate-500 w-full">
-                diluído em {Number(anchorItem.meses || 1)}x → {brl(Number(anchorItem.valor || 0))}/mês (mensalidade abaixo)
-              </span>
-            </div>
-          )}
+          <div className="rounded-3xl bg-white/85 backdrop-blur border border-pink-200 shadow-xl shadow-pink-100/50 p-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-pink-500 w-full">
+              Compromisso Total do Período Contratual
+            </span>
+            {calc.compromissoFinal < calc.compromissoOriginal && (
+              <span className="text-xl font-bold text-slate-400 line-through">De {brl(calc.compromissoOriginal)}</span>
+            )}
+            <span className="text-3xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
+              {calc.compromissoFinal < calc.compromissoOriginal ? "por " : ""}{brl(calc.compromissoFinal)}
+            </span>
+            {calc.compromissoFinal < calc.compromissoOriginal && (
+              <Badge className="bg-emerald-100 text-emerald-700 border-none font-black text-xs px-2.5 py-0.5">
+                {Math.round((1 - calc.compromissoFinal / calc.compromissoOriginal) * 100)}% OFF
+              </Badge>
+            )}
+            <span className="text-xs font-bold text-slate-500 w-full">
+              diluído em {calc.mesesPeriodo} meses → {brl(calc.mensalidadeFinal)}/mês (mensalidade abaixo)
+            </span>
+          </div>
 
           {/* Painel de valores — trilhas separadas */}
           <div className="rounded-3xl bg-gradient-to-r from-purple-600 to-pink-500 p-[2px] shadow-2xl shadow-purple-300/40">
@@ -257,10 +310,10 @@ export function GeracaoDigitalNegotiationBoard({
                 </span>
                 <div className="flex items-baseline gap-2 flex-wrap">
                   <h2 className="text-4xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
-                    {layers.parcelas > 1 ? `${layers.parcelas}x ${brl(result.valorParcela)}` : brl(result.entradaFinal)}
+                    {layers.parcelas > 1 ? `${layers.parcelas}x ${brl(calc.setupFinal / layers.parcelas)}` : brl(calc.setupFinal)}
                   </h2>
-                  {result.entradaFinal < result.entradaOriginal && (
-                    <span className="text-sm font-bold text-slate-400 line-through">{brl(result.entradaOriginal)}</span>
+                  {calc.setupFinal < calc.setupOriginal && (
+                    <span className="text-sm font-bold text-slate-400 line-through">{brl(calc.setupOriginal)}</span>
                   )}
                 </div>
                 {setupVexoValue > 0 && (
@@ -280,10 +333,10 @@ export function GeracaoDigitalNegotiationBoard({
                 </span>
                 <div className="flex items-baseline gap-2 flex-wrap sm:justify-end">
                   <h2 className="text-4xl font-black text-slate-900">
-                    {brl(result.mensalidadeFinal)}<span className="text-base font-bold text-slate-400">/mês</span>
+                    {brl(calc.mensalidadeFinal)}<span className="text-base font-bold text-slate-400">/mês</span>
                   </h2>
-                  {result.mensalidadeFinal < result.mensalidadeOriginal && (
-                    <span className="text-sm font-bold text-slate-400 line-through">{brl(result.mensalidadeOriginal)}</span>
+                  {calc.mensalidadeFinal < calc.mensalidadeOriginal && (
+                    <span className="text-sm font-bold text-slate-400 line-through">{brl(calc.mensalidadeOriginal)}</span>
                   )}
                 </div>
                 <span className="text-[10px] text-slate-500 block">faturamento recorrente, à parte da entrada</span>
@@ -296,126 +349,12 @@ export function GeracaoDigitalNegotiationBoard({
             </div>
           </div>
 
-          {/* Alavancas */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <button
-              onClick={() => patch({ isencaoSetup: !layers.isencaoSetup })}
-              disabled={setupVexoValue <= 0}
-              className={cn(
-                "rounded-3xl p-5 text-left border-2 transition-all space-y-2 bg-white shadow-lg",
-                setupVexoValue <= 0 && "opacity-40 cursor-not-allowed",
-                layers.isencaoSetup ? "border-emerald-400 shadow-emerald-100" : "border-transparent hover:border-purple-200 shadow-purple-100/60"
-              )}
-            >
-              <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center", layers.isencaoSetup ? "bg-emerald-100 text-emerald-600" : "bg-purple-100 text-purple-600")}>
-                <Gift className="h-4 w-4" />
-              </div>
-              <h4 className="text-sm font-black text-slate-800">Isentar Setup</h4>
-              <p className="text-[10px] text-slate-500 leading-snug">
-                {layers.isencaoSetup ? "Setup isento nesta negociação ✔" : "Cortesia de implantação (ex: plano anual)."}
-              </p>
-            </button>
-
-            <div className={cn(
-              "rounded-3xl p-5 border-2 bg-white shadow-lg space-y-2 transition-all",
-              layers.descontoSetup.valor > 0 ? "border-pink-400 shadow-pink-100" : "border-transparent shadow-purple-100/60"
-            )}>
-              <div className="flex items-center gap-2">
-                <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center shrink-0", layers.descontoSetup.valor > 0 ? "bg-pink-100 text-pink-600" : "bg-purple-100 text-purple-600")}>
-                  <Percent className="h-4 w-4" />
-                </div>
-                <h4 className="text-sm font-black text-slate-800">Desconto na Entrada</h4>
-              </div>
-              <DescontoLivreInput
-                modo={layers.descontoSetup.modo}
-                valor={layers.descontoSetup.valor}
-                max={result.entradaOriginal}
-                onModo={(m) => patch({ descontoSetup: { modo: m, valor: 0 } })}
-                onValor={(v) => patch({ descontoSetup: { ...layers.descontoSetup, valor: v } })}
-                alvo="a entrada (setup)"
-              />
-            </div>
-
-            <div className={cn(
-              "rounded-3xl p-5 border-2 bg-white shadow-lg space-y-2 transition-all",
-              layers.descontoMensalidade.valor > 0 ? "border-blue-400 shadow-blue-100" : "border-transparent shadow-purple-100/60"
-            )}>
-              <div className="flex items-center gap-2">
-                <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center shrink-0", layers.descontoMensalidade.valor > 0 ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600")}>
-                  <Percent className="h-4 w-4" />
-                </div>
-                <h4 className="text-sm font-black text-slate-800">Desconto na Mensalidade</h4>
-              </div>
-              <DescontoLivreInput
-                modo={layers.descontoMensalidade.modo}
-                valor={layers.descontoMensalidade.valor}
-                max={result.mensalidadeOriginal}
-                onModo={(m) => patch({ descontoMensalidade: { modo: m, valor: 0 } })}
-                onValor={(v) => patch({ descontoMensalidade: { ...layers.descontoMensalidade, valor: v } })}
-                alvo="a mensalidade"
-              />
-            </div>
-
-            <div className={cn(
-              "rounded-3xl p-5 border-2 bg-white shadow-lg space-y-2 transition-all",
-              layers.parcelas > 1 ? "border-purple-400 shadow-purple-100" : "border-transparent shadow-purple-100/60"
-            )}>
-              <div className="h-9 w-9 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
-                <Layers className="h-4 w-4" />
-              </div>
-              <h4 className="text-sm font-black text-slate-800">Dividir / Parcelar</h4>
-              <div className="flex gap-1.5">
-                {[1, 3, 6, 12].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => patch({ parcelas: n })}
-                    className={cn(
-                      "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
-                      layers.parcelas === n
-                        ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white border-transparent"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
-                    )}
-                  >
-                    {n === 1 ? "1x" : `${n}x`}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-slate-500 leading-snug">parcela só a entrada — mensalidade à parte</p>
-            </div>
-          </div>
-
-          {/* Meio de pagamento */}
-          <div className="rounded-3xl bg-white/85 backdrop-blur border border-purple-100 shadow-lg p-5 grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Wallet className="h-4 w-4 text-purple-600" />
-                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Meio de pagamento — Entrada</h4>
-              </div>
-              <MeioPills value={layers.meioSetup} onChange={(m) => patch({ meioSetup: m })} disabled={result.entradaOriginal <= 0} />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Wallet className="h-4 w-4 text-blue-600" />
-                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Meio de pagamento — Mensalidade</h4>
-              </div>
-              <MeioPills value={layers.meioMensalidade} onChange={(m) => patch({ meioMensalidade: m })} disabled={result.mensalidadeOriginal <= 0} />
-            </div>
-          </div>
-
-          {/* Concessões acumuladas */}
-          {temCamadas && (
-            <ConcessionsPanel
-              result={result}
-              parcelas={layers.parcelas}
-              onReset={() => setLayers(EMPTY_LAYERS)}
-            />
-          )}
-
           <Button
             onClick={() => onFinalize({
               descontos: result.descontos,
               valorSetupVexoFinal: layers.isencaoSetup ? 0 : setupVexoValue,
-              meioPagamento: { setup: layers.meioSetup, mensalidade: layers.meioMensalidade }
+              meioPagamento: { setup: layers.meioSetup, mensalidade: layers.meioMensalidade },
+              carenciaDias: layers.carenciaDias
             })}
             className="w-full bg-gradient-to-r from-purple-600 to-pink-500 hover:opacity-90 text-white font-black py-7 rounded-3xl text-sm shadow-2xl shadow-purple-300/50"
           >
@@ -424,6 +363,17 @@ export function GeracaoDigitalNegotiationBoard({
           </Button>
         </section>
       </main>
+
+      {/* Painel do Vendedor (Drawer oculto) */}
+      <SellerControlPanel
+        open={showSellerPanel}
+        onOpenChange={setShowSellerPanel}
+        layers={layers}
+        onLayersChange={setLayers}
+        result={result}
+        offeredTerms={offeredTerms}
+        setupVexoValue={setupVexoValue}
+      />
     </div>
   );
 }
