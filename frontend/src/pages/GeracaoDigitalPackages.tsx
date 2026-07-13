@@ -62,7 +62,7 @@ export default function GeracaoDigitalPackages() {
   const { isAuthenticated, getIdToken, clientId } = useAuth();
 
   // State
-  const [activeSection, setActiveSection] = useState<"packages" | "vexo-products" | "gd-products">("packages");
+  const [activeSection, setActiveSection] = useState<"packages" | "vexo-packages" | "vexo-products" | "gd-products">("packages");
   // Seção de módulos parametrizada: "vexo-products" e "gd-products" reusam o mesmo form/lista
   const moduleOrigin: "gd" | "vexo" = activeSection === "gd-products" ? "gd" : "vexo";
   const [packages, setPackages] = useState<Package[]>([]);
@@ -176,7 +176,7 @@ export default function GeracaoDigitalPackages() {
   const handleOpenCreate = () => {
     setSelectedPackage(null);
     setPackageName("");
-    setPackageTipo("gd");
+    setPackageTipo(activeSection === "vexo-packages" ? "vexo" : "gd");
     setPackagePeriod("mensal");
     setPackageValue(0);
     setPackageTabela(0);
@@ -184,7 +184,8 @@ export default function GeracaoDigitalPackages() {
     setPackageAtivo(true);
 
     const initialMap: Record<string, boolean> = {};
-    products.forEach((p) => {
+    const catalog = (activeSection === "vexo-packages") ? vexoProducts : products;
+    catalog.forEach((p) => {
       initialMap[p.id] = false;
     });
     setPackageIncludedProductIds(initialMap);
@@ -596,20 +597,6 @@ export default function GeracaoDigitalPackages() {
             </button>
             <button
               onClick={() => {
-                setActiveSection("vexo-products");
-                setIsVexoEditing(false);
-              }}
-              className={cn(
-                "px-5 py-2 rounded-lg text-xs font-bold transition-all",
-                activeSection === "vexo-products"
-                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
-              )}
-            >
-              Módulos Vexo OS
-            </button>
-            <button
-              onClick={() => {
                 setActiveSection("gd-products");
                 setIsVexoEditing(false);
               }}
@@ -622,17 +609,51 @@ export default function GeracaoDigitalPackages() {
             >
               Módulos Geração Digital
             </button>
+            <button
+              onClick={() => {
+                setActiveSection("vexo-packages");
+                setIsEditing(false);
+              }}
+              className={cn(
+                "px-5 py-2 rounded-lg text-xs font-bold transition-all",
+                activeSection === "vexo-packages"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              )}
+            >
+              Pacotes Vexo OS
+            </button>
+            <button
+              onClick={() => {
+                setActiveSection("vexo-products");
+                setIsVexoEditing(false);
+              }}
+              className={cn(
+                "px-5 py-2 rounded-lg text-xs font-bold transition-all",
+                activeSection === "vexo-products"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              )}
+            >
+              Módulos Vexo OS
+            </button>
           </div>
         </div>
 
         {/* SECTION 1: PACKAGES CRUD */}
-        {activeSection === "packages" && (
+        {(activeSection === "packages" || activeSection === "vexo-packages") && (
           <>
             {/* Top Header Controls */}
             <div className="flex justify-between items-center mb-8 relative z-10 border-b border-slate-200 pb-4">
               <div className="space-y-0.5">
-                <h2 className="text-base font-bold text-slate-800">Templates de Pacotes Salvos</h2>
-                <p className="text-xs text-slate-500">Estes pacotes estarão disponíveis para simulação em qualquer apresentação comercial futura.</p>
+                <h2 className="text-base font-bold text-slate-800">
+                  {activeSection === "vexo-packages" ? "Templates de Pacotes Vexo OS" : "Templates de Pacotes Geração Digital"}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {activeSection === "vexo-packages"
+                    ? "Estes pacotes estarão disponíveis para simulação Vexo OS em propostas comerciais futuras."
+                    : "Estes pacotes estarão disponíveis para simulação em qualquer apresentação comercial futura."}
+                </p>
               </div>
               {!isEditing && (
                 <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 font-extrabold text-white text-xs">
@@ -830,19 +851,14 @@ export default function GeracaoDigitalPackages() {
                     </Button>
                   </CardContent>
                 </Card>
-              ) : packages.length === 0 ? (
-                <Card className="bg-white border-slate-200 p-8 text-center max-w-md mx-auto shadow-sm">
-                  <CardContent className="space-y-4">
-                    <Layers className="h-12 w-12 text-slate-400 mx-auto" />
-                    <h3 className="text-base font-bold text-slate-800">Nenhum Pacote Cadastrado</h3>
-                    <p className="text-xs text-slate-500">
-                      Clique em "Novo Pacote" no topo para criar seus templates comerciais fechados.
-                    </p>
-                  </CardContent>
-                </Card>
               ) : (() => {
-                const gdPackages = packages.filter(p => p.tipo === "gd" || !p.tipo);
-                const vexoPackages = packages.filter(p => p.tipo === "vexo");
+                const displayedPackages = activeSection === "vexo-packages"
+                  ? packages.filter(p => p.tipo === "vexo")
+                  : packages.filter(p => p.tipo === "gd" || !p.tipo);
+
+                const titleText = activeSection === "vexo-packages"
+                  ? "Pacotes Vexo OS"
+                  : "Pacotes Geração Digital (GD)";
 
                 const renderPackageGrid = (pkgList: Package[]) => (
                   <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 relative z-10 animate-fade-in">
@@ -962,27 +978,29 @@ export default function GeracaoDigitalPackages() {
                   </div>
                 );
 
+                if (displayedPackages.length === 0) {
+                  return (
+                    <Card className="bg-white border-slate-200 p-8 text-center max-w-md mx-auto shadow-sm">
+                      <CardContent className="space-y-4">
+                        <Layers className="h-12 w-12 text-slate-400 mx-auto" />
+                        <h3 className="text-base font-bold text-slate-800">Nenhum Pacote Cadastrado</h3>
+                        <p className="text-xs text-slate-500">
+                          Clique em "Novo Pacote" no topo para criar seus templates comerciais fechados.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+
                 return (
                   <div className="space-y-8">
-                    {gdPackages.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pacotes Geração Digital (GD)</span>
-                          <Badge className="bg-slate-100 text-slate-600 text-[10px] font-bold border-none">{gdPackages.length}</Badge>
-                        </div>
-                        {renderPackageGrid(gdPackages)}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{titleText}</span>
+                        <Badge className="bg-slate-100 text-slate-600 text-[10px] font-bold border-none">{displayedPackages.length}</Badge>
                       </div>
-                    )}
-
-                    {vexoPackages.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pacotes Vexo OS</span>
-                          <Badge className="bg-slate-100 text-slate-600 text-[10px] font-bold border-none">{vexoPackages.length}</Badge>
-                        </div>
-                        {renderPackageGrid(vexoPackages)}
-                      </div>
-                    )}
+                      {renderPackageGrid(displayedPackages)}
+                    </div>
                   </div>
                 );
               })()
