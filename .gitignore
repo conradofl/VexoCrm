@@ -67,3 +67,7 @@ nul
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Local/AI files
+task.md
+_memoria/
