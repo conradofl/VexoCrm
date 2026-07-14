@@ -307,7 +307,7 @@ export default function GeracaoDigitalCommercialPitch({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-50 text-slate-800 overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
+    <div className="fixed inset-0 z-50 bg-slate-50 text-slate-800 overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300 dark:text-white">
 
       {/* Light background gradients */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
@@ -330,14 +330,14 @@ export default function GeracaoDigitalCommercialPitch({
                 </div>
               )}
               <div>
-                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Apresentação Comercial</span>
-                <h3 className="text-sm font-extrabold text-slate-850 leading-tight">{prospectName}</h3>
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block dark:text-slate-400">Apresentação Comercial</span>
+                <h3 className="text-sm font-extrabold text-slate-850 leading-tight dark:text-white">{prospectName}</h3>
               </div>
             </>
           ) : (
             <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Apresentação Comercial</span>
-              <h3 className="text-sm font-extrabold text-slate-850 leading-tight">Vexo OS</h3>
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block dark:text-slate-400">Apresentação Comercial</span>
+              <h3 className="text-sm font-extrabold text-slate-850 leading-tight dark:text-white">Vexo OS</h3>
             </div>
           )}
         </div>
@@ -346,7 +346,7 @@ export default function GeracaoDigitalCommercialPitch({
           <Badge className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-none font-bold uppercase tracking-wider text-[10px] px-3.5 py-1.5 shadow-md shadow-indigo-600/10">
             Geração Digital
           </Badge>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-655 transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-655 transition-colors dark:text-slate-200">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -371,16 +371,16 @@ export default function GeracaoDigitalCommercialPitch({
               </div>
             )}
 
-            <h1 className="text-4xl md:text-6xl font-black tracking-tight text-slate-900 leading-tight">
+            <h1 className="text-4xl md:text-6xl font-black tracking-tight text-slate-900 leading-tight dark:text-white">
               Aceleração Digital para
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-700 to-indigo-650 text-6xl md:text-8xl block mt-4 font-black tracking-tighter">
                 {prospectName}
               </span>
             </h1>
-            <p className="text-slate-655 text-base md:text-lg max-w-xl mx-auto font-medium leading-relaxed">
+            <p className="text-slate-655 text-base md:text-lg max-w-xl mx-auto font-medium leading-relaxed dark:text-slate-200">
               Como construir uma máquina de geração de leads e conversão de vendas desenhada especificamente para o segmento de <span className="text-purple-600 font-extrabold">{segmentName}</span>.
             </p>
-            <div className="pt-6 flex items-center justify-center gap-2 text-slate-500 text-xs">
+            <div className="pt-6 flex items-center justify-center gap-2 text-slate-500 text-xs dark:text-slate-400">
               <Target className="h-4 w-4 text-purple-600" />
               <span className="font-semibold uppercase tracking-wider text-[9px] text-slate-400 font-mono">Diagnóstico Comercial GD</span>
             </div>
@@ -393,10 +393,10 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-red-50 hover:bg-red-50 text-red-650 border border-red-100 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 02 · Diagnóstico
             </Badge>
-            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight">
+            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight dark:text-white">
               Os Gargalos de Vendas no Setor de <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-700 to-indigo-600">{segmentName}</span>
             </h2>
-            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light">
+            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light dark:text-slate-200">
               Mapeamos os 3 principais pontos de vazamento de faturamento que ocorrem frequentemente na jornada de clientes do seu setor:
             </p>
 
@@ -406,8 +406,8 @@ export default function GeracaoDigitalCommercialPitch({
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-500 mb-2">
                     <Flame className="h-5 w-5" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-850">Desperdiçar cliques pagos</h3>
-                  <p className="text-slate-600 text-[11px] leading-relaxed mt-1">
+                  <h3 className="text-sm font-bold text-slate-850 dark:text-white">Desperdiçar cliques pagos</h3>
+                  <p className="text-slate-600 text-[11px] leading-relaxed mt-1 dark:text-slate-200">
                     Investimentos em tráfego que geram cliques curiosos e leads desqualificados sem intenção de compra.
                   </p>
                 </div>
@@ -418,8 +418,8 @@ export default function GeracaoDigitalCommercialPitch({
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-500 mb-2">
                     <Zap className="h-5 w-5" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-850">Lentidão no atendimento</h3>
-                  <p className="text-slate-600 text-[11px] leading-relaxed mt-1">
+                  <h3 className="text-sm font-bold text-slate-850 dark:text-white">Lentidão no atendimento</h3>
+                  <p className="text-slate-600 text-[11px] leading-relaxed mt-1 dark:text-slate-200">
                     Perder o momento de interesse: responder um lead horas após o cadastro reduz as chances de conversão em até 8x.
                   </p>
                 </div>
@@ -430,8 +430,8 @@ export default function GeracaoDigitalCommercialPitch({
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-500 mb-2">
                     <Layers className="h-5 w-5" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-850">Funil desestruturado</h3>
-                  <p className="text-slate-600 text-[11px] leading-relaxed mt-1">
+                  <h3 className="text-sm font-bold text-slate-850 dark:text-white">Funil desestruturado</h3>
+                  <p className="text-slate-600 text-[11px] leading-relaxed mt-1 dark:text-slate-200">
                     Ausência de sequências automáticas de acompanhamento e nutrição que reaquecem os contatos antigos.
                   </p>
                 </div>
@@ -442,7 +442,7 @@ export default function GeracaoDigitalCommercialPitch({
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-550 mb-2">
                     <AlertTriangle className="h-5 w-5" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-850">Outras Dores Mapeadas</h3>
+                  <h3 className="text-sm font-bold text-slate-850 dark:text-white">Outras Dores Mapeadas</h3>
                 </div>
               </Card>
             </div>
@@ -455,17 +455,17 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-red-50 hover:bg-red-50 text-red-650 border border-red-100 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 03 · Custo da Oportunidade Perdida
             </Badge>
-            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight">
+            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight dark:text-white">
               O Custo Oculto do Funil Comercial
             </h2>
-            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light">
+            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light dark:text-slate-200">
               Considerando seu volume atual de **{leadsCount} contatos/mês** e uma conversão média estimada em **{customConv}%**:
             </p>
 
             <div className="grid gap-6 md:grid-cols-2 pt-6 max-w-2xl mx-auto">
               <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none p-6 flex flex-col justify-center items-center space-y-2 text-center">
-                <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Leads perdidos por ano</span>
-                <span className="text-4xl font-black text-slate-800 font-mono">
+                <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider dark:text-slate-400">Leads perdidos por ano</span>
+                <span className="text-4xl font-black text-slate-800 font-mono dark:text-white">
                   <AnimatedCounter value={unconvertedLeads * 12} />
                 </span>
                 <span className="text-[10px] text-slate-400">Pessoas interessadas sem fechar negócio</span>
@@ -494,16 +494,16 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-emerald-50 hover:bg-emerald-50 text-emerald-600 border border-emerald-100 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 04 · Recuperação de Receita
             </Badge>
-            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight">
+            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight dark:text-white">
               A Aceleração Comercial
             </h2>
-            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light">
+            <p className="text-slate-600 text-sm max-w-xl mx-auto font-light dark:text-slate-200">
               Nossa estratégia inicial foca em blindar seu funil para recuperar e converter **40% dessas perdas atuais**:
             </p>
 
             <div className="grid gap-6 md:grid-cols-2 pt-6 max-w-2xl mx-auto">
               <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none p-6 flex flex-col justify-center items-center space-y-2 text-center">
-                <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Nova Conversão Alvo</span>
+                <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider dark:text-slate-400">Nova Conversão Alvo</span>
                 <span className="text-4xl font-black text-purple-600 font-mono">
                   {newConversionRate}%
                 </span>
@@ -532,10 +532,10 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 05 · A Engrenagem
             </Badge>
-            <h2 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight dark:text-white">
               A Engrenagem de Geração & Conversão
             </h2>
-            <p className="text-slate-655 text-lg max-w-2xl mx-auto font-light">
+            <p className="text-slate-655 text-lg max-w-2xl mx-auto font-light dark:text-slate-200">
               Como aplicamos nossa infraestrutura para obter a aceleração de receita vista no diagnóstico:
             </p>
 
@@ -544,8 +544,8 @@ export default function GeracaoDigitalCommercialPitch({
                 <div className="h-14 w-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 font-black text-lg">
                   01
                 </div>
-                <h3 className="text-xl font-bold text-slate-850">Atração Segmentada</h3>
-                <p className="text-slate-655 text-base leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 dark:text-white">Atração Segmentada</h3>
+                <p className="text-slate-655 text-base leading-relaxed dark:text-slate-200">
                   Campanhas de tráfego focado construídas com base no perfil ideal de cliente do segmento de {segmentName.toLowerCase()}.
                 </p>
               </Card>
@@ -553,8 +553,8 @@ export default function GeracaoDigitalCommercialPitch({
                 <div className="h-14 w-14 rounded-2xl bg-pink-50 flex items-center justify-center text-pink-600 font-black text-lg">
                   02
                 </div>
-                <h3 className="text-xl font-bold text-slate-850">Captura e Engajamento</h3>
-                <p className="text-slate-655 text-base leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 dark:text-white">Captura e Engajamento</h3>
+                <p className="text-slate-655 text-base leading-relaxed dark:text-slate-200">
                   Landing Pages de alta velocidade integradas a formulários inteligentes que qualificam o lead em tempo real.
                 </p>
               </Card>
@@ -562,8 +562,8 @@ export default function GeracaoDigitalCommercialPitch({
                 <div className="h-14 w-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-lg">
                   03
                 </div>
-                <h3 className="text-xl font-bold text-slate-850">Régua de Relacionamento</h3>
-                <p className="text-slate-655 text-base leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 dark:text-white">Régua de Relacionamento</h3>
+                <p className="text-slate-655 text-base leading-relaxed dark:text-slate-200">
                   Follow-ups automáticos no WhatsApp e campanhas de remarketing recorrentes para converter oportunidades.
                 </p>
               </Card>
@@ -581,10 +581,10 @@ export default function GeracaoDigitalCommercialPitch({
                 <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
                   Slide 06 · Solução sob Medida
                 </Badge>
-                <h2 className="text-2xl md:text-3xl font-black text-slate-900 leading-tight">
+                <h2 className="text-2xl md:text-3xl font-black text-slate-900 leading-tight dark:text-white">
                   Construa a Solução ao Vivo
                 </h2>
-                <p className="text-slate-600 text-xs">
+                <p className="text-slate-600 text-xs dark:text-slate-200">
                   Clique nos blocos estratégicos abaixo para desenhar o escopo ideal para o cliente (sem exibição de valores):
                 </p>
               </div>
@@ -623,7 +623,7 @@ export default function GeracaoDigitalCommercialPitch({
                           : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                       )}
                     >
-                      <span className="text-xs font-bold text-slate-800 leading-tight">{prod.nome}</span>
+                      <span className="text-xs font-bold text-slate-800 leading-tight dark:text-white">{prod.nome}</span>
                       {isSelected ? (
                         <div className="h-4 w-4 rounded-full bg-gradient-to-r from-purple-700 to-indigo-600 flex items-center justify-center shrink-0">
                           <Check className="h-2.5 w-2.5 text-white" />
@@ -641,7 +641,7 @@ export default function GeracaoDigitalCommercialPitch({
             <Card className="md:col-span-1 bg-white dark:bg-slate-900 border-purple-200/60 dark:border-purple-900/55 shadow-lg shadow-purple-500/5 p-6 space-y-4 self-stretch flex flex-col">
               <div className="border-b border-slate-100 pb-3">
                 <span className="text-[10px] text-pink-500 font-bold uppercase tracking-wider block">Construindo Plano</span>
-                <h3 className="text-sm font-black text-slate-850">Sua Solução sob Medida</h3>
+                <h3 className="text-sm font-black text-slate-850 dark:text-white">Sua Solução sob Medida</h3>
               </div>
 
               <div className="flex-1 overflow-y-auto max-h-[280px] space-y-3 pr-1">
@@ -651,7 +651,7 @@ export default function GeracaoDigitalCommercialPitch({
                   {liveSelectedProducts.map((p, idx) => (
                     <div key={idx} className="flex items-center gap-2 p-1.5 rounded bg-slate-50 border border-slate-100 text-left animate-fade-in">
                       <Check className="h-3 w-3 text-pink-500 shrink-0" />
-                      <span className="text-[10px] font-bold text-slate-700 leading-tight">{p.nome}</span>
+                      <span className="text-[10px] font-bold text-slate-700 leading-tight dark:text-slate-200">{p.nome}</span>
                     </div>
                   ))}
                   {liveSelectedProducts.length === 0 && (
@@ -692,10 +692,10 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 07 · Módulos Vexo OS
             </Badge>
-            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight">
+            <h2 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight dark:text-white">
               Módulos Vexo OS Selecionados
             </h2>
-            <p className="text-slate-600 text-lg max-w-2xl mx-auto font-light">
+            <p className="text-slate-600 text-lg max-w-2xl mx-auto font-light dark:text-slate-200">
               Potencialize sua captação unindo a Inteligência Artificial e automações do Vexo OS ao marketing da Geração Digital:
             </p>
 
@@ -706,9 +706,9 @@ export default function GeracaoDigitalCommercialPitch({
                     <div className="h-14 w-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 font-extrabold text-lg">
                       V
                     </div>
-                    <h3 className="text-xl font-bold text-slate-850">{vm.nome}</h3>
+                    <h3 className="text-xl font-bold text-slate-850 dark:text-white">{vm.nome}</h3>
                     {vm.descricao && (
-                      <p className="text-slate-660 text-base leading-relaxed">
+                      <p className="text-slate-660 text-base leading-relaxed dark:text-slate-200">
                         {vm.descricao}
                       </p>
                     )}
@@ -725,31 +725,31 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 08 · Implantação e Cronograma
             </Badge>
-            <h2 className="text-3xl font-black text-slate-900 leading-tight">O que acontece após o aceite</h2>
-            <p className="text-slate-600 text-lg max-w-2xl mx-auto">
+            <h2 className="text-3xl font-black text-slate-900 leading-tight dark:text-white">O que acontece após o aceite</h2>
+            <p className="text-slate-600 text-lg max-w-2xl mx-auto dark:text-slate-200">
               Nossa operação de onboarding reduz seu risco de tempo de espera com um plano ágil de 4 semanas:
             </p>
 
             <div className="grid gap-8 md:grid-cols-4 text-left pt-10 max-w-6xl mx-auto">
               <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 1</Badge>
-                <h4 className="text-lg font-bold text-slate-800">Diagnóstico & Setup</h4>
-                <p className="text-slate-600 text-sm leading-relaxed">Auditoria técnica de pixels, integrações e design de landing page.</p>
+                <h4 className="text-lg font-bold text-slate-800 dark:text-white">Diagnóstico & Setup</h4>
+                <p className="text-slate-600 text-sm leading-relaxed dark:text-slate-200">Auditoria técnica de pixels, integrações e design de landing page.</p>
               </Card>
               <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 2</Badge>
-                <h4 className="text-lg font-bold text-slate-800">Páginas de Captura</h4>
-                <p className="text-slate-600 text-sm leading-relaxed">Publicação das LPs de alta performance voltadas para conversão ativa.</p>
+                <h4 className="text-lg font-bold text-slate-800 dark:text-white">Páginas de Captura</h4>
+                <p className="text-slate-600 text-sm leading-relaxed dark:text-slate-200">Publicação das LPs de alta performance voltadas para conversão ativa.</p>
               </Card>
               <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 3</Badge>
-                <h4 className="text-lg font-bold text-slate-800">Campanhas no Ar</h4>
-                <p className="text-slate-600 text-sm leading-relaxed">Ativação dos criativos e segmentação qualificada de tráfego pago.</p>
+                <h4 className="text-lg font-bold text-slate-800 dark:text-white">Campanhas no Ar</h4>
+                <p className="text-slate-600 text-sm leading-relaxed dark:text-slate-200">Ativação dos criativos e segmentação qualificada de tráfego pago.</p>
               </Card>
               <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 4</Badge>
-                <h4 className="text-lg font-bold text-slate-800">Entrega de Resultados</h4>
-                <p className="text-slate-600 text-sm leading-relaxed">Acompanhamento das primeiras conversões e reuniões de otimização.</p>
+                <h4 className="text-lg font-bold text-slate-800 dark:text-white">Entrega de Resultados</h4>
+                <p className="text-slate-600 text-sm leading-relaxed dark:text-slate-200">Acompanhamento das primeiras conversões e reuniões de otimização.</p>
               </Card>
             </div>
           </div>
@@ -761,8 +761,8 @@ export default function GeracaoDigitalCommercialPitch({
             <Badge className="bg-purple-100 hover:bg-purple-100 text-purple-650 border border-purple-200 px-3 py-1 uppercase text-[10px] font-mono tracking-widest font-extrabold">
               Slide 09 · Prova de Performance
             </Badge>
-            <h2 className="text-3xl font-black text-slate-900 leading-tight">Resultados Comerciais Reais</h2>
-            <p className="text-slate-600 text-lg max-w-2xl mx-auto">
+            <h2 className="text-3xl font-black text-slate-900 leading-tight dark:text-white">Resultados Comerciais Reais</h2>
+            <p className="text-slate-600 text-lg max-w-2xl mx-auto dark:text-slate-200">
               Casos práticos de empresas parceiras que escalaram receita utilizando a metodologia GD:
             </p>
 
@@ -772,8 +772,8 @@ export default function GeracaoDigitalCommercialPitch({
                   <span className="text-xs text-purple-600 font-bold uppercase font-mono tracking-wider">Performance · {segmentName}</span>
                   <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-sm px-3 py-1">+145% Conversão</Badge>
                 </div>
-                <h3 className="text-xl font-bold text-slate-850 leading-snug">Vendas dobradas no primeiro trimestre</h3>
-                <p className="text-slate-600 text-base leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 leading-snug dark:text-white">Vendas dobradas no primeiro trimestre</h3>
+                <p className="text-slate-600 text-base leading-relaxed dark:text-slate-200">
                   "Conseguimos gerar um fluxo estável de 450 contatos quentes e otimizar nosso funil de atendimento, fechando 18 contratos novos."
                 </p>
               </Card>
@@ -782,8 +782,8 @@ export default function GeracaoDigitalCommercialPitch({
                   <span className="text-xs text-purple-600 font-bold uppercase font-mono tracking-wider">Automação · {segmentName}</span>
                   <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-sm px-3 py-1">-70% Tempo Resposta</Badge>
                 </div>
-                <h3 className="text-xl font-bold text-slate-850 leading-snug">Atendimento em segundos no WhatsApp</h3>
-                <p className="text-slate-600 text-base leading-relaxed">
+                <h3 className="text-xl font-bold text-slate-850 leading-snug dark:text-white">Atendimento em segundos no WhatsApp</h3>
+                <p className="text-slate-600 text-base leading-relaxed dark:text-slate-200">
                   "Eliminamos a perda de leads fora do horário comercial integrando respostas autônomas de IA, gerando 35% mais agendamentos."
                 </p>
               </Card>
@@ -829,7 +829,7 @@ export default function GeracaoDigitalCommercialPitch({
 
       {/* Footer controls */}
       <footer className="relative z-10 flex items-center justify-between border-t border-slate-200/80 dark:border-white/10 px-8 py-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm">
-        <div className="flex items-center gap-1.5 text-xs font-mono text-slate-500 font-semibold">
+        <div className="flex items-center gap-1.5 text-xs font-mono text-slate-500 font-semibold dark:text-slate-400">
           <span>SLIDE {String(activeSlide).padStart(2, "0")} / {String(totalSlides).padStart(2, "0")}</span>
         </div>
 

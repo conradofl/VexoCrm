@@ -382,7 +382,14 @@ const App = () => (
                 }
               />
              </Route>
-
+             <Route
+               path="/crm/propostas-gd/negociacao/:id"
+               element={
+                 <ProtectedRoute allowedRoles={["internal"]}>
+                   <GeracaoDigitalNegotiationPage />
+                 </ProtectedRoute>
+               }
+             />
              <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
              <Route path="*" element={<NotFound />} />
           </Routes>

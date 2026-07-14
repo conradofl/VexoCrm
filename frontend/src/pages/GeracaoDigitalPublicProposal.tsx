@@ -35,7 +35,6 @@ import {
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { GeracaoDigitalNegotiationBoard, type NegotiationFinalizeResult } from "@/components/GeracaoDigitalNegotiationBoard";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -100,135 +99,17 @@ export default function GeracaoDigitalPublicProposal() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
-  // Negotiation state
-  const { isAuthenticated, getIdToken, clientId } = useAuth();
-  const [isNegotiationOpen, setIsNegotiationOpen] = useState(false);
-  const [availablePackages, setAvailablePackages] = useState<any[]>([]);
-  const [pendingNegotiationUpdate, setPendingNegotiationUpdate] = useState<NegotiationFinalizeResult | null>(null);
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.shiftKey && e.key.toLowerCase() === 'n') {
-        setIsNegotiationOpen(prev => !prev);
+        window.open(`/crm/propostas-gd/negociacao/${id}`, '_blank');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthenticated || !clientId) return;
-    const loadPackages = async () => {
-      try {
-        const token = await getIdToken();
-        const headers: HeadersInit = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        const pkgRes = await fetchApi(`/api/gd/packages?client_id=${clientId}`, { headers });
-        if (pkgRes.ok) {
-          const pkgData = await pkgRes.json();
-          if (pkgData.success) {
-            setAvailablePackages(pkgData.data || pkgData.packages);
-          }
-        }
-      } catch (err) {
-        console.error("Error loading packages", err);
-      }
-    };
-    loadPackages();
-  }, [isAuthenticated, clientId]);
-
-  // Debounced auto-save on lever adjustments
-  useEffect(() => {
-    if (!pendingNegotiationUpdate || !proposal || !isAuthenticated || !clientId) return;
-
-    const timer = setTimeout(async () => {
-      try {
-        const token = await getIdToken();
-        const headers: HeadersInit = { "Content-Type": "application/json" };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-
-        const isento = pendingNegotiationUpdate.descontos.some((d: any) => d.tipo === "isencao_setup");
-        const cobrarSetup = proposal.cobrar_setup;
-        const valorSetupVexo = proposal.valor_setup_vexo;
-
-        const body = {
-          client_id: clientId,
-          prospect_name: proposal.prospect_name,
-          itens: proposal.itens,
-          condicoes: proposal.condicoes,
-          payment_link: proposal.payment_link,
-          cobrar_setup: cobrarSetup,
-          valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
-          descontos_concedidos: pendingNegotiationUpdate.descontos,
-          meio_pagamento: pendingNegotiationUpdate.meioPagamento,
-          periodo_plano: proposal.periodo_plano || null,
-          validade_ate: proposal.validade_ate || null,
-          valor_apos_validade: proposal.valor_apos_validade !== null ? Number(proposal.valor_apos_validade) : null,
-          observacao_validade: proposal.observacao_validade || null,
-          carencia_dias: pendingNegotiationUpdate.carenciaDias ? Number(pendingNegotiationUpdate.carenciaDias) : (proposal.carencia_dias || null),
-          condicoes_pagamento: proposal.condicoes_pagamento
-        };
-
-        const res = await fetchApi(`/api/gd/proposals/${proposal.id}`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify(body)
-        });
-
-        if (res.ok) {
-          console.log("Auto-save completed successfully.");
-        }
-      } catch (err) {
-        console.error("Auto-save error:", err);
-      }
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [pendingNegotiationUpdate, proposal, clientId, isAuthenticated]);
-
-  const handleFinalizeNegotiation = async (result: NegotiationFinalizeResult) => {
-    if (!proposal || !isAuthenticated) return;
-    try {
-      const token = await getIdToken();
-      const headers: HeadersInit = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const isento = result.descontos.some((d) => d.tipo === "isencao_setup");
-      const cobrarSetup = proposal.cobrar_setup;
-      const valorSetupVexo = proposal.valor_setup_vexo;
-
-      const body = {
-        client_id: clientId,
-        prospect_name: proposal.prospect_name,
-        itens: proposal.itens,
-        condicoes: proposal.condicoes,
-        payment_link: proposal.payment_link,
-        cobrar_setup: cobrarSetup,
-        valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
-        descontos_concedidos: result.descontos,
-        meio_pagamento: result.meioPagamento,
-        periodo_plano: proposal.periodo_plano || null,
-        validade_ate: proposal.validade_ate || null,
-        valor_apos_validade: proposal.valor_apos_validade !== null ? Number(proposal.valor_apos_validade) : null,
-        observacao_validade: proposal.observacao_validade || null,
-        carencia_dias: result.carenciaDias ? Number(result.carenciaDias) : (proposal.carencia_dias || null),
-        condicoes_pagamento: proposal.condicoes_pagamento
-      };
-
-      const res = await fetchApi(`/api/gd/proposals/${proposal.id}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify(body)
-      });
-      
-      if (!res.ok) throw new Error("Erro ao gravar as concessões da negociação.");
-
-      toast({ title: "Negociação registrada", description: "Concessões gravadas com sucesso!" });
-      setIsNegotiationOpen(false);
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message || "Falha ao finalizar", variant: "destructive" });
-    }
-  };
+  }, [id]);
 
   useEffect(() => {
     if (id) {
@@ -479,6 +360,23 @@ export default function GeracaoDigitalPublicProposal() {
   const meioSetupPub = proposal.meio_pagamento?.setup ? MEIO_LABELS_PUB[proposal.meio_pagamento.setup] : null;
   const meioMensalPub = proposal.meio_pagamento?.mensalidade ? MEIO_LABELS_PUB[proposal.meio_pagamento.mensalidade] : null;
 
+  // Resumo "Como você vai pagar" por trilha (meio + parcelamento + condição)
+  const parcelamentoConc = descontosConcedidos.find((d) => d.tipo === "parcelamento");
+  const parcelasEntradaMatch = parcelamentoConc?.motivo?.match(/(\d+)x de (R\$\s?[\d.,]+)/);
+  const condSetupEscolhida = chosenTerm && termAplicaA(chosenTerm) === "setup" ? chosenTerm : null;
+  const condMensalEscolhida = chosenTerm && termAplicaA(chosenTerm) === "mensalidade" ? chosenTerm : null;
+  const pagamentoEntrada = [
+    condSetupEscolhida ? computePaymentBreakdown(condSetupEscolhida, setupFinalVal).linhas[0] : null,
+    !condSetupEscolhida && parcelasEntradaMatch ? `${parcelasEntradaMatch[1]}x de ${parcelasEntradaMatch[2]}` : null,
+    !condSetupEscolhida && !parcelasEntradaMatch ? "à vista" : null,
+    meioSetupPub ? `no ${meioSetupPub}` : null,
+  ].filter(Boolean).join(" · ");
+  const pagamentoMensalidade = [
+    condMensalEscolhida ? computePaymentBreakdown(condMensalEscolhida, mensalFinalVal).linhas[0] : "faturamento mensal recorrente",
+    meioMensalPub ? `no ${meioMensalPub}` : null,
+  ].filter(Boolean).join(" · ");
+  const temResumoPagamento = !!(meioSetupPub || meioMensalPub || parcelasEntradaMatch || chosenTerm);
+
   // Carência do 1º vencimento: informativo, não altera valores.
   const carenciaDias = Number(proposal.carencia_dias || 0);
   const primeiraMensalidadeDate = carenciaDias > 0
@@ -644,7 +542,7 @@ export default function GeracaoDigitalPublicProposal() {
                         </div>
                         <div className="text-right">
                           {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                            <span className="text-[10px] text-slate-500 line-through font-mono block">
+                            <span className="text-[10px] text-slate-500 line-through font-mono block dark:text-slate-400">
                               De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
                             </span>
                           )}
@@ -660,7 +558,7 @@ export default function GeracaoDigitalPublicProposal() {
                             {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
                           </span>
                           {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
-                            <span className="text-[9px] text-slate-500 block font-mono">
+                            <span className="text-[9px] text-slate-500 block font-mono dark:text-slate-400">
                               total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
                             </span>
                           )}
@@ -699,6 +597,30 @@ export default function GeracaoDigitalPublicProposal() {
               <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
                 {SETUP_JUSTIFICATION}
               </p>
+            </Card>
+          )}
+
+          {/* Como você vai pagar — resumo por trilha */}
+          {temResumoPagamento && (
+            <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
+              <h3 className="font-bold text-white text-xl">Como você vai pagar</h3>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="p-4 rounded-xl bg-slate-950 border border-purple-900/40 space-y-1">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-purple-400 block">Entrada (Setup)</span>
+                  <span className="text-sm font-bold text-white block">
+                    {setupIsento ? "Isenta nesta proposta" : pagamentoEntrada || "à vista"}
+                  </span>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-950 border border-blue-900/40 space-y-1">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-blue-400 block">Mensalidade</span>
+                  <span className="text-sm font-bold text-white block">{pagamentoMensalidade}</span>
+                  {primeiraMensalidadeDate && (
+                    <span className="text-xs font-bold text-amber-300 block">
+                      1º vencimento em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
+                    </span>
+                  )}
+                </div>
+              </div>
             </Card>
           )}
 
@@ -769,7 +691,7 @@ export default function GeracaoDigitalPublicProposal() {
                     </div>
                     {d.tipo !== "parcelamento" && Number(d.valor_original) !== Number(d.valor_final) && (
                       <span className="font-mono shrink-0">
-                        <span className="text-slate-500 line-through mr-2">R$ {Number(d.valor_original || 0).toLocaleString("pt-BR")}</span>
+                        <span className="text-slate-500 line-through mr-2 dark:text-slate-400">R$ {Number(d.valor_original || 0).toLocaleString("pt-BR")}</span>
                         <span className="text-emerald-400 font-bold">R$ {Number(d.valor_final || 0).toLocaleString("pt-BR")}</span>
                       </span>
                     )}
@@ -804,7 +726,7 @@ export default function GeracaoDigitalPublicProposal() {
                   ) : (
                     <>
                       {setupFinalVal < setupBaseVal && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
                           R$ {setupBaseVal.toLocaleString("pt-BR")}
                         </span>
                       )}
@@ -817,7 +739,7 @@ export default function GeracaoDigitalPublicProposal() {
                 <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Mensalidade</span>
                 <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
                   {mensalFinalVal < mensalBaseVal && (
-                    <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                    <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
                       R$ {mensalBaseVal.toLocaleString("pt-BR")}
                     </span>
                   )}
@@ -842,7 +764,7 @@ export default function GeracaoDigitalPublicProposal() {
                     <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
                     <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
                       {calc.compromissoFinal < calc.compromissoOriginal && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
                           R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
                         </span>
                       )}
@@ -916,15 +838,15 @@ export default function GeracaoDigitalPublicProposal() {
                     </div>
                   ) : (
                     <div className="py-3 text-center">
-                      <span className="font-mono text-lg italic font-bold text-slate-800 bg-white border border-slate-200 rounded-lg px-4 py-1.5 inline-block max-w-xs mx-auto shadow-sm tracking-wider">
+                      <span className="font-mono text-lg italic font-bold text-slate-800 bg-white border border-slate-200 rounded-lg px-4 py-1.5 inline-block max-w-xs mx-auto shadow-sm tracking-wider dark:text-white">
                         {proposal.assinatura}
                       </span>
-                      <span className="text-[9px] text-slate-500 block mt-1 font-mono uppercase">Assinatura Digitada</span>
+                      <span className="text-[9px] text-slate-500 block mt-1 font-mono uppercase dark:text-slate-400">Assinatura Digitada</span>
                     </div>
                   )
                 )}
 
-                <div className="text-[9px] text-slate-550 font-mono space-y-0.5 pt-1.5 border-t border-slate-800">
+                <div className="text-[9px] text-slate-550 font-mono space-y-0.5 pt-1.5 border-t border-slate-800 dark:text-slate-400">
                   <div>Assinado em: {proposal.signed_at ? new Date(proposal.signed_at).toLocaleString("pt-BR") : ""}</div>
                   {proposal.assinatura_metodo && (
                     <div>Método de Aceite: {proposal.assinatura_metodo === "digitado" ? "Nome Digitado" : "Desenho Livre"}</div>
@@ -1009,7 +931,7 @@ export default function GeracaoDigitalPublicProposal() {
                           {signerName}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-500 italic font-mono">Digite seu nome completo acima para pré-visualizar...</span>
+                        <span className="text-[10px] text-slate-500 italic font-mono dark:text-slate-400">Digite seu nome completo acima para pré-visualizar...</span>
                       )}
                     </div>
                   </div>
@@ -1029,39 +951,10 @@ export default function GeracaoDigitalPublicProposal() {
       </main>
 
       <div className="fixed bottom-4 right-4 z-40 opacity-0 hover:opacity-100 transition-opacity">
-        <Button variant="ghost" size="icon" onClick={() => setIsNegotiationOpen(true)} className="text-slate-800 hover:text-white hover:bg-slate-800 rounded-full w-8 h-8">
+        <Button variant="ghost" size="icon" onClick={() => window.open(`/crm/propostas-gd/negociacao/${id}`, '_blank')} className="text-slate-800 hover:text-white hover:bg-slate-800 rounded-full w-8 h-8 dark:text-white">
            <Lock className="w-3 h-3 opacity-20 hover:opacity-100" />
         </Button>
       </div>
-
-      {isNegotiationOpen && isAuthenticated && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4 animate-fade-in backdrop-blur-sm">
-          <div className="relative w-full max-w-6xl max-h-[95vh] overflow-hidden bg-white dark:bg-slate-950 rounded-2xl shadow-2xl flex flex-col border border-slate-200 dark:border-slate-800">
-            <div className="absolute top-3 right-3 z-50">
-               <Button variant="ghost" size="icon" onClick={() => setIsNegotiationOpen(false)} className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 rounded-full bg-slate-100/50 dark:bg-transparent">
-                  <X className="w-5 h-5" />
-               </Button>
-            </div>
-            <div className="flex-1 overflow-y-auto w-full">
-              <GeracaoDigitalNegotiationBoard
-                prospectName={proposal.prospect_name}
-                items={proposal.itens.map(i => ({ ...i, categoria: i.categoria as "gd"|"vexo", recorrencia: i.recorrencia as "mensal"|"unico" }))}
-                setupItensTotal={proposal.valor_setup}
-                recurringTotal={proposal.valor_recorrente}
-                setupVexoValue={proposal.valor_setup_vexo !== null ? Number(proposal.valor_setup_vexo) : 0}
-                periodoPlano={proposal.periodo_plano || "1"}
-                validadeAte={proposal.validade_ate || ""}
-                offeredTerms={proposal.condicoes_pagamento ? proposal.condicoes_pagamento.condicoes : []}
-                onClose={() => setIsNegotiationOpen(false)}
-                onFinalize={handleFinalizeNegotiation}
-                packageId={proposal.package_id}
-                packageVexoId={(proposal as any).package_vexo_id}
-                availablePackages={availablePackages}
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

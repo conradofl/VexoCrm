@@ -1058,8 +1058,8 @@ export default function GeracaoDigitalProposals() {
           <Card className="bg-red-50 border-red-200 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
             <CardContent className="space-y-4">
               <Info className="h-12 w-12 text-red-500 mx-auto" />
-              <h3 className="text-lg font-bold text-slate-850">Falha na Conexão</h3>
-              <p className="text-xs text-slate-650">
+              <h3 className="text-lg font-bold text-slate-850 dark:text-white">Falha na Conexão</h3>
+              <p className="text-xs text-slate-650 dark:text-slate-200">
                 {error}
               </p>
               <Button onClick={loadProposals} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-6 py-2 rounded-xl">
@@ -1071,8 +1071,8 @@ export default function GeracaoDigitalProposals() {
           <Card className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-white/10 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
             <CardContent className="space-y-4">
               <FileText className="h-12 w-12 text-slate-400 mx-auto" />
-              <h3 className="text-lg font-bold text-slate-800">Nenhuma Proposta Gerada</h3>
-              <p className="text-xs text-slate-500">
+              <h3 className="text-lg font-bold text-slate-800 dark:text-white">Nenhuma Proposta Gerada</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Inicie uma apresentação comercial a partir da aba "Geração Digital" e escolha um pacote — ou crie uma proposta direta abaixo.
               </p>
               <Button
@@ -1113,7 +1113,7 @@ export default function GeracaoDigitalProposals() {
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Nova Proposta
               </Button>
-              <label className="flex items-center gap-2 px-2 pb-1 text-[10px] text-slate-500 font-medium cursor-pointer">
+              <label className="flex items-center gap-2 px-2 pb-1 text-[10px] text-slate-500 font-medium cursor-pointer dark:text-slate-400">
                 <input
                   type="checkbox"
                   checked={showArchived}
@@ -1189,7 +1189,7 @@ export default function GeracaoDigitalProposals() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-black text-slate-800">{prospectName}</h2>
+                      <h2 className="text-xl font-black text-slate-800 dark:text-white">{prospectName}</h2>
                       {selectedProposal.status === "aceita" && (
                         <Badge className="bg-emerald-500 text-white font-bold flex items-center gap-1">
                           <CheckCircle className="h-3 w-3" />
@@ -1197,7 +1197,7 @@ export default function GeracaoDigitalProposals() {
                         </Badge>
                       )}
                     </div>
-                    <p className="text-xs text-slate-500 font-mono">ID: {selectedProposal.id}</p>
+                    <p className="text-xs text-slate-500 font-mono dark:text-slate-400">ID: {selectedProposal.id}</p>
                   </div>
 
                   <div className="flex gap-2">
@@ -1225,7 +1225,7 @@ export default function GeracaoDigitalProposals() {
                       variant="outline"
                       size="sm"
                       onClick={handleSendToClient}
-                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
+                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0 dark:text-slate-200"
                     >
                       <Share2 className="h-4 w-4 mr-1.5" />
                       Enviar ao Cliente
@@ -1234,7 +1234,7 @@ export default function GeracaoDigitalProposals() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleArchiveProposal(selectedProposal.arquivada !== true)}
-                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
+                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0 dark:text-slate-200"
                     >
                       <Archive className="h-4 w-4 mr-1.5" />
                       {selectedProposal.arquivada === true ? "Desarquivar" : "Arquivar"}
@@ -1259,7 +1259,7 @@ export default function GeracaoDigitalProposals() {
                     <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100">
                       Resumo da Proposta Comercial
                     </CardTitle>
-                    <CardDescription className="text-[11px] text-slate-500">
+                    <CardDescription className="text-[11px] text-slate-500 dark:text-slate-400">
                       Esta é uma visualização consolidada dos itens, valores e condições acordadas. Edições e negociações devem ser feitas na Mesa de Negociação separada.
                     </CardDescription>
                   </CardHeader>
@@ -1303,14 +1303,14 @@ export default function GeracaoDigitalProposals() {
                       return (
                         <div className="grid gap-4 sm:grid-cols-3 bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-150 dark:border-slate-700">
                           <div className="space-y-1">
-                            <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block">Taxa de Setup</span>
+                            <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block dark:text-slate-400">Taxa de Setup</span>
                             <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 font-mono">
                               {calc.setupFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                             </h4>
                           </div>
 
                           <div className="space-y-1">
-                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Mensalidade</span>
+                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block dark:text-slate-400">Mensalidade</span>
                             <h4 className="text-lg font-black text-pink-650 font-mono">
                               {calc.mensalidadeFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
                             </h4>
@@ -1318,12 +1318,12 @@ export default function GeracaoDigitalProposals() {
 
                           {(!periodoPlano || periodoPlano === "1") ? (
                             <div className="space-y-1">
-                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Plano Mensal (Sem fidelidade)</span>
+                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block dark:text-slate-400">Plano Mensal (Sem fidelidade)</span>
                               <h4 className="text-lg font-black text-indigo-600 font-mono">-</h4>
                             </div>
                           ) : (
                             <div className="space-y-1">
-                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Compromisso do Período</span>
+                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block dark:text-slate-400">Compromisso do Período</span>
                               <h4 className="text-lg font-black text-indigo-600 font-mono">
                                 {calc.compromissoFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                               </h4>
@@ -1436,8 +1436,8 @@ export default function GeracaoDigitalProposals() {
                         <div className="space-y-4 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 text-center flex-grow flex flex-col justify-center">
                           <CheckCircle className="h-10 w-10 text-emerald-600 mx-auto" />
                           <div className="space-y-1">
-                            <h4 className="text-sm font-bold text-slate-800">Contrato Fechado com Sucesso!</h4>
-                            <p className="text-[11px] text-slate-500">Proposta assinada comercialmente por:</p>
+                            <h4 className="text-sm font-bold text-slate-800 dark:text-white">Contrato Fechado com Sucesso!</h4>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">Proposta assinada comercialmente por:</p>
                             <span className="text-xs font-mono font-bold text-emerald-600 block">{selectedProposal.signer_name}</span>
                           </div>
 
@@ -1447,7 +1447,7 @@ export default function GeracaoDigitalProposals() {
                             </div>
                           )}
 
-                          <div className="text-[9px] text-slate-500 font-mono space-y-0.5 mt-2">
+                          <div className="text-[9px] text-slate-500 font-mono space-y-0.5 mt-2 dark:text-slate-400">
                             <div>Data/Hora: {selectedProposal.signed_at ? new Date(selectedProposal.signed_at).toLocaleString("pt-BR") : ""}</div>
                             <div>IP do Assinante: {selectedProposal.signer_ip || "Registrado"}</div>
                           </div>
@@ -1456,12 +1456,12 @@ export default function GeracaoDigitalProposals() {
                         <div className="space-y-4 flex-grow flex flex-col justify-between">
                           <div className="space-y-4">
                             <div className="text-[10px] text-slate-600 dark:text-slate-350 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                              <span className="font-bold text-slate-800 block mb-1 uppercase font-mono tracking-wider">Termo de Aceite:</span>
+                              <span className="font-bold text-slate-800 block mb-1 uppercase font-mono tracking-wider dark:text-white">Termo de Aceite:</span>
                               "Declaro estar de acordo com os services, valores e condições desta proposta e autorizo o início dos trabalhos."
                             </div>
 
                             <div className="space-y-2">
-                              <Label className="text-[10px] text-slate-500 font-mono">Nome Completo do Assinante</Label>
+                              <Label className="text-[10px] text-slate-500 font-mono dark:text-slate-400">Nome Completo do Assinante</Label>
                               <Input
                                 value={signerName}
                                 onChange={(e) => setSignerName(e.target.value)}
@@ -1472,7 +1472,7 @@ export default function GeracaoDigitalProposals() {
 
                             <div className="space-y-2">
                               <div className="flex justify-between items-center">
-                                <Label className="text-[10px] text-slate-500 font-mono">Assine com o Mouse ou Dedo</Label>
+                                <Label className="text-[10px] text-slate-500 font-mono dark:text-slate-400">Assine com o Mouse ou Dedo</Label>
                                 <button onClick={clearCanvas} className="text-[10px] text-pink-600 hover:text-pink-500 font-semibold font-mono">
                                   Limpar
                                 </button>
