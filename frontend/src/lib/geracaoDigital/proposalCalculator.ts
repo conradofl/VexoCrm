@@ -70,7 +70,7 @@ export function calculateProposalValues(
     gdMonthly = Number(gdPkg.valor || 0) / months;
   } else {
     // Fallback: read directly from the saved item
-    const savedGdPkgItem = items.find(i => i.categoria === "gd" && i.recorrencia === "mensal" && i.descricao.startsWith("Pacote:"));
+    const savedGdPkgItem = items.find(i => i.categoria === "gd" && i.recorrencia === "mensal" && i.descricao?.startsWith("Pacote:"));
     if (savedGdPkgItem) {
       gdMonthly = Number(savedGdPkgItem.valor || 0);
     }
@@ -82,7 +82,7 @@ export function calculateProposalValues(
     vexoMonthly = Number(vexoPkg.valor || 0) / months;
   } else {
     // Fallback: read directly from the saved item
-    const savedVexoPkgItem = items.find(i => i.categoria === "vexo" && i.recorrencia === "mensal" && i.descricao.startsWith("Pacote Vexo:"));
+    const savedVexoPkgItem = items.find(i => i.categoria === "vexo" && i.recorrencia === "mensal" && i.descricao?.startsWith("Pacote Vexo:"));
     if (savedVexoPkgItem) {
       vexoMonthly = Number(savedVexoPkgItem.valor || 0);
     }
@@ -90,18 +90,18 @@ export function calculateProposalValues(
 
   // Vexo avulsos: items in proposal that are Vexo but NOT the Vexo package itself.
   const vexoAvulsos = items.filter(item => {
-    return item.categoria === "vexo" && item.product_id !== null && !item.descricao.startsWith("Pacote Vexo") && item.recorrencia !== "unico";
+    return item.categoria === "vexo" && item.product_id !== null && !item.descricao?.startsWith("Pacote Vexo") && item.recorrencia !== "unico";
   });
   const avulsosMonthly = vexoAvulsos.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
   // Legacy items (for backward compatibility):
   const legacyItems = items.filter(item => {
-    return item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao.startsWith("Pacote:") && item.recorrencia !== "unico";
+    return item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && item.recorrencia !== "unico";
   });
   const legacyMonthly = legacyItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
   const faturamentoMensalItems = items.filter(item => {
-    return item.recorrencia === "mensal" && item.product_id === null && !item.descricao.startsWith("Pacote:") && !item.descricao.startsWith("Pacote Vexo:");
+    return item.recorrencia === "mensal" && item.product_id === null && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("Pacote Vexo:");
   });
   const faturamentoMensalExtra = faturamentoMensalItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
