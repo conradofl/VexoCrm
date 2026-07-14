@@ -394,8 +394,8 @@ export default function GeracaoDigitalProposals() {
     });
     // 4. Keep legacy items (manually edited items with valor > 0 that are not packages)
     const legacyItems = items.filter(item => {
-      return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao.startsWith("Pacote:") && !item.descricao.startsWith("GD:")) ||
-             (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao.startsWith("Pacote Vexo:"));
+      return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("GD:")) ||
+             (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao?.startsWith("Pacote Vexo:"));
     });
     finalItems.push(...legacyItems);
 
@@ -492,7 +492,7 @@ export default function GeracaoDigitalProposals() {
     const avulsosMap: Record<string, boolean> = {};
     if (Array.isArray(prop.itens)) {
       prop.itens.forEach((item) => {
-        if (item.categoria === "vexo" && item.product_id && !item.descricao.startsWith("Pacote Vexo")) {
+        if (item.categoria === "vexo" && item.product_id && !item.descricao?.startsWith("Pacote Vexo")) {
           avulsosMap[item.product_id] = true;
         }
       });
@@ -501,7 +501,7 @@ export default function GeracaoDigitalProposals() {
     const gdAvulsosMap: Record<string, boolean> = {};
     if (Array.isArray(prop.itens)) {
       prop.itens.forEach((item) => {
-        if (item.categoria === "gd" && item.product_id && item.descricao.startsWith("GD:")) {
+        if (item.categoria === "gd" && item.product_id && item.descricao?.startsWith("GD:")) {
           gdAvulsosMap[item.product_id] = true;
         }
       });
@@ -771,8 +771,8 @@ export default function GeracaoDigitalProposals() {
       });
       // 4. Keep legacy items (manually edited items with valor > 0 that are not packages)
       const legacyItems = items.filter(item => {
-        return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao.startsWith("Pacote:") && !item.descricao.startsWith("GD:")) ||
-               (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao.startsWith("Pacote Vexo:"));
+        return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("GD:")) ||
+               (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao?.startsWith("Pacote Vexo:"));
       });
       finalItems.push(...legacyItems);
 
