@@ -793,114 +793,35 @@ export default function GeracaoDigitalCommercialPitch({
 
         {/* SLIDE 10: INVESTMENT (INVESTIMENTO) */}
         {currentSlideType === "investment" && (
-          <div className="max-w-5xl w-full space-y-6 text-center animate-fade-in px-4 overflow-y-auto max-h-[calc(100vh-180px)] pb-32 scrollbar-thin">
+          <div className="max-w-5xl w-full space-y-6 text-center animate-fade-in px-4 overflow-y-auto max-h-[calc(100vh-180px)] pb-32 scrollbar-thin flex flex-col items-center justify-center">
             <div className="space-y-2">
               <Badge className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-none text-xs px-4 py-1.5 uppercase font-mono tracking-wider shadow-md shadow-indigo-600/10">
-                Slide 10 · Investimento & Fechamento
+                Slide 10 · Encerramento & Proposta
               </Badge>
-              <h2 className="text-3xl md:text-4xl font-black text-slate-900">Planos e Pacotes Comerciais</h2>
-              <p className="text-slate-600 text-xs max-w-md mx-auto">
-                Selecione o plano ideal para implantarmos sua máquina de aceleração digital de vendas.
+              <h2 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-white">Apresentação Comercial Concluída</h2>
+              <p className="text-slate-600 dark:text-slate-400 text-xs max-w-md mx-auto">
+                Próximos passos para iniciarmos a aceleração das suas vendas digitais.
               </p>
             </div>
 
-            {packagesOfertados.length > 0 ? (
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 justify-center items-stretch mt-6">
-                {packagesOfertados.map((pkg) => (
-                  <Card
-                    key={pkg.package_id}
-                    className={cn(
-                      "p-6 flex flex-col justify-between space-y-4 hover:-translate-y-1 hover:shadow-xl transition-all text-left relative",
-                      pkg.destaque
-                        ? "border-purple-500 ring-2 ring-purple-600/10 shadow-lg shadow-purple-600/5 bg-purple-50/10 scale-[1.02]"
-                        : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-white/10 shadow-md dark:shadow-none"
-                    )}
-                  >
-                    {pkg.destaque && (
-                      <Badge className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold uppercase tracking-wider text-[8px] px-2 py-0.5 rounded-full absolute -top-2.5 right-6">
-                        RECOMENDADO
-                      </Badge>
-                    )}
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-purple-600 font-bold uppercase tracking-wider">Pacote Comercial</span>
-                      <h3 className="text-base font-black text-slate-850 leading-snug">{pkg.nome}</h3>
-                    </div>
-
-                    <div className="space-y-1.5 flex-1 border-t border-slate-150/60 pt-3">
-                      <span className="text-[9px] text-slate-400 uppercase font-mono tracking-wider">Produtos inclusos:</span>
-                      <ul className="space-y-1 max-h-[140px] overflow-y-auto pr-1">
-                        {pkg.produtos_incluidos?.map((p, pIdx) => (
-                          <li key={pIdx} className="text-[10px] text-slate-650 flex items-center gap-1.5 leading-tight font-semibold">
-                            <Check className="h-3 w-3 text-pink-550 shrink-0" />
-                            <span>{p.nome}</span>
-                          </li>
-                        ))}
-                        {(!pkg.produtos_incluidos || pkg.produtos_incluidos.length === 0) && (
-                          <li className="text-[10px] text-slate-400 italic">Nenhum escopo associado</li>
-                        )}
-                      </ul>
-                    </div>
-
-                    <div className="space-y-1 py-2 border-t border-slate-150/60">
-                      <span className="text-[9px] text-slate-500 uppercase font-mono">Valor Fechado</span>
-                      {(() => {
-                        const pr = computePackagePricing(pkg.valor, pkg.periodo, pkg.valor_tabela);
-                        return (
-                          <>
-                            {pr.valorTabela !== null && (
-                              <span className="text-xs text-slate-400 line-through font-bold font-mono block">
-                                De {brlPkg(pr.valorTabela)}
-                              </span>
-                            )}
-                            <h4 className="text-2xl font-black text-pink-550 font-mono">
-                              {brlPkg(pr.totalPeriodo)}
-                              {pr.descontoPct !== null && (
-                                <span className="text-[11px] text-emerald-600 font-bold ml-1.5">({pr.descontoPct}% off)</span>
-                              )}
-                            </h4>
-                            {pr.meses !== null && pr.meses > 1 ? (
-                              <span className="text-[10px] text-slate-600 font-mono block">
-                                total do período · equivale a {pr.aprox ? "aprox. " : ""}{brlPkg(pr.mensalidade || 0)}/mês
-                              </span>
-                            ) : pr.meses === null ? (
-                              <span className="text-[10px] text-slate-600 font-mono block">valor único (setup)</span>
-                            ) : null}
-                          </>
-                        );
-                      })()}
-                      {vendaCasada && vexoSubtotal > 0 && (
-                        <span className="text-[10px] text-purple-650 font-bold block leading-tight">
-                          + R$ {vexoSubtotal.toLocaleString("pt-BR")}/mês (Módulos Vexo OS)
-                        </span>
-                      )}
-                    </div>
-                    <Button
-                      onClick={() => handleGenerateProposal(pkg.package_id)}
-                      className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-95 text-white font-extrabold text-xs py-4 rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/10"
-                    >
-                      <FileCheck className="h-4 w-4" />
-                      Escolher & Gerar Proposta
-                    </Button>
-                  </Card>
-                ))}
+            <div className="max-w-xl w-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-white/10 p-8 md:p-10 rounded-3xl space-y-6 shadow-xl mt-6 text-center">
+              <CheckCircle className="h-16 w-16 text-emerald-500 mx-auto" />
+              <div className="space-y-3">
+                <h3 className="text-xl font-bold text-slate-850 dark:text-slate-100">Proposta Pronta para Avaliação</h3>
+                <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">
+                  O escopo e os planos comerciais correspondentes foram compilados. O cliente poderá revisar a especificação e escolher o plano desejado diretamente na tela da proposta pública.
+                </p>
               </div>
-            ) : (
-              <div className="max-w-md mx-auto space-y-4">
-                <Card className="bg-white dark:bg-slate-900 border-slate-100 dark:border-white/10 shadow-md p-6 space-y-4">
-                  <Info className="h-8 w-8 text-amber-500 mx-auto" />
-                  <p className="text-xs text-slate-600">
-                    Nenhum pacote fechado pré-configurado foi selecionado no Setup.
-                  </p>
-                </Card>
+              <div className="pt-2">
                 <Button
                   onClick={() => handleGenerateProposal(null)}
-                  className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-4 rounded-xl text-xs"
+                  className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-95 text-white font-extrabold text-xs px-8 py-5 rounded-2xl flex items-center justify-center gap-2 mx-auto shadow-lg shadow-indigo-600/20"
                 >
-                  <FileCheck className="h-4.5 w-4.5 mr-1.5" />
-                  Gerar Rascunho de Proposta Customizada
+                  <FileCheck className="h-4.5 w-4.5" />
+                  Ir para Proposta
                 </Button>
               </div>
-            )}
+            </div>
           </div>
         )}
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { toast } from "@/components/ui/use-toast";
@@ -22,7 +23,9 @@ import {
   Info,
   Sparkles,
   X,
-  Archive
+  Archive,
+  Play,
+  Edit
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
@@ -98,6 +101,7 @@ const PERIODO_OPTIONS = [
 
 export default function GeracaoDigitalProposals() {
   const { isAuthenticated, getIdToken, clientId } = useAuth();
+  const navigate = useNavigate();
 
   // Proposals State
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -148,7 +152,57 @@ export default function GeracaoDigitalProposals() {
     toast
   });
 
-  const { showNewForm, setShowNewForm, resetWizard } = wizardState;
+  const {
+    showNewForm,
+    setShowNewForm,
+    resetWizard,
+    setNewProspect,
+    setNewPackageId,
+    setNewPackageVexoId,
+    setNewVexoAvulsoIds,
+    setNewGdAvulsoIds,
+    setNewCarencia,
+    setNewCobrarSetup,
+    setNewValorSetup,
+    setNewPeriodo,
+    setNewValidade,
+    setNewCondicoes,
+    setNewPaymentLink,
+    setEditingProposalId
+  } = wizardState;
+
+  const openWizardForEdit = (prop: any) => {
+    resetWizard();
+    setEditingProposalId(prop.id);
+    setNewProspect(prop.prospect_name || "");
+    setNewPackageId(prop.package_id || "");
+    setNewPackageVexoId(prop.package_vexo_id || "");
+    setNewCarencia(prop.carencia_dias !== null && prop.carencia_dias !== undefined ? String(prop.carencia_dias) : "");
+    setNewCobrarSetup(prop.cobrar_setup === true);
+    setNewValorSetup(Number(prop.valor_setup_vexo || 0));
+    setNewPeriodo(prop.periodo_plano || "mensal");
+    setNewValidade(prop.validade_ate ? prop.validade_ate.split("T")[0] : "");
+    setNewCondicoes(prop.condicoes || "");
+    setNewPaymentLink(prop.payment_link || "");
+
+    const vexoIds: Record<string, boolean> = {};
+    const gdIds: Record<string, boolean> = {};
+
+    if (Array.isArray(prop.itens)) {
+      prop.itens.forEach((item: any) => {
+        if (item.product_id) {
+          if (item.categoria === "vexo") {
+            vexoIds[item.product_id] = true;
+          } else {
+            gdIds[item.product_id] = true;
+          }
+        }
+      });
+    }
+    setNewVexoAvulsoIds(vexoIds);
+    setNewGdAvulsoIds(gdIds);
+    setShowNewForm(true);
+  };
 
   // Modal de compartilhamento da proposta
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
@@ -1158,11 +1212,11 @@ export default function GeracaoDigitalProposals() {
                     {selectedProposal.status !== "aceita" && (
                       <Button
                         size="sm"
-                        onClick={() => window.open(`/crm/propostas-gd/negociacao/${selectedProposal.id}`, "_blank")}
-                        className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold shrink-0"
+                        onClick={() => openWizardForEdit(selectedProposal)}
+                        className="bg-purple-600 hover:bg-purple-500 text-white font-bold shrink-0"
                       >
-                        <Sparkles className="h-4 w-4 mr-1.5" />
-                        Abrir Mesa de Negociação
+                        <Edit className="h-4 w-4 mr-1.5" />
+                        Gerar/Editar Proposta
                       </Button>
                     )}
                     <Button
@@ -1184,24 +1238,15 @@ export default function GeracaoDigitalProposals() {
                       {selectedProposal.arquivada === true ? "Desarquivar" : "Arquivar"}
                     </Button>
                     {selectedProposal.status !== "aceita" && (
-                      <>
-                              <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={handleDeleteProposal}
-                          className="bg-rose-600 hover:bg-rose-500 text-white font-bold shrink-0"
-                        >
-                          <Trash2 className="h-4 w-4 mr-1.5" />
-                          Excluir Rascunho
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={handleSaveProposal}
-                          className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
-                        >
-                          Salvar Alterações
-                        </Button>
-                      </>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={handleDeleteProposal}
+                        className="bg-rose-600 hover:bg-rose-500 text-white font-bold shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1.5" />
+                        Excluir Rascunho
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -1217,6 +1262,29 @@ export default function GeracaoDigitalProposals() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-6">
+                    {/* Ações contextuais internas da Proposta */}
+                    <div className="flex gap-2 pb-4 border-b border-slate-150 dark:border-white/5">
+                      {selectedProposal.status !== "aceita" && (
+                        <Button
+                          size="sm"
+                          onClick={() => window.open(`/crm/propostas-gd/negociacao/${selectedProposal.id}`, "_blank")}
+                          className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold"
+                        >
+                          <Sparkles className="h-4 w-4 mr-1.5" />
+                          Abrir Mesa de Negociação
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate("/crm/apresentacao-gd")}
+                        className="border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
+                      >
+                        <Play className="h-4 w-4 mr-1.5 text-purple-650" />
+                        Iniciar Apresentação
+                      </Button>
+                    </div>
+
                     {/* Resumo Financeiro */}
                     {(() => {
                       const tempProposal = {

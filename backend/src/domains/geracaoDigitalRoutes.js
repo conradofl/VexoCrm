@@ -1814,6 +1814,12 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const row = result.rows[0];
 
+      // Fetch available packages for this tenant
+      const packagesRes = await pool.query(
+        `SELECT * FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true`,
+        [row.tenant_id]
+      );
+
       // Fetch tenant payment default link as fallback
       const tenantModulesRes = await pool.query(
         `SELECT config FROM public.tenant_modules WHERE tenant_id = $1`,
@@ -1834,12 +1840,108 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           ...row,
           payment_link: finalPaymentLink,
           valor_setup: valorSetup,
-          valor_recorrente: valorRecorrente
+          valor_recorrente: valorRecorrente,
+          packages: packagesRes.rows
         }
       });
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao buscar proposta pública:", error);
       res.status(500).json({ error: "Erro ao buscar proposta." });
+    }
+  });
+
+  // POST /api/gd/public/proposals/:id/select-package
+  app.post("/api/gd/public/proposals/:id/select-package", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { package_id } = req.body;
+
+      // 1. Get the package details
+      const pkgResult = await pool.query(
+        `SELECT * FROM public.gd_packages WHERE id = $1 AND ativo = true`,
+        [package_id]
+      );
+      if (pkgResult.rows.length === 0 && package_id !== null) {
+        return res.status(404).json({ error: "Pacote não encontrado." });
+      }
+
+      const selectedPkg = pkgResult.rows[0];
+
+      // 2. Fetch the current proposal to get details
+      const propResult = await pool.query(
+        `SELECT * FROM public.gd_proposals WHERE id = $1`,
+        [id]
+      );
+      if (propResult.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      const proposal = propResult.rows[0];
+      if (proposal.status === "aceita") {
+        return res.status(400).json({ error: "Proposta já aceita e assinada. Não é possível alterar o pacote." });
+      }
+
+      // 3. Build new items list based on selected package
+      const finalItems = [];
+
+      if (selectedPkg) {
+        const val = Number(selectedPkg.valor || 0);
+        const PERIOD_MONTHS = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
+        const meses = selectedPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedPkg.periodo] ?? 1);
+        const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
+        const valorTabela = Number(selectedPkg.valor_tabela || 0);
+
+        finalItems.push({
+          product_id: null,
+          descricao: `Pacote: ${selectedPkg.nome} (${selectedPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
+          categoria: selectedPkg.tipo || "gd",
+          valor: mensalidade,
+          recorrencia: meses ? "mensal" : "unico",
+          periodo: selectedPkg.periodo,
+          meses,
+          total_periodo: meses ? val : null,
+          valor_tabela: valorTabela > val ? valorTabela : null
+        });
+
+        if (Array.isArray(selectedPkg.produtos_incluidos)) {
+          selectedPkg.produtos_incluidos.forEach((p) => {
+            finalItems.push({
+              product_id: p.product_id || null,
+              descricao: p.nome,
+              categoria: selectedPkg.tipo || "gd",
+              valor: 0,
+              recorrencia: "mensal"
+            });
+          });
+        }
+      }
+
+      // Keep any other items from the old proposal that were not part of the old package (e.g. Vexo avulso modules)
+      if (Array.isArray(proposal.itens)) {
+        proposal.itens.forEach((item) => {
+          if (item.categoria === "vexo" && !item.descricao.startsWith("Pacote Vexo:")) {
+            finalItems.push(item);
+          }
+        });
+      }
+
+      // Recalculate totals
+      const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorTotal = valorSetup + valorRecorrente;
+
+      // Update proposal in DB
+      await pool.query(
+        `UPDATE public.gd_proposals
+         SET package_id = $1, itens = $2, valor_total = $3
+         WHERE id = $4`,
+        [package_id, JSON.stringify(finalItems), valorTotal, id]
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao selecionar pacote:", error);
+      res.status(500).json({ error: "Erro ao selecionar pacote na proposta." });
     }
   });
 

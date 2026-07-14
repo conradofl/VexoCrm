@@ -34,6 +34,7 @@ export function useProposalWizard({
   const [newValidade, setNewValidade] = useState<string>("");
   const [newCondicoes, setNewCondicoes] = useState<string>("");
   const [newPaymentLink, setNewPaymentLink] = useState<string>("");
+  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
 
   const resetWizard = () => {
     setWizardStep(1);
@@ -49,6 +50,7 @@ export function useProposalWizard({
     setNewValidade("");
     setNewCondicoes("");
     setNewPaymentLink("");
+    setEditingProposalId(null);
   };
 
   const handleCreateDirectProposal = async () => {
@@ -193,22 +195,30 @@ export function useProposalWizard({
         valor_vp: totalVp > 0 ? totalVp : null
       };
 
-      const res = await fetchApi(`/api/gd/proposals`, {
-        method: "POST",
+      const url = editingProposalId ? `/api/gd/proposals/${editingProposalId}` : `/api/gd/proposals`;
+      const method = editingProposalId ? "PUT" : "POST";
+
+      const res = await fetchApi(url, {
+        method,
         headers,
         body: JSON.stringify(body)
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "Erro ao criar proposta.");
+        throw new Error(errorData.error || `Erro ao ${editingProposalId ? "atualizar" : "criar"} proposta.`);
       }
-      toast({ title: "Proposta Criada", description: `Rascunho para ${newProspect} pronto para edição e negociação.` });
+      toast({
+        title: editingProposalId ? "Proposta Atualizada" : "Proposta Criada",
+        description: editingProposalId 
+          ? `Rascunho de ${newProspect} atualizado com sucesso.`
+          : `Rascunho para ${newProspect} pronto para edição e negociação.`
+      });
       setShowNewForm(false);
       resetWizard();
       loadProposals();
     } catch (err: any) {
       console.error(err);
-      toast({ title: "Erro ao Criar", description: err.message, variant: "destructive" });
+      toast({ title: editingProposalId ? "Erro ao Atualizar" : "Erro ao Criar", description: err.message, variant: "destructive" });
     }
   };
 
@@ -241,6 +251,8 @@ export function useProposalWizard({
     setNewCondicoes,
     newPaymentLink,
     setNewPaymentLink,
+    editingProposalId,
+    setEditingProposalId,
     resetWizard,
     handleCreateDirectProposal
   };

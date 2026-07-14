@@ -16,7 +16,8 @@ import {
   DollarSign,
   Zap,
   Info,
-  ExternalLink
+  ExternalLink,
+  Check
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -71,6 +72,8 @@ interface Proposal {
   meio_pagamento?: { setup?: string; mensalidade?: string } | null;
   carencia_dias?: number | null;
   assinatura_metodo?: string | null;
+  package_id?: string | null;
+  packages?: any[];
 }
 
 const PERIODO_LABELS: Record<string, string> = {
@@ -162,6 +165,32 @@ export default function GeracaoDigitalPublicProposal() {
       setIsLoading(false);
     }
   }
+
+  const handleSelectPackage = async (packageId: string) => {
+    if (!id || !proposal || proposal.status === "aceita") return;
+    try {
+      const res = await fetchApi(`/api/gd/public/proposals/${id}/select-package`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ package_id: packageId })
+      });
+      if (!res.ok) {
+        throw new Error("Erro ao alterar o pacote.");
+      }
+      toast({
+        title: "Plano Alterado",
+        description: "Os valores e itens da proposta foram atualizados com sucesso."
+      });
+      loadPublicProposal();
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro ao Alterar Plano",
+        description: err.message || "Não foi possível alterar seu plano.",
+        variant: "destructive"
+      });
+    }
+  };
 
   // Canvas drawing handlers
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -292,6 +321,7 @@ export default function GeracaoDigitalPublicProposal() {
   }
 
   const items = Array.isArray(proposal.itens) ? proposal.itens : [];
+  const packages = Array.isArray(proposal.packages) ? proposal.packages : [];
   const setupVexoValue = proposal.cobrar_setup ? Number(proposal.valor_setup_vexo || 0) : 0;
   const grandTotal = Number(proposal.valor_setup || 0) + Number(proposal.valor_recorrente || 0) + setupVexoValue;
   const offeredTerms = Array.isArray(proposal.condicoes_pagamento?.ofertadas)
@@ -404,6 +434,46 @@ export default function GeracaoDigitalPublicProposal() {
                 <span className="text-xs text-slate-400">A entrada é paga na contratação; a mensalidade só começa após a carência.</span>
               </div>
             </Card>
+          )}
+
+           {/* Seletor de Pacotes Comerciais */}
+          {proposal.status !== "aceita" && packages.length > 0 && (
+            <div className="space-y-4">
+              <span className="text-[10px] text-purple-400 font-mono font-bold uppercase tracking-wider block">Escolha seu Plano</span>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {packages.map((pkg: any) => {
+                  const isSelected = proposal.package_id === pkg.id;
+                  return (
+                    <button
+                      key={pkg.id}
+                      onClick={() => handleSelectPackage(pkg.id)}
+                      className={cn(
+                        "text-left p-5 rounded-2xl border transition-all duration-300 relative flex flex-col justify-between min-h-[140px]",
+                        isSelected
+                          ? "bg-purple-650/15 border-purple-500 shadow-lg shadow-purple-600/10"
+                          : "bg-slate-900/40 border-slate-900 hover:border-slate-800"
+                      )}
+                    >
+                      <div className="space-y-1">
+                        <span className="text-[8px] text-purple-400 font-bold uppercase tracking-wider font-semibold">Plano</span>
+                        <h4 className="text-sm font-black text-white leading-snug">{pkg.nome}</h4>
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-slate-950/60 w-full">
+                        <span className="text-[9px] text-slate-400 block uppercase font-mono tracking-wider">Valor total:</span>
+                        <span className="text-lg font-black text-pink-500 font-mono">
+                          R$ {Number(pkg.valor || 0).toLocaleString("pt-BR")}
+                        </span>
+                      </div>
+                      {isSelected && (
+                        <div className="absolute top-3 right-3 h-5 w-5 bg-purple-650 rounded-full flex items-center justify-center text-white">
+                          <Check className="h-3 w-3" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           {/* List of items */}

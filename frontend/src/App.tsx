@@ -308,14 +308,6 @@ const App = () => (
                 }
               />
               <Route
-                path="propostas-gd/negociacao/:id"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <GeracaoDigitalNegotiationPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="pacotes-gd"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
@@ -390,6 +382,14 @@ const App = () => (
                 }
               />
              </Route>
+             <Route
+               path="/crm/propostas-gd/negociacao/:id"
+               element={
+                 <ProtectedRoute allowedRoles={["internal"]}>
+                   <GeracaoDigitalNegotiationPage />
+                 </ProtectedRoute>
+               }
+             />
              <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
              <Route path="*" element={<NotFound />} />
           </Routes>
