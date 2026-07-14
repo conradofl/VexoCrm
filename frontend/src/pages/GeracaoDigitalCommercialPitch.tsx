@@ -250,25 +250,95 @@ export default function GeracaoDigitalCommercialPitch({
           color: #1f2937 !important;
           color-scheme: light !important;
         }
+
+        /* Force ALL cards/containers to white bg, overriding dark: variants */
+        .presentation-sandbox [class*="rounded-lg"],
+        .presentation-sandbox [class*="rounded-xl"],
+        .presentation-sandbox [class*="rounded-2xl"],
+        .presentation-sandbox [class*="rounded-3xl"] {
+          background-color: #ffffff !important;
+          border-color: #e5e7eb !important;
+          box-shadow: 0 6px 22px rgba(15, 23, 42, 0.08) !important;
+          color: #1f2937 !important;
+        }
+
+        /* Preserve intentional gradient/colored backgrounds */
+        .presentation-sandbox [class*="bg-gradient"],
+        .presentation-sandbox [class*="bg-purple-6"],
+        .presentation-sandbox [class*="bg-purple-7"],
+        .presentation-sandbox [class*="bg-indigo-"],
+        .presentation-sandbox [class*="bg-emerald-5"],
+        .presentation-sandbox [class*="bg-teal-"],
+        .presentation-sandbox [class*="bg-red-50"],
+        .presentation-sandbox [class*="bg-purple-50"],
+        .presentation-sandbox [class*="bg-purple-100"],
+        .presentation-sandbox [class*="bg-pink-"],
+        .presentation-sandbox [class*="bg-emerald-50"] {
+          background-color: unset !important;
+        }
+
+        /* Subtle tinted cards keep their light tint */
+        .presentation-sandbox .bg-slate-50,
+        .presentation-sandbox .bg-slate-100 {
+          background-color: #f8fafc !important;
+        }
+
+        /* All borders light */
         .presentation-sandbox * {
           border-color: #e5e7eb !important;
         }
+
+        /* Purple accent borders stay purple */
+        .presentation-sandbox [class*="border-purple"] {
+          border-color: #c4b5fd !important;
+        }
+
+        /* Text colors forced light-theme */
         .presentation-sandbox h1,
         .presentation-sandbox h2,
         .presentation-sandbox h3,
         .presentation-sandbox h4,
         .presentation-sandbox h5,
-        .presentation-sandbox h6,
+        .presentation-sandbox h6 {
+          color: #0f172a !important;
+        }
         .presentation-sandbox p,
-        .presentation-sandbox span:not(.text-transparent):not(.text-purple-600):not(.text-indigo-600):not(.text-emerald-400):not(.text-emerald-500):not(.text-amber-500):not(.text-white):not(.text-purple-500),
-        .presentation-sandbox div:not([class*="bg-"]) {
+        .presentation-sandbox span:not(.text-transparent):not(.text-purple-600):not(.text-indigo-600):not(.text-emerald-400):not(.text-emerald-500):not(.text-amber-500):not(.text-white):not(.text-purple-500):not(.text-pink-500):not(.text-pink-600):not(.text-red-600):not(.text-red-650) {
           color: inherit !important;
         }
         .presentation-sandbox .text-slate-500,
         .presentation-sandbox .text-slate-400,
         .presentation-sandbox .text-slate-600,
         .presentation-sandbox .text-slate-655 {
-           color: #4b5563 !important;
+          color: #4b5563 !important;
+        }
+        .presentation-sandbox .text-slate-800,
+        .presentation-sandbox .text-slate-850,
+        .presentation-sandbox .text-slate-900 {
+          color: #0f172a !important;
+        }
+        .presentation-sandbox .text-slate-700 {
+          color: #334155 !important;
+        }
+
+        /* White text elements (inside colored cards) stay white */
+        .presentation-sandbox .text-white {
+          color: #ffffff !important;
+        }
+
+        /* Ensure the investment/closing card stays clean */
+        .presentation-sandbox .bg-white\\/88 {
+          background-color: #ffffff !important;
+        }
+
+        /* Header backdrop */
+        .presentation-sandbox header {
+          background-color: rgba(255, 255, 255, 0.85) !important;
+        }
+
+        /* Footer */
+        .presentation-sandbox footer {
+          background-color: rgba(255, 255, 255, 0.85) !important;
         }
       `}</style>
       {/* Light background gradients */}
