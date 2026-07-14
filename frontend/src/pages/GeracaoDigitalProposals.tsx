@@ -1073,38 +1073,55 @@ export default function GeracaoDigitalProposals() {
                 </p>
               )}
               {proposals.filter((p) => (showArchived ? p.arquivada === true : p.arquivada !== true)).map((prop) => (
-                <button
+                <div
                   key={prop.id}
-                  onClick={() => selectProposal(prop)}
                   className={cn(
-                    "w-full text-left p-4 rounded-xl border transition-all space-y-2 group shadow-sm",
+                    "w-full text-left p-4 rounded-xl border transition-all space-y-2 group shadow-sm flex flex-col justify-between",
                     selectedProposal?.id === prop.id
                       ? "bg-slate-50 dark:bg-slate-850 border-purple-500/50 dark:border-purple-550/50 shadow-md shadow-purple-600/5"
                       : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                   )}
                 >
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-black text-slate-800 group-hover:text-purple-600 transition-colors leading-tight">
-                      {prop.prospect_name}
-                    </span>
-                    <Badge
-                      className={cn(
-                        "text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 border-none",
-                        prop.status === "aceita"
-                          ? "bg-emerald-500 text-white"
-                          : prop.status === "enviada"
-                          ? "bg-blue-600 text-white"
-                          : "bg-amber-600 text-white"
-                      )}
-                    >
-                      {prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho"}
-                    </Badge>
+                  <div className="cursor-pointer" onClick={() => selectProposal(prop)}>
+                    <div className="flex justify-between items-start">
+                      <span className="text-xs font-black text-slate-800 dark:text-slate-100 group-hover:text-purple-600 transition-colors leading-tight">
+                        {prop.prospect_name}
+                      </span>
+                      <Badge
+                        className={cn(
+                          "text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 border-none",
+                          prop.status === "aceita"
+                            ? "bg-emerald-500 text-white"
+                            : prop.status === "enviada"
+                            ? "bg-blue-600 text-white"
+                            : "bg-amber-600 text-white"
+                        )}
+                      >
+                        {prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho"}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] text-slate-550 dark:text-slate-400 font-mono mt-1">
+                      <span>Total Geral</span>
+                      <span className="text-slate-850 dark:text-slate-100 font-bold">R$ {prop.valor_total.toLocaleString("pt-BR")}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
-                    <span>Total Geral</span>
-                    <span className="text-slate-800 font-bold">R$ {prop.valor_total.toLocaleString("pt-BR")}</span>
-                  </div>
-                </button>
+
+                  {prop.status !== "aceita" && (
+                    <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex gap-1.5">
+                      <Button
+                        size="xs"
+                        variant="default"
+                        className="w-full text-[10px] bg-purple-650 hover:bg-purple-750 text-white font-bold"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.open(`/crm/propostas-gd/negociacao/${prop.id}`, "_blank");
+                        }}
+                      >
+                        Mesa de Negociação
+                      </Button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
 
@@ -1141,7 +1158,7 @@ export default function GeracaoDigitalProposals() {
                     {selectedProposal.status !== "aceita" && (
                       <Button
                         size="sm"
-                        onClick={() => setIsNegotiating(true)}
+                        onClick={() => window.open(`/crm/propostas-gd/negociacao/${selectedProposal.id}`, "_blank")}
                         className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold shrink-0"
                       >
                         <Sparkles className="h-4 w-4 mr-1.5" />
@@ -1189,136 +1206,61 @@ export default function GeracaoDigitalProposals() {
                   </div>
                 </div>
 
-                {/* Pacotes & Módulos da Proposta */}
-                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="text-base font-bold text-slate-800">Escopo & Combos Comerciais</CardTitle>
-                    <CardDescription className="text-[11px] text-slate-500">Configure os pacotes e módulos integrados nesta proposta comercial.</CardDescription>
+                {/* Visualização Consolidada da Proposta (Somente Leitura) */}
+                <Card className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
+                  <CardHeader className="pb-3 border-b border-slate-200 dark:border-white/5">
+                    <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100">
+                      Resumo da Proposta Comercial
+                    </CardTitle>
+                    <CardDescription className="text-[11px] text-slate-500">
+                      Esta é uma visualização consolidada dos itens, valores e condições acordadas. Edições e negociações devem ser feitas na Mesa de Negociação separada.
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-6">
-                    {/* Pacote selects */}
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-bold text-slate-700">Combo Geração Digital (Marketing/Vendas)</Label>
-                        <select
-                          value={editPackageId}
-                          disabled={selectedProposal.status === "aceita"}
-                          onChange={(e) => setEditPackageId(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-850 dark:text-slate-100 h-10 focus:outline-none focus:border-indigo-500"
-                        >
-                          <option value="">— Sem Pacote GD —</option>
-                          {availablePackages.filter(p => p.tipo === "gd" || !p.tipo).map((pk: any) => (
-                            <option key={pk.id} value={pk.id}>
-                              {pk.nome} ({(pk.valor / (pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês)
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                  <CardContent className="pt-6 space-y-6">
+                    {/* Resumo Financeiro */}
+                    {(() => {
+                      const tempProposal = {
+                        cobrar_setup: cobrarSetup,
+                        valor_setup_vexo: valorSetupVexo,
+                        package_id: editPackageId || null,
+                        package_vexo_id: editPackageVexoId || null,
+                        periodo_plano: periodoPlano || "mensal",
+                        descontos_concedidos: selectedProposal?.descontos_concedidos || [],
+                        itens: items
+                      };
+                      const calc = calculateProposalValues(tempProposal, availablePackages);
 
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-bold text-slate-700">Combo Vexo OS (Software/ERP)</Label>
-                        <select
-                          value={editPackageVexoId}
-                          disabled={selectedProposal.status === "aceita"}
-                          onChange={(e) => setEditPackageVexoId(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-855 dark:text-slate-100 h-10 focus:outline-none focus:border-indigo-500"
-                        >
-                          <option value="">— Sem Combo Vexo OS —</option>
-                          {availablePackages.filter(p => p.tipo === "vexo").map((pk: any) => (
-                            <option key={pk.id} value={pk.id}>
-                              {pk.nome} ({(pk.valor / (pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês)
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
+                      return (
+                        <div className="grid gap-4 sm:grid-cols-3 bg-white dark:bg-slate-850 p-4 rounded-xl border border-slate-150 dark:border-white/5">
+                          <div className="space-y-1">
+                            <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block">Taxa de Setup</span>
+                            <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 font-mono">
+                              {calc.setupFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                            </h4>
+                          </div>
 
-                    {/* Vexo Extras */}
+                          <div className="space-y-1">
+                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Mensalidade</span>
+                            <h4 className="text-lg font-black text-pink-650 font-mono">
+                              {calc.mensalidadeFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
+                            </h4>
+                          </div>
+
+                          <div className="space-y-1">
+                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Compromisso do Período</span>
+                            <h4 className="text-lg font-black text-indigo-600 font-mono">
+                              {calc.compromissoFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                            </h4>
+                            <span className="text-[9px] text-slate-450 block">Soma recorrente por {calc.mesesPeriodo} meses</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Escopo da Proposta */}
                     <div className="space-y-2">
-                      <Label className="text-xs font-bold text-slate-850">Módulos Extras Vexo OS (Avulsos)</Label>
-                      <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 max-h-[160px] overflow-y-auto pr-1">
-                        {vexoProducts.map((p) => {
-                          const isIncluded = !!editVexoAvulsoIds[p.id];
-                          return (
-                            <div
-                              key={p.id}
-                              onClick={() => {
-                                if (selectedProposal.status === "aceita") return;
-                                setEditVexoAvulsoIds(prev => ({
-                                  ...prev,
-                                  [p.id]: !isIncluded
-                                }));
-                              }}
-                              className={cn(
-                                "p-2 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
-                                isIncluded
-                                  ? "bg-indigo-50 border-indigo-300"
-                                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20",
-                                selectedProposal.status === "aceita" && "cursor-default opacity-85"
-                              )}
-                            >
-                              <div className="space-y-0.5">
-                                <span className="text-[11px] font-bold text-slate-800 block leading-tight">{p.nome}</span>
-                                <span className="text-[9px] font-mono font-bold text-purple-650">
-                                  {Number(p.valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
-                                </span>
-                              </div>
-                              {isIncluded && (
-                                <div className="h-3.5 w-3.5 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
-                                  <CheckCircle className="h-2 w-2 text-white" />
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* GD Extras (avulsos) */}
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold text-slate-850">Módulos Extras Geração Digital (Avulsos)</Label>
-                      <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 max-h-[160px] overflow-y-auto pr-1">
-                        {gdProducts.map((p) => {
-                          const isIncluded = !!editGdAvulsoIds[p.id];
-                          return (
-                            <div
-                              key={p.id}
-                              onClick={() => {
-                                if (selectedProposal.status === "aceita") return;
-                                setEditGdAvulsoIds(prev => ({ ...prev, [p.id]: !isIncluded }));
-                              }}
-                              className={cn(
-                                "p-2 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
-                                isIncluded ? "bg-pink-50 border-pink-300" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20",
-                                selectedProposal.status === "aceita" && "cursor-default opacity-85"
-                              )}
-                            >
-                              <div className="space-y-0.5">
-                                <span className="text-[11px] font-bold text-slate-800 block leading-tight">{p.nome}</span>
-                                <span className="text-[9px] font-mono font-bold text-pink-600">
-                                  {Number(p.valor_padrao || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/{p.recorrencia === "unico" ? "único" : "mês"}
-                                </span>
-                              </div>
-                              {isIncluded && (
-                                <div className="h-3.5 w-3.5 rounded-full bg-pink-600 flex items-center justify-center shrink-0">
-                                  <CheckCircle className="h-2 w-2 text-white" />
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {gdProducts.length === 0 && (
-                          <p className="text-[10px] text-slate-450 italic col-span-3">Nenhum módulo GD no catálogo.</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Escopo Incluso (Read-only list of items) */}
-                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 space-y-3">
-                      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                        <span className="text-xs font-black text-slate-800 uppercase tracking-wider">Escopo Incluso na Proposta</span>
-                      </div>
-                      <div className="space-y-2">
+                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">Itens e Serviços Incluídos</h4>
+                      <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-white/5 space-y-3">
                         {(() => {
                           const activeGdPkg = availablePackages.find(p => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
                           const activeVexoPkg = availablePackages.find(p => p.id === editPackageVexoId && p.tipo === "vexo");
@@ -1335,13 +1277,12 @@ export default function GeracaoDigitalProposals() {
                             <div className="space-y-3">
                               {activeGdPkg && (
                                 <div className="space-y-1">
-                                  <div className="flex justify-between items-center text-xs font-bold text-slate-850">
+                                  <div className="flex justify-between items-center text-xs font-bold text-slate-850 dark:text-slate-200">
                                     <span>Combo GD: {activeGdPkg.nome}</span>
-                                    <span>{(activeGdPkg.valor / (activeGdPkg.periodo === "anual" ? 12 : activeGdPkg.periodo === "semestral" ? 6 : activeGdPkg.periodo === "trimestral" ? 3 : 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês</span>
                                   </div>
                                   <div className="flex flex-wrap gap-1 pl-3 border-l-2 border-purple-300">
                                     {(activeGdPkg.produtos_incluidos || []).map((p: any, idx: number) => (
-                                      <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 text-slate-650 dark:text-slate-300 text-[9px] py-0">{p.nome}</Badge>
+                                      <Badge key={idx} variant="outline" className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-750 text-slate-650 dark:text-slate-350 text-[9px] py-0">{p.nome}</Badge>
                                     ))}
                                   </div>
                                 </div>
@@ -1349,13 +1290,12 @@ export default function GeracaoDigitalProposals() {
 
                               {activeVexoPkg && (
                                 <div className="space-y-1">
-                                  <div className="flex justify-between items-center text-xs font-bold text-slate-850">
+                                  <div className="flex justify-between items-center text-xs font-bold text-slate-850 dark:text-slate-200">
                                     <span>Combo Vexo OS: {activeVexoPkg.nome}</span>
-                                    <span>{(activeVexoPkg.valor / (activeVexoPkg.periodo === "anual" ? 12 : activeVexoPkg.periodo === "semestral" ? 6 : activeVexoPkg.periodo === "trimestral" ? 3 : 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês</span>
                                   </div>
                                   <div className="flex flex-wrap gap-1 pl-3 border-l-2 border-indigo-300">
                                     {(activeVexoPkg.produtos_incluidos || []).map((p: any, idx: number) => (
-                                      <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 text-slate-650 dark:text-slate-300 text-[9px] py-0">{p.nome}</Badge>
+                                      <Badge key={idx} variant="outline" className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-750 text-slate-650 dark:text-slate-350 text-[9px] py-0">{p.nome}</Badge>
                                     ))}
                                   </div>
                                 </div>
@@ -1363,12 +1303,11 @@ export default function GeracaoDigitalProposals() {
 
                               {activeAvulsos.length > 0 && (
                                 <div className="space-y-1">
-                                  <span className="text-xs font-bold text-slate-855 block">Módulos Avulsos Extras:</span>
-                                  <div className="grid gap-2 pl-3 border-l-2 border-slate-300">
+                                  <span className="text-xs font-bold text-slate-855 dark:text-slate-200 block">Módulos Avulsos Extras:</span>
+                                  <div className="grid gap-2 pl-3 border-l-2 border-slate-300 dark:border-slate-750">
                                     {activeAvulsos.map((p: any) => (
-                                      <div key={p.id} className="flex justify-between items-center text-xs text-slate-650">
+                                      <div key={p.id} className="flex justify-between items-center text-xs text-slate-650 dark:text-slate-350">
                                         <span>• {p.nome}</span>
-                                        <span className="font-mono text-slate-500">{Number(p.valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês</span>
                                       </div>
                                     ))}
                                   </div>
@@ -1380,477 +1319,44 @@ export default function GeracaoDigitalProposals() {
                       </div>
                     </div>
 
-                    {/* Legacy items (if any exist) */}
-                    {(() => {
-                      const legacyItems = items.filter(item => {
-                        return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao.startsWith("Pacote:")) ||
-                               (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao.startsWith("Pacote Vexo:"));
-                      });
-                      if (legacyItems.length === 0) return null;
-                      return (
-                        <div className="p-4 rounded-xl bg-orange-50/10 dark:bg-orange-950/10 border border-orange-200 dark:border-orange-900/50 space-y-2">
-                          <Label className="text-xs font-bold text-orange-850 uppercase block">Itens Adicionais (Legado)</Label>
-                          <p className="text-[10px] text-orange-700 font-medium">Esses itens foram cadastrados no modelo antigo e possuem precificação customizada manual.</p>
-                          <div className="space-y-2 mt-2">
-                            {legacyItems.map((item, idx) => {
-                              const globalIdx = items.findIndex(it => it.descricao === item.descricao && it.valor === item.valor);
-                              return (
-                                <div key={idx} className="flex justify-between items-center p-2 rounded bg-white dark:bg-slate-900 border border-orange-100 dark:border-orange-900/20 text-xs">
-                                  <div>
-                                    <span className="font-semibold text-slate-800">{item.descricao}</span>
-                                    <span className="text-[9px] text-slate-450 block uppercase font-mono">{item.categoria} · {item.recorrencia}</span>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    <span className="font-mono font-bold text-slate-700">{Number(item.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
-                                    {selectedProposal.status !== "aceita" && (
-                                      <Button variant="ghost" size="icon" onClick={() => handleRemoveItem(globalIdx)} className="h-6 w-6 text-red-500 hover:text-red-750 hover:bg-red-50">
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Consolidated Financial Summary Card */}
-                    {(() => {
-                      const tempProposal = {
-                        cobrar_setup: cobrarSetup,
-                        valor_setup_vexo: valorSetupVexo,
-                        package_id: editPackageId || null,
-                        package_vexo_id: editPackageVexoId || null,
-                        periodo_plano: periodoPlano || "mensal",
-                        descontos_concedidos: selectedProposal?.descontos_concedidos || [],
-                        itens: items
-                      };
-                      const calc = calculateProposalValues(tempProposal, availablePackages);
-
-                      return (
-                        <div className={cn(
-                          "grid gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10",
-                          vpActive ? "sm:grid-cols-4" : "sm:grid-cols-3"
-                        )}>
-                          <div className="space-y-1">
-                            <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block">1. Taxa de Setup</span>
-                            <h4 className="text-lg font-black text-slate-800 font-mono">
-                              {calc.setupFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                            </h4>
-                            {cobrarSetup && calc.setupFinal < calc.setupOriginal && (
-                              <span className="text-[9px] text-emerald-600 font-bold block">
-                                Desconto de {(calc.setupOriginal - calc.setupFinal).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} aplicado
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-1">
-                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">2. Valor Recorrente (Mensalidade)</span>
-                            <h4 className="text-lg font-black text-pink-650 font-mono">
-                              {calc.mensalidadeFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
-                            </h4>
-                            {calc.mensalidadeFinal < calc.mensalidadeOriginal && (
-                              <span className="text-[9px] text-emerald-600 font-bold block">
-                                Desconto de {(calc.mensalidadeOriginal - calc.mensalidadeFinal).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês aplicado
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-1">
-                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">3. Compromisso do Período</span>
-                            <h4 className="text-lg font-black text-indigo-600 font-mono">
-                              {calc.compromissoFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                            </h4>
-                            <span className="text-[9px] text-slate-450 block">Soma recorrente por {calc.mesesPeriodo} meses</span>
-                          </div>
-
-                          {vpActive && (
-                            <div className="space-y-1 border-l border-purple-100 pl-3">
-                              <span className="text-[10px] text-purple-650 uppercase font-black tracking-wider block">4. Permuta Comercial (VP)</span>
-                              <h4 className="text-lg font-black text-purple-700 font-mono">
-                                {editValorVp.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                              </h4>
-                              <span className="text-[9px] text-purple-500 block">Acordado em troca de permuta</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </CardContent>
-                </Card>
-
-                {/* Setup Vexo (taxa de implantação opcional) */}
-                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="text-base font-bold text-slate-800">Taxa de Implantação (Setup Vexo OS)</CardTitle>
-                    <CardDescription className="text-[11px] text-slate-500">
-                      Investimento único e opcional de implantação, discriminado no total de entrada da proposta.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs font-bold text-slate-700">Cobrar setup de implantação?</Label>
-                      <Switch
-                        checked={cobrarSetup}
-                        disabled={selectedProposal.status === "aceita"}
-                        onCheckedChange={setCobrarSetup}
-                      />
-                    </div>
-                    {cobrarSetup && (
-                      <div className="space-y-3 border-t border-slate-100 dark:border-white/5 dark:border-white/5 pt-3">
-                        <div className="w-full md:w-48 space-y-1">
-                          <Label className="text-[10px] text-slate-500 font-mono">Valor do Setup (R$)</Label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-[10px] text-slate-500 font-mono">R$</span>
-                            <Input
-                              type="number"
-                              value={valorSetupVexo}
-                              disabled={selectedProposal.status === "aceita"}
-                              onChange={(e) => setValorSetupVexo(Number(e.target.value) || 0)}
-                              className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 pl-7 h-8 font-mono"
-                            />
-                          </div>
-                        </div>
-                        <div className="text-[10px] text-slate-600 dark:text-slate-350 leading-relaxed bg-purple-50/10 dark:bg-purple-950/10 p-3 rounded-lg border border-purple-100 dark:border-purple-900/30 whitespace-pre-line">
-                          <span className="font-bold text-slate-800 block mb-1">{SETUP_LABEL}</span>
-                          {SETUP_JUSTIFICATION}
+                    {/* Informações Comerciais */}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">Prazos e Validade</h4>
+                        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-white/5 text-xs space-y-2 text-slate-700 dark:text-slate-350">
+                          <p><span className="font-bold text-slate-900 dark:text-slate-200">Período Contratual:</span> {periodoPlano ? periodoPlano.toUpperCase() : "Mensal"}</p>
+                          <p><span className="font-bold text-slate-900 dark:text-slate-200">Validade da Proposta:</span> {validadeAte ? new Date(`${validadeAte}T23:59:59`).toLocaleDateString("pt-BR") : "Sem validade definida"}</p>
+                          <p><span className="font-bold text-slate-900 dark:text-slate-200">Carência de Pagamento:</span> {editCarencia ? `${editCarencia} dias` : "Imediato na contratação"}</p>
                         </div>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
 
-                {/* Período do Plano e Validade da Proposta */}
-                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="text-base font-bold text-slate-800">Período do Plano & Validade da Proposta</CardTitle>
-                    <CardDescription className="text-[11px] text-slate-500">
-                      O período registra o plano fechado (sem desconto automático). A validade cria urgência na proposta pública.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-500 font-mono">Período do plano</Label>
-                        <select
-                          value={periodoPlano}
-                          disabled={selectedProposal.status === "aceita"}
-                          onChange={(e) => setPeriodoPlano(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 py-1 text-xs text-slate-850 dark:text-slate-100 focus:outline-none focus:border-indigo-500/50 h-8"
-                        >
-                          {PERIODO_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-500 font-mono">Proposta válida até</Label>
-                        <Input
-                          type="date"
-                          value={validadeAte}
-                          disabled={selectedProposal.status === "aceita"}
-                          onChange={(e) => setValidadeAte(e.target.value)}
-                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-500 font-mono">1º vencimento da mensalidade (carência)</Label>
-                        <select
-                          value={editCarencia}
-                          disabled={selectedProposal.status === "aceita"}
-                          onChange={(e) => setEditCarencia(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 py-1 text-xs text-slate-850 dark:text-slate-100 focus:outline-none h-8"
-                        >
-                          <option value="">Imediato (na contratação)</option>
-                          <option value="15">15 dias após a contratação</option>
-                          <option value="20">20 dias após a contratação</option>
-                          <option value="30">30 dias após a contratação</option>
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-500 font-mono">Valor após a validade (R$, opcional)</Label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-2 text-[10px] text-slate-500 font-mono">R$</span>
-                          <Input
-                            type="number"
-                            value={valorAposValidade}
-                            disabled={selectedProposal.status === "aceita"}
-                            onChange={(e) => setValorAposValidade(e.target.value)}
-                            className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 pl-7 h-8 font-mono"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-500 font-mono">Observação após o prazo (opcional)</Label>
-                      <Input
-                        value={observacaoValidade}
-                        disabled={selectedProposal.status === "aceita"}
-                        onChange={(e) => setObservacaoValidade(e.target.value)}
-                        placeholder='Ex: "Após esta data o valor retorna ao preço de tabela" ou "condições sujeitas a reajuste"'
-                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Condições de Pagamento ofertadas */}
-                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="text-base font-bold text-slate-800">Condições de Pagamento Ofertadas</CardTitle>
-                    <CardDescription className="text-[11px] text-slate-500 font-light">
-                      Selecione as condições salvas que o cliente poderá escolher. O desdobramento é calculado sobre o investimento único de setup (R$ {(setupTotal + setupVexoValue).toLocaleString("pt-BR")}).
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {availableTerms.length === 0 ? (
-                      <p className="text-[10px] text-slate-400 italic">
-                        Nenhuma condição de pagamento ativa. Cadastre na aba "Condições" do módulo Geração Digital.
-                      </p>
-                    ) : (
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {availableTerms.map((term) => {
-                          const isOffered = offeredTermIds.includes(term.id);
-                          const aplicaA = termAplicaA(term);
-                          const base = aplicaA === "mensalidade" ? recurringTotal : setupTotal + setupVexoValue;
-                          const breakdown = computePaymentBreakdown(term, base);
-                          return (
-                            <div
-                              key={term.id}
-                              className={cn(
-                                "p-3 rounded-xl border transition-all space-y-1.5",
-                                isOffered ? "bg-purple-50/50 border-purple-200" : "bg-white border-slate-200"
-                              )}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight">
-                                  {term.nome}
-                                  <Badge className={cn(
-                                    "text-[8px] font-bold border-none px-1.5 py-0 ml-1.5",
-                                    aplicaA === "mensalidade" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
-                                  )}>
-                                    {APLICA_A_LABELS[aplicaA]}
-                                  </Badge>
-                                </span>
-                                <Switch
-                                  checked={isOffered}
-                                  disabled={selectedProposal.status === "aceita"}
-                                  onCheckedChange={() => toggleOfferedTerm(term.id)}
-                                  className="scale-90"
-                                />
-                              </div>
-                              {isOffered && breakdown.linhas.map((linha, idx) => (
-                                <p key={idx} className="text-[10px] text-purple-700 font-medium">{linha}</p>
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">Condições de Pagamento Oferecidas</h4>
+                        <div className="p-4 rounded-xl bg-white dark:bg-slate-855 border border-slate-150 dark:border-white/5 text-xs space-y-2 text-slate-700 dark:text-slate-350">
+                          {offeredTerms.length === 0 ? (
+                            <p className="text-slate-450 italic">Nenhuma condição de pagamento especial oferecida.</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {offeredTerms.map((term) => (
+                                <p key={term.id} className="font-semibold">• {term.nome}</p>
                               ))}
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {selectedProposal.status !== "aceita" && (
-                      showInlineTerm ? (
-                        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-purple-200 dark:border-purple-900/50 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-800">Nova condição (aplicar nesta proposta)</span>
-                            <button onClick={() => setShowInlineTerm(false)} className="text-slate-400 hover:text-slate-600">
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div className="space-y-1">
-                              <Label className="text-[10px] text-slate-500 font-mono">Nome</Label>
-                              <Input
-                                value={inlineTerm.nome}
-                                onChange={(e) => setInlineTerm((p) => ({ ...p, nome: e.target.value }))}
-                                placeholder='Ex: "Entrada + 6x sem juros"'
-                                className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-[10px] text-slate-500 font-mono">Tipo</Label>
-                              <select
-                                value={inlineTerm.tipo}
-                                onChange={(e) => setInlineTerm((p) => ({ ...p, tipo: e.target.value as PaymentTermTipo, config: {} }))}
-                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 h-8"
-                              >
-                                {PAYMENT_TERM_TIPOS.map((t) => (
-                                  <option key={t.value} value={t.value}>{t.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                          <div className="grid gap-3 md:grid-cols-3">
-                            {inlineTerm.tipo === "avista_desconto" && (
-                              <div className="space-y-1">
-                                <Label className="text-[10px] text-slate-500 font-mono">% de desconto</Label>
-                                <Input
-                                  type="number"
-                                  value={inlineTerm.config.percentual_desconto ?? ""}
-                                  onChange={(e) => updateInlineConfig("percentual_desconto", Number(e.target.value) || 0)}
-                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                                />
-                              </div>
-                            )}
-                            {inlineTerm.tipo === "entrada_parcelas" && (
-                              <>
-                                <div className="space-y-1">
-                                  <Label className="text-[10px] text-slate-500 font-mono">Entrada (R$)</Label>
-                                  <Input
-                                    type="number"
-                                    value={inlineTerm.config.valor_entrada ?? ""}
-                                    onChange={(e) => updateInlineConfig("valor_entrada", Number(e.target.value) || 0)}
-                                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-[10px] text-slate-500 font-mono">Nº parcelas</Label>
-                                  <Input
-                                    type="number"
-                                    value={inlineTerm.config.num_parcelas ?? ""}
-                                    onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)}
-                                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                                  />
-                                </div>
-                              </>
-                            )}
-                            {(inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "boleto_recorrente" || inlineTerm.tipo === "semanal") && (
-                              <div className="space-y-1">
-                                <Label className="text-[10px] text-slate-500 font-mono">Nº parcelas</Label>
-                                <Input
-                                  type="number"
-                                  value={inlineTerm.config.num_parcelas ?? ""}
-                                  onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)}
-                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                                />
-                              </div>
-                            )}
-                            {inlineTerm.tipo === "custom" && (
-                              <div className="space-y-1 md:col-span-3">
-                                <Label className="text-[10px] text-slate-500 font-mono">Descrição</Label>
-                                <Input
-                                  value={inlineTerm.config.descricao ?? ""}
-                                  onChange={(e) => updateInlineConfig("descricao", e.target.value)}
-                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
-                                />
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <label className="flex items-center gap-2 text-[10px] text-slate-600 font-medium cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={inlineTerm.salvarTemplate}
-                                onChange={(e) => setInlineTerm((p) => ({ ...p, salvarTemplate: e.target.checked }))}
-                                className="accent-purple-600"
-                              />
-                              Salvar como template reutilizável (aba Condições)
-                            </label>
-                            <Button size="xs" onClick={handleCreateInlineTerm} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold">
-                              Criar e aplicar
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          onClick={() => setShowInlineTerm(true)}
-                          className="border-purple-200 text-purple-650 hover:bg-purple-50 text-xs font-bold"
-                        >
-                          <Plus className="h-3.5 w-3.5 mr-1" />
-                          Criar condição na hora
-                        </Button>
-                      )
-                    )}
-                    {selectedProposal.condicoes_pagamento?.escolhida && (
-                      <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
-                        <span className="text-[10px] font-bold text-emerald-700">
-                          Condição escolhida pelo cliente: {selectedProposal.condicoes_pagamento.escolhida.nome}
-                        </span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Conditions & Signatures */}
-                <div className="grid gap-6 md:grid-cols-2 items-stretch">
-
-                  {/* Conditions Card */}
-                  <Card className="bg-white border-slate-200 shadow-sm flex flex-col h-full">
-                    <CardHeader>
-                      <CardTitle className="text-base font-bold text-slate-800">Condições Contratuais</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4 flex-grow flex flex-col justify-between">
-                      <div className="space-y-4 flex-grow">
-                        <div className="space-y-2">
-                          <Label className="text-[10px] text-slate-500 font-mono">Condições e Regras Comerciais</Label>
-                          <textarea
-                            value={condicoes}
-                            disabled={selectedProposal.status === "aceita"}
-                            onChange={(e) => setCondicoes(e.target.value)}
-                            className="w-full min-h-[140px] bg-white border border-slate-200 rounded-lg p-3 text-xs text-slate-800 focus:outline-none focus:border-indigo-500/50"
-                          />
-                        </div>
-
-                        <div className="space-y-2 pt-2">
-                          <Label className="text-[10px] text-slate-500 font-mono">Link de Pagamento (Checkout)</Label>
-                          <Input
-                            value={paymentLink}
-                            disabled={selectedProposal.status === "aceita"}
-                            onChange={(e) => setPaymentLink(e.target.value)}
-                            placeholder="https://checkout.exemplo.com/..."
-                            className="bg-white border-slate-200 text-xs text-slate-800 focus:outline-none"
-                          />
-                          <span className="text-[9px] text-slate-450 block font-light leading-snug">
-                            Deixe vazio para herdar o link de checkout padrão da Geração Digital configurado no tenant.
-                          </span>
-                        </div>
-
-                        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-white/5 mt-2">
-                          <div className="flex items-center justify-between">
-                            <div className="space-y-0.5">
-                              <Label className="text-[10px] text-slate-500 font-mono">Ativar VP (Permuta)</Label>
-                              <span className="text-[9px] text-slate-450 block leading-snug">Esta proposta possui permuta associada</span>
-                            </div>
-                            <Switch
-                              checked={vpActive}
-                              disabled={selectedProposal.status === "aceita"}
-                              onCheckedChange={(checked) => {
-                                setVpActive(checked);
-                                if (!checked) setEditValorVp(0);
-                              }}
-                            />
-                          </div>
-
-                          {vpActive && (
-                            <div className="space-y-1.5 pt-1 animate-fade-in">
-                              <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor em VP (R$)</Label>
-                              <Input
-                                type="number"
-                                value={editValorVp || ""}
-                                disabled={selectedProposal.status === "aceita"}
-                                onChange={(e) => setEditValorVp(Number(e.target.value) || 0)}
-                                placeholder="Valor total para permuta"
-                                className="bg-white border-slate-200 text-xs text-slate-850 font-mono focus:outline-none h-10"
-                              />
-                            </div>
                           )}
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </CardContent>
+                </Card>
 
-                  {/* Electronic Signature Card */}
-                  <Card className="bg-white border-slate-200 shadow-sm flex flex-col h-full">
+                                  {/* Electronic Signature Card */}
+                  <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm flex flex-col h-full">
                     <CardHeader>
-                      <CardTitle className="text-base font-bold text-slate-800">Assinatura de Aceite Comercial</CardTitle>
+                      <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100">Assinatura de Aceite Comercial</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4 flex-grow flex flex-col justify-between">
 
                       {selectedProposal.status === "aceita" ? (
-                        <div className="space-y-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center flex-grow flex flex-col justify-center">
+                        <div className="space-y-4 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 text-center flex-grow flex flex-col justify-center">
                           <CheckCircle className="h-10 w-10 text-emerald-600 mx-auto" />
                           <div className="space-y-1">
                             <h4 className="text-sm font-bold text-slate-800">Contrato Fechado com Sucesso!</h4>
@@ -1859,7 +1365,7 @@ export default function GeracaoDigitalProposals() {
                           </div>
 
                           {selectedProposal.assinatura && selectedProposal.assinatura.startsWith("data:image") && (
-                            <div className="h-20 w-full max-w-[200px] bg-white rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden border border-slate-100">
+                            <div className="h-20 w-full max-w-[200px] bg-white dark:bg-slate-800 rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-700">
                               <img src={selectedProposal.assinatura} alt="Assinatura" className="max-h-full max-w-full object-contain" />
                             </div>
                           )}
@@ -1872,7 +1378,7 @@ export default function GeracaoDigitalProposals() {
                       ) : (
                         <div className="space-y-4 flex-grow flex flex-col justify-between">
                           <div className="space-y-4">
-                            <div className="text-[10px] text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
+                            <div className="text-[10px] text-slate-600 dark:text-slate-350 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
                               <span className="font-bold text-slate-800 block mb-1 uppercase font-mono tracking-wider">Termo de Aceite:</span>
                               "Declaro estar de acordo com os services, valores e condições desta proposta e autorizo o início dos trabalhos."
                             </div>
@@ -1883,7 +1389,7 @@ export default function GeracaoDigitalProposals() {
                                 value={signerName}
                                 onChange={(e) => setSignerName(e.target.value)}
                                 placeholder="Nome do Responsável Legal"
-                                className="bg-white border-slate-200 text-xs text-slate-800 focus:outline-none"
+                                className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 focus:outline-none"
                               />
                             </div>
 
@@ -1907,7 +1413,7 @@ export default function GeracaoDigitalProposals() {
                                 onTouchMove={draw}
                                 onTouchEnd={stopDrawing}
                                 style={{ touchAction: "none" }}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl cursor-crosshair h-[120px]"
+                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl cursor-crosshair h-[120px]"
                               />
                             </div>
                           </div>
@@ -1923,7 +1429,6 @@ export default function GeracaoDigitalProposals() {
                       )}
                     </CardContent>
                   </Card>
-                </div>
               </div>
             ) : (
               <div className="lg:col-span-3 flex items-center justify-center min-h-[400px] w-full">
