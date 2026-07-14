@@ -58,6 +58,7 @@ interface NegotiationBoardProps {
   offeredTerms: PaymentTerm[];
   onClose: () => void;
   onFinalize: (result: NegotiationFinalizeResult) => void;
+  onNegotiationChange?: (result: NegotiationFinalizeResult) => void;
   packageId?: string | null;
   packageVexoId?: string | null;
   availablePackages: any[];
@@ -83,6 +84,7 @@ export function GeracaoDigitalNegotiationBoard({
   offeredTerms,
   onClose,
   onFinalize,
+  onNegotiationChange,
   packageId,
   packageVexoId,
   availablePackages
@@ -105,6 +107,17 @@ export function GeracaoDigitalNegotiationBoard({
     () => computeNegotiation({ setupItensTotal, setupVexoValue, recurringTotal, periodoPlano }, layers, offeredTerms),
     [setupItensTotal, setupVexoValue, recurringTotal, periodoPlano, layers, offeredTerms]
   );
+
+  useEffect(() => {
+    if (onNegotiationChange) {
+      onNegotiationChange({
+        descontos: result.descontos,
+        valorSetupVexoFinal: layers.isencaoSetup ? 0 : setupVexoValue,
+        meioPagamento: { setup: layers.meioSetup, mensalidade: layers.meioMensalidade },
+        carenciaDias: layers.carenciaDias
+      });
+    }
+  }, [result.descontos, layers, setupVexoValue, onNegotiationChange]);
 
   const calc = useMemo(() => {
     return calculateProposalValues({

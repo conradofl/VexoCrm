@@ -20,6 +20,7 @@ export default function GeracaoDigitalNegotiationPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [negotiated, setNegotiated] = useState(false);
+  const [pendingNegotiationUpdate, setPendingNegotiationUpdate] = useState<NegotiationFinalizeResult | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated || !clientId) return;
@@ -57,6 +58,55 @@ export default function GeracaoDigitalNegotiationPage() {
 
     loadData();
   }, [id, isAuthenticated, clientId]);
+
+  // Debounced auto-save on lever adjustments
+  useEffect(() => {
+    if (!pendingNegotiationUpdate || !proposal || negotiated) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const token = await getIdToken();
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const isento = pendingNegotiationUpdate.descontos.some((d: any) => d.tipo === "isencao_setup");
+        const cobrarSetup = proposal.cobrar_setup;
+        const valorSetupVexo = proposal.valor_setup_vexo;
+
+        const body = {
+          client_id: clientId,
+          prospect_name: proposal.prospect_name,
+          itens: proposal.itens,
+          condicoes: proposal.condicoes,
+          payment_link: proposal.payment_link,
+          cobrar_setup: cobrarSetup,
+          valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
+          descontos_concedidos: pendingNegotiationUpdate.descontos,
+          meio_pagamento: pendingNegotiationUpdate.meioPagamento,
+          periodo_plano: proposal.periodo_plano || null,
+          validade_ate: proposal.validade_ate || null,
+          valor_apos_validade: proposal.valor_apos_validade !== null ? Number(proposal.valor_apos_validade) : null,
+          observacao_validade: proposal.observacao_validade || null,
+          carencia_dias: pendingNegotiationUpdate.carenciaDias ? Number(pendingNegotiationUpdate.carenciaDias) : (proposal.carencia_dias || null),
+          condicoes_pagamento: proposal.condicoes_pagamento
+        };
+
+        const res = await fetchApi(`/api/gd/proposals/${proposal.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(body)
+        });
+
+        if (res.ok) {
+          console.log("Auto-save completed successfully.");
+        }
+      } catch (err) {
+        console.error("Auto-save error:", err);
+      }
+    }, 400); // 400ms debounce
+
+    return () => clearTimeout(timer);
+  }, [pendingNegotiationUpdate, proposal, clientId, negotiated]);
 
   const handleFinalize = async (result: NegotiationFinalizeResult) => {
     if (!proposal) return;
@@ -189,6 +239,7 @@ export default function GeracaoDigitalNegotiationPage() {
       offeredTerms={offeredTerms}
       onClose={() => window.close()}
       onFinalize={handleFinalize}
+      onNegotiationChange={(res) => setPendingNegotiationUpdate(res)}
       packageId={proposal.package_id}
       packageVexoId={proposal.package_vexo_id}
       availablePackages={availablePackages}

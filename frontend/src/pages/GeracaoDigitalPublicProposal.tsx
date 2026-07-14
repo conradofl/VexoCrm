@@ -30,6 +30,7 @@ import {
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
+import { supabase } from "@/lib/supabase";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -97,6 +98,47 @@ export default function GeracaoDigitalPublicProposal() {
       loadPublicProposal();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !supabase) return;
+
+    const channel = supabase
+      .channel(`public-proposal-${id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "gd_proposals",
+          filter: `id=eq.${id}`
+        },
+        (payload) => {
+          console.log("Realtime update received:", payload);
+          reloadPublicProposalSilent();
+        }
+      )
+      .subscribe((status) => {
+        console.log(`Supabase Realtime subscription status for proposal ${id}:`, status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id]);
+
+  async function reloadPublicProposalSilent() {
+    try {
+      const res = await fetchApi(`/api/gd/public/proposals/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.data) {
+          setProposal(data.data);
+        }
+      }
+    } catch (err) {
+      console.error("Silent reload error:", err);
+    }
+  }
 
   async function loadPublicProposal() {
     try {
@@ -515,15 +557,15 @@ export default function GeracaoDigitalPublicProposal() {
             <h3 className="font-bold text-white text-xl">Valores Propostos</h3>
 
             <div className="space-y-5">
-              <div className="pb-4 border-b border-slate-800 space-y-1">
-                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Investimento único (Setup)</span>
-                <span className="text-purple-300 font-black text-3xl block">
+              <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Investimento único (Setup)</span>
+                <span className="text-purple-300 font-black text-3xl block transition-all duration-500 ease-in-out">
                   {setupIsento ? (
-                    <span className="text-emerald-400">Isento</span>
+                    <span className="text-emerald-400 transition-colors duration-500">Isento</span>
                   ) : (
                     <>
                       {setupFinalVal < setupBaseVal && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg">
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
                           R$ {setupBaseVal.toLocaleString("pt-BR")}
                         </span>
                       )}
@@ -532,26 +574,40 @@ export default function GeracaoDigitalPublicProposal() {
                   )}
                 </span>
               </div>
-              <div className="pb-4 border-b border-slate-800 space-y-1">
-                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Mensalidade</span>
-                <span className="text-pink-400 font-black text-3xl block">
+              <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Mensalidade</span>
+                <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
                   {mensalFinalVal < mensalBaseVal && (
-                    <span className="text-slate-500 line-through mr-2 font-bold text-lg">
+                    <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
                       R$ {mensalBaseVal.toLocaleString("pt-BR")}
                     </span>
                   )}
-                  R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400">/mês</span>
+                  R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
                 </span>
                 {primeiraMensalidadeDate && (
-                  <span className="text-xs font-bold text-amber-300 block pt-1">
+                  <span className="text-xs font-bold text-amber-300 block pt-1 transition-colors duration-500">
                     Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
                   </span>
                 )}
               </div>
+              <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
+                <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                  {calc.compromissoFinal < calc.compromissoOriginal && (
+                    <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                      R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
+                    </span>
+                  )}
+                  R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
+                </span>
+                <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
+                  Soma total das mensalidades por {calc.mesesPeriodo} meses.
+                </span>
+              </div>
               {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
-                <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in">
-                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Permuta Comercial (VP)</span>
-                  <span className="text-purple-400 font-black text-3xl block">
+                <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
+                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Permuta Comercial (VP)</span>
+                  <span className="text-purple-400 font-black text-3xl block transition-all duration-500 ease-in-out">
                     R$ {Number(proposal.valor_vp).toLocaleString("pt-BR")}
                   </span>
                   <span className="text-[10px] text-purple-300 block font-light leading-snug">
