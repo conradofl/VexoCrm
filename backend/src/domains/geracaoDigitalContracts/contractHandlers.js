@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import db from "../../services/database.js";
+import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
 

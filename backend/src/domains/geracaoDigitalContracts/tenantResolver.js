@@ -1,4 +1,4 @@
-import db from "../../services/database.js";
+import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveAuthorizedClientId } from "../../services/tenant.js";
 import { sendError } from "../../services/httpInfra.js";
 

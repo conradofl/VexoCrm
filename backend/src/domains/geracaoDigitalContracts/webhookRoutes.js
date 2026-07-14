@@ -1,5 +1,5 @@
 import express from "express";
-import db from "../../services/database.js";
+import { pgDatabasePool as db } from "../../services/database.js";
 
 const router = express.Router();
 
