@@ -36,10 +36,30 @@ export function calculateProposalValues(
   // Setup original: base value is the optional Vexo Setup
   let setupOriginal = cobrarSetup ? valorSetupVexo : 0;
 
-  // Sum any items in proposal.itens with recorrencia === "unico"
   const items = Array.isArray(proposal.itens) ? proposal.itens : [];
+
+  // Anti-bitributação: product_ids que JÁ compõem o pacote selecionado.
+  // Itens do pacote entram com valor 0 e sem prefixo de avulso ("GD:"/"Vexo OS:")
+  // nem de pacote ("Pacote:"/"Pacote Vexo:"). Qualquer avulso que repita um
+  // desses product_ids é redundante e NÃO deve somar de novo.
+  const includedProductIds = new Set(
+    items
+      .filter(item =>
+        item.product_id &&
+        Number(item.valor || 0) === 0 &&
+        !item.descricao?.startsWith("GD:") &&
+        !item.descricao?.startsWith("Vexo OS:") &&
+        !item.descricao?.startsWith("Pacote:") &&
+        !item.descricao?.startsWith("Pacote Vexo:")
+      )
+      .map(item => item.product_id)
+  );
+  const naoInclusoNoPacote = (item: any) =>
+    !(item.product_id && includedProductIds.has(item.product_id));
+
+  // Setup: itens únicos avulsos, excluindo os que já compõem o pacote.
   const itemsSetup = items
-    .filter(item => item.recorrencia === "unico")
+    .filter(item => item.recorrencia === "unico" && naoInclusoNoPacote(item))
     .reduce((sum, item) => sum + Number(item.valor || 0), 0);
   setupOriginal += itemsSetup;
 
@@ -88,15 +108,17 @@ export function calculateProposalValues(
     }
   }
 
-  // Vexo avulsos: items in proposal that are Vexo but NOT the Vexo package itself.
+  // Vexo avulsos: items in proposal that are Vexo but NOT the Vexo package itself
+  // nem já inclusos no pacote selecionado.
   const vexoAvulsos = items.filter(item => {
-    return item.categoria === "vexo" && item.product_id !== null && !item.descricao?.startsWith("Pacote Vexo") && item.recorrencia !== "unico";
+    return item.categoria === "vexo" && item.product_id !== null && !item.descricao?.startsWith("Pacote Vexo") && item.recorrencia !== "unico" && naoInclusoNoPacote(item);
   });
   const avulsosMonthly = vexoAvulsos.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
-  // Legacy items (for backward compatibility):
+  // Legacy items (for backward compatibility): itens GD avulsos com valor,
+  // excluindo os que já compõem o pacote selecionado.
   const legacyItems = items.filter(item => {
-    return item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && item.recorrencia !== "unico";
+    return item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && item.recorrencia !== "unico" && naoInclusoNoPacote(item);
   });
   const legacyMonthly = legacyItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
