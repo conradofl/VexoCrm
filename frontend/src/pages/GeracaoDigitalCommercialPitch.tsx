@@ -793,7 +793,7 @@ export default function GeracaoDigitalCommercialPitch({
 
         {/* SLIDE 10: INVESTMENT (INVESTIMENTO) */}
         {currentSlideType === "investment" && (
-          <div className="max-w-5xl w-full space-y-6 text-center animate-fade-in px-4">
+          <div className="max-w-5xl w-full space-y-6 text-center animate-fade-in px-4 overflow-y-auto max-h-[calc(100vh-180px)] pb-32 scrollbar-thin">
             <div className="space-y-2">
               <Badge className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-none text-xs px-4 py-1.5 uppercase font-mono tracking-wider shadow-md shadow-indigo-600/10">
                 Slide 10 · Investimento & Fechamento

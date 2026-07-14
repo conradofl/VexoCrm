@@ -37,39 +37,39 @@ export function GeracaoDigitalTabs() {
   return (
     <div className="border-b border-slate-200 dark:border-white/10 pb-2 mb-6">
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="flex w-full max-w-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/10 h-10 p-1 rounded-xl">
+        <TabsList className="flex w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/10 h-11 p-1 rounded-xl overflow-x-auto overflow-y-hidden whitespace-nowrap scrollbar-none select-none [&::-webkit-scrollbar]:hidden">
           {hasApresentacao && (
-            <TabsTrigger value="apresentacao" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+            <TabsTrigger value="apresentacao" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <Briefcase className="h-3.5 w-3.5 mr-1.5" />
               Apresentação
             </TabsTrigger>
           )}
           {hasBriefings && (
-            <TabsTrigger value="briefing" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+            <TabsTrigger value="briefing" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <ListChecks className="h-3.5 w-3.5 mr-1.5" />
               Briefing
             </TabsTrigger>
           )}
           {hasPropostas && (
-            <TabsTrigger value="propostas" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+            <TabsTrigger value="propostas" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <FileText className="h-3.5 w-3.5 mr-1.5" />
               Propostas
             </TabsTrigger>
           )}
           {hasPacotes && (
-            <TabsTrigger value="pacotes" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+            <TabsTrigger value="pacotes" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <Layers className="h-3.5 w-3.5 mr-1.5" />
               Pacotes
             </TabsTrigger>
           )}
           {hasCondicoes && (
-            <TabsTrigger value="condicoes" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+            <TabsTrigger value="condicoes" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <CreditCard className="h-3.5 w-3.5 mr-1.5" />
               Condições
             </TabsTrigger>
           )}
           {hasContratos && (
-            <TabsTrigger value="contratos" className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+            <TabsTrigger value="contratos" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <FileText className="h-3.5 w-3.5 mr-1.5" />
               Contratos
             </TabsTrigger>
