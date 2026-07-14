@@ -1819,11 +1819,41 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const row = result.rows[0];
 
-      // Fetch available packages for this tenant
-      const packagesRes = await pool.query(
-        `SELECT * FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true`,
-        [row.tenant_id]
-      );
+      // Pacotes desta proposta: apenas os ofertados pelo vendedor (não todos do
+      // tenant). Fonte: pacotes_ofertados da apresentação vinculada + os pacotes
+      // efetivamente escolhidos na proposta (package_id / package_vexo_id).
+      const allowedPackageIds = new Set();
+      if (row.package_id) allowedPackageIds.add(row.package_id);
+      if (row.package_vexo_id) allowedPackageIds.add(row.package_vexo_id);
+      if (row.presentation_id) {
+        try {
+          const presRes = await pool.query(
+            `SELECT pacotes_ofertados FROM public.gd_presentations WHERE id = $1 AND tenant_id = $2`,
+            [row.presentation_id, row.tenant_id]
+          );
+          let ofertados = presRes.rows[0]?.pacotes_ofertados;
+          if (typeof ofertados === "string") {
+            try { ofertados = JSON.parse(ofertados); } catch { ofertados = []; }
+          }
+          if (Array.isArray(ofertados)) {
+            ofertados.forEach((p) => {
+              const pid = p?.package_id || p?.id;
+              if (pid) allowedPackageIds.add(pid);
+            });
+          }
+        } catch (presErr) {
+          console.warn("[GeracaoDigital] Falha ao ler pacotes ofertados da apresentação:", presErr?.message || presErr);
+        }
+      }
+
+      let packagesRows = [];
+      if (allowedPackageIds.size > 0) {
+        const packagesRes = await pool.query(
+          `SELECT * FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true AND id = ANY($2::uuid[])`,
+          [row.tenant_id, Array.from(allowedPackageIds)]
+        );
+        packagesRows = packagesRes.rows;
+      }
 
       // Fetch tenant payment default link as fallback
       const tenantModulesRes = await pool.query(
@@ -1846,7 +1876,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           payment_link: finalPaymentLink,
           valor_setup: valorSetup,
           valor_recorrente: valorRecorrente,
-          packages: packagesRes.rows
+          packages: packagesRows
         }
       });
     } catch (error) {
