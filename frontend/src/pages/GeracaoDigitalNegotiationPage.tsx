@@ -156,10 +156,10 @@ export default function GeracaoDigitalNegotiationPage() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || !proposal) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <span className="animate-spin h-8 w-8 border-4 border-purple-600 border-t-transparent rounded-full" />
+        <div>Carregando Mesa de Negociação...</div>
       </div>
     );
   }

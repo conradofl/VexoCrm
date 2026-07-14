@@ -25,7 +25,8 @@ import {
   X,
   Archive,
   Play,
-  Edit
+  Edit,
+  ExternalLink
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
@@ -1267,11 +1268,11 @@ export default function GeracaoDigitalProposals() {
                       {selectedProposal.status !== "aceita" && (
                         <Button
                           size="sm"
-                          onClick={() => window.open(`/crm/propostas-gd/negociacao/${selectedProposal.id}`, "_blank")}
+                          onClick={() => window.open(`/proposta/${selectedProposal.id}`, "_blank")}
                           className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold"
                         >
-                          <Sparkles className="h-4 w-4 mr-1.5" />
-                          Abrir Mesa de Negociação
+                          <ExternalLink className="h-4 w-4 mr-1.5" />
+                          Abrir Proposta
                         </Button>
                       )}
                       <Button

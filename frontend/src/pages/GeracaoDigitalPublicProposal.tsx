@@ -371,14 +371,23 @@ export default function GeracaoDigitalPublicProposal() {
           </div>
         </div>
 
-        <Badge
-          className={cn(
-            "text-xs font-extrabold px-3 py-1 border-none",
-            proposal.status === "aceita" ? "bg-emerald-500 text-white" : "bg-purple-600 text-white animate-pulse"
-          )}
-        >
-          {proposal.status === "aceita" ? "Fechado ✔" : "Aguardando Assinatura"}
-        </Badge>
+        <div className="flex items-center gap-4">
+          <Button
+            size="sm"
+            onClick={() => window.open(`/crm/propostas-gd/negociacao/${proposal.id}`, "_blank")}
+            className="hidden sm:flex bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold border border-slate-700"
+          >
+            Abrir Mesa de Negociação
+          </Button>
+          <Badge
+            className={cn(
+              "text-xs font-extrabold px-3 py-1 border-none",
+              proposal.status === "aceita" ? "bg-emerald-500 text-white" : "bg-purple-600 text-white animate-pulse"
+            )}
+          >
+            {proposal.status === "aceita" ? "Fechado ✔" : "Aguardando Assinatura"}
+          </Badge>
+        </div>
       </header>
 
       <main className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 mt-12 grid gap-10 lg:grid-cols-5">
