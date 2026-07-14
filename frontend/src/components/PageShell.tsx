@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import { Building2, ChevronDown, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,6 +14,9 @@ export const PageShellContext = createContext(false);
 interface PageShellProps {
   title: string;
   subtitle?: string;
+  // Aceitas por páginas legadas/novas; ainda não renderizadas pelo shell atual.
+  description?: string;
+  icon?: React.ElementType;
   headerRight?: ReactNode;
   children: ReactNode;
   spacing?: string;

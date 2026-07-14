@@ -82,3 +82,12 @@ export const COLOR_PRESETS = {
 };
 
 export type ColorPreset = (typeof COLOR_PRESETS)[keyof typeof COLOR_PRESETS];
+
+
+// ─── Modos da sidebar (Vendas | Disparos) ─── usados pelo ModeSwitcher
+export type Modo = "vendas" | "disparos";
+
+export const MODULOS: Record<Modo, { labelCurto: string; labelLongo: string; cor: string }> = {
+  vendas: { labelCurto: "Vendas", labelLongo: "Módulo de Vendas", cor: "#9333ea" },
+  disparos: { labelCurto: "Disparos", labelLongo: "Módulo de Disparos", cor: "#ec4899" },
+};

@@ -130,8 +130,8 @@ export default function Leads({
           .toLowerCase()
           .includes(normalizedTerm);
       const matchesOrigin = originFilter === "all" ||
-        (row as Record<string, unknown>).lead_source === originFilter ||
-        (originFilter === "campanha" && !!(row as Record<string, unknown>).source_campaign_id);
+        (row as unknown as Record<string, unknown>).lead_source === originFilter ||
+        (originFilter === "campanha" && !!(row as unknown as Record<string, unknown>).source_campaign_id);
       return matchesText && matchesOrigin;
     });
   }, [filterTerm, selectedColumn, sourceRows, originFilter]);

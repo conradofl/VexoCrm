@@ -44,6 +44,7 @@ interface Package {
   periodo: string;
   produtos_incluidos: { product_id: string; nome: string }[];
   valor: number;
+  valor_vp?: number | string | null;
   valor_tabela?: number | null;
   destaque: boolean;
   ativo: boolean;
@@ -54,6 +55,7 @@ interface VexoProduct {
   nome: string;
   descricao: string;
   valor: number;
+  valor_vp?: number | string | null;
   recorrencia: string;
   ativo: boolean;
 }

@@ -119,6 +119,7 @@ export const DEFAULT_TEAM: TeamMember[] = [
       bio: "Pilar de comunicação e retenção. Responsável por traduzir as necessidades do cliente para o time técnico.",
       responsibilities: ["Primeira reunião de onboarding comercial", "Alinhamento semanal de metas de entrega", "Aprovação de roteiros e layouts criativos"],
       tools: ["Slack", "Trello", "Google Meet", "WhatsApp Business"],
+      status: "Online",
       avatarColor: "from-purple-600 to-indigo-400"
     },
     {
@@ -129,6 +130,7 @@ export const DEFAULT_TEAM: TeamMember[] = [
       bio: "Supervisora direta dos processos criativos e de mídia, garantindo entrega no prazo e alinhamento tático.",
       responsibilities: ["Criação e acompanhamento de cronogramas", "Gestão de filas de chamados operacionais", "Auditoria de peças prontas para lançamento"],
       tools: ["Asana", "Jira", "Notion", "Google Calendar"],
+      status: "Online",
       avatarColor: "from-pink-600 to-rose-400"
     },
     {

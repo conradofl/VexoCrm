@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   Monitor,
   Rocket,
+  ShieldAlert,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -172,6 +173,10 @@ const VIEW_LABELS: Record<AccessView, string> = {
 
 const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   dashboard: "Dashboard",
+  "propostas-gd": "Propostas GD",
+  "contratos-gd": "Contratos GD",
+  "pacotes-gd": "Pacotes GD",
+  "condicoes-gd": "Condições GD",
   leads: "Leads",
   planilhas: "Planilhas",
   whatsapp: "WhatsApp",
@@ -1217,7 +1222,7 @@ function AccessProfileForm({ draft, isNew, editable, onChange }: AccessProfileFo
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-[220px_minmax(0,1fr)]">
-          {normalized.role !== "pending" ? (
+          {(normalized.role as string) !== "pending" ? (
             <div className="space-y-2">
               <p className="text-sm font-medium text-foreground">Aprovacao</p>
               <Select
@@ -1254,7 +1259,7 @@ function AccessProfileForm({ draft, isNew, editable, onChange }: AccessProfileFo
       {normalized.role !== "pending" ? (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
           <AccessPagesTabs
-            role={normalized.role === "pending" ? "internal" : normalized.role}
+            role={(normalized.role as string) === "pending" ? "internal" : normalized.role}
             selected={normalized.role === "client" ? normalized.allowedViews : normalized.internalPages}
             disabled={!editable}
             onChange={(next) =>
@@ -1273,7 +1278,7 @@ function AccessProfileForm({ draft, isNew, editable, onChange }: AccessProfileFo
             description="Ajuste as permissoes operacionais que esse tipo vai carregar por padrao."
             items={permissionItems}
             selected={normalized.permissions}
-            disabled={!editable || normalized.role === "pending"}
+            disabled={!editable || (normalized.role as string) === "pending"}
             emptyMessage="Nenhuma permissao disponivel."
             onToggle={(item, checked) =>
               onChange({

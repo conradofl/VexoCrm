@@ -90,6 +90,8 @@ interface Proposal {
   descontos_concedidos?: DescontoConcedido[] | null;
   arquivada?: boolean;
   carencia_dias?: number | null;
+  package_id?: string | null;
+  package_vexo_id?: string | null;
 }
 
 const PERIODO_OPTIONS = [
@@ -792,7 +794,7 @@ export default function GeracaoDigitalProposals() {
         validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
         valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
         observacao_validade: observacaoValidade || null,
-        carencia_dias: result.carenciaDias ?? (editCarencia !== "" ? Number(editCarencia) : null),
+        carencia_dias: editCarencia !== "" ? Number(editCarencia) : null,
         valor_vp: vpActive ? Number(editValorVp || 0) : null
       };
 
@@ -1164,7 +1166,7 @@ export default function GeracaoDigitalProposals() {
                   {prop.status !== "aceita" && (
                     <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex gap-1.5">
                       <Button
-                        size="xs"
+                        size={"xs" as "sm"}
                         variant="outline"
                         className="w-full text-[10px] border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
                         onClick={(e) => {

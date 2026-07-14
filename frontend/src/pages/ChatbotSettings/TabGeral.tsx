@@ -34,7 +34,7 @@ function CopyButton({ text }: { text: string }) {
 
 export function TabGeral({ clientId, clientName, client }: { clientId: string; clientName: string; client: ReturnType<typeof useLeadClients>["data"][0] }) {
   const { getIdToken, hasPermission } = useAuth();
-  const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
+  const canEdit = hasPermission("empresas.edit" as import("@/lib/access").AccessPermission) || hasPermission("admin" as import("@/lib/access").AccessPermission);
   const updateSettings = useUpdateLeadClientN8nSettings();
   const { data: builtinModels = [] } = useBuiltinTemplates();
   const { data: clientTemplates = [] } = useChatbotTemplates(clientId);

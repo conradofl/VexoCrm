@@ -99,6 +99,7 @@ export interface DistributionRuleItem {
 
 export interface DistributionQueueRow {
   id: string;
+  receivedAt?: string;
   leadId: string;
   leadName: string;
   leadPhone: string;

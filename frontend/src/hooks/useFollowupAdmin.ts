@@ -168,7 +168,7 @@ export function useUpdateFupCompany() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: Partial<FupCompany> & { id: string }) =>
+    mutationFn: ({ id, ...body }: Partial<FupCompany> & { id: string; company_id?: string }) =>
       apiCall<{ company: FupCompany }>(`/api/followup/companies/${id}`, getIdToken, {
         method: "PATCH",
         body: JSON.stringify(body),

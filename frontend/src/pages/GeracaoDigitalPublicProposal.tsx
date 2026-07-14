@@ -74,6 +74,7 @@ interface Proposal {
   descontos_concedidos?: DescontoConcedido[] | null;
   meio_pagamento?: { setup?: string; mensalidade?: string } | null;
   carencia_dias?: number | null;
+  package_vexo_id?: string | null;
   assinatura_metodo?: string | null;
   package_id?: string | null;
   packages?: any[];

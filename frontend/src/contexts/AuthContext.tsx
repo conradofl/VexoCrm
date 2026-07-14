@@ -73,6 +73,8 @@ interface AuthContextType {
   internalPages: InternalPage[];
   permissions: AccessPermission[];
   loading: boolean;
+  // Tenant corrente (opcional — nem todo provider popula; consumidores tratam undefined)
+  currentTenant?: string | null;
   isAuthenticated: boolean;
   isInternalUser: boolean;
   isClientUser: boolean;
@@ -140,7 +142,7 @@ function buildAccessProfile(user: User, claims: Record<string, unknown> = {}): A
   const directClientId = normalizeString(rawClientId);
   const isAdmin = Boolean(
     directClientId === "vexo" ||
-      isFixedAdminAccount(user.uid, user.email || claims.email || null)
+      isFixedAdminAccount(user.uid, user.email || (claims.email as string | null) || null)
   );
   const role = isAdmin ? "internal" : requestedRole;
   const normalizedPreset = role === requestedRole ? accessPreset : normalizeAccessPreset("admin_vexo", role);

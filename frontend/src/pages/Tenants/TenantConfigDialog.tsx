@@ -68,6 +68,7 @@ export function TenantConfigDialog({ tenant, onClose, tableStatuses, setTableSta
       dispatchWebhookToken?: string;
       inboundBearerToken?: string;
       active?: boolean;
+      allowedTabs?: string[] | null;
     }
   ) => {
     setN8nDrafts((current) => ({

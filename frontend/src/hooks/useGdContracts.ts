@@ -30,6 +30,7 @@ export interface GdContract {
   proposal_id: string;
   dados: GdContractFormData;
   pdf_url: string | null;
+  sign_url?: string | null;
   status: "rascunho" | "enviado" | "assinado";
   created_at: string;
 }

@@ -61,7 +61,7 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
   const [model, setModel] = useState(initialModel || "outlier");
   const [sdrNumber, setSdrNumber] = useState(initialSdrNumber || "");
   const [savingSdr, setSavingSdr] = useState(false);
-  const canEdit = hasPermission("empresas.edit") || hasPermission("admin");
+  const canEdit = hasPermission("empresas.edit" as import("@/lib/access").AccessPermission) || hasPermission("admin" as import("@/lib/access").AccessPermission);
   const updateSettings = useUpdateLeadClientN8nSettings();
   const { data: builtinModels = [] } = useBuiltinTemplates();
   const { data: clientTemplates = [] } = useChatbotTemplates(clientId);

@@ -36,6 +36,7 @@ import {
 
 interface SelectedProduct {
   product_id: string;
+  id?: string;
   nome: string;
 }
 
