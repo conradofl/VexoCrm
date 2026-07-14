@@ -1094,4 +1094,3 @@ export async function propagateTenantPermissions(tenantId, allowedTabs) {
 
   return { updatedUsers, skippedUsers };
 }
-

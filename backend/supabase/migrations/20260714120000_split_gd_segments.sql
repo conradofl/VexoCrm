@@ -95,7 +95,7 @@ WITH name_map(old_name, new_name) AS (
     ('Food service premium e delivery', 'Food Service Premium')
 ),
 updates AS (
-  SELECT 
+  SELECT
     p.id AS presentation_id,
     s_new.id AS new_segment_id
   FROM public.gd_presentations p
