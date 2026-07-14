@@ -316,12 +316,12 @@ export default function GeracaoDigitalCommercialPitch({
       </div>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between border-b border-slate-200/80 px-8 py-4 bg-white/80 backdrop-blur-md shadow-sm">
+      <header className="relative z-10 flex items-center justify-between border-b border-slate-200/80 dark:border-white/10 px-8 py-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm">
         <div className="flex items-center gap-3">
           {currentSlideType !== "welcome" ? (
             <>
               {prospectLogo ? (
-                <div className="h-9 w-9 rounded-lg bg-white p-1 flex items-center justify-center border border-slate-200 shrink-0 shadow-sm">
+                <div className="h-9 w-9 rounded-lg bg-white dark:bg-slate-800 p-1 flex items-center justify-center border border-slate-200 dark:border-white/10 shrink-0 shadow-sm">
                   <img src={prospectLogo} alt="Logo" className="h-full w-full object-contain" />
                 </div>
               ) : (
@@ -362,7 +362,7 @@ export default function GeracaoDigitalCommercialPitch({
             </Badge>
 
             {prospectLogo ? (
-              <div className="mx-auto h-36 w-36 md:h-44 md:w-44 rounded-3xl bg-white p-4 border-2 border-purple-200 shadow-2xl flex items-center justify-center overflow-hidden animate-bounce-slow mb-6">
+              <div className="mx-auto h-36 w-36 md:h-44 md:w-44 rounded-3xl bg-white dark:bg-slate-900 p-4 border-2 border-purple-200 dark:border-purple-900/50 shadow-2xl flex items-center justify-center overflow-hidden animate-bounce-slow mb-6">
                 <img src={prospectLogo} alt="Logo Prospect" className="h-full w-full object-contain" />
               </div>
             ) : (
@@ -401,7 +401,7 @@ export default function GeracaoDigitalCommercialPitch({
             </p>
 
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 text-left pt-6">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
                 <div>
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-500 mb-2">
                     <Flame className="h-5 w-5" />
@@ -413,7 +413,7 @@ export default function GeracaoDigitalCommercialPitch({
                 </div>
               </Card>
 
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
                 <div>
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-500 mb-2">
                     <Zap className="h-5 w-5" />
@@ -425,7 +425,7 @@ export default function GeracaoDigitalCommercialPitch({
                 </div>
               </Card>
 
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 space-y-3 flex flex-col justify-between">
                 <div>
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-500 mb-2">
                     <Layers className="h-5 w-5" />
@@ -437,7 +437,7 @@ export default function GeracaoDigitalCommercialPitch({
                 </div>
               </Card>
 
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 flex flex-col justify-between">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-6 flex flex-col justify-between">
                 <div>
                   <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-550 mb-2">
                     <AlertTriangle className="h-5 w-5" />
@@ -463,7 +463,7 @@ export default function GeracaoDigitalCommercialPitch({
             </p>
 
             <div className="grid gap-6 md:grid-cols-2 pt-6 max-w-2xl mx-auto">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 p-6 flex flex-col justify-center items-center space-y-2 text-center">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none p-6 flex flex-col justify-center items-center space-y-2 text-center">
                 <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Leads perdidos por ano</span>
                 <span className="text-4xl font-black text-slate-800 font-mono">
                   <AnimatedCounter value={unconvertedLeads * 12} />
@@ -502,7 +502,7 @@ export default function GeracaoDigitalCommercialPitch({
             </p>
 
             <div className="grid gap-6 md:grid-cols-2 pt-6 max-w-2xl mx-auto">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 p-6 flex flex-col justify-center items-center space-y-2 text-center">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none p-6 flex flex-col justify-center items-center space-y-2 text-center">
                 <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Nova Conversão Alvo</span>
                 <span className="text-4xl font-black text-purple-600 font-mono">
                   {newConversionRate}%
@@ -540,7 +540,7 @@ export default function GeracaoDigitalCommercialPitch({
             </p>
 
             <div className="grid gap-8 md:grid-cols-3 text-left pt-10">
-              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/85 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
                 <div className="h-14 w-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 font-black text-lg">
                   01
                 </div>
@@ -549,7 +549,7 @@ export default function GeracaoDigitalCommercialPitch({
                   Campanhas de tráfego focado construídas com base no perfil ideal de cliente do segmento de {segmentName.toLowerCase()}.
                 </p>
               </Card>
-              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/85 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
                 <div className="h-14 w-14 rounded-2xl bg-pink-50 flex items-center justify-center text-pink-600 font-black text-lg">
                   02
                 </div>
@@ -558,7 +558,7 @@ export default function GeracaoDigitalCommercialPitch({
                   Landing Pages de alta velocidade integradas a formulários inteligentes que qualificam o lead em tempo real.
                 </p>
               </Card>
-              <Card className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/85 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-5 min-h-[260px]">
                 <div className="h-14 w-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-lg">
                   03
                 </div>
@@ -620,7 +620,7 @@ export default function GeracaoDigitalCommercialPitch({
                         "p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between hover:shadow-md hover:-translate-y-0.5 select-none",
                         isSelected
                           ? "bg-purple-600/10 border-purple-500 shadow-sm"
-                          : "bg-white border-slate-200/80 hover:border-slate-350"
+                          : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                       )}
                     >
                       <span className="text-xs font-bold text-slate-800 leading-tight">{prod.nome}</span>
@@ -638,7 +638,7 @@ export default function GeracaoDigitalCommercialPitch({
             </div>
 
             {/* Right: Live Tailored Proposal view */}
-            <Card className="md:col-span-1 bg-white border-purple-200/60 shadow-lg shadow-purple-500/5 p-6 space-y-4 self-stretch flex flex-col">
+            <Card className="md:col-span-1 bg-white dark:bg-slate-900 border-purple-200/60 dark:border-purple-900/55 shadow-lg shadow-purple-500/5 p-6 space-y-4 self-stretch flex flex-col">
               <div className="border-b border-slate-100 pb-3">
                 <span className="text-[10px] text-pink-500 font-bold uppercase tracking-wider block">Construindo Plano</span>
                 <h3 className="text-sm font-black text-slate-850">Sua Solução sob Medida</h3>
@@ -701,7 +701,7 @@ export default function GeracaoDigitalCommercialPitch({
 
             <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 text-left pt-10 max-h-[480px] overflow-y-auto pr-1">
               {(vexoSelectedProducts || []).map((vm, vmIdx) => (
-                <Card key={vmIdx} className="bg-white border-slate-100/85 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[220px] flex flex-col justify-between">
+                <Card key={vmIdx} className="bg-white dark:bg-slate-900 border-slate-100/85 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[220px] flex flex-col justify-between">
                   <div className="space-y-4">
                     <div className="h-14 w-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 font-extrabold text-lg">
                       V
@@ -731,22 +731,22 @@ export default function GeracaoDigitalCommercialPitch({
             </p>
 
             <div className="grid gap-8 md:grid-cols-4 text-left pt-10 max-w-6xl mx-auto">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 1</Badge>
                 <h4 className="text-lg font-bold text-slate-800">Diagnóstico & Setup</h4>
                 <p className="text-slate-600 text-sm leading-relaxed">Auditoria técnica de pixels, integrações e design de landing page.</p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 2</Badge>
                 <h4 className="text-lg font-bold text-slate-800">Páginas de Captura</h4>
                 <p className="text-slate-600 text-sm leading-relaxed">Publicação das LPs de alta performance voltadas para conversão ativa.</p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 3</Badge>
                 <h4 className="text-lg font-bold text-slate-800">Campanhas no Ar</h4>
                 <p className="text-slate-600 text-sm leading-relaxed">Ativação dos criativos e segmentação qualificada de tráfego pago.</p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-7 space-y-4 min-h-[220px]">
                 <Badge className="bg-purple-100 text-purple-700 border-none font-bold text-xs uppercase px-3 py-1">Semana 4</Badge>
                 <h4 className="text-lg font-bold text-slate-800">Entrega de Resultados</h4>
                 <p className="text-slate-600 text-sm leading-relaxed">Acompanhamento das primeiras conversões e reuniões de otimização.</p>
@@ -767,7 +767,7 @@ export default function GeracaoDigitalCommercialPitch({
             </p>
 
             <div className="grid gap-8 md:grid-cols-2 text-left pt-10 max-w-5xl mx-auto">
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[240px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[240px]">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-purple-600 font-bold uppercase font-mono tracking-wider">Performance · {segmentName}</span>
                   <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-sm px-3 py-1">+145% Conversão</Badge>
@@ -777,7 +777,7 @@ export default function GeracaoDigitalCommercialPitch({
                   "Conseguimos gerar um fluxo estável de 450 contatos quentes e otimizar nosso funil de atendimento, fechando 18 contratos novos."
                 </p>
               </Card>
-              <Card className="bg-white border-slate-100/80 shadow-md shadow-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[240px]">
+              <Card className="bg-white dark:bg-slate-900 border-slate-100/80 dark:border-white/10 shadow-md shadow-slate-100 dark:shadow-none hover:shadow-lg hover:-translate-y-1 transition-all duration-300 p-8 space-y-4 min-h-[240px]">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-purple-600 font-bold uppercase font-mono tracking-wider">Automação · {segmentName}</span>
                   <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-sm px-3 py-1">-70% Tempo Resposta</Badge>
@@ -813,7 +813,7 @@ export default function GeracaoDigitalCommercialPitch({
                       "p-6 flex flex-col justify-between space-y-4 hover:-translate-y-1 hover:shadow-xl transition-all text-left relative",
                       pkg.destaque
                         ? "border-purple-500 ring-2 ring-purple-600/10 shadow-lg shadow-purple-600/5 bg-purple-50/10 scale-[1.02]"
-                        : "bg-white border-slate-200/80 shadow-md shadow-slate-100"
+                        : "bg-white dark:bg-slate-900 border-slate-200/80 dark:border-white/10 shadow-md dark:shadow-none"
                     )}
                   >
                     {pkg.destaque && (
@@ -886,7 +886,7 @@ export default function GeracaoDigitalCommercialPitch({
               </div>
             ) : (
               <div className="max-w-md mx-auto space-y-4">
-                <Card className="bg-white border-slate-100 shadow-md p-6 space-y-4">
+                <Card className="bg-white dark:bg-slate-900 border-slate-100 dark:border-white/10 shadow-md p-6 space-y-4">
                   <Info className="h-8 w-8 text-amber-500 mx-auto" />
                   <p className="text-xs text-slate-600">
                     Nenhum pacote fechado pré-configurado foi selecionado no Setup.
@@ -907,7 +907,7 @@ export default function GeracaoDigitalCommercialPitch({
       </main>
 
       {/* Footer controls */}
-      <footer className="relative z-10 flex items-center justify-between border-t border-slate-200/80 px-8 py-4 bg-white/80 backdrop-blur-md shadow-sm">
+      <footer className="relative z-10 flex items-center justify-between border-t border-slate-200/80 dark:border-white/10 px-8 py-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm">
         <div className="flex items-center gap-1.5 text-xs font-mono text-slate-500 font-semibold">
           <span>SLIDE {String(activeSlide).padStart(2, "0")} / {String(totalSlides).padStart(2, "0")}</span>
         </div>
@@ -918,7 +918,7 @@ export default function GeracaoDigitalCommercialPitch({
             size="sm"
             onClick={handlePrev}
             disabled={activeSlide === 1}
-            className="border-slate-200 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 h-8 font-mono text-xs font-bold"
+            className="border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 h-8 font-mono text-xs font-bold"
           >
             <ChevronLeft className="h-4 w-4 mr-1" />
             ANTERIOR
@@ -928,7 +928,7 @@ export default function GeracaoDigitalCommercialPitch({
             size="sm"
             onClick={handleNext}
             disabled={activeSlide === totalSlides}
-            className="border-slate-200 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 h-8 font-mono text-xs font-bold"
+            className="border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 h-8 font-mono text-xs font-bold"
           >
             PRÓXIMO
             <ChevronRight className="h-4 w-4 ml-1" />

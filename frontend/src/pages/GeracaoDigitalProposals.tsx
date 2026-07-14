@@ -988,11 +988,11 @@ export default function GeracaoDigitalProposals() {
       icon={FileText}
     >
       <GeracaoDigitalTabs />
-      <div className="w-full min-h-screen bg-white text-slate-800 rounded-3xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+      <div className="w-full min-h-screen bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden">
 
         {/* Glow Effects */}
-        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 dark:bg-purple-950/20 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 dark:bg-pink-950/20 rounded-full blur-[100px] pointer-events-none" />
 
         {/* Loading / Error states */}
         {isLoading ? (
@@ -1013,7 +1013,7 @@ export default function GeracaoDigitalProposals() {
             </CardContent>
           </Card>
         ) : proposals.length === 0 ? (
-          <Card className="bg-white border-slate-200 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
+          <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
             <CardContent className="space-y-4">
               <FileText className="h-12 w-12 text-slate-400 mx-auto" />
               <h3 className="text-lg font-bold text-slate-800">Nenhuma Proposta Gerada</h3>
@@ -1079,8 +1079,8 @@ export default function GeracaoDigitalProposals() {
                   className={cn(
                     "w-full text-left p-4 rounded-xl border transition-all space-y-2 group shadow-sm",
                     selectedProposal?.id === prop.id
-                      ? "bg-slate-50 border-purple-500/50 shadow-md shadow-purple-600/5"
-                      : "bg-white border-slate-200 hover:border-slate-350"
+                      ? "bg-slate-50 dark:bg-slate-850 border-purple-500/50 dark:border-purple-550/50 shadow-md shadow-purple-600/5"
+                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                   )}
                 >
                   <div className="flex justify-between items-start">
@@ -1113,7 +1113,7 @@ export default function GeracaoDigitalProposals() {
               <div className="space-y-6 lg:col-span-3">
 
                 {/* Header overview */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-sm">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <h2 className="text-xl font-black text-slate-800">{prospectName}</h2>
@@ -1190,7 +1190,7 @@ export default function GeracaoDigitalProposals() {
                 </div>
 
                 {/* Pacotes & Módulos da Proposta */}
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base font-bold text-slate-800">Escopo & Combos Comerciais</CardTitle>
                     <CardDescription className="text-[11px] text-slate-500">Configure os pacotes e módulos integrados nesta proposta comercial.</CardDescription>
@@ -1204,7 +1204,7 @@ export default function GeracaoDigitalProposals() {
                           value={editPackageId}
                           disabled={selectedProposal.status === "aceita"}
                           onChange={(e) => setEditPackageId(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-850 h-10 focus:outline-none focus:border-indigo-500"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-850 dark:text-slate-100 h-10 focus:outline-none focus:border-indigo-500"
                         >
                           <option value="">— Sem Pacote GD —</option>
                           {availablePackages.filter(p => p.tipo === "gd" || !p.tipo).map((pk: any) => (
@@ -1221,7 +1221,7 @@ export default function GeracaoDigitalProposals() {
                           value={editPackageVexoId}
                           disabled={selectedProposal.status === "aceita"}
                           onChange={(e) => setEditPackageVexoId(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-855 h-10 focus:outline-none focus:border-indigo-500"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-855 dark:text-slate-100 h-10 focus:outline-none focus:border-indigo-500"
                         >
                           <option value="">— Sem Combo Vexo OS —</option>
                           {availablePackages.filter(p => p.tipo === "vexo").map((pk: any) => (
@@ -1253,7 +1253,7 @@ export default function GeracaoDigitalProposals() {
                                 "p-2 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
                                 isIncluded
                                   ? "bg-indigo-50 border-indigo-300"
-                                  : "bg-white border-slate-200 hover:border-slate-350",
+                                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20",
                                 selectedProposal.status === "aceita" && "cursor-default opacity-85"
                               )}
                             >
@@ -1289,7 +1289,7 @@ export default function GeracaoDigitalProposals() {
                               }}
                               className={cn(
                                 "p-2 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
-                                isIncluded ? "bg-pink-50 border-pink-300" : "bg-white border-slate-200 hover:border-slate-350",
+                                isIncluded ? "bg-pink-50 border-pink-300" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20",
                                 selectedProposal.status === "aceita" && "cursor-default opacity-85"
                               )}
                             >
@@ -1314,7 +1314,7 @@ export default function GeracaoDigitalProposals() {
                     </div>
 
                     {/* Escopo Incluso (Read-only list of items) */}
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 space-y-3">
                       <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
                         <span className="text-xs font-black text-slate-800 uppercase tracking-wider">Escopo Incluso na Proposta</span>
                       </div>
@@ -1341,7 +1341,7 @@ export default function GeracaoDigitalProposals() {
                                   </div>
                                   <div className="flex flex-wrap gap-1 pl-3 border-l-2 border-purple-300">
                                     {(activeGdPkg.produtos_incluidos || []).map((p: any, idx: number) => (
-                                      <Badge key={idx} variant="outline" className="bg-white text-slate-650 text-[9px] py-0">{p.nome}</Badge>
+                                      <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 text-slate-650 dark:text-slate-300 text-[9px] py-0">{p.nome}</Badge>
                                     ))}
                                   </div>
                                 </div>
@@ -1355,7 +1355,7 @@ export default function GeracaoDigitalProposals() {
                                   </div>
                                   <div className="flex flex-wrap gap-1 pl-3 border-l-2 border-indigo-300">
                                     {(activeVexoPkg.produtos_incluidos || []).map((p: any, idx: number) => (
-                                      <Badge key={idx} variant="outline" className="bg-white text-slate-650 text-[9px] py-0">{p.nome}</Badge>
+                                      <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 text-slate-650 dark:text-slate-300 text-[9px] py-0">{p.nome}</Badge>
                                     ))}
                                   </div>
                                 </div>
@@ -1388,14 +1388,14 @@ export default function GeracaoDigitalProposals() {
                       });
                       if (legacyItems.length === 0) return null;
                       return (
-                        <div className="p-4 rounded-xl bg-orange-50/50 border border-orange-200 space-y-2">
+                        <div className="p-4 rounded-xl bg-orange-50/10 dark:bg-orange-950/10 border border-orange-200 dark:border-orange-900/50 space-y-2">
                           <Label className="text-xs font-bold text-orange-850 uppercase block">Itens Adicionais (Legado)</Label>
                           <p className="text-[10px] text-orange-700 font-medium">Esses itens foram cadastrados no modelo antigo e possuem precificação customizada manual.</p>
                           <div className="space-y-2 mt-2">
                             {legacyItems.map((item, idx) => {
                               const globalIdx = items.findIndex(it => it.descricao === item.descricao && it.valor === item.valor);
                               return (
-                                <div key={idx} className="flex justify-between items-center p-2 rounded bg-white border border-orange-100 text-xs">
+                                <div key={idx} className="flex justify-between items-center p-2 rounded bg-white dark:bg-slate-900 border border-orange-100 dark:border-orange-900/20 text-xs">
                                   <div>
                                     <span className="font-semibold text-slate-800">{item.descricao}</span>
                                     <span className="text-[9px] text-slate-450 block uppercase font-mono">{item.categoria} · {item.recorrencia}</span>
@@ -1431,7 +1431,7 @@ export default function GeracaoDigitalProposals() {
 
                       return (
                         <div className={cn(
-                          "grid gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200",
+                          "grid gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10",
                           vpActive ? "sm:grid-cols-4" : "sm:grid-cols-3"
                         )}>
                           <div className="space-y-1">
@@ -1482,7 +1482,7 @@ export default function GeracaoDigitalProposals() {
                 </Card>
 
                 {/* Setup Vexo (taxa de implantação opcional) */}
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base font-bold text-slate-800">Taxa de Implantação (Setup Vexo OS)</CardTitle>
                     <CardDescription className="text-[11px] text-slate-500">
@@ -1499,7 +1499,7 @@ export default function GeracaoDigitalProposals() {
                       />
                     </div>
                     {cobrarSetup && (
-                      <div className="space-y-3 border-t border-slate-100 pt-3">
+                      <div className="space-y-3 border-t border-slate-100 dark:border-white/5 dark:border-white/5 pt-3">
                         <div className="w-full md:w-48 space-y-1">
                           <Label className="text-[10px] text-slate-500 font-mono">Valor do Setup (R$)</Label>
                           <div className="relative">
@@ -1509,11 +1509,11 @@ export default function GeracaoDigitalProposals() {
                               value={valorSetupVexo}
                               disabled={selectedProposal.status === "aceita"}
                               onChange={(e) => setValorSetupVexo(Number(e.target.value) || 0)}
-                              className="bg-white border-slate-200 text-xs text-slate-800 pl-7 h-8 font-mono"
+                              className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 pl-7 h-8 font-mono"
                             />
                           </div>
                         </div>
-                        <div className="text-[10px] text-slate-600 leading-relaxed bg-purple-50/60 p-3 rounded-lg border border-purple-100 whitespace-pre-line">
+                        <div className="text-[10px] text-slate-600 dark:text-slate-350 leading-relaxed bg-purple-50/10 dark:bg-purple-950/10 p-3 rounded-lg border border-purple-100 dark:border-purple-900/30 whitespace-pre-line">
                           <span className="font-bold text-slate-800 block mb-1">{SETUP_LABEL}</span>
                           {SETUP_JUSTIFICATION}
                         </div>
@@ -1523,7 +1523,7 @@ export default function GeracaoDigitalProposals() {
                 </Card>
 
                 {/* Período do Plano e Validade da Proposta */}
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base font-bold text-slate-800">Período do Plano & Validade da Proposta</CardTitle>
                     <CardDescription className="text-[11px] text-slate-500">
@@ -1538,7 +1538,7 @@ export default function GeracaoDigitalProposals() {
                           value={periodoPlano}
                           disabled={selectedProposal.status === "aceita"}
                           onChange={(e) => setPeriodoPlano(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 focus:outline-none focus:border-indigo-500/50 h-8"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 py-1 text-xs text-slate-850 dark:text-slate-100 focus:outline-none focus:border-indigo-500/50 h-8"
                         >
                           {PERIODO_OPTIONS.map((o) => (
                             <option key={o.value} value={o.value}>{o.label}</option>
@@ -1552,7 +1552,7 @@ export default function GeracaoDigitalProposals() {
                           value={validadeAte}
                           disabled={selectedProposal.status === "aceita"}
                           onChange={(e) => setValidadeAte(e.target.value)}
-                          className="bg-white border-slate-200 text-xs text-slate-800 h-8"
+                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                         />
                       </div>
                       <div className="space-y-1">
@@ -1561,7 +1561,7 @@ export default function GeracaoDigitalProposals() {
                           value={editCarencia}
                           disabled={selectedProposal.status === "aceita"}
                           onChange={(e) => setEditCarencia(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-850 focus:outline-none h-8"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 py-1 text-xs text-slate-850 dark:text-slate-100 focus:outline-none h-8"
                         >
                           <option value="">Imediato (na contratação)</option>
                           <option value="15">15 dias após a contratação</option>
@@ -1578,7 +1578,7 @@ export default function GeracaoDigitalProposals() {
                             value={valorAposValidade}
                             disabled={selectedProposal.status === "aceita"}
                             onChange={(e) => setValorAposValidade(e.target.value)}
-                            className="bg-white border-slate-200 text-xs text-slate-800 pl-7 h-8 font-mono"
+                            className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 pl-7 h-8 font-mono"
                           />
                         </div>
                       </div>
@@ -1590,14 +1590,14 @@ export default function GeracaoDigitalProposals() {
                         disabled={selectedProposal.status === "aceita"}
                         onChange={(e) => setObservacaoValidade(e.target.value)}
                         placeholder='Ex: "Após esta data o valor retorna ao preço de tabela" ou "condições sujeitas a reajuste"'
-                        className="bg-white border-slate-200 text-xs text-slate-800 h-8"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                       />
                     </div>
                   </CardContent>
                 </Card>
 
                 {/* Condições de Pagamento ofertadas */}
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-base font-bold text-slate-800">Condições de Pagamento Ofertadas</CardTitle>
                     <CardDescription className="text-[11px] text-slate-500 font-light">
@@ -1625,7 +1625,7 @@ export default function GeracaoDigitalProposals() {
                               )}
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-bold text-slate-800 leading-tight">
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight">
                                   {term.nome}
                                   <Badge className={cn(
                                     "text-[8px] font-bold border-none px-1.5 py-0 ml-1.5",
@@ -1651,7 +1651,7 @@ export default function GeracaoDigitalProposals() {
                     )}
                     {selectedProposal.status !== "aceita" && (
                       showInlineTerm ? (
-                        <div className="p-4 rounded-xl bg-slate-50 border border-purple-200 space-y-3">
+                        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-purple-200 dark:border-purple-900/50 space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-slate-800">Nova condição (aplicar nesta proposta)</span>
                             <button onClick={() => setShowInlineTerm(false)} className="text-slate-400 hover:text-slate-600">
@@ -1665,7 +1665,7 @@ export default function GeracaoDigitalProposals() {
                                 value={inlineTerm.nome}
                                 onChange={(e) => setInlineTerm((p) => ({ ...p, nome: e.target.value }))}
                                 placeholder='Ex: "Entrada + 6x sem juros"'
-                                className="bg-white border-slate-200 text-xs h-8"
+                                className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                               />
                             </div>
                             <div className="space-y-1">
@@ -1689,7 +1689,7 @@ export default function GeracaoDigitalProposals() {
                                   type="number"
                                   value={inlineTerm.config.percentual_desconto ?? ""}
                                   onChange={(e) => updateInlineConfig("percentual_desconto", Number(e.target.value) || 0)}
-                                  className="bg-white border-slate-200 text-xs h-8"
+                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                                 />
                               </div>
                             )}
@@ -1701,7 +1701,7 @@ export default function GeracaoDigitalProposals() {
                                     type="number"
                                     value={inlineTerm.config.valor_entrada ?? ""}
                                     onChange={(e) => updateInlineConfig("valor_entrada", Number(e.target.value) || 0)}
-                                    className="bg-white border-slate-200 text-xs h-8"
+                                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                                   />
                                 </div>
                                 <div className="space-y-1">
@@ -1710,7 +1710,7 @@ export default function GeracaoDigitalProposals() {
                                     type="number"
                                     value={inlineTerm.config.num_parcelas ?? ""}
                                     onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)}
-                                    className="bg-white border-slate-200 text-xs h-8"
+                                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                                   />
                                 </div>
                               </>
@@ -1722,7 +1722,7 @@ export default function GeracaoDigitalProposals() {
                                   type="number"
                                   value={inlineTerm.config.num_parcelas ?? ""}
                                   onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)}
-                                  className="bg-white border-slate-200 text-xs h-8"
+                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                                 />
                               </div>
                             )}
@@ -1732,7 +1732,7 @@ export default function GeracaoDigitalProposals() {
                                 <Input
                                   value={inlineTerm.config.descricao ?? ""}
                                   onChange={(e) => updateInlineConfig("descricao", e.target.value)}
-                                  className="bg-white border-slate-200 text-xs h-8"
+                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8"
                                 />
                               </div>
                             )}
@@ -1808,7 +1808,7 @@ export default function GeracaoDigitalProposals() {
                           </span>
                         </div>
 
-                        <div className="space-y-2 pt-2 border-t border-slate-100 mt-2">
+                        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-white/5 mt-2">
                           <div className="flex items-center justify-between">
                             <div className="space-y-0.5">
                               <Label className="text-[10px] text-slate-500 font-mono">Ativar VP (Permuta)</Label>
@@ -1826,7 +1826,7 @@ export default function GeracaoDigitalProposals() {
 
                           {vpActive && (
                             <div className="space-y-1.5 pt-1 animate-fade-in">
-                              <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                              <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor em VP (R$)</Label>
                               <Input
                                 type="number"
                                 value={editValorVp || ""}

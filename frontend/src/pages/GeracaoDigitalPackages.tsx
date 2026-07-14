@@ -587,11 +587,11 @@ export default function GeracaoDigitalPackages() {
     >
       <GeracaoDigitalTabs />
 
-      <div className="w-full min-h-screen bg-white text-slate-800 rounded-3xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+      <div className="w-full min-h-screen bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden">
 
         {/* Glow Effects */}
-        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 dark:bg-purple-950/20 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 dark:bg-pink-950/20 rounded-full blur-[100px] pointer-events-none" />
 
         {/* Toggle between Pacotes and Módulos Vexo */}
         <div className="flex justify-center mb-8 relative z-10">
@@ -604,8 +604,8 @@ export default function GeracaoDigitalPackages() {
               className={cn(
                 "px-5 py-2 rounded-lg text-xs font-bold transition-all",
                 activeSection === "packages"
-                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 dark:text-purple-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
               )}
             >
               Pacotes Geração Digital
@@ -618,8 +618,8 @@ export default function GeracaoDigitalPackages() {
               className={cn(
                 "px-5 py-2 rounded-lg text-xs font-bold transition-all",
                 activeSection === "gd-products"
-                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 dark:text-purple-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
               )}
             >
               Módulos Geração Digital
@@ -632,8 +632,8 @@ export default function GeracaoDigitalPackages() {
               className={cn(
                 "px-5 py-2 rounded-lg text-xs font-bold transition-all",
                 activeSection === "vexo-packages"
-                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 dark:text-purple-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
               )}
             >
               Pacotes Vexo OS
@@ -646,8 +646,8 @@ export default function GeracaoDigitalPackages() {
               className={cn(
                 "px-5 py-2 rounded-lg text-xs font-bold transition-all",
                 activeSection === "vexo-products"
-                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 dark:text-purple-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
               )}
             >
               Módulos Vexo OS
@@ -661,7 +661,7 @@ export default function GeracaoDigitalPackages() {
             {/* Top Header Controls */}
             <div className="flex justify-between items-center mb-8 relative z-10 border-b border-slate-200 pb-4">
               <div className="space-y-0.5">
-                <h2 className="text-base font-bold text-slate-800">
+                <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
                   {activeSection === "vexo-packages" ? "Templates de Pacotes Vexo OS" : "Templates de Pacotes Geração Digital"}
                 </h2>
                 <p className="text-xs text-slate-500">
@@ -680,29 +680,29 @@ export default function GeracaoDigitalPackages() {
 
             {/* 1. Package Form Editor (Create/Edit Mode) */}
             {isEditing ? (
-              <Card className="bg-white border-slate-200 max-w-2xl mx-auto relative z-10 animate-fade-in shadow-sm">
+              <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 max-w-2xl mx-auto relative z-10 animate-fade-in shadow-sm">
                 <CardHeader>
-                  <CardTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                     <Layers className="h-4.5 w-4.5 text-purple-650" />
                     {selectedPackage ? "Editar Pacote Comercial" : "Novo Pacote Comercial"}
                   </CardTitle>
-                  <CardDescription className="text-xs text-slate-500">Preencha os campos para salvar este modelo de pacote comercial.</CardDescription>
+                  <CardDescription className="text-xs text-slate-500 dark:text-slate-400">Preencha os campos para salvar este modelo de pacote comercial.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
 
                   <div className="grid gap-4 md:grid-cols-3">
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Nome do Pacote</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Nome do Pacote</Label>
                       <Input
                         value={packageName}
                         onChange={(e) => setPackageName(e.target.value)}
                         placeholder="Ex: Pacote Tração Premium"
-                        className="bg-white border-slate-200 text-xs text-slate-800"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100"
                       />
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Tipo de Pacote</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Tipo de Pacote</Label>
                       <select
                         value={packageTipo}
                         onChange={(e) => {
@@ -710,7 +710,7 @@ export default function GeracaoDigitalPackages() {
                           setPackageTipo(newTipo);
                           setPackageIncludedProductIds({});
                         }}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none h-10"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none h-10"
                       >
                         <option value="gd">Geração Digital</option>
                         <option value="vexo">Vexo OS</option>
@@ -718,13 +718,13 @@ export default function GeracaoDigitalPackages() {
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Período de Recorrência</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Período de Recorrência</Label>
                       <select
                         value={packagePeriod}
                         onChange={(e) => setPackagePeriod(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none h-10"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none h-10"
                       >
-                        <option value="mensal">Mensal</option>
+                        <option value="mensal" className="dark:bg-slate-850">Mensal</option>
                         <option value="trimestral">Trimestral</option>
                         <option value="semestral">Semestral</option>
                         <option value="anual">Anual</option>
@@ -735,7 +735,7 @@ export default function GeracaoDigitalPackages() {
 
                   <div className="grid gap-4 md:grid-cols-2 items-start">
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">
                         {packagePeriod === "unico" ? "Valor Único (R$)" : "Valor Total do Período (R$)"}
                       </Label>
                       <Input
@@ -743,19 +743,19 @@ export default function GeracaoDigitalPackages() {
                         value={packageValue}
                         onChange={(e) => setPackageValue(Number(e.target.value) || 0)}
                         placeholder={packagePeriod === "unico" ? "Ex: 2900" : "Ex: 48000"}
-                        className="bg-white border-slate-200 text-xs text-slate-800 font-mono"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
                       {(() => {
                         const pr = computePackagePricing(packageValue, packagePeriod, packageTabela);
                         if (pr.meses === null) {
                           return (
-                            <span className="text-[10px] text-slate-500 block">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
                               Valor único (setup) — sem recorrência.
                             </span>
                           );
                         }
                         return (
-                          <span className="text-[10px] text-purple-650 font-medium block">
+                          <span className="text-[10px] text-purple-650 dark:text-purple-400 font-medium block">
                             Total do período ({pr.meses} {pr.meses === 1 ? "mês" : "meses"}): {brlPkg(pr.totalPeriodo)} · Equivale a {pr.aprox ? "aprox. " : ""}{brlPkg(pr.mensalidade || 0)}/mês
                             {pr.descontoPct !== null && (
                               <> · <span className="line-through text-slate-400">{brlPkg(pr.valorTabela || 0)}</span> ({pr.descontoPct}% off)</>
@@ -766,13 +766,13 @@ export default function GeracaoDigitalPackages() {
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Valor de Tabela (R$, opcional)</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor de Tabela (R$, opcional)</Label>
                       <Input
                         type="number"
                         value={packageTabela || ""}
                         onChange={(e) => setPackageTabela(Number(e.target.value) || 0)}
                         placeholder="Preço cheio, sem desconto — para exibir riscado"
-                        className="bg-white border-slate-200 text-xs text-slate-800 font-mono"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
                       <span className="text-[9px] text-slate-450 block">
                         Se maior que o valor do período, o desconto aparece riscado na apresentação, mesa e proposta.
@@ -780,24 +780,24 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 pt-3">
-                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm h-14">
+                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 dark:border-white/5 dark:border-white/5 pt-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 shadow-sm h-14">
                       <div className="space-y-0.5">
-                        <Label className="text-[11px] text-slate-700 font-bold">Ativar VP (Permuta)</Label>
-                        <span className="text-[8px] text-slate-500 block">Este pacote aceita permuta</span>
+                        <Label className="text-[11px] text-slate-700 dark:text-slate-300 font-bold">Ativar VP (Permuta)</Label>
+                        <span className="text-[8px] text-slate-500 dark:text-slate-400 block">Este pacote aceita permuta</span>
                       </div>
                       <Switch checked={packageVpActive} onCheckedChange={setPackageVpActive} />
                     </div>
 
                     {packageVpActive ? (
                       <div className="space-y-1.5 animate-fade-in">
-                        <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                        <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor em VP (R$)</Label>
                         <Input
                           type="number"
                           value={packageVpValue || ""}
                           onChange={(e) => setPackageVpValue(Number(e.target.value) || 0)}
                           placeholder="Valor para permuta"
-                          className="bg-white border-slate-200 text-xs text-slate-850 font-mono h-10"
+                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-850 dark:text-slate-100 font-mono h-10"
                         />
                       </div>
                     ) : (
@@ -810,18 +810,18 @@ export default function GeracaoDigitalPackages() {
                   <div className="grid gap-4 md:grid-cols-2 items-center">
 
                     <div className="grid gap-2 grid-cols-2 mt-4">
-                      <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm">
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 shadow-sm">
                         <div className="space-y-0.5">
-                          <Label className="text-[11px] text-slate-700 font-bold">Destaque</Label>
-                          <span className="text-[8px] text-slate-500 block">Exibir em destaque</span>
+                          <Label className="text-[11px] text-slate-700 dark:text-slate-300 font-bold">Destaque</Label>
+                          <span className="text-[8px] text-slate-500 dark:text-slate-400 block">Exibir em destaque</span>
                         </div>
                         <Switch checked={packageDestaque} onCheckedChange={setPackageDestaque} />
                       </div>
 
-                      <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm">
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 shadow-sm">
                         <div className="space-y-0.5">
-                          <Label className="text-[11px] text-slate-700 font-bold">Ativo</Label>
-                          <span className="text-[8px] text-slate-500 block">Disponível para venda</span>
+                          <Label className="text-[11px] text-slate-700 dark:text-slate-300 font-bold">Ativo</Label>
+                          <span className="text-[8px] text-slate-500 dark:text-slate-400 block">Disponível para venda</span>
                         </div>
                         <Switch checked={packageAtivo} onCheckedChange={setPackageAtivo} />
                       </div>
@@ -829,7 +829,7 @@ export default function GeracaoDigitalPackages() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs text-slate-550 font-medium">
+                    <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">
                       {packageTipo === "gd" ? "Produtos/Serviços de Solução Incluídos (Sem Valor)" : "Módulos Vexo OS Incluídos (Sem Valor)"}
                     </Label>
                     <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 max-h-[220px] overflow-y-auto pr-1">
@@ -847,8 +847,8 @@ export default function GeracaoDigitalPackages() {
                             className={cn(
                               "p-2.5 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
                               isIncluded
-                                ? "bg-purple-50 border-purple-300"
-                                : "bg-white border-slate-200 hover:border-slate-350"
+                                ? "bg-purple-50 dark:bg-purple-950/20 border-purple-300 dark:border-purple-900/40"
+                                : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                             )}
                           >
                             <span className="text-xs font-semibold text-slate-800 leading-tight">{p.nome}</span>
@@ -863,7 +863,7 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2.5 border-t border-slate-200 pt-4 mt-2">
+                  <div className="flex justify-end gap-2.5 border-t border-slate-200 dark:border-white/10 pt-4 mt-2">
                     <Button variant="outline" size="sm" onClick={() => setIsEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
                       Cancelar
                     </Button>
@@ -908,16 +908,16 @@ export default function GeracaoDigitalPackages() {
                       <Card
                         key={pkg.id}
                         className={cn(
-                          "bg-white border-slate-200 p-5 flex flex-col justify-between space-y-4 hover:border-purple-500/20 transition-all shadow-sm",
+                          "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 p-5 flex flex-col justify-between space-y-4 hover:border-purple-500/20 transition-all shadow-sm",
                           !pkg.ativo && "opacity-60 hover:border-slate-300"
                         )}
                       >
                         <div className="space-y-2">
                           <div className="flex justify-between items-start">
                             <div className="space-y-0.5">
-                              <h4 className="text-sm font-black text-slate-800 leading-tight">{pkg.nome}</h4>
+                              <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 leading-tight">{pkg.nome}</h4>
                               {!pkg.ativo && (
-                                <Badge className="bg-red-50 border border-red-200 text-red-650 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
+                                <Badge className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 text-red-650 dark:text-red-400 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
                                   Inativo
                                 </Badge>
                               )}
@@ -930,7 +930,7 @@ export default function GeracaoDigitalPackages() {
                           </div>
 
                           <div className="space-y-1 pt-1">
-                            <span className="text-[10px] text-slate-500 block font-mono">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-mono">
                               {pkg.tipo === "vexo" ? "Módulos Vexo" : "Produtos"} Incluídos ({pkg.produtos_incluidos?.length || 0}):
                             </span>
                             <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-1">
@@ -946,7 +946,7 @@ export default function GeracaoDigitalPackages() {
                           </div>
                         </div>
 
-                        <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
                           <div className="space-y-0.5">
                             <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor</span>
                             {(() => {
@@ -1022,10 +1022,10 @@ export default function GeracaoDigitalPackages() {
 
                 if (displayedPackages.length === 0) {
                   return (
-                    <Card className="bg-white border-slate-200 p-8 text-center max-w-md mx-auto shadow-sm">
+                    <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 p-8 text-center max-w-md mx-auto shadow-sm">
                       <CardContent className="space-y-4">
                         <Layers className="h-12 w-12 text-slate-400 mx-auto" />
-                        <h3 className="text-base font-bold text-slate-800">Nenhum Pacote Cadastrado</h3>
+                        <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Nenhum Pacote Cadastrado</h3>
                         <p className="text-xs text-slate-500">
                           Clique em "Novo Pacote" no topo para criar seus templates comerciais fechados.
                         </p>
@@ -1037,9 +1037,9 @@ export default function GeracaoDigitalPackages() {
                 return (
                   <div className="space-y-8">
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                      <div className="flex items-center gap-2 border-b border-slate-100 dark:border-white/5 pb-2">
                         <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{titleText}</span>
-                        <Badge className="bg-slate-100 text-slate-600 text-[10px] font-bold border-none">{displayedPackages.length}</Badge>
+                        <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-350 text-[10px] font-bold border-none">{displayedPackages.length}</Badge>
                       </div>
                       {renderPackageGrid(displayedPackages)}
                     </div>
@@ -1056,7 +1056,7 @@ export default function GeracaoDigitalPackages() {
             {/* Top Header Controls */}
             <div className="flex justify-between items-center mb-8 relative z-10 border-b border-slate-200 pb-4">
               <div className="space-y-0.5">
-                <h2 className="text-base font-bold text-slate-800">
+                <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
                   {moduleOrigin === "gd" ? "Catálogo de Módulos Geração Digital (avulsos)" : "Catálogo de Módulos Vexo OS"}
                 </h2>
                 <p className="text-xs text-slate-500">
@@ -1075,89 +1075,89 @@ export default function GeracaoDigitalPackages() {
 
             {/* 1. Vexo Product Form Editor */}
             {isVexoEditing ? (
-              <Card className="bg-white border-slate-200 max-w-2xl mx-auto relative z-10 animate-fade-in shadow-sm">
+              <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 max-w-2xl mx-auto relative z-10 animate-fade-in shadow-sm">
                 <CardHeader>
-                  <CardTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                     <Layers className="h-4.5 w-4.5 text-purple-650" />
                     {selectedVexoProduct ? (moduleOrigin === "gd" ? "Editar Módulo GD" : "Editar Módulo Vexo OS") : (moduleOrigin === "gd" ? "Novo Módulo GD" : "Novo Módulo Vexo OS")}
                   </CardTitle>
-                  <CardDescription className="text-xs text-slate-500">Preencha os campos para salvar as configurações do módulo Vexo.</CardDescription>
+                  <CardDescription className="text-xs text-slate-500 dark:text-slate-400">Preencha os campos para salvar as configurações do módulo Vexo.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Nome do Módulo</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Nome do Módulo</Label>
                       <Input
                         value={vexoNome}
                         onChange={(e) => setVexoNome(e.target.value)}
                         placeholder="Ex: Agente de IA / SDR"
-                        className="bg-white border-slate-200 text-xs text-slate-800"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100"
                       />
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Recorrência comercial</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Recorrência comercial</Label>
                       <select
                         value={vexoRecorrencia}
                         onChange={(e) => setVexoRecorrencia(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none h-10"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none h-10"
                       >
-                        <option value="mensal">Mensal</option>
-                        <option value="unico">Pagamento Único</option>
+                        <option value="mensal" className="dark:bg-slate-850">Mensal</option>
+                        <option value="unico" className="dark:bg-slate-850">Pagamento Único</option>
                       </select>
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs text-slate-550 font-medium">Descrição detalhada</Label>
+                    <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Descrição detalhada</Label>
                     <Input
                       value={vexoDescricao}
                       onChange={(e) => setVexoDescricao(e.target.value)}
                       placeholder="Ex: Agente inteligente para prospecção ativa via WhatsApp."
-                      className="bg-white border-slate-200 text-xs text-slate-800"
+                      className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100"
                     />
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2 items-center">
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-550 font-medium">Valor de Venda (R$)</Label>
+                      <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor de Venda (R$)</Label>
                       <Input
                         type="number"
                         value={vexoValor}
                         onChange={(e) => setVexoValor(Number(e.target.value) || 0)}
                         placeholder="Ex: 980"
-                        className="bg-white border-slate-200 text-xs text-slate-800 font-mono"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
                     </div>
 
-                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm mt-4">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 shadow-sm mt-4">
                       <div className="space-y-0.5">
-                        <Label className="text-[11px] text-slate-700 font-bold">Módulo Ativo</Label>
-                        <span className="text-[8px] text-slate-500 block">Exibir nas opções de fechamento</span>
+                        <Label className="text-[11px] text-slate-700 dark:text-slate-300 font-bold">Módulo Ativo</Label>
+                        <span className="text-[8px] text-slate-500 dark:text-slate-400 block">Exibir nas opções de fechamento</span>
                       </div>
                       <Switch checked={vexoAtivo} onCheckedChange={setVexoAtivo} />
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 pt-3">
-                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm h-14">
+                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 dark:border-white/5 dark:border-white/5 pt-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 shadow-sm h-14">
                       <div className="space-y-0.5">
-                        <Label className="text-[11px] text-slate-700 font-bold">Ativar VP (Permuta)</Label>
-                        <span className="text-[8px] text-slate-500 block">Este módulo aceita permuta</span>
+                        <Label className="text-[11px] text-slate-700 dark:text-slate-300 font-bold">Ativar VP (Permuta)</Label>
+                        <span className="text-[8px] text-slate-500 dark:text-slate-400 block">Este módulo aceita permuta</span>
                       </div>
                       <Switch checked={vexoVpActive} onCheckedChange={setVexoVpActive} />
                     </div>
 
                     {vexoVpActive ? (
                       <div className="space-y-1.5 animate-fade-in">
-                        <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                        <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor em VP (R$)</Label>
                         <Input
                           type="number"
                           value={vexoVpValue || ""}
                           onChange={(e) => setVexoVpValue(Number(e.target.value) || 0)}
                           placeholder="Valor para permuta"
-                          className="bg-white border-slate-200 text-xs text-slate-850 font-mono h-10"
+                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-850 dark:text-slate-100 font-mono h-10"
                         />
                       </div>
                     ) : (
@@ -1167,7 +1167,7 @@ export default function GeracaoDigitalPackages() {
                     )}
                   </div>
 
-                  <div className="flex justify-end gap-2.5 border-t border-slate-200 pt-4 mt-2">
+                  <div className="flex justify-end gap-2.5 border-t border-slate-200 dark:border-white/10 pt-4 mt-2">
                     <Button variant="outline" size="sm" onClick={() => setIsVexoEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
                       Cancelar
                     </Button>
@@ -1196,10 +1196,10 @@ export default function GeracaoDigitalPackages() {
                     }))
                   : vexoProducts;
                 return moduleList.length === 0 ? (
-                <Card className="bg-white border-slate-200 text-center max-w-lg mx-auto py-12 relative z-10 animate-fade-in shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-center max-w-lg mx-auto py-12 relative z-10 animate-fade-in shadow-sm">
                   <CardContent className="space-y-4">
                     <Layers className="h-12 w-12 text-slate-400 mx-auto" />
-                    <h3 className="text-base font-bold text-slate-800">Nenhum Módulo Cadastrado</h3>
+                    <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Nenhum Módulo Cadastrado</h3>
                     <p className="text-xs text-slate-500">
                       Clique em "Novo Módulo" no topo para criar opções personalizadas de módulos Vexo.
                     </p>
@@ -1211,23 +1211,23 @@ export default function GeracaoDigitalPackages() {
                     <Card
                       key={prod.id}
                       className={cn(
-                        "bg-white border-slate-200 p-5 flex flex-col justify-between space-y-4 hover:border-purple-500/20 transition-all shadow-sm",
+                        "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 p-5 flex flex-col justify-between space-y-4 hover:border-purple-500/20 transition-all shadow-sm",
                         !prod.ativo && "opacity-60 hover:border-slate-300"
                       )}
                     >
                       <div className="space-y-2">
                         <div className="flex justify-between items-start">
                           <div className="space-y-0.5">
-                            <h4 className="text-sm font-black text-slate-800 leading-tight">{prod.nome}</h4>
+                            <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 leading-tight">{prod.nome}</h4>
                             <span className="text-[10px] text-slate-500 block leading-tight mt-1">{prod.descricao || "Sem descrição"}</span>
                           </div>
-                          <Badge className="bg-slate-50 border border-slate-200 text-slate-600 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
+                          <Badge className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
                             {prod.recorrencia === "unico" ? "único" : "mensal"}
                           </Badge>
                         </div>
                       </div>
 
-                      <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
                         <div className="space-y-0.5">
                           <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor Sugerido</span>
                           <span className="text-base font-black text-pink-600 font-mono">

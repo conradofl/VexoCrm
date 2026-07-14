@@ -406,15 +406,15 @@ export default function GeracaoDigitalCommercialSetup() {
       icon={Sparkles}
     >
       <GeracaoDigitalTabs />
-      <div className="w-full bg-white text-slate-800 rounded-3xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+      <div className="w-full bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden">
 
         {/* Decorative background blur */}
-        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 dark:bg-purple-950/20 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-0 left-0 h-96 w-96 bg-pink-50 dark:bg-pink-950/20 rounded-full blur-[100px] pointer-events-none" />
 
         {/* 1. Selector of Flow (A vs B) */}
         <div className="flex justify-center mb-8 relative z-10">
-          <div className="bg-slate-100 p-1.5 rounded-2xl border border-slate-200 flex gap-2">
+          <div className="bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-white/10 flex gap-2">
             <button
               onClick={() => setActiveFlow("A")}
               className={cn(
@@ -442,7 +442,7 @@ export default function GeracaoDigitalCommercialSetup() {
 
         {/* 2. Flow B View */}
         {activeFlow === "B" ? (
-          <Card className="bg-white border-slate-200 max-w-lg mx-auto py-8 text-center relative z-10 shadow-sm">
+          <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 max-w-lg mx-auto py-8 text-center relative z-10 shadow-sm">
             <CardContent className="space-y-6">
               <Briefcase className="h-12 w-12 text-slate-500 mx-auto" />
               <div className="space-y-2">
@@ -468,7 +468,7 @@ export default function GeracaoDigitalCommercialSetup() {
 
               {/* Left Column: Prospect and Segment settings */}
               <div className="space-y-6">
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
                       <Building2 className="h-4 w-4 text-purple-600" />
@@ -484,7 +484,7 @@ export default function GeracaoDigitalCommercialSetup() {
                         value={prospectName}
                         onChange={(e) => setProspectName(e.target.value)}
                         placeholder="Ex: Nome da Empresa"
-                        className="bg-white border-slate-200 focus:border-indigo-500/50 text-slate-800 text-xs h-10"
+                        className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 focus:border-indigo-500/50 text-slate-800 dark:text-slate-100 text-xs h-10"
                       />
                     </div>
 
@@ -493,7 +493,7 @@ export default function GeracaoDigitalCommercialSetup() {
                       <select
                         value={selectedSegmentId}
                         onChange={(e) => setSelectedSegmentId(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-indigo-500/50 h-10"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500/50 h-10"
                       >
                         {segments.map((seg) => (
                           <option key={seg.id} value={seg.id}>
@@ -507,7 +507,7 @@ export default function GeracaoDigitalCommercialSetup() {
                       <Label className="text-xs text-slate-500 font-medium block">Logotipo do Prospect</Label>
                       <div className="flex items-center gap-4">
                         {prospectLogo ? (
-                          <div className="relative h-16 w-16 rounded-xl bg-white p-1 flex items-center justify-center border border-slate-200">
+                          <div className="relative h-16 w-16 rounded-xl bg-white dark:bg-slate-800 p-1 flex items-center justify-center border border-slate-200 dark:border-white/10">
                             <img src={prospectLogo} alt="Logo" className="h-full w-full object-contain" />
                             <button
                               onClick={() => setProspectLogo(null)}
@@ -517,7 +517,7 @@ export default function GeracaoDigitalCommercialSetup() {
                             </button>
                           </div>
                         ) : (
-                          <Label className="h-16 w-16 rounded-xl border border-dashed border-slate-200 hover:border-slate-300 cursor-pointer flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 bg-slate-50">
+                          <Label className="h-16 w-16 rounded-xl border border-dashed border-slate-200 dark:border-white/10 hover:border-slate-300 cursor-pointer flex flex-col items-center justify-center text-slate-400 hover:text-slate-300 bg-slate-50 dark:bg-slate-800">
                             <Upload className="h-4 w-4 mb-1" />
                             <span className="text-[9px] uppercase font-mono">logo</span>
                             <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
@@ -530,7 +530,7 @@ export default function GeracaoDigitalCommercialSetup() {
                 </Card>
 
                 {/* Venda Casada Block */}
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardContent className="py-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
@@ -564,8 +564,8 @@ export default function GeracaoDigitalCommercialSetup() {
                                   className={cn(
                                     "flex items-center justify-between p-2 rounded-lg border text-left transition-all",
                                     isSelected
-                                      ? "bg-purple-50/50 border-purple-200"
-                                      : "bg-white border-slate-150"
+                                      ? "bg-purple-50/10 dark:bg-purple-950/10 border-purple-200 dark:border-purple-900/30"
+                                      : "bg-white dark:bg-slate-900 border-slate-150 dark:border-white/5"
                                   )}
                                 >
                                   <div className="flex items-center gap-2.5">
@@ -595,7 +595,7 @@ export default function GeracaoDigitalCommercialSetup() {
                                       onChange={(e) =>
                                         handleUpdateVexoProductPrice(prod.id, Number(e.target.value) || 0)
                                       }
-                                      className="w-20 h-7 text-right text-xs font-mono bg-white border-slate-200 disabled:opacity-60 disabled:bg-slate-50 p-1"
+                                      className="w-20 h-7 text-right text-xs font-mono bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 disabled:opacity-60 disabled:bg-slate-900 p-1"
                                     />
                                     <span className="text-[9px] text-slate-450 font-sans">
                                       /{prod.recorrencia === "unico" ? "único" : "mês"}
@@ -614,7 +614,7 @@ export default function GeracaoDigitalCommercialSetup() {
 
               {/* Right Column: ROI Calculator */}
               <div className="space-y-6">
-                <Card className="bg-white border-slate-200 shadow-sm">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
                       <Calculator className="h-4 w-4 text-purple-600" />
@@ -646,7 +646,7 @@ export default function GeracaoDigitalCommercialSetup() {
                           type="number"
                           value={customTicket}
                           onChange={(e) => setCustomTicket(Number(e.target.value) || 0)}
-                          className="bg-white border-slate-200 focus:border-indigo-500/50 text-slate-800 text-xs h-10"
+                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 focus:border-indigo-500/50 text-slate-800 dark:text-slate-100 text-xs h-10"
                         />
                       </div>
                       <div className="space-y-1">
@@ -656,12 +656,12 @@ export default function GeracaoDigitalCommercialSetup() {
                           step="0.5"
                           value={customConv}
                           onChange={(e) => setCustomConv(Number(e.target.value) || 0)}
-                          className="bg-white border-slate-200 focus:border-indigo-500/50 text-slate-800 text-xs h-10"
+                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 focus:border-indigo-500/50 text-slate-800 dark:text-slate-100 text-xs h-10"
                         />
                       </div>
                     </div>
 
-                    <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-between mt-2">
+                    <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/10 border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-between mt-2">
                       <span className="text-xs text-slate-650 font-medium">Faturamento Mensal Extra Estimado:</span>
                       <span className="text-sm font-extrabold text-emerald-600">
                         R$ {additionalRevenue.toLocaleString("pt-BR")} / mês
@@ -681,7 +681,7 @@ export default function GeracaoDigitalCommercialSetup() {
               </div>
             </div>
 
-            <Card className="bg-white border-slate-200 shadow-sm">
+            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div>
                   <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
@@ -708,8 +708,8 @@ export default function GeracaoDigitalCommercialSetup() {
                         className={cn(
                           "p-4 rounded-xl border transition-all flex flex-col justify-between space-y-3",
                           isSelected
-                            ? "bg-pink-50 border-pink-200 shadow-md shadow-pink-500/5"
-                            : "bg-white border-slate-200 hover:border-slate-350 shadow-sm"
+                            ? "bg-pink-50 dark:bg-pink-950/10 border-pink-200 dark:border-pink-900/30 shadow-md shadow-pink-500/5"
+                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20 shadow-sm"
                         )}
                       >
                         <div className="flex items-start gap-2.5">
@@ -744,7 +744,7 @@ export default function GeracaoDigitalCommercialSetup() {
                                   [pk.id]: Number(e.target.value) || 0
                                 }))
                               }
-                              className="bg-white border-slate-200 text-xs text-slate-800 h-8 font-mono"
+                              className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 h-8 font-mono"
                             />
                           </div>
                         )}
@@ -767,7 +767,7 @@ export default function GeracaoDigitalCommercialSetup() {
         <ErrorBoundary
           fallback={
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 p-8">
-              <div className="max-w-lg rounded-xl border border-red-400/30 bg-white p-6 text-center space-y-4">
+              <div className="max-w-lg rounded-xl border border-red-400/30 bg-white dark:bg-slate-900 p-6 text-center space-y-4">
                 <h2 className="text-lg font-bold text-slate-900">Erro ao exibir a apresentação</h2>
                 <p className="text-sm text-slate-600">
                   Um dos slides encontrou um erro inesperado. Feche a apresentação e tente novamente.

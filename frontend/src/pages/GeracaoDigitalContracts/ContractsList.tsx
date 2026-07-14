@@ -20,7 +20,7 @@ export function ContractsList() {
 
   if (error) {
     return (
-      <div className="bg-red-50 text-red-600 p-4 rounded-xl">
+      <div className="bg-red-50 dark:bg-red-950/20 text-red-650 dark:text-red-400 p-4 rounded-xl">
         Erro ao carregar contratos: {(error as Error).message}
       </div>
     );
@@ -28,7 +28,7 @@ export function ContractsList() {
 
   if (!contracts || contracts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 text-slate-500">
+      <div className="flex flex-col items-center justify-center p-12 text-slate-500 dark:text-slate-400">
         <FileText className="h-12 w-12 mb-4 opacity-50" />
         <h3 className="text-lg font-medium">Nenhum contrato gerado</h3>
         <p className="text-sm">Os contratos gerados aparecerão aqui.</p>
