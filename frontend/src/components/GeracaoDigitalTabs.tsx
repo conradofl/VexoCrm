@@ -7,14 +7,17 @@ import { useAuth } from "@/contexts/AuthContext";
 export function GeracaoDigitalTabs() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { canAccessInternalPage } = useAuth();
+  const { canAccessInternalPage, isInternalUser } = useAuth();
 
   const hasApresentacao = canAccessInternalPage("apresentacao-gd");
   const hasBriefings = canAccessInternalPage("briefings-gd");
-  const hasPropostas = canAccessInternalPage("propostas-gd");
-  const hasPacotes = canAccessInternalPage("pacotes-gd");
-  const hasCondicoes = canAccessInternalPage("condicoes-gd");
-  const hasContratos = canAccessInternalPage("contratos-gd");
+  // Abas operacionais do fluxo comercial: liberadas para toda a equipe interna
+  // (vendedores), não só admins. As rotas já permitem allowedRoles=["internal"];
+  // o gate por preset ocultava as abas para quem não era admin.
+  const hasPropostas = isInternalUser;
+  const hasPacotes = isInternalUser;
+  const hasCondicoes = isInternalUser;
+  const hasContratos = isInternalUser;
 
   // Determine active tab based on path name
   let activeTab = "";

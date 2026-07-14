@@ -692,10 +692,11 @@ export default function GeracaoDigitalProposals() {
 
         if (Array.isArray(selectedGdPkg.produtos_incluidos)) {
           selectedGdPkg.produtos_incluidos.forEach((p: any) => {
+            const isVexo = p.origem === "vexo";
             finalItems.push({
               product_id: p.product_id || null,
-              descricao: p.nome,
-              categoria: "gd",
+              descricao: isVexo ? `Módulo: ${p.nome}` : p.nome,
+              categoria: isVexo ? "vexo" : "gd",
               valor: 0,
               recorrencia: "mensal"
             });

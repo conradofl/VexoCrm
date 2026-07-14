@@ -1324,10 +1324,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             : null;
           const includedProds = liveSelected || (Array.isArray(pack.produtos_incluidos) ? pack.produtos_incluidos : []);
           includedProds.forEach(p => {
+            const isVexo = p.origem === "vexo";
             finalItems.push({
               product_id: p.product_id || null,
-              descricao: p.nome,
-              categoria: "gd",
+              descricao: isVexo ? `Módulo: ${p.nome}` : p.nome,
+              categoria: isVexo ? "vexo" : "gd",
               valor: 0,
               recorrencia: "mensal"
             });
@@ -1908,10 +1909,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
         if (Array.isArray(selectedPkg.produtos_incluidos)) {
           selectedPkg.produtos_incluidos.forEach((p) => {
+            const isVexo = p.origem === "vexo" || selectedPkg.tipo === "vexo";
             finalItems.push({
               product_id: p.product_id || null,
-              descricao: p.nome,
-              categoria: selectedPkg.tipo || "gd",
+              descricao: (isVexo && !String(p.nome || "").startsWith("Módulo:")) ? `Módulo: ${p.nome}` : p.nome,
+              categoria: isVexo ? "vexo" : "gd",
               valor: 0,
               recorrencia: "mensal"
             });

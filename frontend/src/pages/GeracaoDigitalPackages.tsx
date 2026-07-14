@@ -42,7 +42,7 @@ interface Package {
   nome: string;
   tipo?: "gd" | "vexo";
   periodo: string;
-  produtos_incluidos: { product_id: string; nome: string }[];
+  produtos_incluidos: { product_id: string; nome: string; origem?: "gd" | "vexo" }[];
   valor: number;
   valor_vp?: number | string | null;
   valor_tabela?: number | null;
@@ -85,6 +85,8 @@ export default function GeracaoDigitalPackages() {
   const [packageDestaque, setPackageDestaque] = useState<boolean>(false);
   const [packageAtivo, setPackageAtivo] = useState<boolean>(true);
   const [packageIncludedProductIds, setPackageIncludedProductIds] = useState<Record<string, boolean>>({});
+  // Módulos Vexo incluídos DENTRO de um pacote GD (pacote híbrido GD + Vexo).
+  const [packageIncludedVexoIds, setPackageIncludedVexoIds] = useState<Record<string, boolean>>({});
 
   // Vexo Products CRUD state
   const [vexoProducts, setVexoProducts] = useState<VexoProduct[]>([]);
@@ -197,6 +199,7 @@ export default function GeracaoDigitalPackages() {
       initialMap[p.id] = false;
     });
     setPackageIncludedProductIds(initialMap);
+    setPackageIncludedVexoIds({});
     setIsEditing(true);
   };
 
@@ -212,12 +215,22 @@ export default function GeracaoDigitalPackages() {
     setPackageDestaque(pkg.destaque);
     setPackageAtivo(pkg.ativo);
 
+    const included = pkg.produtos_incluidos || [];
+    // Produtos GD do pacote: origem "gd" (ou sem origem = legado, tratado como do catálogo do tipo).
     const map: Record<string, boolean> = {};
     const catalog = (pkg.tipo === "vexo") ? vexoProducts : products;
     catalog.forEach((p) => {
-      map[p.id] = (pkg.produtos_incluidos || []).some((pi) => pi.product_id === p.id);
+      map[p.id] = included.some((pi) => pi.product_id === p.id && pi.origem !== "vexo");
     });
     setPackageIncludedProductIds(map);
+    // Módulos Vexo incluídos num pacote GD híbrido (origem "vexo").
+    const vexoMap: Record<string, boolean> = {};
+    if ((pkg.tipo || "gd") === "gd") {
+      vexoProducts.forEach((p) => {
+        vexoMap[p.id] = included.some((pi) => pi.product_id === p.id && pi.origem === "vexo");
+      });
+    }
+    setPackageIncludedVexoIds(vexoMap);
     setIsEditing(true);
   };
 
@@ -343,7 +356,7 @@ export default function GeracaoDigitalPackages() {
       return;
     }
 
-    const includedList = Object.entries(packageIncludedProductIds)
+    const includedGd = Object.entries(packageIncludedProductIds)
       .filter(([_, included]) => included)
       .map(([id]) => {
         const prod = packageTipo === "gd"
@@ -351,9 +364,22 @@ export default function GeracaoDigitalPackages() {
           : vexoProducts.find((p) => p.id === id);
         return {
           product_id: id,
-          nome: prod?.nome || ""
+          nome: prod?.nome || "",
+          origem: (packageTipo === "gd" ? "gd" : "vexo") as "gd" | "vexo"
         };
       });
+
+    // Pacote híbrido: módulos Vexo dentro de um pacote GD (origem "vexo").
+    const includedVexo = packageTipo === "gd"
+      ? Object.entries(packageIncludedVexoIds)
+          .filter(([_, included]) => included)
+          .map(([id]) => {
+            const prod = vexoProducts.find((p) => p.id === id);
+            return { product_id: id, nome: prod?.nome || "", origem: "vexo" as const };
+          })
+      : [];
+
+    const includedList = [...includedGd, ...includedVexo];
 
     try {
       const token = await getIdToken();
@@ -864,6 +890,48 @@ export default function GeracaoDigitalPackages() {
                       })}
                     </div>
                   </div>
+
+                  {/* Pacote híbrido: módulos Vexo OS incluídos num pacote GD (valor consolidado) */}
+                  {packageTipo === "gd" && (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-indigo-600 dark:text-indigo-300 font-medium flex items-center gap-1.5">
+                        <Layers className="h-3.5 w-3.5" />
+                        Módulos Vexo OS Incluídos (Pacote Híbrido, Sem Valor)
+                      </Label>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Combine ferramentas Vexo dentro deste plano GD. O valor do pacote é único e consolidado.
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 max-h-[220px] overflow-y-auto pr-1">
+                        {(vexoProducts || []).map((p) => {
+                          const isIncluded = packageIncludedVexoIds[p.id] || false;
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() =>
+                                setPackageIncludedVexoIds((prev) => ({ ...prev, [p.id]: !isIncluded }))
+                              }
+                              className={cn(
+                                "p-2.5 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
+                                isIncluded
+                                  ? "bg-indigo-50 dark:bg-indigo-950/20 border-indigo-300 dark:border-indigo-900/40"
+                                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
+                              )}
+                            >
+                              <span className="text-xs font-semibold text-slate-800 leading-tight dark:text-white">{p.nome}</span>
+                              {isIncluded && (
+                                <div className="h-3.5 w-3.5 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
+                                  <CheckCircle className="h-2.5 w-2.5 text-white" />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {vexoProducts.length === 0 && (
+                          <p className="text-[10px] text-slate-450 dark:text-slate-500 italic col-span-3">Nenhum módulo Vexo cadastrado. Crie na aba "Módulos Vexo OS".</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex justify-end gap-2.5 border-t border-slate-200 dark:border-white/10 pt-4 mt-2">
                     <Button variant="outline" size="sm" onClick={() => setIsEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50 dark:text-slate-200">
