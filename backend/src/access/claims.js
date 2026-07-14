@@ -1030,3 +1030,68 @@ export async function syncUsersWithAccessProfile(profile) {
 
   return { updatedUsers, skippedUsers };
 }
+
+export async function propagateTenantPermissions(tenantId, allowedTabs) {
+  const auth = getAuth();
+  const users = await listAllFirebaseUsers();
+  let updatedUsers = 0;
+  let skippedUsers = 0;
+
+  const companyViews = (allowedTabs || []).filter((view) =>
+    CLIENT_VIEW_KEYS.includes(view)
+  );
+
+  for (const user of users) {
+    const currentAccess = extractManagedAccessClaims(user.customClaims || {}, {
+      uid: user.uid,
+      email: user.email,
+    });
+
+    if (currentAccess.role !== "client") {
+      continue;
+    }
+
+    const belongsToTenant =
+      currentAccess.clientId === tenantId ||
+      (currentAccess.clientIds && currentAccess.clientIds.includes(tenantId));
+
+    if (!belongsToTenant) {
+      continue;
+    }
+
+    try {
+      const nextAllowedViews = Array.from(
+        new Set([...(currentAccess.allowedViews || []), ...companyViews])
+      );
+
+      const nextClaims = buildManagedClaims({
+        role: "client",
+        accessPreset: currentAccess.accessPreset,
+        scopeMode: currentAccess.scopeMode,
+        approvalLevel: currentAccess.approvalLevel,
+        permissions: currentAccess.permissions,
+        clientIds: currentAccess.clientIds,
+        tenantIds: currentAccess.tenantIds,
+        clientId: currentAccess.clientId,
+        tenantId: currentAccess.tenantId,
+        allowedViews: nextAllowedViews,
+        companyName: currentAccess.companyName,
+      });
+
+      await auth.setCustomUserClaims(
+        user.uid,
+        mergeManagedClaims(user.customClaims || {}, nextClaims)
+      );
+      updatedUsers += 1;
+    } catch (error) {
+      skippedUsers += 1;
+      console.error("tenant permission propagation error for user:", {
+        uid: user.uid,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { updatedUsers, skippedUsers };
+}
+

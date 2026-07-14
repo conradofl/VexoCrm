@@ -31,12 +31,16 @@ import { Badge } from "@/components/ui/badge";
 interface ProductApi {
   id: string;
   nome: string;
+  descricao?: string | null;
+  valor_padrao?: number | string | null;
   recorrencia: string;
+  ativo?: boolean;
 }
 
 interface Package {
   id: string;
   nome: string;
+  tipo?: "gd" | "vexo";
   periodo: string;
   produtos_incluidos: { product_id: string; nome: string }[];
   valor: number;
@@ -58,7 +62,9 @@ export default function GeracaoDigitalPackages() {
   const { isAuthenticated, getIdToken, clientId } = useAuth();
 
   // State
-  const [activeSection, setActiveSection] = useState<"packages" | "vexo-products">("packages");
+  const [activeSection, setActiveSection] = useState<"packages" | "vexo-packages" | "vexo-products" | "gd-products">("packages");
+  // Seção de módulos parametrizada: "vexo-products" e "gd-products" reusam o mesmo form/lista
+  const moduleOrigin: "gd" | "vexo" = activeSection === "gd-products" ? "gd" : "vexo";
   const [packages, setPackages] = useState<Package[]>([]);
   const [products, setProducts] = useState<ProductApi[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -68,15 +74,20 @@ export default function GeracaoDigitalPackages() {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [packageName, setPackageName] = useState<string>("");
+  const [packageTipo, setPackageTipo] = useState<"gd" | "vexo">("gd");
   const [packagePeriod, setPackagePeriod] = useState<string>("mensal");
   const [packageValue, setPackageValue] = useState<number>(0);
   const [packageTabela, setPackageTabela] = useState<number>(0);
+  const [packageVpActive, setPackageVpActive] = useState<boolean>(false);
+  const [packageVpValue, setPackageVpValue] = useState<number>(0);
   const [packageDestaque, setPackageDestaque] = useState<boolean>(false);
   const [packageAtivo, setPackageAtivo] = useState<boolean>(true);
   const [packageIncludedProductIds, setPackageIncludedProductIds] = useState<Record<string, boolean>>({});
 
   // Vexo Products CRUD state
   const [vexoProducts, setVexoProducts] = useState<VexoProduct[]>([]);
+  const [vexoVpActive, setVexoVpActive] = useState<boolean>(false);
+  const [vexoVpValue, setVexoVpValue] = useState<number>(0);
   const [isVexoEditing, setIsVexoEditing] = useState<boolean>(false);
   const [selectedVexoProduct, setSelectedVexoProduct] = useState<VexoProduct | null>(null);
   const [vexoNome, setVexoNome] = useState<string>("");
@@ -131,7 +142,7 @@ export default function GeracaoDigitalPackages() {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      const res = await fetchApi(`/api/gd/products?client_id=${clientId || ""}`, { headers });
+      const res = await fetchApi(`/api/gd/products?client_id=${clientId || ""}&include_inactive=1`, { headers });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -169,13 +180,18 @@ export default function GeracaoDigitalPackages() {
   const handleOpenCreate = () => {
     setSelectedPackage(null);
     setPackageName("");
+    setPackageTipo(activeSection === "vexo-packages" ? "vexo" : "gd");
     setPackagePeriod("mensal");
     setPackageValue(0);
+    setPackageTabela(0);
+    setPackageVpActive(false);
+    setPackageVpValue(0);
     setPackageDestaque(false);
     setPackageAtivo(true);
 
     const initialMap: Record<string, boolean> = {};
-    products.forEach((p) => {
+    const catalog = (activeSection === "vexo-packages") ? vexoProducts : products;
+    catalog.forEach((p) => {
       initialMap[p.id] = false;
     });
     setPackageIncludedProductIds(initialMap);
@@ -185,14 +201,18 @@ export default function GeracaoDigitalPackages() {
   const handleOpenEdit = (pkg: Package) => {
     setSelectedPackage(pkg);
     setPackageName(pkg.nome);
+    setPackageTipo(pkg.tipo || "gd");
     setPackagePeriod(pkg.periodo);
     setPackageValue(pkg.valor);
     setPackageTabela(Number(pkg.valor_tabela || 0));
+    setPackageVpActive(!!pkg.valor_vp);
+    setPackageVpValue(Number(pkg.valor_vp || 0));
     setPackageDestaque(pkg.destaque);
     setPackageAtivo(pkg.ativo);
 
     const map: Record<string, boolean> = {};
-    products.forEach((p) => {
+    const catalog = (pkg.tipo === "vexo") ? vexoProducts : products;
+    catalog.forEach((p) => {
       map[p.id] = (pkg.produtos_incluidos || []).some((pi) => pi.product_id === p.id);
     });
     setPackageIncludedProductIds(map);
@@ -243,6 +263,7 @@ export default function GeracaoDigitalPackages() {
       const body = {
         client_id: clientId,
         nome: pkg.nome,
+        tipo: pkg.tipo || "gd",
         periodo: pkg.periodo,
         produtos_incluidos: pkg.produtos_incluidos,
         valor: pkg.valor,
@@ -323,7 +344,9 @@ export default function GeracaoDigitalPackages() {
     const includedList = Object.entries(packageIncludedProductIds)
       .filter(([_, included]) => included)
       .map(([id]) => {
-        const prod = products.find((p) => p.id === id);
+        const prod = packageTipo === "gd"
+          ? products.find((p) => p.id === id)
+          : vexoProducts.find((p) => p.id === id);
         return {
           product_id: id,
           nome: prod?.nome || ""
@@ -340,10 +363,12 @@ export default function GeracaoDigitalPackages() {
       const body = {
         client_id: clientId,
         nome: packageName,
+        tipo: packageTipo,
         periodo: packagePeriod,
         produtos_incluidos: includedList,
         valor: Number(packageValue || 0),
         valor_tabela: Number(packageTabela || 0) || null,
+        valor_vp: packageVpActive ? Number(packageVpValue || 0) : null,
         destaque: packageDestaque,
         ativo: packageAtivo
       };
@@ -390,6 +415,8 @@ export default function GeracaoDigitalPackages() {
     setVexoNome("");
     setVexoDescricao("");
     setVexoValor(0);
+    setVexoVpActive(false);
+    setVexoVpValue(0);
     setVexoRecorrencia("mensal");
     setVexoAtivo(true);
     setIsVexoEditing(true);
@@ -400,6 +427,8 @@ export default function GeracaoDigitalPackages() {
     setVexoNome(prod.nome);
     setVexoDescricao(prod.descricao || "");
     setVexoValor(prod.valor);
+    setVexoVpActive(!!prod.valor_vp);
+    setVexoVpValue(Number(prod.valor_vp || 0));
     setVexoRecorrencia(prod.recorrencia);
     setVexoAtivo(prod.ativo);
     setIsVexoEditing(true);
@@ -421,18 +450,28 @@ export default function GeracaoDigitalPackages() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const body = {
-        client_id: clientId,
-        nome: vexoNome,
-        descricao: vexoDescricao,
-        valor: Number(vexoValor || 0),
-        recorrencia: vexoRecorrencia,
-        ativo: vexoAtivo
-      };
+      const body = moduleOrigin === "gd"
+        ? {
+            client_id: clientId,
+            nome: vexoNome,
+            descricao: vexoDescricao,
+            valor_padrao: Number(vexoValor || 0),
+            valor_vp: vexoVpActive ? Number(vexoVpValue || 0) : null,
+            recorrencia: vexoRecorrencia,
+            ativo: vexoAtivo
+          }
+        : {
+            client_id: clientId,
+            nome: vexoNome,
+            descricao: vexoDescricao,
+            valor: Number(vexoValor || 0),
+            valor_vp: vexoVpActive ? Number(vexoVpValue || 0) : null,
+            recorrencia: vexoRecorrencia,
+            ativo: vexoAtivo
+          };
 
-      const url = selectedVexoProduct
-        ? `/api/gd/vexo-products/${selectedVexoProduct.id}`
-        : "/api/gd/vexo-products";
+      const baseUrl = moduleOrigin === "gd" ? "/api/gd/products" : "/api/gd/vexo-products";
+      const url = selectedVexoProduct ? `${baseUrl}/${selectedVexoProduct.id}` : baseUrl;
       const method = selectedVexoProduct ? "PUT" : "POST";
 
       const res = await fetchApi(url, {
@@ -451,7 +490,7 @@ export default function GeracaoDigitalPackages() {
       });
 
       setIsVexoEditing(false);
-      loadVexoProducts();
+      if (moduleOrigin === "gd") loadProducts(); else loadVexoProducts();
     } catch (err) {
       console.error(err);
       toast({
@@ -472,16 +511,18 @@ export default function GeracaoDigitalPackages() {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      const res = await fetchApi(`/api/gd/vexo-products/${id}?client_id=${clientId || ""}`, {
-        method: "DELETE",
-        headers
-      });
+      const res = await fetchApi(
+        moduleOrigin === "gd"
+          ? `/api/gd/products/${id}?client_id=${clientId || ""}`
+          : `/api/gd/vexo-products/${id}?client_id=${clientId || ""}`,
+        { method: "DELETE", headers }
+      );
       if (res.ok) {
         toast({
-          title: "Módulo Removido",
-          description: "O módulo Vexo foi excluído com sucesso."
+          title: moduleOrigin === "gd" ? "Módulo Desativado" : "Módulo Removido",
+          description: moduleOrigin === "gd" ? "O módulo GD foi desativado (pode estar em pacotes antigos)." : "O módulo Vexo foi excluído com sucesso."
         });
-        loadVexoProducts();
+        if (moduleOrigin === "gd") loadProducts(); else loadVexoProducts();
       } else {
         throw new Error("Erro ao excluir módulo.");
       }
@@ -503,20 +544,21 @@ export default function GeracaoDigitalPackages() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const body = {
-        client_id: clientId,
-        nome: prod.nome,
-        descricao: prod.descricao,
-        valor: prod.valor,
-        recorrencia: prod.recorrencia,
-        ativo: newStatus
-      };
+      const body = moduleOrigin === "gd"
+        ? { client_id: clientId, ativo: newStatus }
+        : {
+            client_id: clientId,
+            nome: prod.nome,
+            descricao: prod.descricao,
+            valor: prod.valor,
+            recorrencia: prod.recorrencia,
+            ativo: newStatus
+          };
 
-      const res = await fetchApi(`/api/gd/vexo-products/${prod.id}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify(body)
-      });
+      const res = await fetchApi(
+        moduleOrigin === "gd" ? `/api/gd/products/${prod.id}` : `/api/gd/vexo-products/${prod.id}`,
+        { method: "PUT", headers, body: JSON.stringify(body) }
+      );
 
       if (!res.ok) {
         throw new Error("Erro ao atualizar status do módulo.");
@@ -526,7 +568,7 @@ export default function GeracaoDigitalPackages() {
         title: newStatus ? "Módulo Ativado" : "Módulo Desativado",
         description: `O módulo foi ${newStatus ? "ativado" : "desativado"} com sucesso.`
       });
-      loadVexoProducts();
+      if (moduleOrigin === "gd") loadProducts(); else loadVexoProducts();
     } catch (err) {
       console.error(err);
       toast({
@@ -570,6 +612,34 @@ export default function GeracaoDigitalPackages() {
             </button>
             <button
               onClick={() => {
+                setActiveSection("gd-products");
+                setIsVexoEditing(false);
+              }}
+              className={cn(
+                "px-5 py-2 rounded-lg text-xs font-bold transition-all",
+                activeSection === "gd-products"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              )}
+            >
+              Módulos Geração Digital
+            </button>
+            <button
+              onClick={() => {
+                setActiveSection("vexo-packages");
+                setIsEditing(false);
+              }}
+              className={cn(
+                "px-5 py-2 rounded-lg text-xs font-bold transition-all",
+                activeSection === "vexo-packages"
+                  ? "bg-white dark:bg-slate-800 text-purple-650 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              )}
+            >
+              Pacotes Vexo OS
+            </button>
+            <button
+              onClick={() => {
                 setActiveSection("vexo-products");
                 setIsVexoEditing(false);
               }}
@@ -586,16 +656,22 @@ export default function GeracaoDigitalPackages() {
         </div>
 
         {/* SECTION 1: PACKAGES CRUD */}
-        {activeSection === "packages" && (
+        {(activeSection === "packages" || activeSection === "vexo-packages") && (
           <>
             {/* Top Header Controls */}
             <div className="flex justify-between items-center mb-8 relative z-10 border-b border-slate-200 pb-4">
               <div className="space-y-0.5">
-                <h2 className="text-base font-bold text-slate-800">Templates de Pacotes Salvos</h2>
-                <p className="text-xs text-slate-500">Estes pacotes estarão disponíveis para simulação em qualquer apresentação comercial futura.</p>
+                <h2 className="text-base font-bold text-slate-800">
+                  {activeSection === "vexo-packages" ? "Templates de Pacotes Vexo OS" : "Templates de Pacotes Geração Digital"}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {activeSection === "vexo-packages"
+                    ? "Estes pacotes estarão disponíveis para simulação Vexo OS em propostas comerciais futuras."
+                    : "Estes pacotes estarão disponíveis para simulação em qualquer apresentação comercial futura."}
+                </p>
               </div>
               {!isEditing && (
-                <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 font-extrabold text-white text-xs">
+                <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 font-extrabold text-white text-xs">
                   <Plus className="h-4 w-4 mr-1.5" />
                   Novo Pacote
                 </Button>
@@ -614,7 +690,7 @@ export default function GeracaoDigitalPackages() {
                 </CardHeader>
                 <CardContent className="space-y-5">
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-3">
                     <div className="space-y-1.5">
                       <Label className="text-xs text-slate-550 font-medium">Nome do Pacote</Label>
                       <Input
@@ -623,6 +699,22 @@ export default function GeracaoDigitalPackages() {
                         placeholder="Ex: Pacote Tração Premium"
                         className="bg-white border-slate-200 text-xs text-slate-800"
                       />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-slate-550 font-medium">Tipo de Pacote</Label>
+                      <select
+                        value={packageTipo}
+                        onChange={(e) => {
+                          const newTipo = e.target.value as "gd" | "vexo";
+                          setPackageTipo(newTipo);
+                          setPackageIncludedProductIds({});
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none h-10"
+                      >
+                        <option value="gd">Geração Digital</option>
+                        <option value="vexo">Vexo OS</option>
+                      </select>
                     </div>
 
                     <div className="space-y-1.5">
@@ -688,6 +780,33 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
+                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm h-14">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px] text-slate-700 font-bold">Ativar VP (Permuta)</Label>
+                        <span className="text-[8px] text-slate-500 block">Este pacote aceita permuta</span>
+                      </div>
+                      <Switch checked={packageVpActive} onCheckedChange={setPackageVpActive} />
+                    </div>
+
+                    {packageVpActive ? (
+                      <div className="space-y-1.5 animate-fade-in">
+                        <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                        <Input
+                          type="number"
+                          value={packageVpValue || ""}
+                          onChange={(e) => setPackageVpValue(Number(e.target.value) || 0)}
+                          placeholder="Valor para permuta"
+                          className="bg-white border-slate-200 text-xs text-slate-850 font-mono h-10"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        Permuta desativada para este pacote.
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid gap-4 md:grid-cols-2 items-center">
 
                     <div className="grid gap-2 grid-cols-2 mt-4">
@@ -710,16 +829,18 @@ export default function GeracaoDigitalPackages() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs text-slate-550 font-medium">Produtos/Serviços de Solução Incluídos (Sem Valor)</Label>
+                    <Label className="text-xs text-slate-550 font-medium">
+                      {packageTipo === "gd" ? "Produtos/Serviços de Solução Incluídos (Sem Valor)" : "Módulos Vexo OS Incluídos (Sem Valor)"}
+                    </Label>
                     <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 max-h-[220px] overflow-y-auto pr-1">
-                      {products.map((p) => {
+                      {((packageTipo === "vexo" ? vexoProducts : products) || []).map((p) => {
                         const isIncluded = packageIncludedProductIds[p.id] || false;
                         return (
                           <div
                             key={p.id}
                             onClick={() =>
                               setPackageIncludedProductIds((prev) => ({
-                                ...prev,
+                               ...prev,
                                 [p.id]: !isIncluded
                               }))
                             }
@@ -746,7 +867,7 @@ export default function GeracaoDigitalPackages() {
                     <Button variant="outline" size="sm" onClick={() => setIsEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
                       Cancelar
                     </Button>
-                    <Button onClick={handleSave} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 text-white font-extrabold">
+                    <Button onClick={handleSave} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold">
                       Salvar Modelo de Pacote
                     </Button>
                   </div>
@@ -772,146 +893,180 @@ export default function GeracaoDigitalPackages() {
                     </Button>
                   </CardContent>
                 </Card>
-              ) : packages.length === 0 ? (
-                <Card className="bg-white border-slate-200 text-center max-w-lg mx-auto py-12 relative z-10 animate-fade-in shadow-sm">
-                  <CardContent className="space-y-4">
-                    <Layers className="h-12 w-12 text-slate-400 mx-auto" />
-                    <h3 className="text-base font-bold text-slate-800">Nenhum Pacote Cadastrado</h3>
-                    <p className="text-xs text-slate-500">
-                      Clique em "Novo Pacote" no topo para criar seus templates comerciais fechados.
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 relative z-10 animate-fade-in">
-                  {packages.map((pkg) => (
-                    <Card
-                      key={pkg.id}
-                      className={cn(
-                        "bg-white border-slate-200 p-5 flex flex-col justify-between space-y-4 hover:border-purple-500/20 transition-all shadow-sm",
-                        !pkg.ativo && "opacity-60 hover:border-slate-300"
-                      )}
-                    >
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-start">
+              ) : (() => {
+                const displayedPackages = activeSection === "vexo-packages"
+                  ? packages.filter(p => p.tipo === "vexo")
+                  : packages.filter(p => p.tipo === "gd" || !p.tipo);
+
+                const titleText = activeSection === "vexo-packages"
+                  ? "Pacotes Vexo OS"
+                  : "Pacotes Geração Digital (GD)";
+
+                const renderPackageGrid = (pkgList: Package[]) => (
+                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 relative z-10 animate-fade-in">
+                    {pkgList.map((pkg) => (
+                      <Card
+                        key={pkg.id}
+                        className={cn(
+                          "bg-white border-slate-200 p-5 flex flex-col justify-between space-y-4 hover:border-purple-500/20 transition-all shadow-sm",
+                          !pkg.ativo && "opacity-60 hover:border-slate-300"
+                        )}
+                      >
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start">
+                            <div className="space-y-0.5">
+                              <h4 className="text-sm font-black text-slate-800 leading-tight">{pkg.nome}</h4>
+                              {!pkg.ativo && (
+                                <Badge className="bg-red-50 border border-red-200 text-red-650 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
+                                  Inativo
+                                </Badge>
+                              )}
+                            </div>
+                            {pkg.destaque && (
+                              <Badge className="bg-pink-600 text-white border-none font-bold uppercase tracking-wider text-[8px] px-1.5 py-0.5">
+                                Destaque
+                              </Badge>
+                            )}
+                          </div>
+
+                          <div className="space-y-1 pt-1">
+                            <span className="text-[10px] text-slate-500 block font-mono">
+                              {pkg.tipo === "vexo" ? "Módulos Vexo" : "Produtos"} Incluídos ({pkg.produtos_incluidos?.length || 0}):
+                            </span>
+                            <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-1">
+                              {pkg.produtos_incluidos?.map((p, idx) => (
+                                <Badge key={idx} variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[9px] font-normal font-sans py-0">
+                                  {p.nome}
+                                </Badge>
+                              ))}
+                              {(!pkg.produtos_incluidos || pkg.produtos_incluidos.length === 0) && (
+                                <span className="text-[10px] text-slate-400 italic">Nenhum produto incluído</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-100">
                           <div className="space-y-0.5">
-                            <h4 className="text-sm font-black text-slate-800 leading-tight">{pkg.nome}</h4>
-                            {!pkg.ativo && (
-                              <Badge className="bg-red-50 border border-red-200 text-red-650 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
-                                Inativo
-                              </Badge>
-                            )}
-                          </div>
-                          {pkg.destaque && (
-                            <Badge className="bg-pink-600 text-white border-none font-bold uppercase tracking-wider text-[8px] px-1.5 py-0.5">
-                              Destaque
-                            </Badge>
-                          )}
-                        </div>
-
-                        <div className="space-y-1 pt-1">
-                          <span className="text-[10px] text-slate-500 block font-mono">Produtos Incluídos ({pkg.produtos_incluidos?.length || 0}):</span>
-                          <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-1">
-                            {pkg.produtos_incluidos?.map((p, idx) => (
-                              <Badge key={idx} variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[9px] font-normal font-sans py-0">
-                                {p.nome}
-                              </Badge>
-                            ))}
-                            {(!pkg.produtos_incluidos || pkg.produtos_incluidos.length === 0) && (
-                              <span className="text-[10px] text-slate-400 italic">Nenhum produto incluído</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                        <div className="space-y-0.5">
-                          <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor</span>
-                          {(() => {
-                            const pr = computePackagePricing(pkg.valor, pkg.periodo, pkg.valor_tabela);
-                            if (pr.meses === null) {
+                            <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor</span>
+                            {(() => {
+                              const pr = computePackagePricing(pkg.valor, pkg.periodo, pkg.valor_tabela);
+                              if (pr.meses === null) {
+                                  return (
+                                  <span className="text-base font-black text-pink-600 font-mono">
+                                    {brlPkg(pr.totalPeriodo)}
+                                    <span className="text-[10px] text-slate-500 font-normal">/setup único</span>
+                                  </span>
+                                );
+                              }
                               return (
-                                <span className="text-base font-black text-pink-600 font-mono">
-                                  {brlPkg(pr.totalPeriodo)}
-                                  <span className="text-[10px] text-slate-500 font-normal">/setup único</span>
-                                </span>
+                                <>
+                                  <span className="text-base font-black text-pink-600 font-mono block">
+                                    {pr.valorTabela !== null && (
+                                      <span className="text-[11px] text-slate-400 line-through font-bold mr-1.5">De {brlPkg(pr.valorTabela)}</span>
+                                    )}
+                                    {pr.valorTabela !== null ? "por " : ""}{brlPkg(pr.totalPeriodo)}
+                                    {pr.descontoPct !== null && (
+                                      <span className="text-[10px] text-emerald-600 font-bold ml-1">({pr.descontoPct}% off)</span>
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono block">
+                                    {pr.meses > 1 ? `total do período · ${pr.aprox ? "aprox. " : ""}${brlPkg(pr.mensalidade || 0)}/mês` : `${brlPkg(pr.mensalidade || 0)}/mês`}
+                                  </span>
+                                </>
                               );
-                            }
-                            return (
-                              <>
-                                <span className="text-base font-black text-pink-600 font-mono block">
-                                  {pr.valorTabela !== null && (
-                                    <span className="text-[11px] text-slate-400 line-through font-bold mr-1.5">De {brlPkg(pr.valorTabela)}</span>
-                                  )}
-                                  {pr.valorTabela !== null ? "por " : ""}{brlPkg(pr.totalPeriodo)}
-                                  {pr.descontoPct !== null && (
-                                    <span className="text-[10px] text-emerald-600 font-bold ml-1">({pr.descontoPct}% off)</span>
-                                  )}
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-mono block">
-                                  {pr.meses > 1 ? `total do período · ${pr.aprox ? "aprox. " : ""}${brlPkg(pr.mensalidade || 0)}/mês` : `${brlPkg(pr.mensalidade || 0)}/mês`}
-                                </span>
-                              </>
-                            );
-                          })()}
-                        </div>
+                            })()}
+                          </div>
 
-                        <div className="flex gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleToggleActive(pkg, !pkg.ativo)}
-                            title={pkg.ativo ? "Desativar pacote" : "Ativar pacote"}
-                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
-                          >
-                            <Switch checked={pkg.ativo} className="scale-75 cursor-pointer pointer-events-none" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleOpenEdit(pkg)}
-                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDuplicate(pkg.id)}
-                            title="Duplicar pacote"
-                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDelete(pkg.id)}
-                            className="text-red-500 hover:text-red-650 hover:bg-red-50 h-8 w-8"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex gap-1.5">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleToggleActive(pkg, !pkg.ativo)}
+                              title={pkg.ativo ? "Desativar pacote" : "Ativar pacote"}
+                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                            >
+                              <Switch checked={pkg.ativo} className="scale-75 cursor-pointer pointer-events-none" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleOpenEdit(pkg)}
+                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDuplicate(pkg.id)}
+                              title="Duplicar pacote"
+                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(pkg.id)}
+                              className="text-red-500 hover:text-red-650 hover:bg-red-50 h-8 w-8"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
-                      </div>
+                      </Card>
+                    ))}
+                  </div>
+                );
+
+                if (displayedPackages.length === 0) {
+                  return (
+                    <Card className="bg-white border-slate-200 p-8 text-center max-w-md mx-auto shadow-sm">
+                      <CardContent className="space-y-4">
+                        <Layers className="h-12 w-12 text-slate-400 mx-auto" />
+                        <h3 className="text-base font-bold text-slate-800">Nenhum Pacote Cadastrado</h3>
+                        <p className="text-xs text-slate-500">
+                          Clique em "Novo Pacote" no topo para criar seus templates comerciais fechados.
+                        </p>
+                      </CardContent>
                     </Card>
-                  ))}
-                </div>
-              )
+                  );
+                }
+
+                return (
+                  <div className="space-y-8">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{titleText}</span>
+                        <Badge className="bg-slate-100 text-slate-600 text-[10px] font-bold border-none">{displayedPackages.length}</Badge>
+                      </div>
+                      {renderPackageGrid(displayedPackages)}
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </>
         )}
 
         {/* SECTION 2: VEXO PRODUCTS CRUD */}
-        {activeSection === "vexo-products" && (
+        {(activeSection === "vexo-products" || activeSection === "gd-products") && (
           <>
             {/* Top Header Controls */}
             <div className="flex justify-between items-center mb-8 relative z-10 border-b border-slate-200 pb-4">
               <div className="space-y-0.5">
-                <h2 className="text-base font-bold text-slate-800">Catálogo de Módulos Vexo OS</h2>
-                <p className="text-xs text-slate-500">Configure as opções de módulos e funcionalidades Vexo com valores e recorrências editáveis.</p>
+                <h2 className="text-base font-bold text-slate-800">
+                  {moduleOrigin === "gd" ? "Catálogo de Módulos Geração Digital (avulsos)" : "Catálogo de Módulos Vexo OS"}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {moduleOrigin === "gd"
+                    ? "Serviços GD vendidos avulsos, fora de pacote — nome, descrição, valor mensal e recorrência."
+                    : "Configure as opções de módulos e funcionalidades Vexo com valores e recorrências editáveis."}
+                </p>
               </div>
               {!isVexoEditing && (
-                <Button onClick={handleOpenVexoCreate} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 font-extrabold text-white text-xs">
+                <Button onClick={handleOpenVexoCreate} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 font-extrabold text-white text-xs">
                   <Plus className="h-4 w-4 mr-1.5" />
                   Novo Módulo
                 </Button>
@@ -924,7 +1079,7 @@ export default function GeracaoDigitalPackages() {
                 <CardHeader>
                   <CardTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
                     <Layers className="h-4.5 w-4.5 text-purple-650" />
-                    {selectedVexoProduct ? "Editar Módulo Vexo OS" : "Novo Módulo Vexo OS"}
+                    {selectedVexoProduct ? (moduleOrigin === "gd" ? "Editar Módulo GD" : "Editar Módulo Vexo OS") : (moduleOrigin === "gd" ? "Novo Módulo GD" : "Novo Módulo Vexo OS")}
                   </CardTitle>
                   <CardDescription className="text-xs text-slate-500">Preencha os campos para salvar as configurações do módulo Vexo.</CardDescription>
                 </CardHeader>
@@ -985,12 +1140,39 @@ export default function GeracaoDigitalPackages() {
                     </div>
                   </div>
 
+                  <div className="grid gap-4 md:grid-cols-2 items-center border-t border-slate-100 pt-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 shadow-sm h-14">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px] text-slate-700 font-bold">Ativar VP (Permuta)</Label>
+                        <span className="text-[8px] text-slate-500 block">Este módulo aceita permuta</span>
+                      </div>
+                      <Switch checked={vexoVpActive} onCheckedChange={setVexoVpActive} />
+                    </div>
+
+                    {vexoVpActive ? (
+                      <div className="space-y-1.5 animate-fade-in">
+                        <Label className="text-xs text-slate-550 font-medium">Valor em VP (R$)</Label>
+                        <Input
+                          type="number"
+                          value={vexoVpValue || ""}
+                          onChange={(e) => setVexoVpValue(Number(e.target.value) || 0)}
+                          placeholder="Valor para permuta"
+                          className="bg-white border-slate-200 text-xs text-slate-850 font-mono h-10"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        Permuta desativada para este módulo.
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex justify-end gap-2.5 border-t border-slate-200 pt-4 mt-2">
                     <Button variant="outline" size="sm" onClick={() => setIsVexoEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
                       Cancelar
                     </Button>
-                    <Button onClick={handleSaveVexoProduct} size="sm" className="bg-gradient-to-r from-purple-600 to-pink-500 text-white font-extrabold">
-                      Salvar Módulo Vexo
+                    <Button onClick={handleSaveVexoProduct} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold">
+                      {moduleOrigin === "gd" ? "Salvar Módulo GD" : "Salvar Módulo Vexo"}
                     </Button>
                   </div>
 
@@ -1002,7 +1184,18 @@ export default function GeracaoDigitalPackages() {
                 <div className="flex h-64 items-center justify-center">
                   <span className="animate-spin h-8 w-8 border-4 border-purple-600 border-t-transparent rounded-full" />
                 </div>
-              ) : vexoProducts.length === 0 ? (
+              ) : (() => {
+                const moduleList: VexoProduct[] = moduleOrigin === "gd"
+                  ? products.map((prod) => ({
+                      id: prod.id,
+                      nome: prod.nome,
+                      descricao: prod.descricao || "",
+                      valor: Number(prod.valor_padrao || 0),
+                      recorrencia: prod.recorrencia,
+                      ativo: prod.ativo !== false
+                    }))
+                  : vexoProducts;
+                return moduleList.length === 0 ? (
                 <Card className="bg-white border-slate-200 text-center max-w-lg mx-auto py-12 relative z-10 animate-fade-in shadow-sm">
                   <CardContent className="space-y-4">
                     <Layers className="h-12 w-12 text-slate-400 mx-auto" />
@@ -1014,7 +1207,7 @@ export default function GeracaoDigitalPackages() {
                 </Card>
               ) : (
                 <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 relative z-10 animate-fade-in">
-                  {vexoProducts.map((prod) => (
+                  {moduleList.map((prod) => (
                     <Card
                       key={prod.id}
                       className={cn(
@@ -1074,7 +1267,8 @@ export default function GeracaoDigitalPackages() {
                     </Card>
                   ))}
                 </div>
-              )
+              );
+              })()
             )}
           </>
         )}

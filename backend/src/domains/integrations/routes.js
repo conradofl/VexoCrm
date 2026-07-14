@@ -16,6 +16,7 @@
 
 import { createLeadMessaging } from "../shared/leadMessaging.js";
 import { whatsappSessionManager } from "../../whatsapp.js";
+import { propagateTenantPermissions } from "../../access/claims.js";
 
 // Trava de backend contra o martelo em /instance/fetchInstances da Evolution (incidente
 // 15/06). Cache curto + dedupe de chamadas concorrentes: N requisições na janela viram
@@ -446,6 +447,14 @@ export function registerIntegrationsRoutes(app, deps) {
           req.authAccess,
           existing
         );
+
+        if (Array.isArray(req.body?.allowedTabs)) {
+          try {
+            await propagateTenantPermissions(tenantId, req.body.allowedTabs);
+          } catch (propError) {
+            console.error("Failed to propagate tenant permissions to users:", propError);
+          }
+        }
 
         res.json({ item: maskN8nSettings(savedSettings) });
       } catch (error) {

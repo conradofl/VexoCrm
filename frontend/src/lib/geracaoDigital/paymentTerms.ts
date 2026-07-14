@@ -133,16 +133,21 @@ export interface ProposalPaymentTerms {
 
 // Concessão registrada na mesa de negociação
 export interface DescontoConcedido {
-  tipo: "isencao_setup" | "desconto_avista" | "parcelamento";
+  tipo: "isencao_setup" | "desconto_avista" | "parcelamento" | "condicao_pagamento" | "desconto_mensalidade" | "carencia";
   valor_original: number;
   valor_final: number;
   motivo?: string;
+  // Trilha da concessão (entrada/setup ou mensalidade). Ausente em registros antigos = setup.
+  trilha?: "setup" | "mensalidade";
 }
 
 export const DESCONTO_LABELS: Record<DescontoConcedido["tipo"], string> = {
   isencao_setup: "Isenção de setup",
   desconto_avista: "Desconto à vista",
   parcelamento: "Parcelamento da entrada",
+  condicao_pagamento: "Condição de pagamento aplicada",
+  desconto_mensalidade: "Desconto na mensalidade",
+  carencia: "Carência do primeiro vencimento",
 };
 
 export const SETUP_LABEL = "Setup / Implantação Vexo OS";

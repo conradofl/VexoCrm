@@ -29,6 +29,7 @@ import {
   SETUP_LABEL,
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
+import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -47,6 +48,7 @@ interface Proposal {
   prospect_name: string;
   itens: ProposalItem[];
   valor_total: number;
+  valor_vp?: number | null;
   valor_setup: number;
   valor_recorrente: number;
   condicoes: string;
@@ -65,6 +67,8 @@ interface Proposal {
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
   descontos_concedidos?: DescontoConcedido[] | null;
+  meio_pagamento?: { setup?: string; mensalidade?: string } | null;
+  carencia_dias?: number | null;
   assinatura_metodo?: string | null;
 }
 
@@ -256,15 +260,24 @@ export default function GeracaoDigitalPublicProposal() {
   const validadeExpirada = validadeDate ? validadeDate.getTime() < Date.now() : false;
   const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
 
-  const setupBaseVal = Number(proposal.valor_setup || 0) + setupVexoValue;
-  const discountConcession = descontosConcedidos.find(d => d.tipo === "desconto_avista");
-  const isentoConcession = descontosConcedidos.find(d => d.tipo === "isencao_setup");
-  const setupIsento = (setupBaseVal === 0) || (isentoConcession && setupBaseVal === setupVexoValue);
+  const calc = calculateProposalValues(proposal, []);
 
-  let setupFinalVal = setupIsento ? 0 : setupBaseVal;
-  if (discountConcession && !setupIsento) {
-    setupFinalVal = Number(discountConcession.valor_final);
-  }
+  const setupBaseVal = calc.setupOriginal;
+  const setupFinalVal = calc.setupFinal;
+  const setupIsento = calc.setupFinal === 0;
+
+  const mensalBaseVal = calc.mensalidadeOriginal;
+  const mensalFinalVal = calc.mensalidadeFinal;
+
+  const MEIO_LABELS_PUB: Record<string, string> = { cartao: "Cartão", boleto: "Boleto", pix: "PIX" };
+  const meioSetupPub = proposal.meio_pagamento?.setup ? MEIO_LABELS_PUB[proposal.meio_pagamento.setup] : null;
+  const meioMensalPub = proposal.meio_pagamento?.mensalidade ? MEIO_LABELS_PUB[proposal.meio_pagamento.mensalidade] : null;
+
+  // Carência do 1º vencimento: informativo, não altera valores.
+  const carenciaDias = Number(proposal.carencia_dias || 0);
+  const primeiraMensalidadeDate = carenciaDias > 0
+    ? new Date(Date.now() + carenciaDias * 24 * 60 * 60 * 1000)
+    : null;
 
   return (
     <div className="dark min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/35 pb-16">
@@ -275,9 +288,9 @@ export default function GeracaoDigitalPublicProposal() {
         <div className="absolute bottom-0 left-0 h-[400px] w-[400px] rounded-full bg-pink-600/5 blur-[100px]" />
       </div>
 
-      <header className="relative z-10 max-w-5xl mx-auto px-6 py-8 flex justify-between items-center border-b border-slate-900">
+      <header className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 py-8 flex justify-between items-center border-b border-slate-900">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-white font-black text-lg">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 flex items-center justify-center text-white font-black text-lg">
             GD
           </div>
           <div>
@@ -296,15 +309,15 @@ export default function GeracaoDigitalPublicProposal() {
         </Badge>
       </header>
 
-      <main className="relative z-10 max-w-5xl mx-auto px-6 mt-12 grid gap-8 md:grid-cols-3">
+      <main className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 mt-12 grid gap-10 lg:grid-cols-5">
 
         {/* Left/Middle area: content of proposal */}
-        <div className="md:col-span-2 space-y-8">
+        <div className="lg:col-span-3 space-y-8">
 
           <div className="space-y-2">
             <span className="text-[10px] text-purple-400 font-mono font-bold uppercase tracking-wider">Apresentado para</span>
-            <h1 className="text-3xl md:text-4xl font-black text-white">{proposal.prospect_name}</h1>
-            <p className="text-xs text-slate-400 font-mono">Proposta comercial emitida em {new Date(proposal.created_at).toLocaleDateString("pt-BR")}</p>
+            <h1 className="text-4xl md:text-5xl font-black text-white">{proposal.prospect_name}</h1>
+            <p className="text-sm text-slate-400 font-mono">Proposta comercial emitida em {new Date(proposal.created_at).toLocaleDateString("pt-BR")}</p>
           </div>
 
           {/* Validade da proposta (gatilho de urgência) */}
@@ -338,17 +351,30 @@ export default function GeracaoDigitalPublicProposal() {
             </Card>
           )}
 
+          {/* Carência do primeiro vencimento */}
+          {primeiraMensalidadeDate && proposal.status !== "aceita" && (
+            <Card className="p-5 border bg-emerald-950/25 border-emerald-900/50 flex items-center gap-3">
+              <Clock className="h-5 w-5 text-emerald-400 shrink-0" />
+              <div>
+                <span className="text-base font-black text-emerald-300 block">
+                  Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
+                </span>
+                <span className="text-xs text-slate-400">A entrada é paga na contratação; a mensalidade só começa após a carência.</span>
+              </div>
+            </Card>
+          )}
+
           {/* List of items */}
           <Card className="bg-slate-900/40 border-slate-900 overflow-hidden shadow-2xl">
             <CardHeader className="border-b border-slate-900 bg-slate-900/60">
-              <CardTitle className="text-base font-bold text-white">Escopo Geral de Serviços</CardTitle>
+              <CardTitle className="text-xl font-bold text-white">Escopo Geral de Serviços</CardTitle>
             </CardHeader>
             <CardContent className="p-0 divide-y divide-slate-900">
               {items.map((item, idx) => (
-                <div key={idx} className="p-5 flex items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-bold text-white leading-tight">{item.descricao}</h4>
-                    <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-800">
+                <div key={idx} className="p-6 flex items-center justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <h4 className="text-base font-bold text-white leading-tight">{item.descricao}</h4>
+                    <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-800">
                       {item.categoria === "vexo" ? "Vexo OS" : "Geração Digital"}
                     </span>
                   </div>
@@ -358,7 +384,7 @@ export default function GeracaoDigitalPublicProposal() {
                         De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
                       </span>
                     )}
-                    <span className="text-sm font-black text-white font-mono">
+                    <span className="text-lg font-black text-white font-mono">
                       R$ {Number(item.valor || 0).toFixed(2)}
                       {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
                         <span className="text-[10px] text-emerald-400 font-bold ml-1">
@@ -389,7 +415,7 @@ export default function GeracaoDigitalPublicProposal() {
                   R$ {setupVexoValue.toLocaleString("pt-BR")}
                 </span>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line font-light">
+              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
                 {SETUP_JUSTIFICATION}
               </p>
             </Card>
@@ -475,29 +501,29 @@ export default function GeracaoDigitalPublicProposal() {
           {/* Contract details and conditions */}
           <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
             <h3 className="font-bold text-white text-base">Condições de Implantação e Contrato</h3>
-            <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line font-light">
+            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
               {proposal.condicoes}
             </p>
           </Card>
         </div>
 
         {/* Right area: investment, payment link and sign pad */}
-        <div className="space-y-6">
+        <div className="lg:col-span-2 space-y-6">
 
           {/* Investment Totals Card */}
-          <Card className="bg-slate-900/60 border-slate-900 p-6 space-y-5 shadow-2xl">
-            <h3 className="font-bold text-white text-base">Valores Propostos</h3>
+          <Card className="bg-slate-900/60 border-slate-900 p-8 space-y-6 shadow-2xl">
+            <h3 className="font-bold text-white text-xl">Valores Propostos</h3>
 
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
-                <span className="text-slate-400">Investimento único (Setup):</span>
-                <span className="text-purple-300 font-extrabold text-sm">
+            <div className="space-y-5">
+              <div className="pb-4 border-b border-slate-800 space-y-1">
+                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Investimento único (Setup)</span>
+                <span className="text-purple-300 font-black text-3xl block">
                   {setupIsento ? (
-                    <span className="text-emerald-400 font-bold">Isento</span>
+                    <span className="text-emerald-400">Isento</span>
                   ) : (
                     <>
                       {setupFinalVal < setupBaseVal && (
-                        <span className="text-slate-500 line-through mr-2 font-normal text-xs">
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg">
                           R$ {setupBaseVal.toLocaleString("pt-BR")}
                         </span>
                       )}
@@ -506,14 +532,43 @@ export default function GeracaoDigitalPublicProposal() {
                   )}
                 </span>
               </div>
-              <div className="flex justify-between items-center text-xs font-mono pb-2 border-b border-slate-900">
-                <span className="text-slate-400">Mensalidade:</span>
-                <span className="text-pink-400 font-extrabold text-sm">
-                  R$ {proposal.valor_recorrente?.toLocaleString("pt-BR") || "0,00"}/mês
+              <div className="pb-4 border-b border-slate-800 space-y-1">
+                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Mensalidade</span>
+                <span className="text-pink-400 font-black text-3xl block">
+                  {mensalFinalVal < mensalBaseVal && (
+                    <span className="text-slate-500 line-through mr-2 font-bold text-lg">
+                      R$ {mensalBaseVal.toLocaleString("pt-BR")}
+                    </span>
+                  )}
+                  R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400">/mês</span>
                 </span>
+                {primeiraMensalidadeDate && (
+                  <span className="text-xs font-bold text-amber-300 block pt-1">
+                    Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
+                  </span>
+                )}
               </div>
+              {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
+                <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in">
+                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Permuta Comercial (VP)</span>
+                  <span className="text-purple-400 font-black text-3xl block">
+                    R$ {Number(proposal.valor_vp).toLocaleString("pt-BR")}
+                  </span>
+                  <span className="text-[10px] text-purple-300 block font-light leading-snug">
+                    Acordo realizado via permuta comercial física ou de serviços.
+                  </span>
+                </div>
+              )}
+              {(meioSetupPub || meioMensalPub) && (
+                <div className="flex justify-between items-center text-sm font-mono pb-2 border-b border-slate-900">
+                  <span className="text-slate-400">Meio de pagamento:</span>
+                  <span className="text-white font-bold">
+                    {[meioSetupPub && `Setup: ${meioSetupPub}`, meioMensalPub && `Mensalidade: ${meioMensalPub}`].filter(Boolean).join(" · ")}
+                  </span>
+                </div>
+              )}
               {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
-                <div className="flex justify-between items-center text-xs font-mono">
+                <div className="flex justify-between items-center text-sm font-mono">
                   <span className="text-slate-400">Período do Plano:</span>
                   <span className="text-white font-bold">{PERIODO_LABELS[proposal.periodo_plano]}</span>
                 </div>
@@ -524,7 +579,7 @@ export default function GeracaoDigitalPublicProposal() {
             {proposal.payment_link && (
               <Button
                 asChild
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-6 rounded-xl text-xs shadow-lg shadow-purple-600/15 flex items-center justify-center gap-1.5"
+                className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-6 rounded-xl text-xs shadow-lg shadow-indigo-600/15 flex items-center justify-center gap-1.5"
               >
                 <a href={proposal.payment_link} target="_blank" rel="noopener noreferrer">
                   Pagar agora
@@ -597,7 +652,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onClick={() => setSignMethod('desenho')}
                       className={cn(
                         "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
-                        signMethod === 'desenho' ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white" : "text-slate-400 hover:text-white"
+                        signMethod === 'desenho' ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white" : "text-slate-400 hover:text-white"
                       )}
                     >
                       Desenhar Assinatura
@@ -607,7 +662,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onClick={() => setSignMethod('digitado')}
                       className={cn(
                         "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
-                        signMethod === 'digitado' ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white" : "text-slate-400 hover:text-white"
+                        signMethod === 'digitado' ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white" : "text-slate-400 hover:text-white"
                       )}
                     >
                       Digitar Nome
@@ -635,6 +690,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onTouchStart={startDrawing}
                       onTouchMove={draw}
                       onTouchEnd={stopDrawing}
+                      style={{ touchAction: "none" }}
                       className="w-full bg-slate-950 border border-slate-900 rounded-xl cursor-crosshair h-[120px]"
                     />
                   </div>
@@ -655,7 +711,7 @@ export default function GeracaoDigitalPublicProposal() {
 
                 <Button
                   onClick={handleSignProposal}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
+                  className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
                 >
                   <PenTool className="h-4 w-4 mr-1.5" />
                   Registrar Assinatura de Aceite
