@@ -762,6 +762,13 @@ export default function GeracaoDigitalPublicProposal() {
                   )}
                   R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
                 </span>
+                {Number(proposal.valor_vp || 0) > 0 && (
+                  <div className="mt-2 py-1 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md inline-block">
+                    <span className="text-emerald-400 text-sm font-medium">
+                      Sendo R$ {Number(proposal.valor_vp || 0).toLocaleString("pt-BR")} pagos via VP
+                    </span>
+                  </div>
+                )}
                 {primeiraMensalidadeDate && (
                   <span className="text-xs font-bold text-amber-300 block pt-1 transition-colors duration-500">
                     Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
