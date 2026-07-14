@@ -3,10 +3,10 @@ import { monthsForPeriod } from "./packagePricing";
 export interface ProposalCalculatedValues {
   setupOriginal: number;
   setupFinal: number;
-  
+
   mensalidadeOriginal: number;
   mensalidadeFinal: number;
-  
+
   mesesPeriodo: number;
   compromissoOriginal: number;
   compromissoFinal: number;
@@ -56,7 +56,7 @@ export function calculateProposalValues(
   // Setup final after discounts/concessions
   let setupFinal = setupOriginal;
   const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
-  
+
   // Find setup trilha concessions (excluding parcelamento)
   const setupTrilhaConcessions = descontosConcedidos.filter(d => d.trilha === "setup" && d.tipo !== "parcelamento");
   if (setupTrilhaConcessions.length > 0) {

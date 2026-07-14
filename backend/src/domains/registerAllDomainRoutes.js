@@ -3,6 +3,8 @@ import { registerFollowupRoutes } from "../followup/routes.js";
 import { registerJourneysRoutes } from "../followup/journeysRoutes.js";
 import { registerFollowupQueueRoutes } from "../followup/queueRoutes.js";
 import { registerGeracaoDigitalRoutes } from "./geracaoDigitalRoutes.js";
+import { registerContractRoutes } from "./geracaoDigitalContracts/contractRoutes.js";
+import { registerContractWebhookRoutes } from "./geracaoDigitalContracts/webhookRoutes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { registerEventosRoutes } from "./eventos/routes.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -47,6 +49,8 @@ export function registerAllDomainRoutes(app) {
   registerFollowupRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
   registerJourneysRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
   registerGeracaoDigitalRoutes(app, pgDatabasePool, requireFirebaseAuth, requireInternalPageAccess);
+  registerContractRoutes(app);
+  registerContractWebhookRoutes(app);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);
