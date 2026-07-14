@@ -51,7 +51,7 @@ export function ContractsList() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {contracts.map((contract) => {
+      {Array.isArray(contracts) ? contracts.map((contract) => {
         const statusConfig = getStatusConfig(contract.status);
         const StatusIcon = statusConfig.icon;
 
@@ -109,7 +109,7 @@ export function ContractsList() {
             </CardContent>
           </Card>
         );
-      })}
+      }) : null}
     </div>
   );
 }
