@@ -19,8 +19,9 @@ export const PERIOD_LABELS: Record<string, string> = {
 
 // null = valor único (sem recorrência)
 export function monthsForPeriod(periodo?: string | null): number | null {
-  if (periodo === "unico") return null;
-  return PERIOD_MONTHS[periodo || "mensal"] ?? 1;
+  const key = String(periodo || "mensal").trim().toLowerCase();
+  if (key === "unico") return null;
+  return PERIOD_MONTHS[key] ?? 1;
 }
 
 export interface PackagePricing {

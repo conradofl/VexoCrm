@@ -36,7 +36,14 @@ export function calculateProposalValues(
   // Setup original: base value is the optional Vexo Setup
   let setupOriginal = cobrarSetup ? valorSetupVexo : 0;
 
-  const items = Array.isArray(proposal.itens) ? proposal.itens : [];
+  const itemsRaw = Array.isArray(proposal.itens) ? proposal.itens : [];
+
+  // Módulo Vexo fantasma legado ("Inteligência de Atendimento", R$ 980, sem
+  // product_id): não pertence a nenhum pacote e foi injetado por fallback antigo.
+  // Removido da soma e da exibição.
+  const isOrfaoLegado = (item: any) =>
+    !item.product_id && String(item.descricao || "").includes("Inteligência de Atendimento");
+  const items = itemsRaw.filter(item => !isOrfaoLegado(item));
 
   // Anti-bitributação: product_ids que JÁ compõem o pacote selecionado.
   // Itens do pacote entram com valor 0 e sem prefixo de avulso ("GD:"/"Vexo OS:")
@@ -136,9 +143,15 @@ export function calculateProposalValues(
     mensalidadeFinal = Number(mensalidadeTrilhaConcessions[mensalidadeTrilhaConcessions.length - 1].valor_final || 0);
   }
 
-  // Period Plano months:
-  const planoPeriodoKey = proposal.periodo_plano || gdPkg?.periodo || vexoPkg?.periodo || "mensal";
-  const mesesPeriodo = monthsForPeriod(planoPeriodoKey) || 1;
+  // Meses do contrato (Compromisso do Período): robusto mesmo sem availablePackages.
+  // Ordem: periodo_plano da proposta → período do pacote (catálogo) →
+  // metadados do item "Pacote:" salvo na proposta → mensal.
+  const pkgItem = items.find(i =>
+    i.descricao?.startsWith("Pacote:") || i.descricao?.startsWith("Pacote Vexo:")
+  );
+  const mesesFromItem = pkgItem && Number(pkgItem.meses) > 0 ? Number(pkgItem.meses) : null;
+  const planoPeriodoKey = proposal.periodo_plano || gdPkg?.periodo || vexoPkg?.periodo || pkgItem?.periodo || "mensal";
+  const mesesPeriodo = mesesFromItem || monthsForPeriod(planoPeriodoKey) || 1;
 
   const compromissoOriginal = mensalidadeOriginal * mesesPeriodo;
   const compromissoFinal = mensalidadeFinal * mesesPeriodo;

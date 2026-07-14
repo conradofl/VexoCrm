@@ -340,7 +340,10 @@ export default function GeracaoDigitalPublicProposal() {
     );
   }
 
-  const items = Array.isArray(proposal.itens) ? proposal.itens : [];
+  // Remove o módulo Vexo fantasma legado (R$ 980, sem product_id) do escopo exibido.
+  const items = (Array.isArray(proposal.itens) ? proposal.itens : []).filter(
+    (it) => !(!it.product_id && String(it.descricao || "").includes("Inteligência de Atendimento"))
+  );
   const packages = Array.isArray(proposal.packages) ? proposal.packages : [];
   const setupVexoValue = proposal.cobrar_setup ? Number(proposal.valor_setup_vexo || 0) : 0;
   const grandTotal = Number(proposal.valor_setup || 0) + Number(proposal.valor_recorrente || 0) + setupVexoValue;

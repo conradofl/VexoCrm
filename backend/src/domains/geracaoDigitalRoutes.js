@@ -1397,16 +1397,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
               recorrencia: vm.recorrencia || "mensal"
             });
           });
-        } else {
-          // Fallback to legacy default if empty
-          finalItems.push({
-            product_id: null,
-            descricao: "Módulo Vexo OS - Inteligência de Atendimento",
-            categoria: "vexo",
-            valor: 980.00,
-            recorrencia: "mensal"
-          });
         }
+        // Sem fallback: não injetar módulo Vexo fantasma quando a seleção está
+        // vazia (gerava item órfão "Inteligência de Atendimento" R$ 980).
       }
 
       // Setup Vexo opcional e condições de pagamento (campos opcionais)
