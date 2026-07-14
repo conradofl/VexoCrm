@@ -8,9 +8,18 @@ import { Button } from "@/components/ui/button";
 import { FileText, ArrowLeft, CheckCircle, Share2, ExternalLink } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 
-export default function GeracaoDigitalNegotiationPage() {
-  const { id } = useParams<{ id: string }>();
+interface NegotiationPageProps {
+  // Quando renderizada inline (overlay na proposta pública), recebe o id por
+  // prop e um onExit em vez de depender da rota/window.close.
+  proposalId?: string;
+  onExit?: () => void;
+}
+
+export default function GeracaoDigitalNegotiationPage({ proposalId, onExit }: NegotiationPageProps = {}) {
+  const params = useParams<{ id: string }>();
+  const id = proposalId ?? params.id;
   const navigate = useNavigate();
+  const handleExit = onExit ?? (() => window.close());
   const { toast } = useToast();
   const { isAuthenticated, getIdToken, clientId } = useAuth();
   
@@ -23,7 +32,7 @@ export default function GeracaoDigitalNegotiationPage() {
   const [pendingNegotiationUpdate, setPendingNegotiationUpdate] = useState<NegotiationFinalizeResult | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated || !clientId) return;
+    if (!isAuthenticated) return;
     
     const loadData = async () => {
       try {
@@ -34,7 +43,7 @@ export default function GeracaoDigitalNegotiationPage() {
         if (token) headers["Authorization"] = `Bearer ${token}`;
 
         // 1. Load Proposal
-        const propRes = await fetchApi(`/api/gd/proposals/${id}?client_id=${clientId}`, { headers });
+        const propRes = await fetchApi(`/api/gd/proposals/${id}?client_id=${clientId || ""}`, { headers });
         if (!propRes.ok) {
           throw new Error(await readApiErrorMessage(propRes, "Erro ao carregar proposta"));
         }
@@ -43,10 +52,10 @@ export default function GeracaoDigitalNegotiationPage() {
         setProposal(proposalObj);
 
         // 2. Load Packages
-        const pkgRes = await fetchApi(`/api/gd/packages?client_id=${clientId}`, { headers });
+        const pkgRes = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers });
         if (pkgRes.ok) {
-          const pkgData = await readApiJson<any[]>(pkgRes, "packages");
-          setAvailablePackages(pkgData);
+          const pkgData = await readApiJson<any>(pkgRes, "packages");
+          setAvailablePackages(Array.isArray(pkgData) ? pkgData : (pkgData?.data || []));
         }
       } catch (err: any) {
         console.error(err);
@@ -156,20 +165,35 @@ export default function GeracaoDigitalNegotiationPage() {
     }
   };
 
-  if (isLoading || !proposal) {
+  if (error) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div>Carregando Mesa de Negociação...</div>
+      <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-950 p-6">
+        <div className="p-8 max-w-lg w-full text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl space-y-4">
+          <h2 className="text-lg font-bold text-red-600">Erro ao abrir a Mesa</h2>
+          <p className="text-sm text-slate-600 dark:text-slate-300">{error}</p>
+          <Button onClick={handleExit} variant="outline" className="w-full dark:text-slate-200">
+            Fechar
+          </Button>
+        </div>
       </div>
     );
   }
 
-  if (error || !proposal) {
+  if (isLoading || !proposal) {
+    return (
+      <div className="flex h-screen items-center justify-center gap-3 bg-slate-50 dark:bg-slate-950">
+        <span className="animate-spin h-6 w-6 border-4 border-purple-600 border-t-transparent rounded-full" />
+        <div className="text-sm font-bold text-slate-700 dark:text-slate-200">Carregando Mesa de Negociação...</div>
+      </div>
+    );
+  }
+
+  if (false) {
     return (
       <div className="p-8 max-w-lg mx-auto text-center mt-12 bg-white dark:bg-slate-900 border rounded-xl">
         <h2 className="text-lg font-bold text-red-600 mb-2">Erro</h2>
         <p className="text-slate-650 dark:text-slate-350 text-sm mb-4">{error || "Proposta não encontrada."}</p>
-        <Button onClick={() => window.close()} variant="outline" className="w-full">
+        <Button onClick={handleExit} variant="outline" className="w-full">
           Fechar Aba
         </Button>
       </div>
@@ -211,9 +235,9 @@ export default function GeracaoDigitalNegotiationPage() {
             <Button
               variant="ghost"
               className="w-full text-slate-550 dark:text-slate-400"
-              onClick={() => window.close()}
+              onClick={handleExit}
             >
-              Fechar Negociação (Aba)
+              Fechar Negociação
             </Button>
           </div>
         </div>
@@ -237,7 +261,7 @@ export default function GeracaoDigitalNegotiationPage() {
       periodoPlano={proposal.periodo_plano || "mensal"}
       validadeAte={proposal.validade_ate ? proposal.validade_ate.split("T")[0] : ""}
       offeredTerms={offeredTerms}
-      onClose={() => window.close()}
+      onClose={handleExit}
       onFinalize={handleFinalize}
       onNegotiationChange={(res) => setPendingNegotiationUpdate(res)}
       packageId={proposal.package_id}

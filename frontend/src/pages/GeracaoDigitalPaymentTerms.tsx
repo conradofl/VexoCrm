@@ -380,10 +380,10 @@ export default function GeracaoDigitalPaymentTerms() {
                         <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono">{term.ativo ? "ativa" : "inativa"}</span>
                       </div>
                       <div className="flex gap-0.5">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(term)} className="h-7 w-7 text-slate-500 hover:text-indigo-600">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(term)} className="h-7 w-7 text-slate-500 hover:text-indigo-600 dark:text-slate-400">
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDuplicate(term)} className="h-7 w-7 text-slate-500 hover:text-purple-600">
+                        <Button variant="ghost" size="icon" onClick={() => handleDuplicate(term)} className="h-7 w-7 text-slate-500 hover:text-purple-600 dark:text-slate-400">
                           <Copy className="h-3.5 w-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" onClick={() => handleDelete(term)} className="h-7 w-7 text-red-500 hover:text-red-600">

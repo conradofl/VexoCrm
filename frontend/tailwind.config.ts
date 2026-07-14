@@ -14,6 +14,42 @@ export default {
     },
     extend: {
       colors: {
+        /* ── Tons intermediários usados pelo módulo GD ──
+           Interpolados entre os tons padrão do Tailwind; sem eles as
+           classes (ex: text-slate-850) eram no-op e o texto ficava sem
+           cor/contraste, principalmente no dark mode. */
+        slate: {
+          150: "#eaeff5",
+          350: "#a8b6c8",
+          450: "#7c8ba1",
+          505: "#657084",
+          550: "#57657b",
+          650: "#3d4b60",
+          655: "#3b4a5f",
+          660: "#3a485d",
+          750: "#293548",
+          850: "#172033",
+          855: "#161f31",
+        },
+        purple: {
+          150: "#ebe0fd",
+          550: "#8b3dfc",
+          650: "#7e22e8",
+          750: "#6b21b6",
+        },
+        pink: {
+          650: "#d61f69",
+          750: "#a41752",
+        },
+        indigo: {
+          650: "#5257e0",
+          750: "#4038a8",
+        },
+        red: {
+          550: "#e63535",
+          650: "#d92626",
+        },
+
         /* ── Vexo Design System ── */
         "deep-navy": "#020617",
         "slate-dark": "#0B0E14",

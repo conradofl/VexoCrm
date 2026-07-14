@@ -666,7 +666,7 @@ export default function GeracaoDigitalPackages() {
                 <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
                   {activeSection === "vexo-packages" ? "Templates de Pacotes Vexo OS" : "Templates de Pacotes Geração Digital"}
                 </h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {activeSection === "vexo-packages"
                     ? "Estes pacotes estarão disponíveis para simulação Vexo OS em propostas comerciais futuras."
                     : "Estes pacotes estarão disponíveis para simulação em qualquer apresentação comercial futura."}
@@ -853,7 +853,7 @@ export default function GeracaoDigitalPackages() {
                                 : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                             )}
                           >
-                            <span className="text-xs font-semibold text-slate-800 leading-tight">{p.nome}</span>
+                            <span className="text-xs font-semibold text-slate-800 leading-tight dark:text-white">{p.nome}</span>
                             {isIncluded && (
                               <div className="h-3.5 w-3.5 rounded-full bg-purple-600 flex items-center justify-center shrink-0">
                                 <CheckCircle className="h-2.5 w-2.5 text-white" />
@@ -866,7 +866,7 @@ export default function GeracaoDigitalPackages() {
                   </div>
 
                   <div className="flex justify-end gap-2.5 border-t border-slate-200 dark:border-white/10 pt-4 mt-2">
-                    <Button variant="outline" size="sm" onClick={() => setIsEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
+                    <Button variant="outline" size="sm" onClick={() => setIsEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50 dark:text-slate-200">
                       Cancelar
                     </Button>
                     <Button onClick={handleSave} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold">
@@ -886,8 +886,8 @@ export default function GeracaoDigitalPackages() {
                 <Card className="bg-red-50 border-red-200 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
                   <CardContent className="space-y-4">
                     <Info className="h-12 w-12 text-red-500 mx-auto" />
-                    <h3 className="text-lg font-bold text-slate-850">Falha na Conexão</h3>
-                    <p className="text-xs text-slate-650">
+                    <h3 className="text-lg font-bold text-slate-850 dark:text-white">Falha na Conexão</h3>
+                    <p className="text-xs text-slate-650 dark:text-slate-200">
                       {error}
                     </p>
                     <Button onClick={loadPackages} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-6 py-2 rounded-xl">
@@ -937,7 +937,7 @@ export default function GeracaoDigitalPackages() {
                             </span>
                             <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-1">
                               {pkg.produtos_incluidos?.map((p, idx) => (
-                                <Badge key={idx} variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[9px] font-normal font-sans py-0">
+                                <Badge key={idx} variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[9px] font-normal font-sans py-0 dark:text-slate-300">
                                   {p.nome}
                                 </Badge>
                               ))}
@@ -950,14 +950,14 @@ export default function GeracaoDigitalPackages() {
 
                         <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
                           <div className="space-y-0.5">
-                            <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor</span>
+                            <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block dark:text-slate-400">Valor</span>
                             {(() => {
                               const pr = computePackagePricing(pkg.valor, pkg.periodo, pkg.valor_tabela);
                               if (pr.meses === null) {
                                   return (
                                   <span className="text-base font-black text-pink-600 font-mono">
                                     {brlPkg(pr.totalPeriodo)}
-                                    <span className="text-[10px] text-slate-500 font-normal">/setup único</span>
+                                    <span className="text-[10px] text-slate-500 font-normal dark:text-slate-400">/setup único</span>
                                   </span>
                                 );
                               }
@@ -972,7 +972,7 @@ export default function GeracaoDigitalPackages() {
                                       <span className="text-[10px] text-emerald-600 font-bold ml-1">({pr.descontoPct}% off)</span>
                                     )}
                                   </span>
-                                  <span className="text-[10px] text-slate-500 font-mono block">
+                                  <span className="text-[10px] text-slate-500 font-mono block dark:text-slate-400">
                                     {pr.meses > 1 ? `total do período · ${pr.aprox ? "aprox. " : ""}${brlPkg(pr.mensalidade || 0)}/mês` : `${brlPkg(pr.mensalidade || 0)}/mês`}
                                   </span>
                                 </>
@@ -986,7 +986,7 @@ export default function GeracaoDigitalPackages() {
                               size="icon"
                               onClick={() => handleToggleActive(pkg, !pkg.ativo)}
                               title={pkg.ativo ? "Desativar pacote" : "Ativar pacote"}
-                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8 dark:text-slate-200"
                             >
                               <Switch checked={pkg.ativo} className="scale-75 cursor-pointer pointer-events-none" />
                             </Button>
@@ -994,7 +994,7 @@ export default function GeracaoDigitalPackages() {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleOpenEdit(pkg)}
-                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8 dark:text-slate-200"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </Button>
@@ -1003,7 +1003,7 @@ export default function GeracaoDigitalPackages() {
                               size="icon"
                               onClick={() => handleDuplicate(pkg.id)}
                               title="Duplicar pacote"
-                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8 dark:text-slate-200"
                             >
                               <Copy className="h-3.5 w-3.5" />
                             </Button>
@@ -1028,7 +1028,7 @@ export default function GeracaoDigitalPackages() {
                       <CardContent className="space-y-4">
                         <Layers className="h-12 w-12 text-slate-400 mx-auto" />
                         <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Nenhum Pacote Cadastrado</h3>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                           Clique em "Novo Pacote" no topo para criar seus templates comerciais fechados.
                         </p>
                       </CardContent>
@@ -1040,7 +1040,7 @@ export default function GeracaoDigitalPackages() {
                   <div className="space-y-8">
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 border-b border-slate-100 dark:border-white/5 pb-2">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{titleText}</span>
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider dark:text-slate-400">{titleText}</span>
                         <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-350 text-[10px] font-bold border-none">{displayedPackages.length}</Badge>
                       </div>
                       {renderPackageGrid(displayedPackages)}
@@ -1061,7 +1061,7 @@ export default function GeracaoDigitalPackages() {
                 <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">
                   {moduleOrigin === "gd" ? "Catálogo de Módulos Geração Digital (avulsos)" : "Catálogo de Módulos Vexo OS"}
                 </h2>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {moduleOrigin === "gd"
                     ? "Serviços GD vendidos avulsos, fora de pacote — nome, descrição, valor mensal e recorrência."
                     : "Configure as opções de módulos e funcionalidades Vexo com valores e recorrências editáveis."}
@@ -1170,7 +1170,7 @@ export default function GeracaoDigitalPackages() {
                   </div>
 
                   <div className="flex justify-end gap-2.5 border-t border-slate-200 dark:border-white/10 pt-4 mt-2">
-                    <Button variant="outline" size="sm" onClick={() => setIsVexoEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50">
+                    <Button variant="outline" size="sm" onClick={() => setIsVexoEditing(false)} className="border-slate-200 text-slate-700 hover:bg-slate-50 dark:text-slate-200">
                       Cancelar
                     </Button>
                     <Button onClick={handleSaveVexoProduct} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-extrabold">
@@ -1202,7 +1202,7 @@ export default function GeracaoDigitalPackages() {
                   <CardContent className="space-y-4">
                     <Layers className="h-12 w-12 text-slate-400 mx-auto" />
                     <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Nenhum Módulo Cadastrado</h3>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       Clique em "Novo Módulo" no topo para criar opções personalizadas de módulos Vexo.
                     </p>
                   </CardContent>
@@ -1221,7 +1221,7 @@ export default function GeracaoDigitalPackages() {
                         <div className="flex justify-between items-start">
                           <div className="space-y-0.5">
                             <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 leading-tight">{prod.nome}</h4>
-                            <span className="text-[10px] text-slate-500 block leading-tight mt-1">{prod.descricao || "Sem descrição"}</span>
+                            <span className="text-[10px] text-slate-500 block leading-tight mt-1 dark:text-slate-400">{prod.descricao || "Sem descrição"}</span>
                           </div>
                           <Badge className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
                             {prod.recorrencia === "unico" ? "único" : "mensal"}
@@ -1231,10 +1231,10 @@ export default function GeracaoDigitalPackages() {
 
                       <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
                         <div className="space-y-0.5">
-                          <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block">Valor Sugerido</span>
+                          <span className="text-[9px] text-slate-500 uppercase font-mono tracking-wider block dark:text-slate-400">Valor Sugerido</span>
                           <span className="text-base font-black text-pink-600 font-mono">
                             R$ {prod.valor.toLocaleString("pt-BR")}
-                            <span className="text-[10px] text-slate-500 font-normal">/{prod.recorrencia === "unico" ? "único" : "mês"}</span>
+                            <span className="text-[10px] text-slate-500 font-normal dark:text-slate-400">/{prod.recorrencia === "unico" ? "único" : "mês"}</span>
                           </span>
                         </div>
 
@@ -1244,7 +1244,7 @@ export default function GeracaoDigitalPackages() {
                             size="icon"
                             onClick={() => handleToggleVexoActive(prod, !prod.ativo)}
                             title={prod.ativo ? "Desativar módulo" : "Ativar módulo"}
-                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8 dark:text-slate-200"
                           >
                             <Switch checked={prod.ativo} className="scale-75 cursor-pointer pointer-events-none" />
                           </Button>
@@ -1252,7 +1252,7 @@ export default function GeracaoDigitalPackages() {
                             variant="ghost"
                             size="icon"
                             onClick={() => handleOpenVexoEdit(prod)}
-                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8"
+                            className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-8 w-8 dark:text-slate-200"
                           >
                             <Edit2 className="h-3.5 w-3.5" />
                           </Button>

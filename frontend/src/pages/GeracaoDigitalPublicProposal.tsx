@@ -35,6 +35,7 @@ import {
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import GeracaoDigitalNegotiationPage from "@/pages/GeracaoDigitalNegotiationPage";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -93,6 +94,7 @@ export default function GeracaoDigitalPublicProposal() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [chosenTermId, setChosenTermId] = useState<string | null>(null);
+  const [showMesa, setShowMesa] = useState(false);
 
   // Signature state
   const [signerName, setSignerName] = useState<string>("");
@@ -105,7 +107,9 @@ export default function GeracaoDigitalPublicProposal() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.shiftKey && e.key.toLowerCase() === 'n') {
-        window.open(`/crm/propostas-gd/negociacao/${id}`, '_blank');
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+        setShowMesa((v) => !v);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -405,13 +409,6 @@ export default function GeracaoDigitalPublicProposal() {
         </div>
 
         <div className="flex items-center gap-4">
-          <Button
-            size="sm"
-            onClick={() => window.open(`/crm/propostas-gd/negociacao/${proposal.id}`, "_blank")}
-            className="hidden sm:flex bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold border border-slate-700"
-          >
-            Abrir Mesa de Negociação
-          </Button>
           <Badge
             className={cn(
               "text-xs font-extrabold px-3 py-1 border-none",
@@ -796,6 +793,34 @@ export default function GeracaoDigitalPublicProposal() {
                   </span>
                 </div>
               )}
+              <div className="pt-1 space-y-2">
+                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Formas de pagamento aceitas</span>
+                <div className="flex flex-wrap gap-2">
+                  {([["pix", "PIX"], ["cartao", "Cartão de Crédito"], ["boleto", "Boleto"]] as const).map(([key, label]) => {
+                    const selecionado = proposal.meio_pagamento?.setup === key || proposal.meio_pagamento?.mensalidade === key;
+                    return (
+                      <span
+                        key={key}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold border",
+                          selecionado
+                            ? "bg-purple-600 text-white border-purple-500"
+                            : "bg-slate-950 text-slate-200 border-slate-700"
+                        )}
+                      >
+                        {label}
+                        {selecionado && " ✓"}
+                      </span>
+                    );
+                  })}
+                </div>
+                {(meioSetupPub || meioMensalPub) && (
+                  <span className="text-xs text-slate-300 font-medium block">
+                    {[meioSetupPub && `Entrada: ${meioSetupPub}`, meioMensalPub && `Mensalidade: ${meioMensalPub}`].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </div>
+
               {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
                 <div className="flex justify-between items-center text-sm font-mono">
                   <span className="text-slate-400">Período do Plano:</span>
@@ -952,10 +977,23 @@ export default function GeracaoDigitalPublicProposal() {
       </main>
 
       <div className="fixed bottom-4 right-4 z-40 opacity-0 hover:opacity-100 transition-opacity">
-        <Button variant="ghost" size="icon" onClick={() => window.open(`/crm/propostas-gd/negociacao/${id}`, '_blank')} className="text-slate-800 hover:text-white hover:bg-slate-800 rounded-full w-8 h-8 dark:text-white">
+        <Button variant="ghost" size="icon" onClick={() => setShowMesa(true)} className="text-slate-800 hover:text-white hover:bg-slate-800 rounded-full w-8 h-8 dark:text-white">
            <Lock className="w-3 h-3 opacity-20 hover:opacity-100" />
         </Button>
       </div>
+
+      {/* Mesa de Negociação — overlay na MESMA tela (gatilho: cadeado ou Shift+N) */}
+      {showMesa && id && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-50 dark:bg-slate-950">
+          <GeracaoDigitalNegotiationPage
+            proposalId={id}
+            onExit={() => {
+              setShowMesa(false);
+              reloadPublicProposalSilent();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

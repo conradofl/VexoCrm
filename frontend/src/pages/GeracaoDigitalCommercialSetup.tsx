@@ -478,10 +478,10 @@ export default function GeracaoDigitalCommercialSetup() {
         {activeFlow === "B" ? (
           <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 max-w-lg mx-auto py-8 text-center relative z-10 shadow-sm">
             <CardContent className="space-y-6">
-              <Briefcase className="h-12 w-12 text-slate-500 mx-auto" />
+              <Briefcase className="h-12 w-12 text-slate-500 mx-auto dark:text-slate-400" />
               <div className="space-y-2">
-                <h3 className="text-lg font-bold text-slate-800">Fluxo de Briefing GD</h3>
-                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                <h3 className="text-lg font-bold text-slate-800 dark:text-white">Fluxo de Briefing GD</h3>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto dark:text-slate-400">
                   Este botão abrirá diretamente a tela operacional de coleta de briefings existentes, sem alterações.
                 </p>
               </div>
@@ -504,16 +504,16 @@ export default function GeracaoDigitalCommercialSetup() {
               <div className="space-y-6">
                 <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
-                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800 dark:text-white">
                       <Building2 className="h-4 w-4 text-purple-600" />
                       Dados do Prospect
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-500">Identificação e segmento para o pitch comercial.</CardDescription>
+                    <CardDescription className="text-xs text-slate-500 dark:text-slate-400">Identificação e segmento para o pitch comercial.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-500 font-medium">Nome da Empresa Prospect</Label>
+                      <Label className="text-xs text-slate-500 font-medium dark:text-slate-400">Nome da Empresa Prospect</Label>
                       <Input
                         value={prospectName}
                         onChange={(e) => setProspectName(e.target.value)}
@@ -523,7 +523,7 @@ export default function GeracaoDigitalCommercialSetup() {
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-slate-500 font-medium">Segmento de Atuação</Label>
+                      <Label className="text-xs text-slate-500 font-medium dark:text-slate-400">Segmento de Atuação</Label>
                       <select
                         value={selectedSegmentId}
                         onChange={(e) => setSelectedSegmentId(e.target.value)}
@@ -538,7 +538,7 @@ export default function GeracaoDigitalCommercialSetup() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label className="text-xs text-slate-500 font-medium block">Logotipo do Prospect</Label>
+                      <Label className="text-xs text-slate-500 font-medium block dark:text-slate-400">Logotipo do Prospect</Label>
                       <div className="flex items-center gap-4">
                         {prospectLogo ? (
                           <div className="relative h-16 w-16 rounded-xl bg-white dark:bg-slate-800 p-1 flex items-center justify-center border border-slate-200 dark:border-white/10">
@@ -557,7 +557,7 @@ export default function GeracaoDigitalCommercialSetup() {
                             <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
                           </Label>
                         )}
-                        <span className="text-[10px] text-slate-500 leading-snug">Selecione uma imagem PNG ou JPG para personalizar a capa e os slides do pitch comercial.</span>
+                        <span className="text-[10px] text-slate-500 leading-snug dark:text-slate-400">Selecione uma imagem PNG ou JPG para personalizar a capa e os slides do pitch comercial.</span>
                       </div>
                     </div>
                   </CardContent>
@@ -568,8 +568,8 @@ export default function GeracaoDigitalCommercialSetup() {
                   <CardContent className="py-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
-                        <Label className="text-sm font-bold text-slate-800">Venda Casada · Módulo Vexo OS</Label>
-                        <p className="text-xs text-slate-500">Inclui módulos adicionais do Vexo OS no pacote comercial do cliente.</p>
+                        <Label className="text-sm font-bold text-slate-800 dark:text-white">Venda Casada · Módulo Vexo OS</Label>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Inclui módulos adicionais do Vexo OS no pacote comercial do cliente.</p>
                       </div>
                       <Switch checked={vendaCasada} onCheckedChange={setVendaCasada} />
                     </div>
@@ -577,7 +577,7 @@ export default function GeracaoDigitalCommercialSetup() {
                     {vendaCasada && (
                       <div className="border-t border-slate-100 pt-4 space-y-3 animate-fade-in">
                         <div className="flex justify-between items-center">
-                          <Label className="text-xs font-bold text-slate-700">Módulos Vexo a incluir:</Label>
+                          <Label className="text-xs font-bold text-slate-700 dark:text-slate-200">Módulos Vexo a incluir:</Label>
                           <Badge className="bg-purple-100 text-purple-750 font-mono text-[10px] font-bold border-none px-2 py-0.5">
                             Subtotal Vexo: R$ {vexoSubtotal.toLocaleString("pt-BR")}/mês
                           </Badge>
@@ -609,7 +609,7 @@ export default function GeracaoDigitalCommercialSetup() {
                                       className="scale-90"
                                     />
                                     <div className="space-y-0.5">
-                                      <span className="text-[11px] font-bold text-slate-800 leading-tight block">
+                                      <span className="text-[11px] font-bold text-slate-800 leading-tight block dark:text-white">
                                         {prod.nome}
                                       </span>
                                       {prod.descricao && (
@@ -621,7 +621,7 @@ export default function GeracaoDigitalCommercialSetup() {
                                   </div>
 
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-[9px] text-slate-500 font-mono">R$</span>
+                                    <span className="text-[9px] text-slate-500 font-mono dark:text-slate-400">R$</span>
                                     <Input
                                       type="number"
                                       value={displayValue}
@@ -650,16 +650,16 @@ export default function GeracaoDigitalCommercialSetup() {
               <div className="space-y-6">
                 <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
-                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800 dark:text-white">
                       <Calculator className="h-4 w-4 text-purple-600" />
                       Simulador de ROI Comercial
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-500">Previsão financeira de retorno sobre o investimento.</CardDescription>
+                    <CardDescription className="text-xs text-slate-500 dark:text-slate-400">Previsão financeira de retorno sobre o investimento.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
-                        <Label className="text-slate-500 font-medium">Contatos/Leads Mensais</Label>
+                        <Label className="text-slate-500 font-medium dark:text-slate-400">Contatos/Leads Mensais</Label>
                         <span className="font-bold text-indigo-600">{leadsCount} leads</span>
                       </div>
                       <input
@@ -675,7 +675,7 @@ export default function GeracaoDigitalCommercialSetup() {
 
                     <div className="grid gap-3 grid-cols-2">
                       <div className="space-y-1">
-                        <Label className="text-xs text-slate-500 font-medium">Ticket Médio (R$)</Label>
+                        <Label className="text-xs text-slate-500 font-medium dark:text-slate-400">Ticket Médio (R$)</Label>
                         <Input
                           type="number"
                           value={customTicket}
@@ -684,7 +684,7 @@ export default function GeracaoDigitalCommercialSetup() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs text-slate-500 font-medium">Conversão Atual (%)</Label>
+                        <Label className="text-xs text-slate-500 font-medium dark:text-slate-400">Conversão Atual (%)</Label>
                         <Input
                           type="number"
                           step="0.5"
@@ -696,7 +696,7 @@ export default function GeracaoDigitalCommercialSetup() {
                     </div>
 
                     <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/10 border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-between mt-2">
-                      <span className="text-xs text-slate-650 font-medium">Faturamento Mensal Extra Estimado:</span>
+                      <span className="text-xs text-slate-650 font-medium dark:text-slate-200">Faturamento Mensal Extra Estimado:</span>
                       <span className="text-sm font-extrabold text-emerald-600">
                         R$ {additionalRevenue.toLocaleString("pt-BR")} / mês
                       </span>
@@ -718,11 +718,11 @@ export default function GeracaoDigitalCommercialSetup() {
             <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div>
-                  <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                  <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800 dark:text-white">
                     <Briefcase className="h-4 w-4 text-pink-500" />
                     Pacotes Comerciais a Ofertar (gd_packages)
                   </CardTitle>
-                  <CardDescription className="text-xs text-slate-500">Selecione os pacotes salvos que apresentará e ajuste o valor final se desejar.</CardDescription>
+                  <CardDescription className="text-xs text-slate-500 dark:text-slate-400">Selecione os pacotes salvos que apresentará e ajuste o valor final se desejar.</CardDescription>
                 </div>
                 <button
                   onClick={() => navigate("/crm/pacotes-gd")}
@@ -759,8 +759,8 @@ export default function GeracaoDigitalCommercialSetup() {
                             className="mt-1 rounded text-pink-600 focus:ring-pink-500 bg-white border-slate-200"
                           />
                           <div className="space-y-0.5">
-                            <span className="text-xs font-bold text-slate-800 block">{pk.nome}</span>
-                            <span className="text-[9px] uppercase font-mono text-slate-500">
+                            <span className="text-xs font-bold text-slate-800 block dark:text-white">{pk.nome}</span>
+                            <span className="text-[9px] uppercase font-mono text-slate-500 dark:text-slate-400">
                               Período: {pk.periodo === "mensal" ? "Mensal" : "Setup Único"}
                             </span>
                           </div>
@@ -768,7 +768,7 @@ export default function GeracaoDigitalCommercialSetup() {
 
                         {isSelected && (
                           <div className="space-y-1">
-                            <Label className="text-[9px] text-slate-550 font-mono">Valor Fechado da Oferta (R$)</Label>
+                            <Label className="text-[9px] text-slate-550 font-mono dark:text-slate-400">Valor Fechado da Oferta (R$)</Label>
                             <Input
                               type="number"
                               value={overrideVal}
@@ -802,8 +802,8 @@ export default function GeracaoDigitalCommercialSetup() {
           fallback={
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 p-8">
               <div className="max-w-lg rounded-xl border border-red-400/30 bg-white dark:bg-slate-900 p-6 text-center space-y-4">
-                <h2 className="text-lg font-bold text-slate-900">Erro ao exibir a apresentação</h2>
-                <p className="text-sm text-slate-600">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Erro ao exibir a apresentação</h2>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
                   Um dos slides encontrou um erro inesperado. Feche a apresentação e tente novamente.
                 </p>
                 <button
