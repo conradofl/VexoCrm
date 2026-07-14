@@ -747,8 +747,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     try {
       const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
       const tenantId = await resolveTenantUuid(clientKey);
+      const includeInactive = req.query.include_inactive === "1";
       const result = await pool.query(
-        "SELECT id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, created_at FROM public.gd_packages WHERE tenant_id = $1 AND ativo = true ORDER BY nome ASC",
+        `SELECT id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, created_at FROM public.gd_packages WHERE tenant_id = $1 ${includeInactive ? "" : "AND ativo = true"} ORDER BY nome ASC`,
         [tenantId]
       );
       const rows = Array.isArray(result?.rows) ? result.rows : [];

@@ -87,6 +87,7 @@ export default function GeracaoDigitalPackages() {
   const [packageIncludedProductIds, setPackageIncludedProductIds] = useState<Record<string, boolean>>({});
   // Módulos Vexo incluídos DENTRO de um pacote GD (pacote híbrido GD + Vexo).
   const [packageIncludedVexoIds, setPackageIncludedVexoIds] = useState<Record<string, boolean>>({});
+  const [showInactive, setShowInactive] = useState<boolean>(false);
 
   // Vexo Products CRUD state
   const [vexoProducts, setVexoProducts] = useState<VexoProduct[]>([]);
@@ -109,6 +110,11 @@ export default function GeracaoDigitalPackages() {
     }
   }, [isAuthenticated, clientId]);
 
+  // Recarrega os pacotes ao alternar exibição de inativos (backend filtra por ativo)
+  useEffect(() => {
+    if (isAuthenticated) loadPackages();
+  }, [showInactive]);
+
   async function loadPackages() {
     try {
       setIsLoading(true);
@@ -118,7 +124,7 @@ export default function GeracaoDigitalPackages() {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      const res = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers });
+      const res = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}${showInactive ? "&include_inactive=1" : ""}`, { headers });
       if (!res.ok) {
         throw new Error(`Erro ao buscar pacotes (Status ${res.status}).`);
       }
@@ -699,10 +705,21 @@ export default function GeracaoDigitalPackages() {
                 </p>
               </div>
               {!isEditing && (
-                <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 font-extrabold text-white text-xs">
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Novo Pacote
-                </Button>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showInactive}
+                      onChange={(e) => setShowInactive(e.target.checked)}
+                      className="accent-purple-600"
+                    />
+                    Mostrar pacotes inativos
+                  </label>
+                  <Button onClick={handleOpenCreate} size="sm" className="bg-gradient-to-r from-purple-700 to-indigo-600 font-extrabold text-white text-xs">
+                    <Plus className="h-4 w-4 mr-1.5" />
+                    Novo Pacote
+                  </Button>
+                </div>
               )}
             </div>
 
@@ -964,9 +981,10 @@ export default function GeracaoDigitalPackages() {
                   </CardContent>
                 </Card>
               ) : (() => {
-                const displayedPackages = activeSection === "vexo-packages"
+                const displayedPackages = (activeSection === "vexo-packages"
                   ? packages.filter(p => p.tipo === "vexo")
-                  : packages.filter(p => p.tipo === "gd" || !p.tipo);
+                  : packages.filter(p => p.tipo === "gd" || !p.tipo)
+                ).filter(p => showInactive || p.ativo);
 
                 const titleText = activeSection === "vexo-packages"
                   ? "Pacotes Vexo OS"
