@@ -17,7 +17,9 @@ import {
   Zap,
   Info,
   ExternalLink,
-  Check
+  Check,
+  X,
+  Lock
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,6 +34,8 @@ import {
 } from "@/lib/geracaoDigital/paymentTerms";
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { GeracaoDigitalNegotiationBoard, type NegotiationFinalizeResult } from "@/components/GeracaoDigitalNegotiationBoard";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -95,6 +99,136 @@ export default function GeracaoDigitalPublicProposal() {
   const [signMethod, setSignMethod] = useState<'desenho' | 'digitado'>('desenho');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+
+  // Negotiation state
+  const { isAuthenticated, getIdToken, clientId } = useAuth();
+  const [isNegotiationOpen, setIsNegotiationOpen] = useState(false);
+  const [availablePackages, setAvailablePackages] = useState<any[]>([]);
+  const [pendingNegotiationUpdate, setPendingNegotiationUpdate] = useState<NegotiationFinalizeResult | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.key.toLowerCase() === 'n') {
+        setIsNegotiationOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || !clientId) return;
+    const loadPackages = async () => {
+      try {
+        const token = await getIdToken();
+        const headers: HeadersInit = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const pkgRes = await fetchApi(`/api/gd/packages?client_id=${clientId}`, { headers });
+        if (pkgRes.ok) {
+          const pkgData = await pkgRes.json();
+          if (pkgData.success) {
+            setAvailablePackages(pkgData.data || pkgData.packages);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading packages", err);
+      }
+    };
+    loadPackages();
+  }, [isAuthenticated, clientId]);
+
+  // Debounced auto-save on lever adjustments
+  useEffect(() => {
+    if (!pendingNegotiationUpdate || !proposal || !isAuthenticated || !clientId) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const token = await getIdToken();
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const isento = pendingNegotiationUpdate.descontos.some((d: any) => d.tipo === "isencao_setup");
+        const cobrarSetup = proposal.cobrar_setup;
+        const valorSetupVexo = proposal.valor_setup_vexo;
+
+        const body = {
+          client_id: clientId,
+          prospect_name: proposal.prospect_name,
+          itens: proposal.itens,
+          condicoes: proposal.condicoes,
+          payment_link: proposal.payment_link,
+          cobrar_setup: cobrarSetup,
+          valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
+          descontos_concedidos: pendingNegotiationUpdate.descontos,
+          meio_pagamento: pendingNegotiationUpdate.meioPagamento,
+          periodo_plano: proposal.periodo_plano || null,
+          validade_ate: proposal.validade_ate || null,
+          valor_apos_validade: proposal.valor_apos_validade !== null ? Number(proposal.valor_apos_validade) : null,
+          observacao_validade: proposal.observacao_validade || null,
+          carencia_dias: pendingNegotiationUpdate.carenciaDias ? Number(pendingNegotiationUpdate.carenciaDias) : (proposal.carencia_dias || null),
+          condicoes_pagamento: proposal.condicoes_pagamento
+        };
+
+        const res = await fetchApi(`/api/gd/proposals/${proposal.id}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(body)
+        });
+
+        if (res.ok) {
+          console.log("Auto-save completed successfully.");
+        }
+      } catch (err) {
+        console.error("Auto-save error:", err);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [pendingNegotiationUpdate, proposal, clientId, isAuthenticated]);
+
+  const handleFinalizeNegotiation = async (result: NegotiationFinalizeResult) => {
+    if (!proposal || !isAuthenticated) return;
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const isento = result.descontos.some((d) => d.tipo === "isencao_setup");
+      const cobrarSetup = proposal.cobrar_setup;
+      const valorSetupVexo = proposal.valor_setup_vexo;
+
+      const body = {
+        client_id: clientId,
+        prospect_name: proposal.prospect_name,
+        itens: proposal.itens,
+        condicoes: proposal.condicoes,
+        payment_link: proposal.payment_link,
+        cobrar_setup: cobrarSetup,
+        valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
+        descontos_concedidos: result.descontos,
+        meio_pagamento: result.meioPagamento,
+        periodo_plano: proposal.periodo_plano || null,
+        validade_ate: proposal.validade_ate || null,
+        valor_apos_validade: proposal.valor_apos_validade !== null ? Number(proposal.valor_apos_validade) : null,
+        observacao_validade: proposal.observacao_validade || null,
+        carencia_dias: result.carenciaDias ? Number(result.carenciaDias) : (proposal.carencia_dias || null),
+        condicoes_pagamento: proposal.condicoes_pagamento
+      };
+
+      const res = await fetchApi(`/api/gd/proposals/${proposal.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(body)
+      });
+      
+      if (!res.ok) throw new Error("Erro ao gravar as concessões da negociação.");
+
+      toast({ title: "Negociação registrada", description: "Concessões gravadas com sucesso!" });
+      setIsNegotiationOpen(false);
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message || "Falha ao finalizar", variant: "destructive" });
+    }
+  };
 
   useEffect(() => {
     if (id) {
@@ -198,7 +332,7 @@ export default function GeracaoDigitalPublicProposal() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.strokeStyle = "#ec4899"; // pink-500
+    ctx.strokeStyle = "#000000"; // Always black stroke since bg is white
     ctx.lineWidth = 3;
     ctx.lineCap = "round";
 
@@ -491,39 +625,65 @@ export default function GeracaoDigitalPublicProposal() {
               <CardTitle className="text-xl font-bold text-white">Escopo Geral de Serviços</CardTitle>
             </CardHeader>
             <CardContent className="p-0 divide-y divide-slate-900">
-              {items.map((item, idx) => (
-                <div key={idx} className="p-6 flex items-center justify-between gap-4">
-                  <div className="space-y-1.5">
-                    <h4 className="text-base font-bold text-white leading-tight">{item.descricao}</h4>
-                    <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-800">
-                      {item.categoria === "vexo" ? "Vexo OS" : "Geração Digital"}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                      <span className="text-[10px] text-slate-500 line-through font-mono block">
-                        De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
-                      </span>
-                    )}
-                    <span className="text-lg font-black text-white font-mono">
-                      R$ {Number(item.valor || 0).toFixed(2)}
-                      {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                        <span className="text-[10px] text-emerald-400 font-bold ml-1">
-                          ({Math.round((1 - Number(item.total_periodo || 0) / Number(item.valor_tabela || 1)) * 100)}% off)
-                        </span>
+              {(["gd", "vexo"] as const).map(cat => {
+                const catItems = items.filter(i => i.categoria === cat).sort((a, b) => Number(b.valor || 0) - Number(a.valor || 0));
+                if (catItems.length === 0) return null;
+                return catItems.map((item, idx) => {
+                  const isGdPkg = cat === "gd" && proposal.package_id && packages.find(p => p.id === proposal.package_id && p.nome === item.descricao);
+                  const isVexoPkg = cat === "vexo" && proposal.package_vexo_id && packages.find(p => p.id === proposal.package_vexo_id && p.nome === item.descricao);
+                  const pkgRef = isGdPkg || isVexoPkg;
+                  
+                  return (
+                    <div key={`${cat}-${idx}`} className="p-6 flex flex-col gap-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-1.5">
+                          <h4 className="text-base font-bold text-white leading-tight">{item.descricao}</h4>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-800">
+                            {item.categoria === "vexo" ? "Vexo OS" : "Geração Digital"}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
+                            <span className="text-[10px] text-slate-500 line-through font-mono block">
+                              De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
+                            </span>
+                          )}
+                          <span className="text-lg font-black text-white font-mono">
+                            R$ {Number(item.valor || 0).toFixed(2)}
+                            {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
+                              <span className="text-[10px] text-emerald-400 font-bold ml-1">
+                                ({Math.round((1 - Number(item.total_periodo || 0) / Number(item.valor_tabela || 1)) * 100)}% off)
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[9px] text-slate-400 block uppercase tracking-wider font-mono">
+                            {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
+                          </span>
+                          {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
+                            <span className="text-[9px] text-slate-500 block font-mono">
+                              total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {pkgRef && pkgRef.produtos_incluidos && pkgRef.produtos_incluidos.length > 0 && (
+                        <div className="pt-3 border-t border-slate-800/50 mt-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Módulos Incluídos neste pacote:</span>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {pkgRef.produtos_incluidos.map((p: any, pIdx: number) => (
+                              <div key={pIdx} className="flex items-center gap-2 text-xs text-slate-300">
+                                <div className="h-1.5 w-1.5 rounded-full bg-purple-500/50 shrink-0" />
+                                <span>{p.nome}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
-                    </span>
-                    <span className="text-[9px] text-slate-400 block uppercase tracking-wider font-mono">
-                      {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
-                    </span>
-                    {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
-                      <span className="text-[9px] text-slate-500 block font-mono">
-                        total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                    </div>
+                  );
+                });
+              })}
             </CardContent>
           </Card>
 
@@ -670,18 +830,29 @@ export default function GeracaoDigitalPublicProposal() {
                 )}
               </div>
               <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
-                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
-                <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                  {calc.compromissoFinal < calc.compromissoOriginal && (
-                    <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
-                      R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
+                {(!proposal.periodo_plano || proposal.periodo_plano === "1") ? (
+                  <>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Plano Mensal (Sem fidelidade)</span>
+                    <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                      -
                     </span>
-                  )}
-                  R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
-                </span>
-                <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
-                  Soma total das mensalidades por {calc.mesesPeriodo} meses.
-                </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
+                    <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                      {calc.compromissoFinal < calc.compromissoOriginal && (
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                          R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
+                        </span>
+                      )}
+                      R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
+                      Soma total das mensalidades por {calc.mesesPeriodo} meses.
+                    </span>
+                  </>
+                )}
               </div>
               {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
                 <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
@@ -763,8 +934,8 @@ export default function GeracaoDigitalPublicProposal() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="text-[10px] text-slate-400 leading-relaxed bg-slate-950 p-3 rounded-lg border border-slate-900">
-                  <span className="font-bold text-white block mb-1 uppercase font-mono tracking-wider">Termo de Aceite:</span>
+                <div className="text-[10px] text-slate-700 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800 transition-colors duration-500">
+                  <span className="font-bold text-slate-900 dark:text-white block mb-1 uppercase font-mono tracking-wider">Termo de Aceite:</span>
                   "Declaro estar de acordo com os serviços, valores e condições desta proposta e autorizo o início dos trabalhos."
                 </div>
 
@@ -774,7 +945,7 @@ export default function GeracaoDigitalPublicProposal() {
                     value={signerName}
                     onChange={(e) => setSignerName(e.target.value)}
                     placeholder="Nome do Responsável Legal"
-                    className="bg-slate-900 border-slate-800 text-xs text-white placeholder:text-slate-500 focus-visible:ring-purple-500/50 h-9"
+                    className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder:text-slate-500 focus-visible:ring-purple-500/50 h-9"
                   />
                 </div>
 
@@ -826,7 +997,7 @@ export default function GeracaoDigitalPublicProposal() {
                       onTouchMove={draw}
                       onTouchEnd={stopDrawing}
                       style={{ touchAction: "none" }}
-                      className="w-full bg-slate-950 border border-slate-900 rounded-xl cursor-crosshair h-[120px]"
+                      className="w-full bg-white border border-slate-300 dark:border-slate-700 rounded-xl cursor-crosshair h-[120px]"
                     />
                   </div>
                 ) : (
@@ -856,6 +1027,41 @@ export default function GeracaoDigitalPublicProposal() {
           </Card>
         </div>
       </main>
+
+      <div className="fixed bottom-4 right-4 z-40 opacity-0 hover:opacity-100 transition-opacity">
+        <Button variant="ghost" size="icon" onClick={() => setIsNegotiationOpen(true)} className="text-slate-800 hover:text-white hover:bg-slate-800 rounded-full w-8 h-8">
+           <Lock className="w-3 h-3 opacity-20 hover:opacity-100" />
+        </Button>
+      </div>
+
+      {isNegotiationOpen && isAuthenticated && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4 animate-fade-in backdrop-blur-sm">
+          <div className="relative w-full max-w-6xl max-h-[95vh] overflow-hidden bg-white dark:bg-slate-950 rounded-2xl shadow-2xl flex flex-col border border-slate-200 dark:border-slate-800">
+            <div className="absolute top-3 right-3 z-50">
+               <Button variant="ghost" size="icon" onClick={() => setIsNegotiationOpen(false)} className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 rounded-full bg-slate-100/50 dark:bg-transparent">
+                  <X className="w-5 h-5" />
+               </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto w-full">
+              <GeracaoDigitalNegotiationBoard
+                prospectName={proposal.prospect_name}
+                items={proposal.itens.map(i => ({ ...i, categoria: i.categoria as "gd"|"vexo", recorrencia: i.recorrencia as "mensal"|"unico" }))}
+                setupItensTotal={proposal.valor_setup}
+                recurringTotal={proposal.valor_recorrente}
+                setupVexoValue={proposal.valor_setup_vexo !== null ? Number(proposal.valor_setup_vexo) : 0}
+                periodoPlano={proposal.periodo_plano || "1"}
+                validadeAte={proposal.validade_ate || ""}
+                offeredTerms={proposal.condicoes_pagamento ? proposal.condicoes_pagamento.condicoes : []}
+                onClose={() => setIsNegotiationOpen(false)}
+                onFinalize={handleFinalizeNegotiation}
+                packageId={proposal.package_id}
+                packageVexoId={(proposal as any).package_vexo_id}
+                availablePackages={availablePackages}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

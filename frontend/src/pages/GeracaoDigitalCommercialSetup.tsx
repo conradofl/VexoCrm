@@ -166,6 +166,14 @@ export default function GeracaoDigitalCommercialSetup() {
           if (data.success && data.data) {
             if (data.data.prospect_name) setProspectName(data.data.prospect_name);
             if (data.data.cobrar_setup !== undefined) setVendaCasada(data.data.cobrar_setup);
+            if (data.data.segment_id) setSelectedSegmentId(data.data.segment_id);
+            if (data.data.prospect_logo) setProspectLogo(data.data.prospect_logo);
+            if (data.data.roi) {
+              const roiParsed = typeof data.data.roi === "string" ? JSON.parse(data.data.roi) : data.data.roi;
+              if (roiParsed.leads) setLeadsCount(roiParsed.leads);
+              if (roiParsed.ticket) setCustomTicket(roiParsed.ticket);
+              if (roiParsed.conv) setCustomConv(roiParsed.conv);
+            }
           }
         }
       } catch (err) {

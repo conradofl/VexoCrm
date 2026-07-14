@@ -1043,7 +1043,7 @@ export default function GeracaoDigitalProposals() {
       icon={FileText}
     >
       <GeracaoDigitalTabs />
-      <div className="w-full min-h-screen bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden">
+      <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-sm relative overflow-hidden">
 
         {/* Glow Effects */}
         <div className="absolute top-0 right-0 h-96 w-96 bg-purple-50 dark:bg-purple-950/20 rounded-full blur-[100px] pointer-events-none" />
@@ -1068,7 +1068,7 @@ export default function GeracaoDigitalProposals() {
             </CardContent>
           </Card>
         ) : proposals.length === 0 ? (
-          <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
+          <Card className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-white/10 text-center max-w-lg mx-auto py-12 relative z-10 shadow-sm">
             <CardContent className="space-y-4">
               <FileText className="h-12 w-12 text-slate-400 mx-auto" />
               <h3 className="text-lg font-bold text-slate-800">Nenhuma Proposta Gerada</h3>
@@ -1134,7 +1134,7 @@ export default function GeracaoDigitalProposals() {
                     "w-full text-left p-4 rounded-xl border transition-all space-y-2 group shadow-sm flex flex-col justify-between",
                     selectedProposal?.id === prop.id
                       ? "bg-slate-50 dark:bg-slate-850 border-purple-500/50 dark:border-purple-550/50 shadow-md shadow-purple-600/5"
-                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
+                      : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
                   )}
                 >
                   <div className="cursor-pointer" onClick={() => selectProposal(prop)}>
@@ -1165,14 +1165,15 @@ export default function GeracaoDigitalProposals() {
                     <div className="pt-2 border-t border-slate-100 dark:border-white/5 flex gap-1.5">
                       <Button
                         size="xs"
-                        variant="default"
-                        className="w-full text-[10px] bg-purple-650 hover:bg-purple-750 text-white font-bold"
+                        variant="outline"
+                        className="w-full text-[10px] border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(`/crm/propostas-gd/negociacao/${prop.id}`, "_blank");
+                          window.open(`/proposta/${prop.id}`, "_blank");
                         }}
                       >
-                        Mesa de Negociação
+                        <ExternalLink className="h-3 w-3 mr-1.5" />
+                        Abrir Proposta
                       </Button>
                     </div>
                   )}
@@ -1185,7 +1186,7 @@ export default function GeracaoDigitalProposals() {
               <div className="space-y-6 lg:col-span-3">
 
                 {/* Header overview */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <h2 className="text-xl font-black text-slate-800">{prospectName}</h2>
@@ -1300,7 +1301,7 @@ export default function GeracaoDigitalProposals() {
                       const calc = calculateProposalValues(tempProposal, availablePackages);
 
                       return (
-                        <div className="grid gap-4 sm:grid-cols-3 bg-white dark:bg-slate-850 p-4 rounded-xl border border-slate-150 dark:border-white/5">
+                        <div className="grid gap-4 sm:grid-cols-3 bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-150 dark:border-slate-700">
                           <div className="space-y-1">
                             <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block">Taxa de Setup</span>
                             <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 font-mono">
@@ -1315,13 +1316,20 @@ export default function GeracaoDigitalProposals() {
                             </h4>
                           </div>
 
-                          <div className="space-y-1">
-                            <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Compromisso do Período</span>
-                            <h4 className="text-lg font-black text-indigo-600 font-mono">
-                              {calc.compromissoFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                            </h4>
-                            <span className="text-[9px] text-slate-450 block">Soma recorrente por {calc.mesesPeriodo} meses</span>
-                          </div>
+                          {(!periodoPlano || periodoPlano === "1") ? (
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Plano Mensal (Sem fidelidade)</span>
+                              <h4 className="text-lg font-black text-indigo-600 font-mono">-</h4>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block">Compromisso do Período</span>
+                              <h4 className="text-lg font-black text-indigo-600 font-mono">
+                                {calc.compromissoFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                              </h4>
+                              <span className="text-[9px] text-slate-450 block">Soma recorrente por {calc.mesesPeriodo} meses</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1329,7 +1337,7 @@ export default function GeracaoDigitalProposals() {
                     {/* Escopo da Proposta */}
                     <div className="space-y-2">
                       <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">Itens e Serviços Incluídos</h4>
-                      <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-white/5 space-y-3">
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-700 space-y-3">
                         {(() => {
                           const activeGdPkg = availablePackages.find(p => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
                           const activeVexoPkg = availablePackages.find(p => p.id === editPackageVexoId && p.tipo === "vexo");
@@ -1392,7 +1400,7 @@ export default function GeracaoDigitalProposals() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">Prazos e Validade</h4>
-                        <div className="p-4 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-white/5 text-xs space-y-2 text-slate-700 dark:text-slate-350">
+                        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-700 text-xs space-y-2 text-slate-700 dark:text-slate-300">
                           <p><span className="font-bold text-slate-900 dark:text-slate-200">Período Contratual:</span> {periodoPlano ? periodoPlano.toUpperCase() : "Mensal"}</p>
                           <p><span className="font-bold text-slate-900 dark:text-slate-200">Validade da Proposta:</span> {validadeAte ? new Date(`${validadeAte}T23:59:59`).toLocaleDateString("pt-BR") : "Sem validade definida"}</p>
                           <p><span className="font-bold text-slate-900 dark:text-slate-200">Carência de Pagamento:</span> {editCarencia ? `${editCarencia} dias` : "Imediato na contratação"}</p>
@@ -1401,7 +1409,7 @@ export default function GeracaoDigitalProposals() {
 
                       <div className="space-y-2">
                         <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">Condições de Pagamento Oferecidas</h4>
-                        <div className="p-4 rounded-xl bg-white dark:bg-slate-855 border border-slate-150 dark:border-white/5 text-xs space-y-2 text-slate-700 dark:text-slate-350">
+                        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-700 text-xs space-y-2 text-slate-700 dark:text-slate-300">
                           {offeredTerms.length === 0 ? (
                             <p className="text-slate-450 italic">Nenhuma condição de pagamento especial oferecida.</p>
                           ) : (
@@ -1418,7 +1426,7 @@ export default function GeracaoDigitalProposals() {
                 </Card>
 
                                   {/* Electronic Signature Card */}
-                  <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm flex flex-col h-full">
+                  <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-full">
                     <CardHeader>
                       <CardTitle className="text-base font-bold text-slate-800 dark:text-slate-100">Assinatura de Aceite Comercial</CardTitle>
                     </CardHeader>
@@ -1434,7 +1442,7 @@ export default function GeracaoDigitalProposals() {
                           </div>
 
                           {selectedProposal.assinatura && selectedProposal.assinatura.startsWith("data:image") && (
-                            <div className="h-20 w-full max-w-[200px] bg-white dark:bg-slate-800 rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-700">
+                            <div className="h-20 w-full max-w-[200px] bg-slate-100 dark:bg-slate-800 rounded-lg p-1.5 mx-auto flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700">
                               <img src={selectedProposal.assinatura} alt="Assinatura" className="max-h-full max-w-full object-contain" />
                             </div>
                           )}
@@ -1505,7 +1513,7 @@ export default function GeracaoDigitalProposals() {
                   icon={FileText}
                   title="Nenhuma proposta selecionada"
                   description="Selecione um rascunho ou simulação comercial na barra lateral ou clique em 'Nova Proposta' para começar."
-                  className="max-w-md w-full bg-white border border-slate-200"
+                  className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100"
                 />
               </div>
             )}
