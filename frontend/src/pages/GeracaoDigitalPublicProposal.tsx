@@ -475,13 +475,16 @@ export default function GeracaoDigitalPublicProposal() {
             </Card>
           )}
 
-           {/* Seletor de Pacotes Comerciais */}
+           {/* Seletor de Pacotes Comerciais (Grid Unificado) */}
           {proposal.status !== "aceita" && packages.length > 0 && (
             <div className="space-y-4">
               <span className="text-[10px] text-purple-400 font-mono font-bold uppercase tracking-wider block">Escolha seu Plano</span>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {packages.map((pkg: any) => {
-                  const isSelected = proposal.package_id === pkg.id;
+                  const isSelected = proposal.package_id === pkg.id || proposal.package_vexo_id === pkg.id;
+                  const periodoLabel = pkg.periodo ? (PERIODO_LABELS[pkg.periodo] || pkg.periodo) : null;
+                  const meses = pkg.periodo === 'anual' ? 12 : pkg.periodo === 'semestral' ? 6 : pkg.periodo === 'trimestral' ? 3 : 1;
+                  const valorMensal = meses > 1 ? Number(pkg.valor || 0) / meses : Number(pkg.valor || 0);
                   return (
                     <button
                       key={pkg.id}
@@ -494,14 +497,21 @@ export default function GeracaoDigitalPublicProposal() {
                       )}
                     >
                       <div className="space-y-1">
-                        <span className="text-[8px] text-purple-400 font-bold uppercase tracking-wider font-semibold">Plano</span>
+                        <span className="text-[8px] text-purple-400 font-bold uppercase tracking-wider">Plano</span>
                         <h4 className="text-sm font-black text-white leading-snug">{pkg.nome}</h4>
+                        {periodoLabel && (
+                          <span className="text-[9px] text-slate-400 font-mono">{periodoLabel}</span>
+                        )}
                       </div>
                       <div className="mt-4 pt-3 border-t border-slate-950/60 w-full">
-                        <span className="text-[9px] text-slate-400 block uppercase font-mono tracking-wider">Valor total:</span>
                         <span className="text-lg font-black text-pink-500 font-mono">
-                          R$ {Number(pkg.valor || 0).toLocaleString("pt-BR")}
+                          R$ {valorMensal.toLocaleString("pt-BR")}<span className="text-xs font-bold text-slate-400">/mês</span>
                         </span>
+                        {meses > 1 && (
+                          <span className="text-[9px] text-slate-500 block font-mono">
+                            Total: R$ {Number(pkg.valor || 0).toLocaleString("pt-BR")} ({meses} meses)
+                          </span>
+                        )}
                       </div>
                       {isSelected && (
                         <div className="absolute top-3 right-3 h-5 w-5 bg-purple-650 rounded-full flex items-center justify-center text-white">
@@ -539,26 +549,32 @@ export default function GeracaoDigitalPublicProposal() {
                           </span>
                         </div>
                         <div className="text-right">
-                          {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                            <span className="text-[10px] text-slate-500 line-through font-mono block dark:text-slate-400">
-                              De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
-                            </span>
-                          )}
-                          <span className="text-lg font-black text-white font-mono">
-                            R$ {Number(item.valor || 0).toFixed(2)}
-                            {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                              <span className="text-[10px] text-emerald-400 font-bold ml-1">
-                                ({Math.round((1 - Number(item.total_periodo || 0) / Number(item.valor_tabela || 1)) * 100)}% off)
+                          {Number(item.valor || 0) === 0 ? (
+                            <span className="text-emerald-400 font-medium text-sm">Incluso no pacote</span>
+                          ) : (
+                            <>
+                              {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
+                                <span className="text-[10px] text-slate-500 line-through font-mono block">
+                                  De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
+                                </span>
+                              )}
+                              <span className="text-lg font-black text-white font-mono">
+                                R$ {Number(item.valor || 0).toFixed(2)}
+                                {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
+                                  <span className="text-[10px] text-emerald-400 font-bold ml-1">
+                                    ({Math.round((1 - Number(item.total_periodo || 0) / Number(item.valor_tabela || 1)) * 100)}% off)
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </span>
-                          <span className="text-[9px] text-slate-400 block uppercase tracking-wider font-mono">
-                            {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
-                          </span>
-                          {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
-                            <span className="text-[9px] text-slate-500 block font-mono dark:text-slate-400">
-                              total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
-                            </span>
+                              <span className="text-[9px] text-slate-400 block uppercase tracking-wider font-mono">
+                                {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
+                              </span>
+                              {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
+                                <span className="text-[9px] text-slate-500 block font-mono">
+                                  total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
@@ -749,31 +765,22 @@ export default function GeracaoDigitalPublicProposal() {
                   </span>
                 )}
               </div>
-              <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
-                {(!proposal.periodo_plano || proposal.periodo_plano === "1") ? (
-                  <>
-                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Plano Mensal (Sem fidelidade)</span>
-                    <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                      -
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
-                    <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                      {calc.compromissoFinal < calc.compromissoOriginal && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
-                          R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
-                        </span>
-                      )}
-                      R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
-                    </span>
-                    <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
-                      Soma total das mensalidades por {calc.mesesPeriodo} meses.
-                    </span>
-                  </>
-                )}
-              </div>
+              {calc.mesesPeriodo > 1 && (
+                <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
+                  <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                    {calc.compromissoFinal < calc.compromissoOriginal && (
+                      <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                        R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
+                      </span>
+                    )}
+                    R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
+                    Soma total das mensalidades por {calc.mesesPeriodo} meses.
+                  </span>
+                </div>
+              )}
               {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
                 <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
                   <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Permuta Comercial (VP)</span>
