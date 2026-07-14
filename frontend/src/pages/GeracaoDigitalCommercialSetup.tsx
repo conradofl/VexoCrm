@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, ChangeEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { toast } from "@/components/ui/use-toast";
@@ -102,6 +102,8 @@ interface PackageApi {
 export default function GeracaoDigitalCommercialSetup() {
   const { isAuthenticated, getIdToken, clientId } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const proposalId = searchParams.get("proposalId");
 
   // State
   const [activeFlow, setActiveFlow] = useState<"A" | "B">("A");
@@ -148,6 +150,30 @@ export default function GeracaoDigitalCommercialSetup() {
   const vexoSubtotal = useMemo(() => {
     return selectedVexoProducts.reduce((sum, p) => sum + Number(p.valor || 0), 0);
   }, [selectedVexoProducts]);
+
+  // Load Proposal Details if proposalId is present
+  useEffect(() => {
+    async function loadProposal() {
+      if (!proposalId || !isAuthenticated) return;
+      try {
+        const token = await getIdToken();
+        const headers: HeadersInit = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const res = await fetchApi(`/api/gd/proposals/${proposalId}?client_id=${clientId || ""}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            if (data.data.prospect_name) setProspectName(data.data.prospect_name);
+            if (data.data.cobrar_setup !== undefined) setVendaCasada(data.data.cobrar_setup);
+          }
+        }
+      } catch (err) {
+        console.error("Falha ao carregar a proposta", err);
+      }
+    }
+    loadProposal();
+  }, [proposalId, isAuthenticated, clientId]);
 
   // Load Segments and Packages from Backend
   useEffect(() => {
