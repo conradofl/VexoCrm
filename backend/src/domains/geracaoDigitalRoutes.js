@@ -1806,7 +1806,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo
+        `SELECT id, tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo, valor_vp, meio_pagamento, carencia_dias, pacotes_ofertados
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );
