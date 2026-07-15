@@ -20,10 +20,10 @@ import {
   PAYMENT_TERM_TIPOS,
   APLICA_A_LABELS,
   termAplicaA,
-  computePaymentBreakdown
+  computePaymentBreakdown,
+  describeTerm
 } from "@/lib/geracaoDigital/paymentTerms";
 
-const EXEMPLO_TOTAL = 10000;
 
 const EMPTY_FORM: { nome: string; tipo: PaymentTermTipo; config: PaymentTermConfig; aplica_a: PaymentTermAplicaA } = {
   nome: "",
@@ -168,8 +168,6 @@ export default function GeracaoDigitalPaymentTerms() {
     }
   };
 
-  const previewBreakdown = computePaymentBreakdown(form, EXEMPLO_TOTAL);
-
   return (
     <PageShell
       title="Condições de Pagamento GD"
@@ -312,9 +310,9 @@ export default function GeracaoDigitalPaymentTerms() {
               {/* Preview do desdobramento */}
               <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
                 <span className="text-[9px] text-purple-600 dark:text-purple-400 font-mono font-bold uppercase tracking-wider block mb-1">
-                  Prévia (sobre um total de exemplo de R$ {EXEMPLO_TOTAL.toLocaleString("pt-BR")})
+                  Prévia da condição
                 </span>
-                {previewBreakdown.linhas.map((linha, idx) => (
+                {[describeTerm(form)].map((linha, idx) => (
                   <p key={idx} className="text-xs text-slate-700 dark:text-slate-300 font-medium">{linha}</p>
                 ))}
               </div>
@@ -340,7 +338,7 @@ export default function GeracaoDigitalPaymentTerms() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {terms.map((term) => {
-              const breakdown = computePaymentBreakdown(term, EXEMPLO_TOTAL);
+              const breakdown = { linhas: [describeTerm(term)] };
               return (
                 <Card
                   key={term.id}

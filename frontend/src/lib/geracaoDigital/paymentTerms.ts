@@ -125,6 +125,32 @@ export function computePaymentBreakdown(
   }
 }
 
+// Descrição SIMBÓLICA da condição, sem valores fictícios (não divide um total
+// de exemplo). Mostra só a estrutura configurada; os valores em R$ são
+// calculados ao vivo sobre o total real da proposta.
+export function describeTerm(term: Pick<PaymentTerm, "tipo" | "config">): string {
+  const cfg = term.config || {};
+  const meio = cfg.meio ? ` no ${MEIO_LABELS[cfg.meio] || cfg.meio}` : "";
+  switch (term.tipo) {
+    case "avista_desconto":
+      return `À vista${meio}${cfg.percentual_desconto ? ` com ${cfg.percentual_desconto}% de desconto` : ""}`;
+    case "entrada_parcelas": {
+      const n = Math.max(1, Number(cfg.num_parcelas || 1));
+      const entrada = Number(cfg.valor_entrada || 0);
+      return `Entrada${entrada > 0 ? ` de ${brl(entrada)}` : ""} + ${n}x${meio}`;
+    }
+    case "parcelado_cartao":
+      return `${Math.max(1, Number(cfg.num_parcelas || 1))}x no cartão`;
+    case "boleto_recorrente":
+      return `${Math.max(1, Number(cfg.num_parcelas || 1))} boletos mensais`;
+    case "semanal":
+      return `${Math.max(1, Number(cfg.num_parcelas || 1))} parcelas semanais`;
+    case "custom":
+    default:
+      return cfg.descricao || "Condição personalizada";
+  }
+}
+
 // Estrutura persistida em gd_proposals.condicoes_pagamento
 export interface ProposalPaymentTerms {
   ofertadas: PaymentTerm[];

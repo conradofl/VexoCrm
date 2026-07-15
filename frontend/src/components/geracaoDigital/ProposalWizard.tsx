@@ -120,7 +120,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           {[
             { label: "Cliente", step: 1 },
             { label: "Pacotes", step: 2 },
-            { label: "Vexo Avulsos", step: 3 },
+            { label: "Módulos Avulsos", step: 3 },
             { label: "Condições", step: 4 },
             { label: "Revisão", step: 5 }
           ].map((s) => (
@@ -207,16 +207,6 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                       </div>
                       {isOn && <CheckCircle className="h-4 w-4 text-purple-600 shrink-0" />}
                     </div>
-                    {isOn && (pk.produtos_incluidos || []).length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {(pk.produtos_incluidos || []).slice(0, 6).map((prod: any, idx: number) => (
-                          <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-350 text-[8px] py-0">{prod.nome}</Badge>
-                        ))}
-                        {(pk.produtos_incluidos || []).length > 6 && (
-                          <Badge variant="outline" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 text-[8px] py-0">+{(pk.produtos_incluidos || []).length - 6}</Badge>
-                        )}
-                      </div>
-                    )}
                   </button>
                 );
               })}
@@ -242,87 +232,62 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 3: VEXO AVULSOS */}
+        {/* STEP 3: MÓDULOS AVULSOS */}
         {wizardStep === 3 && (
           <div className="space-y-5 animate-fade-in">
+            <div className="space-y-1">
+              <Label className="text-xs font-bold text-slate-800 dark:text-slate-200">Módulos Avulsos</Label>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">Selecione módulos adicionais. Os valores aparecem descritos na proposta.</p>
+            </div>
+
             <div className="space-y-1.5">
-              <Label className="text-xs font-bold text-slate-800 dark:text-slate-200">Módulos Extras Vexo OS (Avulsos)</Label>
-              <p className="text-[10px] text-slate-500">Selecione módulos adicionais que serão somados avulsamente à mensalidade da proposta.</p>
+              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 dark:text-indigo-300">Vexo OS</span>
+              <div className="flex flex-wrap gap-1.5">
+                {vexoProducts.map((p) => {
+                  const isIncluded = !!newVexoAvulsoIds[p.id];
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setNewVexoAvulsoIds((prev) => ({ ...prev, [p.id]: !isIncluded }))}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all flex items-center gap-1",
+                        isIncluded
+                          ? "bg-indigo-600 text-white border-indigo-500"
+                          : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300"
+                      )}
+                    >
+                      {p.nome}{isIncluded && <CheckCircle className="h-3 w-3 shrink-0" />}
+                    </button>
+                  );
+                })}
+                {vexoProducts.length === 0 && <span className="text-[10px] text-slate-400 italic">Nenhum módulo Vexo cadastrado.</span>}
+              </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 max-h-[260px] overflow-y-auto pr-1">
-              {vexoProducts.map((p) => {
-                const isIncluded = !!newVexoAvulsoIds[p.id];
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() =>
-                      setNewVexoAvulsoIds((prev) => ({
-                        ...prev,
-                        [p.id]: !isIncluded
-                      }))
-                    }
-                    className={cn(
-                      "p-3 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
-                      isIncluded
-                        ? "bg-indigo-50 border-indigo-300"
-                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-350 dark:hover:border-slate-600"
-                    )}
-                  >
-                    <div className="space-y-0.5">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight block">{p.nome}</span>
-                      <span className="text-[10px] font-mono font-bold text-purple-650">
-                        {Number(p.valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
-                      </span>
-                    </div>
-                    {isIncluded && (
-                      <div className="h-4 w-4 rounded-full bg-indigo-600 flex items-center justify-center shrink-0">
-                        <CheckCircle className="h-2.5 w-2.5 text-white" />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {vexoProducts.length === 0 && (
-                <p className="text-xs text-slate-450 italic col-span-3 text-center py-6">Nenhum módulo cadastrado no catálogo.</p>
-              )}
-            </div>
-
-            <div className="space-y-1.5 pt-4 border-t border-dashed border-slate-200">
-              <Label className="text-xs font-bold text-slate-800 dark:text-slate-200">Módulos Extras Geração Digital (Avulsos)</Label>
-              <p className="text-[10px] text-slate-500">Serviços GD avulsos somados à mensalidade da proposta.</p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 max-h-[260px] overflow-y-auto pr-1">
-              {gdProducts.map((p) => {
-                const isIncluded = !!newGdAvulsoIds[p.id];
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() =>
-                      setNewGdAvulsoIds((prev) => ({ ...prev, [p.id]: !isIncluded }))
-                    }
-                    className={cn(
-                      "p-3 rounded-lg border transition-all flex items-center justify-between cursor-pointer text-left shadow-sm",
-                      isIncluded ? "bg-pink-50 border-pink-300" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-350 dark:hover:border-slate-600"
-                    )}
-                  >
-                    <div className="space-y-0.5">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight block">{p.nome}</span>
-                      <span className="text-[10px] font-mono font-bold text-pink-600">
-                        {Number(p.valor_padrao || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/{p.recorrencia === "unico" ? "único" : "mês"}
-                      </span>
-                    </div>
-                    {isIncluded && (
-                      <div className="h-4 w-4 rounded-full bg-pink-600 flex items-center justify-center shrink-0">
-                        <CheckCircle className="h-2.5 w-2.5 text-white" />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {gdProducts.length === 0 && (
-                <p className="text-xs text-slate-450 italic col-span-3 text-center py-6">Nenhum módulo GD cadastrado no catálogo.</p>
-              )}
+            <div className="space-y-1.5 pt-3 border-t border-dashed border-slate-200 dark:border-white/10">
+              <span className="text-[10px] font-black uppercase tracking-wider text-pink-500 dark:text-pink-300">Geração Digital</span>
+              <div className="flex flex-wrap gap-1.5">
+                {gdProducts.map((p) => {
+                  const isIncluded = !!newGdAvulsoIds[p.id];
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setNewGdAvulsoIds((prev) => ({ ...prev, [p.id]: !isIncluded }))}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all flex items-center gap-1",
+                        isIncluded
+                          ? "bg-pink-600 text-white border-pink-500"
+                          : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-pink-300"
+                      )}
+                    >
+                      {p.nome}{isIncluded && <CheckCircle className="h-3 w-3 shrink-0" />}
+                    </button>
+                  );
+                })}
+                {gdProducts.length === 0 && <span className="text-[10px] text-slate-400 italic">Nenhum módulo GD cadastrado.</span>}
+              </div>
             </div>
 
             <div className="flex justify-between pt-4 border-t border-slate-100">
