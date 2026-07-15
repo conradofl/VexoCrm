@@ -8,12 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ArrowRight, X, FileText, CheckCircle } from "lucide-react";
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
+import { type PaymentTerm, termAplicaA, APLICA_A_LABELS } from "@/lib/geracaoDigital/paymentTerms";
 
 interface ProposalWizardProps {
   onClose: () => void;
   availablePackages: any[];
   vexoProducts: any[];
   gdProducts: any[];
+  availableTerms: PaymentTerm[];
   wizardState: {
     wizardStep: number;
     setWizardStep: (step: number) => void;
@@ -25,6 +27,8 @@ interface ProposalWizardProps {
     setNewPackageVexoId: (val: string) => void;
     newPacotesOfertados: string[];
     setNewPacotesOfertados: React.Dispatch<React.SetStateAction<string[]>>;
+    newOfferedTermIds: string[];
+    setNewOfferedTermIds: React.Dispatch<React.SetStateAction<string[]>>;
     newVexoAvulsoIds: Record<string, boolean>;
     setNewVexoAvulsoIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     newGdAvulsoIds: Record<string, boolean>;
@@ -53,6 +57,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
   availablePackages,
   vexoProducts,
   gdProducts,
+  availableTerms,
   wizardState,
   toast
 }) => {
@@ -67,6 +72,8 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
     setNewPackageVexoId,
     newPacotesOfertados,
     setNewPacotesOfertados,
+    newOfferedTermIds,
+    setNewOfferedTermIds,
     newVexoAvulsoIds,
     setNewVexoAvulsoIds,
     newGdAvulsoIds,
@@ -351,6 +358,35 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                   placeholder="Ex: https://checkout.vexo.com.br/proposta"
                   className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs dark:text-white h-10 focus:border-indigo-500"
                 />
+              </div>
+            </div>
+
+            {/* Condições de pagamento a ofertar — o cliente escolhe na proposta pública */}
+            <div className="space-y-2">
+              <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Condições de Pagamento a Ofertar</Label>
+              <p className="text-[10px] text-slate-450 dark:text-slate-500">Selecione as condições que aparecerão na proposta para o cliente escolher a que melhor se encaixa.</p>
+              <div className="flex flex-wrap gap-1.5">
+                {availableTerms.filter((t) => t.ativo).map((term) => {
+                  const isOn = newOfferedTermIds.includes(term.id);
+                  return (
+                    <button
+                      key={term.id}
+                      type="button"
+                      onClick={() => setNewOfferedTermIds((prev) => isOn ? prev.filter((x) => x !== term.id) : [...prev, term.id])}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all",
+                        isOn
+                          ? "bg-purple-600 text-white border-purple-500"
+                          : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-purple-300"
+                      )}
+                    >
+                      {term.nome} · {APLICA_A_LABELS[termAplicaA(term)]}{isOn ? " ✓" : ""}
+                    </button>
+                  );
+                })}
+                {availableTerms.filter((t) => t.ativo).length === 0 && (
+                  <span className="text-[10px] text-slate-400 italic">Nenhuma condição salva. Crie na aba Condições.</span>
+                )}
               </div>
             </div>
 

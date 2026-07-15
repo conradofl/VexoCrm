@@ -23,7 +23,7 @@ import {
   type NegotiationLayers,
   type MeioPagamento,
   EMPTY_LAYERS,
-  MEIO_PAGAMENTO_LABELS,
+  meiosLabel,
   computeNegotiation
 } from "@/lib/geracaoDigital/negotiation";
 import { SellerControlPanel } from "@/components/geracaoDigital/SellerControlPanel";
@@ -43,7 +43,7 @@ interface BoardItem {
 export interface NegotiationFinalizeResult {
   descontos: DescontoConcedido[];
   valorSetupVexoFinal: number;
-  meioPagamento: { setup: MeioPagamento; mensalidade: MeioPagamento };
+  meioPagamento: { setup: MeioPagamento[]; mensalidade: MeioPagamento[] };
   carenciaDias: number | null;
 }
 
@@ -149,8 +149,8 @@ export function GeracaoDigitalNegotiationBoard({
     const hasSetupCond = !!condSetupActive;
     const hasMensalCond = !!condMensalActive;
     const hasParcelamento = layers.parcelas > 1;
-    const hasMeioSetup = !!layers.meioSetup;
-    const hasMeioMensal = !!layers.meioMensalidade;
+    const hasMeioSetup = layers.meioSetup.length > 0;
+    const hasMeioMensal = layers.meioMensalidade.length > 0;
 
     if (!hasSetupCond && !hasMensalCond && !hasParcelamento && !hasMeioSetup && !hasMeioMensal) {
       return (
@@ -180,7 +180,7 @@ export function GeracaoDigitalNegotiationBoard({
                   <div>{hasParcelamento ? `Parcelado em ${layers.parcelas}x de ${brl(result.valorParcela)}` : "À vista"}</div>
                 )}
                 {hasMeioSetup && (
-                  <div className="text-[10px] text-purple-600 font-bold">Meio: {MEIO_PAGAMENTO_LABELS[layers.meioSetup]}</div>
+                  <div className="text-[10px] text-purple-600 font-bold">Meio: {meiosLabel(layers.meioSetup)}</div>
                 )}
               </div>
             </div>
@@ -201,7 +201,7 @@ export function GeracaoDigitalNegotiationBoard({
                   <div>Faturamento recorrente</div>
                 )}
                 {hasMeioMensal && (
-                  <div className="text-[10px] text-blue-600 font-bold">Meio: {MEIO_PAGAMENTO_LABELS[layers.meioMensalidade]}</div>
+                  <div className="text-[10px] text-blue-600 font-bold">Meio: {meiosLabel(layers.meioMensalidade)}</div>
                 )}
               </div>
             </div>
@@ -330,9 +330,9 @@ export function GeracaoDigitalNegotiationBoard({
                     {SETUP_LABEL}: {layers.isencaoSetup ? <b className="text-emerald-600">isento</b> : brl(setupVexoValue)}
                   </span>
                 )}
-                {layers.meioSetup && (
+                {layers.meioSetup.length > 0 && (
                   <span className="text-[10px] text-purple-600 font-bold block">
-                    via {MEIO_PAGAMENTO_LABELS[layers.meioSetup]}
+                    via {meiosLabel(layers.meioSetup)}
                   </span>
                 )}
               </div>
@@ -349,9 +349,9 @@ export function GeracaoDigitalNegotiationBoard({
                   )}
                 </div>
                 <span className="text-[10px] text-slate-500 block">faturamento recorrente, à parte da entrada</span>
-                {layers.meioMensalidade && (
+                {layers.meioMensalidade.length > 0 && (
                   <span className="text-[10px] text-blue-600 font-bold block">
-                    via {MEIO_PAGAMENTO_LABELS[layers.meioMensalidade]}
+                    via {meiosLabel(layers.meioMensalidade)}
                   </span>
                 )}
               </div>

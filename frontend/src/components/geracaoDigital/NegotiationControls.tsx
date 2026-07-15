@@ -7,25 +7,30 @@ import {
 // Controles reutilizáveis da Mesa de Negociação (pílulas de meio de pagamento
 // e input de desconto livre % / R$).
 
-export function MeioPills({ value, onChange, disabled }: { value: MeioPagamento; onChange: (m: MeioPagamento) => void; disabled?: boolean }) {
+// Multi-seleção: o vendedor pode ofertar mais de um meio de pagamento por
+// trilha (ex: Cartão + PIX). `value` é a lista de meios ativos.
+export function MeioPills({ value, onToggle, disabled }: { value: MeioPagamento[]; onToggle: (m: Exclude<MeioPagamento, "">) => void; disabled?: boolean }) {
   return (
     <div className="flex gap-1.5">
-      {(Object.keys(MEIO_PAGAMENTO_LABELS) as Exclude<MeioPagamento, "">[]).map((m) => (
-        <button
-          key={m}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(value === m ? "" : m)}
-          className={cn(
-            "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
-            value === m
-              ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-transparent"
-              : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
-          )}
-        >
-          {MEIO_PAGAMENTO_LABELS[m]}
-        </button>
-      ))}
+      {(Object.keys(MEIO_PAGAMENTO_LABELS) as Exclude<MeioPagamento, "">[]).map((m) => {
+        const on = value.includes(m);
+        return (
+          <button
+            key={m}
+            type="button"
+            disabled={disabled}
+            onClick={() => onToggle(m)}
+            className={cn(
+              "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
+              on
+                ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-transparent"
+                : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
+            )}
+          >
+            {MEIO_PAGAMENTO_LABELS[m]}{on ? " ✓" : ""}
+          </button>
+        );
+      })}
     </div>
   );
 }

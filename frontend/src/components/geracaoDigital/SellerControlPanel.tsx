@@ -216,11 +216,19 @@ export function SellerControlPanel({
             </div>
             <div className="space-y-1">
               <span className="text-[9px] font-bold uppercase text-slate-400">Entrada</span>
-              <MeioPills value={layers.meioSetup} onChange={(m) => patch({ meioSetup: m })} disabled={result.entradaOriginal <= 0} />
+              <MeioPills
+                value={layers.meioSetup}
+                onToggle={(m) => patch({ meioSetup: layers.meioSetup.includes(m) ? layers.meioSetup.filter((x) => x !== m) : [...layers.meioSetup, m] })}
+                disabled={result.entradaOriginal <= 0}
+              />
             </div>
             <div className="space-y-1">
               <span className="text-[9px] font-bold uppercase text-slate-400">Mensalidade</span>
-              <MeioPills value={layers.meioMensalidade} onChange={(m) => patch({ meioMensalidade: m })} disabled={result.mensalidadeOriginal <= 0} />
+              <MeioPills
+                value={layers.meioMensalidade}
+                onToggle={(m) => patch({ meioMensalidade: layers.meioMensalidade.includes(m) ? layers.meioMensalidade.filter((x) => x !== m) : [...layers.meioMensalidade, m] })}
+                disabled={result.mensalidadeOriginal <= 0}
+              />
             </div>
           </div>
 

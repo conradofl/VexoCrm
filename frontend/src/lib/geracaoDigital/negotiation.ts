@@ -29,8 +29,9 @@ export interface NegotiationLayers {
   descontoSetup: DescontoLivre;
   descontoMensalidade: DescontoLivre;
   parcelas: number;
-  meioSetup: MeioPagamento;
-  meioMensalidade: MeioPagamento;
+  // Multi-seleção de meios de pagamento por trilha (ex: ["cartao","pix"]).
+  meioSetup: MeioPagamento[];
+  meioMensalidade: MeioPagamento[];
   // Carência do 1º vencimento da mensalidade (dias). Não altera valores.
   carenciaDias: number | null;
 }
@@ -42,10 +43,14 @@ export const EMPTY_LAYERS: NegotiationLayers = {
   descontoSetup: { modo: "porcentagem", valor: 0 },
   descontoMensalidade: { modo: "porcentagem", valor: 0 },
   parcelas: 1,
-  meioSetup: "",
-  meioMensalidade: "",
+  meioSetup: [],
+  meioMensalidade: [],
   carenciaDias: null,
 };
+
+// Rótulo de uma lista de meios de pagamento (ex: "Cartão · PIX").
+export const meiosLabel = (meios: MeioPagamento[]): string =>
+  meios.filter((m): m is Exclude<MeioPagamento, ""> => !!m).map((m) => MEIO_PAGAMENTO_LABELS[m]).join(" · ");
 
 export interface CamadaEfeito {
   label: string;

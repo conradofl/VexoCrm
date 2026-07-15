@@ -1871,7 +1871,36 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const finalPaymentLink = row.payment_link || paymentLinkDefault || "";
 
-      const items = Array.isArray(row.itens) ? row.itens : [];
+      let items = Array.isArray(row.itens) ? row.itens : [];
+
+      // Sincroniza o escopo com o template vivo do pacote escolhido: módulos
+      // adicionados ao pacote DEPOIS da criação da proposta aparecem
+      // automaticamente. Só ANEXA linhas de valor 0 (não remove nem altera o
+      // que já existe, nem os totais) — módulos avulsos e valores negociados
+      // ficam intactos.
+      const activePkg = packagesRows.find((p) => p.id === row.package_id || p.id === row.package_vexo_id);
+      if (activePkg && Array.isArray(activePkg.produtos_incluidos)) {
+        const norm = (s) => String(s || "").trim().toLowerCase().replace(/^módulo:\s*/, "");
+        const existingKeys = new Set(
+          items.map((i) => i.product_id ? `id:${i.product_id}` : `nm:${norm(i.descricao)}`)
+        );
+        const extras = [];
+        activePkg.produtos_incluidos.forEach((p) => {
+          const isVexo = p.origem === "vexo" || activePkg.tipo === "vexo";
+          const key = p.product_id ? `id:${p.product_id}` : `nm:${norm(p.nome)}`;
+          if (existingKeys.has(key)) return;
+          existingKeys.add(key);
+          extras.push({
+            product_id: p.product_id || null,
+            descricao: (isVexo && !String(p.nome || "").startsWith("Módulo:")) ? `Módulo: ${p.nome}` : p.nome,
+            categoria: isVexo ? "vexo" : "gd",
+            valor: 0,
+            recorrencia: "mensal"
+          });
+        });
+        if (extras.length > 0) items = [...items, ...extras];
+      }
+
       const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
 
@@ -1879,6 +1908,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         success: true,
         data: {
           ...row,
+          itens: items,
           payment_link: finalPaymentLink,
           valor_setup: valorSetup,
           valor_recorrente: valorRecorrente,

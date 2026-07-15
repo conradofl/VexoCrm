@@ -73,7 +73,7 @@ interface Proposal {
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
   descontos_concedidos?: DescontoConcedido[] | null;
-  meio_pagamento?: { setup?: string; mensalidade?: string } | null;
+  meio_pagamento?: { setup?: string | string[]; mensalidade?: string | string[] } | null;
   carencia_dias?: number | null;
   package_vexo_id?: string | null;
   assinatura_metodo?: string | null;
@@ -365,8 +365,17 @@ export default function GeracaoDigitalPublicProposal() {
   const mensalFinalVal = calc.mensalidadeFinal;
 
   const MEIO_LABELS_PUB: Record<string, string> = { cartao: "Cartão", boleto: "Boleto", pix: "PIX" };
-  const meioSetupPub = proposal.meio_pagamento?.setup ? MEIO_LABELS_PUB[proposal.meio_pagamento.setup] : null;
-  const meioMensalPub = proposal.meio_pagamento?.mensalidade ? MEIO_LABELS_PUB[proposal.meio_pagamento.mensalidade] : null;
+  // meio_pagamento pode ser string (legado) ou array (multi-seleção).
+  const meiosAsArray = (v: string | string[] | undefined | null): string[] =>
+    Array.isArray(v) ? v.filter(Boolean) : v ? [v] : [];
+  const meiosPubLabel = (v: string | string[] | undefined | null): string | null => {
+    const arr = meiosAsArray(v).map((m) => MEIO_LABELS_PUB[m] || m);
+    return arr.length > 0 ? arr.join(" · ") : null;
+  };
+  const meioSetupArr = meiosAsArray(proposal.meio_pagamento?.setup);
+  const meioMensalArr = meiosAsArray(proposal.meio_pagamento?.mensalidade);
+  const meioSetupPub = meiosPubLabel(proposal.meio_pagamento?.setup);
+  const meioMensalPub = meiosPubLabel(proposal.meio_pagamento?.mensalidade);
 
   // Resumo "Como você vai pagar" por trilha (meio + parcelamento + condição)
   const parcelamentoConc = descontosConcedidos.find((d) => d.tipo === "parcelamento");
@@ -786,7 +795,7 @@ export default function GeracaoDigitalPublicProposal() {
                       {temVp && (
                         <div className="mt-2 space-y-1">
                           <div className="flex items-center justify-between py-1.5 px-3 bg-pink-500/10 border border-pink-500/20 rounded-md">
-                            <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em dinheiro</span>
+                            <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
                             <span className="text-pink-300 text-sm font-black">R$ {dinheiroMensal.toLocaleString("pt-BR")}/mês</span>
                           </div>
                           <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
@@ -843,7 +852,7 @@ export default function GeracaoDigitalPublicProposal() {
                 <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Formas de pagamento aceitas</span>
                 <div className="flex flex-wrap gap-2">
                   {([["pix", "PIX"], ["cartao", "Cartão de Crédito"], ["boleto", "Boleto"]] as const).map(([key, label]) => {
-                    const selecionado = proposal.meio_pagamento?.setup === key || proposal.meio_pagamento?.mensalidade === key;
+                    const selecionado = meioSetupArr.includes(key) || meioMensalArr.includes(key);
                     return (
                       <span
                         key={key}

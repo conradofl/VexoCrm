@@ -1023,7 +1023,7 @@ export default function GeracaoDigitalPackages() {
                             </span>
                             <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-1">
                               {pkg.produtos_incluidos?.map((p, idx) => (
-                                <Badge key={idx} variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[9px] font-normal font-sans py-0 dark:text-slate-300">
+                                <Badge key={idx} variant="outline" className="bg-slate-50 border-slate-200 text-slate-600 text-[9px] font-normal font-sans py-0 dark:bg-transparent dark:border-white/20 dark:text-slate-100">
                                   {p.nome}
                                 </Badge>
                               ))}

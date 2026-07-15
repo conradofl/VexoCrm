@@ -153,6 +153,7 @@ export default function GeracaoDigitalProposals() {
     availablePackages,
     vexoProducts,
     gdProducts,
+    availableTerms,
     loadProposals,
     toast
   });
@@ -165,6 +166,7 @@ export default function GeracaoDigitalProposals() {
     setNewPackageId,
     setNewPackageVexoId,
     setNewPacotesOfertados,
+    setNewOfferedTermIds,
     setNewVexoAvulsoIds,
     setNewGdAvulsoIds,
     setNewCarencia,
@@ -195,6 +197,11 @@ export default function GeracaoDigitalProposals() {
     setNewValidade(prop.validade_ate ? prop.validade_ate.split("T")[0] : "");
     setNewCondicoes(prop.condicoes || "");
     setNewPaymentLink(prop.payment_link || "");
+    setNewOfferedTermIds(
+      Array.isArray(prop.condicoes_pagamento?.ofertadas)
+        ? prop.condicoes_pagamento.ofertadas.map((t: any) => t.id)
+        : []
+    );
 
     const vexoIds: Record<string, boolean> = {};
     const gdIds: Record<string, boolean> = {};
@@ -1120,6 +1127,7 @@ export default function GeracaoDigitalProposals() {
                   availablePackages={availablePackages}
                   vexoProducts={vexoProducts}
                   gdProducts={gdProducts}
+                  availableTerms={availableTerms}
                   wizardState={wizardState}
                   toast={toast}
                 />

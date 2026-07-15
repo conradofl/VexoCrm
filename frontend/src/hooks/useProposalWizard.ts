@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { fetchApi } from "@/lib/api";
+import type { PaymentTerm } from "@/lib/geracaoDigital/paymentTerms";
 
 interface UseProposalWizardProps {
   clientId: string;
@@ -7,6 +8,7 @@ interface UseProposalWizardProps {
   availablePackages: any[];
   vexoProducts: any[];
   gdProducts: any[];
+  availableTerms: PaymentTerm[];
   loadProposals: () => void;
   toast: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void;
 }
@@ -17,6 +19,7 @@ export function useProposalWizard({
   availablePackages,
   vexoProducts,
   gdProducts,
+  availableTerms,
   loadProposals,
   toast
 }: UseProposalWizardProps) {
@@ -26,6 +29,7 @@ export function useProposalWizard({
   const [newPackageId, setNewPackageId] = useState<string>("");
   const [newPackageVexoId, setNewPackageVexoId] = useState<string>("");
   const [newPacotesOfertados, setNewPacotesOfertados] = useState<string[]>([]);
+  const [newOfferedTermIds, setNewOfferedTermIds] = useState<string[]>([]);
   const [newVexoAvulsoIds, setNewVexoAvulsoIds] = useState<Record<string, boolean>>({});
   const [newGdAvulsoIds, setNewGdAvulsoIds] = useState<Record<string, boolean>>({});
   const [newCarencia, setNewCarencia] = useState<string>("");
@@ -43,6 +47,7 @@ export function useProposalWizard({
     setNewPackageId("");
     setNewPackageVexoId("");
     setNewPacotesOfertados([]);
+    setNewOfferedTermIds([]);
     setNewVexoAvulsoIds({});
     setNewGdAvulsoIds({});
     setNewCarencia("");
@@ -199,7 +204,12 @@ export function useProposalWizard({
         condicoes: newCondicoes || undefined,
         payment_link: newPaymentLink || null,
         carencia_dias: newCarencia !== "" ? Number(newCarencia) : null,
-        valor_vp: totalVp > 0 ? totalVp : null
+        valor_vp: totalVp > 0 ? totalVp : null,
+        // Condições de pagamento ofertadas ao cliente (menu na proposta pública).
+        condicoes_pagamento: {
+          ofertadas: availableTerms.filter((t) => newOfferedTermIds.includes(t.id)),
+          escolhida: null
+        }
       };
 
       const url = editingProposalId ? `/api/gd/proposals/${editingProposalId}` : `/api/gd/proposals`;
@@ -242,6 +252,8 @@ export function useProposalWizard({
     setNewPackageVexoId,
     newPacotesOfertados,
     setNewPacotesOfertados,
+    newOfferedTermIds,
+    setNewOfferedTermIds,
     newVexoAvulsoIds,
     setNewVexoAvulsoIds,
     newGdAvulsoIds,
