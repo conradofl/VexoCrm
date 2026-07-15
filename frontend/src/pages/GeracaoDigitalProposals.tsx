@@ -92,6 +92,7 @@ interface Proposal {
   carencia_dias?: number | null;
   package_id?: string | null;
   package_vexo_id?: string | null;
+  pacotes_ofertados?: string[] | null;
 }
 
 const PERIODO_OPTIONS = [
@@ -119,6 +120,7 @@ export default function GeracaoDigitalProposals() {
   const [paymentLink, setPaymentLink] = useState<string>("");
   const [editPackageId, setEditPackageId] = useState<string>("");
   const [editPackageVexoId, setEditPackageVexoId] = useState<string>("");
+  const [editPacotesOfertados, setEditPacotesOfertados] = useState<string[]>([]);
   const [editValorVp, setEditValorVp] = useState<number>(0);
   const [vpActive, setVpActive] = useState<boolean>(false);
   const [editVexoAvulsoIds, setEditVexoAvulsoIds] = useState<Record<string, boolean>>({});
@@ -489,6 +491,11 @@ export default function GeracaoDigitalProposals() {
 
     setEditPackageId(prop.package_id || "");
     setEditPackageVexoId(prop.package_vexo_id || "");
+    setEditPacotesOfertados(
+      Array.isArray((prop as any).pacotes_ofertados)
+        ? (prop as any).pacotes_ofertados
+        : [prop.package_id, prop.package_vexo_id].filter(Boolean) as string[]
+    );
     const avulsosMap: Record<string, boolean> = {};
     if (Array.isArray(prop.itens)) {
       prop.itens.forEach((item) => {
@@ -782,6 +789,7 @@ export default function GeracaoDigitalProposals() {
         client_id: clientId,
         prospect_name: prospectName,
         package_id: editPackageId || null,
+        pacotes_ofertados: editPacotesOfertados,
         package_vexo_id: editPackageVexoId || null,
         itens: finalItems,
         condicoes,
@@ -1306,34 +1314,53 @@ export default function GeracaoDigitalProposals() {
                           </Button>
                         </div>
 
-                        {/* 1. Pacotes */}
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Combo Geração Digital</Label>
-                            <select
-                              value={editPackageId}
-                              onChange={(e) => setEditPackageId(e.target.value)}
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-850 dark:text-white h-9"
-                            >
-                              <option value="">— Sem combo GD —</option>
-                              {availablePackages.filter((p) => p.tipo === "gd" || !p.tipo).map((p) => (
-                                <option key={p.id} value={p.id}>{p.nome} ({PKG_PERIOD_LABELS[p.periodo] || p.periodo})</option>
-                              ))}
-                            </select>
+                        {/* 1. Pacotes ofertados — multi-seleção (o cliente escolhe na proposta) */}
+                        <div className="space-y-2">
+                          <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Pacotes ofertados (o cliente escolhe um na proposta)</Label>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {availablePackages.map((p) => {
+                              const isOn = editPacotesOfertados.includes(p.id);
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setEditPacotesOfertados((prev) => {
+                                      const next = prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id];
+                                      // Pacote "padrão" (base do cálculo) = primeiro GD e Vexo ofertados
+                                      const firstGd = next.find((id) => { const pk = availablePackages.find((a) => a.id === id); return pk && (pk.tipo === "gd" || !pk.tipo); }) || "";
+                                      const firstVexo = next.find((id) => { const pk = availablePackages.find((a) => a.id === id); return pk && pk.tipo === "vexo"; }) || "";
+                                      setEditPackageId(firstGd);
+                                      setEditPackageVexoId(firstVexo);
+                                      return next;
+                                    });
+                                  }}
+                                  className={cn(
+                                    "p-2.5 rounded-lg border text-left transition-all flex items-center justify-between gap-2",
+                                    isOn
+                                      ? "bg-purple-50 dark:bg-purple-950/20 border-purple-300 dark:border-purple-900/40"
+                                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-purple-300"
+                                  )}
+                                >
+                                  <div className="min-w-0">
+                                    <span className="text-xs font-bold text-slate-800 dark:text-white block truncate">{p.nome}</span>
+                                    <span className="text-[9px] text-slate-500 dark:text-slate-400 block">
+                                      {p.tipo === "vexo" ? "Vexo OS" : "Geração Digital"} · {PKG_PERIOD_LABELS[p.periodo] || p.periodo}
+                                    </span>
+                                  </div>
+                                  {isOn && <CheckCircle className="h-4 w-4 text-purple-600 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                            {availablePackages.length === 0 && (
+                              <span className="text-[10px] text-slate-400 italic col-span-3">Nenhum pacote cadastrado. Crie na aba Pacotes.</span>
+                            )}
                           </div>
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Combo Vexo OS</Label>
-                            <select
-                              value={editPackageVexoId}
-                              onChange={(e) => setEditPackageVexoId(e.target.value)}
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-850 dark:text-white h-9"
-                            >
-                              <option value="">— Sem combo Vexo —</option>
-                              {availablePackages.filter((p) => p.tipo === "vexo").map((p) => (
-                                <option key={p.id} value={p.id}>{p.nome} ({PKG_PERIOD_LABELS[p.periodo] || p.periodo})</option>
-                              ))}
-                            </select>
-                          </div>
+                          {editPacotesOfertados.length > 1 && (
+                            <span className="text-[9px] text-emerald-600 dark:text-emerald-400 block">
+                              {editPacotesOfertados.length} pacotes serão exibidos na proposta para o cliente escolher.
+                            </span>
+                          )}
                         </div>
 
                         {/* 2/3. Venda Casada / Setup de implantação */}

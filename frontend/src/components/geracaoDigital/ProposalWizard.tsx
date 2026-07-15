@@ -117,9 +117,8 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
             { label: "Cliente", step: 1 },
             { label: "Pacotes", step: 2 },
             { label: "Vexo Avulsos", step: 3 },
-            { label: "Setup", step: 4 },
-            { label: "Condições", step: 5 },
-            { label: "Revisão", step: 6 }
+            { label: "Condições", step: 4 },
+            { label: "Revisão", step: 5 }
           ].map((s) => (
             <div key={s.step} className="space-y-2">
               <div className={cn(
@@ -338,46 +337,8 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
         )}
 
         {/* STEP 4: SETUP */}
+        {/* STEP 4: CONDIÇÕES COMERCIAIS */}
         {wizardStep === 4 && (
-          <div className="space-y-5 max-w-md mx-auto py-4 animate-fade-in">
-            <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 shadow-sm">
-              <div className="space-y-0.5">
-                <Label className="text-xs font-bold text-slate-800 dark:text-slate-200">Cobrar taxa de setup de implantação?</Label>
-                <span className="text-[10px] text-slate-450 block">Cobrança única e de entrada na assinatura do contrato.</span>
-              </div>
-              <Switch checked={newCobrarSetup} onCheckedChange={setNewCobrarSetup} />
-            </div>
-
-            {newCobrarSetup && (
-              <div className="space-y-1.5 animate-slide-down">
-                <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Valor do Setup de Implantação (R$)</Label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-3 text-xs text-slate-500 font-mono">R$</span>
-                  <Input
-                    type="number"
-                    value={newValorSetup || ""}
-                    onChange={(e) => setNewValorSetup(Number(e.target.value) || 0)}
-                    placeholder="Ex: 1500"
-                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs dark:text-white pl-8 h-10 font-mono focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-between pt-6 border-t border-slate-100 mt-6">
-              <Button variant="outline" onClick={() => setWizardStep(3)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
-                Voltar
-              </Button>
-              <Button onClick={() => setWizardStep(5)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
-                Avançar
-                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 5: CONDIÇÕES COMERCIAIS */}
-        {wizardStep === 5 && (
           <div className="space-y-5 animate-fade-in">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -442,10 +403,10 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
             </div>
 
             <div className="flex justify-between pt-4 border-t border-slate-100">
-              <Button variant="outline" onClick={() => setWizardStep(4)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+              <Button variant="outline" onClick={() => setWizardStep(3)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                 Voltar
               </Button>
-              <Button onClick={() => setWizardStep(6)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
+              <Button onClick={() => setWizardStep(5)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
                 Avançar
                 <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
               </Button>
@@ -453,8 +414,8 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 6: REVISÃO E FECHAMENTO */}
-        {wizardStep === 6 && (() => {
+        {/* STEP 5: REVISÃO E FECHAMENTO */}
+        {wizardStep === 5 && (() => {
           const selectedGdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
           const selectedVexoPkg = availablePackages.find(p => p.id === newPackageVexoId && p.tipo === "vexo");
 
@@ -540,7 +501,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
               </div>
 
               <div className="flex justify-between pt-4 border-t border-slate-100">
-                <Button variant="outline" onClick={() => setWizardStep(5)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                <Button variant="outline" onClick={() => setWizardStep(4)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                   Voltar
                 </Button>
                 <Button onClick={handleCreateDirectProposal} className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-black text-xs px-8">

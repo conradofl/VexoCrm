@@ -1518,7 +1518,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento, package_id, package_vexo_id, valor_vp } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento, package_id, package_vexo_id, valor_vp, pacotes_ofertados } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1566,6 +1566,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const finalPackageId = package_id !== undefined ? (package_id || null) : current.package_id;
       const finalPackageVexoId = package_vexo_id !== undefined ? (package_vexo_id || null) : current.package_vexo_id;
+      const finalPacotesOfertados = pacotes_ofertados !== undefined
+        ? (Array.isArray(pacotes_ofertados) ? pacotes_ofertados : [])
+        : current.pacotes_ofertados;
       const finalValorVp = valor_vp !== undefined
         ? (valor_vp !== null ? Number(valor_vp) : null)
         : (current.valor_vp !== null ? Number(current.valor_vp) : null);
@@ -1590,7 +1593,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              meio_pagamento = COALESCE($16, meio_pagamento),
              package_id = $17,
              package_vexo_id = $18,
-             valor_vp = $21
+             valor_vp = $21,
+             pacotes_ofertados = $22
          WHERE id = $19 AND tenant_id = $20 RETURNING *`,
         [
           prospect_name,
@@ -1613,7 +1617,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalPackageVexoId,
           id,
           tenantId,
-          finalValorVp
+          finalValorVp,
+          finalPacotesOfertados ? JSON.stringify(finalPacotesOfertados) : null
         ]
       );
 
@@ -1818,6 +1823,14 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const allowedPackageIds = new Set();
       if (row.package_id) allowedPackageIds.add(row.package_id);
       if (row.package_vexo_id) allowedPackageIds.add(row.package_vexo_id);
+      // Menu de pacotes ofertados salvo na própria proposta (multi-seleção).
+      let ofertadosProp = row.pacotes_ofertados;
+      if (typeof ofertadosProp === "string") {
+        try { ofertadosProp = JSON.parse(ofertadosProp); } catch { ofertadosProp = []; }
+      }
+      if (Array.isArray(ofertadosProp)) {
+        ofertadosProp.forEach((pid) => { if (pid) allowedPackageIds.add(pid); });
+      }
       if (row.presentation_id) {
         try {
           const presRes = await pool.query(
