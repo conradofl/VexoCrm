@@ -769,21 +769,35 @@ export default function GeracaoDigitalPublicProposal() {
               </div>
               <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
                 <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Mensalidade</span>
-                <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                  {mensalFinalVal < mensalBaseVal && (
-                    <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
-                      R$ {mensalBaseVal.toLocaleString("pt-BR")}
-                    </span>
-                  )}
-                  R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
-                </span>
-                {Number(proposal.valor_vp || 0) > 0 && (
-                  <div className="mt-2 py-1 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md inline-block">
-                    <span className="text-emerald-400 text-sm font-medium">
-                      Sendo R$ {Number(proposal.valor_vp || 0).toLocaleString("pt-BR")} pagos via VP
-                    </span>
-                  </div>
-                )}
+                {(() => {
+                  const vpMensal = Number(proposal.valor_vp || 0);
+                  const temVp = vpMensal > 0 && vpMensal < mensalFinalVal;
+                  const dinheiroMensal = temVp ? mensalFinalVal - vpMensal : mensalFinalVal;
+                  return (
+                    <>
+                      <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                        {(mensalFinalVal < mensalBaseVal || temVp) && (
+                          <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
+                            R$ {(temVp ? mensalFinalVal : mensalBaseVal).toLocaleString("pt-BR")}
+                          </span>
+                        )}
+                        R$ {(temVp ? dinheiroMensal : mensalFinalVal).toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
+                      </span>
+                      {temVp && (
+                        <div className="mt-2 space-y-1">
+                          <div className="flex items-center justify-between py-1.5 px-3 bg-pink-500/10 border border-pink-500/20 rounded-md">
+                            <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em dinheiro</span>
+                            <span className="text-pink-300 text-sm font-black">R$ {dinheiroMensal.toLocaleString("pt-BR")}/mês</span>
+                          </div>
+                          <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
+                            <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em VP (permuta)</span>
+                            <span className="text-emerald-400 text-sm font-black">R$ {vpMensal.toLocaleString("pt-BR")}/mês</span>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {primeiraMensalidadeDate && (
                   <span className="text-xs font-bold text-amber-300 block pt-1 transition-colors duration-500">
                     Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
