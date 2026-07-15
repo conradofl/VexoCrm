@@ -1977,11 +1977,17 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const periodoDoPacote = selectedPkg && selectedPkg.periodo && selectedPkg.periodo !== "unico"
         ? selectedPkg.periodo
         : (selectedPkg ? "mensal" : null);
+      // VP (permuta) acompanha o pacote escolhido — cada pacote tem seu próprio
+      // valor em VP. Ao trocar de plano, o valor em dinheiro passa a descontar
+      // o VP do NOVO pacote (antes ficava preso ao VP do pacote anterior).
+      const vpDoPacote = selectedPkg && Number(selectedPkg.valor_vp || 0) > 0
+        ? Number(selectedPkg.valor_vp)
+        : null;
       await pool.query(
         `UPDATE public.gd_proposals
-         SET package_id = $1, itens = $2, valor_total = $3, periodo_plano = COALESCE($5, periodo_plano)
+         SET package_id = $1, itens = $2, valor_total = $3, periodo_plano = COALESCE($5, periodo_plano), valor_vp = $6
          WHERE id = $4`,
-        [package_id, JSON.stringify(finalItems), valorTotal, id, periodoDoPacote]
+        [package_id, JSON.stringify(finalItems), valorTotal, id, periodoDoPacote, vpDoPacote]
       );
 
       res.json({ success: true });
