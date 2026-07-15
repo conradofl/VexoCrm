@@ -1828,10 +1828,14 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       if (typeof ofertadosProp === "string") {
         try { ofertadosProp = JSON.parse(ofertadosProp); } catch { ofertadosProp = []; }
       }
+      const hasOwnOfertados = Array.isArray(ofertadosProp) && ofertadosProp.length > 0;
       if (Array.isArray(ofertadosProp)) {
         ofertadosProp.forEach((pid) => { if (pid) allowedPackageIds.add(pid); });
       }
-      if (row.presentation_id) {
+      // Só usa os pacotes da apresentação vinculada como FALLBACK — quando a
+      // proposta ainda não definiu seu próprio menu (pacotes_ofertados). Assim
+      // uma apresentação antiga não injeta pacotes "fantasma" na proposta.
+      if (row.presentation_id && !hasOwnOfertados) {
         try {
           const presRes = await pool.query(
             `SELECT pacotes_ofertados FROM public.gd_presentations WHERE id = $1 AND tenant_id = $2`,
