@@ -641,7 +641,11 @@ export default function GeracaoDigitalProposals() {
         valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
         descontos_concedidos: result.descontos,
         meio_pagamento: result.meioPagamento,
-        periodo_plano: periodoPlano || null,
+        periodo_plano: (() => {
+          const gdPkg = availablePackages.find((p: any) => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
+          const vexoPkg = availablePackages.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
+          return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
+        })(),
         validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
         valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
         observacao_validade: observacaoValidade || null,
@@ -806,7 +810,11 @@ export default function GeracaoDigitalProposals() {
           ofertadas: offeredTerms,
           escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
         },
-        periodo_plano: periodoPlano || null,
+        periodo_plano: (() => {
+          const gdPkg = availablePackages.find((p: any) => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
+          const vexoPkg = availablePackages.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
+          return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
+        })(),
         validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
         valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
         observacao_validade: observacaoValidade || null,

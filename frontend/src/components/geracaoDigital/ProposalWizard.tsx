@@ -308,20 +308,6 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           <div className="space-y-5 animate-fade-in">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
-                <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Período de Compromisso do Plano</Label>
-                <select
-                  value={newPeriodo}
-                  onChange={(e) => setNewPeriodo(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-850 dark:text-white h-10 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="mensal">Mensal (1 mês)</option>
-                  <option value="trimestral">Trimestral (3 meses)</option>
-                  <option value="semestral">Semestral (6 meses)</option>
-                  <option value="anual">Anual (12 meses)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
                 <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Validade da Proposta</Label>
                 <Input
                   type="date"
@@ -390,7 +376,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
             valor_setup_vexo: newValorSetup,
             package_id: newPackageId || null,
             package_vexo_id: newPackageVexoId || null,
-            periodo_plano: newPeriodo || "mensal",
+            periodo_plano: selectedGdPkg?.periodo || selectedVexoPkg?.periodo || "mensal",
             itens: [
               ...(selectedGdPkg ? [{ categoria: "gd", valor: 0 }] : []),
               ...(selectedVexoPkg ? [{ categoria: "vexo", valor: 0 }] : []),

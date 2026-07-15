@@ -1972,12 +1972,16 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const valorTotal = valorSetup + valorRecorrente;
 
-      // Update proposal in DB
+      // Update proposal in DB — período do plano acompanha o pacote escolhido
+      // (fonte única: o pacote define o período, sem seletor separado).
+      const periodoDoPacote = selectedPkg && selectedPkg.periodo && selectedPkg.periodo !== "unico"
+        ? selectedPkg.periodo
+        : (selectedPkg ? "mensal" : null);
       await pool.query(
         `UPDATE public.gd_proposals
-         SET package_id = $1, itens = $2, valor_total = $3
+         SET package_id = $1, itens = $2, valor_total = $3, periodo_plano = COALESCE($5, periodo_plano)
          WHERE id = $4`,
-        [package_id, JSON.stringify(finalItems), valorTotal, id]
+        [package_id, JSON.stringify(finalItems), valorTotal, id, periodoDoPacote]
       );
 
       res.json({ success: true });

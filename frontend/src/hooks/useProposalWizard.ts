@@ -190,7 +190,11 @@ export function useProposalWizard({
         itens: finalItems,
         cobrar_setup: newCobrarSetup,
         valor_setup_vexo: newCobrarSetup ? Number(newValorSetup || 0) : null,
-        periodo_plano: newPeriodo || null,
+        periodo_plano: (() => {
+          const gdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
+          const vexoPkg = availablePackages.find(p => p.id === newPackageVexoId && p.tipo === "vexo");
+          return gdPkg?.periodo || vexoPkg?.periodo || "mensal";
+        })(),
         validade_ate: newValidade ? new Date(`${newValidade}T23:59:59`).toISOString() : null,
         condicoes: newCondicoes || undefined,
         payment_link: newPaymentLink || null,
