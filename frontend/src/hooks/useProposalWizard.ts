@@ -25,6 +25,7 @@ export function useProposalWizard({
   const [newProspect, setNewProspect] = useState<string>("");
   const [newPackageId, setNewPackageId] = useState<string>("");
   const [newPackageVexoId, setNewPackageVexoId] = useState<string>("");
+  const [newPacotesOfertados, setNewPacotesOfertados] = useState<string[]>([]);
   const [newVexoAvulsoIds, setNewVexoAvulsoIds] = useState<Record<string, boolean>>({});
   const [newGdAvulsoIds, setNewGdAvulsoIds] = useState<Record<string, boolean>>({});
   const [newCarencia, setNewCarencia] = useState<string>("");
@@ -41,6 +42,7 @@ export function useProposalWizard({
     setNewProspect("");
     setNewPackageId("");
     setNewPackageVexoId("");
+    setNewPacotesOfertados([]);
     setNewVexoAvulsoIds({});
     setNewGdAvulsoIds({});
     setNewCarencia("");
@@ -184,6 +186,7 @@ export function useProposalWizard({
         prospect_name: newProspect.trim(),
         package_id: newPackageId || null,
         package_vexo_id: newPackageVexoId || null,
+        pacotes_ofertados: newPacotesOfertados,
         itens: finalItems,
         cobrar_setup: newCobrarSetup,
         valor_setup_vexo: newCobrarSetup ? Number(newValorSetup || 0) : null,
@@ -233,6 +236,8 @@ export function useProposalWizard({
     setNewPackageId,
     newPackageVexoId,
     setNewPackageVexoId,
+    newPacotesOfertados,
+    setNewPacotesOfertados,
     newVexoAvulsoIds,
     setNewVexoAvulsoIds,
     newGdAvulsoIds,

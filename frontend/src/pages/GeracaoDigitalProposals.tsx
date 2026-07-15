@@ -164,6 +164,7 @@ export default function GeracaoDigitalProposals() {
     setNewProspect,
     setNewPackageId,
     setNewPackageVexoId,
+    setNewPacotesOfertados,
     setNewVexoAvulsoIds,
     setNewGdAvulsoIds,
     setNewCarencia,
@@ -182,6 +183,11 @@ export default function GeracaoDigitalProposals() {
     setNewProspect(prop.prospect_name || "");
     setNewPackageId(prop.package_id || "");
     setNewPackageVexoId(prop.package_vexo_id || "");
+    setNewPacotesOfertados(
+      Array.isArray(prop.pacotes_ofertados)
+        ? prop.pacotes_ofertados
+        : [prop.package_id, prop.package_vexo_id].filter(Boolean)
+    );
     setNewCarencia(prop.carencia_dias !== null && prop.carencia_dias !== undefined ? String(prop.carencia_dias) : "");
     setNewCobrarSetup(prop.cobrar_setup === true);
     setNewValorSetup(Number(prop.valor_setup_vexo || 0));
@@ -1312,55 +1318,6 @@ export default function GeracaoDigitalProposals() {
                             <Sparkles className="h-3.5 w-3.5 mr-1.5" />
                             Abrir Mesa de Negociação
                           </Button>
-                        </div>
-
-                        {/* 1. Pacotes ofertados — multi-seleção (o cliente escolhe na proposta) */}
-                        <div className="space-y-2">
-                          <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Pacotes ofertados (o cliente escolhe um na proposta)</Label>
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            {availablePackages.map((p) => {
-                              const isOn = editPacotesOfertados.includes(p.id);
-                              return (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setEditPacotesOfertados((prev) => {
-                                      const next = prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id];
-                                      // Pacote "padrão" (base do cálculo) = primeiro GD e Vexo ofertados
-                                      const firstGd = next.find((id) => { const pk = availablePackages.find((a) => a.id === id); return pk && (pk.tipo === "gd" || !pk.tipo); }) || "";
-                                      const firstVexo = next.find((id) => { const pk = availablePackages.find((a) => a.id === id); return pk && pk.tipo === "vexo"; }) || "";
-                                      setEditPackageId(firstGd);
-                                      setEditPackageVexoId(firstVexo);
-                                      return next;
-                                    });
-                                  }}
-                                  className={cn(
-                                    "p-2.5 rounded-lg border text-left transition-all flex items-center justify-between gap-2",
-                                    isOn
-                                      ? "bg-purple-50 dark:bg-purple-950/20 border-purple-300 dark:border-purple-900/40"
-                                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-purple-300"
-                                  )}
-                                >
-                                  <div className="min-w-0">
-                                    <span className="text-xs font-bold text-slate-800 dark:text-white block truncate">{p.nome}</span>
-                                    <span className="text-[9px] text-slate-500 dark:text-slate-400 block">
-                                      {p.tipo === "vexo" ? "Vexo OS" : "Geração Digital"} · {PKG_PERIOD_LABELS[p.periodo] || p.periodo}
-                                    </span>
-                                  </div>
-                                  {isOn && <CheckCircle className="h-4 w-4 text-purple-600 shrink-0" />}
-                                </button>
-                              );
-                            })}
-                            {availablePackages.length === 0 && (
-                              <span className="text-[10px] text-slate-400 italic col-span-3">Nenhum pacote cadastrado. Crie na aba Pacotes.</span>
-                            )}
-                          </div>
-                          {editPacotesOfertados.length > 1 && (
-                            <span className="text-[9px] text-emerald-600 dark:text-emerald-400 block">
-                              {editPacotesOfertados.length} pacotes serão exibidos na proposta para o cliente escolher.
-                            </span>
-                          )}
                         </div>
 
                         {/* 2/3. Venda Casada / Setup de implantação */}

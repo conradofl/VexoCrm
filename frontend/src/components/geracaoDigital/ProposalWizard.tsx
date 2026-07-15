@@ -23,6 +23,8 @@ interface ProposalWizardProps {
     setNewPackageId: (val: string) => void;
     newPackageVexoId: string;
     setNewPackageVexoId: (val: string) => void;
+    newPacotesOfertados: string[];
+    setNewPacotesOfertados: React.Dispatch<React.SetStateAction<string[]>>;
     newVexoAvulsoIds: Record<string, boolean>;
     setNewVexoAvulsoIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     newGdAvulsoIds: Record<string, boolean>;
@@ -63,6 +65,8 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
     setNewPackageId,
     newPackageVexoId,
     setNewPackageVexoId,
+    newPacotesOfertados,
+    setNewPacotesOfertados,
     newVexoAvulsoIds,
     setNewVexoAvulsoIds,
     newGdAvulsoIds,
@@ -162,74 +166,71 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 2: PACOTES */}
+        {/* STEP 2: PACOTES (multi-seleção — o cliente escolhe um na proposta) */}
         {wizardStep === 2 && (
           <div className="space-y-5 animate-fade-in">
-            <div className="grid gap-6 md:grid-cols-2">
-              {/* GD Packages */}
-              <div className="space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
-                <Label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-1">1. Combo Geração Digital (GD)</Label>
-                <select
-                  value={newPackageId}
-                  onChange={(e) => setNewPackageId(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-850 dark:text-white h-10 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">— Sem Pacote GD —</option>
-                  {availablePackages.filter(p => p.tipo === "gd" || !p.tipo).map((pk: any) => (
-                    <option key={pk.id} value={pk.id}>
-                      {pk.nome} ({(pk.valor / (pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês)
-                    </option>
-                  ))}
-                </select>
-                {(() => {
-                  const pkg = availablePackages.find(p => p.id === newPackageId);
-                  if (!pkg) return <p className="text-[10px] text-slate-400 italic mt-2">Nenhum pacote de marketing digital selecionado.</p>;
-                  return (
-                    <div className="mt-3 space-y-1.5">
-                      <span className="text-[10px] font-bold text-slate-500 block">Itens inclusos neste pacote GD:</span>
-                      <div className="flex flex-wrap gap-1">
-                        {(pkg.produtos_incluidos || []).map((prod: any, idx: number) => (
-                          <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-350 text-[9px] py-0">{prod.nome}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Vexo Packages */}
-              <div className="space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
-                <Label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-1">2. Combo Vexo OS (Software)</Label>
-                <select
-                  value={newPackageVexoId}
-                  onChange={(e) => setNewPackageVexoId(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-850 dark:text-white h-10 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">— Sem Combo Vexo OS —</option>
-                  {availablePackages.filter(p => p.tipo === "vexo").map((pk: any) => (
-                    <option key={pk.id} value={pk.id}>
-                      {pk.nome} ({(pk.valor / (pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês)
-                    </option>
-                  ))}
-                </select>
-                {(() => {
-                  const pkg = availablePackages.find(p => p.id === newPackageVexoId);
-                  if (!pkg) return <p className="text-[10px] text-slate-400 italic mt-2">Nenhum combo Vexo OS selecionado.</p>;
-                  return (
-                    <div className="mt-3 space-y-1.5">
-                      <span className="text-[10px] font-bold text-slate-500 block">Módulos do sistema inclusos:</span>
-                      <div className="flex flex-wrap gap-1">
-                        {(pkg.produtos_incluidos || []).map((prod: any, idx: number) => (
-                          <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-350 text-[9px] py-0">{prod.nome}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
+            <div>
+              <Label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-1">Pacotes a Ofertar</Label>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Marque um ou vários pacotes. Todos aparecem na proposta para o cliente escolher.</p>
             </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-[340px] overflow-y-auto pr-1">
+              {availablePackages.map((pk: any) => {
+                const isOn = newPacotesOfertados.includes(pk.id);
+                const meses = pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1;
+                return (
+                  <button
+                    key={pk.id}
+                    type="button"
+                    onClick={() => {
+                      setNewPacotesOfertados((prev) => {
+                        const next = prev.includes(pk.id) ? prev.filter((x) => x !== pk.id) : [...prev, pk.id];
+                        const firstGd = next.find((id) => { const p = availablePackages.find((a: any) => a.id === id); return p && (p.tipo === "gd" || !p.tipo); }) || "";
+                        const firstVexo = next.find((id) => { const p = availablePackages.find((a: any) => a.id === id); return p && p.tipo === "vexo"; }) || "";
+                        setNewPackageId(firstGd);
+                        setNewPackageVexoId(firstVexo);
+                        return next;
+                      });
+                    }}
+                    className={cn(
+                      "p-3 rounded-xl border text-left transition-all flex flex-col gap-1.5",
+                      isOn
+                        ? "bg-purple-50 dark:bg-purple-950/20 border-purple-300 dark:border-purple-900/40"
+                        : "bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-purple-300"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-xs font-bold text-slate-850 dark:text-white block truncate">{pk.nome}</span>
+                        <span className="text-[9px] text-slate-500 dark:text-slate-400 block">
+                          {pk.tipo === "vexo" ? "Vexo OS" : "Geração Digital"} · {(Number(pk.valor || 0) / meses).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
+                        </span>
+                      </div>
+                      {isOn && <CheckCircle className="h-4 w-4 text-purple-600 shrink-0" />}
+                    </div>
+                    {isOn && (pk.produtos_incluidos || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {(pk.produtos_incluidos || []).slice(0, 6).map((prod: any, idx: number) => (
+                          <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-350 text-[8px] py-0">{prod.nome}</Badge>
+                        ))}
+                        {(pk.produtos_incluidos || []).length > 6 && (
+                          <Badge variant="outline" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 text-[8px] py-0">+{(pk.produtos_incluidos || []).length - 6}</Badge>
+                        )}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+              {availablePackages.length === 0 && (
+                <p className="text-[10px] text-slate-400 italic col-span-3">Nenhum pacote cadastrado. Crie na aba Pacotes.</p>
+              )}
+            </div>
+            {newPacotesOfertados.length > 1 && (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">
+                {newPacotesOfertados.length} pacotes serão exibidos na proposta para o cliente escolher.
+              </span>
+            )}
 
-            <div className="flex justify-between pt-4 border-t border-slate-100">
+            <div className="flex justify-between pt-4 border-t border-slate-100 dark:border-white/5">
               <Button variant="outline" onClick={() => setWizardStep(1)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                 Voltar
               </Button>
