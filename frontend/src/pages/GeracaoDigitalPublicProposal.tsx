@@ -535,7 +535,22 @@ export default function GeracaoDigitalPublicProposal() {
             </CardHeader>
             <CardContent className="p-0 divide-y divide-slate-900">
               {(["gd", "vexo"] as const).map(cat => {
-                const catItems = items.filter(i => i.categoria === cat).sort((a, b) => Number(b.valor || 0) - Number(a.valor || 0));
+                // Desduplicação: o mesmo serviço/módulo pode chegar em várias
+                // variantes (plano "Google Ads", avulso "GD: Google Ads",
+                // "Vexo OS: Google Ads") compartilhando o mesmo product_id.
+                // Chave = product_id (quando existe) ou nome sem prefixo.
+                const dedupKey = (it: ProposalItem) => {
+                  if (it.product_id) return `pid:${it.product_id}`;
+                  const nome = String(it.descricao || "")
+                    .replace(/^(GD:|Vexo OS:|Módulo:|Pacote Vexo:|Pacote:)\s*/, "")
+                    .trim()
+                    .toLowerCase();
+                  return `nome:${nome}`;
+                };
+                const uniqueItems = items.filter(
+                  (item, index, self) => index === self.findIndex(t => dedupKey(t) === dedupKey(item))
+                );
+                const catItems = uniqueItems.filter(i => i.categoria === cat).sort((a, b) => Number(b.valor || 0) - Number(a.valor || 0));
                 if (catItems.length === 0) return null;
                 return catItems.map((item, idx) => {
                   const isGdPkg = cat === "gd" && proposal.package_id && packages.find(p => p.id === proposal.package_id && p.nome === item.descricao);
