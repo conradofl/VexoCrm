@@ -190,7 +190,7 @@ export function SellerControlPanel({
           <div className="p-3 rounded-2xl border-2 border-slate-200 bg-white space-y-3">
             <div className="flex items-center gap-2">
               <Layers className="h-3.5 w-3.5 text-purple-500" />
-              <span className="text-xs font-black text-slate-800">Dividir / Parcelar a Entrada</span>
+              <span className="text-xs font-black text-slate-800">Parcelamento Setup</span>
             </div>
             {/* Número livre de parcelas + forma (cartão/boleto). */}
             <div className="space-y-1.5">
@@ -240,14 +240,6 @@ export function SellerControlPanel({
             <div className="flex items-center gap-2">
               <Wallet className="h-3.5 w-3.5 text-purple-500" />
               <span className="text-xs font-black text-slate-800">Meio de Pagamento</span>
-            </div>
-            <div className="space-y-1">
-              <span className="text-[9px] font-bold uppercase text-slate-400">Entrada</span>
-              <MeioPills
-                value={layers.meioSetup}
-                onToggle={(m) => patch({ meioSetup: layers.meioSetup.includes(m) ? layers.meioSetup.filter((x) => x !== m) : [...layers.meioSetup, m] })}
-                disabled={result.entradaOriginal <= 0}
-              />
             </div>
             <div className="space-y-1">
               <span className="text-[9px] font-bold uppercase text-slate-400">Mensalidade</span>
