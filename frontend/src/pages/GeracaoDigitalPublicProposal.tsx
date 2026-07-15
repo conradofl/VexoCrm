@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,7 @@ const PERIODO_LABELS: Record<string, string> = {
 
 export default function GeracaoDigitalPublicProposal() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -421,7 +422,18 @@ export default function GeracaoDigitalPublicProposal() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* Botão de saída — só para o vendedor logado (cliente não vê). */}
+          {isAuthenticated && (
+            <Button
+              onClick={() => navigate("/crm/propostas-gd")}
+              variant="outline"
+              className="h-9 gap-1.5 border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white text-xs font-bold"
+            >
+              <X className="h-3.5 w-3.5" />
+              Voltar ao sistema
+            </Button>
+          )}
           <Badge
             className={cn(
               "text-xs font-extrabold px-3 py-1 border-none",
