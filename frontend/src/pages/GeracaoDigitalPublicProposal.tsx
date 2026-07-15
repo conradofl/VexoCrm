@@ -19,7 +19,8 @@ import {
   ExternalLink,
   Check,
   X,
-  Lock
+  Lock,
+  ChevronDown
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -432,25 +433,26 @@ export default function GeracaoDigitalPublicProposal() {
         </div>
       </header>
 
-      <main className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 mt-12 grid gap-10 lg:grid-cols-5">
+      <main className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 mt-10 grid gap-8 grid-cols-1 lg:grid-cols-12 items-start">
 
-        {/* Left/Middle area: content of proposal */}
-        <div className="lg:col-span-3 space-y-8">
+        {/* ================= COLUNA ESQUERDA (conteúdo) ================= */}
+        <div className="lg:col-span-8 space-y-6">
 
-          <div className="space-y-2">
+          {/* Header compacto */}
+          <div className="space-y-1.5">
             <span className="text-[10px] text-purple-400 font-mono font-bold uppercase tracking-wider">Apresentado para</span>
-            <h1 className="text-4xl md:text-5xl font-black text-white">{proposal.prospect_name}</h1>
-            <p className="text-sm text-slate-400 font-mono">Proposta comercial emitida em {new Date(proposal.created_at).toLocaleDateString("pt-BR")}</p>
+            <h1 className="text-3xl md:text-5xl font-black text-white leading-[1.05]">{proposal.prospect_name}</h1>
+            <p className="text-xs text-slate-400 font-mono">Proposta comercial emitida em {new Date(proposal.created_at).toLocaleDateString("pt-BR")}</p>
           </div>
 
-          {/* Validade da proposta (gatilho de urgência) */}
+          {/* Validade da proposta (gatilho de urgência) — banner compacto */}
           {validadeDate && proposal.status !== "aceita" && (
-            <Card
+            <div
               className={cn(
-                "p-4 space-y-1 border",
+                "rounded-xl px-4 py-3 border backdrop-blur-xl space-y-0.5",
                 validadeExpirada
-                  ? "bg-red-950/40 border-red-900/60"
-                  : "bg-amber-950/30 border-amber-800/50"
+                  ? "bg-red-500/10 border-red-500/30"
+                  : "bg-amber-500/10 border-amber-500/25"
               )}
             >
               <div className="flex items-center gap-2">
@@ -471,27 +473,27 @@ export default function GeracaoDigitalPublicProposal() {
                     : ""}
                 </p>
               )}
-            </Card>
+            </div>
           )}
 
-          {/* Carência do primeiro vencimento */}
+          {/* Carência do primeiro vencimento — banner compacto */}
           {primeiraMensalidadeDate && proposal.status !== "aceita" && (
-            <Card className="p-5 border bg-emerald-950/25 border-emerald-900/50 flex items-center gap-3">
+            <div className="rounded-xl px-4 py-3 border bg-emerald-500/10 border-emerald-500/25 backdrop-blur-xl flex items-center gap-3">
               <Clock className="h-5 w-5 text-emerald-400 shrink-0" />
               <div>
-                <span className="text-base font-black text-emerald-300 block">
+                <span className="text-sm font-black text-emerald-300 block">
                   Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
                 </span>
-                <span className="text-xs text-slate-400">A entrada é paga na contratação; a mensalidade só começa após a carência.</span>
+                <span className="text-[11px] text-slate-400">A entrada é paga na contratação; a mensalidade só começa após a carência.</span>
               </div>
-            </Card>
+            </div>
           )}
 
-           {/* Seletor de Pacotes Comerciais (Grid Unificado) */}
+          {/* Seletor de Pacotes — cards compactos */}
           {proposal.status !== "aceita" && packages.length > 0 && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <span className="text-[10px] text-purple-400 font-mono font-bold uppercase tracking-wider block">Escolha seu Plano</span>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
                 {packages.map((pkg: any) => {
                   const isSelected = proposal.package_id === pkg.id || proposal.package_vexo_id === pkg.id;
                   const periodoLabel = pkg.periodo ? (PERIODO_LABELS[pkg.periodo] || pkg.periodo) : null;
@@ -502,22 +504,21 @@ export default function GeracaoDigitalPublicProposal() {
                       key={pkg.id}
                       onClick={() => handleSelectPackage(pkg.id)}
                       className={cn(
-                        "text-left p-5 rounded-2xl border transition-all duration-300 relative flex flex-col justify-between min-h-[140px]",
+                        "text-left p-3.5 rounded-xl border transition-all duration-300 relative flex flex-col justify-between gap-3 backdrop-blur-xl",
                         isSelected
-                          ? "bg-purple-650/15 border-purple-500 shadow-lg shadow-purple-600/10"
-                          : "bg-slate-900/40 border-slate-900 hover:border-slate-800"
+                          ? "bg-violet-600/15 border-violet-500 shadow-lg shadow-violet-600/20"
+                          : "bg-white/[0.03] border-white/10 hover:border-white/25"
                       )}
                     >
-                      <div className="space-y-1">
-                        <span className="text-[8px] text-purple-400 font-bold uppercase tracking-wider">Plano</span>
-                        <h4 className="text-sm font-black text-white leading-snug">{pkg.nome}</h4>
+                      <div className="space-y-0.5 pr-5">
+                        <h4 className="text-[13px] font-black text-white leading-snug">{pkg.nome}</h4>
                         {periodoLabel && (
                           <span className="text-[9px] text-slate-400 font-mono">{periodoLabel}</span>
                         )}
                       </div>
-                      <div className="mt-4 pt-3 border-t border-slate-950/60 w-full">
-                        <span className="text-lg font-black text-pink-500 font-mono">
-                          R$ {valorMensal.toLocaleString("pt-BR")}<span className="text-xs font-bold text-slate-400">/mês</span>
+                      <div>
+                        <span className="text-base font-black text-pink-500 font-mono">
+                          R$ {valorMensal.toLocaleString("pt-BR")}<span className="text-[10px] font-bold text-slate-400">/mês</span>
                         </span>
                         {meses > 1 && (
                           <span className="text-[9px] text-slate-500 block font-mono">
@@ -526,7 +527,7 @@ export default function GeracaoDigitalPublicProposal() {
                         )}
                       </div>
                       {isSelected && (
-                        <div className="absolute top-3 right-3 h-5 w-5 bg-purple-650 rounded-full flex items-center justify-center text-white">
+                        <div className="absolute top-2.5 right-2.5 h-5 w-5 bg-violet-600 rounded-full flex items-center justify-center text-white">
                           <Check className="h-3 w-3" />
                         </div>
                       )}
@@ -537,17 +538,15 @@ export default function GeracaoDigitalPublicProposal() {
             </div>
           )}
 
-          {/* List of items */}
-          <Card className="bg-slate-900/40 border-slate-900 overflow-hidden shadow-2xl">
-            <CardHeader className="border-b border-slate-900 bg-slate-900/60">
-              <CardTitle className="text-xl font-bold text-white">Escopo Geral de Serviços</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0 divide-y divide-slate-900">
-              {(["gd", "vexo"] as const).map(cat => {
-                // Desduplicação: o mesmo serviço/módulo pode chegar em várias
-                // variantes (plano "Google Ads", avulso "GD: Google Ads",
-                // "Vexo OS: Google Ads") compartilhando o mesmo product_id.
-                // Chave = product_id (quando existe) ou nome sem prefixo.
+          {/* Escopo de Serviços — grid denso (check + nome) */}
+          <div className="rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black text-white">Escopo de Serviços</h3>
+              <span className="text-[10px] text-slate-400 font-mono">tudo incluído no pacote</span>
+            </div>
+            <div className="columns-1 sm:columns-2 gap-x-1.5">
+              {(() => {
+                // Desduplicação (mesma regra de antes): product_id ou nome sem prefixo.
                 const dedupKey = (it: ProposalItem) => {
                   if (it.product_id) return `pid:${it.product_id}`;
                   const nome = String(it.descricao || "")
@@ -559,122 +558,42 @@ export default function GeracaoDigitalPublicProposal() {
                 const uniqueItems = items.filter(
                   (item, index, self) => index === self.findIndex(t => dedupKey(t) === dedupKey(item))
                 );
-                const catItems = uniqueItems.filter(i => i.categoria === cat).sort((a, b) => Number(b.valor || 0) - Number(a.valor || 0));
-                if (catItems.length === 0) return null;
-                return catItems.map((item, idx) => {
-                  const isGdPkg = cat === "gd" && proposal.package_id && packages.find(p => p.id === proposal.package_id && p.nome === item.descricao);
-                  const isVexoPkg = cat === "vexo" && proposal.package_vexo_id && packages.find(p => p.id === proposal.package_vexo_id && p.nome === item.descricao);
-                  const pkgRef = isGdPkg || isVexoPkg;
-                  
-                  return (
-                    <div key={`${cat}-${idx}`} className="p-6 flex flex-col gap-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="space-y-1.5">
-                          <h4 className="text-base font-bold text-white leading-tight">{item.descricao}</h4>
-                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-800">
-                            {item.categoria === "vexo" ? "Vexo OS" : "Geração Digital"}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          {Number(item.valor || 0) === 0 ? (
-                            <span className="text-emerald-400 font-medium text-sm">Incluso no pacote</span>
-                          ) : (
-                            <>
-                              {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                                <span className="text-[10px] text-slate-500 line-through font-mono block">
-                                  De R$ {Number(item.valor_tabela || 0).toLocaleString("pt-BR")}
-                                </span>
-                              )}
-                              <span className="text-lg font-black text-white font-mono">
-                                R$ {Number(item.valor || 0).toFixed(2)}
-                                {Number(item.valor_tabela || 0) > 0 && Number(item.total_periodo || 0) > 0 && (
-                                  <span className="text-[10px] text-emerald-400 font-bold ml-1">
-                                    ({Math.round((1 - Number(item.total_periodo || 0) / Number(item.valor_tabela || 1)) * 100)}% off)
-                                  </span>
-                                )}
-                              </span>
-                              <span className="text-[9px] text-slate-400 block uppercase tracking-wider font-mono">
-                                {item.recorrencia === "mensal" ? "recorrente" : "setup único"}
-                              </span>
-                              {Number(item.total_periodo || 0) > 0 && Number(item.meses || 0) > 1 && (
-                                <span className="text-[9px] text-slate-500 block font-mono">
-                                  total do período: R$ {Number(item.total_periodo || 0).toLocaleString("pt-BR")} ({item.meses} meses)
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {pkgRef && pkgRef.produtos_incluidos && pkgRef.produtos_incluidos.length > 0 && (
-                        <div className="pt-3 border-t border-slate-800/50 mt-1">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Módulos Incluídos neste pacote:</span>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            {pkgRef.produtos_incluidos.map((p: any, pIdx: number) => (
-                              <div key={pIdx} className="flex items-center gap-2 text-xs text-slate-300">
-                                <div className="h-1.5 w-1.5 rounded-full bg-purple-500/50 shrink-0" />
-                                <span>{p.nome}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                // Ordena: TODOS os serviços GD primeiro, depois TODOS os Vexo.
+                const byValor = (a: ProposalItem, b: ProposalItem) => Number(b.valor || 0) - Number(a.valor || 0);
+                const gdItems = uniqueItems.filter(i => i.categoria !== "vexo").sort(byValor);
+                const vexoItems = uniqueItems.filter(i => i.categoria === "vexo").sort(byValor);
+                const ordered = [...gdItems, ...vexoItems];
+                return ordered.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] border border-white/5 px-3 py-2 mb-1.5 break-inside-avoid"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span className="text-[13px] text-slate-100 truncate">{item.descricao}</span>
+                      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", item.categoria === "vexo" ? "bg-blue-400/70" : "bg-purple-400/70")} />
                     </div>
-                  );
-                });
-              })}
-            </CardContent>
-          </Card>
+                    {Number(item.valor || 0) > 0 ? (
+                      <span className="text-[11px] font-black text-white font-mono shrink-0">R$ {Number(item.valor || 0).toFixed(2)}</span>
+                    ) : (
+                      <span className="text-[10px] text-emerald-400/70 font-mono shrink-0">incluso</span>
+                    )}
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
 
-          {/* Setup / Implantação Vexo OS (só quando cobrado) */}
-          {proposal.cobrar_setup && (
-            <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
-              <div className="flex items-center justify-between gap-4">
-                <h3 className="font-bold text-white text-base">Taxa de Implantação (Setup)</h3>
-                <span className="text-sm font-black text-purple-300 font-mono shrink-0">
-                  R$ {setupVexoValue.toLocaleString("pt-BR")}
-                </span>
-              </div>
-              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
-                {SETUP_JUSTIFICATION}
-              </p>
-            </Card>
-          )}
-
-          {/* Como você vai pagar — resumo por trilha */}
-          {temResumoPagamento && (
-            <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
-              <h3 className="font-bold text-white text-xl">Como você vai pagar</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="p-4 rounded-xl bg-slate-950 border border-purple-900/40 space-y-1">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-purple-400 block">Entrada (Setup)</span>
-                  <span className="text-sm font-bold text-white block">
-                    {setupIsento ? "Isenta nesta proposta" : pagamentoEntrada || "à vista"}
-                  </span>
-                </div>
-                <div className="p-4 rounded-xl bg-slate-950 border border-blue-900/40 space-y-1">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-blue-400 block">Mensalidade</span>
-                  <span className="text-sm font-bold text-white block">{pagamentoMensalidade}</span>
-                  {primeiraMensalidadeDate && (
-                    <span className="text-xs font-bold text-amber-300 block">
-                      1º vencimento em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
-                    </span>
-                  )}
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Condições de pagamento ofertadas */}
+          {/* Condições de pagamento ofertadas — escolha do cliente */}
           {offeredTerms.length > 0 && (
-            <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
-              <h3 className="font-bold text-white text-base">Condições de Pagamento</h3>
+            <div className="rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 p-5 space-y-3">
+              <h3 className="font-black text-white text-base">Condições de Pagamento</h3>
               <p className="text-[11px] text-slate-400">
                 {proposal.status === "aceita"
                   ? "Condições ofertadas nesta proposta:"
                   : "Escolha a condição de pagamento de sua preferência antes de assinar:"}
               </p>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2.5 sm:grid-cols-2">
                 {offeredTerms.map((term) => {
                   const aplicaA = termAplicaA(term);
                   const breakdown = computePaymentBreakdown(term, aplicaA === "mensalidade" ? Number(proposal.valor_recorrente || 0) : setupFinalVal);
@@ -688,10 +607,10 @@ export default function GeracaoDigitalPublicProposal() {
                       disabled={proposal.status === "aceita"}
                       onClick={() => setChosenTermId(term.id)}
                       className={cn(
-                        "text-left p-4 rounded-xl border transition-all space-y-1.5",
+                        "text-left p-3.5 rounded-xl border transition-all space-y-1.5",
                         isChosen
-                          ? "bg-purple-600/15 border-purple-500/60"
-                          : "bg-slate-950 border-slate-900 hover:border-slate-700",
+                          ? "bg-violet-600/15 border-violet-500/60"
+                          : "bg-white/[0.03] border-white/10 hover:border-white/25",
                         proposal.status === "aceita" && "cursor-default"
                       )}
                     >
@@ -702,7 +621,7 @@ export default function GeracaoDigitalPublicProposal() {
                             · {APLICA_A_LABELS[aplicaA]}
                           </span>
                         </span>
-                        {isChosen && <CheckCircle className="h-4 w-4 text-purple-400 shrink-0" />}
+                        {isChosen && <CheckCircle className="h-4 w-4 text-violet-400 shrink-0" />}
                       </div>
                       {breakdown.linhas.map((linha, idx) => (
                         <p key={idx} className="text-[10px] text-slate-300 font-medium">{linha}</p>
@@ -716,19 +635,21 @@ export default function GeracaoDigitalPublicProposal() {
                   Condição escolhida: {chosenTerm.nome}
                 </p>
               )}
-            </Card>
+            </div>
           )}
 
           {/* Condições negociadas na mesa */}
           {descontosConcedidos.length > 0 && (
-            <Card className="bg-emerald-950/20 border-emerald-900/50 p-6 space-y-3">
-              <h3 className="font-bold text-white text-base">Condições Negociadas</h3>
+            <div className="rounded-2xl bg-emerald-500/[0.07] border border-emerald-500/25 backdrop-blur-xl p-5 space-y-2.5">
+              <h3 className="font-black text-white text-base">Condições Negociadas</h3>
               <div className="space-y-2">
                 {descontosConcedidos.map((d, idx) => (
                   <div key={idx} className="flex items-center justify-between gap-4 text-xs">
                     <div className="flex items-center gap-2">
                       <CheckCircle className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                      <span className="text-slate-200 font-medium">{d.motivo || DESCONTO_LABELS[d.tipo] || d.tipo}</span>
+                      <span className="text-slate-200 font-medium">
+                        {(d.motivo || DESCONTO_LABELS[d.tipo] || d.tipo).replace(/Entrada/g, "Setup").replace(/entrada/g, "setup")}
+                      </span>
                     </div>
                     {d.tipo !== "parcelamento" && Number(d.valor_original) !== Number(d.valor_final) && (
                       <span className="font-mono shrink-0">
@@ -739,27 +660,50 @@ export default function GeracaoDigitalPublicProposal() {
                   </div>
                 ))}
               </div>
-            </Card>
+            </div>
           )}
 
-          {/* Contract details and conditions */}
-          <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-4">
-            <h3 className="font-bold text-white text-base">Condições de Implantação e Contrato</h3>
-            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
-              {proposal.condicoes}
-            </p>
-          </Card>
+          {/* Detalhes longos em Acordeão — economiza scroll */}
+          <div className="space-y-3">
+            {/* Setup / Implantação (só quando cobrado) */}
+            {proposal.cobrar_setup && (
+              <details className="group rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 overflow-hidden">
+                <summary className="cursor-pointer list-none flex items-center justify-between gap-3 px-5 py-4">
+                  <span className="font-black text-white text-sm">Serviços de Implantação</span>
+                  <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180 shrink-0" />
+                </summary>
+                <div className="px-5 pb-5 -mt-1">
+                  <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
+                    {SETUP_JUSTIFICATION}
+                  </p>
+                </div>
+              </details>
+            )}
+
+            {/* Condições de Implantação e Contrato */}
+            <details className="group rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 overflow-hidden">
+              <summary className="cursor-pointer list-none flex items-center justify-between gap-3 px-5 py-4">
+                <span className="font-black text-white text-sm">Condições de Implantação e Contrato</span>
+                <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180 shrink-0" />
+              </summary>
+              <div className="px-5 pb-5 -mt-1">
+                <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line font-light">
+                  {proposal.condicoes}
+                </p>
+              </div>
+            </details>
+          </div>
         </div>
 
-        {/* Right area: investment, payment link and sign pad */}
-        <div className="lg:col-span-2 space-y-6">
+        {/* ================= COLUNA DIREITA (checkout sticky) ================= */}
+        <div className="lg:col-span-4 lg:sticky lg:top-6 lg:self-start space-y-5">
 
-          {/* Investment Totals Card */}
-          <Card className="bg-slate-900/60 border-slate-900 p-8 space-y-6 shadow-2xl">
-            <h3 className="font-bold text-white text-xl">Valores Propostos</h3>
+          {/* Valores Propostos */}
+          <div className="rounded-2xl bg-white/[0.06] backdrop-blur-xl border border-white/10 p-6 space-y-5 shadow-2xl">
+            <h3 className="font-black text-white text-lg">Valores Propostos</h3>
 
-            <div className="space-y-5">
-              <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+            <div className="space-y-4">
+              <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
                 <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Investimento único (Setup)</span>
                 <span className="text-purple-300 font-black text-3xl block transition-all duration-500 ease-in-out">
                   {setupIsento ? (
@@ -776,7 +720,7 @@ export default function GeracaoDigitalPublicProposal() {
                   )}
                 </span>
               </div>
-              <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+              <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
                 <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Mensalidade</span>
                 {(() => {
                   const vpMensal = Number(proposal.valor_vp || 0);
@@ -814,7 +758,7 @@ export default function GeracaoDigitalPublicProposal() {
                 )}
               </div>
               {calc.mesesPeriodo > 1 && (
-                <div className="pb-4 border-b border-slate-800 space-y-1 transition-all duration-500 ease-in-out">
+                <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
                   <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
                   <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
                     {calc.compromissoFinal < calc.compromissoOriginal && (
@@ -830,7 +774,7 @@ export default function GeracaoDigitalPublicProposal() {
                 </div>
               )}
               {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
-                <div className="pb-4 border-b border-slate-800 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
+                <div className="pb-4 border-b border-white/10 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
                   <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Permuta Comercial (VP)</span>
                   <span className="text-purple-400 font-black text-3xl block transition-all duration-500 ease-in-out">
                     R$ {Number(proposal.valor_vp).toLocaleString("pt-BR")}
@@ -840,41 +784,6 @@ export default function GeracaoDigitalPublicProposal() {
                   </span>
                 </div>
               )}
-              {(meioSetupPub || meioMensalPub) && (
-                <div className="flex justify-between items-center text-sm font-mono pb-2 border-b border-slate-900">
-                  <span className="text-slate-400">Meio de pagamento:</span>
-                  <span className="text-white font-bold">
-                    {[meioSetupPub && `Setup: ${meioSetupPub}`, meioMensalPub && `Mensalidade: ${meioMensalPub}`].filter(Boolean).join(" · ")}
-                  </span>
-                </div>
-              )}
-              <div className="pt-1 space-y-2">
-                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Formas de pagamento aceitas</span>
-                <div className="flex flex-wrap gap-2">
-                  {([["pix", "PIX"], ["cartao", "Cartão de Crédito"], ["boleto", "Boleto"]] as const).map(([key, label]) => {
-                    const selecionado = meioSetupArr.includes(key) || meioMensalArr.includes(key);
-                    return (
-                      <span
-                        key={key}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-bold border",
-                          selecionado
-                            ? "bg-purple-600 text-white border-purple-500"
-                            : "bg-slate-950 text-slate-200 border-slate-700"
-                        )}
-                      >
-                        {label}
-                        {selecionado && " ✓"}
-                      </span>
-                    );
-                  })}
-                </div>
-                {(meioSetupPub || meioMensalPub) && (
-                  <span className="text-xs text-slate-300 font-medium block">
-                    {[meioSetupPub && `Entrada: ${meioSetupPub}`, meioMensalPub && `Mensalidade: ${meioMensalPub}`].filter(Boolean).join(" · ")}
-                  </span>
-                )}
-              </div>
 
               {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
                 <div className="flex justify-between items-center text-sm font-mono">
@@ -888,7 +797,7 @@ export default function GeracaoDigitalPublicProposal() {
             {proposal.payment_link && (
               <Button
                 asChild
-                className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-6 rounded-xl text-xs shadow-lg shadow-indigo-600/15 flex items-center justify-center gap-1.5"
+                className="w-full bg-gradient-to-r from-violet-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-6 rounded-xl text-xs shadow-lg shadow-violet-600/25 flex items-center justify-center gap-1.5"
               >
                 <a href={proposal.payment_link} target="_blank" rel="noopener noreferrer">
                   Pagar agora
@@ -896,10 +805,57 @@ export default function GeracaoDigitalPublicProposal() {
                 </a>
               </Button>
             )}
-          </Card>
+
+            {/* Como você vai pagar + Formas aceitas — consolidados no checkout */}
+            {(temResumoPagamento || meioSetupPub || meioMensalPub) && (
+              <div className="pt-4 border-t border-white/10 space-y-3">
+                {temResumoPagamento && (
+                  <div className="grid gap-2">
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-purple-500/20 space-y-0.5">
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-purple-400 block">Entrada (Setup)</span>
+                      <span className="text-[13px] font-bold text-white block">
+                        {setupIsento ? "Isenta nesta proposta" : pagamentoEntrada || "à vista"}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-blue-500/20 space-y-0.5">
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-blue-400 block">Mensalidade</span>
+                      <span className="text-[13px] font-bold text-white block">{pagamentoMensalidade}</span>
+                      {primeiraMensalidadeDate && (
+                        <span className="text-[11px] font-bold text-amber-300 block">
+                          1º vencimento em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Formas de pagamento aceitas</span>
+                  <div className="flex flex-wrap gap-2">
+                    {([["pix", "PIX"], ["cartao", "Cartão de Crédito"], ["boleto", "Boleto"]] as const).map(([key, label]) => {
+                      const selecionado = meioSetupArr.includes(key) || meioMensalArr.includes(key);
+                      return (
+                        <span
+                          key={key}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-xs font-bold border",
+                            selecionado
+                              ? "bg-violet-600 text-white border-violet-500"
+                              : "bg-white/[0.03] text-slate-200 border-white/10"
+                          )}
+                        >
+                          {label}
+                          {selecionado && " ✓"}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Signature or Confirmation card */}
-          <Card className="bg-slate-900/40 border-slate-900 p-6 space-y-5">
+          <Card className="bg-white/5 backdrop-blur-xl border-white/10 p-6 space-y-5">
 
             {proposal.status === "aceita" ? (
               <div className="space-y-4 text-center">
