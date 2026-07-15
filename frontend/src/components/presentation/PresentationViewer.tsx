@@ -238,12 +238,17 @@ function SlideBody({
             Apresentação preparada para
           </p>
           {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt={companyName}
-              className="h-28 w-auto max-w-full rounded-2xl object-contain sm:h-40"
-              style={{ filter: `drop-shadow(0 20px 45px ${accent}66)` }}
-            />
+            <div className="flex flex-wrap items-center gap-5">
+              <img
+                src={logoUrl}
+                alt={companyName}
+                className="h-28 w-auto max-w-full rounded-2xl object-contain sm:h-40"
+                style={{ filter: `drop-shadow(0 20px 45px ${accent}66)` }}
+              />
+              <span className="text-3xl font-black leading-tight tracking-tight sm:text-5xl">
+                {companyName}
+              </span>
+            </div>
           ) : (
             <div
               className="inline-flex items-center gap-5 rounded-3xl border border-white/10 bg-white/[0.04] px-7 py-5 backdrop-blur-md"
