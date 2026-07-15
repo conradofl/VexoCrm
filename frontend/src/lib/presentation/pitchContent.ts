@@ -1,0 +1,371 @@
+// Motor de conteúdo da Apresentação Comercial High-Ticket (SPIN Selling).
+//
+// Separação de preocupações: este arquivo carrega SÓ os dados/roteiro. O
+// componente visual (PresentationViewer.tsx) é genérico e recebe tudo via props.
+//
+// Isolamento: nada aqui toca preços, pacotes ou venda casada (ProposalConfig).
+// É estritamente o roteiro visual da apresentação.
+//
+// Regra de copy — ANTI-JARGÃO. Proibido: SDR, Tráfego Pago, N8N, Typebot,
+// Evolution API, Funil, Leads, Automação. Traduções aplicadas no roteiro:
+//   SDR / IA        -> "Recepcionista Digital 24h" / "Atendimento Imediato"
+//   Tráfego Pago    -> "Sistema de Atração de Clientes"
+//   Automação       -> "Operação no Piloto Automático"
+
+export type SlideKind =
+  | "impact"
+  | "pain"
+  | "implication"
+  | "solution"
+  | "partnership"
+  | "vision"
+  | "close";
+
+export interface PitchFront {
+  label: string;        // nome da frente (ex: "Geração Digital")
+  tag: string;          // papel curto (ex: "Atração & Marca")
+  items: string[];      // entregáveis em linguagem anti-jargão
+}
+
+export interface PitchSlide {
+  id: number;
+  kind: SlideKind;
+  eyebrow: string;      // rótulo curto (ex: "A DOR ATUAL")
+  title: string;
+  subtitle?: string;
+  body?: string;
+  steps?: string[];     // passos numerados (usado no slide de solução)
+  fronts?: PitchFront[]; // colunas da parceria (GD + Vexo)
+  compare?: {           // antes/depois visual (impacto: loja vazia -> cheia)
+    before: { img?: string; label: string };
+    after: { img?: string; label: string };
+  };
+  metric?: {            // destaque numérico (ROI / benchmark)
+    value: string;
+    caption: string;
+  };
+  punch?: string;       // frase de efeito / gatilho mental (slide de fechamento)
+}
+
+export interface SegmentGroup {
+  id: string;
+  label: string;
+  focus: string;        // resumo do foco comercial do grupo
+  accent: string;       // cor de destaque (hex) do tema do grupo
+  buildSlides: (ctx: PitchContext) => PitchSlide[];
+}
+
+export interface PitchContext {
+  companyName: string;
+  segmentId?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Utilitários de estimativa (ROI automático por benchmark de mercado)
+// ---------------------------------------------------------------------------
+
+const brl = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
+const milhar = (v: number) =>
+  `R$ ${Math.round(v / 1000).toLocaleString("pt-BR")} mil`;
+
+// Benchmarks de mercado — usados quando o cliente não traz os próprios números.
+// Conservadores de propósito: melhor subestimar a dor do que soar irreal.
+export const BENCHMARKS = {
+  entretenimento_local: {
+    mesasOciosasDiaFraco: 6,   // mesas/estações vazias em média (ter–qui)
+    ticketMedioMesa: 180,      // consumação + jogos por mesa numa noite
+    diasBaixoFluxo: 3,         // terça, quarta, quinta
+    semanasAno: 52,
+  },
+  saude_estetica: {
+    horariosVagosDia: 4,       // janelas ociosas por dia na agenda
+    ticketMedioProcedimento: 250,
+    diasUteisMes: 22,
+    mesesAno: 12,
+  },
+} as const;
+
+// Perda anual estimada com mesas ociosas (entretenimento_local).
+export function estimateIdleTableLoss() {
+  const b = BENCHMARKS.entretenimento_local;
+  const anual = b.mesasOciosasDiaFraco * b.ticketMedioMesa * b.diasBaixoFluxo * b.semanasAno;
+  const mensal = anual / 12;
+  return { anual, mensal };
+}
+
+// Perda anual estimada com horários vagos na agenda (saude_estetica).
+export function estimateEmptyChairLoss() {
+  const b = BENCHMARKS.saude_estetica;
+  const mensal = b.horariosVagosDia * b.ticketMedioProcedimento * b.diasUteisMes * 0.5; // 50% recuperável
+  const anual = mensal * 12;
+  return { anual, mensal };
+}
+
+// ---------------------------------------------------------------------------
+// Grupos de segmentos (dicionário) — segmentos semelhantes compartilham roteiro
+// ---------------------------------------------------------------------------
+
+export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
+  entretenimento_local: {
+    id: "entretenimento_local",
+    label: "Entretenimento Local",
+    focus: "Fluxo de pessoas e reservas (luderias, bares, boliches, karaokês).",
+    accent: "#a855f7",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "sua casa";
+      const { anual, mensal } = estimateIdleTableLoss();
+      const b = BENCHMARKS.entretenimento_local;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "O Fim das Mesas Vazias.",
+          subtitle: `Como transformar a ${nome} no destino número 1 da cidade, todos os dias da semana.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "O gargalo do atendimento.",
+          body:
+            "Quando um grupo quer reservar uma mesa, eles querem resposta imediata. Se o seu WhatsApp demora porque a equipe está atendendo as mesas físicas, o cliente esfria, deixa pra depois e acaba esquecendo de voltar.",
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=70",
+              label: "Terça à noite, hoje — mesas e cadeiras vazias",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1585504198199-20277593b94f?auto=format&fit=crop&w=900&q=70",
+              label: "Terça à noite, com GD + Vexo — mesas cheias de gente jogando",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "O Custo da Cadeira Vazia.",
+          body:
+            `De terça a quinta, uma casa como a ${nome} fica em média com ${b.mesasOciosasDiaFraco} mesas ociosas por noite. ` +
+            `Com um ticket médio de ${brl(b.ticketMedioMesa)} por mesa (jogos + consumação), isso é receita evaporando toda semana — ` +
+            `${milhar(mensal)} por mês que simplesmente não entram no caixa.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "perda estimada com mesas ociosas nos dias de semana",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Atração e Reservas.",
+          steps: [
+            "Atraímos o público local que está buscando diversão, com o Sistema de Atração de Clientes.",
+            "Nossa Recepcionista Digital 24h atende o WhatsApp em 3 segundos, envia o cardápio e agenda a mesa — no piloto automático.",
+            "Você foca no que importa: entregar a melhor experiência física da cidade.",
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital cuida da sua atração e da sua marca. A Vexo cuida do atendimento no piloto automático. Juntas, enchem a ${nome}.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Atração & Marca",
+              items: [
+                "Sistema de Atração de Clientes na sua região",
+                "Presença forte nas redes sociais",
+                "Sua casa achada no Google na hora certa",
+                "Página de reservas profissional",
+                "Vídeos e fotos que enchem os olhos",
+                "Marca com cara de líder da cidade",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Atendimento & Piloto Automático",
+              items: [
+                "Recepcionista Digital 24h no seu WhatsApp",
+                "Reservas e cardápio enviados na hora",
+                "Lembretes automáticos que trazem o cliente de volta",
+                "Tudo organizado num só lugar",
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body: `Imagine abrir a ${nome} na segunda-feira já com a agenda da semana lotada. Sem depender de sorte, sem torcer pelo movimento.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo da inércia.",
+          body: `Quanto a ${nome} perde por mês continuando exatamente como está hoje?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o preço estimado de não fazer nada",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada semana parada é receita que não volta — e a virada começa hoje.",
+        },
+      ];
+    },
+  },
+
+  saude_estetica: {
+    id: "saude_estetica",
+    label: "Saúde & Estética",
+    focus: "Agendamentos (clínicas, consultórios, estética).",
+    accent: "#06b6d4",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "sua clínica";
+      const { anual, mensal } = estimateEmptyChairLoss();
+      const b = BENCHMARKS.saude_estetica;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "A Agenda Sempre Cheia.",
+          subtitle: `Como transformar a ${nome} na referência da região, com horários disputados o mês inteiro.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "O paciente que não espera.",
+          body:
+            "Quem procura um procedimento quer resposta na hora. Se o seu WhatsApp demora porque a recepção está cuidando de quem já está na clínica, esse paciente esfria, adia a decisão e acaba não voltando.",
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=900&q=70",
+              label: "Agenda de hoje",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=900&q=70",
+              label: "Agenda com GD + Vexo",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "O Custo do Horário Vago.",
+          body:
+            `Uma agenda como a da ${nome} costuma ter em média ${b.horariosVagosDia} janelas ociosas por dia. ` +
+            `Com um ticket médio de ${brl(b.ticketMedioProcedimento)}, metade disso é receita perfeitamente recuperável — ` +
+            `${milhar(mensal)} por mês deixados na mesa.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "perda estimada com horários vagos na agenda",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Atração e Agendamentos.",
+          steps: [
+            "Atraímos os pacientes certos da sua região, com o Sistema de Atração de Clientes.",
+            "Nossa Recepcionista Digital 24h responde em 3 segundos, tira dúvidas e agenda a consulta — no piloto automático.",
+            "Sua equipe foca no atendimento presencial de excelência.",
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital cuida da sua atração e da sua marca. A Vexo cuida do atendimento no piloto automático. Juntas, enchem a agenda da ${nome}.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Atração & Marca",
+              items: [
+                "Sistema de Atração de Clientes na sua região",
+                "Presença forte nas redes sociais",
+                "Sua clínica achada no Google na hora certa",
+                "Página de agendamento profissional",
+                "Vídeos e fotos que passam confiança",
+                "Marca com cara de referência",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Atendimento & Piloto Automático",
+              items: [
+                "Recepcionista Digital 24h no seu WhatsApp",
+                "Consultas agendadas na hora, sem fila de espera",
+                "Lembretes automáticos que reduzem as faltas",
+                "Tudo organizado num só lugar",
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body: `Imagine começar a semana com a agenda da ${nome} praticamente fechada, sem correria e sem horário vago.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo da inércia.",
+          body: `Quanto a ${nome} deixa de faturar por mês continuando exatamente como está hoje?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o preço estimado de não fazer nada",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada dia de agenda vazia é receita que não volta — e a virada começa hoje.",
+        },
+      ];
+    },
+  },
+};
+
+// Mapeamento de segment_id específico -> grupo. Adicione novos ids aqui conforme
+// a base crescer; o default cai em entretenimento_local.
+const SEGMENT_ID_TO_GROUP: Record<string, string> = {
+  // Entretenimento local
+  luderia: "entretenimento_local",
+  bar: "entretenimento_local",
+  boliche: "entretenimento_local",
+  karaoke: "entretenimento_local",
+  entretenimento: "entretenimento_local",
+  entretenimento_local: "entretenimento_local",
+  // Saúde & estética
+  clinica: "saude_estetica",
+  clinicas: "saude_estetica",
+  clinicas_de_saude: "saude_estetica",
+  consultorio: "saude_estetica",
+  estetica: "saude_estetica",
+  saude: "saude_estetica",
+  saude_estetica: "saude_estetica",
+};
+
+export const DEFAULT_GROUP_ID = "entretenimento_local";
+
+export function resolveSegmentGroup(segmentId?: string | null): SegmentGroup {
+  const key = String(segmentId || "").trim().toLowerCase();
+  const groupId = SEGMENT_ID_TO_GROUP[key] || DEFAULT_GROUP_ID;
+  return SEGMENT_GROUPS[groupId] || SEGMENT_GROUPS[DEFAULT_GROUP_ID];
+}
+
+export function buildPitch(ctx: PitchContext): { group: SegmentGroup; slides: PitchSlide[] } {
+  const group = resolveSegmentGroup(ctx.segmentId);
+  return { group, slides: group.buildSlides(ctx) };
+}

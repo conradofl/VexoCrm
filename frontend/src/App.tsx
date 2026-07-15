@@ -38,6 +38,7 @@ import GeracaoDigital from "./pages/GeracaoDigital";
 import GeracaoDigitalCommercialSetup from "./pages/GeracaoDigitalCommercialSetup";
 import GeracaoDigitalProposals from "./pages/GeracaoDigitalProposals";
 import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
+import PresentationPreview from "./pages/PresentationPreview";
 import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
 import GeracaoDigitalPaymentTerms from "./pages/GeracaoDigitalPaymentTerms";
 import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
@@ -391,6 +392,8 @@ const App = () => (
                }
              />
              <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
+             {/* Preview temporário da Apresentação Comercial (teste de layout/copy). */}
+             <Route path="/apresentacao-preview" element={<PresentationPreview />} />
              <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
