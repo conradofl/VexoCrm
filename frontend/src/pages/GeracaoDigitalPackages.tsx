@@ -785,8 +785,8 @@ export default function GeracaoDigitalPackages() {
                       </Label>
                       <Input
                         type="number"
-                        value={packageValue}
-                        onChange={(e) => setPackageValue(Number(e.target.value) || 0)}
+                        value={packageValue || ""}
+                        onChange={(e) => setPackageValue(e.target.value === "" ? 0 : Number(e.target.value))}
                         placeholder={packagePeriod === "unico" ? "Ex: 2900" : "Ex: 48000"}
                         className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
@@ -1212,8 +1212,8 @@ export default function GeracaoDigitalPackages() {
                       <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Valor de Venda (R$)</Label>
                       <Input
                         type="number"
-                        value={vexoValor}
-                        onChange={(e) => setVexoValor(Number(e.target.value) || 0)}
+                        value={vexoValor || ""}
+                        onChange={(e) => setVexoValor(e.target.value === "" ? 0 : Number(e.target.value))}
                         placeholder="Ex: 980"
                         className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />

@@ -174,8 +174,9 @@ export function ConfigBoard({
                   <Label className="text-[10px] text-slate-400 font-mono">Ticket Médio (R$)</Label>
                   <Input
                     type="number"
-                    value={customTicket}
-                    onChange={(e) => setCustomTicket(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    value={customTicket || ""}
+                    onChange={(e) => setCustomTicket(e.target.value === "" ? 0 : Number(e.target.value))}
                     className="h-8.5 text-xs"
                   />
                 </div>
@@ -184,8 +185,9 @@ export function ConfigBoard({
                   <Input
                     type="number"
                     step="0.5"
-                    value={customConv}
-                    onChange={(e) => setCustomConv(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    value={customConv || ""}
+                    onChange={(e) => setCustomConv(e.target.value === "" ? 0 : Number(e.target.value))}
                     className="h-8.5 text-xs"
                   />
                 </div>

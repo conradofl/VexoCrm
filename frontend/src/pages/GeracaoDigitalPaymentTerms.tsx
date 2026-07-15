@@ -241,7 +241,7 @@ export default function GeracaoDigitalPaymentTerms() {
                     <Input
                       type="number"
                       value={form.config.percentual_desconto ?? ""}
-                      onChange={(e) => updateConfig("percentual_desconto", Number(e.target.value) || 0)}
+                      onChange={(e) => updateConfig("percentual_desconto", e.target.value === "" ? undefined : Number(e.target.value))}
                       className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-9 text-slate-900 dark:text-slate-100"
                     />
                   </div>
@@ -253,7 +253,7 @@ export default function GeracaoDigitalPaymentTerms() {
                       <Input
                         type="number"
                         value={form.config.valor_entrada ?? ""}
-                        onChange={(e) => updateConfig("valor_entrada", Number(e.target.value) || 0)}
+                        onChange={(e) => updateConfig("valor_entrada", e.target.value === "" ? undefined : Number(e.target.value))}
                         className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-9 text-slate-900 dark:text-slate-100"
                       />
                     </div>
@@ -262,7 +262,7 @@ export default function GeracaoDigitalPaymentTerms() {
                       <Input
                         type="number"
                         value={form.config.num_parcelas ?? ""}
-                        onChange={(e) => updateConfig("num_parcelas", Number(e.target.value) || 1)}
+                        onChange={(e) => updateConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))}
                         className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-9 text-slate-900 dark:text-slate-100"
                       />
                     </div>
@@ -274,7 +274,7 @@ export default function GeracaoDigitalPaymentTerms() {
                     <Input
                       type="number"
                       value={form.config.num_parcelas ?? ""}
-                      onChange={(e) => updateConfig("num_parcelas", Number(e.target.value) || 1)}
+                      onChange={(e) => updateConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))}
                       className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-9 text-slate-900 dark:text-slate-100"
                     />
                   </div>

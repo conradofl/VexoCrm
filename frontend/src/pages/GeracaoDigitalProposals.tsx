@@ -1347,8 +1347,9 @@ export default function GeracaoDigitalProposals() {
                               <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Valor do Setup (R$)</Label>
                               <Input
                                 type="number"
-                                value={valorSetupVexo}
-                                onChange={(e) => setValorSetupVexo(Number(e.target.value) || 0)}
+                                placeholder="0"
+                                value={valorSetupVexo === 0 ? "" : valorSetupVexo}
+                                onChange={(e) => setValorSetupVexo(e.target.value === "" ? 0 : Number(e.target.value))}
                                 className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-xs h-8 w-40 font-mono"
                               />
                             </div>
@@ -1420,13 +1421,13 @@ export default function GeracaoDigitalProposals() {
                               </div>
                               <div className="grid gap-2 sm:grid-cols-3">
                                 {inlineTerm.tipo === "avista_desconto" && (
-                                  <Input type="number" placeholder="% desconto" value={inlineTerm.config.percentual_desconto ?? ""} onChange={(e) => updateInlineConfig("percentual_desconto", Number(e.target.value) || 0)} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                  <Input type="number" placeholder="% desconto" value={inlineTerm.config.percentual_desconto ?? ""} onChange={(e) => updateInlineConfig("percentual_desconto", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
                                 )}
                                 {(inlineTerm.tipo === "entrada_parcelas" || inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "boleto_recorrente" || inlineTerm.tipo === "semanal") && (
-                                  <Input type="number" placeholder="Nº de parcelas" value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                  <Input type="number" placeholder="Nº de parcelas" value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
                                 )}
                                 {inlineTerm.tipo === "entrada_parcelas" && (
-                                  <Input type="number" placeholder="Entrada (R$)" value={inlineTerm.config.valor_entrada ?? ""} onChange={(e) => updateInlineConfig("valor_entrada", Number(e.target.value) || 0)} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                  <Input type="number" placeholder="Entrada (R$)" value={inlineTerm.config.valor_entrada ?? ""} onChange={(e) => updateInlineConfig("valor_entrada", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
                                 )}
                                 {(inlineTerm.tipo === "avista_desconto" || inlineTerm.tipo === "entrada_parcelas") && (
                                   <select value={inlineTerm.config.meio ?? ""} onChange={(e) => updateInlineConfig("meio", e.target.value || undefined)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8">

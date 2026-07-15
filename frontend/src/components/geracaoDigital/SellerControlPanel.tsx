@@ -204,6 +204,7 @@ export function SellerControlPanel({
                     const n = Math.max(1, Math.floor(Number(e.target.value) || 1));
                     patch({ parcelas: n });
                   }}
+                  onFocus={(e) => e.target.select()}
                   className="bg-slate-50 border-slate-200 text-xs h-8 w-24 font-mono text-right"
                 />
                 <span className="text-[11px] font-bold text-slate-500">
