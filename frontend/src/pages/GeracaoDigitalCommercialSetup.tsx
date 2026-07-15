@@ -393,6 +393,53 @@ export default function GeracaoDigitalCommercialSetup() {
     }
   };
 
+  // CTA "Ir para a proposta" no fim da apresentação.
+  // - Já veio de uma proposta (proposalId): abre a proposta pública.
+  // - Apresentação avulsa: cria um RASCUNHO de proposta para esta empresa
+  //   (nome/logo/segmento/pacotes da apresentação) e leva para o editor, para
+  //   o vendedor só finalizar. Assim dá pra apresentar antes e fechar depois.
+  const handleGoToProposal = async () => {
+    if (proposalId) {
+      window.open(`/proposta/${proposalId}`, "_blank");
+      return;
+    }
+    if (!prospectName.trim()) {
+      toast({ title: "Nome obrigatório", description: "Informe o nome da empresa antes de gerar a proposta.", variant: "destructive" });
+      return;
+    }
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // Separa pacotes ofertados por tipo (gd / vexo) para semear os itens.
+      const selIds = Object.entries(selectedPackages).filter(([_, v]) => v).map(([id]) => id);
+      const gdPkgId = selIds.find((id) => { const p = packages.find((x) => x.id === id); return p && p.tipo !== "vexo"; }) || null;
+      const vexoPkgId = selIds.find((id) => { const p = packages.find((x) => x.id === id); return p && p.tipo === "vexo"; }) || null;
+
+      const body = {
+        client_id: clientId || "00000000-0000-0000-0000-000000000000",
+        presentation_id: presentationId,
+        prospect_name: prospectName,
+        package_id: gdPkgId,
+        package_vexo_id: vexoPkgId,
+        status: "rascunho"
+      };
+
+      const res = await fetchApi("/api/gd/proposals", { method: "POST", headers, body: JSON.stringify(body) });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Erro ao criar o rascunho da proposta.");
+      }
+      toast({ title: "Rascunho criado", description: `Proposta rascunho de ${prospectName} pronta para finalizar.` });
+      setIsPresenting(false);
+      navigate("/crm/propostas-gd");
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: "Erro ao gerar proposta", description: err.message, variant: "destructive" });
+    }
+  };
+
   const selectedPackagesList = useMemo(() => {
     return Object.entries(selectedPackages)
       .filter(([_, selected]) => selected)
@@ -625,7 +672,8 @@ export default function GeracaoDigitalCommercialSetup() {
           companyName={prospectName || "Sua Empresa"}
           logoUrl={prospectLogo}
           segmentId={activeSegmentObj?.nome || null}
-          proposalHref={proposalId ? `/proposta/${proposalId}` : "/crm/propostas-gd"}
+          proposalHref={proposalId ? `/proposta/${proposalId}` : null}
+          onGoToProposal={proposalId ? undefined : handleGoToProposal}
           onClose={() => setIsPresenting(false)}
         />
         </ErrorBoundary>
