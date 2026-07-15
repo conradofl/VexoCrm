@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 
 // Import slides & simulator utilities from VexoPitch
-import GeracaoDigitalCommercialPitch from "./GeracaoDigitalCommercialPitch";
+import { PresentationViewer } from "@/components/presentation/PresentationViewer";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { SEGMENTS, type SegmentScenario } from "@/pages/demoSegments";
 import { computeRoi } from "@/lib/vexoPitch/helpers";
@@ -566,60 +566,23 @@ export default function GeracaoDigitalCommercialSetup() {
                 </Card>
               </div>
 
-              {/* Right Column: ROI Calculator */}
+              {/* Right Column: Preview da Apresentação */}
               <div className="space-y-6">
                 <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
                   <CardHeader>
                     <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800 dark:text-white">
-                      <Calculator className="h-4 w-4 text-purple-600" />
-                      Simulador de ROI Comercial
+                      <Play className="h-4 w-4 text-purple-600" />
+                      Apresentação Comercial
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-500 dark:text-slate-400">Previsão financeira de retorno sobre o investimento.</CardDescription>
+                    <CardDescription className="text-xs text-slate-500 dark:text-slate-400">
+                      Roteiro dinâmico por segmento, com estimativas por benchmark de mercado — sem depender de números que o cliente não tem em mãos.
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <Label className="text-slate-500 font-medium dark:text-slate-400">Contatos/Leads Mensais</Label>
-                        <span className="font-bold text-indigo-600">{leadsCount} leads</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="50"
-                        max="2000"
-                        step="50"
-                        value={leadsCount}
-                        onChange={(e) => setLeadsCount(Number(e.target.value))}
-                        className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-200 accent-indigo-500"
-                      />
-                    </div>
-
-                    <div className="grid gap-3 grid-cols-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-500 font-medium dark:text-slate-400">Ticket Médio (R$)</Label>
-                        <Input
-                          type="number"
-                          value={customTicket}
-                          onChange={(e) => setCustomTicket(Number(e.target.value) || 0)}
-                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 focus:border-indigo-500/50 text-slate-800 dark:text-slate-100 text-xs h-10"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-500 font-medium dark:text-slate-400">Conversão Atual (%)</Label>
-                        <Input
-                          type="number"
-                          step="0.5"
-                          value={customConv}
-                          onChange={(e) => setCustomConv(Number(e.target.value) || 0)}
-                          className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 focus:border-indigo-500/50 text-slate-800 dark:text-slate-100 text-xs h-10"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/10 border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-between mt-2">
-                      <span className="text-xs text-slate-650 font-medium dark:text-slate-200">Faturamento Mensal Extra Estimado:</span>
-                      <span className="text-sm font-extrabold text-emerald-600">
-                        R$ {additionalRevenue.toLocaleString("pt-BR")} / mês
-                      </span>
+                  <CardContent className="space-y-3">
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-white/5 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                      <p><span className="font-bold text-slate-800 dark:text-slate-100">Empresa:</span> {prospectName || "—"}</p>
+                      <p><span className="font-bold text-slate-800 dark:text-slate-100">Segmento:</span> {activeSegmentObj?.nome || "—"}</p>
+                      <p className="text-[11px] text-slate-450 dark:text-slate-500">A apresentação usa o nome e a logomarca acima na abertura personalizada.</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -658,20 +621,12 @@ export default function GeracaoDigitalCommercialSetup() {
             </div>
           }
         >
-        <GeracaoDigitalCommercialPitch
-          prospectName={prospectName}
-          prospectLogo={prospectLogo}
-          segmentName={activeSegmentObj?.nome || "Comercial"}
-          mappedVexoSegment={mappedVexoSegment}
-          vendaCasada={vendaCasada}
-          selectedProductsList={consolidatedProductsList}
-          packagesOfertados={selectedPackagesList}
-          leadsCount={leadsCount}
-          customTicket={customTicket}
-          customConv={customConv}
+        <PresentationViewer
+          companyName={prospectName || "Sua Empresa"}
+          logoUrl={prospectLogo}
+          segmentId={activeSegmentObj?.nome || null}
+          proposalHref={proposalId ? `/proposta/${proposalId}` : "/crm/propostas-gd"}
           onClose={() => setIsPresenting(false)}
-          presentationId={presentationId}
-          vexoSelectedProducts={selectedVexoProducts}
         />
         </ErrorBoundary>
       )}

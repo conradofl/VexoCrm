@@ -359,10 +359,30 @@ const SEGMENT_ID_TO_GROUP: Record<string, string> = {
 
 export const DEFAULT_GROUP_ID = "entretenimento_local";
 
-export function resolveSegmentGroup(segmentId?: string | null): SegmentGroup {
-  const key = String(segmentId || "").trim().toLowerCase();
-  const groupId = SEGMENT_ID_TO_GROUP[key] || DEFAULT_GROUP_ID;
-  return SEGMENT_GROUPS[groupId] || SEGMENT_GROUPS[DEFAULT_GROUP_ID];
+// Palavras-chave por grupo — casam contra o NOME do segmento (o segment_id real
+// do app é um UUID, então resolvemos pelo texto: "Clínicas de Saúde",
+// "Odontologia", "Food Service", etc.).
+const GROUP_KEYWORDS: Record<string, string[]> = {
+  saude_estetica: [
+    "clinica", "clínica", "saude", "saúde", "estetica", "estética", "odonto",
+    "consultorio", "consultório", "laboratorio", "laboratório", "medic", "dental",
+  ],
+  entretenimento_local: [
+    "luderia", "jogos", "board", "bar", "boliche", "karaoke", "karaokê",
+    "entreten", "food service", "delivery", "hospitalidade", "turismo",
+    "restaurante", "gastro", "lazer", "diversao", "diversão",
+  ],
+};
+
+// Resolve o grupo por: (1) id/chave exata do dicionário; (2) palavra-chave no
+// nome; senão cai no grupo padrão.
+export function resolveSegmentGroup(segmentIdOrName?: string | null): SegmentGroup {
+  const raw = String(segmentIdOrName || "").trim().toLowerCase();
+  if (SEGMENT_ID_TO_GROUP[raw]) return SEGMENT_GROUPS[SEGMENT_ID_TO_GROUP[raw]];
+  for (const [groupId, words] of Object.entries(GROUP_KEYWORDS)) {
+    if (words.some((w) => raw.includes(w))) return SEGMENT_GROUPS[groupId];
+  }
+  return SEGMENT_GROUPS[DEFAULT_GROUP_ID];
 }
 
 export function buildPitch(ctx: PitchContext): { group: SegmentGroup; slides: PitchSlide[] } {
