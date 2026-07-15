@@ -53,6 +53,7 @@ export function SellerControlPanel({
   setupVexoValue
 }: SellerControlPanelProps) {
   const patch = (p: Partial<NegotiationLayers>) => onLayersChange({ ...layers, ...p });
+  const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const { scenarios, createScenario, deleteScenario } = useNegotiationScenarios();
   const [scenarioName, setScenarioName] = useState("");
 
@@ -186,26 +187,52 @@ export function SellerControlPanel({
             />
           </div>
 
-          <div className="p-3 rounded-2xl border-2 border-slate-200 bg-white space-y-2">
+          <div className="p-3 rounded-2xl border-2 border-slate-200 bg-white space-y-3">
             <div className="flex items-center gap-2">
               <Layers className="h-3.5 w-3.5 text-purple-500" />
               <span className="text-xs font-black text-slate-800">Dividir / Parcelar a Entrada</span>
             </div>
-            <div className="flex gap-1.5">
-              {[1, 3, 6, 12].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => patch({ parcelas: n })}
-                  className={cn(
-                    "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
-                    layers.parcelas === n
-                      ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-transparent"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
-                  )}
-                >
-                  {n}x
-                </button>
-              ))}
+            {/* Número livre de parcelas + forma (cartão/boleto). */}
+            <div className="space-y-1.5">
+              <span className="text-[9px] font-bold uppercase text-slate-400">Nº de parcelas</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={layers.parcelas || 1}
+                  onChange={(e) => {
+                    const n = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                    patch({ parcelas: n });
+                  }}
+                  className="bg-slate-50 border-slate-200 text-xs h-8 w-24 font-mono text-right"
+                />
+                <span className="text-[11px] font-bold text-slate-500">
+                  {layers.parcelas > 1 ? `${layers.parcelas}x de ${brl(result.valorParcela)}` : "à vista"}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-[9px] font-bold uppercase text-slate-400">Forma da entrada</span>
+              <div className="flex gap-1.5">
+                {(["cartao", "boleto"] as const).map((m) => {
+                  const on = layers.meioSetup.includes(m);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => patch({ meioSetup: on ? layers.meioSetup.filter((x) => x !== m) : [...layers.meioSetup, m] })}
+                      className={cn(
+                        "flex-1 rounded-lg py-1.5 text-[11px] font-bold border transition-all",
+                        on
+                          ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white border-transparent"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
+                      )}
+                    >
+                      {m === "cartao" ? "Cartão" : "Boleto"}{on ? " ✓" : ""}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
