@@ -214,7 +214,7 @@ export default function GeracaoDigitalProposals() {
 
   // Condição de pagamento criada na hora (sem ir na aba Condições)
   const [showInlineTerm, setShowInlineTerm] = useState<boolean>(false);
-  const [inlineTerm, setInlineTerm] = useState<{ nome: string; tipo: PaymentTermTipo; config: PaymentTermConfig; salvarTemplate: boolean }>({
+  const [inlineTerm, setInlineTerm] = useState<{ nome: string; tipo: PaymentTermTipo; config: PaymentTermConfig; aplica_a?: "setup" | "mensalidade"; salvarTemplate: boolean }>({
     nome: "", tipo: "avista_desconto", config: {}, salvarTemplate: false
   });
   const [adhocTerms, setAdhocTerms] = useState<PaymentTerm[]>([]);
@@ -575,7 +575,7 @@ export default function GeracaoDigitalProposals() {
         const res = await fetchApi(`/api/gd/payment-terms`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ client_id: clientId, nome: inlineTerm.nome, tipo: inlineTerm.tipo, config: inlineTerm.config })
+          body: JSON.stringify({ client_id: clientId, nome: inlineTerm.nome, tipo: inlineTerm.tipo, config: inlineTerm.config, aplica_a: inlineTerm.aplica_a || "setup" })
         });
         if (!res.ok) throw new Error("Erro ao salvar condição como template.");
         const data = await res.json();
@@ -592,13 +592,14 @@ export default function GeracaoDigitalProposals() {
         nome: inlineTerm.nome.trim(),
         tipo: inlineTerm.tipo,
         config: inlineTerm.config,
+        aplica_a: inlineTerm.aplica_a || "setup",
         ativo: true
       };
       setAdhocTerms((prev) => [...prev, created!]);
     }
     setOfferedTermIds((prev) => [...prev, created!.id]);
     setShowInlineTerm(false);
-    setInlineTerm({ nome: "", tipo: "avista_desconto", config: {}, salvarTemplate: false });
+    setInlineTerm({ nome: "", tipo: "avista_desconto", config: {}, aplica_a: "setup", salvarTemplate: false });
     toast({ title: "Condição aplicada", description: created.nome });
   };
 
@@ -1289,6 +1290,174 @@ export default function GeracaoDigitalProposals() {
                         Iniciar Apresentação
                       </Button>
                     </div>
+
+                    {/* Configuração da Proposta — interativa, editável ao vivo com o cliente */}
+                    {selectedProposal.status !== "aceita" && (
+                      <div className="p-4 rounded-xl bg-white dark:bg-slate-800/40 border border-purple-200 dark:border-purple-900/30 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider">Configuração da Proposta</h4>
+                          <Button
+                            size="sm"
+                            onClick={() => setIsNegotiating(true)}
+                            className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold text-xs"
+                          >
+                            <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                            Abrir Mesa de Negociação
+                          </Button>
+                        </div>
+
+                        {/* 1. Pacotes */}
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Combo Geração Digital</Label>
+                            <select
+                              value={editPackageId}
+                              onChange={(e) => setEditPackageId(e.target.value)}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-850 dark:text-white h-9"
+                            >
+                              <option value="">— Sem combo GD —</option>
+                              {availablePackages.filter((p) => p.tipo === "gd" || !p.tipo).map((p) => (
+                                <option key={p.id} value={p.id}>{p.nome} ({PKG_PERIOD_LABELS[p.periodo] || p.periodo})</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Combo Vexo OS</Label>
+                            <select
+                              value={editPackageVexoId}
+                              onChange={(e) => setEditPackageVexoId(e.target.value)}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-xs text-slate-850 dark:text-white h-9"
+                            >
+                              <option value="">— Sem combo Vexo —</option>
+                              {availablePackages.filter((p) => p.tipo === "vexo").map((p) => (
+                                <option key={p.id} value={p.id}>{p.nome} ({PKG_PERIOD_LABELS[p.periodo] || p.periodo})</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* 2/3. Venda Casada / Setup de implantação */}
+                        <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100 dark:border-white/5">
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+                            <Switch checked={cobrarSetup} onCheckedChange={setCobrarSetup} />
+                            Cobrar setup de implantação?
+                          </label>
+                          {cobrarSetup && (
+                            <div className="space-y-1">
+                              <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Valor do Setup (R$)</Label>
+                              <Input
+                                type="number"
+                                value={valorSetupVexo}
+                                onChange={(e) => setValorSetupVexo(Number(e.target.value) || 0)}
+                                className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-xs h-8 w-40 font-mono"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 4. Condições de Pagamento (selecionar + criar na hora) */}
+                        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Condições de Pagamento a Ofertar</Label>
+                            <button
+                              type="button"
+                              onClick={() => setShowInlineTerm((v) => !v)}
+                              className="text-[10px] font-bold text-purple-650 dark:text-purple-300 hover:underline"
+                            >
+                              {showInlineTerm ? "Cancelar" : "+ Criar condição na hora"}
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[...availableTerms, ...adhocTerms].map((term) => {
+                              const isOn = offeredTermIds.includes(term.id);
+                              return (
+                                <button
+                                  key={term.id}
+                                  type="button"
+                                  onClick={() => toggleOfferedTerm(term.id)}
+                                  className={cn(
+                                    "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all",
+                                    isOn
+                                      ? "bg-purple-600 text-white border-purple-500"
+                                      : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-purple-300"
+                                  )}
+                                >
+                                  {term.nome} · {APLICA_A_LABELS[termAplicaA(term)]}{isOn ? " ✓" : ""}
+                                </button>
+                              );
+                            })}
+                            {availableTerms.length === 0 && adhocTerms.length === 0 && (
+                              <span className="text-[10px] text-slate-400 italic">Nenhuma condição salva. Crie na hora ou na aba Condições.</span>
+                            )}
+                          </div>
+
+                          {showInlineTerm && (
+                            <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900 border border-purple-200 dark:border-purple-900/30 space-y-2">
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <Input
+                                  value={inlineTerm.nome}
+                                  onChange={(e) => setInlineTerm((p) => ({ ...p, nome: e.target.value }))}
+                                  placeholder='Nome (ex: "Setup 2x boleto")'
+                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8"
+                                />
+                                <select
+                                  value={inlineTerm.tipo}
+                                  onChange={(e) => setInlineTerm((p) => ({ ...p, tipo: e.target.value as PaymentTermTipo, config: {} }))}
+                                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8"
+                                >
+                                  {PAYMENT_TERM_TIPOS.map((t) => (
+                                    <option key={t.value} value={t.value}>{t.label}</option>
+                                  ))}
+                                </select>
+                                <select
+                                  value={(inlineTerm as any).aplica_a || "setup"}
+                                  onChange={(e) => setInlineTerm((p) => ({ ...(p as any), aplica_a: e.target.value }))}
+                                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8"
+                                >
+                                  <option value="setup">Aplica ao Setup</option>
+                                  <option value="mensalidade">Aplica à Mensalidade</option>
+                                </select>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                {inlineTerm.tipo === "avista_desconto" && (
+                                  <Input type="number" placeholder="% desconto" value={inlineTerm.config.percentual_desconto ?? ""} onChange={(e) => updateInlineConfig("percentual_desconto", Number(e.target.value) || 0)} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                )}
+                                {(inlineTerm.tipo === "entrada_parcelas" || inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "boleto_recorrente" || inlineTerm.tipo === "semanal") && (
+                                  <Input type="number" placeholder="Nº de parcelas" value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", Number(e.target.value) || 1)} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                )}
+                                {inlineTerm.tipo === "entrada_parcelas" && (
+                                  <Input type="number" placeholder="Entrada (R$)" value={inlineTerm.config.valor_entrada ?? ""} onChange={(e) => updateInlineConfig("valor_entrada", Number(e.target.value) || 0)} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                )}
+                                {(inlineTerm.tipo === "avista_desconto" || inlineTerm.tipo === "entrada_parcelas") && (
+                                  <select value={inlineTerm.config.meio ?? ""} onChange={(e) => updateInlineConfig("meio", e.target.value || undefined)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8">
+                                    <option value="">Meio (opcional)</option>
+                                    <option value="pix">PIX</option>
+                                    <option value="cartao">Cartão</option>
+                                    <option value="boleto">Boleto</option>
+                                  </select>
+                                )}
+                                {inlineTerm.tipo === "custom" && (
+                                  <Input value={inlineTerm.config.descricao ?? ""} onChange={(e) => updateInlineConfig("descricao", e.target.value)} placeholder="Descrição livre" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8 sm:col-span-2" />
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <label className="flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-300 cursor-pointer">
+                                  <input type="checkbox" checked={inlineTerm.salvarTemplate} onChange={(e) => setInlineTerm((p) => ({ ...p, salvarTemplate: e.target.checked }))} className="accent-purple-600" />
+                                  Salvar como template reutilizável
+                                </label>
+                                <Button size="sm" onClick={handleCreateInlineTerm} className="bg-purple-600 hover:bg-purple-500 text-white text-xs h-8">Criar e aplicar</Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-white/5">
+                          <Button size="sm" onClick={handleSaveProposal} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs">
+                            Salvar Configuração
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Resumo Financeiro */}
                     {(() => {
