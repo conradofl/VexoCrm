@@ -769,22 +769,44 @@ export default function GeracaoDigitalPublicProposal() {
                   </span>
                 )}
               </div>
-              {calc.mesesPeriodo > 1 && (
-                <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
-                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
-                  <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                    {calc.compromissoFinal < calc.compromissoOriginal && (
-                      <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
-                        R$ {calc.compromissoOriginal.toLocaleString("pt-BR")}
-                      </span>
+              {calc.mesesPeriodo > 1 && (() => {
+                // O VP (permuta) é mensal; no período ele acumula. Mostrar quanto
+                // do compromisso total sai em dinheiro e quanto é abatido em VP
+                // evita o susto do número cheio.
+                const vpMensalC = Number(proposal.valor_vp || 0);
+                const temVpC = vpMensalC > 0 && vpMensalC < mensalFinalVal;
+                const vpPeriodo = temVpC ? vpMensalC * calc.mesesPeriodo : 0;
+                const dinheiroPeriodo = calc.compromissoFinal - vpPeriodo;
+                return (
+                  <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
+                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
+                    <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                      {(calc.compromissoFinal < calc.compromissoOriginal || temVpC) && (
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
+                          R$ {(temVpC ? calc.compromissoFinal : calc.compromissoOriginal).toLocaleString("pt-BR")}
+                        </span>
+                      )}
+                      R$ {(temVpC ? dinheiroPeriodo : calc.compromissoFinal).toLocaleString("pt-BR")}
+                    </span>
+                    {temVpC && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center justify-between py-1.5 px-3 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
+                          <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
+                          <span className="text-indigo-300 text-sm font-black">R$ {dinheiroPeriodo.toLocaleString("pt-BR")}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
+                          <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em VP (permuta)</span>
+                          <span className="text-emerald-400 text-sm font-black">R$ {vpPeriodo.toLocaleString("pt-BR")}</span>
+                        </div>
+                      </div>
                     )}
-                    R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
-                  </span>
-                  <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
-                    Soma total das mensalidades por {calc.mesesPeriodo} meses.
-                  </span>
-                </div>
-              )}
+                    <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
+                      Soma total das mensalidades por {calc.mesesPeriodo} meses.
+                      {temVpC && ` Desse total, R$ ${vpPeriodo.toLocaleString("pt-BR")} são abatidos em permuta.`}
+                    </span>
+                  </div>
+                );
+              })()}
               {proposal.valor_vp !== null && Number(proposal.valor_vp) > 0 && (
                 <div className="pb-4 border-b border-white/10 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
                   <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Permuta Comercial (VP)</span>

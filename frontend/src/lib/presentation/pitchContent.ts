@@ -74,10 +74,13 @@ const milhar = (v: number) =>
 // Conservadores de propósito: melhor subestimar a dor do que soar irreal.
 export const BENCHMARKS = {
   entretenimento_local: {
-    mesasOciosasDiaFraco: 6,   // mesas/estações vazias em média (ter–qui)
-    ticketMedioMesa: 180,      // consumação + jogos por mesa numa noite
-    diasBaixoFluxo: 3,         // terça, quarta, quinta
-    semanasAno: 52,
+    // Ocupação real da casa no ponto ATUAL.
+    ocupacaoDiaFracoAtual: "50%",      // quinta e domingo
+    ocupacaoFimDeSemanaAtual: "80% a 100%", // sexta e sábado
+    // Mesmo público num ponto com 3x a capacidade: a ocupação se dilui.
+    multiplicadorNovoPonto: 3,
+    ocupacaoDiaFracoNovo: "15% a 20%",
+    ocupacaoFimDeSemanaNovo: "25% a 33%",
   },
   saude_estetica: {
     horariosVagosDia: 4,       // janelas ociosas por dia na agenda
@@ -87,12 +90,10 @@ export const BENCHMARKS = {
   },
 } as const;
 
-// Perda anual estimada com mesas ociosas (entretenimento_local).
-export function estimateIdleTableLoss() {
-  const b = BENCHMARKS.entretenimento_local;
-  const anual = b.mesasOciosasDiaFraco * b.ticketMedioMesa * b.diasBaixoFluxo * b.semanasAno;
-  const mensal = anual / 12;
-  return { anual, mensal };
+// Ocupação diluída ao mudar para um ponto maior: o público é o mesmo, o salão
+// não. Números da própria casa — sem benchmark inventado.
+export function estimateOcupacaoNovoPonto() {
+  return BENCHMARKS.entretenimento_local;
 }
 
 // Perda anual estimada com horários vagos na agenda (saude_estetica).
@@ -115,31 +116,32 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
     accent: "#a855f7",
     buildSlides: ({ companyName }) => {
       const nome = companyName?.trim() || "sua casa";
-      const { anual, mensal } = estimateIdleTableLoss();
-      const b = BENCHMARKS.entretenimento_local;
+      const b = estimateOcupacaoNovoPonto();
       return [
         {
           id: 1,
           kind: "impact",
           eyebrow: "APRESENTAÇÃO COMERCIAL",
           title: "O Fim das Mesas Vazias.",
-          subtitle: `Como transformar a ${nome} no destino número 1 da cidade, todos os dias da semana.`,
+          subtitle: `Como encher um salão ${b.multiplicadorNovoPonto}x maior desde a primeira semana, e fazer a cidade inteira saber que a ${nome} mudou de endereço.`,
         },
         {
           id: 2,
           kind: "pain",
           eyebrow: "A DOR ATUAL",
-          title: "O gargalo do atendimento.",
+          title: "O salão novo é 3x maior. O público, o mesmo.",
           body:
-            "Quando um grupo quer reservar uma mesa, eles querem resposta imediata. Se o seu WhatsApp demora porque a equipe está atendendo as mesas físicas, o cliente esfria, deixa pra depois e acaba esquecendo de voltar.",
+            `Hoje a ${nome} enche: ${b.ocupacaoFimDeSemanaAtual} na sexta e no sábado, e ${b.ocupacaoDiaFracoAtual} na quinta e no domingo. ` +
+            `No ponto novo, com ${b.multiplicadorNovoPonto}x a capacidade, esse mesmo público ocupa só ${b.ocupacaoFimDeSemanaNovo} no fim de semana ` +
+            `e ${b.ocupacaoDiaFracoNovo} na quinta e no domingo. O salão triplica; o movimento, não.`,
           compare: {
             before: {
               img: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=70",
-              label: "Terça à noite, hoje — mesas e cadeiras vazias",
+              label: "O salão novo com o público de hoje",
             },
             after: {
               img: "https://images.unsplash.com/photo-1585504198199-20277593b94f?auto=format&fit=crop&w=900&q=70",
-              label: "Terça à noite, com GD + Vexo — mesas cheias de gente jogando",
+              label: "O salão novo cheio, com GD + Vexo",
             },
           },
         },
@@ -147,14 +149,14 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
           id: 3,
           kind: "implication",
           eyebrow: "A IMPLICAÇÃO",
-          title: "O Custo da Cadeira Vazia.",
+          title: "Mudar de endereço reinicia o jogo.",
           body:
-            `De terça a quinta, uma casa como a ${nome} fica em média com ${b.mesasOciosasDiaFraco} mesas ociosas por noite. ` +
-            `Com um ticket médio de ${brl(b.ticketMedioMesa)} por mesa (jogos + consumação), isso é receita evaporando toda semana — ` +
-            `${milhar(mensal)} por mês que simplesmente não entram no caixa.`,
+            `Quem não souber que a ${nome} mudou, simplesmente não aparece. E o melhor dia da casa, sexta e sábado, passa a ocupar ` +
+            `só ${b.ocupacaoFimDeSemanaNovo} do salão novo. Um espaço grande e vazio não dá sensação de espaço: dá sensação de casa parada. ` +
+            `Para o ponto novo funcionar, o público precisa crescer na mesma proporção que a capacidade.`,
           metric: {
-            value: `${milhar(anual)}/ano`,
-            caption: "perda estimada com mesas ociosas nos dias de semana",
+            value: b.ocupacaoFimDeSemanaNovo,
+            caption: "é o quanto o seu melhor dia ocupa do salão novo, se o público continuar o mesmo",
           },
         },
         {
@@ -163,8 +165,9 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
           eyebrow: "A SOLUÇÃO",
           title: "A Máquina de Atração e Reservas.",
           steps: [
-            "Atraímos o público local que está buscando diversão, com o Sistema de Atração de Clientes.",
-            "Nossa Recepcionista Digital 24h atende o WhatsApp em 3 segundos, envia o cardápio e agenda a mesa — no piloto automático.",
+            `Avisamos a cidade inteira que a ${nome} mudou de endereço, com o Sistema de Atração de Clientes na sua região.`,
+            "Atraímos o público local que está buscando diversão e enchemos também a quinta e o domingo.",
+            "Nossa Recepcionista Digital 24h atende o WhatsApp em 3 segundos, envia o cardápio e agenda a mesa, no piloto automático.",
             "Você foca no que importa: entregar a melhor experiência física da cidade.",
           ],
         },
@@ -204,19 +207,21 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
           kind: "vision",
           eyebrow: "VISÃO DE FUTURO",
           title: "Previsibilidade.",
-          body: `Imagine abrir a ${nome} na segunda-feira já com a agenda da semana lotada. Sem depender de sorte, sem torcer pelo movimento.`,
+          body:
+            `Imagine estrear o salão novo já cheio, com a quinta e o domingo enchendo de verdade, e a quarta abrindo porque a procura passou a justificar. ` +
+            `Sem depender de sorte, sem torcer pelo movimento.`,
         },
         {
           id: 7,
           kind: "close",
           eyebrow: "A DECISÃO",
           title: "O custo da inércia.",
-          body: `Quanto a ${nome} perde por mês continuando exatamente como está hoje?`,
+          body: `Quanto a ${nome} perde por mês inaugurando um salão ${b.multiplicadorNovoPonto}x maior com o público de hoje?`,
           metric: {
-            value: `${milhar(mensal)}/mês`,
-            caption: "é o preço estimado de não fazer nada",
+            value: b.ocupacaoDiaFracoNovo,
+            caption: "é a ocupação da quinta e do domingo no salão novo, se nada mudar",
           },
-          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada semana parada é receita que não volta — e a virada começa hoje.",
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada semana parada é receita que não volta. A virada começa hoje.",
         },
       ];
     },
@@ -264,7 +269,7 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
           title: "O Custo do Horário Vago.",
           body:
             `Uma agenda como a da ${nome} costuma ter em média ${b.horariosVagosDia} janelas ociosas por dia. ` +
-            `Com um ticket médio de ${brl(b.ticketMedioProcedimento)}, metade disso é receita perfeitamente recuperável — ` +
+            `Com um ticket médio de ${brl(b.ticketMedioProcedimento)}, metade disso é receita perfeitamente recuperável, ` +
             `${milhar(mensal)} por mês deixados na mesa.`,
           metric: {
             value: `${milhar(anual)}/ano`,
@@ -278,7 +283,7 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
           title: "A Máquina de Atração e Agendamentos.",
           steps: [
             "Atraímos os pacientes certos da sua região, com o Sistema de Atração de Clientes.",
-            "Nossa Recepcionista Digital 24h responde em 3 segundos, tira dúvidas e agenda a consulta — no piloto automático.",
+            "Nossa Recepcionista Digital 24h responde em 3 segundos, tira dúvidas e agenda a consulta, no piloto automático.",
             "Sua equipe foca no atendimento presencial de excelência.",
           ],
         },
@@ -330,7 +335,7 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
             value: `${milhar(mensal)}/mês`,
             caption: "é o preço estimado de não fazer nada",
           },
-          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada dia de agenda vazia é receita que não volta — e a virada começa hoje.",
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada dia de agenda vazia é receita que não volta. A virada começa hoje.",
         },
       ];
     },
