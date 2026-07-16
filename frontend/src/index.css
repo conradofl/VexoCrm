@@ -290,9 +290,11 @@
   textarea:-webkit-autofill,
   textarea:-webkit-autofill:hover,
   textarea:-webkit-autofill:focus {
+    /* Segue o tema: no claro fica claro, no escuro fica escuro. Antes era
+       escuro fixo — no tema claro o texto (escuro) sumia no fundo preto. */
     -webkit-text-fill-color: hsl(var(--foreground));
-    -webkit-box-shadow: 0 0 0 1000px rgba(10, 12, 24, 0.96) inset;
-    box-shadow: 0 0 0 1000px rgba(10, 12, 24, 0.96) inset;
+    -webkit-box-shadow: 0 0 0 1000px hsl(var(--background)) inset;
+    box-shadow: 0 0 0 1000px hsl(var(--background)) inset;
     transition: background-color 9999s ease-out 0s;
     caret-color: hsl(var(--foreground));
   }

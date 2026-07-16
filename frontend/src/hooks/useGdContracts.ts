@@ -31,7 +31,8 @@ export interface GdContract {
   dados: GdContractFormData;
   pdf_url: string | null;
   sign_url?: string | null;
-  status: "rascunho" | "enviado" | "assinado";
+  status: "rascunho" | "gerado" | "enviado" | "assinado";
+  arquivado?: boolean;
   created_at: string;
 }
 
@@ -56,16 +57,18 @@ export function useGdContractTemplates() {
   });
 }
 
-export function useGdContracts(proposalId?: string) {
+export function useGdContracts(proposalId?: string, arquivado = false) {
   const { isAuthenticated, getIdToken } = useAuth();
   return useQuery({
-    queryKey: ["gdContracts", proposalId],
+    queryKey: ["gdContracts", proposalId, arquivado],
     enabled: isAuthenticated,
     queryFn: async (): Promise<GdContract[]> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
-      let url = "/api/gd/contracts";
-      if (proposalId) url += `?proposal_id=${proposalId}`;
+      const params = new URLSearchParams();
+      if (proposalId) params.set("proposal_id", proposalId);
+      if (arquivado) params.set("arquivado", "true");
+      const url = `/api/gd/contracts${params.toString() ? `?${params}` : ""}`;
       const res = await fetchApi(url, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -101,6 +104,30 @@ export function useCreateGdContract() {
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["gdContracts"] });
       queryClient.invalidateQueries({ queryKey: ["gdContracts", variables.proposal_id] });
+    },
+  });
+}
+
+// Preenchimento assistido por IA: manda o texto colado, recebe os campos.
+// Não grava nada — o retorno só preenche o formulário para revisão.
+export function useExtractContractData() {
+  const { getIdToken } = useAuth();
+  return useMutation({
+    mutationFn: async (texto: string): Promise<Partial<GdContractFormData>> => {
+      const token = await getIdToken();
+      const res = await fetchApi("/api/gd/contracts/extract", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ texto }),
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao extrair os dados com a IA"));
+      }
+      const json = await res.json();
+      return json.data as Partial<GdContractFormData>;
     },
   });
 }

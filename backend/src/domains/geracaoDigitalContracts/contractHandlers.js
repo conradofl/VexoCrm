@@ -104,16 +104,19 @@ export async function listContracts(req, res) {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
 
-    const { proposal_id } = req.query;
-    
-    let query = "SELECT * FROM gd_contracts WHERE tenant_id = $1";
-    const params = [tenantId];
-    
+    const { proposal_id, arquivado } = req.query;
+
+    // Por padrão lista só os ativos; ?arquivado=true traz os arquivados.
+    const querArquivados = String(arquivado) === "true";
+
+    let query = "SELECT * FROM gd_contracts WHERE tenant_id = $1 AND COALESCE(arquivado, false) = $2";
+    const params = [tenantId, querArquivados];
+
     if (proposal_id) {
-      query += " AND proposal_id = $2";
       params.push(proposal_id);
+      query += ` AND proposal_id = $${params.length}`;
     }
-    
+
     query += " ORDER BY created_at DESC";
 
     const { rows } = await db.query(query, params);
@@ -152,15 +155,17 @@ export async function updateContract(req, res) {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
     const { id } = req.params;
-    const { dados, status } = req.body;
+    const { dados, status, arquivado } = req.body;
 
     const { rows } = await db.query(
-      `UPDATE gd_contracts 
-       SET dados = COALESCE($1, dados), 
-           status = COALESCE($2, status)
-       WHERE id = $3 AND tenant_id = $4
+      `UPDATE gd_contracts
+       SET dados = COALESCE($1, dados),
+           status = COALESCE($2, status),
+           arquivado = COALESCE($3, arquivado),
+           updated_at = NOW()
+       WHERE id = $4 AND tenant_id = $5
        RETURNING *`,
-      [dados, status, id, tenantId]
+      [dados, status, typeof arquivado === "boolean" ? arquivado : null, id, tenantId]
     );
 
     if (rows.length === 0) {
@@ -208,7 +213,7 @@ export async function generateContractPdf(req, res) {
     const mergedContent = applyMerge(templateConteudo, dados);
 
     // Generate PDF to Buffer instead of direct stream
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ margin: 56, bufferPages: true });
     const buffers = [];
     doc.on('data', buffers.push.bind(buffers));
     
@@ -220,27 +225,52 @@ export async function generateContractPdf(req, res) {
       });
     });
 
-    // Split text by lines and render it
-    const paragraphs = mergedContent.split("\n");
-    for (let p of paragraphs) {
+    // Renderização espelhando o preview da tela: alinhado à esquerda, espaçamento
+    // consistente e sem "justify" (que esticava as linhas e desalinhava o texto).
+    const BODY_SIZE = 10.5;
+    const LINE_GAP = 2.5;
+    const linhas = mergedContent.split("\n");
+    let tituloRenderizado = false;
+
+    for (const linha of linhas) {
+      const p = linha.trimEnd();
+
       if (p.trim() === "") {
-        doc.moveDown();
-      } else if (p.toUpperCase() === p && p.trim().length > 10 && !p.startsWith("A.") && !p.startsWith("B.") && !p.startsWith("C.")) {
-        // Simple heuristic for titles
-        doc.font("Helvetica-Bold").fontSize(12).text(p, { align: "center" });
-        doc.moveDown();
-      } else if (p.startsWith("Cláusula")) {
-        doc.font("Helvetica-Bold").fontSize(11).text(p);
-        doc.moveDown();
-      } else {
-        doc.font("Helvetica").fontSize(11).text(p, { align: "justify" });
+        doc.moveDown(0.5);
+        continue;
       }
+
+      // Título principal: apenas a primeira linha em caixa alta do documento.
+      if (!tituloRenderizado && p.trim() === p.trim().toUpperCase() && p.trim().length > 10) {
+        doc.font("Helvetica-Bold").fontSize(13).text(p.trim(), { align: "center", lineGap: LINE_GAP });
+        doc.moveDown(1);
+        tituloRenderizado = true;
+        continue;
+      }
+
+      // Cabeçalho de cláusula.
+      if (/^Cláusula\s/i.test(p.trim())) {
+        doc.moveDown(0.4);
+        doc.font("Helvetica-Bold").fontSize(11.5).text(p.trim(), { align: "left", lineGap: LINE_GAP });
+        doc.moveDown(0.25);
+        continue;
+      }
+
+      // Itens de lista (A./B./ "- item" / "1º Pagamento") — sem recuo extra,
+      // mantendo o alinhamento à esquerda igual ao preview.
+      const isItem = /^([A-Z]\.|[-•]|\d+º)\s/.test(p.trim());
+      doc.font("Helvetica").fontSize(BODY_SIZE).text(p.trim(), {
+        align: "left",
+        lineGap: LINE_GAP,
+        paragraphGap: isItem ? 0 : 2,
+      });
     }
 
-    doc.moveDown(4);
+    doc.moveDown(3);
 
-    // Signatures
-    doc.font("Helvetica").text("____________________________________________________", { align: "center" });
+    // Assinaturas
+    doc.font("Helvetica").fontSize(10.5);
+    doc.text("____________________________________________________", { align: "center" });
     doc.text("Contratada: CAIO VINÍCIUS ALMEIDA DE OLIVEIRA", { align: "center" });
     doc.moveDown(2);
     doc.text("____________________________________________________", { align: "center" });
@@ -250,29 +280,19 @@ export async function generateContractPdf(req, res) {
 
     const pdfData = await pdfBufferPromise;
 
-    // FASE 3: Enviar para o ZapSign (Mock)
-    const { createDocument } = await import("../../services/zapsign.js");
-    
-    const zapsignResponse = await createDocument(id, pdfData, {
-      email: dados.email || "teste@teste.com"
-    });
-
-    // Salvar o link e provedor no banco de dados
+    // Marca o contrato como "gerado" (não sobrescreve um já "assinado") e
+    // devolve o PDF direto para download/visualização no navegador.
     await db.query(
-      `UPDATE gd_contracts 
-       SET provider_id = $1, provider_name = $2, sign_url = $3, status = $4
-       WHERE id = $5 AND tenant_id = $6`,
-      [zapsignResponse.provider_id, zapsignResponse.provider_name, zapsignResponse.sign_url, zapsignResponse.status, id, tenantId]
+      `UPDATE gd_contracts
+       SET status = CASE WHEN status = 'assinado' THEN status ELSE 'gerado' END,
+           updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
     );
 
-    // Retornar os dados para o frontend (JSON) em vez de baixar o PDF automaticamente.
-    // O frontend pode exibir o link de assinatura.
-    res.json({
-      success: true,
-      contract_id: id,
-      sign_url: zapsignResponse.sign_url,
-      message: "Contrato gerado e enviado para assinatura eletrônica com sucesso."
-    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="contrato-${id}.pdf"`);
+    res.send(pdfData);
 
   } catch (error) {
     console.error("[generateContractPdf] Error:", error);
