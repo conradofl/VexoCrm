@@ -179,37 +179,81 @@ export async function updateContract(req, res) {
   }
 }
 
+// Monta o PDF do contrato (template ativo + dados salvos) e devolve o Buffer.
+// Usado pelo download e pelo envio ao jurídico — uma única fonte de verdade
+// para o documento. Lança Error com code para o chamador traduzir em HTTP.
+export async function buildContractPdfBuffer(tenantId, id) {
+  const { rows: contractRows } = await db.query(
+    "SELECT * FROM gd_contracts WHERE id = $1 AND tenant_id = $2",
+    [id, tenantId]
+  );
+  if (contractRows.length === 0) {
+    const e = new Error("Contrato não encontrado");
+    e.code = "CONTRACT_NOT_FOUND";
+    throw e;
+  }
+
+  const contract = contractRows[0];
+  const dados = contract.dados || {};
+  dados.data_extenso = formatExtenseDate();
+
+  const { rows: templateRows } = await db.query(
+    "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1",
+    [tenantId]
+  );
+  if (templateRows.length === 0) {
+    const e = new Error("Template de contrato não encontrado");
+    e.code = "TEMPLATE_NOT_FOUND";
+    throw e;
+  }
+
+  const pdfData = await renderContractPdf(templateRows[0].conteudo, dados);
+  return { contract, dados, pdfData };
+}
+
 export async function generateContractPdf(req, res) {
   try {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
     const { id } = req.params;
 
-    // Load Contract
-    const { rows: contractRows } = await db.query(
-      "SELECT * FROM gd_contracts WHERE id = $1 AND tenant_id = $2",
-      [id, tenantId]
-    );
-
-    if (contractRows.length === 0) {
-      return sendError(res, 404, "NOT_FOUND", "Contrato não encontrado");
+    let built;
+    try {
+      built = await buildContractPdfBuffer(tenantId, id);
+    } catch (e) {
+      if (e.code === "CONTRACT_NOT_FOUND" || e.code === "TEMPLATE_NOT_FOUND") {
+        return sendError(res, 404, "NOT_FOUND", e.message);
+      }
+      throw e;
     }
-
-    const contract = contractRows[0];
-    const dados = contract.dados || {};
-    dados.data_extenso = formatExtenseDate(); // add extense date for {{data_extenso}}
-
-    // Load Template
-    const { rows: templateRows } = await db.query(
-      "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1",
-      [tenantId]
-    );
-
-    if (templateRows.length === 0) {
-      return sendError(res, 404, "NOT_FOUND", "Template de contrato não encontrado");
+    const { dados, pdfData } = built;
+    return await finalizeContractPdfResponse(res, tenantId, id, dados, pdfData);
+  } catch (error) {
+    console.error("[generateContractPdf] Error:", error);
+    if (!res.headersSent) {
+      sendError(res, 500, "INTERNAL_ERROR", "Erro ao gerar PDF do contrato");
     }
+  }
+}
 
-    const templateConteudo = templateRows[0].conteudo;
+async function finalizeContractPdfResponse(res, tenantId, id, dados, pdfData) {
+  // Marca o contrato como "gerado" (não sobrescreve um já "assinado") e
+  // devolve o PDF direto para download/visualização no navegador.
+  await db.query(
+    `UPDATE gd_contracts
+     SET status = CASE WHEN status = 'assinado' THEN status ELSE 'gerado' END,
+         updated_at = NOW()
+     WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
+  );
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="contrato-${id}.pdf"`);
+  return res.send(pdfData);
+}
+
+// Renderização do documento (mesmo layout do preview da tela).
+async function renderContractPdf(templateConteudo, dados) {
+  {
     const mergedContent = applyMerge(templateConteudo, dados);
 
     // Generate PDF to Buffer instead of direct stream
@@ -278,26 +322,6 @@ export async function generateContractPdf(req, res) {
 
     doc.end();
 
-    const pdfData = await pdfBufferPromise;
-
-    // Marca o contrato como "gerado" (não sobrescreve um já "assinado") e
-    // devolve o PDF direto para download/visualização no navegador.
-    await db.query(
-      `UPDATE gd_contracts
-       SET status = CASE WHEN status = 'assinado' THEN status ELSE 'gerado' END,
-           updated_at = NOW()
-       WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId]
-    );
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="contrato-${id}.pdf"`);
-    res.send(pdfData);
-
-  } catch (error) {
-    console.error("[generateContractPdf] Error:", error);
-    if (!res.headersSent) {
-      sendError(res, 500, "INTERNAL_ERROR", "Erro ao gerar PDF do contrato");
-    }
+    return await pdfBufferPromise;
   }
 }

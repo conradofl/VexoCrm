@@ -9,8 +9,19 @@ import {
   generateContractPdf,
 } from "./contractHandlers.js";
 import { extractContractData } from "./contractExtract.js";
+import {
+  getJuridicoSettings,
+  saveJuridicoSettings,
+  listEvolutionInstances,
+  sendContractToJuridico,
+} from "./juridicoHandlers.js";
 
 export function registerContractRoutes(app) {
+  // Jurídico: configuração (canal do Slack + WhatsApp + instância) e envio.
+  app.get("/api/gd/juridico-settings", requireFirebaseAuth, getJuridicoSettings);
+  app.put("/api/gd/juridico-settings", requireFirebaseAuth, saveJuridicoSettings);
+  app.get("/api/gd/evolution-instances", requireFirebaseAuth, listEvolutionInstances);
+  app.post("/api/gd/contracts/:id/enviar-juridico", requireFirebaseAuth, sendContractToJuridico);
   app.get("/api/gd/contract-templates", requireFirebaseAuth, listContractTemplates);
   app.get("/api/gd/contract-templates/:id", requireFirebaseAuth, getContractTemplate);
   

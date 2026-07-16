@@ -26,6 +26,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { GenerateContractDialog } from "./GenerateContractDialog";
+import { JuridicoSettingsCard } from "./JuridicoSettingsCard";
+import { useSendContractToJuridico } from "@/hooks/useJuridico";
 
 const PAGE_SIZE = 20;
 
@@ -37,6 +39,8 @@ function getStatusConfig(status: string) {
       return { label: "Gerado", color: "bg-purple-100 text-purple-800", icon: FileText };
     case "aguardando_assinatura":
       return { label: "Aguardando Assinatura", color: "bg-blue-100 text-blue-800", icon: Send };
+    case "em_revisao_juridico":
+      return { label: "No Jurídico", color: "bg-indigo-100 text-indigo-800", icon: Send };
     case "assinado":
       return { label: "Assinado", color: "bg-emerald-100 text-emerald-800", icon: CheckCircle };
     default:
@@ -52,6 +56,7 @@ export function ContractsList() {
 
   const { data: contracts, isLoading, error } = useGdContracts(undefined, showArquivados);
   const updateContract = useUpdateGdContract();
+  const enviarJuridico = useSendContractToJuridico();
   const { getIdToken, clientId } = useAuth();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; proposalId: string; dados: any } | null>(null);
@@ -171,8 +176,33 @@ export function ContractsList() {
     );
   }
 
+  // Envia o PDF para o canal do jurídico no Slack + aviso no WhatsApp.
+  const handleEnviarJuridico = (contract: any) => {
+    const empresa = contract.dados?.razao_social || "este contrato";
+    if (!window.confirm(`Enviar o contrato de "${empresa}" para o jurídico revisar?`)) return;
+    enviarJuridico.mutate(contract.id, {
+      onSuccess: (r: any) => {
+        const wa =
+          r?.whatsapp === "sent" ? " WhatsApp avisado." :
+          r?.whatsapp === "not_configured" ? " (WhatsApp não configurado)" :
+          r?.whatsapp === "error" ? " (falha no aviso por WhatsApp)" : "";
+        toast({ title: "Enviado ao jurídico", description: `PDF publicado no Slack.${wa}` });
+      },
+      onError: (err: any) => toast({ title: "Erro ao enviar", description: err.message, variant: "destructive" }),
+    });
+  };
+
   const acoes = (contract: any, compact = false) => (
     <>
+      <Button
+        size="sm"
+        className={cn("bg-indigo-600 hover:bg-indigo-500 text-white", compact ? "" : "w-full")}
+        onClick={() => handleEnviarJuridico(contract)}
+        disabled={enviarJuridico.isPending}
+      >
+        <Send className="h-4 w-4 mr-2" />
+        {enviarJuridico.isPending ? "Enviando..." : "Enviar ao Jurídico"}
+      </Button>
       <Button
         variant="outline"
         size="sm"
@@ -206,6 +236,7 @@ export function ContractsList() {
 
   return (
     <div>
+      <JuridicoSettingsCard />
       {toolbar}
 
       {pagina.length === 0 ? (
