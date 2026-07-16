@@ -51,6 +51,7 @@ import {
 import { GeracaoDigitalNegotiationBoard, type NegotiationFinalizeResult } from "@/components/GeracaoDigitalNegotiationBoard";
 import { GenerateContractDialog } from "./GeracaoDigitalContracts/GenerateContractDialog";
 import { ShareProposalDialog } from "./GeracaoDigitalProposals/ShareProposalDialog";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useProposalWizard } from "@/hooks/useProposalWizard";
 import { ProposalWizard } from "@/components/geracaoDigital/ProposalWizard";
 
@@ -145,8 +146,10 @@ export default function GeracaoDigitalProposals() {
   // Arquivadas
   const [showArchived, setShowArchived] = useState<boolean>(false);
   // Busca e modo de visualização da lista lateral de propostas.
+  // A preferência de visualização persiste: antes voltava para cards toda vez
+  // que se saía e voltava na aba.
   const [buscaProposta, setBuscaProposta] = useState<string>("");
-  const [viewProposta, setViewProposta] = useState<"cards" | "list">("cards");
+  const [viewProposta, setViewProposta] = useLocalStorage<"cards" | "list">("gd_propostas_view", "cards");
 
   // Catalog catalogs (shared between wizard and proposal editor)
   const [availablePackages, setAvailablePackages] = useState<any[]>([]);

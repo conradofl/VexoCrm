@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { GenerateContractDialog } from "./GenerateContractDialog";
 import { JuridicoSettingsCard } from "./JuridicoSettingsCard";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { useSendContractToJuridico } from "@/hooks/useJuridico";
 
 const PAGE_SIZE = 20;
@@ -51,7 +52,8 @@ function getStatusConfig(status: string) {
 export function ContractsList() {
   const [showArquivados, setShowArquivados] = useState(false);
   const [busca, setBusca] = useState("");
-  const [view, setView] = useState<"grid" | "list">("grid");
+  // Preferência de visualização persiste entre visitas à aba.
+  const [view, setView] = useLocalStorage<"grid" | "list">("gd_contratos_view", "grid");
   const [page, setPage] = useState(1);
 
   const { data: contracts, isLoading, error } = useGdContracts(undefined, showArquivados);
