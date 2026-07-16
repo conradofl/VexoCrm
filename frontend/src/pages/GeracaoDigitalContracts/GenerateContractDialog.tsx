@@ -12,6 +12,39 @@ import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 
+const CONTRACT_DEFAULTS: Record<string, string> = {
+  // Contratante
+  razao_social: "",
+  cnpj: "",
+  telefone: "",
+  telefone2: "",
+  email: "",
+  representante: "",
+  endereco: "",
+  // Objeto / entregas
+  produtos: "",
+  condicoes_pagamento: "",
+  artes_mensais: "15",
+  // Preço (estruturado)
+  forma_pagamento: "permuta",
+  num_parcelas: "6",
+  valor_parcela: "",
+  data_primeiro_venc: "",
+  // Prazo / foro / assinatura
+  prazo_dias: "180",
+  aviso_previo_dias: "60",
+  foro_cidade: "Uberlândia-MG",
+  cidade_assinatura: "Uberlândia-MG",
+  vigencia: "90",
+};
+
+// Ignora chaves vazias para não apagar default com string em branco.
+function somentePreenchidos(obj: Record<string, any> = {}): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "")
+  ) as Record<string, string>;
+}
+
 interface GenerateContractDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -32,31 +65,13 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
   const isEdit = !!contractId;
   const [textoColado, setTextoColado] = useState("");
 
-  const [formData, setFormData] = useLocalStorage<GdContractFormData>(`gd_contract_form_${proposalId}`, {
-    // Contratante
-    razao_social: initialData.razao_social || "",
-    cnpj: "",
-    telefone: "",
-    telefone2: "",
-    email: "",
-    representante: "",
-    endereco: "",
-    // Objeto / entregas
-    produtos: initialData.produtos || "",
-    condicoes_pagamento: initialData.condicoes_pagamento || "",
-    artes_mensais: "15",
-    // Preço (estruturado)
-    forma_pagamento: "permuta",
-    num_parcelas: "6",
-    valor_parcela: "",
-    data_primeiro_venc: "",
-    // Prazo / foro / assinatura
-    prazo_dias: "180",
-    aviso_previo_dias: "60",
-    foro_cidade: "Uberlândia-MG",
-    cidade_assinatura: "Uberlândia-MG",
-    vigencia: "90",
-  } as GdContractFormData);
+  const [formData, setFormData] = useLocalStorage<GdContractFormData>(
+    `gd_contract_form_${proposalId}`,
+    // Defaults + tudo que veio da proposta aceita (escopo, parcelas, valores,
+    // período, carência). O spread precisa vir por último: antes só 3 campos
+    // eram aproveitados e o resto ficava no default.
+    { ...CONTRACT_DEFAULTS, ...somentePreenchidos(initialData) } as GdContractFormData
+  );
 
   // Modo edição: ao abrir, carrega os dados salvos do contrato (fonte da verdade,
   // não o rascunho do localStorage).
@@ -67,17 +82,18 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, contractId]);
 
-  // Atualizar quando initialData mudar (se não tinha localStorage)
-  useEffect(() => {
-    if (!contractId && open && initialData && (!formData.razao_social && !formData.produtos)) {
-      setFormData((prev) => ({
-        ...prev,
-        razao_social: initialData.razao_social || prev.razao_social,
-        produtos: initialData.produtos || prev.produtos,
-        condicoes_pagamento: initialData.condicoes_pagamento || prev.condicoes_pagamento,
-      }));
+  // Puxa (de novo) tudo que já foi negociado na proposta: escopo, forma de
+  // pagamento, parcelas, valor, 1º vencimento e prazo. Útil quando existe um
+  // rascunho antigo no navegador, criado antes destes campos existirem.
+  const handlePuxarDaProposta = () => {
+    const vindos = somentePreenchidos(initialData);
+    if (Object.keys(vindos).length === 0) {
+      toast({ title: "Nada para puxar", description: "Esta proposta não tem dados aproveitáveis.", variant: "destructive" });
+      return;
     }
-  }, [open, initialData, setFormData, formData]);
+    setFormData((prev) => ({ ...prev, ...vindos }));
+    toast({ title: "Dados da proposta aplicados", description: `${Object.keys(vindos).length} campo(s) preenchido(s) a partir da proposta.` });
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -173,6 +189,21 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
           </TabsList>
 
           <TabsContent value="form" className="space-y-4">
+            {/* Dados já negociados na proposta */}
+            {!isEdit && (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-indigo-900 block">Dados da proposta</span>
+                  <span className="text-[10px] text-indigo-700/80">
+                    Escopo, forma de pagamento, parcelas, valor, 1º vencimento e prazo.
+                  </span>
+                </div>
+                <Button size="sm" variant="outline" onClick={handlePuxarDaProposta} className="h-8 border-indigo-300 text-indigo-800 hover:bg-indigo-100 shrink-0">
+                  Puxar da proposta
+                </Button>
+              </div>
+            )}
+
             {/* Preenchimento assistido por IA — cole o que o cliente mandou */}
             <div className="rounded-xl border border-purple-200 bg-purple-50/60 p-3 space-y-2">
               <div className="flex items-center justify-between gap-3">

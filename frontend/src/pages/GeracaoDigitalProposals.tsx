@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
+import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
 import { API_BASE_URL, fetchApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -1818,11 +1819,7 @@ export default function GeracaoDigitalProposals() {
           open={showGenerateContract}
           onOpenChange={setShowGenerateContract}
           proposalId={selectedProposal.id}
-          initialData={{
-            razao_social: selectedProposal.prospect_name,
-            produtos: selectedProposal.itens.map(i => `- ${i.descricao} (R$ ${i.valor})`).join("\n"),
-            condicoes_pagamento: selectedProposal.condicoes_pagamento?.escolhida?.nome || "",
-          }}
+          initialData={buildContractInitialData(selectedProposal, availablePackages)}
         />
       )}
     </PageShell>
