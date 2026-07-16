@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
@@ -26,7 +26,10 @@ import {
   Archive,
   Play,
   Edit,
-  ExternalLink
+  ExternalLink,
+  Search,
+  LayoutGrid,
+  List as ListIcon
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
@@ -140,6 +143,9 @@ export default function GeracaoDigitalProposals() {
 
   // Arquivadas
   const [showArchived, setShowArchived] = useState<boolean>(false);
+  // Busca e modo de visualização da lista lateral de propostas.
+  const [buscaProposta, setBuscaProposta] = useState<string>("");
+  const [viewProposta, setViewProposta] = useState<"cards" | "list">("cards");
 
   // Catalog catalogs (shared between wizard and proposal editor)
   const [availablePackages, setAvailablePackages] = useState<any[]>([]);
@@ -545,6 +551,19 @@ export default function GeracaoDigitalProposals() {
   const grandTotal = setupTotal + recurringTotal + setupVexoValue;
 
   const offeredTerms = [...availableTerms, ...adhocTerms].filter((t) => offeredTermIds.includes(t.id));
+
+  // Lista lateral: ativas/arquivadas + busca por empresa, status ou ID.
+  const propostasFiltradas = useMemo(() => {
+    const base = proposals.filter((p) => (showArchived ? p.arquivada === true : p.arquivada !== true));
+    const q = buscaProposta.trim().toLowerCase();
+    if (!q) return base;
+    const statusLabel = (s: string) => (s === "aceita" ? "fechado" : s === "enviada" ? "enviada" : "rascunho");
+    return base.filter((p) =>
+      [p.prospect_name, p.status, statusLabel(p.status), p.id]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    );
+  }, [proposals, showArchived, buscaProposta]);
 
   const toggleOfferedTerm = (termId: string) => {
     setOfferedTermIds((prev) =>
@@ -1147,21 +1166,89 @@ export default function GeracaoDigitalProposals() {
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Nova Proposta
               </Button>
-              <label className="flex items-center gap-2 px-2 pb-1 text-[10px] text-slate-500 font-medium cursor-pointer dark:text-slate-400">
-                <input
-                  type="checkbox"
-                  checked={showArchived}
-                  onChange={(e) => { setShowArchived(e.target.checked); setSelectedProposal(null); }}
-                  className="accent-purple-600"
+              {/* Busca */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  value={buscaProposta}
+                  onChange={(e) => setBuscaProposta(e.target.value)}
+                  placeholder="Buscar por empresa, status ou ID..."
+                  className="pl-8 h-8 text-xs"
                 />
-                mostrar arquivadas
-              </label>
-              {proposals.filter((p) => (showArchived ? p.arquivada === true : p.arquivada !== true)).length === 0 && (
+              </div>
+
+              {/* Ativos / Arquivados + visualização */}
+              <div className="flex items-center gap-1.5">
+                <div className="flex flex-1 rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+                  <button
+                    onClick={() => { setShowArchived(false); setSelectedProposal(null); }}
+                    className={cn("flex-1 px-2 py-1.5 text-[10px] font-bold transition-colors", !showArchived ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
+                  >
+                    Ativas
+                  </button>
+                  <button
+                    onClick={() => { setShowArchived(true); setSelectedProposal(null); }}
+                    className={cn("flex-1 px-2 py-1.5 text-[10px] font-bold transition-colors", showArchived ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
+                  >
+                    Arquivadas
+                  </button>
+                </div>
+                <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+                  <button
+                    onClick={() => setViewProposta("cards")}
+                    aria-label="Visualizar em cards"
+                    className={cn("px-2 py-1.5 transition-colors", viewProposta === "cards" ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setViewProposta("list")}
+                    aria-label="Visualizar em lista"
+                    className={cn("px-2 py-1.5 transition-colors", viewProposta === "list" ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
+                  >
+                    <ListIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {propostasFiltradas.length === 0 && (
                 <p className="text-[10px] text-slate-400 italic px-2">
-                  {showArchived ? "Nenhuma proposta arquivada." : "Nenhuma proposta ativa."}
+                  {buscaProposta
+                    ? "Nenhuma proposta encontrada."
+                    : showArchived ? "Nenhuma proposta arquivada." : "Nenhuma proposta ativa."}
                 </p>
               )}
-              {proposals.filter((p) => (showArchived ? p.arquivada === true : p.arquivada !== true)).map((prop) => (
+
+              {/* Visualização compacta em lista */}
+              {viewProposta === "list" && propostasFiltradas.map((prop) => (
+                <button
+                  key={prop.id}
+                  onClick={() => selectProposal(prop)}
+                  className={cn(
+                    "w-full text-left px-3 py-2 rounded-lg border transition-all flex items-center justify-between gap-2",
+                    selectedProposal?.id === prop.id
+                      ? "bg-slate-50 dark:bg-slate-850 border-purple-500/50"
+                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
+                  )}
+                >
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate block">{prop.prospect_name}</span>
+                    <span className="text-[9px] text-slate-500 font-mono dark:text-slate-400">
+                      R$ {prop.valor_total.toLocaleString("pt-BR")}
+                    </span>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-[8px] uppercase font-bold px-1.5 py-0.5 rounded shrink-0 text-white",
+                      prop.status === "aceita" ? "bg-emerald-500" : prop.status === "enviada" ? "bg-blue-600" : "bg-amber-600"
+                    )}
+                  >
+                    {prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho"}
+                  </span>
+                </button>
+              ))}
+
+              {viewProposta === "cards" && propostasFiltradas.map((prop) => (
                 <div
                   key={prop.id}
                   className={cn(
