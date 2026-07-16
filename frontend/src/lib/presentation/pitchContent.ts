@@ -76,7 +76,7 @@ export const BENCHMARKS = {
   entretenimento_local: {
     // Ocupação real da casa no ponto ATUAL.
     ocupacaoDiaFracoAtual: "50%",      // quinta e domingo
-    ocupacaoFimDeSemanaAtual: "80% a 100%", // sexta e sábado
+    ocupacaoFimDeSemanaAtual: "80 a 100%", // sexta e sábado
     // Mesmo público num ponto com 3x a capacidade: a ocupação se dilui.
     multiplicadorNovoPonto: 3,
     ocupacaoDiaFracoNovo: "15% a 20%",
@@ -131,7 +131,7 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
           eyebrow: "A DOR ATUAL",
           title: "O salão novo é 3x maior. O público, o mesmo.",
           body:
-            `Hoje a ${nome} enche: ${b.ocupacaoFimDeSemanaAtual} na sexta e no sábado, e ${b.ocupacaoDiaFracoAtual} na quinta e no domingo. ` +
+            `Hoje a ${nome} lota de ${b.ocupacaoFimDeSemanaAtual} da sua capacidade na sexta e no sábado, e ${b.ocupacaoDiaFracoAtual} na quinta e no domingo. ` +
             `No ponto novo, com ${b.multiplicadorNovoPonto}x a capacidade, esse mesmo público ocupa só ${b.ocupacaoFimDeSemanaNovo} no fim de semana ` +
             `e ${b.ocupacaoDiaFracoNovo} na quinta e no domingo. O salão triplica; o movimento, não.`,
           compare: {
@@ -168,7 +168,7 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
             `Avisamos a cidade inteira que a ${nome} mudou de endereço, com o Sistema de Atração de Clientes na sua região.`,
             "Atraímos o público local que está buscando diversão e enchemos também a quinta e o domingo.",
             "Nossa Recepcionista Digital 24h atende o WhatsApp em 3 segundos, envia o cardápio e agenda a mesa, no piloto automático.",
-            "Você foca no que importa: entregar a melhor experiência física da cidade.",
+            "Você foca no que importa: entregar a melhor experiência da cidade.",
           ],
         },
         {
