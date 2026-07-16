@@ -92,8 +92,32 @@ export async function listEvolutionInstances(req, res) {
   }
 }
 
+// O Slack recusa postar em canal onde o app não é membro (not_in_channel). Em
+// canal PÚBLICO o próprio bot entra sozinho — evita ter que convidar na mão a
+// cada canal novo. Em canal privado isso não funciona: aí o convite é manual.
+async function ensureBotInChannel({ token, channelId }) {
+  try {
+    const r = await fetch(`${SLACK_API}/conversations.join`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({ channel: channelId }),
+    });
+    const data = await r.json();
+    if (!data.ok && data.error !== "already_in_channel" && data.error !== "is_archived") {
+      // Canal privado / falta de escopo: segue mesmo assim — o upload dirá o motivo real.
+      console.warn("[juridico] conversations.join falhou:", data.error);
+    }
+  } catch (e) {
+    console.warn("[juridico] conversations.join erro:", e?.message || e);
+  }
+}
+
 // Upload do PDF no Slack (fluxo atual: getUploadURLExternal -> PUT -> complete).
 async function uploadPdfToSlack({ token, channelId, filename, buffer, comment }) {
+  await ensureBotInChannel({ token, channelId });
   const urlRes = await fetch(`${SLACK_API}/files.getUploadURLExternal`, {
     method: "POST",
     headers: {
@@ -121,7 +145,19 @@ async function uploadPdfToSlack({ token, channelId, filename, buffer, comment })
     }),
   });
   const completeData = await completeRes.json();
-  if (!completeData.ok) throw new Error(`Slack completeUploadExternal: ${completeData.error}`);
+  if (!completeData.ok) {
+    // Traduz os erros mais comuns do Slack para algo acionável na tela.
+    const dicas = {
+      not_in_channel:
+        "O app do Slack não está no canal do jurídico. Se o canal for privado, convide o app nele (/invite @app). Se for público, o app precisa do escopo channels:join.",
+      channel_not_found:
+        "Canal do Slack não encontrado. Confira o ID em 'Destino do Jurídico' (está na URL do canal, ex: C0BHT4FDY4E).",
+      missing_scope:
+        "O app do Slack não tem permissão para enviar arquivos. Adicione o escopo files:write (e channels:join) e reinstale o app.",
+      invalid_auth: "Token do Slack inválido no servidor (SLACK_BOT_TOKEN).",
+    };
+    throw new Error(dicas[completeData.error] || `Slack: ${completeData.error}`);
+  }
 }
 
 function normalizeWhatsapp(num) {

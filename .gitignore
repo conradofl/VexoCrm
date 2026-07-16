@@ -71,3 +71,7 @@ nul
 # Local/AI files
 task.md
 _memoria/
+
+# Arquivo temporario para importar envs na Vercel (contem chaves)
+.env.vercel
+frontend/.env.vercel
