@@ -35,6 +35,7 @@ import ChipsWhatsapp from "./pages/ChipsWhatsapp";
 import AdminPanel from "./pages/AdminPanel";
 import VexoPitch from "./pages/VexoPitch";
 import GeracaoDigital from "./pages/GeracaoDigital";
+import GeracaoDigitalDashboard from "./pages/GeracaoDigitalDashboard";
 import GeracaoDigitalCommercialSetup from "./pages/GeracaoDigitalCommercialSetup";
 import GeracaoDigitalProposals from "./pages/GeracaoDigitalProposals";
 import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
@@ -297,6 +298,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
                     <GeracaoDigitalCommercialSetup />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="dashboard-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalDashboard />
                   </ProtectedRoute>
                 }
               />

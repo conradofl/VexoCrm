@@ -1476,6 +1476,37 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     }
   });
 
+  // GET /api/gd/dashboard-stats — contadores do módulo Geração Digital
+  app.get("/api/gd/dashboard-stats", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { client_id } = req.query;
+      const tenantId = await resolveTenantUuid(client_id);
+
+      // Propostas e contratos são por tenant. Briefings vive em
+      // geracao_digital_briefings, que NÃO tem tenant_id (tabela global de
+      // captação), então o contador de briefings é global — não filtra tenant.
+      const [propostas, semAssinatura, contratos, briefings] = await Promise.all([
+        pool.query("SELECT count(*)::int AS n FROM public.gd_proposals WHERE tenant_id = $1", [tenantId]),
+        pool.query("SELECT count(*)::int AS n FROM public.gd_proposals WHERE tenant_id = $1 AND signed_at IS NULL", [tenantId]),
+        pool.query("SELECT count(*)::int AS n FROM public.gd_contracts WHERE tenant_id = $1", [tenantId]),
+        pool.query("SELECT count(*)::int AS n FROM public.geracao_digital_briefings"),
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          propostas: propostas.rows[0].n,
+          propostas_sem_assinatura: semAssinatura.rows[0].n,
+          contratos: contratos.rows[0].n,
+          briefings: briefings.rows[0].n,
+        },
+      });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao carregar dashboard:", error);
+      res.status(500).json({ error: "Erro ao carregar o dashboard." });
+    }
+  });
+
   // GET /api/gd/proposals/:id
   app.get("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
