@@ -22,6 +22,10 @@ interface ProposalWizardProps {
     setWizardStep: (step: number) => void;
     newProspect: string;
     setNewProspect: (val: string) => void;
+    newSegmentId: string;
+    setNewSegmentId: (val: string) => void;
+    newProspectLogo: string | null;
+    setNewProspectLogo: (val: string | null) => void;
     newPackageId: string;
     setNewPackageId: (val: string) => void;
     newPackageVexoId: string;
@@ -54,6 +58,7 @@ interface ProposalWizardProps {
   clientId: string | null;
   getIdToken: () => Promise<string | null>;
   onPackageCreated: (pkg: any) => void;
+  segmentsList: any[];
 }
 
 export const ProposalWizard: React.FC<ProposalWizardProps> = ({
@@ -66,13 +71,18 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
   toast,
   clientId,
   getIdToken,
-  onPackageCreated
+  onPackageCreated,
+  segmentsList
 }) => {
   const {
     wizardStep,
     setWizardStep,
     newProspect,
     setNewProspect,
+    newSegmentId,
+    setNewSegmentId,
+    newProspectLogo,
+    setNewProspectLogo,
     newPackageId,
     setNewPackageId,
     newPackageVexoId,
@@ -237,6 +247,47 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
               />
               <p className="text-[10px] text-slate-400 italic">Identifique o cliente final que irá assinar a proposta.</p>
             </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Segmento</Label>
+              <select
+                value={newSegmentId}
+                onChange={(e) => setNewSegmentId(e.target.value)}
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 h-10 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Selecione o segmento…</option>
+                {segmentsList.map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.nome}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-400 italic">Define o roteiro da apresentação comercial ao iniciar a partir desta proposta.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Logo do Prospect (opcional)</Label>
+              <div className="flex items-center gap-3">
+                {newProspectLogo && (
+                  <img src={newProspectLogo} alt="logo" className="h-10 w-10 rounded-lg object-contain border border-slate-200 dark:border-slate-700 bg-white" />
+                )}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => setNewProspectLogo(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }}
+                  className="text-[11px] text-slate-500 dark:text-slate-400 file:mr-2 file:rounded-md file:border-0 file:bg-indigo-50 file:px-2 file:py-1 file:text-indigo-600 file:text-[11px]"
+                />
+                {newProspectLogo && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setNewProspectLogo(null)} className="text-[11px] h-7">Remover</Button>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400 italic">Aparece na capa e nos slides da apresentação.</p>
+            </div>
+
             <div className="flex justify-end pt-4">
               <Button
                 onClick={handleNextStep1}

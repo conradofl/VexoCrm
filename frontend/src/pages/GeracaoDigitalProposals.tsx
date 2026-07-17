@@ -153,6 +153,7 @@ export default function GeracaoDigitalProposals() {
 
   // Catalog catalogs (shared between wizard and proposal editor)
   const [availablePackages, setAvailablePackages] = useState<any[]>([]);
+  const [segmentsList, setSegmentsList] = useState<any[]>([]);
   const [vexoProducts, setVexoProducts] = useState<any[]>([]);
   const [gdProducts, setGdProducts] = useState<any[]>([]);
 
@@ -271,13 +272,20 @@ export default function GeracaoDigitalProposals() {
       const token = await getIdToken();
       const headers: HeadersInit = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      const res = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
+      const [pkgRes, segRes] = await Promise.all([
+        fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers }),
+        fetchApi(`/api/gd/segments?client_id=${clientId || ""}`, { headers }),
+      ]);
+      if (pkgRes.ok) {
+        const data = await pkgRes.json();
         if (data.success) setAvailablePackages(data.data || []);
       }
+      if (segRes.ok) {
+        const seg = await segRes.json();
+        if (seg.success) setSegmentsList(seg.data || []);
+      }
     } catch (err) {
-      console.error("Erro ao carregar pacotes:", err);
+      console.error("Erro ao carregar pacotes/segmentos:", err);
     }
   }
 
@@ -1188,6 +1196,7 @@ export default function GeracaoDigitalProposals() {
                   clientId={clientId}
                   getIdToken={getIdToken}
                   onPackageCreated={(pkg) => setAvailablePackages((prev) => [...prev, pkg])}
+                  segmentsList={segmentsList}
                 />
               </div>
             )}
