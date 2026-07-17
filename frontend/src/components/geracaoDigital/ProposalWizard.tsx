@@ -299,7 +299,10 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
               </div>
             )}
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-[340px] overflow-y-auto pr-1">
-              {availablePackages.map((pk: any) => {
+              {/* Mostra os Modelos (ad_hoc=false) + qualquer pacote ad_hoc já
+                  ofertado nesta proposta. Pacotes ad_hoc de OUTRAS propostas
+                  (que entram em availablePackages ao carregar a lista) ficam de fora. */}
+              {availablePackages.filter((pk: any) => !pk.ad_hoc || newPacotesOfertados.includes(pk.id)).map((pk: any) => {
                 const isOn = newPacotesOfertados.includes(pk.id);
                 const meses = pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1;
                 return (

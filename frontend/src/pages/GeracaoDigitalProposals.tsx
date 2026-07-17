@@ -281,6 +281,37 @@ export default function GeracaoDigitalProposals() {
     }
   }
 
+  // Ao editar uma proposta que usou um pacote ad_hoc (criado dentro dela), esse
+  // pacote não vem no catálogo da biblioteca (loadPackagesCatalog filtra
+  // ad_hoc=false). Aqui buscamos por id os pacotes referenciados pelas propostas
+  // e mesclamos em availablePackages, para o wizard de edição reencontrá-los.
+  async function loadReferencedPackages(props: any[]) {
+    try {
+      const ids = new Set<string>();
+      (props || []).forEach((p: any) => {
+        if (p?.package_id) ids.add(p.package_id);
+        if (p?.package_vexo_id) ids.add(p.package_vexo_id);
+        (Array.isArray(p?.pacotes_ofertados) ? p.pacotes_ofertados : []).forEach((id: string) => { if (id) ids.add(id); });
+      });
+      if (ids.size === 0) return;
+      const token = await getIdToken();
+      const headers: HeadersInit = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}&ids=${Array.from(ids).join(",")}`, { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setAvailablePackages((prev) => {
+          const map = new Map(prev.map((p: any) => [p.id, p]));
+          data.data.forEach((p: any) => map.set(p.id, p));
+          return Array.from(map.values());
+        });
+      }
+    } catch (err) {
+      console.error("Erro ao carregar pacotes referenciados:", err);
+    }
+  }
+
   async function loadGdProductsCatalog() {
     try {
       const token = await getIdToken();
@@ -465,6 +496,7 @@ export default function GeracaoDigitalProposals() {
       const data = await res.json();
       if (data.success) {
         setProposals(data.data);
+        loadReferencedPackages(data.data);
         if (data.data.length > 0) {
           selectProposal(data.data[0]);
         }
