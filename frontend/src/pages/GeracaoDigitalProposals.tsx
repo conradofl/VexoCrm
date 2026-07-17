@@ -1153,6 +1153,9 @@ export default function GeracaoDigitalProposals() {
                   availableTerms={availableTerms}
                   wizardState={wizardState}
                   toast={toast}
+                  clientId={clientId}
+                  getIdToken={getIdToken}
+                  onPackageCreated={(pkg) => setAvailablePackages((prev) => [...prev, pkg])}
                 />
               </div>
             )}

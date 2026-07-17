@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ArrowRight, X, FileText, CheckCircle } from "lucide-react";
+import { ArrowRight, X, FileText, CheckCircle, Plus } from "lucide-react";
+import { fetchApi } from "@/lib/api";
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 import { type PaymentTerm, termAplicaA, APLICA_A_LABELS } from "@/lib/geracaoDigital/paymentTerms";
 
@@ -50,6 +51,9 @@ interface ProposalWizardProps {
     handleCreateDirectProposal: () => Promise<void>;
   };
   toast: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void;
+  clientId: string | null;
+  getIdToken: () => Promise<string | null>;
+  onPackageCreated: (pkg: any) => void;
 }
 
 export const ProposalWizard: React.FC<ProposalWizardProps> = ({
@@ -59,7 +63,10 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
   gdProducts,
   availableTerms,
   wizardState,
-  toast
+  toast,
+  clientId,
+  getIdToken,
+  onPackageCreated
 }) => {
   const {
     wizardStep,
@@ -94,6 +101,56 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
     setNewPaymentLink,
     handleCreateDirectProposal
   } = wizardState;
+
+  // Montador inline: cria um pacote SÓ para esta proposta (ad_hoc), que não
+  // aparece na biblioteca de Modelos. Reaproveita gdProducts como catálogo.
+  const [showMontador, setShowMontador] = React.useState<boolean>(false);
+  const [mNome, setMNome] = React.useState<string>("");
+  const [mPeriodo, setMPeriodo] = React.useState<string>("mensal");
+  const [mValor, setMValor] = React.useState<number>(0);
+  const [mProdutos, setMProdutos] = React.useState<Record<string, boolean>>({});
+  const [mSaving, setMSaving] = React.useState<boolean>(false);
+
+  const resetMontador = () => {
+    setShowMontador(false); setMNome(""); setMPeriodo("mensal"); setMValor(0); setMProdutos({});
+  };
+
+  const criarPacoteAdHoc = async () => {
+    const produtos = gdProducts.filter((p: any) => mProdutos[p.id]).map((p: any) => ({ product_id: p.id, nome: p.nome, origem: "gd" as const }));
+    if (!mNome.trim() || produtos.length === 0) {
+      toast({ title: "Faltam dados", description: "Dê um nome ao pacote e escolha ao menos 1 produto.", variant: "destructive" });
+      return;
+    }
+    setMSaving(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi("/api/gd/packages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          client_id: clientId,
+          nome: mNome.trim(),
+          tipo: "gd",
+          periodo: mPeriodo,
+          produtos_incluidos: produtos,
+          valor: Number(mValor || 0),
+          ad_hoc: true,
+        }),
+      });
+      if (!res.ok) throw new Error("Falha ao criar o pacote.");
+      const json = await res.json();
+      const pkg = json.data;
+      onPackageCreated(pkg);
+      setNewPacotesOfertados((prev) => [...prev, pkg.id]);
+      setNewPackageId(pkg.id);
+      resetMontador();
+      toast({ title: "Pacote criado", description: "Adicionado a esta proposta. Não aparece na biblioteca de Modelos." });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message || "Erro ao criar o pacote.", variant: "destructive" });
+    } finally {
+      setMSaving(false);
+    }
+  };
 
   const handleNextStep1 = () => {
     if (!newProspect.trim()) {
@@ -176,10 +233,71 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
         {/* STEP 2: PACOTES (multi-seleção — o cliente escolhe um na proposta) */}
         {wizardStep === 2 && (
           <div className="space-y-5 animate-fade-in">
-            <div>
-              <Label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-1">Pacotes a Ofertar</Label>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Marque um ou vários pacotes. Todos aparecem na proposta para o cliente escolher.</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <Label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-1">Pacotes a Ofertar</Label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Marque um ou vários pacotes. Todos aparecem na proposta para o cliente escolher.</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowMontador((v) => !v)}
+                className="shrink-0 text-[11px] h-8 border-purple-300 text-purple-650 dark:text-purple-300"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Criar pacote pra esta proposta
+              </Button>
             </div>
+
+            {showMontador && (
+              <div className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/10 p-4 space-y-3">
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
+                  Pacote exclusivo desta proposta. Não entra na biblioteca de Modelos.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1 sm:col-span-1">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Nome</Label>
+                    <Input value={mNome} onChange={(e) => setMNome(e.target.value)} placeholder="Ex: Plano da Ótica Vista Clara" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Período</Label>
+                    <select value={mPeriodo} onChange={(e) => setMPeriodo(e.target.value)} className="w-full h-9 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none">
+                      <option value="mensal">Mensal</option>
+                      <option value="trimestral">Trimestral</option>
+                      <option value="semestral">Semestral</option>
+                      <option value="anual">Anual</option>
+                      <option value="unico">Setup Único</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{mPeriodo === "unico" ? "Valor Único (R$)" : "Valor do Período (R$)"}</Label>
+                    <Input type="number" value={mValor || ""} onChange={(e) => setMValor(Number(e.target.value))} placeholder="0" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Produtos incluídos</Label>
+                  {gdProducts.length === 0 ? (
+                    <p className="text-[10px] text-slate-400 italic">Nenhum produto no catálogo. Cadastre em Pacotes › Produtos GD.</p>
+                  ) : (
+                    <div className="grid gap-1.5 sm:grid-cols-2 max-h-[180px] overflow-y-auto pr-1">
+                      {gdProducts.map((p: any) => (
+                        <label key={p.id} className="flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                          <input type="checkbox" checked={!!mProdutos[p.id]} onChange={(e) => setMProdutos((prev) => ({ ...prev, [p.id]: e.target.checked }))} className="accent-purple-600" />
+                          <span className="truncate">{p.nome}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={resetMontador} className="text-[11px] h-8">Cancelar</Button>
+                  <Button type="button" size="sm" onClick={criarPacoteAdHoc} disabled={mSaving} className="text-[11px] h-8 bg-purple-600 hover:bg-purple-700 text-white">
+                    {mSaving ? "Criando..." : "Criar e ofertar"}
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-[340px] overflow-y-auto pr-1">
               {availablePackages.map((pk: any) => {
                 const isOn = newPacotesOfertados.includes(pk.id);
