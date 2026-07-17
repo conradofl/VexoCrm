@@ -108,17 +108,26 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
   const [mNome, setMNome] = React.useState<string>("");
   const [mPeriodo, setMPeriodo] = React.useState<string>("mensal");
   const [mValor, setMValor] = React.useState<number>(0);
+  const [mValorTabela, setMValorTabela] = React.useState<number>(0);
+  const [mVpActive, setMVpActive] = React.useState<boolean>(false);
+  const [mVpValor, setMVpValor] = React.useState<number>(0);
   const [mProdutos, setMProdutos] = React.useState<Record<string, boolean>>({});
+  const [mVexoIds, setMVexoIds] = React.useState<Record<string, boolean>>({});
+  const [mSalvarModelo, setMSalvarModelo] = React.useState<boolean>(false);
   const [mSaving, setMSaving] = React.useState<boolean>(false);
 
   const resetMontador = () => {
-    setShowMontador(false); setMNome(""); setMPeriodo("mensal"); setMValor(0); setMProdutos({});
+    setShowMontador(false); setMNome(""); setMPeriodo("mensal"); setMValor(0);
+    setMValorTabela(0); setMVpActive(false); setMVpValor(0); setMProdutos({});
+    setMVexoIds({}); setMSalvarModelo(false);
   };
 
   const criarPacoteAdHoc = async () => {
-    const produtos = gdProducts.filter((p: any) => mProdutos[p.id]).map((p: any) => ({ product_id: p.id, nome: p.nome, origem: "gd" as const }));
+    const produtosGd = gdProducts.filter((p: any) => mProdutos[p.id]).map((p: any) => ({ product_id: p.id, nome: p.nome, origem: "gd" as const }));
+    const produtosVexo = vexoProducts.filter((p: any) => mVexoIds[p.id]).map((p: any) => ({ product_id: p.id, nome: p.nome, origem: "vexo" as const }));
+    const produtos = [...produtosGd, ...produtosVexo];
     if (!mNome.trim() || produtos.length === 0) {
-      toast({ title: "Faltam dados", description: "Dê um nome ao pacote e escolha ao menos 1 produto.", variant: "destructive" });
+      toast({ title: "Faltam dados", description: "Dê um nome ao pacote e escolha ao menos 1 item.", variant: "destructive" });
       return;
     }
     setMSaving(true);
@@ -134,7 +143,11 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           periodo: mPeriodo,
           produtos_incluidos: produtos,
           valor: Number(mValor || 0),
-          ad_hoc: true,
+          valor_tabela: Number(mValorTabela || 0) || null,
+          valor_vp: mVpActive ? Number(mVpValor || 0) : null,
+          // Marcado "salvar como modelo" => vai pra biblioteca (ad_hoc=false);
+          // senão fica exclusivo desta proposta (ad_hoc=true).
+          ad_hoc: !mSalvarModelo,
         }),
       });
       if (!res.ok) throw new Error("Falha ao criar o pacote.");
@@ -143,8 +156,14 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
       onPackageCreated(pkg);
       setNewPacotesOfertados((prev) => [...prev, pkg.id]);
       setNewPackageId(pkg.id);
+      const salvouModelo = mSalvarModelo;
       resetMontador();
-      toast({ title: "Pacote criado", description: "Adicionado a esta proposta. Não aparece na biblioteca de Modelos." });
+      toast({
+        title: "Pacote criado",
+        description: salvouModelo
+          ? "Adicionado a esta proposta e salvo na biblioteca de Modelos."
+          : "Adicionado a esta proposta. Não aparece na biblioteca de Modelos.",
+      });
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message || "Erro ao criar o pacote.", variant: "destructive" });
     } finally {
@@ -253,7 +272,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
             {showMontador && (
               <div className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/10 p-4 space-y-3">
                 <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
-                  Pacote exclusivo desta proposta. Não entra na biblioteca de Modelos.
+                  Monte o pacote para esta proposta. Por padrão fica exclusivo dela; marque "salvar como modelo" para reaproveitar na biblioteca.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="space-y-1 sm:col-span-1">
@@ -275,8 +294,21 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                     <Input type="number" value={mValor || ""} onChange={(e) => setMValor(Number(e.target.value))} placeholder="0" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
                   </div>
                 </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Valor de Tabela (R$, opcional)</Label>
+                    <Input type="number" value={mValorTabela || ""} onChange={(e) => setMValorTabela(Number(e.target.value))} placeholder="Preço cheio p/ exibir riscado" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
+                      <input type="checkbox" checked={mVpActive} onChange={(e) => setMVpActive(e.target.checked)} className="accent-purple-600" />
+                      Aceita VP / Permuta
+                    </Label>
+                    <Input type="number" value={mVpValor || ""} onChange={(e) => setMVpValor(Number(e.target.value))} disabled={!mVpActive} placeholder="Valor em permuta" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 disabled:opacity-50" />
+                  </div>
+                </div>
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Produtos incluídos</Label>
+                  <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Produtos GD incluídos</Label>
                   {gdProducts.length === 0 ? (
                     <p className="text-[10px] text-slate-400 italic">Nenhum produto no catálogo. Cadastre em Pacotes › Produtos GD.</p>
                   ) : (
@@ -290,11 +322,30 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                     </div>
                   )}
                 </div>
-                <div className="flex justify-end gap-2 pt-1">
-                  <Button type="button" variant="ghost" size="sm" onClick={resetMontador} className="text-[11px] h-8">Cancelar</Button>
-                  <Button type="button" size="sm" onClick={criarPacoteAdHoc} disabled={mSaving} className="text-[11px] h-8 bg-purple-600 hover:bg-purple-700 text-white">
-                    {mSaving ? "Criando..." : "Criar e ofertar"}
-                  </Button>
+                {vexoProducts.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Módulos Vexo OS (pacote híbrido, sem valor separado)</Label>
+                    <div className="grid gap-1.5 sm:grid-cols-2 max-h-[160px] overflow-y-auto pr-1">
+                      {vexoProducts.map((p: any) => (
+                        <label key={p.id} className="flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                          <input type="checkbox" checked={!!mVexoIds[p.id]} onChange={(e) => setMVexoIds((prev) => ({ ...prev, [p.id]: e.target.checked }))} className="accent-purple-600" />
+                          <span className="truncate">{p.nome}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <label className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                    <input type="checkbox" checked={mSalvarModelo} onChange={(e) => setMSalvarModelo(e.target.checked)} className="accent-purple-600" />
+                    Salvar também como modelo reutilizável (biblioteca)
+                  </label>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={resetMontador} className="text-[11px] h-8">Cancelar</Button>
+                    <Button type="button" size="sm" onClick={criarPacoteAdHoc} disabled={mSaving} className="text-[11px] h-8 bg-purple-600 hover:bg-purple-700 text-white">
+                      {mSaving ? "Criando..." : "Criar e ofertar"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
