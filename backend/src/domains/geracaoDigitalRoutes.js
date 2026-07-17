@@ -748,20 +748,39 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
       const tenantId = await resolveTenantUuid(clientKey);
       const includeInactive = req.query.include_inactive === "1";
-      // Lista = biblioteca de Modelos: só pacotes reutilizáveis (ad_hoc = false).
-      // Pacotes criados dentro de uma proposta (ad_hoc = true) NÃO aparecem aqui;
-      // são referenciados por id na proposta e hidratados por lookup direto.
-      const segmentoFilter = req.query.segmento;
-      const params = [tenantId];
-      let segmentoClause = "";
-      if (segmentoFilter) {
-        params.push(segmentoFilter);
-        segmentoClause = ` AND segmento = $${params.length}`;
+      const cols = "id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, ad_hoc, segmento, created_at";
+
+      // Modo lookup por ids: usado ao editar uma proposta para reencontrar os
+      // pacotes que ela referencia — INCLUSIVE ad_hoc (que não aparecem na
+      // biblioteca). Por id, sem filtro de ad_hoc/ativo.
+      const idsParam = typeof req.query.ids === "string" ? req.query.ids.trim() : "";
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      let result;
+      if (idsParam) {
+        const ids = idsParam.split(",").map((s) => s.trim()).filter((s) => uuidRe.test(s));
+        if (ids.length === 0) {
+          return res.status(200).json({ success: true, data: [] });
+        }
+        result = await pool.query(
+          `SELECT ${cols} FROM public.gd_packages WHERE tenant_id = $1 AND id = ANY($2::uuid[]) ORDER BY nome ASC`,
+          [tenantId, ids]
+        );
+      } else {
+        // Lista = biblioteca de Modelos: só pacotes reutilizáveis (ad_hoc = false).
+        // Pacotes criados dentro de uma proposta (ad_hoc = true) NÃO aparecem aqui;
+        // são referenciados por id na proposta e hidratados por lookup direto.
+        const segmentoFilter = req.query.segmento;
+        const params = [tenantId];
+        let segmentoClause = "";
+        if (segmentoFilter) {
+          params.push(segmentoFilter);
+          segmentoClause = ` AND segmento = $${params.length}`;
+        }
+        result = await pool.query(
+          `SELECT ${cols} FROM public.gd_packages WHERE tenant_id = $1 AND ad_hoc = false${segmentoClause} ${includeInactive ? "" : "AND ativo = true"} ORDER BY nome ASC`,
+          params
+        );
       }
-      const result = await pool.query(
-        `SELECT id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, ad_hoc, segmento, created_at FROM public.gd_packages WHERE tenant_id = $1 AND ad_hoc = false${segmentoClause} ${includeInactive ? "" : "AND ativo = true"} ORDER BY nome ASC`,
-        params
-      );
       const rows = Array.isArray(result?.rows) ? result.rows : [];
       const data = rows.map((row) => {
         let produtosIncluidos = row.produtos_incluidos;
