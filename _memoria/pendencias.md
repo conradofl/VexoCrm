@@ -7,10 +7,11 @@
 
 ## Próxima fila — módulo GD
 
-### Redesign de pacotes: 2 camadas + snapshot (decidido, a construir)
+### Redesign de pacotes: abordagem ad_hoc + segmento (em andamento)
 - Problema: hoje cada proposta cria uma linha em `gd_packages` (biblioteca global) → tela lotando, gambiarra de prefixo de letra por segmento.
-- Solução aprovada (ver `decisoes.md` 2026-07-17): (1) Modelos de Pacote reutilizáveis com coluna `segmento` + filtro + arquivar; (2) montador inline na proposta gravando snapshot em `gd_proposals.pacotes_ofertados` (JSONB já existe), sem sujar a biblioteca; (3) botão "salvar como modelo".
-- Requer: migration (add `segmento` em `gd_packages`), ajuste da tela Pacotes, montador na tela Propostas, backend.
+- Abordagem escolhida (não snapshot profundo): marcar pacote da proposta como `ad_hoc=true` (some da biblioteca) + coluna `segmento` real. Reaproveita todo o pipeline — `gd_proposals.itens` já é o snapshot do que é vendido; `package_id`/`pacotes_ofertados` são só referências hidratadas por lookup de ID (que NÃO filtra ad_hoc). Public proposal hidrata via `id = ANY(...) AND ativo = true` (sem filtro ad_hoc). Ver `decisoes.md` 2026-07-17.
+- **FATIA 1 — FEITA (a shipar):** migration `20260717160000_add_adhoc_segmento_to_packages.sql`; backend (GET filtra `ad_hoc=false` + filtro `?segmento`; POST/PUT aceitam `ad_hoc`/`segmento`); tela Pacotes (campo Segmento + filtro + badge). Mata a gambiarra da letra.
+- **FATIA 2 — PENDENTE:** montador inline na tela de Propostas (`GeracaoDigitalProposals.tsx`, 85KB) — botão "Criar pacote pra esta proposta" que faz POST com `ad_hoc=true` + segmento da apresentação, injeta no wizard (`newPacotesOfertados`/`availablePackages`) sem re-fetch. Opcional "salvar como modelo" = PUT `ad_hoc=false`. É a peça que entrega a dor principal (pacote específico da proposta sem sujar a biblioteca). Backend já pronto pra isso.
 
 ### Briefings por tenant (opcional)
 - `geracao_digital_briefings` não tem `tenant_id` → contador de briefings do dashboard é global. Se quiser por tenant, adicionar coluna + migração de dados + filtro.
