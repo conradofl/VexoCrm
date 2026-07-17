@@ -1,7 +1,19 @@
 # Pendências — Vexo OS
 
 > Tarefas abertas por prioridade. Só fato confirmado.
-> Última atualização: 2026-06-13.
+> Última atualização: 2026-07-17.
+
+---
+
+## Próxima fila — módulo GD
+
+### Redesign de pacotes: 2 camadas + snapshot (decidido, a construir)
+- Problema: hoje cada proposta cria uma linha em `gd_packages` (biblioteca global) → tela lotando, gambiarra de prefixo de letra por segmento.
+- Solução aprovada (ver `decisoes.md` 2026-07-17): (1) Modelos de Pacote reutilizáveis com coluna `segmento` + filtro + arquivar; (2) montador inline na proposta gravando snapshot em `gd_proposals.pacotes_ofertados` (JSONB já existe), sem sujar a biblioteca; (3) botão "salvar como modelo".
+- Requer: migration (add `segmento` em `gd_packages`), ajuste da tela Pacotes, montador na tela Propostas, backend.
+
+### Briefings por tenant (opcional)
+- `geracao_digital_briefings` não tem `tenant_id` → contador de briefings do dashboard é global. Se quiser por tenant, adicionar coluna + migração de dados + filtro.
 
 ---
 
