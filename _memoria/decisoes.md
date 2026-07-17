@@ -2,6 +2,11 @@
 
 > Append-only. Cada entrada: data + decisão + 1 frase de porquê. Só fato confirmado.
 
+## 2026-07-17
+- **Novo segmento de apresentação comercial: "Óticas" (`otica`).** Roteiro SPIN próprio em `frontend/src/lib/presentation/pitchContent.ts` (grupo `otica`, 7 slides), seed do segmento em `backend/supabase/migrations/20260717120000_add_oticas_segment.sql` (idempotente, roda depois da deactivate → nasce ativo) e registro em `DEFAULT_SEGMENTS`/`SEGMENT_MAPPING` do setup. Motivo: abrir o nicho de óticas seguindo a mesma arquitetura de entretenimento_local e saude_estetica.
+- **Eixo de ROI do pitch de óticas = vazamento duplo.** Slide de implicação soma orçamentos sem follow-up + recompra dormida (troca de lente/grau ~18 meses) num só número/ano, sob benchmark conservador embutido (`estimateOpticalLoss`). Motivo: two-leak story converte melhor que número único e materializa as duas dores que mais vendem no nicho.
+- **Convenção de copy de apresentação: sem travessão, frases curtas e diretas.** Travessão (—) na copy visual lê como amador; frase longa perde a atenção do cliente na apresentação. Aplicado aos slides de óticas; pendente estender aos segmentos legados. Ver [[aprendizados]].
+
 ## 2026-06-16
 - **Segundo cérebro compartilhado via RAG é regra global para Codex/Cursor/Claude.** O servidor em `segundo-cerebro/_rag` expõe `/api/query`, `/api/search` e `/api/chat`; Codex/Cursor usam o helper global `cerebro`, e Claude Code pode consultar os endpoints HTTP.
 - **Evolution Admin não consulta instâncias remotas por padrão.** `GET /api/admin/evolution-config` retorna só inventário local; a chamada cara à Evolution (`/instance/fetchInstances`) fica atrás de `?remote=true`/botão "Buscar Evolution", com cache/dedupe no backend para evitar loop e sobrecarga.

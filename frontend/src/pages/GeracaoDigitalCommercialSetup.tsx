@@ -56,7 +56,8 @@ const DEFAULT_SEGMENTS = [
   { id: "19", nome: "Turismo", faturamento_min: 45000 },
   { id: "20", nome: "Hospitalidade", faturamento_min: 50000 },
   { id: "21", nome: "Food Service Premium", faturamento_min: 30000 },
-  { id: "22", nome: "Delivery", faturamento_min: 25000 }
+  { id: "22", nome: "Delivery", faturamento_min: 25000 },
+  { id: "24", nome: "Óticas", faturamento_min: 25000 }
 ];
 
 const SEGMENT_MAPPING: Record<string, string> = {
@@ -83,6 +84,7 @@ const SEGMENT_MAPPING: Record<string, string> = {
   "Hospitalidade": "turismo",
   "Food Service Premium": "restaurante",
   "Delivery": "restaurante",
+  "Óticas": "academia",
 };
 
 interface SegmentApi {

@@ -88,6 +88,17 @@ export const BENCHMARKS = {
     diasUteisMes: 22,
     mesesAno: 12,
   },
+  otica: {
+    // Vazamento 1 — orçamentos que saem pela porta e ninguém retoma.
+    orcamentosSemFollowupMes: 30,   // orçamentos/mês sem nenhum retorno
+    ticketMedio: 650,               // armação + lente (conservador)
+    taxaResgateOrcamento: 0.2,      // 20% recuperável com follow-up ativo
+    // Vazamento 2 — recompra dormida (troca de lente/grau a cada ~18 meses).
+    clientesNoCicloMes: 25,         // clientes/mês que batem o ciclo e não voltam
+    ticketRecompra: 650,
+    taxaResgateRecompra: 0.15,      // 15% recuperável com lembrete de troca
+    cicloMeses: 18,
+  },
 } as const;
 
 // Ocupação diluída ao mudar para um ponto maior: o público é o mesmo, o salão
@@ -102,6 +113,19 @@ export function estimateEmptyChairLoss() {
   const mensal = b.horariosVagosDia * b.ticketMedioProcedimento * b.diasUteisMes * 0.5; // 50% recuperável
   const anual = mensal * 12;
   return { anual, mensal };
+}
+
+// Óticas — dois vazamentos recuperáveis somados num só número de ROI:
+// (1) orçamentos sem follow-up + (2) recompra dormida (troca de lente/grau).
+// Números da própria base do cliente sob benchmark conservador — não é
+// promessa de venda nova, é receita já presente na base que hoje escapa.
+export function estimateOpticalLoss() {
+  const b = BENCHMARKS.otica;
+  const orcamentoMensal = b.orcamentosSemFollowupMes * b.ticketMedio * b.taxaResgateOrcamento;
+  const recompraMensal = b.clientesNoCicloMes * b.ticketRecompra * b.taxaResgateRecompra;
+  const mensal = orcamentoMensal + recompraMensal;
+  const anual = mensal * 12;
+  return { orcamentoMensal, recompraMensal, mensal, anual };
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +364,123 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
       ];
     },
   },
+
+  otica: {
+    id: "otica",
+    label: "Óticas",
+    focus: "Fim da guerra de preço: resgate de orçamentos, recompra e ticket maior (óticas).",
+    accent: "#4f46e5",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "sua ótica";
+      const { orcamentoMensal, recompraMensal, mensal, anual } = estimateOpticalLoss();
+      const b = BENCHMARKS.otica;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "O Fim da Guerra de Preço.",
+          subtitle: `A ${nome} vira referência na cidade. Mais movimento, ticket maior e uma base que volta sozinha.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "O orçamento que sai pela porta.",
+          body:
+            `O cliente experimenta, pede o orçamento e diz que "vai pensar". Compara o preço na concorrência e some. ` +
+            `Ninguém liga de volta. Quando decide comprar, já fechou em outra loja.`,
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1574258495973-f010dfbb5371?auto=format&fit=crop&w=900&q=70",
+              label: "O orçamento de hoje: feito e esquecido",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1715635845783-7404fae223f9?auto=format&fit=crop&w=900&q=70",
+              label: "Cliente sendo atendido na loja, com GD + Vexo",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "O dinheiro parado na sua base.",
+          body:
+            `Dois vazamentos ao mesmo tempo. Cerca de ${b.orcamentosSemFollowupMes} orçamentos por mês que ninguém retoma valem ${milhar(orcamentoMensal * 12)} por ano. ` +
+            `Os clientes de ${b.cicloMeses} meses que precisam trocar de grau e ninguém avisa somam outros ${milhar(recompraMensal * 12)}. Junto, ${milhar(mensal)} escapam todo mês.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "receita já presente na sua base que hoje escapa por falta de retorno e recompra",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Atração e Resgate.",
+          steps: [
+            `Atraímos quem está procurando óculos agora na sua região, não quem só caça desconto.`,
+            "Nossa Recepcionista Digital 24h responde o WhatsApp em 3 segundos, tira dúvida e já chama pra loja, no piloto automático.",
+            "O Resgate Automático de Orçamentos volta a falar com quem pediu preço e não fechou, antes de ele comprar em outro lugar.",
+            `O Lembrete de Troca de Lentes avisa o cliente certo na hora certa e traz a recompra de volta a cada ${b.cicloMeses} meses, sozinho.`,
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital constrói sua atração e sua autoridade. A Vexo cuida do atendimento, do resgate e da recompra no piloto automático. Juntas, tiram a ${nome} da guerra de preço.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Atração & Autoridade",
+              items: [
+                "Sistema de Atração de Clientes na sua região",
+                "Conteúdo que educa (saúde ocular, luz azul, multifocais) e vende o premium",
+                "Sua ótica achada no Google na hora certa",
+                "Reputação forte: mais avaliações e prova social",
+                "Campanhas para as datas que vendem (volta às aulas, Dia das Mães, Natal)",
+                "Marca com cara de referência, não de mais uma ótica",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Atendimento, Resgate & Recompra",
+              items: [
+                "Recepcionista Digital 24h no seu WhatsApp",
+                "Resgate automático dos orçamentos que não fecharam",
+                "Lembrete de troca de lentes que traz a recompra sozinho",
+                "Cada atendimento e orçamento registrado num só lugar",
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body:
+            `Imagine a ${nome} com movimento o mês todo. Vendendo lente premium em vez de brigar por centavos. ` +
+            `Os orçamentos se resgatam sozinhos e a base antiga volta na hora da troca.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo da inércia.",
+          body: `Quanto a ${nome} deixa na mesa todo mês atendendo bem, orçando bem e nunca dando o retorno?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o preço estimado de não resgatar orçamento nem trabalhar a recompra",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada orçamento sem retorno é uma venda que fecha na concorrência. A virada começa hoje.",
+        },
+      ];
+    },
+  },
 };
 
 // Mapeamento de segment_id específico -> grupo. Adicione novos ids aqui conforme
@@ -360,6 +501,11 @@ const SEGMENT_ID_TO_GROUP: Record<string, string> = {
   estetica: "saude_estetica",
   saude: "saude_estetica",
   saude_estetica: "saude_estetica",
+  // Óticas
+  otica: "otica",
+  oticas: "otica",
+  optica: "otica",
+  opticas: "otica",
 };
 
 export const DEFAULT_GROUP_ID = "entretenimento_local";
@@ -368,6 +514,10 @@ export const DEFAULT_GROUP_ID = "entretenimento_local";
 // do app é um UUID, então resolvemos pelo texto: "Clínicas de Saúde",
 // "Odontologia", "Food Service", etc.).
 const GROUP_KEYWORDS: Record<string, string[]> = {
+  otica: [
+    "otica", "ótica", "oticas", "óticas", "optica", "óptica", "oculos", "óculos",
+    "lente", "armacao", "armação", "grau", "multifocal", "visao", "visão", "eyewear",
+  ],
   saude_estetica: [
     "clinica", "clínica", "saude", "saúde", "estetica", "estética", "odonto",
     "consultorio", "consultório", "laboratorio", "laboratório", "medic", "dental",
