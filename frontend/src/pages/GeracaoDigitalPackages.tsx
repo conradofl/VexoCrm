@@ -48,6 +48,8 @@ interface Package {
   valor_tabela?: number | null;
   destaque: boolean;
   ativo: boolean;
+  segmento?: string | null;
+  ad_hoc?: boolean;
 }
 
 interface VexoProduct {
@@ -87,7 +89,11 @@ export default function GeracaoDigitalPackages() {
   const [packageIncludedProductIds, setPackageIncludedProductIds] = useState<Record<string, boolean>>({});
   // Módulos Vexo incluídos DENTRO de um pacote GD (pacote híbrido GD + Vexo).
   const [packageIncludedVexoIds, setPackageIncludedVexoIds] = useState<Record<string, boolean>>({});
+  const [packageSegmento, setPackageSegmento] = useState<string>("");
   const [showInactive, setShowInactive] = useState<boolean>(false);
+  // Filtro da biblioteca de Modelos por segmento (substitui a gambiarra de
+  // prefixar letra no nome). "" = todos.
+  const [filtroSegmento, setFiltroSegmento] = useState<string>("");
 
   // Vexo Products CRUD state
   const [vexoProducts, setVexoProducts] = useState<VexoProduct[]>([]);
@@ -198,6 +204,7 @@ export default function GeracaoDigitalPackages() {
     setPackageVpValue(0);
     setPackageDestaque(false);
     setPackageAtivo(true);
+    setPackageSegmento("");
 
     const initialMap: Record<string, boolean> = {};
     const catalog = (activeSection === "vexo-packages") ? vexoProducts : products;
@@ -220,6 +227,7 @@ export default function GeracaoDigitalPackages() {
     setPackageVpValue(Number(pkg.valor_vp || 0));
     setPackageDestaque(pkg.destaque);
     setPackageAtivo(pkg.ativo);
+    setPackageSegmento(pkg.segmento || "");
 
     const included = pkg.produtos_incluidos || [];
     // Produtos GD do pacote: origem "gd" (ou sem origem = legado, tratado como do catálogo do tipo).
@@ -404,7 +412,8 @@ export default function GeracaoDigitalPackages() {
         valor_tabela: Number(packageTabela || 0) || null,
         valor_vp: packageVpActive ? Number(packageVpValue || 0) : null,
         destaque: packageDestaque,
-        ativo: packageAtivo
+        ativo: packageAtivo,
+        segmento: packageSegmento.trim() || null
       };
 
       let res;
@@ -613,6 +622,11 @@ export default function GeracaoDigitalPackages() {
     }
   };
 
+  // Segmentos já usados nos modelos — alimenta o autocomplete do form e o filtro.
+  const segmentosConhecidos = Array.from(
+    new Set(packages.map((p) => (p.segmento || "").trim()).filter(Boolean))
+  ).sort();
+
   return (
     <PageShell
       title="Configurações Comerciais GD"
@@ -706,6 +720,16 @@ export default function GeracaoDigitalPackages() {
               </div>
               {!isEditing && (
                 <div className="flex items-center gap-4">
+                  {activeSection === "packages" && segmentosConhecidos.length > 0 && (
+                    <select
+                      value={filtroSegmento}
+                      onChange={(e) => setFiltroSegmento(e.target.value)}
+                      className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-[11px] text-slate-700 dark:text-slate-200 focus:outline-none"
+                    >
+                      <option value="">Todos os segmentos</option>
+                      {segmentosConhecidos.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  )}
                   <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium cursor-pointer select-none">
                     <input
                       type="checkbox"
@@ -776,6 +800,21 @@ export default function GeracaoDigitalPackages() {
                         <option value="unico">Setup Único</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-550 dark:text-slate-400 font-medium">Segmento (opcional)</Label>
+                    <Input
+                      value={packageSegmento}
+                      onChange={(e) => setPackageSegmento(e.target.value)}
+                      placeholder="Ex: Óticas, Clínicas de Saúde, Entretenimento"
+                      list="gd-segmentos-conhecidos"
+                      className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-100"
+                    />
+                    <datalist id="gd-segmentos-conhecidos">
+                      {segmentosConhecidos.map((s) => <option key={s} value={s} />)}
+                    </datalist>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-450">Organiza os modelos por segmento (dispensa prefixar letra no nome).</p>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2 items-start">
@@ -984,7 +1023,9 @@ export default function GeracaoDigitalPackages() {
                 const displayedPackages = (activeSection === "vexo-packages"
                   ? packages.filter(p => p.tipo === "vexo")
                   : packages.filter(p => p.tipo === "gd" || !p.tipo)
-                ).filter(p => showInactive || p.ativo);
+                )
+                  .filter(p => showInactive || p.ativo)
+                  .filter(p => !filtroSegmento || (p.segmento || "") === filtroSegmento);
 
                 const titleText = activeSection === "vexo-packages"
                   ? "Pacotes Vexo OS"
@@ -1004,6 +1045,11 @@ export default function GeracaoDigitalPackages() {
                           <div className="flex justify-between items-start">
                             <div className="space-y-0.5">
                               <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 leading-tight">{pkg.nome}</h4>
+                              {pkg.segmento && (
+                                <Badge className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 text-purple-650 dark:text-purple-300 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
+                                  {pkg.segmento}
+                                </Badge>
+                              )}
                               {!pkg.ativo && (
                                 <Badge className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 text-red-650 dark:text-red-400 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0">
                                   Inativo

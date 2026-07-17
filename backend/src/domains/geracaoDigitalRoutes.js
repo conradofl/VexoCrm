@@ -748,9 +748,19 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const clientKey = req.query.client_id || "00000000-0000-0000-0000-000000000000";
       const tenantId = await resolveTenantUuid(clientKey);
       const includeInactive = req.query.include_inactive === "1";
+      // Lista = biblioteca de Modelos: só pacotes reutilizáveis (ad_hoc = false).
+      // Pacotes criados dentro de uma proposta (ad_hoc = true) NÃO aparecem aqui;
+      // são referenciados por id na proposta e hidratados por lookup direto.
+      const segmentoFilter = req.query.segmento;
+      const params = [tenantId];
+      let segmentoClause = "";
+      if (segmentoFilter) {
+        params.push(segmentoFilter);
+        segmentoClause = ` AND segmento = $${params.length}`;
+      }
       const result = await pool.query(
-        `SELECT id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, created_at FROM public.gd_packages WHERE tenant_id = $1 ${includeInactive ? "" : "AND ativo = true"} ORDER BY nome ASC`,
-        [tenantId]
+        `SELECT id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, ad_hoc, segmento, created_at FROM public.gd_packages WHERE tenant_id = $1 AND ad_hoc = false${segmentoClause} ${includeInactive ? "" : "AND ativo = true"} ORDER BY nome ASC`,
+        params
       );
       const rows = Array.isArray(result?.rows) ? result.rows : [];
       const data = rows.map((row) => {
@@ -786,13 +796,13 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   // POST /api/gd/packages
   app.post("/api/gd/packages", requireFirebaseAuth, async (req, res) => {
     try {
-      const { client_id, nome, tipo = "gd", periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque = false } = req.body;
+      const { client_id, nome, tipo = "gd", periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque = false, ad_hoc = false, segmento = null } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       const result = await pool.query(
-        `INSERT INTO public.gd_packages (tenant_id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-        [tenantId, nome, tipo, periodo, JSON.stringify(produtos_incluidos || []), Number(valor || 0), Number(valor_tabela || 0) || null, Number(valor_vp || 0) || null, destaque]
+        `INSERT INTO public.gd_packages (tenant_id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ad_hoc, segmento)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [tenantId, nome, tipo, periodo, JSON.stringify(produtos_incluidos || []), Number(valor || 0), Number(valor_tabela || 0) || null, Number(valor_vp || 0) || null, destaque, Boolean(ad_hoc), segmento || null]
       );
       res.status(201).json({ success: true, data: result.rows[0] });
     } catch (error) {
@@ -805,7 +815,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/packages/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo } = req.body;
+      const { client_id, nome, tipo, periodo, produtos_incluidos, valor, valor_tabela, valor_vp, destaque, ativo, ad_hoc, segmento } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       const result = await pool.query(
@@ -818,9 +828,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              valor_tabela = CASE WHEN $6::boolean THEN NULLIF($7::numeric, 0) ELSE valor_tabela END,
              destaque = COALESCE($8, destaque),
              ativo = COALESCE($9, ativo),
-             valor_vp = CASE WHEN $12::boolean THEN NULLIF($13::numeric, 0) ELSE valor_vp END
+             valor_vp = CASE WHEN $12::boolean THEN NULLIF($13::numeric, 0) ELSE valor_vp END,
+             ad_hoc = COALESCE($14, ad_hoc),
+             segmento = COALESCE($15, segmento)
          WHERE id = $10 AND tenant_id = $11 RETURNING *`,
-        [nome, tipo, periodo, produtos_incluidos ? JSON.stringify(produtos_incluidos) : null, valor, valor_tabela !== undefined, Number(valor_tabela || 0), destaque, ativo, id, tenantId, valor_vp !== undefined, Number(valor_vp || 0)]
+        [nome, tipo, periodo, produtos_incluidos ? JSON.stringify(produtos_incluidos) : null, valor, valor_tabela !== undefined, Number(valor_tabela || 0), destaque, ativo, id, tenantId, valor_vp !== undefined, Number(valor_vp || 0), ad_hoc === undefined ? null : Boolean(ad_hoc), segmento === undefined ? null : segmento]
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: "Pacote não encontrado." });
