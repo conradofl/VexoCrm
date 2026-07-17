@@ -26,6 +26,8 @@ export function useProposalWizard({
   const [showNewForm, setShowNewForm] = useState<boolean>(false);
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [newProspect, setNewProspect] = useState<string>("");
+  const [newSegmentId, setNewSegmentId] = useState<string>("");
+  const [newProspectLogo, setNewProspectLogo] = useState<string | null>(null);
   const [newPackageId, setNewPackageId] = useState<string>("");
   const [newPackageVexoId, setNewPackageVexoId] = useState<string>("");
   const [newPacotesOfertados, setNewPacotesOfertados] = useState<string[]>([]);
@@ -44,6 +46,8 @@ export function useProposalWizard({
   const resetWizard = () => {
     setWizardStep(1);
     setNewProspect("");
+    setNewSegmentId("");
+    setNewProspectLogo(null);
     setNewPackageId("");
     setNewPackageVexoId("");
     setNewPacotesOfertados([]);
@@ -189,6 +193,8 @@ export function useProposalWizard({
       const body: any = {
         client_id: clientId,
         prospect_name: newProspect.trim(),
+        segment_id: newSegmentId || null,
+        prospect_logo: newProspectLogo || null,
         package_id: newPackageId || null,
         package_vexo_id: newPackageVexoId || null,
         pacotes_ofertados: newPacotesOfertados,
@@ -246,6 +252,10 @@ export function useProposalWizard({
     setWizardStep,
     newProspect,
     setNewProspect,
+    newSegmentId,
+    setNewSegmentId,
+    newProspectLogo,
+    setNewProspectLogo,
     newPackageId,
     setNewPackageId,
     newPackageVexoId,

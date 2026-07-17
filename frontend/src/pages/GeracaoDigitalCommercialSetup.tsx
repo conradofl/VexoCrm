@@ -207,7 +207,11 @@ export default function GeracaoDigitalCommercialSetup() {
           const segmentsData = await segmentsRes.json();
           if (segmentsData.success && segmentsData.data?.length > 0) {
             setSegments(segmentsData.data);
-            setSelectedSegmentId(segmentsData.data[0].id);
+            // Não sobrescrever o segmento quando a tela foi aberta a partir de uma
+            // proposta (proposalId) — nesse caso o loadProposal já setou o correto.
+            if (!proposalId) {
+              setSelectedSegmentId(segmentsData.data[0].id);
+            }
           }
         }
         if (packagesRes.ok) {

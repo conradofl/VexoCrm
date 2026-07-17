@@ -1292,6 +1292,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         package_id,
         package_vexo_id,
         prospect_name,
+        segment_id,
+        prospect_logo,
         itens,
         condicoes,
         status = "rascunho"
@@ -1448,8 +1450,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const result = await pool.query(
         `INSERT INTO public.gd_proposals (
           tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status,
-          cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, valor_vp
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+          cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, valor_vp,
+          segment_id, prospect_logo
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
         [
           tenantId,
           validPresentationId,
@@ -1467,7 +1470,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           validade_ate || null,
           valor_apos_validade !== null && valor_apos_validade !== "" ? Number(valor_apos_validade) : null,
           observacao_validade || null,
-          valor_vp !== null && valor_vp !== undefined ? Number(valor_vp) : null
+          valor_vp !== null && valor_vp !== undefined ? Number(valor_vp) : null,
+          segment_id || null,
+          prospect_logo || null
         ]
       );
 
@@ -1546,7 +1551,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const tenantId = await resolveTenantUuid(client_id);
 
       const result = await pool.query(
-        `SELECT p.*, pr.segment_id, pr.prospect_logo, pr.roi
+        // Prefere segmento/logo da própria proposta; se null (proposta sem
+        // apresentação vinculada é o caso comum do wizard), cai no da apresentação.
+        // As colunas aliased vêm depois de p.* e sobrescrevem no objeto de retorno.
+        `SELECT p.*, COALESCE(p.segment_id, pr.segment_id) AS segment_id, COALESCE(p.prospect_logo, pr.prospect_logo) AS prospect_logo, pr.roi
          FROM public.gd_proposals p
          LEFT JOIN public.gd_presentations pr ON p.presentation_id = pr.id
          WHERE p.id = $1 AND p.tenant_id = $2`,
