@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Check,
   X,
+  Share2,
   Lock,
   ChevronDown
 } from "lucide-react";
@@ -36,6 +37,7 @@ import {
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { ShareProposalDialog } from "@/pages/GeracaoDigitalProposals/ShareProposalDialog";
 import GeracaoDigitalNegotiationPage from "@/pages/GeracaoDigitalNegotiationPage";
 
 interface ProposalItem {
@@ -104,7 +106,8 @@ export default function GeracaoDigitalPublicProposal() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, clientId, getIdToken } = useAuth();
+  const [showShare, setShowShare] = useState<boolean>(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -423,16 +426,26 @@ export default function GeracaoDigitalPublicProposal() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Botão de saída — só para o vendedor logado (cliente não vê). */}
+          {/* Ações do vendedor logado (cliente não vê). O botão de envio pega o
+              link desta proposta aberta — sem risco de pegar a proposta errada. */}
           {isAuthenticated && (
-            <Button
-              onClick={() => navigate("/crm/propostas-gd")}
-              variant="outline"
-              className="h-9 gap-1.5 border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white text-xs font-bold"
-            >
-              <X className="h-3.5 w-3.5" />
-              Voltar ao sistema
-            </Button>
+            <>
+              <Button
+                onClick={() => setShowShare(true)}
+                className="h-9 gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                Enviar ao Cliente
+              </Button>
+              <Button
+                onClick={() => navigate("/crm/propostas-gd")}
+                variant="outline"
+                className="h-9 gap-1.5 border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white text-xs font-bold"
+              >
+                <X className="h-3.5 w-3.5" />
+                Voltar ao sistema
+              </Button>
+            </>
           )}
           <Badge
             className={cn(
@@ -444,6 +457,17 @@ export default function GeracaoDigitalPublicProposal() {
           </Badge>
         </div>
       </header>
+
+      {isAuthenticated && proposal && (
+        <ShareProposalDialog
+          open={showShare}
+          onOpenChange={setShowShare}
+          proposalId={proposal.id}
+          prospectName={proposal.prospect_name}
+          clientId={clientId}
+          getIdToken={getIdToken}
+        />
+      )}
 
       <main className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 mt-10 grid gap-8 grid-cols-1 lg:grid-cols-12 items-start">
 
