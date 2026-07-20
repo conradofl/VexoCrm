@@ -360,7 +360,10 @@ export default function GeracaoDigitalPublicProposal() {
   const validadeExpirada = validadeDate ? validadeDate.getTime() < Date.now() : false;
   const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
 
-  const calc = calculateProposalValues(proposal, []);
+  // Passa os pacotes vivos (proposal.packages) para o cálculo refletir edições
+  // feitas no pacote depois da criação da proposta. Sem isso, o cálculo caía no
+  // valor congelado do item salvo e divergia do card do plano.
+  const calc = calculateProposalValues(proposal, packages);
 
   const setupBaseVal = calc.setupOriginal;
   const setupFinalVal = calc.setupFinal;
