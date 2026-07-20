@@ -51,12 +51,32 @@ export default function GeracaoDigitalNegotiationPage({ proposalId, onExit }: Ne
         const proposalObj = propData.data || propData;
         setProposal(proposalObj);
 
-        // 2. Load Packages
-        const pkgRes = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers });
+        // 2. Load Packages — biblioteca (ad_hoc=false) + os pacotes referenciados
+        // por esta proposta buscados por id (INCLUSIVE ad_hoc, que não aparecem na
+        // biblioteca). Sem isso, uma proposta com pacote ad_hoc abria a Mesa com o
+        // pacote faltando e o board quebrava no lookup.
+        const refIds = new Set<string>();
+        if (proposalObj?.package_id) refIds.add(proposalObj.package_id);
+        if (proposalObj?.package_vexo_id) refIds.add(proposalObj.package_vexo_id);
+        (Array.isArray(proposalObj?.pacotes_ofertados) ? proposalObj.pacotes_ofertados : []).forEach((pid: string) => { if (pid) refIds.add(pid); });
+
+        const [pkgRes, refRes] = await Promise.all([
+          fetchApi(`/api/gd/packages?client_id=${clientId || ""}`, { headers }),
+          refIds.size > 0
+            ? fetchApi(`/api/gd/packages?client_id=${clientId || ""}&ids=${Array.from(refIds).join(",")}`, { headers })
+            : Promise.resolve(null),
+        ]);
+
+        const merged = new Map<string, any>();
         if (pkgRes.ok) {
           const pkgData = await readApiJson<any>(pkgRes, "packages");
-          setAvailablePackages(Array.isArray(pkgData) ? pkgData : (pkgData?.data || []));
+          (Array.isArray(pkgData) ? pkgData : (pkgData?.data || [])).forEach((p: any) => merged.set(p.id, p));
         }
+        if (refRes && refRes.ok) {
+          const refData = await readApiJson<any>(refRes, "packages-ref");
+          (Array.isArray(refData) ? refData : (refData?.data || [])).forEach((p: any) => merged.set(p.id, p));
+        }
+        setAvailablePackages(Array.from(merged.values()));
       } catch (err: any) {
         console.error(err);
         setError(err.message || "Falha ao carregar dados da negociação.");
