@@ -235,6 +235,10 @@ export default function GeracaoDigitalProposals() {
 
   // Modal de compartilhamento da proposta
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
+  // Proposta alvo do compartilhamento, capturada no clique. Necessário porque
+  // loadProposals() reseta selectedProposal para a primeira da lista logo depois
+  // de abrir o modal — sem isso, o dialog pegava o link da proposta errada.
+  const [shareTarget, setShareTarget] = useState<Proposal | null>(null);
   // Modal de geração de contrato jurídico
   const [showGenerateContract, setShowGenerateContract] = useState<boolean>(false);
 
@@ -736,6 +740,7 @@ export default function GeracaoDigitalProposals() {
       if (isento) setValorSetupVexo(0);
       if (result.carenciaDias) setEditCarencia(String(result.carenciaDias));
       toast({ title: "Negociação registrada", description: "Concessões gravadas — compartilhe o link com o cliente." });
+      setShareTarget(selectedProposal);
       setShowSendModal(true);
       loadProposals();
     } catch (err: any) {
@@ -1121,6 +1126,7 @@ export default function GeracaoDigitalProposals() {
         title: "Enviada & Link Copiado",
         description: "Proposta marcada como 'enviada' e link de acesso copiado!"
       });
+      setShareTarget(selectedProposal);
       setShowSendModal(true);
       loadProposals();
     } catch (err) {
@@ -1393,15 +1399,6 @@ export default function GeracaoDigitalProposals() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleSendToClient}
-                      className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0 dark:text-slate-200"
-                    >
-                      <Share2 className="h-4 w-4 mr-1.5" />
-                      Enviar ao Cliente
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
                       onClick={() => handleArchiveProposal(selectedProposal.arquivada !== true)}
                       className="border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0 dark:text-slate-200"
                     >
@@ -1453,6 +1450,15 @@ export default function GeracaoDigitalProposals() {
                       >
                         <Play className="h-4 w-4 mr-1.5 text-purple-650" />
                         Iniciar Apresentação
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSendToClient}
+                        className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-950/30 font-semibold"
+                      >
+                        <Share2 className="h-4 w-4 mr-1.5" />
+                        Enviar ao Cliente
                       </Button>
                     </div>
 
@@ -1849,13 +1855,14 @@ export default function GeracaoDigitalProposals() {
         />
       )}
 
-      {/* Modal de Compartilhamento da Proposta */}
-      {selectedProposal && (
+      {/* Modal de Compartilhamento da Proposta — usa shareTarget (capturado no
+          clique), não selectedProposal, que pode ter sido resetado por loadProposals. */}
+      {shareTarget && (
         <ShareProposalDialog
           open={showSendModal}
-          onOpenChange={setShowSendModal}
-          proposalId={selectedProposal.id}
-          prospectName={selectedProposal.prospect_name}
+          onOpenChange={(v) => { setShowSendModal(v); if (!v) setShareTarget(null); }}
+          proposalId={shareTarget.id}
+          prospectName={shareTarget.prospect_name}
           clientId={clientId}
           getIdToken={getIdToken}
         />
