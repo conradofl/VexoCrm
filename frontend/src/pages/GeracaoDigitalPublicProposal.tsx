@@ -889,7 +889,7 @@ export default function GeracaoDigitalPublicProposal() {
                 <div className="space-y-2">
                   <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block">Formas de pagamento aceitas</span>
                   <div className="flex flex-wrap gap-2">
-                    {([["pix", "PIX"], ["cartao", "Cartão de Crédito"], ["boleto", "Boleto"]] as const).map(([key, label]) => {
+                    {([["pix", "PIX"], ["cartao", "Cartão de Crédito"]] as const).map(([key, label]) => {
                       const selecionado = meioSetupArr.includes(key) || meioMensalArr.includes(key);
                       return (
                         <span

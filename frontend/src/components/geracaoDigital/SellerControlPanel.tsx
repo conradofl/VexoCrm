@@ -192,7 +192,7 @@ export function SellerControlPanel({
               <Layers className="h-3.5 w-3.5 text-purple-500" />
               <span className="text-xs font-black text-slate-800">Parcelamento Setup</span>
             </div>
-            {/* Número livre de parcelas + forma (cartão/boleto). */}
+            {/* Número livre de parcelas + forma (cartão/PIX). */}
             <div className="space-y-1.5">
               <span className="text-[9px] font-bold uppercase text-slate-400">Nº de parcelas</span>
               <div className="flex items-center gap-2">
@@ -215,7 +215,7 @@ export function SellerControlPanel({
             <div className="space-y-1.5">
               <span className="text-[9px] font-bold uppercase text-slate-400">Forma da entrada</span>
               <div className="flex gap-1.5">
-                {(["cartao", "boleto"] as const).map((m) => {
+                {(["cartao", "pix"] as const).map((m) => {
                   const on = layers.meioSetup.includes(m);
                   return (
                     <button
@@ -229,7 +229,7 @@ export function SellerControlPanel({
                           : "bg-white text-slate-600 border-slate-200 hover:border-purple-300"
                       )}
                     >
-                      {m === "cartao" ? "Cartão" : "Boleto"}{on ? " ✓" : ""}
+                      {m === "cartao" ? "Cartão" : "PIX"}{on ? " ✓" : ""}
                     </button>
                   );
                 })}

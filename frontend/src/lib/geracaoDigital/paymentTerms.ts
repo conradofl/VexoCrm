@@ -5,7 +5,7 @@ export type PaymentTermTipo =
   | "avista_desconto"
   | "entrada_parcelas"
   | "parcelado_cartao"
-  | "boleto_recorrente"
+  | "cartao_recorrente"
   | "semanal"
   | "custom";
 
@@ -14,7 +14,7 @@ export interface PaymentTermConfig {
   valor_entrada?: number;
   num_parcelas?: number;
   intervalo?: "semanal" | "mensal";
-  meio?: "cartao" | "boleto" | "pix";
+  meio?: "cartao" | "pix";
   descricao?: string;
 }
 
@@ -41,18 +41,24 @@ export function termAplicaA(term: Pick<PaymentTerm, "aplica_a">): PaymentTermApl
   return term.aplica_a === "mensalidade" ? "mensalidade" : "setup";
 }
 
+// Planos de recorrência mensal no cartão (compromisso de período).
+export const CARTAO_RECORRENTE_PLANOS: { value: number; label: string }[] = [
+  { value: 3, label: "3 meses" },
+  { value: 6, label: "6 meses" },
+  { value: 12, label: "Anual (12 meses)" },
+];
+
 export const PAYMENT_TERM_TIPOS: { value: PaymentTermTipo; label: string }[] = [
   { value: "avista_desconto", label: "À vista com desconto" },
   { value: "entrada_parcelas", label: "Entrada + parcelas" },
   { value: "parcelado_cartao", label: "Parcelado no cartão" },
-  { value: "boleto_recorrente", label: "Boleto recorrente" },
+  { value: "cartao_recorrente", label: "Recorrência mensal no cartão" },
   { value: "semanal", label: "Parcelas semanais" },
   { value: "custom", label: "Personalizada (texto livre)" },
 ];
 
 export const MEIO_LABELS: Record<string, string> = {
   cartao: "cartão",
-  boleto: "boleto",
   pix: "PIX",
 };
 
@@ -102,10 +108,10 @@ export function computePaymentBreakdown(
         totalFinal: base,
       };
     }
-    case "boleto_recorrente": {
+    case "cartao_recorrente": {
       const n = Math.max(1, Number(cfg.num_parcelas || 1));
       return {
-        linhas: [`${n} boletos mensais de ${brl(base / n)}`],
+        linhas: [`Recorrência mensal no cartão · plano de ${n} meses · ${n}x de ${brl(base / n)}`],
         totalFinal: base,
       };
     }
@@ -141,8 +147,8 @@ export function describeTerm(term: Pick<PaymentTerm, "tipo" | "config">): string
     }
     case "parcelado_cartao":
       return `${Math.max(1, Number(cfg.num_parcelas || 1))}x no cartão`;
-    case "boleto_recorrente":
-      return `${Math.max(1, Number(cfg.num_parcelas || 1))} boletos mensais`;
+    case "cartao_recorrente":
+      return `Recorrência mensal no cartão · plano de ${Math.max(1, Number(cfg.num_parcelas || 1))} meses`;
     case "semanal":
       return `${Math.max(1, Number(cfg.num_parcelas || 1))} parcelas semanais`;
     case "custom":

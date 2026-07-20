@@ -9,11 +9,10 @@ import {
   termAplicaA,
 } from "./paymentTerms";
 
-export type MeioPagamento = "" | "cartao" | "boleto" | "pix";
+export type MeioPagamento = "" | "cartao" | "pix";
 
 export const MEIO_PAGAMENTO_LABELS: Record<Exclude<MeioPagamento, "">, string> = {
   cartao: "Cartão",
-  boleto: "Boleto",
   pix: "PIX",
 };
 

@@ -18,6 +18,7 @@ import {
   type PaymentTermConfig,
   type PaymentTermAplicaA,
   PAYMENT_TERM_TIPOS,
+  CARTAO_RECORRENTE_PLANOS,
   APLICA_A_LABELS,
   termAplicaA,
   computePaymentBreakdown,
@@ -171,7 +172,7 @@ export default function GeracaoDigitalPaymentTerms() {
   return (
     <PageShell
       title="Condições de Pagamento GD"
-      subtitle="Crie condições reutilizáveis para ofertar nas propostas comerciais: à vista, entrada + parcelas, cartão, boleto e mais."
+      subtitle="Crie condições reutilizáveis para ofertar nas propostas comerciais: à vista, entrada + parcelas, parcelado ou recorrência mensal no cartão e mais."
       icon={CreditCard}
     >
       <GeracaoDigitalTabs />
@@ -268,7 +269,7 @@ export default function GeracaoDigitalPaymentTerms() {
                     </div>
                   </>
                 )}
-                {(form.tipo === "parcelado_cartao" || form.tipo === "boleto_recorrente" || form.tipo === "semanal") && (
+                {(form.tipo === "parcelado_cartao" || form.tipo === "semanal") && (
                   <div className="space-y-1">
                     <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Nº de parcelas</Label>
                     <Input
@@ -277,6 +278,21 @@ export default function GeracaoDigitalPaymentTerms() {
                       onChange={(e) => updateConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))}
                       className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-9 text-slate-900 dark:text-slate-100"
                     />
+                  </div>
+                )}
+                {form.tipo === "cartao_recorrente" && (
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Plano de recorrência</Label>
+                    <select
+                      value={form.config.num_parcelas ?? ""}
+                      onChange={(e) => updateConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 py-1 text-xs text-slate-850 dark:text-slate-200 h-9"
+                    >
+                      <option value="" className="dark:bg-slate-800">— selecione —</option>
+                      {CARTAO_RECORRENTE_PLANOS.map((p) => (
+                        <option key={p.value} value={p.value} className="dark:bg-slate-800">{p.label}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 {(form.tipo === "avista_desconto" || form.tipo === "entrada_parcelas") && (
@@ -290,7 +306,6 @@ export default function GeracaoDigitalPaymentTerms() {
                       <option value="" className="dark:bg-slate-800">— opcional —</option>
                       <option value="pix" className="dark:bg-slate-800">PIX</option>
                       <option value="cartao" className="dark:bg-slate-800">Cartão</option>
-                      <option value="boleto" className="dark:bg-slate-800">Boleto</option>
                     </select>
                   </div>
                 )}
