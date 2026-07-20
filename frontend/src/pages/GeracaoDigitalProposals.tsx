@@ -42,6 +42,7 @@ import {
   type ProposalPaymentTerms,
   type DescontoConcedido,
   PAYMENT_TERM_TIPOS,
+  CARTAO_RECORRENTE_PLANOS,
   computePaymentBreakdown,
   termAplicaA,
   APLICA_A_LABELS,
@@ -1539,7 +1540,7 @@ export default function GeracaoDigitalProposals() {
                                 <Input
                                   value={inlineTerm.nome}
                                   onChange={(e) => setInlineTerm((p) => ({ ...p, nome: e.target.value }))}
-                                  placeholder='Nome (ex: "Setup 2x boleto")'
+                                  placeholder='Nome (ex: "Setup 2x no cartão")'
                                   className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8"
                                 />
                                 <select
@@ -1564,8 +1565,16 @@ export default function GeracaoDigitalProposals() {
                                 {inlineTerm.tipo === "avista_desconto" && (
                                   <Input type="number" placeholder="% desconto" value={inlineTerm.config.percentual_desconto ?? ""} onChange={(e) => updateInlineConfig("percentual_desconto", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
                                 )}
-                                {(inlineTerm.tipo === "entrada_parcelas" || inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "boleto_recorrente" || inlineTerm.tipo === "semanal") && (
+                                {(inlineTerm.tipo === "entrada_parcelas" || inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "semanal") && (
                                   <Input type="number" placeholder="Nº de parcelas" value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
+                                )}
+                                {inlineTerm.tipo === "cartao_recorrente" && (
+                                  <select value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8">
+                                    <option value="">Plano de recorrência</option>
+                                    {CARTAO_RECORRENTE_PLANOS.map((p) => (
+                                      <option key={p.value} value={p.value}>{p.label}</option>
+                                    ))}
+                                  </select>
                                 )}
                                 {inlineTerm.tipo === "entrada_parcelas" && (
                                   <Input type="number" placeholder="Entrada (R$)" value={inlineTerm.config.valor_entrada ?? ""} onChange={(e) => updateInlineConfig("valor_entrada", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
@@ -1575,7 +1584,6 @@ export default function GeracaoDigitalProposals() {
                                     <option value="">Meio (opcional)</option>
                                     <option value="pix">PIX</option>
                                     <option value="cartao">Cartão</option>
-                                    <option value="boleto">Boleto</option>
                                   </select>
                                 )}
                                 {inlineTerm.tipo === "custom" && (
