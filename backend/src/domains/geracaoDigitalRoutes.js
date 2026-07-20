@@ -597,6 +597,25 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   });
 
   // Helper to resolve UUID tenant_id
+  // Checa uma vez se gd_proposals já tem as colunas segment_id/prospect_logo
+  // (podem não existir se a migration ainda não rodou no ambiente). Evita 500
+  // no INSERT quando a migration está atrasada. Memoizado.
+  let _proposalHasSegmentLogo = null;
+  async function proposalHasSegmentLogo() {
+    if (_proposalHasSegmentLogo !== null) return _proposalHasSegmentLogo;
+    try {
+      const r = await pool.query(
+        `SELECT count(*)::int AS n FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'gd_proposals'
+           AND column_name IN ('segment_id', 'prospect_logo')`
+      );
+      _proposalHasSegmentLogo = (r.rows[0]?.n || 0) >= 2;
+    } catch {
+      _proposalHasSegmentLogo = false;
+    }
+    return _proposalHasSegmentLogo;
+  }
+
   async function resolveTenantUuid(clientKey) {
     let tenantId = "00000000-0000-0000-0000-000000000000";
     if (!clientKey) {
@@ -1447,33 +1466,39 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const computedTotal = valorSetup + valorRecorrente + setupVexo;
 
+      const hasSegmentLogo = await proposalHasSegmentLogo();
       const result = await pool.query(
-        `INSERT INTO public.gd_proposals (
-          tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status,
-          cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, valor_vp,
-          segment_id, prospect_logo
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
-        [
-          tenantId,
-          validPresentationId,
-          validPackageId,
-          validPackageVexoId,
-          finalProspectName,
-          JSON.stringify(finalItems),
-          computedTotal,
-          condicoes || "Contrato de 6 meses. Faturamento recorrente mensal.",
-          status,
-          cobrar_setup === true,
-          valor_setup_vexo !== null && valor_setup_vexo !== undefined ? Number(valor_setup_vexo) : null,
-          condicoes_pagamento ? JSON.stringify(condicoes_pagamento) : null,
-          postPeriodoPlano,
-          validade_ate || null,
-          valor_apos_validade !== null && valor_apos_validade !== "" ? Number(valor_apos_validade) : null,
-          observacao_validade || null,
-          valor_vp !== null && valor_vp !== undefined ? Number(valor_vp) : null,
-          segment_id || null,
-          prospect_logo || null
-        ]
+        (() => {
+          const baseCols = [
+            "tenant_id", "presentation_id", "package_id", "package_vexo_id", "prospect_name", "itens", "valor_total", "condicoes", "status",
+            "cobrar_setup", "valor_setup_vexo", "condicoes_pagamento", "periodo_plano", "validade_ate", "valor_apos_validade", "observacao_validade", "valor_vp"
+          ];
+          const cols = hasSegmentLogo ? [...baseCols, "segment_id", "prospect_logo"] : baseCols;
+          const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+          return `INSERT INTO public.gd_proposals (${cols.join(", ")}) VALUES (${placeholders}) RETURNING *`;
+        })(),
+        (() => {
+          const base = [
+            tenantId,
+            validPresentationId,
+            validPackageId,
+            validPackageVexoId,
+            finalProspectName,
+            JSON.stringify(finalItems),
+            computedTotal,
+            condicoes || "Contrato de 6 meses. Faturamento recorrente mensal.",
+            status,
+            cobrar_setup === true,
+            valor_setup_vexo !== null && valor_setup_vexo !== undefined ? Number(valor_setup_vexo) : null,
+            condicoes_pagamento ? JSON.stringify(condicoes_pagamento) : null,
+            postPeriodoPlano,
+            validade_ate || null,
+            valor_apos_validade !== null && valor_apos_validade !== "" ? Number(valor_apos_validade) : null,
+            observacao_validade || null,
+            valor_vp !== null && valor_vp !== undefined ? Number(valor_vp) : null
+          ];
+          return hasSegmentLogo ? [...base, segment_id || null, prospect_logo || null] : base;
+        })()
       );
 
       res.status(201).json({ success: true, data: result.rows[0] });
@@ -1551,10 +1576,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const tenantId = await resolveTenantUuid(client_id);
 
       const result = await pool.query(
-        // Prefere segmento/logo da própria proposta; se null (proposta sem
-        // apresentação vinculada é o caso comum do wizard), cai no da apresentação.
-        // As colunas aliased vêm depois de p.* e sobrescrevem no objeto de retorno.
-        `SELECT p.*, COALESCE(p.segment_id, pr.segment_id) AS segment_id, COALESCE(p.prospect_logo, pr.prospect_logo) AS prospect_logo, pr.roi
+        // NÃO referenciar p.segment_id / p.prospect_logo explicitamente: se a
+        // migration que cria essas colunas ainda não rodou, o SQL quebraria (500).
+        // p.* traz as colunas SE existirem; o coalesce com a apresentação é feito
+        // em JS abaixo. Robusto a coluna ausente.
+        `SELECT p.*, pr.segment_id AS pres_segment_id, pr.prospect_logo AS pres_prospect_logo, pr.roi
          FROM public.gd_proposals p
          LEFT JOIN public.gd_presentations pr ON p.presentation_id = pr.id
          WHERE p.id = $1 AND p.tenant_id = $2`,
@@ -1569,11 +1595,17 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const items = Array.isArray(row.itens) ? row.itens : [];
       const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
       const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      // Prefere segmento/logo da própria proposta (row.segment_id vindo de p.*,
+      // presente só se a coluna existe); senão cai no da apresentação vinculada.
+      const segmentId = row.segment_id ?? row.pres_segment_id ?? null;
+      const prospectLogo = row.prospect_logo ?? row.pres_prospect_logo ?? null;
 
       res.json({
         success: true,
         data: {
           ...row,
+          segment_id: segmentId,
+          prospect_logo: prospectLogo,
           valor_setup: valorSetup,
           valor_recorrente: valorRecorrente
         }
