@@ -19,6 +19,13 @@ O único efeito de `parcelamento` é o texto da linha "Como você vai pagar" da 
 `descontos_concedidos` e `gd_negotiation_scenarios` **ficam no banco como histórico** — nada de DROP.
 Confirmado: `psql`/`pg_dump` 18.4 disponíveis e `DATABASE_URL` presente no `backend/.env` → backup viável na 5d (único ponto com mudança de schema).
 
+### Fase 5c-1 concluída (Mesa de Negociação removida)
+- Removidos 7 arquivos: `GeracaoDigitalNegotiationPage`, `GeracaoDigitalNegotiationBoard`, `NegotiationControls`, `ConcessionsPanel`, `SellerControlPanel`, `lib/geracaoDigital/negotiation.ts`, `hooks/useNegotiationScenarios.ts`.
+- Removidos também: rota `/crm/propostas-gd/negociacao/:id`, atalho **Shift+N** e botão do cadeado na proposta pública, botão "Abrir Mesa de Negociação", handler `handleFinalizeNegotiation` e estado `isNegotiating`.
+- Copy atualizada: "Edições e negociações devem ser feitas na Mesa separada" → "Ajuste valores, condições e prazos na configuração abaixo e reenvie ao cliente".
+- **Mantida de propósito** a leitura de `descontos_concedidos` (calculator + bloco "Condições Negociadas" + texto do parcelamento na pública), para não alterar nada visual nas 2 propostas já enviadas antes da conversão. Isso sai na 5c-2.
+- Snapshot das 2 propostas salvo em `backups/` (fora do git) antes de qualquer write.
+
 ### Fase 5a concluída (alavancas da Mesa viram campos da proposta)
 - **Preço negociado por proposta sem coluna nova:** o override vive no próprio item do pacote dentro do JSONB `itens` (`valor_override: true`). Precedência no calculator: **negociado > pacote vivo do catálogo > valor congelado**. Isso concilia as duas regras: editar o pacote continua propagando para propostas sem override, e proposta negociada mantém o preço combinado.
 - Painel de configuração ganhou **"Mensalidade negociada (R$)"** (vazio = usa o pacote) e **"Carência do 1º vencimento"** (o estado `editCarencia` já existia sem UI).

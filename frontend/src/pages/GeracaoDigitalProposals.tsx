@@ -49,7 +49,6 @@ import {
   SETUP_LABEL,
   SETUP_JUSTIFICATION
 } from "@/lib/geracaoDigital/paymentTerms";
-import { GeracaoDigitalNegotiationBoard, type NegotiationFinalizeResult } from "@/components/GeracaoDigitalNegotiationBoard";
 import { GenerateContractDialog } from "./GeracaoDigitalContracts/GenerateContractDialog";
 import { ShareProposalDialog } from "./GeracaoDigitalProposals/ShareProposalDialog";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
@@ -145,7 +144,6 @@ export default function GeracaoDigitalProposals() {
   const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
 
   // Mesa de negociação
-  const [isNegotiating, setIsNegotiating] = useState<boolean>(false);
 
   // Arquivadas
   const [showArchived, setShowArchived] = useState<boolean>(false);
@@ -704,60 +702,6 @@ export default function GeracaoDigitalProposals() {
   };
 
   // Fecha a negociação: grava concessões e abre a proposta pública final
-  const handleFinalizeNegotiation = async (result: NegotiationFinalizeResult) => {
-    if (!selectedProposal) return;
-    try {
-      const token = await getIdToken();
-      const headers: HeadersInit = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const isento = result.descontos.some((d) => d.tipo === "isencao_setup");
-      // Payload completo: inclui os campos editados na tela (condicoes, prospect,
-      // período, validade) para a negociação não descartar edições pendentes.
-      const body = {
-        client_id: clientId,
-        prospect_name: prospectName,
-        itens: items,
-        condicoes,
-        payment_link: paymentLink,
-        cobrar_setup: cobrarSetup,
-        valor_setup_vexo: isento ? 0 : (cobrarSetup ? Number(valorSetupVexo || 0) : null),
-        descontos_concedidos: result.descontos,
-        meio_pagamento: result.meioPagamento,
-        periodo_plano: (() => {
-          const gdPkg = availablePackages.find((p: any) => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
-          const vexoPkg = availablePackages.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
-          return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
-        })(),
-        validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
-        valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
-        observacao_validade: observacaoValidade || null,
-        carencia_dias: editCarencia !== "" ? Number(editCarencia) : null,
-        condicoes_pagamento: {
-          ofertadas: offeredTerms,
-          escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
-        }
-      };
-      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify(body)
-      });
-      if (!res.ok) throw new Error("Erro ao gravar as concessões da negociação.");
-
-      setIsNegotiating(false);
-      if (isento) setValorSetupVexo(0);
-      if (result.carenciaDias) setEditCarencia(String(result.carenciaDias));
-      toast({ title: "Negociação registrada", description: "Concessões gravadas — compartilhe o link com o cliente." });
-      setShareTarget(selectedProposal);
-      setShowSendModal(true);
-      loadProposals();
-    } catch (err: any) {
-      console.error(err);
-      toast({ title: "Erro", description: err.message || "Falha ao fechar a negociação.", variant: "destructive" });
-    }
-  };
-
   // Save proposal updates
   const handleSaveProposal = async () => {
     if (!selectedProposal) return;
@@ -1445,7 +1389,7 @@ export default function GeracaoDigitalProposals() {
                       Resumo da Proposta Comercial
                     </CardTitle>
                     <CardDescription className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Esta é uma visualização consolidada dos itens, valores e condições acordadas. Edições e negociações devem ser feitas na Mesa de Negociação separada.
+                      Esta é uma visualização consolidada dos itens, valores e condições acordadas. Ajuste valores, condições e prazos na configuração abaixo e reenvie ao cliente.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-6">
@@ -1486,14 +1430,6 @@ export default function GeracaoDigitalProposals() {
                       <div className="p-4 rounded-xl bg-white dark:bg-slate-800/40 border border-purple-200 dark:border-purple-900/30 space-y-4">
                         <div className="flex items-center justify-between">
                           <h4 className="text-xs font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider">Configuração da Proposta</h4>
-                          <Button
-                            size="sm"
-                            onClick={() => setIsNegotiating(true)}
-                            className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold text-xs"
-                          >
-                            <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                            Abrir Mesa de Negociação
-                          </Button>
                         </div>
 
                         {/* 2/3. Venda Casada / Setup de implantação */}
@@ -1893,24 +1829,6 @@ export default function GeracaoDigitalProposals() {
 
       </div>
 
-      {/* Mesa de Negociação (tela cheia, compartilhável com o cliente) */}
-      {isNegotiating && selectedProposal && (
-        <GeracaoDigitalNegotiationBoard
-          prospectName={prospectName}
-          items={items}
-          setupItensTotal={setupTotal}
-          recurringTotal={recurringTotal}
-          setupVexoValue={setupVexoValue}
-          periodoPlano={periodoPlano}
-          validadeAte={validadeAte}
-          offeredTerms={offeredTerms}
-          onClose={() => setIsNegotiating(false)}
-          onFinalize={handleFinalizeNegotiation}
-          packageId={editPackageId}
-          packageVexoId={editPackageVexoId}
-          availablePackages={availablePackages}
-        />
-      )}
 
       {/* Modal de Compartilhamento da Proposta — usa shareTarget (capturado no
           clique), não selectedProposal, que pode ter sido resetado por loadProposals. */}

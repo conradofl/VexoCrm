@@ -38,7 +38,6 @@ import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { ShareProposalDialog } from "@/pages/GeracaoDigitalProposals/ShareProposalDialog";
-import GeracaoDigitalNegotiationPage from "@/pages/GeracaoDigitalNegotiationPage";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -98,7 +97,6 @@ export default function GeracaoDigitalPublicProposal() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [chosenTermId, setChosenTermId] = useState<string | null>(null);
-  const [showMesa, setShowMesa] = useState(false);
 
   // Signature state
   const [signerName, setSignerName] = useState<string>("");
@@ -108,18 +106,6 @@ export default function GeracaoDigitalPublicProposal() {
 
   const { isAuthenticated, clientId, getIdToken } = useAuth();
   const [showShare, setShowShare] = useState<boolean>(false);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.shiftKey && e.key.toLowerCase() === 'n') {
-        const target = e.target as HTMLElement | null;
-        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-        setShowMesa((v) => !v);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [id]);
 
   useEffect(() => {
     if (id) {
@@ -1048,24 +1034,6 @@ export default function GeracaoDigitalPublicProposal() {
         </div>
       </main>
 
-      <div className="fixed bottom-4 right-4 z-40 opacity-0 hover:opacity-100 transition-opacity">
-        <Button variant="ghost" size="icon" onClick={() => setShowMesa(true)} className="text-slate-800 hover:text-white hover:bg-slate-800 rounded-full w-8 h-8 dark:text-white">
-           <Lock className="w-3 h-3 opacity-20 hover:opacity-100" />
-        </Button>
-      </div>
-
-      {/* Mesa de Negociação — overlay na MESMA tela (gatilho: cadeado ou Shift+N) */}
-      {showMesa && id && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-50 dark:bg-slate-950">
-          <GeracaoDigitalNegotiationPage
-            proposalId={id}
-            onExit={() => {
-              setShowMesa(false);
-              reloadPublicProposalSilent();
-            }}
-          />
-        </div>
-      )}
     </div>
   );
 }
