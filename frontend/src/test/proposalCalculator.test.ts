@@ -25,7 +25,7 @@ const pkgTrimestral = {
 };
 
 /** Itens como o wizard monta: linha do pacote + conteúdo do pacote a valor 0. */
-function itensDoPacote(nome: string, mensalidade: number, meses: number, produtos: string[]) {
+function itensDoPacote(nome: string, mensalidade: number, meses: number, produtos: string[]): any[] {
   return [
     {
       product_id: null,
@@ -168,6 +168,34 @@ describe("totais derivados (nunca ler valor_total do banco)", () => {
     const pkgAtualizado = { ...pkgAnual, valor: 72000 }; // 6.000/mês
     const calc = calculateProposalValues({ package_id: "pkg-anual", itens: items }, [pkgAtualizado]);
     expect(calc.mensalidadeOriginal).toBe(6000);
+  });
+
+  it("preço negociado (valor_override) vence o pacote vivo do catálogo", () => {
+    // vendedor negociou 2.000/mês nesta proposta; catálogo está em 2.400
+    const items = itensDoPacote("Anual", 2000, 12, ["p1"]);
+    items[0].valor_override = true;
+    const calc = calculateProposalValues({ package_id: "pkg-anual", itens: items }, [pkgAnual]);
+    expect(calc.mensalidadeFinal).toBe(2000);
+    expect(calc.compromissoFinal).toBe(24000);
+  });
+
+  it("sem override, editar o pacote no catálogo continua propagando", () => {
+    const items = itensDoPacote("Anual", 2000, 12, ["p1"]);
+    // sem valor_override => catálogo manda
+    const calc = calculateProposalValues({ package_id: "pkg-anual", itens: items }, [pkgAnual]);
+    expect(calc.mensalidadeFinal).toBe(2400);
+  });
+
+  it("override + setup negociado somam corretamente no total", () => {
+    const items = itensDoPacote("Trimestral", 2500, 3, ["p1"]);
+    items[0].valor_override = true;
+    const calc = calculateProposalValues(
+      { package_id: "pkg-tri", itens: items, cobrar_setup: true, valor_setup_vexo: 1000 },
+      [pkgTrimestral]
+    );
+    expect(calc.mensalidadeFinal).toBe(2500);
+    expect(calc.compromissoFinal).toBe(7500);
+    expect(calc.totalGeral).toBe(8500);
   });
 
   it("sem catálogo, cai no valor salvo do item (fallback)", () => {

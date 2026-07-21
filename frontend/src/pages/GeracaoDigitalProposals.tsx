@@ -136,6 +136,9 @@ export default function GeracaoDigitalProposals() {
   // Setup Vexo opcional
   const [cobrarSetup, setCobrarSetup] = useState<boolean>(false);
   const [valorSetupVexo, setValorSetupVexo] = useState<number>(0);
+  // Fase 5a: alavancas que moravam na Mesa de Negociação agora são campos
+  // editáveis da própria proposta. 0/vazio = usa o preço do pacote no catálogo.
+  const [editMensalidadeNegociada, setEditMensalidadeNegociada] = useState<number>(0);
 
   // Condições de pagamento
   const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
@@ -536,6 +539,11 @@ export default function GeracaoDigitalProposals() {
     setPaymentLink(prop.payment_link || "");
     setCobrarSetup(prop.cobrar_setup === true);
     setValorSetupVexo(Number(prop.valor_setup_vexo || 0));
+    // Preço negociado só existe se a proposta gravou override no item do pacote.
+    const pkgItem = (Array.isArray(prop.itens) ? prop.itens : []).find(
+      (i: any) => i?.descricao?.startsWith("Pacote:") && i?.valor_override === true
+    );
+    setEditMensalidadeNegociada(pkgItem ? Number(pkgItem.valor || 0) : 0);
     setVpActive(!!prop.valor_vp);
     setEditValorVp(Number(prop.valor_vp || 0));
     setOfferedTermIds(
@@ -771,16 +779,22 @@ export default function GeracaoDigitalProposals() {
         const meses = selectedGdPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedGdPkg.periodo] ?? 1);
         const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
         const valorTabela = Number(selectedGdPkg.valor_tabela || 0);
+        // Preço negociado desta proposta (fase 5a). Quando preenchido, vence o
+        // pacote vivo do catálogo — é a alavanca de desconto que morava na Mesa.
+        const negociada = Number(editMensalidadeNegociada || 0);
+        const usaOverride = negociada > 0 && meses !== null;
+        const mensalidadeFinalItem = usaOverride ? negociada : mensalidade;
 
         finalItems.push({
           product_id: null,
           descricao: `Pacote: ${selectedGdPkg.nome} (${selectedGdPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
           categoria: "gd",
-          valor: mensalidade,
+          valor: mensalidadeFinalItem,
+          valor_override: usaOverride || undefined,
           recorrencia: meses ? "mensal" : "unico",
           periodo: selectedGdPkg.periodo,
           meses,
-          total_periodo: meses ? val : null,
+          total_periodo: meses ? (usaOverride ? mensalidadeFinalItem * meses : val) : null,
           valor_tabela: valorTabela > val ? valorTabela : null
         });
 
@@ -1500,6 +1514,37 @@ export default function GeracaoDigitalProposals() {
                               />
                             </div>
                           )}
+                        </div>
+
+                        {/* Alavancas de negociação — antes só existiam na Mesa (fase 5a). */}
+                        <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100 dark:border-white/5">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Mensalidade negociada (R$)</Label>
+                            <Input
+                              type="number"
+                              placeholder="usa o pacote"
+                              value={editMensalidadeNegociada === 0 ? "" : editMensalidadeNegociada}
+                              onChange={(e) => setEditMensalidadeNegociada(e.target.value === "" ? 0 : Number(e.target.value))}
+                              className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-xs h-8 w-44 font-mono"
+                            />
+                            <span className="block text-[9px] text-slate-450">
+                              Vazio = usa o preço do pacote. Preenchido, vence o catálogo só nesta proposta.
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Carência do 1º vencimento</Label>
+                            <select
+                              value={editCarencia}
+                              onChange={(e) => setEditCarencia(e.target.value)}
+                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8"
+                            >
+                              <option value="">Imediato (na contratação)</option>
+                              <option value="15">15 dias</option>
+                              <option value="20">20 dias</option>
+                              <option value="30">30 dias</option>
+                            </select>
+                            <span className="block text-[9px] text-slate-450">Não altera valores — só a data.</span>
+                          </div>
                         </div>
 
                         {/* 4. Condições de Pagamento (selecionar + criar na hora) */}

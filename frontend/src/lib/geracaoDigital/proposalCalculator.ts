@@ -124,25 +124,37 @@ export function calculateProposalValues(
   }
 
   // Monthly Original
+  //
+  // Precedência (fase 5a): preço NEGOCIADO da proposta > pacote vivo do
+  // catálogo > valor congelado no item.
+  // O override vive no próprio item (`valor_override: true`), dentro do JSONB
+  // `itens` — sem coluna nova. Assim continuam valendo as duas regras:
+  //   - editar o pacote no catálogo propaga para propostas SEM override;
+  //   - proposta negociada mantém o preço combinado (decisão: valores flexíveis).
+  const savedGdPkgItem = items.find(i => i.categoria === "gd" && i.recorrencia === "mensal" && i.descricao?.startsWith("Pacote:"));
+  const gdOverride = savedGdPkgItem?.valor_override === true;
+
   let gdMonthly = 0;
-  if (gdPkg && gdPkg.periodo !== "unico") {
+  if (gdOverride) {
+    gdMonthly = Number(savedGdPkgItem?.valor || 0);
+  } else if (gdPkg && gdPkg.periodo !== "unico") {
     const months = monthsForPeriod(gdPkg.periodo) || 1;
     gdMonthly = Number(gdPkg.valor || 0) / months;
-  } else {
+  } else if (savedGdPkgItem) {
     // Fallback: read directly from the saved item
-    const savedGdPkgItem = items.find(i => i.categoria === "gd" && i.recorrencia === "mensal" && i.descricao?.startsWith("Pacote:"));
-    if (savedGdPkgItem) {
-      gdMonthly = Number(savedGdPkgItem.valor || 0);
-    }
+    gdMonthly = Number(savedGdPkgItem.valor || 0);
   }
 
+  const savedVexoPkgItem = items.find(i => i.categoria === "vexo" && i.recorrencia === "mensal" && i.descricao?.startsWith("Pacote Vexo:"));
+  const vexoOverride = savedVexoPkgItem?.valor_override === true;
+
   let vexoMonthly = 0;
-  if (vexoPkg && vexoPkg.periodo !== "unico") {
+  if (vexoOverride) {
+    vexoMonthly = Number(savedVexoPkgItem?.valor || 0);
+  } else if (vexoPkg && vexoPkg.periodo !== "unico") {
     const months = monthsForPeriod(vexoPkg.periodo) || 1;
     vexoMonthly = Number(vexoPkg.valor || 0) / months;
   } else {
-    // Fallback: read directly from the saved item
-    const savedVexoPkgItem = items.find(i => i.categoria === "vexo" && i.recorrencia === "mensal" && i.descricao?.startsWith("Pacote Vexo:"));
     if (savedVexoPkgItem) {
       vexoMonthly = Number(savedVexoPkgItem.valor || 0);
     }

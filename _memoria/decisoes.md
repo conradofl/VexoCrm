@@ -12,6 +12,19 @@
 - **`valor_total` é DERIVADO, nunca lido do banco.** O backend recomputa sem dedupe e infla (visto ao vivo: R$ 5.400 → R$ 10.900). A UI deriva via `calculateProposalValues(...).totalGeral`.
 - **Consequência:** como tudo deriva, "recalcular propostas antigas" deixa de exigir migração destrutiva — o `valor_total` armazenado não é mais exibido. Backfill fica opcional/cosmético.
 
+### Fase 5 — pré-voo no banco (SQL read-only, 2026-07-21)
+Rodado via `psql` com `DATABASE_URL` do `backend/.env`: **6 propostas** no total, **2 com concessão**, **4 enviadas/aceitas**, **2** enviadas/aceitas COM concessão.
+**O risco temido não existe:** as 2 concessões são `tipo: parcelamento`, `trilha: setup`, com `valor_original == valor_final` (1500→1500 e 2000→2000). O calculator **já exclui `parcelamento`** do preço (`d.tipo !== "parcelamento"`) e **não há nenhuma concessão de trilha `mensalidade`**. Logo, desligar a leitura de `descontos_concedidos` altera **R$ 0,00 em 0 propostas** — a materialização (Opção A original) virou desnecessária.
+O único efeito de `parcelamento` é o texto da linha "Como você vai pagar" da entrada (regex sobre `motivo`, em `GeracaoDigitalPublicProposal.tsx:389-390`), e só quando não há condição de pagamento escolhida. Decidido: converter essas 2 em **Condição de Pagamento** real (na fase 5c, antes de remover a leitura).
+`descontos_concedidos` e `gd_negotiation_scenarios` **ficam no banco como histórico** — nada de DROP.
+Confirmado: `psql`/`pg_dump` 18.4 disponíveis e `DATABASE_URL` presente no `backend/.env` → backup viável na 5d (único ponto com mudança de schema).
+
+### Fase 5a concluída (alavancas da Mesa viram campos da proposta)
+- **Preço negociado por proposta sem coluna nova:** o override vive no próprio item do pacote dentro do JSONB `itens` (`valor_override: true`). Precedência no calculator: **negociado > pacote vivo do catálogo > valor congelado**. Isso concilia as duas regras: editar o pacote continua propagando para propostas sem override, e proposta negociada mantém o preço combinado.
+- Painel de configuração ganhou **"Mensalidade negociada (R$)"** (vazio = usa o pacote) e **"Carência do 1º vencimento"** (o estado `editCarencia` já existia sem UI).
+- Isenção de setup já era coberta (desligar o toggle) e condições de pagamento também — não precisaram de campo novo.
+- 3 testes novos de precedência do override. Suíte 53/53.
+
 ### Fase 4 concluída (Setup no formulário + fim do clobber de pacotes)
 - **Taxa de Setup entrou no wizard** (passo 4 – Condições). O estado `newCobrarSetup`/`newValorSetup` e o envio no body já existiam no `useProposalWizard` (linhas 203-204) — faltava só a UI, por isso toda proposta criada pelo wizard nascia com `cobrar_setup = false` e exigia um segundo salvamento no painel de configuração.
 - **Bug do "Salvar Configuração" corrigido na raiz:** `handleSaveProposal` reenviava `pacotes_ofertados: editPacotesOfertados`, sobrescrevendo o menu de pacotes da proposta (derrubou de 3 → 1 no Dr. Diogo, reproduzido ao vivo). O campo saiu do payload; o PUT do backend preserva o valor atual quando ele vem `undefined` (`finalPacotesOfertados = pacotes_ofertados !== undefined ? ... : current.pacotes_ofertados`).
