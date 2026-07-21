@@ -26,8 +26,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   type ProposalPaymentTerms,
-  type DescontoConcedido,
-  DESCONTO_LABELS,
   termAplicaA,
   APLICA_A_LABELS,
   computePaymentBreakdown,
@@ -74,7 +72,6 @@ interface Proposal {
   validade_ate?: string | null;
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
-  descontos_concedidos?: DescontoConcedido[] | null;
   meio_pagamento?: { setup?: string | string[]; mensalidade?: string | string[] } | null;
   carencia_dias?: number | null;
   package_vexo_id?: string | null;
@@ -344,7 +341,6 @@ export default function GeracaoDigitalPublicProposal() {
   const chosenTerm = proposal.condicoes_pagamento?.escolhida || null;
   const validadeDate = proposal.validade_ate ? new Date(proposal.validade_ate) : null;
   const validadeExpirada = validadeDate ? validadeDate.getTime() < Date.now() : false;
-  const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
 
   // Passa os pacotes vivos (proposal.packages) para o cálculo refletir edições
   // feitas no pacote depois da criação da proposta. Sem isso, o cálculo caía no
@@ -372,21 +368,18 @@ export default function GeracaoDigitalPublicProposal() {
   const meioMensalPub = meiosPubLabel(proposal.meio_pagamento?.mensalidade);
 
   // Resumo "Como você vai pagar" por trilha (meio + parcelamento + condição)
-  const parcelamentoConc = descontosConcedidos.find((d) => d.tipo === "parcelamento");
-  const parcelasEntradaMatch = parcelamentoConc?.motivo?.match(/(\d+)x de (R\$\s?[\d.,]+)/);
   const condSetupEscolhida = chosenTerm && termAplicaA(chosenTerm) === "setup" ? chosenTerm : null;
   const condMensalEscolhida = chosenTerm && termAplicaA(chosenTerm) === "mensalidade" ? chosenTerm : null;
   const pagamentoEntrada = [
     condSetupEscolhida ? computePaymentBreakdown(condSetupEscolhida, setupFinalVal).linhas[0] : null,
-    !condSetupEscolhida && parcelasEntradaMatch ? `${parcelasEntradaMatch[1]}x de ${parcelasEntradaMatch[2]}` : null,
-    !condSetupEscolhida && !parcelasEntradaMatch ? "à vista" : null,
+    !condSetupEscolhida ? "à vista" : null,
     meioSetupPub ? `no ${meioSetupPub}` : null,
   ].filter(Boolean).join(" · ");
   const pagamentoMensalidade = [
     condMensalEscolhida ? computePaymentBreakdown(condMensalEscolhida, mensalFinalVal).linhas[0] : "faturamento mensal recorrente",
     meioMensalPub ? `no ${meioMensalPub}` : null,
   ].filter(Boolean).join(" · ");
-  const temResumoPagamento = !!(meioSetupPub || meioMensalPub || parcelasEntradaMatch || chosenTerm);
+  const temResumoPagamento = !!(meioSetupPub || meioMensalPub || chosenTerm);
 
   // Carência do 1º vencimento: informativo, não altera valores.
   const carenciaDias = Number(proposal.carencia_dias || 0);
@@ -664,29 +657,6 @@ export default function GeracaoDigitalPublicProposal() {
           )}
 
           {/* Condições negociadas na mesa */}
-          {descontosConcedidos.length > 0 && (
-            <div className="rounded-2xl bg-emerald-500/[0.07] border border-emerald-500/25 backdrop-blur-xl p-5 space-y-2.5">
-              <h3 className="font-black text-white text-base">Condições Negociadas</h3>
-              <div className="space-y-2">
-                {descontosConcedidos.map((d, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-4 text-xs">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                      <span className="text-slate-200 font-medium">
-                        {(d.motivo || DESCONTO_LABELS[d.tipo] || d.tipo).replace(/Entrada/g, "Setup").replace(/entrada/g, "setup")}
-                      </span>
-                    </div>
-                    {d.tipo !== "parcelamento" && Number(d.valor_original) !== Number(d.valor_final) && (
-                      <span className="font-mono shrink-0">
-                        <span className="text-slate-500 line-through mr-2 dark:text-slate-400">R$ {Number(d.valor_original || 0).toLocaleString("pt-BR")}</span>
-                        <span className="text-emerald-400 font-bold">R$ {Number(d.valor_final || 0).toLocaleString("pt-BR")}</span>
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Detalhes longos em Acordeão — economiza scroll */}
           <div className="space-y-3">

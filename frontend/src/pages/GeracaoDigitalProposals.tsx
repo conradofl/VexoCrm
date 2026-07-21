@@ -40,7 +40,6 @@ import {
   type PaymentTermTipo,
   type PaymentTermConfig,
   type ProposalPaymentTerms,
-  type DescontoConcedido,
   PAYMENT_TERM_TIPOS,
   CARTAO_RECORRENTE_PLANOS,
   computePaymentBreakdown,
@@ -92,7 +91,6 @@ interface Proposal {
   validade_ate?: string | null;
   valor_apos_validade?: number | null;
   observacao_validade?: string | null;
-  descontos_concedidos?: DescontoConcedido[] | null;
   arquivada?: boolean;
   carencia_dias?: number | null;
   package_id?: string | null;
@@ -1602,7 +1600,6 @@ export default function GeracaoDigitalProposals() {
                         package_id: editPackageId || null,
                         package_vexo_id: editPackageVexoId || null,
                         periodo_plano: periodoPlano || "mensal",
-                        descontos_concedidos: selectedProposal?.descontos_concedidos || [],
                         itens: items
                       };
                       const calc = calculateProposalValues(tempProposal, availablePackages);

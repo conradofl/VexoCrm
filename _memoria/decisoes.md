@@ -26,6 +26,16 @@ Confirmado: `psql`/`pg_dump` 18.4 disponíveis e `DATABASE_URL` presente no `bac
 - **Mantida de propósito** a leitura de `descontos_concedidos` (calculator + bloco "Condições Negociadas" + texto do parcelamento na pública), para não alterar nada visual nas 2 propostas já enviadas antes da conversão. Isso sai na 5c-2.
 - Snapshot das 2 propostas salvo em `backups/` (fora do git) antes de qualquer write.
 
+### Fase 5c-2 concluída (conversão dos dados + camada de concessão desligada)
+- **Write autorizado e executado** (2 linhas, transação única, snapshot antes em `backups/`): o `parcelamento` das 2 propostas virou **Condição de Pagamento real** embutida em `condicoes_pagamento` (`ofertadas` + `escolhida`), tipo `parcelado_cartao`, `aplica_a: setup`, `meio: cartao`. Nº de parcelas derivado do próprio `motivo` por regex — sem hardcode.
+  - Mestre dos Jogos: 10x · setup 1500 → **R$ 150,00**/parcela (idêntico ao texto antigo)
+  - Ótica R Deluxe: 4x · setup 2000 → **R$ 500,00**/parcela
+  - `descontos_concedidos` **preservado** (histórico intacto, 1 registro em cada).
+  - UPDATE foi idempotente por guarda (`só se ofertadas = 0`).
+- **Camada de concessão removida do código:** o calculator não lê mais `descontos_concedidos` (`setupFinal = setupOriginal`, `mensalidadeFinal = mensalidadeOriginal` + override da 5a). A proposta pública perdeu o bloco "Condições Negociadas" e o fallback de texto do parcelamento — a informação agora vem da condição de pagamento.
+- `DescontoConcedido`/`DESCONTO_LABELS` ficam em `paymentTerms.ts` só como documentação do formato histórico.
+- Coluna `descontos_concedidos` e tabela `gd_negotiation_scenarios` **permanecem no banco**. Nenhum DROP.
+
 ### Fase 5a concluída (alavancas da Mesa viram campos da proposta)
 - **Preço negociado por proposta sem coluna nova:** o override vive no próprio item do pacote dentro do JSONB `itens` (`valor_override: true`). Precedência no calculator: **negociado > pacote vivo do catálogo > valor congelado**. Isso concilia as duas regras: editar o pacote continua propagando para propostas sem override, e proposta negociada mantém o preço combinado.
 - Painel de configuração ganhou **"Mensalidade negociada (R$)"** (vazio = usa o pacote) e **"Carência do 1º vencimento"** (o estado `editCarencia` já existia sem UI).

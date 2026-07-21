@@ -71,7 +71,6 @@ export interface ProposalLike {
   package_id?: string | null;
   package_vexo_id?: string | null;
   periodo_plano?: string | null;
-  descontos_concedidos?: any[] | null;
   itens?: any[] | null;
 }
 
@@ -113,15 +112,10 @@ export function calculateProposalValues(
     }
   }
 
-  // Setup final after discounts/concessions
-  let setupFinal = setupOriginal;
-  const descontosConcedidos = Array.isArray(proposal.descontos_concedidos) ? proposal.descontos_concedidos : [];
-
-  // Find setup trilha concessions (excluding parcelamento)
-  const setupTrilhaConcessions = descontosConcedidos.filter(d => d.trilha === "setup" && d.tipo !== "parcelamento");
-  if (setupTrilhaConcessions.length > 0) {
-    setupFinal = Number(setupTrilhaConcessions[setupTrilhaConcessions.length - 1].valor_final || 0);
-  }
+  // Setup final. A camada de concessões (descontos_concedidos, da antiga Mesa de
+  // Negociação) foi removida na fase 5c: o preço negociado agora é editado
+  // direto na proposta. A coluna segue no banco apenas como histórico.
+  const setupFinal = setupOriginal;
 
   // Monthly Original
   //
@@ -180,13 +174,8 @@ export function calculateProposalValues(
   const faturamentoMensalExtra = faturamentoMensalItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
   const mensalidadeOriginal = gdMonthly + vexoMonthly + avulsosMonthly + legacyMonthly + faturamentoMensalExtra;
-  let mensalidadeFinal = mensalidadeOriginal;
+  const mensalidadeFinal = mensalidadeOriginal;
 
-  // Apply monthly discount layers
-  const mensalidadeTrilhaConcessions = descontosConcedidos.filter(d => d.trilha === "mensalidade");
-  if (mensalidadeTrilhaConcessions.length > 0) {
-    mensalidadeFinal = Number(mensalidadeTrilhaConcessions[mensalidadeTrilhaConcessions.length - 1].valor_final || 0);
-  }
 
   // Meses do contrato (Compromisso do Período): robusto mesmo sem availablePackages.
   // Ordem: periodo_plano da proposta → período do pacote (catálogo) →
