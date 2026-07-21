@@ -10,7 +10,12 @@ export function GeracaoDigitalTabs() {
   const { canAccessInternalPage, isInternalUser } = useAuth();
 
   const hasDashboard = isInternalUser;
-  const hasApresentacao = canAccessInternalPage("apresentacao-gd");
+  // Fase 3: apresentação e proposta viraram a MESMA coisa. A aba "Apresentação"
+  // (tela de setup separada) sai da navegação — a apresentação nasce junto da
+  // proposta (segmento + logo no passo 1) e abre direto por
+  // /crm/propostas-gd/:id/apresentacao. A rota antiga continua existindo para
+  // não quebrar links salvos, só não aparece mais no menu.
+  const hasApresentacao = false;
   const hasBriefings = canAccessInternalPage("briefings-gd");
   // Abas operacionais do fluxo comercial: liberadas para toda a equipe interna
   // (vendedores), não só admins. As rotas já permitem allowedRoles=["internal"];

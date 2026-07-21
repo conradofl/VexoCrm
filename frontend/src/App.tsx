@@ -44,6 +44,7 @@ import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
 import GeracaoDigitalPaymentTerms from "./pages/GeracaoDigitalPaymentTerms";
 import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
 import GeracaoDigitalNegotiationPage from "./pages/GeracaoDigitalNegotiationPage";
+import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPresentation";
 
 const queryClient = new QueryClient();
 
@@ -397,6 +398,15 @@ const App = () => (
                element={
                  <ProtectedRoute allowedRoles={["internal"]}>
                    <GeracaoDigitalNegotiationPage />
+                 </ProtectedRoute>
+               }
+             />
+             {/* Apresentação da proposta — abre direto, sem passar pelo setup. */}
+             <Route
+               path="/crm/propostas-gd/:id/apresentacao"
+               element={
+                 <ProtectedRoute allowedRoles={["internal"]}>
+                   <GeracaoDigitalProposalPresentation />
                  </ProtectedRoute>
                }
              />

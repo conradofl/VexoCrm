@@ -1446,7 +1446,7 @@ export default function GeracaoDigitalProposals() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => navigate(`/crm/apresentacao-gd?proposalId=${selectedProposal.id}`)}
+                        onClick={() => navigate(`/crm/propostas-gd/${selectedProposal.id}/apresentacao`)}
                         className="border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
                       >
                         <Play className="h-4 w-4 mr-1.5 text-purple-650" />

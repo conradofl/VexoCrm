@@ -12,6 +12,12 @@
 - **`valor_total` é DERIVADO, nunca lido do banco.** O backend recomputa sem dedupe e infla (visto ao vivo: R$ 5.400 → R$ 10.900). A UI deriva via `calculateProposalValues(...).totalGeral`.
 - **Consequência:** como tudo deriva, "recalcular propostas antigas" deixa de exigir migração destrutiva — o `valor_total` armazenado não é mais exibido. Backfill fica opcional/cosmético.
 
+### Fase 3 concluída (apresentação = proposta)
+- A apresentação deixou de ser entidade/tela separada: virou **view derivada da proposta**. `gd_proposals` já carrega `segment_id` + `prospect_logo` + `prospect_name`, e o vínculo com a empresa vem do `client_id` — não é mais preciso gerar `gd_presentations` para gravar/vincular a proposta.
+- Nova rota **`/crm/propostas-gd/:id/apresentacao`** (`GeracaoDigitalProposalPresentation.tsx`): carrega a proposta e **abre o viewer direto**, sem passar pelo setup nem pelo clique extra "Iniciar Apresentação (Tela Cheia)". Traduz `segment_id` (UUID) → nome do segmento, porque `resolveSegmentGroup` casa por palavra-chave no nome.
+- Botão "Iniciar Apresentação" da proposta agora aponta pra essa rota (antes ia pra `/crm/apresentacao-gd?proposalId=`).
+- Aba **"Apresentação"** removida da navegação GD (`hasApresentacao = false`). A rota antiga continua existindo para não quebrar links salvos — só sumiu do menu. Remoção do arquivo fica pra fase 4/5, depois de confirmar que nada depende dele.
+
 ### Fase 2 concluída (fonte única de cálculo + testes)
 - `lib/geracaoDigital/proposalCalculator.ts` virou a FONTE ÚNICA: exporta `buildIncludedProductIds`, `isNaoInclusoNoPacote`, `isOrfaoLegado`, `computeVpFromItems`, e devolve `vpTotal` + `totalGeral`.
 - **Bug do VP corrigido:** `useProposalWizard` fazia `totalVp += vp` em 4 laços SEM dedupe — produto no pacote que também aparecia como avulso contava 2x; ao editar (que pré-marca todo o conteúdo do pacote como avulso) o VP multiplicava. Agora sai de `computeVpFromItems()`, mesma regra anti-bitributação dos valores.
