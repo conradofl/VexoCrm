@@ -10,6 +10,59 @@ export interface ProposalCalculatedValues {
   mesesPeriodo: number;
   compromissoOriginal: number;
   compromissoFinal: number;
+
+  /** VP/permuta total, com a MESMA regra anti-bitributação dos valores. */
+  vpTotal: number;
+  /** Total geral derivado (setup + compromisso do período). Nunca ler valor_total do banco. */
+  totalGeral: number;
+}
+
+// ---------------------------------------------------------------------------
+// Regra anti-bitributação — FONTE ÚNICA.
+// Um product_id que já compõe o pacote selecionado (linha de valor 0, sem
+// prefixo de avulso/pacote) não pode somar de novo como avulso — nem em valor,
+// nem em VP. Exportado para que o wizard use a mesma regra ao montar os itens.
+// ---------------------------------------------------------------------------
+
+// Módulo Vexo fantasma legado ("Inteligência de Atendimento", R$ 980, sem
+// product_id): não pertence a nenhum pacote e foi injetado por fallback antigo.
+export function isOrfaoLegado(item: any): boolean {
+  return !item?.product_id && String(item?.descricao || "").includes("Inteligência de Atendimento");
+}
+
+export function buildIncludedProductIds(items: any[]): Set<string> {
+  return new Set(
+    (items || [])
+      .filter((item) =>
+        item?.product_id &&
+        Number(item.valor || 0) === 0 &&
+        !item.descricao?.startsWith("GD:") &&
+        !item.descricao?.startsWith("Vexo OS:") &&
+        !item.descricao?.startsWith("Pacote:") &&
+        !item.descricao?.startsWith("Pacote Vexo:")
+      )
+      .map((item) => item.product_id)
+  );
+}
+
+/** true quando o item NÃO é uma repetição de algo que já vem no pacote. */
+export function isNaoInclusoNoPacote(item: any, includedProductIds: Set<string>): boolean {
+  return !(item?.product_id && includedProductIds.has(item.product_id));
+}
+
+/**
+ * VP total dos itens, deduplicado. Antes o wizard fazia `totalVp += vp` por
+ * pacote + cada avulso marcado, sem dedupe: um produto que está no pacote E
+ * aparece como avulso contava duas vezes (e ao editar, TODO o conteúdo do
+ * pacote vira avulso, multiplicando o VP).
+ */
+export function computeVpFromItems(items: any[]): number {
+  const clean = (items || []).filter((i) => !isOrfaoLegado(i));
+  const included = buildIncludedProductIds(clean);
+  const total = clean
+    .filter((item) => isNaoInclusoNoPacote(item, included))
+    .reduce((sum, item) => sum + Number(item?.valor_vp || 0), 0);
+  return Math.round(total * 100) / 100;
 }
 
 export interface ProposalLike {
@@ -38,31 +91,11 @@ export function calculateProposalValues(
 
   const itemsRaw = Array.isArray(proposal.itens) ? proposal.itens : [];
 
-  // Módulo Vexo fantasma legado ("Inteligência de Atendimento", R$ 980, sem
-  // product_id): não pertence a nenhum pacote e foi injetado por fallback antigo.
-  // Removido da soma e da exibição.
-  const isOrfaoLegado = (item: any) =>
-    !item.product_id && String(item.descricao || "").includes("Inteligência de Atendimento");
+  // Remove o módulo fantasma legado e aplica a regra anti-bitributação
+  // (helpers exportados acima = fonte única, usada também pelo wizard).
   const items = itemsRaw.filter(item => !isOrfaoLegado(item));
-
-  // Anti-bitributação: product_ids que JÁ compõem o pacote selecionado.
-  // Itens do pacote entram com valor 0 e sem prefixo de avulso ("GD:"/"Vexo OS:")
-  // nem de pacote ("Pacote:"/"Pacote Vexo:"). Qualquer avulso que repita um
-  // desses product_ids é redundante e NÃO deve somar de novo.
-  const includedProductIds = new Set(
-    items
-      .filter(item =>
-        item.product_id &&
-        Number(item.valor || 0) === 0 &&
-        !item.descricao?.startsWith("GD:") &&
-        !item.descricao?.startsWith("Vexo OS:") &&
-        !item.descricao?.startsWith("Pacote:") &&
-        !item.descricao?.startsWith("Pacote Vexo:")
-      )
-      .map(item => item.product_id)
-  );
-  const naoInclusoNoPacote = (item: any) =>
-    !(item.product_id && includedProductIds.has(item.product_id));
+  const includedProductIds = buildIncludedProductIds(items);
+  const naoInclusoNoPacote = (item: any) => isNaoInclusoNoPacote(item, includedProductIds);
 
   // Setup: itens únicos avulsos, excluindo os que já compõem o pacote.
   const itemsSetup = items
@@ -156,6 +189,12 @@ export function calculateProposalValues(
   const compromissoOriginal = mensalidadeOriginal * mesesPeriodo;
   const compromissoFinal = mensalidadeFinal * mesesPeriodo;
 
+  // VP pela MESMA regra de dedupe (antes era somado solto no wizard).
+  const vpTotal = computeVpFromItems(items);
+  // Total geral SEMPRE derivado: setup final + compromisso do período.
+  // Nunca usar gd_proposals.valor_total (o backend recomputa sem dedupe e infla).
+  const totalGeral = Math.round((setupFinal + compromissoFinal) * 100) / 100;
+
   return {
     setupOriginal: Math.round(setupOriginal * 100) / 100,
     setupFinal: Math.round(setupFinal * 100) / 100,
@@ -163,6 +202,8 @@ export function calculateProposalValues(
     mensalidadeFinal: Math.round(mensalidadeFinal * 100) / 100,
     mesesPeriodo,
     compromissoOriginal: Math.round(compromissoOriginal * 100) / 100,
-    compromissoFinal: Math.round(compromissoFinal * 100) / 100
+    compromissoFinal: Math.round(compromissoFinal * 100) / 100,
+    vpTotal,
+    totalGeral
   };
 }

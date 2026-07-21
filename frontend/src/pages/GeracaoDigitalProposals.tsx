@@ -1289,7 +1289,7 @@ export default function GeracaoDigitalProposals() {
                   <div className="min-w-0">
                     <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate block">{prop.prospect_name}</span>
                     <span className="text-[9px] text-slate-500 font-mono dark:text-slate-400">
-                      R$ {prop.valor_total.toLocaleString("pt-BR")}
+                      R$ {calculateProposalValues(prop, availablePackages).totalGeral.toLocaleString("pt-BR")}
                     </span>
                   </div>
                   <span
@@ -1333,7 +1333,7 @@ export default function GeracaoDigitalProposals() {
                     </div>
                     <div className="flex justify-between items-center text-[10px] text-slate-550 dark:text-slate-400 font-mono mt-1">
                       <span>Total Geral</span>
-                      <span className="text-slate-850 dark:text-slate-100 font-bold">R$ {prop.valor_total.toLocaleString("pt-BR")}</span>
+                      <span className="text-slate-850 dark:text-slate-100 font-bold">R$ {calculateProposalValues(prop, availablePackages).totalGeral.toLocaleString("pt-BR")}</span>
                     </div>
                   </div>
 
