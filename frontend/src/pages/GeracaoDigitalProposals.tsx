@@ -875,7 +875,11 @@ export default function GeracaoDigitalProposals() {
         client_id: clientId,
         prospect_name: prospectName,
         package_id: editPackageId || null,
-        pacotes_ofertados: editPacotesOfertados,
+        // NÃO reenviar pacotes_ofertados aqui. Este painel edita configuração
+        // (setup, condições, validade) — quem define o menu de pacotes é o
+        // wizard. Reenviar a lista daqui derrubava os pacotes ofertados de 3
+        // para 1 (reproduzido no Dr. Diogo). O PUT preserva o valor atual
+        // quando o campo vem `undefined`.
         package_vexo_id: editPackageVexoId || null,
         itens: finalItems,
         condicoes,

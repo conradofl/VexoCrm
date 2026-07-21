@@ -536,6 +536,38 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
         {/* STEP 4: CONDIÇÕES COMERCIAIS */}
         {wizardStep === 4 && (
           <div className="space-y-5 animate-fade-in">
+            {/* Fase 4: taxa de Setup passa a viver AQUI, no mesmo formulário de
+                criação. Antes só existia no painel de configuração pós-criação,
+                o que obrigava um segundo salvamento (e era esse save que
+                derrubava os pacotes ofertados). */}
+            <div className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/10 p-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={newCobrarSetup}
+                    onChange={(e) => setNewCobrarSetup(e.target.checked)}
+                    className="accent-purple-600"
+                  />
+                  Cobrar setup de implantação?
+                </label>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Valor do Setup (R$)</Label>
+                  <Input
+                    type="number"
+                    value={newValorSetup || ""}
+                    onChange={(e) => setNewValorSetup(Number(e.target.value))}
+                    disabled={!newCobrarSetup}
+                    placeholder="0"
+                    className="h-9 w-40 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 disabled:opacity-50"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
+                Investimento único de entrada. Aparece como "Setup / Implantação Vexo OS" na proposta.
+              </p>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Validade da Proposta</Label>

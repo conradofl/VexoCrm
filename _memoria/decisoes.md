@@ -12,6 +12,13 @@
 - **`valor_total` é DERIVADO, nunca lido do banco.** O backend recomputa sem dedupe e infla (visto ao vivo: R$ 5.400 → R$ 10.900). A UI deriva via `calculateProposalValues(...).totalGeral`.
 - **Consequência:** como tudo deriva, "recalcular propostas antigas" deixa de exigir migração destrutiva — o `valor_total` armazenado não é mais exibido. Backfill fica opcional/cosmético.
 
+### Fase 4 concluída (Setup no formulário + fim do clobber de pacotes)
+- **Taxa de Setup entrou no wizard** (passo 4 – Condições). O estado `newCobrarSetup`/`newValorSetup` e o envio no body já existiam no `useProposalWizard` (linhas 203-204) — faltava só a UI, por isso toda proposta criada pelo wizard nascia com `cobrar_setup = false` e exigia um segundo salvamento no painel de configuração.
+- **Bug do "Salvar Configuração" corrigido na raiz:** `handleSaveProposal` reenviava `pacotes_ofertados: editPacotesOfertados`, sobrescrevendo o menu de pacotes da proposta (derrubou de 3 → 1 no Dr. Diogo, reproduzido ao vivo). O campo saiu do payload; o PUT do backend preserva o valor atual quando ele vem `undefined` (`finalPacotesOfertados = pacotes_ofertados !== undefined ? ... : current.pacotes_ofertados`).
+- **Divisão de responsabilidade agora explícita:** o *wizard* define o menu de pacotes/módulos; o *painel de configuração* edita só configuração (setup, condições, validade, link) — sem tocar na lista de pacotes.
+- Setup segue editável também no painel (decisão 1: tudo flexível), mas agora já nasce certo na criação.
+- A duplicação de seleção de pacotes/módulos da tela de setup saiu do fluxo na fase 3 (aba removida do menu); o arquivo `GeracaoDigitalCommercialSetup.tsx` continua no repo, sem entrada no menu.
+
 ### Fase 3 concluída (apresentação = proposta)
 - A apresentação deixou de ser entidade/tela separada: virou **view derivada da proposta**. `gd_proposals` já carrega `segment_id` + `prospect_logo` + `prospect_name`, e o vínculo com a empresa vem do `client_id` — não é mais preciso gerar `gd_presentations` para gravar/vincular a proposta.
 - Nova rota **`/crm/propostas-gd/:id/apresentacao`** (`GeracaoDigitalProposalPresentation.tsx`): carrega a proposta e **abre o viewer direto**, sem passar pelo setup nem pelo clique extra "Iniciar Apresentação (Tela Cheia)". Traduz `segment_id` (UUID) → nome do segmento, porque `resolveSegmentGroup` casa por palavra-chave no nome.
