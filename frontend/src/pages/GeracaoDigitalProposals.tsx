@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { toast } from "@/components/ui/use-toast";
@@ -9,7 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
-import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
+import { calculateProposalValues, isCobrancaUnica, isCobrancaMensal, temPacote, isLinhaDePacote } from "@/lib/geracaoDigital/proposalCalculator";
+import PlanoEditor from "@/components/geracaoDigital/PlanoEditor";
+import { type Plano, planoVazio, planoValido, planoDeProposta } from "@/lib/geracaoDigital/plano";
+import FormasPagamentoEditor from "@/components/geracaoDigital/FormasPagamentoEditor";
+import { type FormasSelecionadas, formasVazias, formasParaTerms, termsParaFormas, termsLegados } from "@/lib/geracaoDigital/formasPagamento";
+import { syncPlanoPackages } from "@/lib/geracaoDigital/planoSync";
 import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
 import { API_BASE_URL, fetchApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -60,7 +65,8 @@ interface ProposalItem {
   categoria: "gd" | "vexo";
   valor: number;
   valor_vp?: number | null;
-  recorrencia: "mensal" | "unico";
+  /** "mensal" | "unico" | "pontual" — usar isCobrancaUnica, nunca comparar string. */
+  recorrencia: string;
   periodo?: string | null;
   meses?: number | null;
   total_periodo?: number | null;
@@ -113,6 +119,14 @@ export default function GeracaoDigitalProposals() {
   // Proposals State
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
+  // Espelho em ref: loadProposals() é chamado de handlers com closure antiga,
+  // então ler selectedProposal direto lá devolveria valor defasado.
+  const selectedProposalRef = useRef<Proposal | null>(null);
+  useEffect(() => {
+    selectedProposalRef.current = selectedProposal;
+  }, [selectedProposal]);
+  // ?proposta=<id> — quem volta da proposta pública reabre a mesma proposta.
+  const propostaIdUrl = new URLSearchParams(useLocation().search).get("proposta");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,10 +138,49 @@ export default function GeracaoDigitalProposals() {
   const [editPackageId, setEditPackageId] = useState<string>("");
   const [editPackageVexoId, setEditPackageVexoId] = useState<string>("");
   const [editPacotesOfertados, setEditPacotesOfertados] = useState<string[]>([]);
+  // Plano da proposta em edição (escopo × prazos) — mesmo editor do wizard.
+  const [editPlano, setEditPlano] = useState<Plano>(planoVazio);
+  const [planoSaving, setPlanoSaving] = useState<boolean>(false);
+
+  // Regrava as linhas de preço desta proposta a partir do plano editado.
+  const handleSalvarPlano = async () => {
+    if (!planoValido(editPlano)) {
+      toast({
+        title: "Plano incompleto",
+        description: "Escolha ao menos 1 item no escopo e preencha o preço de ao menos 1 prazo.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPlanoSaving(true);
+    try {
+      const r = await syncPlanoPackages({
+        plano: editPlano,
+        nomeBase: selectedProposal?.prospect_name || "Plano",
+        clientId,
+        gdProducts,
+        vexoProducts,
+        existentes: availablePackages.filter(
+          (p: any) => p?.ad_hoc && editPacotesOfertados.includes(p.id)
+        ),
+        getIdToken,
+      });
+      setAvailablePackages((prev) => {
+        const semAntigos = prev.filter((p: any) => !r.pacotes.some((n: any) => n.id === p.id));
+        return [...semAntigos, ...r.pacotes];
+      });
+      setEditPacotesOfertados(r.pacotesOfertados);
+      setEditPackageId(r.packageId);
+      setEditPackageVexoId("");
+      toast({ title: "Plano aplicado", description: "Salve a configuração para gravar na proposta." });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message || "Falha ao gravar o plano.", variant: "destructive" });
+    } finally {
+      setPlanoSaving(false);
+    }
+  };
   const [editValorVp, setEditValorVp] = useState<number>(0);
   const [vpActive, setVpActive] = useState<boolean>(false);
-  const [editVexoAvulsoIds, setEditVexoAvulsoIds] = useState<Record<string, boolean>>({});
-  const [editGdAvulsoIds, setEditGdAvulsoIds] = useState<Record<string, boolean>>({});
   const [editCarencia, setEditCarencia] = useState<string>("");
 
   // Setup Vexo opcional
@@ -140,6 +193,14 @@ export default function GeracaoDigitalProposals() {
   // Condições de pagamento
   const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
   const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
+  // Formas fixas de pagamento (Pix/cartão) marcadas nesta proposta.
+  const [formasPgto, setFormasPgto] = useState<FormasSelecionadas>(formasVazias);
+  // Corpo do card: preview por padrão, formulário só quando pedido.
+  const [showConfig, setShowConfig] = useState<boolean>(false);
+  const [editSegmentId, setEditSegmentId] = useState<string>("");
+  const [editProspectLogo, setEditProspectLogo] = useState<string | null>(null);
+  // Muda para forçar o iframe do preview a recarregar depois de salvar.
+  const [previewNonce, setPreviewNonce] = useState<number>(0);
 
   // Mesa de negociação
 
@@ -174,6 +235,8 @@ export default function GeracaoDigitalProposals() {
     setShowNewForm,
     resetWizard,
     setNewProspect,
+    setNewSegmentId,
+    setNewProspectLogo,
     setNewPackageId,
     setNewPackageVexoId,
     setNewPacotesOfertados,
@@ -190,48 +253,6 @@ export default function GeracaoDigitalProposals() {
     setEditingProposalId
   } = wizardState;
 
-  const openWizardForEdit = (prop: any) => {
-    resetWizard();
-    setEditingProposalId(prop.id);
-    setNewProspect(prop.prospect_name || "");
-    setNewPackageId(prop.package_id || "");
-    setNewPackageVexoId(prop.package_vexo_id || "");
-    setNewPacotesOfertados(
-      Array.isArray(prop.pacotes_ofertados)
-        ? prop.pacotes_ofertados
-        : [prop.package_id, prop.package_vexo_id].filter(Boolean)
-    );
-    setNewCarencia(prop.carencia_dias !== null && prop.carencia_dias !== undefined ? String(prop.carencia_dias) : "");
-    setNewCobrarSetup(prop.cobrar_setup === true);
-    setNewValorSetup(Number(prop.valor_setup_vexo || 0));
-    setNewPeriodo(prop.periodo_plano || "mensal");
-    setNewValidade(prop.validade_ate ? prop.validade_ate.split("T")[0] : "");
-    setNewCondicoes(prop.condicoes || "");
-    setNewPaymentLink(prop.payment_link || "");
-    setNewOfferedTermIds(
-      Array.isArray(prop.condicoes_pagamento?.ofertadas)
-        ? prop.condicoes_pagamento.ofertadas.map((t: any) => t.id)
-        : []
-    );
-
-    const vexoIds: Record<string, boolean> = {};
-    const gdIds: Record<string, boolean> = {};
-
-    if (Array.isArray(prop.itens)) {
-      prop.itens.forEach((item: any) => {
-        if (item.product_id) {
-          if (item.categoria === "vexo") {
-            vexoIds[item.product_id] = true;
-          } else {
-            gdIds[item.product_id] = true;
-          }
-        }
-      });
-    }
-    setNewVexoAvulsoIds(vexoIds);
-    setNewGdAvulsoIds(gdIds);
-    setShowNewForm(true);
-  };
 
   // Modal de compartilhamento da proposta
   const [showSendModal, setShowSendModal] = useState<boolean>(false);
@@ -248,6 +269,10 @@ export default function GeracaoDigitalProposals() {
     nome: "", tipo: "avista_desconto", config: {}, salvarTemplate: false
   });
   const [adhocTerms, setAdhocTerms] = useState<PaymentTerm[]>([]);
+  // Condições criadas antes das formas fixas. Vivem no jsonb da própria
+  // proposta, não na biblioteca (que sempre esteve vazia) — por isso são
+  // guardadas daqui, senão salvar a proposta as apagaria.
+  const [legadosPgto, setLegadosPgto] = useState<any[]>([]);
 
   // Período do plano e validade da proposta
   const [periodoPlano, setPeriodoPlano] = useState<string>("");
@@ -428,50 +453,18 @@ export default function GeracaoDigitalProposals() {
       }
     }
 
-    // 3. Add Vexo avulso modules
-    Object.entries(editVexoAvulsoIds).forEach(([id, checked]) => {
-      if (checked) {
-        const prod = vexoProducts.find(p => p.id === id);
-        if (prod) {
-          finalItems.push({
-            product_id: prod.id,
-            descricao: `Vexo OS: ${prod.nome}`,
-            categoria: "vexo",
-            valor: Number(prod.valor || 0),
-            recorrencia: prod.recorrencia || "mensal"
-          });
-        }
-      }
-    });
-
-
-    // 3b. Add GD avulso modules
-    Object.entries(editGdAvulsoIds).forEach(([id, checked]) => {
-      if (checked) {
-        const prod = gdProducts.find(p => p.id === id);
-        if (prod) {
-          finalItems.push({
-            product_id: prod.id,
-            descricao: `GD: ${prod.nome}`,
-            categoria: "gd",
-            valor: Number(prod.valor_padrao || 0),
-            recorrencia: prod.recorrencia || "mensal"
-          });
-        }
-      }
-    });
-    // 4. Keep legacy items (manually edited items with valor > 0 that are not packages)
-    const legacyItems = items.filter(item => {
-      return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("GD:")) ||
-             (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao?.startsWith("Pacote Vexo:"));
-    });
-    finalItems.push(...legacyItems);
+    // Não existe mais "avulso com valor". Um serviço está no plano (linha de
+    // valor 0 vinda de produtos_incluidos, gerada acima) ou não está na
+    // proposta. Antes este efeito regravava `GD: <nome> R$ X` a cada edição:
+    // desde PACOTE FECHADO esse valor não somava em nada, mas continuava sendo
+    // impresso com preço na proposta do cliente. Os itens legados já gravados
+    // são absorvidos no escopo por planoDeProposta() ao abrir a proposta.
 
     const serialize = (arr: any[]) => JSON.stringify(arr.map(i => ({ d: i.descricao, v: i.valor })));
     if (serialize(finalItems) !== serialize(items)) {
       setItems(finalItems);
     }
-  }, [editPackageId, editPackageVexoId, editVexoAvulsoIds, editGdAvulsoIds, availablePackages, vexoProducts, gdProducts, selectedProposal]);
+  }, [editPackageId, editPackageVexoId, availablePackages, vexoProducts, gdProducts, selectedProposal]);
 
   async function loadPaymentTerms() {
     try {
@@ -510,7 +503,13 @@ export default function GeracaoDigitalProposals() {
         setProposals(data.data);
         loadReferencedPackages(data.data);
         if (data.data.length > 0) {
-          selectProposal(data.data[0]);
+          // Mantém aberta a proposta em que o vendedor estava. Antes caía
+          // sempre em data.data[0] — toda vez que loadProposals() rodava
+          // (salvar, arquivar, voltar da proposta pública) a seleção pulava
+          // para o primeiro cliente da lista.
+          const alvoId = selectedProposalRef.current?.id || propostaIdUrl;
+          const alvo = data.data.find((p: any) => p.id === alvoId) || data.data[0];
+          selectProposal(alvo);
         }
       }
     } catch (err: any) {
@@ -547,6 +546,10 @@ export default function GeracaoDigitalProposals() {
         ? prop.condicoes_pagamento!.ofertadas.map((t) => t.id)
         : []
     );
+    setFormasPgto(termsParaFormas(prop.condicoes_pagamento?.ofertadas || []));
+    setLegadosPgto(termsLegados(prop.condicoes_pagamento?.ofertadas || []));
+    setEditSegmentId((prop as any).segment_id || "");
+    setEditProspectLogo((prop as any).prospect_logo || null);
     setAdhocTerms(
       Array.isArray(prop.condicoes_pagamento?.ofertadas)
         ? prop.condicoes_pagamento!.ofertadas.filter((t) => String(t.id).startsWith("adhoc-"))
@@ -563,42 +566,40 @@ export default function GeracaoDigitalProposals() {
 
     setEditPackageId(prop.package_id || "");
     setEditPackageVexoId(prop.package_vexo_id || "");
-    setEditPacotesOfertados(
-      Array.isArray((prop as any).pacotes_ofertados)
-        ? (prop as any).pacotes_ofertados
-        : [prop.package_id, prop.package_vexo_id].filter(Boolean) as string[]
+    const ofertados: string[] = Array.isArray((prop as any).pacotes_ofertados)
+      ? (prop as any).pacotes_ofertados
+      : ([prop.package_id, prop.package_vexo_id].filter(Boolean) as string[]);
+    setEditPacotesOfertados(ofertados);
+    // Reconstrói o plano (escopo × prazos) a partir das linhas de preço já
+    // gravadas, para editar aqui com o mesmo editor do wizard.
+    setEditPlano(
+      planoDeProposta(
+        availablePackages.filter((p: any) => ofertados.includes(p.id)),
+        Array.isArray(prop.itens) ? prop.itens : []
+      )
     );
-    const avulsosMap: Record<string, boolean> = {};
-    if (Array.isArray(prop.itens)) {
-      prop.itens.forEach((item) => {
-        if (item.categoria === "vexo" && item.product_id && !item.descricao?.startsWith("Pacote Vexo")) {
-          avulsosMap[item.product_id] = true;
-        }
-      });
-    }
-    setEditVexoAvulsoIds(avulsosMap);
-    const gdAvulsosMap: Record<string, boolean> = {};
-    if (Array.isArray(prop.itens)) {
-      prop.itens.forEach((item) => {
-        if (item.categoria === "gd" && item.product_id && item.descricao?.startsWith("GD:")) {
-          gdAvulsosMap[item.product_id] = true;
-        }
-      });
-    }
-    setEditGdAvulsoIds(gdAvulsosMap);
+    // O escopo agora vive no plano (editPlano, acima). A hidratação antiga
+    // marcava como "avulso" QUALQUER item vexo com product_id que não fosse a
+    // linha do pacote — inclusive o conteúdo do próprio pacote, gravado a
+    // valor 0. Era daí que saía a lista "Módulos Avulsos Extras" repetindo
+    // CRM Vexo, Automação de WhatsApp, Chips, Follow-up... que já estavam
+    // dentro do combo logo acima.
     setEditCarencia(
       prop.carencia_dias !== null && prop.carencia_dias !== undefined ? String(prop.carencia_dias) : ""
     );
   };
 
   // Live total calculations
-  const setupTotal = items
-    .filter((i) => i.recorrencia === "unico")
-    .reduce((sum, i) => sum + Number(i.valor || 0), 0);
+  // Pacote fechado: o preço do pacote é o preço. Só o setup Vexo soma por fora.
+  const pacoteFechado = temPacote(items);
 
-  const recurringTotal = items
-    .filter((i) => i.recorrencia === "mensal")
-    .reduce((sum, i) => sum + Number(i.valor || 0), 0);
+  const setupTotal = pacoteFechado
+    ? 0
+    : items.filter(isCobrancaUnica).reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+  const recurringTotal = pacoteFechado
+    ? items.filter(isLinhaDePacote).reduce((sum, i) => sum + Number(i.valor || 0), 0)
+    : items.filter(isCobrancaMensal).reduce((sum, i) => sum + Number(i.valor || 0), 0);
 
   const setupVexoValue = cobrarSetup ? Number(valorSetupVexo || 0) : 0;
   const grandTotal = setupTotal + recurringTotal + setupVexoValue;
@@ -788,44 +789,8 @@ export default function GeracaoDigitalProposals() {
         }
       }
 
-      // 3. Add Vexo avulso modules
-      Object.entries(editVexoAvulsoIds).forEach(([id, checked]) => {
-        if (checked) {
-          const prod = vexoProducts.find(p => p.id === id);
-          if (prod) {
-            finalItems.push({
-              product_id: prod.id,
-              descricao: `Vexo OS: ${prod.nome}`,
-              categoria: "vexo",
-              valor: Number(prod.valor || 0),
-              recorrencia: prod.recorrencia || "mensal"
-            });
-          }
-        }
-      });
-
-
-      // 3b. Add GD avulso modules
-      Object.entries(editGdAvulsoIds).forEach(([id, checked]) => {
-        if (checked) {
-          const prod = gdProducts.find(p => p.id === id);
-          if (prod) {
-            finalItems.push({
-              product_id: prod.id,
-              descricao: `GD: ${prod.nome}`,
-              categoria: "gd",
-              valor: Number(prod.valor_padrao || 0),
-              recorrencia: prod.recorrencia || "mensal"
-            });
-          }
-        }
-      });
-      // 4. Keep legacy items (manually edited items with valor > 0 that are not packages)
-      const legacyItems = items.filter(item => {
-        return (item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("GD:")) ||
-               (item.categoria === "vexo" && Number(item.valor || 0) > 0 && item.product_id === null && !item.descricao?.startsWith("Pacote Vexo:"));
-      });
-      finalItems.push(...legacyItems);
+      // Nada de avulso com valor: um serviço está no plano ou não está na
+      // proposta. Ver o efeito de montagem de itens acima.
 
       const body = {
         client_id: clientId,
@@ -841,9 +806,14 @@ export default function GeracaoDigitalProposals() {
         condicoes,
         payment_link: paymentLink,
         cobrar_setup: cobrarSetup,
-        valor_setup_vexo: cobrarSetup ? Number(valorSetupVexo || 0) : selectedProposal.valor_setup_vexo ?? null,
+        // Mantém o valor gravado mesmo isentando, para exibir o riscado.
+        valor_setup_vexo: Number(valorSetupVexo || 0) || null,
+        segment_id: editSegmentId || null,
+        prospect_logo: editProspectLogo || null,
         condicoes_pagamento: {
-          ofertadas: offeredTerms,
+          // Formas fixas primeiro; condições legadas da biblioteca seguem
+          // sendo gravadas enquanto estiverem marcadas.
+          ofertadas: [...formasParaTerms(formasPgto), ...legadosPgto],
           escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
         },
         periodo_plano: (() => {
@@ -876,6 +846,9 @@ export default function GeracaoDigitalProposals() {
           description: "Os itens e condições foram atualizados e o faturamento recalculado."
         });
         loadProposals();
+        // Recarrega o preview e volta para ele: salvar é o fim da edição.
+        setPreviewNonce((n) => n + 1);
+        setShowConfig(false);
       }
     } catch (err: any) {
       console.error(err);
@@ -1305,7 +1278,7 @@ export default function GeracaoDigitalProposals() {
                         className="w-full text-[10px] border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(`/proposta/${prop.id}`, "_blank");
+                          navigate(`/proposta/${prop.id}`);
                         }}
                       >
                         <ExternalLink className="h-3 w-3 mr-1.5" />
@@ -1347,14 +1320,18 @@ export default function GeracaoDigitalProposals() {
                         Gerar Contrato Jurídico
                       </Button>
                     )}
+                    {/* Um único editor. O antigo "Gerar/Editar Proposta" abria o
+                        wizard — que, desde que o painel de configuração ganhou o
+                        PlanoEditor, fazia exatamente a mesma coisa em 4 passos.
+                        O wizard ficou só para CRIAR. */}
                     {selectedProposal.status !== "aceita" && (
                       <Button
                         size="sm"
-                        onClick={() => openWizardForEdit(selectedProposal)}
+                        onClick={() => setShowConfig((v) => !v)}
                         className="bg-purple-600 hover:bg-purple-500 text-white font-bold shrink-0"
                       >
                         <Edit className="h-4 w-4 mr-1.5" />
-                        Gerar/Editar Proposta
+                        {showConfig ? "Fechar edição" : "Editar Proposta"}
                       </Button>
                     )}
                     <Button
@@ -1387,7 +1364,7 @@ export default function GeracaoDigitalProposals() {
                       Resumo da Proposta Comercial
                     </CardTitle>
                     <CardDescription className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Esta é uma visualização consolidada dos itens, valores e condições acordadas. Ajuste valores, condições e prazos na configuração abaixo e reenvie ao cliente.
+                      Exatamente o que o cliente vê. Use "Editar Proposta" para ajustar valores, escopo e condições.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-6">
@@ -1396,7 +1373,7 @@ export default function GeracaoDigitalProposals() {
                       {selectedProposal.status !== "aceita" && (
                         <Button
                           size="sm"
-                          onClick={() => window.open(`/proposta/${selectedProposal.id}`, "_blank")}
+                          onClick={() => navigate(`/proposta/${selectedProposal.id}`)}
                           className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold"
                         >
                           <ExternalLink className="h-4 w-4 mr-1.5" />
@@ -1423,30 +1400,97 @@ export default function GeracaoDigitalProposals() {
                       </Button>
                     </div>
 
+                    {/* Preview: a MESMA página que o cliente recebe, embutida.
+                        Evita um segundo render da proposta que divergiria com o
+                        tempo — o preview não pode virar outra fonte de verdade. */}
+                    {!showConfig && (
+                      <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-white/10 bg-slate-950">
+                        <iframe
+                          key={`${selectedProposal.id}-${previewNonce}`}
+                          src={`/proposta/${selectedProposal.id}?embed=1`}
+                          title="Pré-visualização da proposta"
+                          className="w-full h-[70vh] block"
+                        />
+                      </div>
+                    )}
+
                     {/* Configuração da Proposta — interativa, editável ao vivo com o cliente */}
-                    {selectedProposal.status !== "aceita" && (
+                    {showConfig && selectedProposal.status !== "aceita" && (
                       <div className="p-4 rounded-xl bg-white dark:bg-slate-800/40 border border-purple-200 dark:border-purple-900/30 space-y-4">
                         <div className="flex items-center justify-between">
                           <h4 className="text-xs font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider">Configuração da Proposta</h4>
                         </div>
 
+                        {/* Segmento e logo moraram só no wizard até agora. Com o
+                            wizard restrito a criar, precisam existir aqui — senão
+                            não haveria como trocar o roteiro da apresentação nem
+                            a marca do cliente depois que a proposta existe. */}
+                        <div className="flex flex-wrap items-end gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Segmento (roteiro da apresentação)</Label>
+                            <select
+                              value={editSegmentId}
+                              onChange={(e) => setEditSegmentId(e.target.value)}
+                              className="block bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-2 h-8 text-xs text-slate-800 dark:text-white focus:outline-none"
+                            >
+                              <option value="">Selecione o segmento…</option>
+                              {segmentsList.map((sg: any) => (
+                                <option key={sg.id} value={sg.id}>{sg.nome}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Logo do cliente</Label>
+                            <div className="flex items-center gap-2">
+                              {editProspectLogo && (
+                                <img src={editProspectLogo} alt="logo" className="h-8 w-8 rounded object-contain border border-slate-200 dark:border-slate-700 bg-white" />
+                              )}
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = () => setEditProspectLogo(reader.result as string);
+                                  reader.readAsDataURL(file);
+                                }}
+                                className="text-[10px] text-slate-500 dark:text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-indigo-50 file:px-2 file:py-0.5 file:text-indigo-600 file:text-[10px]"
+                              />
+                              {editProspectLogo && (
+                                <button type="button" onClick={() => setEditProspectLogo(null)} className="text-[10px] text-slate-500 hover:underline">Remover</button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
                         {/* 2/3. Venda Casada / Setup de implantação */}
                         <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100 dark:border-white/5">
+                          {/* "Isentar" em vez de "Cobrar": a ação que o vendedor
+                              precisa na mesa é conceder a cortesia, e o rótulo
+                              invertido escondia isso. Valor > 0 + isento é o que
+                              faz a proposta mostrar o riscado. */}
                           <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
-                            <Switch checked={cobrarSetup} onCheckedChange={setCobrarSetup} />
-                            Cobrar setup de implantação?
+                            <Switch checked={!cobrarSetup} onCheckedChange={(v) => setCobrarSetup(!v)} />
+                            Isentar setup
                           </label>
-                          {cobrarSetup && (
-                            <div className="space-y-1">
-                              <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Valor do Setup (R$)</Label>
-                              <Input
-                                type="number"
-                                placeholder="0"
-                                value={valorSetupVexo === 0 ? "" : valorSetupVexo}
-                                onChange={(e) => setValorSetupVexo(e.target.value === "" ? 0 : Number(e.target.value))}
-                                className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-xs h-8 w-40 font-mono"
-                              />
-                            </div>
+                          {/* O campo fica visível mesmo com a cobrança desligada:
+                              é assim que se isenta o setup mantendo o valor de
+                              tabela, que a proposta exibe riscado com "Isento". */}
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Valor do Setup (R$)</Label>
+                            <Input
+                              type="number"
+                              placeholder="0"
+                              value={valorSetupVexo === 0 ? "" : valorSetupVexo}
+                              onChange={(e) => setValorSetupVexo(e.target.value === "" ? 0 : Number(e.target.value))}
+                              className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-xs h-8 w-40 font-mono"
+                            />
+                          </div>
+                          {!cobrarSetup && Number(valorSetupVexo || 0) > 0 && (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 pb-1.5">
+                              Isento — o cliente vê R$ {Number(valorSetupVexo).toLocaleString("pt-BR")} riscado
+                            </span>
                           )}
                         </div>
 
@@ -1481,107 +1525,62 @@ export default function GeracaoDigitalProposals() {
                           </div>
                         </div>
 
-                        {/* 4. Condições de Pagamento (selecionar + criar na hora) */}
-                        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-white/5">
-                          <div className="flex items-center justify-between">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Condições de Pagamento a Ofertar</Label>
-                            <button
-                              type="button"
-                              onClick={() => setShowInlineTerm((v) => !v)}
-                              className="text-[10px] font-bold text-purple-650 dark:text-purple-300 hover:underline"
-                            >
-                              {showInlineTerm ? "Cancelar" : "+ Criar condição na hora"}
-                            </button>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {[...availableTerms, ...adhocTerms].map((term) => {
-                              const isOn = offeredTermIds.includes(term.id);
-                              return (
-                                <button
-                                  key={term.id}
-                                  type="button"
-                                  onClick={() => toggleOfferedTerm(term.id)}
-                                  className={cn(
-                                    "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all",
-                                    isOn
-                                      ? "bg-purple-600 text-white border-purple-500"
-                                      : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-purple-300"
-                                  )}
-                                >
-                                  {term.nome} · {APLICA_A_LABELS[termAplicaA(term)]}{isOn ? " ✓" : ""}
-                                </button>
-                              );
-                            })}
-                            {availableTerms.length === 0 && adhocTerms.length === 0 && (
-                              <span className="text-[10px] text-slate-400 italic">Nenhuma condição salva. Crie na hora ou na aba Condições.</span>
-                            )}
-                          </div>
+                        {/* Formas de pagamento fixas — o caminho principal.
+                            A biblioteca de condições continua abaixo só para
+                            casos que fujam dessas seis. */}
+                        <div className="pt-3 border-t border-slate-100 dark:border-white/5">
+                          {(() => {
+                            const c = calculateProposalValues(
+                              {
+                                cobrar_setup: cobrarSetup,
+                                valor_setup_vexo: valorSetupVexo,
+                                package_id: editPackageId || null,
+                                package_vexo_id: editPackageVexoId || null,
+                                periodo_plano: periodoPlano || "mensal",
+                                itens: items,
+                              },
+                              availablePackages
+                            );
+                            return (
+                              <FormasPagamentoEditor
+                                formas={formasPgto}
+                                onChange={setFormasPgto}
+                                totalSetup={c.setupFinal}
+                                mensalidade={c.mensalidadeFinal}
+                                meses={c.mesesPeriodo}
+                              />
+                            );
+                          })()}
+                        </div>
 
-                          {showInlineTerm && (
-                            <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900 border border-purple-200 dark:border-purple-900/30 space-y-2">
-                              <div className="grid gap-2 sm:grid-cols-3">
-                                <Input
-                                  value={inlineTerm.nome}
-                                  onChange={(e) => setInlineTerm((p) => ({ ...p, nome: e.target.value }))}
-                                  placeholder='Nome (ex: "Setup 2x no cartão")'
-                                  className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8"
-                                />
-                                <select
-                                  value={inlineTerm.tipo}
-                                  onChange={(e) => setInlineTerm((p) => ({ ...p, tipo: e.target.value as PaymentTermTipo, config: {} }))}
-                                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8"
-                                >
-                                  {PAYMENT_TERM_TIPOS.map((t) => (
-                                    <option key={t.value} value={t.value}>{t.label}</option>
-                                  ))}
-                                </select>
-                                <select
-                                  value={(inlineTerm as any).aplica_a || "setup"}
-                                  onChange={(e) => setInlineTerm((p) => ({ ...(p as any), aplica_a: e.target.value }))}
-                                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8"
-                                >
-                                  <option value="setup">Aplica ao Setup</option>
-                                  <option value="mensalidade">Aplica à Mensalidade</option>
-                                </select>
-                              </div>
-                              <div className="grid gap-2 sm:grid-cols-3">
-                                {inlineTerm.tipo === "avista_desconto" && (
-                                  <Input type="number" placeholder="% desconto" value={inlineTerm.config.percentual_desconto ?? ""} onChange={(e) => updateInlineConfig("percentual_desconto", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
-                                )}
-                                {(inlineTerm.tipo === "entrada_parcelas" || inlineTerm.tipo === "parcelado_cartao" || inlineTerm.tipo === "semanal") && (
-                                  <Input type="number" placeholder="Nº de parcelas" value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
-                                )}
-                                {inlineTerm.tipo === "cartao_recorrente" && (
-                                  <select value={inlineTerm.config.num_parcelas ?? ""} onChange={(e) => updateInlineConfig("num_parcelas", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8">
-                                    <option value="">Plano de recorrência</option>
-                                    {CARTAO_RECORRENTE_PLANOS.map((p) => (
-                                      <option key={p.value} value={p.value}>{p.label}</option>
-                                    ))}
-                                  </select>
-                                )}
-                                {inlineTerm.tipo === "entrada_parcelas" && (
-                                  <Input type="number" placeholder="Entrada (R$)" value={inlineTerm.config.valor_entrada ?? ""} onChange={(e) => updateInlineConfig("valor_entrada", e.target.value === "" ? undefined : Number(e.target.value))} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8" />
-                                )}
-                                {(inlineTerm.tipo === "avista_desconto" || inlineTerm.tipo === "entrada_parcelas") && (
-                                  <select value={inlineTerm.config.meio ?? ""} onChange={(e) => updateInlineConfig("meio", e.target.value || undefined)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8">
-                                    <option value="">Meio (opcional)</option>
-                                    <option value="pix">PIX</option>
-                                    <option value="cartao">Cartão</option>
-                                  </select>
-                                )}
-                                {inlineTerm.tipo === "custom" && (
-                                  <Input value={inlineTerm.config.descricao ?? ""} onChange={(e) => updateInlineConfig("descricao", e.target.value)} placeholder="Descrição livre" className="bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 text-xs h-8 sm:col-span-2" />
-                                )}
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <label className="flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-300 cursor-pointer">
-                                  <input type="checkbox" checked={inlineTerm.salvarTemplate} onChange={(e) => setInlineTerm((p) => ({ ...p, salvarTemplate: e.target.checked }))} className="accent-purple-600" />
-                                  Salvar como template reutilizável
-                                </label>
-                                <Button size="sm" onClick={handleCreateInlineTerm} className="bg-purple-600 hover:bg-purple-500 text-white text-xs h-8">Criar e aplicar</Button>
-                              </div>
-                            </div>
-                          )}
+                        {/* A biblioteca de condições foi removida: a tabela
+                            gd_payment_terms nunca teve uma linha e as seis
+                            formas fixas acima cobrem todos os casos reais.
+                            Condições legadas seguem gravadas na proposta
+                            (legadosPgto) e são preservadas ao salvar. */}
+
+
+                        {/* Plano: escopo × prazos, o mesmo editor do wizard.
+                            Antes não dava para trocar o plano aqui — só os
+                            valores —, o que obrigava a recriar a proposta. */}
+                        <div className="pt-3 border-t border-slate-100 dark:border-white/5 space-y-3">
+                          <PlanoEditor
+                            plano={editPlano}
+                            onChange={setEditPlano}
+                            gdProducts={gdProducts}
+                            vexoProducts={vexoProducts}
+                          />
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={planoSaving}
+                              onClick={handleSalvarPlano}
+                              className="text-xs border-purple-300 text-purple-650 dark:text-purple-300"
+                            >
+                              {planoSaving ? "Gravando plano..." : "Aplicar plano"}
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-white/5">
@@ -1645,12 +1644,7 @@ export default function GeracaoDigitalProposals() {
                         {(() => {
                           const activeGdPkg = availablePackages.find(p => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
                           const activeVexoPkg = availablePackages.find(p => p.id === editPackageVexoId && p.tipo === "vexo");
-                          const activeAvulsos = Object.entries(editVexoAvulsoIds)
-                            .filter(([_, checked]) => checked)
-                            .map(([id]) => vexoProducts.find(vp => vp.id === id))
-                            .filter(Boolean);
-
-                          if (!activeGdPkg && !activeVexoPkg && activeAvulsos.length === 0) {
+                          if (!activeGdPkg && !activeVexoPkg) {
                             return <p className="text-xs text-slate-450 italic">Nenhum combo ou módulo selecionado para esta proposta.</p>;
                           }
 
@@ -1682,18 +1676,6 @@ export default function GeracaoDigitalProposals() {
                                 </div>
                               )}
 
-                              {activeAvulsos.length > 0 && (
-                                <div className="space-y-1">
-                                  <span className="text-xs font-bold text-slate-855 dark:text-slate-200 block">Módulos Avulsos Extras:</span>
-                                  <div className="grid gap-2 pl-3 border-l-2 border-slate-300 dark:border-slate-750">
-                                    {activeAvulsos.map((p: any) => (
-                                      <div key={p.id} className="flex justify-between items-center text-xs text-slate-650 dark:text-slate-350">
-                                        <span>• {p.nome}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           );
                         })()}

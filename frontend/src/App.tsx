@@ -41,7 +41,6 @@ import GeracaoDigitalProposals from "./pages/GeracaoDigitalProposals";
 import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
 import PresentationPreview from "./pages/PresentationPreview";
 import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
-import GeracaoDigitalPaymentTerms from "./pages/GeracaoDigitalPaymentTerms";
 import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
 import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPresentation";
 
@@ -322,14 +321,6 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
                     <GeracaoDigitalPackages />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="condicoes-gd"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <GeracaoDigitalPaymentTerms />
                   </ProtectedRoute>
                 }
               />

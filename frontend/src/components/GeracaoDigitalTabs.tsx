@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Briefcase, ListChecks, FileText, Layers, CreditCard, LayoutDashboard } from "lucide-react";
+import { Briefcase, ListChecks, FileText, Layers, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function GeracaoDigitalTabs() {
@@ -22,7 +22,6 @@ export function GeracaoDigitalTabs() {
   // o gate por preset ocultava as abas para quem não era admin.
   const hasPropostas = isInternalUser;
   const hasPacotes = isInternalUser;
-  const hasCondicoes = isInternalUser;
   const hasContratos = isInternalUser;
 
   // Determine active tab based on path name
@@ -32,7 +31,6 @@ export function GeracaoDigitalTabs() {
   else if (location.pathname.includes("geracao-digital")) activeTab = "briefing";
   else if (location.pathname.includes("propostas-gd")) activeTab = "propostas";
   else if (location.pathname.includes("pacotes-gd")) activeTab = "pacotes";
-  else if (location.pathname.includes("condicoes-gd")) activeTab = "condicoes";
   else if (location.pathname.includes("contratos-gd")) activeTab = "contratos";
 
   const handleTabChange = (val: string) => {
@@ -41,7 +39,6 @@ export function GeracaoDigitalTabs() {
     else if (val === "briefing") navigate("/crm/geracao-digital");
     else if (val === "propostas") navigate("/crm/propostas-gd");
     else if (val === "pacotes") navigate("/crm/pacotes-gd");
-    else if (val === "condicoes") navigate("/crm/condicoes-gd");
     else if (val === "contratos") navigate("/crm/contratos-gd");
   };
 
@@ -76,13 +73,7 @@ export function GeracaoDigitalTabs() {
           {hasPacotes && (
             <TabsTrigger value="pacotes" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <Layers className="h-3.5 w-3.5 mr-1.5" />
-              Pacotes
-            </TabsTrigger>
-          )}
-          {hasCondicoes && (
-            <TabsTrigger value="condicoes" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
-              <CreditCard className="h-3.5 w-3.5 mr-1.5" />
-              Condições
+              Catálogo
             </TabsTrigger>
           )}
           {hasContratos && (

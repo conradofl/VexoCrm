@@ -30,6 +30,28 @@ export function isOrfaoLegado(item: any): boolean {
   return !item?.product_id && String(item?.descricao || "").includes("Inteligência de Atendimento");
 }
 
+// ---------------------------------------------------------------------------
+// Recorrência — NORMALIZAÇÃO. Existem dois vocabulários para a mesma ideia:
+// o catálogo (gd_products.recorrencia) grava "pontual" e o wizard grava "unico".
+// Todo o cálculo testava só "unico", então os 12 produtos GD cadastrados como
+// "pontual" (Landing page, Logomarca, Panfletos, Vídeo avulso...) ficavam de
+// fora do setup E entravam na mensalidade — multiplicados pelos meses do
+// período. Ex.: Landing page R$ 2.500 pontual virava R$ 15.000 num semestral.
+// Nunca comparar recorrencia por string solta: usar os predicados abaixo.
+// ---------------------------------------------------------------------------
+
+const RECORRENCIAS_UNICAS = new Set(["unico", "único", "pontual", "avulso", "unica", "única"]);
+
+/** true quando o item é cobrado UMA vez (setup), não todo mês. */
+export function isCobrancaUnica(item: any): boolean {
+  return RECORRENCIAS_UNICAS.has(String(item?.recorrencia ?? "mensal").trim().toLowerCase());
+}
+
+/** true quando o item compõe a mensalidade. */
+export function isCobrancaMensal(item: any): boolean {
+  return !isCobrancaUnica(item);
+}
+
 export function buildIncludedProductIds(items: any[]): Set<string> {
   return new Set(
     (items || [])
@@ -50,18 +72,35 @@ export function isNaoInclusoNoPacote(item: any, includedProductIds: Set<string>)
   return !(item?.product_id && includedProductIds.has(item.product_id));
 }
 
+/** Linha que representa o pacote em si (não o conteúdo dele). */
+export function isLinhaDePacote(item: any): boolean {
+  const d = String(item?.descricao || "");
+  return d.startsWith("Pacote:") || d.startsWith("Pacote Vexo:");
+}
+
+// ---------------------------------------------------------------------------
+// PACOTE FECHADO — regra de negócio.
+// Escolheu pacote, o preço do pacote É o preço. Nada mais entra em setup nem em
+// mensalidade: nem avulso, nem pontual, nem extra. O único setup cobrável é o
+// do sistema Vexo (`valor_setup_vexo`), que não pertence ao pacote GD.
+// O dedupe por product_id continua existindo para quem NÃO tem pacote e para o
+// escopo exibido, mas deixou de ser o que segura o valor: sem pacote não há o
+// que duplicar, com pacote nada soma.
+// ---------------------------------------------------------------------------
+export function temPacote(items: any[]): boolean {
+  return (items || []).some(isLinhaDePacote);
+}
+
 /**
- * VP total dos itens, deduplicado. Antes o wizard fazia `totalVp += vp` por
- * pacote + cada avulso marcado, sem dedupe: um produto que está no pacote E
- * aparece como avulso contava duas vezes (e ao editar, TODO o conteúdo do
- * pacote vira avulso, multiplicando o VP).
+ * VP total. Com pacote escolhido, só o VP das linhas de pacote conta — mesma
+ * regra do valor em reais. Sem pacote, soma os itens deduplicados.
  */
 export function computeVpFromItems(items: any[]): number {
   const clean = (items || []).filter((i) => !isOrfaoLegado(i));
-  const included = buildIncludedProductIds(clean);
-  const total = clean
-    .filter((item) => isNaoInclusoNoPacote(item, included))
-    .reduce((sum, item) => sum + Number(item?.valor_vp || 0), 0);
+  const base = temPacote(clean)
+    ? clean.filter(isLinhaDePacote)
+    : clean.filter((item) => isNaoInclusoNoPacote(item, buildIncludedProductIds(clean)));
+  const total = base.reduce((sum, item) => sum + Number(item?.valor_vp || 0), 0);
   return Math.round(total * 100) / 100;
 }
 
@@ -96,10 +135,16 @@ export function calculateProposalValues(
   const includedProductIds = buildIncludedProductIds(items);
   const naoInclusoNoPacote = (item: any) => isNaoInclusoNoPacote(item, includedProductIds);
 
-  // Setup: itens únicos avulsos, excluindo os que já compõem o pacote.
-  const itemsSetup = items
-    .filter(item => item.recorrencia === "unico" && naoInclusoNoPacote(item))
-    .reduce((sum, item) => sum + Number(item.valor || 0), 0);
+  // Pacote fechado: nada além do pacote entra na conta. Ver bloco acima.
+  const pacoteFechado = temPacote(items) || !!gdPkg || !!vexoPkg;
+
+  // Setup: sem pacote, itens de cobrança única somam. Com pacote, só o setup
+  // Vexo (já contabilizado em setupOriginal) — o pacote cobre o resto.
+  const itemsSetup = pacoteFechado
+    ? 0
+    : items
+        .filter(item => isCobrancaUnica(item) && naoInclusoNoPacote(item))
+        .reduce((sum, item) => sum + Number(item.valor || 0), 0);
   setupOriginal += itemsSetup;
 
   // If items array is empty (e.g. during wizard draft creation), check package definitions directly:
@@ -157,21 +202,21 @@ export function calculateProposalValues(
   // Vexo avulsos: items in proposal that are Vexo but NOT the Vexo package itself
   // nem já inclusos no pacote selecionado.
   const vexoAvulsos = items.filter(item => {
-    return item.categoria === "vexo" && item.product_id !== null && !item.descricao?.startsWith("Pacote Vexo") && item.recorrencia !== "unico" && naoInclusoNoPacote(item);
+    return item.categoria === "vexo" && item.product_id !== null && !item.descricao?.startsWith("Pacote Vexo") && isCobrancaMensal(item) && naoInclusoNoPacote(item);
   });
-  const avulsosMonthly = vexoAvulsos.reduce((sum, item) => sum + Number(item.valor || 0), 0);
+  const avulsosMonthly = pacoteFechado ? 0 : vexoAvulsos.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
   // Legacy items (for backward compatibility): itens GD avulsos com valor,
   // excluindo os que já compõem o pacote selecionado.
   const legacyItems = items.filter(item => {
-    return item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && item.recorrencia !== "unico" && naoInclusoNoPacote(item);
+    return item.categoria === "gd" && Number(item.valor || 0) > 0 && !item.descricao?.startsWith("Pacote:") && isCobrancaMensal(item) && naoInclusoNoPacote(item);
   });
-  const legacyMonthly = legacyItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
+  const legacyMonthly = pacoteFechado ? 0 : legacyItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
   const faturamentoMensalItems = items.filter(item => {
-    return item.recorrencia === "mensal" && item.product_id === null && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("Pacote Vexo:");
+    return isCobrancaMensal(item) && item.product_id === null && !item.descricao?.startsWith("Pacote:") && !item.descricao?.startsWith("Pacote Vexo:");
   });
-  const faturamentoMensalExtra = faturamentoMensalItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
+  const faturamentoMensalExtra = pacoteFechado ? 0 : faturamentoMensalItems.reduce((sum, item) => sum + Number(item.valor || 0), 0);
 
   const mensalidadeOriginal = gdMonthly + vexoMonthly + avulsosMonthly + legacyMonthly + faturamentoMensalExtra;
   const mensalidadeFinal = mensalidadeOriginal;

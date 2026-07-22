@@ -6,10 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ArrowRight, X, FileText, CheckCircle, Plus } from "lucide-react";
-import { fetchApi } from "@/lib/api";
+import { ArrowRight, X, FileText, CheckCircle } from "lucide-react";
 import { calculateProposalValues } from "@/lib/geracaoDigital/proposalCalculator";
 import { type PaymentTerm, termAplicaA, APLICA_A_LABELS } from "@/lib/geracaoDigital/paymentTerms";
+import PlanoEditor from "@/components/geracaoDigital/PlanoEditor";
+import { type Plano, planoVazio, planoValido } from "@/lib/geracaoDigital/plano";
+import { syncPlanoPackages } from "@/lib/geracaoDigital/planoSync";
+import FormasPagamentoEditor from "@/components/geracaoDigital/FormasPagamentoEditor";
+import { type FormasSelecionadas, formasVazias, formasParaTerms } from "@/lib/geracaoDigital/formasPagamento";
+import { PERIODOS, mesesDoPeriodo, prazosOfertados } from "@/lib/geracaoDigital/plano";
 
 interface ProposalWizardProps {
   onClose: () => void;
@@ -52,12 +57,14 @@ interface ProposalWizardProps {
     setNewCondicoes: (val: string) => void;
     newPaymentLink: string;
     setNewPaymentLink: (val: string) => void;
-    handleCreateDirectProposal: () => Promise<void>;
+    handleCreateDirectProposal: (formasFixas?: any[]) => Promise<void>;
   };
   toast: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void;
   clientId: string | null;
   getIdToken: () => Promise<string | null>;
   onPackageCreated: (pkg: any) => void;
+  /** Plano com que o step 2 abre. Preenchido ao editar uma proposta. */
+  planoInicial?: Plano;
   segmentsList: any[];
 }
 
@@ -72,6 +79,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
   clientId,
   getIdToken,
   onPackageCreated,
+  planoInicial,
   segmentsList
 }) => {
   const {
@@ -112,74 +120,23 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
     handleCreateDirectProposal
   } = wizardState;
 
-  // Montador inline: cria um pacote SÓ para esta proposta (ad_hoc), que não
-  // aparece na biblioteca de Modelos. Reaproveita gdProducts como catálogo.
-  const [showMontador, setShowMontador] = React.useState<boolean>(false);
-  const [mNome, setMNome] = React.useState<string>("");
-  const [mPeriodo, setMPeriodo] = React.useState<string>("mensal");
-  const [mValor, setMValor] = React.useState<number>(0);
-  const [mValorTabela, setMValorTabela] = React.useState<number>(0);
-  const [mVpActive, setMVpActive] = React.useState<boolean>(false);
-  const [mVpValor, setMVpValor] = React.useState<number>(0);
-  const [mProdutos, setMProdutos] = React.useState<Record<string, boolean>>({});
-  const [mVexoIds, setMVexoIds] = React.useState<Record<string, boolean>>({});
-  const [mSalvarModelo, setMSalvarModelo] = React.useState<boolean>(false);
-  const [mSaving, setMSaving] = React.useState<boolean>(false);
+  // Plano da proposta: um escopo, até 4 preços (mensal/tri/semestral/anual).
+  // Substituiu a biblioteca de pacotes + o montador com nome manual. Ver o
+  // cabeçalho de lib/geracaoDigital/plano.ts para o porquê.
+  const [plano, setPlano] = React.useState<Plano>(planoInicial || planoVazio);
+  // Ao abrir para editar, o step 2 vinha em branco: o escopo e os prazos já
+  // gravados não eram carregados.
+  React.useEffect(() => {
+    if (planoInicial) setPlano(planoInicial);
+  }, [planoInicial]);
+  const [planoSaving, setPlanoSaving] = React.useState<boolean>(false);
+  const [formasPgto, setFormasPgto] = React.useState<FormasSelecionadas>(formasVazias);
 
-  const resetMontador = () => {
-    setShowMontador(false); setMNome(""); setMPeriodo("mensal"); setMValor(0);
-    setMValorTabela(0); setMVpActive(false); setMVpValor(0); setMProdutos({});
-    setMVexoIds({}); setMSalvarModelo(false);
-  };
-
-  const criarPacoteAdHoc = async () => {
-    const produtosGd = gdProducts.filter((p: any) => mProdutos[p.id]).map((p: any) => ({ product_id: p.id, nome: p.nome, origem: "gd" as const }));
-    const produtosVexo = vexoProducts.filter((p: any) => mVexoIds[p.id]).map((p: any) => ({ product_id: p.id, nome: p.nome, origem: "vexo" as const }));
-    const produtos = [...produtosGd, ...produtosVexo];
-    if (!mNome.trim() || produtos.length === 0) {
-      toast({ title: "Faltam dados", description: "Dê um nome ao pacote e escolha ao menos 1 item.", variant: "destructive" });
-      return;
-    }
-    setMSaving(true);
-    try {
-      const token = await getIdToken();
-      const res = await fetchApi("/api/gd/packages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
-          client_id: clientId,
-          nome: mNome.trim(),
-          tipo: "gd",
-          periodo: mPeriodo,
-          produtos_incluidos: produtos,
-          valor: Number(mValor || 0),
-          valor_tabela: Number(mValorTabela || 0) || null,
-          valor_vp: mVpActive ? Number(mVpValor || 0) : null,
-          // Marcado "salvar como modelo" => vai pra biblioteca (ad_hoc=false);
-          // senão fica exclusivo desta proposta (ad_hoc=true).
-          ad_hoc: !mSalvarModelo,
-        }),
-      });
-      if (!res.ok) throw new Error("Falha ao criar o pacote.");
-      const json = await res.json();
-      const pkg = json.data;
-      onPackageCreated(pkg);
-      setNewPacotesOfertados((prev) => [...prev, pkg.id]);
-      setNewPackageId(pkg.id);
-      const salvouModelo = mSalvarModelo;
-      resetMontador();
-      toast({
-        title: "Pacote criado",
-        description: salvouModelo
-          ? "Adicionado a esta proposta e salvo na biblioteca de Modelos."
-          : "Adicionado a esta proposta. Não aparece na biblioteca de Modelos.",
-      });
-    } catch (e: any) {
-      toast({ title: "Erro", description: e?.message || "Erro ao criar o pacote.", variant: "destructive" });
-    } finally {
-      setMSaving(false);
-    }
-  };
+  // Base para exibir o valor das parcelas: usa o prazo mais longo ofertado,
+  // que é o pré-selecionado da proposta.
+  const prazoBase = prazosOfertados(plano).slice(-1)[0];
+  const mensalidadePlano = prazoBase ? Number(plano.precos[prazoBase] || 0) : 0;
+  const mesesPlano = prazoBase ? mesesDoPeriodo(prazoBase) : 1;
 
   const handleNextStep1 = () => {
     if (!newProspect.trim()) {
@@ -189,6 +146,43 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
     setWizardStep(2);
   };
 
+  // Ao avançar, cada prazo com preço vira uma linha de preço gravada.
+  // O vendedor não nomeia nem gerencia essas linhas.
+  const handleNextStep2 = async () => {
+    if (!planoValido(plano)) {
+      toast({
+        title: "Plano incompleto",
+        description: "Escolha ao menos 1 item no escopo e preencha o preço de ao menos 1 prazo.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPlanoSaving(true);
+    try {
+      const existentes = availablePackages.filter(
+        (p: any) => p?.ad_hoc && newPacotesOfertados.includes(p.id)
+      );
+      const r = await syncPlanoPackages({
+        plano,
+        nomeBase: newProspect,
+        clientId,
+        gdProducts,
+        vexoProducts,
+        existentes,
+        getIdToken,
+      });
+      r.pacotes.forEach(onPackageCreated);
+      setNewPacotesOfertados(r.pacotesOfertados);
+      setNewPackageId(r.packageId);
+      setNewPackageVexoId("");
+      setWizardStep(3);
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message || "Falha ao gravar o plano.", variant: "destructive" });
+    } finally {
+      setPlanoSaving(false);
+    }
+  };
+
   return (
     <Card className="bg-white dark:bg-slate-900 border-purple-200 dark:border-white/10 shadow-md overflow-hidden">
       <div className="bg-gradient-to-r from-indigo-900 via-purple-900 to-slate-900 p-6 text-white relative">
@@ -196,7 +190,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
         <div className="flex justify-between items-center relative z-10">
           <div>
             <h3 className="text-lg font-black tracking-tight">Assistente de Criação de Proposta Comercial</h3>
-            <p className="text-xs text-purple-200 mt-1">Crie a proposta de forma estruturada e linear em 6 etapas simples.</p>
+            <p className="text-xs text-purple-200 mt-1">Crie a proposta de forma estruturada e linear em 4 etapas simples.</p>
           </div>
           <Button
             variant="ghost"
@@ -209,13 +203,12 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
         </div>
 
         {/* Stepper Indicators */}
-        <div className="grid grid-cols-6 gap-2 mt-6 relative z-10">
+        <div className="grid grid-cols-4 gap-2 mt-6 relative z-10">
           {[
             { label: "Cliente", step: 1 },
-            { label: "Pacotes", step: 2 },
-            { label: "Módulos Avulsos", step: 3 },
-            { label: "Condições", step: 4 },
-            { label: "Revisão", step: 5 }
+            { label: "Plano", step: 2 },
+            { label: "Condições", step: 3 },
+            { label: "Revisão", step: 4 }
           ].map((s) => (
             <div key={s.step} className="space-y-2">
               <div className={cn(
@@ -300,241 +293,30 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
           </div>
         )}
 
-        {/* STEP 2: PACOTES (multi-seleção — o cliente escolhe um na proposta) */}
+        {/* STEP 2: PLANO — um escopo, até 4 preços por prazo */}
         {wizardStep === 2 && (
           <div className="space-y-5 animate-fade-in">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <Label className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-1">Pacotes a Ofertar</Label>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Marque um ou vários pacotes. Todos aparecem na proposta para o cliente escolher.</p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowMontador((v) => !v)}
-                className="shrink-0 text-[11px] h-8 border-purple-300 text-purple-650 dark:text-purple-300"
-              >
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                Criar pacote pra esta proposta
-              </Button>
-            </div>
-
-            {showMontador && (
-              <div className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/10 p-4 space-y-3">
-                <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium">
-                  Monte o pacote para esta proposta. Por padrão fica exclusivo dela; marque "salvar como modelo" para reaproveitar na biblioteca.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="space-y-1 sm:col-span-1">
-                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Nome</Label>
-                    <Input value={mNome} onChange={(e) => setMNome(e.target.value)} placeholder="Ex: Plano da Ótica Vista Clara" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Período</Label>
-                    <select value={mPeriodo} onChange={(e) => setMPeriodo(e.target.value)} className="w-full h-9 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none">
-                      <option value="mensal">Mensal</option>
-                      <option value="trimestral">Trimestral</option>
-                      <option value="semestral">Semestral</option>
-                      <option value="anual">Anual</option>
-                      <option value="unico">Setup Único</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{mPeriodo === "unico" ? "Valor Único (R$)" : "Valor do Período (R$)"}</Label>
-                    <Input type="number" value={mValor || ""} onChange={(e) => setMValor(Number(e.target.value))} placeholder="0" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Valor de Tabela (R$, opcional)</Label>
-                    <Input type="number" value={mValorTabela || ""} onChange={(e) => setMValorTabela(Number(e.target.value))} placeholder="Preço cheio p/ exibir riscado" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
-                      <input type="checkbox" checked={mVpActive} onChange={(e) => setMVpActive(e.target.checked)} className="accent-purple-600" />
-                      Aceita VP / Permuta
-                    </Label>
-                    <Input type="number" value={mVpValor || ""} onChange={(e) => setMVpValor(Number(e.target.value))} disabled={!mVpActive} placeholder="Valor em permuta" className="h-9 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 disabled:opacity-50" />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Produtos GD incluídos</Label>
-                  {gdProducts.length === 0 ? (
-                    <p className="text-[10px] text-slate-400 italic">Nenhum produto no catálogo. Cadastre em Pacotes › Produtos GD.</p>
-                  ) : (
-                    <div className="grid gap-1.5 sm:grid-cols-2 max-h-[180px] overflow-y-auto pr-1">
-                      {gdProducts.map((p: any) => (
-                        <label key={p.id} className="flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
-                          <input type="checkbox" checked={!!mProdutos[p.id]} onChange={(e) => setMProdutos((prev) => ({ ...prev, [p.id]: e.target.checked }))} className="accent-purple-600" />
-                          <span className="truncate">{p.nome}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {vexoProducts.length > 0 && (
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Módulos Vexo OS (pacote híbrido, sem valor separado)</Label>
-                    <div className="grid gap-1.5 sm:grid-cols-2 max-h-[160px] overflow-y-auto pr-1">
-                      {vexoProducts.map((p: any) => (
-                        <label key={p.id} className="flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
-                          <input type="checkbox" checked={!!mVexoIds[p.id]} onChange={(e) => setMVexoIds((prev) => ({ ...prev, [p.id]: e.target.checked }))} className="accent-purple-600" />
-                          <span className="truncate">{p.nome}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <label className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none">
-                    <input type="checkbox" checked={mSalvarModelo} onChange={(e) => setMSalvarModelo(e.target.checked)} className="accent-purple-600" />
-                    Salvar também como modelo reutilizável (biblioteca)
-                  </label>
-                  <div className="flex gap-2">
-                    <Button type="button" variant="ghost" size="sm" onClick={resetMontador} className="text-[11px] h-8">Cancelar</Button>
-                    <Button type="button" size="sm" onClick={criarPacoteAdHoc} disabled={mSaving} className="text-[11px] h-8 bg-purple-600 hover:bg-purple-700 text-white">
-                      {mSaving ? "Criando..." : "Criar e ofertar"}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 max-h-[340px] overflow-y-auto pr-1">
-              {/* Mostra os Modelos (ad_hoc=false) + qualquer pacote ad_hoc já
-                  ofertado nesta proposta. Pacotes ad_hoc de OUTRAS propostas
-                  (que entram em availablePackages ao carregar a lista) ficam de fora. */}
-              {availablePackages.filter((pk: any) => !pk.ad_hoc || newPacotesOfertados.includes(pk.id)).map((pk: any) => {
-                const isOn = newPacotesOfertados.includes(pk.id);
-                const meses = pk.periodo === "anual" ? 12 : pk.periodo === "semestral" ? 6 : pk.periodo === "trimestral" ? 3 : 1;
-                return (
-                  <button
-                    key={pk.id}
-                    type="button"
-                    onClick={() => {
-                      setNewPacotesOfertados((prev) => {
-                        const next = prev.includes(pk.id) ? prev.filter((x) => x !== pk.id) : [...prev, pk.id];
-                        const firstGd = next.find((id) => { const p = availablePackages.find((a: any) => a.id === id); return p && (p.tipo === "gd" || !p.tipo); }) || "";
-                        const firstVexo = next.find((id) => { const p = availablePackages.find((a: any) => a.id === id); return p && p.tipo === "vexo"; }) || "";
-                        setNewPackageId(firstGd);
-                        setNewPackageVexoId(firstVexo);
-                        return next;
-                      });
-                    }}
-                    className={cn(
-                      "p-3 rounded-xl border text-left transition-all flex flex-col gap-1.5",
-                      isOn
-                        ? "bg-purple-50 dark:bg-purple-950/20 border-purple-300 dark:border-purple-900/40"
-                        : "bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-purple-300"
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="text-xs font-bold text-slate-850 dark:text-white block truncate">{pk.nome}</span>
-                        <span className="text-[9px] text-slate-500 dark:text-slate-400 block">
-                          {pk.tipo === "vexo" ? "Vexo OS" : "Geração Digital"} · {(Number(pk.valor || 0) / meses).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
-                        </span>
-                      </div>
-                      {isOn && <CheckCircle className="h-4 w-4 text-purple-600 shrink-0" />}
-                    </div>
-                  </button>
-                );
-              })}
-              {availablePackages.length === 0 && (
-                <p className="text-[10px] text-slate-400 italic col-span-3">Nenhum pacote cadastrado. Crie na aba Pacotes.</p>
-              )}
-            </div>
-            {newPacotesOfertados.length > 1 && (
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">
-                {newPacotesOfertados.length} pacotes serão exibidos na proposta para o cliente escolher.
-              </span>
-            )}
+            <PlanoEditor
+              plano={plano}
+              onChange={setPlano}
+              gdProducts={gdProducts}
+              vexoProducts={vexoProducts}
+            />
 
             <div className="flex justify-between pt-4 border-t border-slate-100 dark:border-white/5">
               <Button variant="outline" onClick={() => setWizardStep(1)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                 Voltar
               </Button>
-              <Button onClick={() => setWizardStep(3)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
-                Avançar
-                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+              <Button onClick={handleNextStep2} disabled={planoSaving} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
+                {planoSaving ? "Gravando..." : "Avançar"}
+                {!planoSaving && <ArrowRight className="h-3.5 w-3.5 ml-1.5" />}
               </Button>
             </div>
           </div>
         )}
 
-        {/* STEP 3: MÓDULOS AVULSOS */}
+                {/* STEP 3: CONDIÇÕES COMERCIAIS */}
         {wizardStep === 3 && (
-          <div className="space-y-5 animate-fade-in">
-            <div className="space-y-1">
-              <Label className="text-xs font-bold text-slate-800 dark:text-slate-200">Módulos Avulsos</Label>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400">Selecione módulos adicionais. Os valores aparecem descritos na proposta.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 dark:text-indigo-300">Vexo OS</span>
-              <div className="flex flex-wrap gap-1.5">
-                {vexoProducts.map((p) => {
-                  const isIncluded = !!newVexoAvulsoIds[p.id];
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setNewVexoAvulsoIds((prev) => ({ ...prev, [p.id]: !isIncluded }))}
-                      className={cn(
-                        "px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all flex items-center gap-1",
-                        isIncluded
-                          ? "bg-indigo-600 text-white border-indigo-500"
-                          : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300"
-                      )}
-                    >
-                      {p.nome}{isIncluded && <CheckCircle className="h-3 w-3 shrink-0" />}
-                    </button>
-                  );
-                })}
-                {vexoProducts.length === 0 && <span className="text-[10px] text-slate-400 italic">Nenhum módulo Vexo cadastrado.</span>}
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-3 border-t border-dashed border-slate-200 dark:border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-pink-500 dark:text-pink-300">Geração Digital</span>
-              <div className="flex flex-wrap gap-1.5">
-                {gdProducts.map((p) => {
-                  const isIncluded = !!newGdAvulsoIds[p.id];
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setNewGdAvulsoIds((prev) => ({ ...prev, [p.id]: !isIncluded }))}
-                      className={cn(
-                        "px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all flex items-center gap-1",
-                        isIncluded
-                          ? "bg-pink-600 text-white border-pink-500"
-                          : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-pink-300"
-                      )}
-                    >
-                      {p.nome}{isIncluded && <CheckCircle className="h-3 w-3 shrink-0" />}
-                    </button>
-                  );
-                })}
-                {gdProducts.length === 0 && <span className="text-[10px] text-slate-400 italic">Nenhum módulo GD cadastrado.</span>}
-              </div>
-            </div>
-
-            <div className="flex justify-between pt-4 border-t border-slate-100">
-              <Button variant="outline" onClick={() => setWizardStep(2)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
-                Voltar
-              </Button>
-              <Button onClick={() => setWizardStep(4)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
-                Avançar
-                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 4: SETUP */}
-        {/* STEP 4: CONDIÇÕES COMERCIAIS */}
-        {wizardStep === 4 && (
           <div className="space-y-5 animate-fade-in">
             {/* Fase 4: taxa de Setup passa a viver AQUI, no mesmo formulário de
                 criação. Antes só existia no painel de configuração pós-criação,
@@ -543,13 +325,16 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
             <div className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/10 p-4">
               <div className="flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                  {/* "Isentar" em vez de "Cobrar": a ação da mesa é conceder
+                      a cortesia. Valor > 0 + isento faz a proposta mostrar o
+                      valor riscado com "Isento". */}
                   <input
                     type="checkbox"
-                    checked={newCobrarSetup}
-                    onChange={(e) => setNewCobrarSetup(e.target.checked)}
+                    checked={!newCobrarSetup}
+                    onChange={(e) => setNewCobrarSetup(!e.target.checked)}
                     className="accent-purple-600"
                   />
-                  Cobrar setup de implantação?
+                  Isentar setup
                 </label>
                 <div className="space-y-1">
                   <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Valor do Setup (R$)</Label>
@@ -557,14 +342,20 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                     type="number"
                     value={newValorSetup || ""}
                     onChange={(e) => setNewValorSetup(Number(e.target.value))}
-                    disabled={!newCobrarSetup}
                     placeholder="0"
-                    className="h-9 w-40 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10 disabled:opacity-50"
+                    className="h-9 w-40 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10"
                   />
                 </div>
+                {!newCobrarSetup && Number(newValorSetup || 0) > 0 && (
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 pb-2">
+                    Isento — o cliente vê R$ {Number(newValorSetup).toLocaleString("pt-BR")} riscado
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
-                Investimento único de entrada. Aparece como "Setup / Implantação Vexo OS" na proposta.
+                Investimento único de entrada. Ao isentar, deixe o valor preenchido:
+                a proposta mostra ele riscado com "Isento" ao lado, deixando a
+                cortesia visível para o cliente.
               </p>
             </div>
 
@@ -616,40 +407,23 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
               </div>
             </div>
 
-            {/* Condições de pagamento a ofertar — o cliente escolhe na proposta pública */}
-            <div className="space-y-2">
-              <Label className="text-xs font-bold text-slate-700 dark:text-slate-350">Condições de Pagamento a Ofertar</Label>
-              <p className="text-[10px] text-slate-450 dark:text-slate-500">Selecione as condições que aparecerão na proposta para o cliente escolher a que melhor se encaixa.</p>
-              <div className="flex flex-wrap gap-1.5">
-                {availableTerms.filter((t) => t.ativo).map((term) => {
-                  const isOn = newOfferedTermIds.includes(term.id);
-                  return (
-                    <button
-                      key={term.id}
-                      type="button"
-                      onClick={() => setNewOfferedTermIds((prev) => isOn ? prev.filter((x) => x !== term.id) : [...prev, term.id])}
-                      className={cn(
-                        "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all",
-                        isOn
-                          ? "bg-purple-600 text-white border-purple-500"
-                          : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-purple-300"
-                      )}
-                    >
-                      {term.nome} · {APLICA_A_LABELS[termAplicaA(term)]}{isOn ? " ✓" : ""}
-                    </button>
-                  );
-                })}
-                {availableTerms.filter((t) => t.ativo).length === 0 && (
-                  <span className="text-[10px] text-slate-400 italic">Nenhuma condição salva. Crie na aba Condições.</span>
-                )}
-              </div>
+            {/* Formas fixas de pagamento — caminho principal. */}
+            <div className="pt-2 border-t border-slate-100 dark:border-white/5">
+              <FormasPagamentoEditor
+                formas={formasPgto}
+                onChange={setFormasPgto}
+                totalSetup={newCobrarSetup ? Number(newValorSetup || 0) : 0}
+                mensalidade={mensalidadePlano}
+                meses={mesesPlano}
+              />
             </div>
 
+
             <div className="flex justify-between pt-4 border-t border-slate-100">
-              <Button variant="outline" onClick={() => setWizardStep(3)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+              <Button variant="outline" onClick={() => setWizardStep(2)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                 Voltar
               </Button>
-              <Button onClick={() => setWizardStep(5)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
+              <Button onClick={() => setWizardStep(4)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs px-6">
                 Avançar
                 <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
               </Button>
@@ -658,7 +432,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
         )}
 
         {/* STEP 5: REVISÃO E FECHAMENTO */}
-        {wizardStep === 5 && (() => {
+        {wizardStep === 4 && (() => {
           const selectedGdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
           const selectedVexoPkg = availablePackages.find(p => p.id === newPackageVexoId && p.tipo === "vexo");
 
@@ -744,10 +518,10 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
               </div>
 
               <div className="flex justify-between pt-4 border-t border-slate-100">
-                <Button variant="outline" onClick={() => setWizardStep(4)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                <Button variant="outline" onClick={() => setWizardStep(3)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                   Voltar
                 </Button>
-                <Button onClick={handleCreateDirectProposal} className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-black text-xs px-8">
+                <Button onClick={() => handleCreateDirectProposal(formasParaTerms(formasPgto))} className="bg-gradient-to-r from-purple-700 to-indigo-600 text-white font-black text-xs px-8">
                   Confirmar & Criar Proposta
                 </Button>
               </div>

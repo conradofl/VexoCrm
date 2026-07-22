@@ -65,7 +65,8 @@ export function useProposalWizard({
     setEditingProposalId(null);
   };
 
-  const handleCreateDirectProposal = async () => {
+  // `formasFixas` vem do editor de formas de pagamento, que vive no wizard.
+  const handleCreateDirectProposal = async (formasFixas: any[] = []) => {
     if (!newProspect.trim()) {
       toast({ title: "Nome obrigatório", description: "Informe o nome do prospect.", variant: "destructive" });
       return;
@@ -155,41 +156,8 @@ export function useProposalWizard({
         }
       }
 
-      // 3. Add Vexo avulso modules
-      Object.entries(newVexoAvulsoIds).forEach(([id, checked]) => {
-        if (checked) {
-          const prod = vexoProducts.find(p => p.id === id);
-          if (prod) {
-            const vp = prod.valor_vp ? Number(prod.valor_vp) : 0;
-                finalItems.push({
-              product_id: prod.id,
-              descricao: `Vexo OS: ${prod.nome}`,
-              categoria: "vexo",
-              valor: Number(prod.valor || 0),
-              valor_vp: vp > 0 ? vp : null,
-              recorrencia: prod.recorrencia || "mensal"
-            });
-          }
-        }
-      });
-
-      // 3b. Add GD avulso modules
-      Object.entries(newGdAvulsoIds).forEach(([id, checked]) => {
-        if (checked) {
-          const prod = gdProducts.find(p => p.id === id);
-          if (prod) {
-            const vp = prod.valor_vp ? Number(prod.valor_vp) : 0;
-                finalItems.push({
-              product_id: prod.id,
-              descricao: `GD: ${prod.nome}`,
-              categoria: "gd",
-              valor: Number(prod.valor_padrao || 0),
-              valor_vp: vp > 0 ? vp : null,
-              recorrencia: prod.recorrencia || "mensal"
-            });
-          }
-        }
-      });
+      // Não existe avulso com valor: o escopo do plano é a única fonte
+      // de serviços da proposta. Ver lib/geracaoDigital/plano.ts.
 
       const body: any = {
         client_id: clientId,
@@ -201,7 +169,10 @@ export function useProposalWizard({
         pacotes_ofertados: newPacotesOfertados,
         itens: finalItems,
         cobrar_setup: newCobrarSetup,
-        valor_setup_vexo: newCobrarSetup ? Number(newValorSetup || 0) : null,
+        // Guarda o valor mesmo com a cobrança desligada: é o que permite
+        // exibir "R$ 3.000 (riscado) Isento" na proposta. O cálculo ignora
+        // quando cobrar_setup = false.
+        valor_setup_vexo: Number(newValorSetup || 0) || null,
         periodo_plano: (() => {
           const gdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
           const vexoPkg = availablePackages.find(p => p.id === newPackageVexoId && p.tipo === "vexo");
@@ -214,7 +185,10 @@ export function useProposalWizard({
         valor_vp: computeVpFromItems(finalItems) > 0 ? computeVpFromItems(finalItems) : null,
         // Condições de pagamento ofertadas ao cliente (menu na proposta pública).
         condicoes_pagamento: {
-          ofertadas: availableTerms.filter((t) => newOfferedTermIds.includes(t.id)),
+          ofertadas: [
+            ...formasFixas,
+            ...availableTerms.filter((t) => newOfferedTermIds.includes(t.id)),
+          ],
           escolhida: null
         }
       };

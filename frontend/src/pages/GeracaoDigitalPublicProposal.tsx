@@ -42,7 +42,8 @@ interface ProposalItem {
   descricao: string;
   categoria: "gd" | "vexo";
   valor: number;
-  recorrencia: "mensal" | "unico";
+  /** "mensal" | "unico" | "pontual" — usar isCobrancaUnica, nunca comparar string. */
+  recorrencia: string;
   periodo?: string | null;
   meses?: number | null;
   total_periodo?: number | null;
@@ -89,6 +90,9 @@ const PERIODO_LABELS: Record<string, string> = {
 
 export default function GeracaoDigitalPublicProposal() {
   const { id } = useParams<{ id: string }>();
+  // ?embed=1: a proposta está dentro do preview da tela interna. Esconde as
+  // ações do vendedor para o preview mostrar exatamente o que o cliente vê.
+  const embed = new URLSearchParams(window.location.search).get("embed") === "1";
   const navigate = useNavigate();
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -349,6 +353,11 @@ export default function GeracaoDigitalPublicProposal() {
 
   const setupBaseVal = calc.setupOriginal;
   const setupFinalVal = calc.setupFinal;
+  // Setup isentado na negociação: o valor segue gravado em valor_setup_vexo,
+  // só não é cobrado (cobrar_setup = false). Mostrar o valor cheio riscado ao
+  // lado de "Isento" deixa a concessão visível — aqui o riscado é real, ao
+  // contrário do que a permuta exibia.
+  const setupIsentadoVal = !proposal.cobrar_setup ? Number(proposal.valor_setup_vexo || 0) : 0;
   const setupIsento = calc.setupFinal === 0;
 
   const mensalBaseVal = calc.mensalidadeOriginal;
@@ -410,7 +419,7 @@ export default function GeracaoDigitalPublicProposal() {
         <div className="flex items-center gap-3">
           {/* Ações do vendedor logado (cliente não vê). O botão de envio pega o
               link desta proposta aberta — sem risco de pegar a proposta errada. */}
-          {isAuthenticated && (
+          {isAuthenticated && !embed && (
             <>
               <Button
                 onClick={() => setShowShare(true)}
@@ -420,7 +429,10 @@ export default function GeracaoDigitalPublicProposal() {
                 Enviar ao Cliente
               </Button>
               <Button
-                onClick={() => navigate("/crm/propostas-gd")}
+                // Leva o id de volta para a lista reabrir ESTA proposta.
+                // Sem isso a lista caía sempre na primeira e o vendedor tinha
+                // que procurar de novo o cliente que estava vendo.
+                onClick={() => navigate(`/crm/propostas-gd?proposta=${id}`)}
                 variant="outline"
                 className="h-9 gap-1.5 border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white text-xs font-bold"
               >
@@ -573,9 +585,17 @@ export default function GeracaoDigitalPublicProposal() {
                     .toLowerCase();
                   return `nome:${nome}`;
                 };
-                const uniqueItems = items.filter(
-                  (item, index, self) => index === self.findIndex(t => dedupKey(t) === dedupKey(item))
-                );
+                const uniqueItems = items
+                  // A linha do pacote é o PLANO, não um serviço do escopo.
+                  // Listá-la aqui repetia "Pacote: X — R$ 6000" dentro de uma
+                  // caixa que já diz "tudo incluído no pacote".
+                  .filter((item) => {
+                    const d = String(item.descricao || "");
+                    return !d.startsWith("Pacote:") && !d.startsWith("Pacote Vexo:");
+                  })
+                  .filter(
+                    (item, index, self) => index === self.findIndex(t => dedupKey(t) === dedupKey(item))
+                  );
                 // Ordena: TODOS os serviços GD primeiro, depois TODOS os Vexo.
                 const byValor = (a: ProposalItem, b: ProposalItem) => Number(b.valor || 0) - Number(a.valor || 0);
                 const gdItems = uniqueItems.filter(i => i.categoria !== "vexo").sort(byValor);
@@ -591,11 +611,12 @@ export default function GeracaoDigitalPublicProposal() {
                       <span className="text-[13px] text-slate-100 truncate">{item.descricao}</span>
                       <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", item.categoria === "vexo" ? "bg-blue-400/70" : "bg-purple-400/70")} />
                     </div>
-                    {Number(item.valor || 0) > 0 ? (
-                      <span className="text-[11px] font-black text-white font-mono shrink-0">R$ {Number(item.valor || 0).toFixed(2)}</span>
-                    ) : (
-                      <span className="text-[10px] text-emerald-400/70 font-mono shrink-0">incluso</span>
-                    )}
+                    {/* Tudo aqui está no plano, então tudo é "incluso". Imprimir
+                        preço por item contradizia o próprio cabeçalho e fazia o
+                        cliente somar de novo o que já estava na mensalidade —
+                        valores que desde PACOTE FECHADO não entram em conta
+                        nenhuma. */}
+                    <span className="text-[10px] text-emerald-400/70 font-mono shrink-0">incluso</span>
                   </div>
                 ));
               })()}
@@ -614,7 +635,16 @@ export default function GeracaoDigitalPublicProposal() {
               <div className="grid gap-2.5 sm:grid-cols-2">
                 {offeredTerms.map((term) => {
                   const aplicaA = termAplicaA(term);
-                  const breakdown = computePaymentBreakdown(term, aplicaA === "mensalidade" ? Number(proposal.valor_recorrente || 0) : setupFinalVal);
+                  // "Parcelar o total do período" incide sobre o compromisso
+                  // inteiro, não sobre a mensalidade — senão 12x sairia de uma
+                  // parcela só.
+                  const base =
+                    term.id === "cartao_total_parcelado"
+                      ? calc.compromissoFinal
+                      : aplicaA === "mensalidade"
+                        ? calc.mensalidadeFinal
+                        : setupFinalVal;
+                  const breakdown = computePaymentBreakdown(term, base);
                   const isChosen = proposal.status === "aceita"
                     ? chosenTerm?.id === term.id
                     : chosenTermId === term.id;
@@ -702,16 +732,18 @@ export default function GeracaoDigitalPublicProposal() {
                 <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Investimento único (Setup)</span>
                 <span className="text-purple-300 font-black text-3xl block transition-all duration-500 ease-in-out">
                   {setupIsento ? (
-                    <span className="text-emerald-400 transition-colors duration-500">Isento</span>
-                  ) : (
                     <>
-                      {setupFinalVal < setupBaseVal && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
-                          R$ {setupBaseVal.toLocaleString("pt-BR")}
+                      {setupIsentadoVal > 0 && (
+                        <span className="text-slate-500 line-through mr-2 font-bold text-lg">
+                          R$ {setupIsentadoVal.toLocaleString("pt-BR")}
                         </span>
                       )}
-                      R$ {setupFinalVal.toLocaleString("pt-BR")}
+                      <span className="text-emerald-400 transition-colors duration-500">Isento</span>
                     </>
+                  ) : (
+                    // A camada de concessões saiu na fase 5c: final e base são
+                    // sempre iguais, então o riscado aqui só podia enganar.
+                    <>R$ {setupFinalVal.toLocaleString("pt-BR")}</>
                   )}
                 </span>
               </div>
@@ -723,22 +755,22 @@ export default function GeracaoDigitalPublicProposal() {
                   const dinheiroMensal = temVp ? mensalFinalVal - vpMensal : mensalFinalVal;
                   return (
                     <>
+                      {/* Sem riscado: a permuta divide a mensalidade, não a
+                          desconta. Riscar o valor cheio fazia parecer desconto
+                          e confundia o cliente. Total em destaque, composição
+                          logo abaixo. */}
                       <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                        {(mensalFinalVal < mensalBaseVal || temVp) && (
-                          <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500 dark:text-slate-400">
-                            R$ {(temVp ? mensalFinalVal : mensalBaseVal).toLocaleString("pt-BR")}
-                          </span>
-                        )}
-                        R$ {(temVp ? dinheiroMensal : mensalFinalVal).toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
+                        R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
                       </span>
                       {temVp && (
                         <div className="mt-2 space-y-1">
+                          <span className="text-[10px] text-slate-400 block">Composição da mensalidade</span>
                           <div className="flex items-center justify-between py-1.5 px-3 bg-pink-500/10 border border-pink-500/20 rounded-md">
                             <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
                             <span className="text-pink-300 text-sm font-black">R$ {dinheiroMensal.toLocaleString("pt-BR")}/mês</span>
                           </div>
                           <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
-                            <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em VP (permuta)</span>
+                            <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em permuta</span>
                             <span className="text-emerald-400 text-sm font-black">R$ {vpMensal.toLocaleString("pt-BR")}/mês</span>
                           </div>
                         </div>
@@ -764,28 +796,24 @@ export default function GeracaoDigitalPublicProposal() {
                   <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
                     <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
                     <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                      {(calc.compromissoFinal < calc.compromissoOriginal || temVpC) && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg transition-all duration-500">
-                          R$ {(temVpC ? calc.compromissoFinal : calc.compromissoOriginal).toLocaleString("pt-BR")}
-                        </span>
-                      )}
-                      R$ {(temVpC ? dinheiroPeriodo : calc.compromissoFinal).toLocaleString("pt-BR")}
+                      R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
                     </span>
                     {temVpC && (
                       <div className="mt-2 space-y-1">
+                        <span className="text-[10px] text-slate-400 block">Composição do período</span>
                         <div className="flex items-center justify-between py-1.5 px-3 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
                           <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
                           <span className="text-indigo-300 text-sm font-black">R$ {dinheiroPeriodo.toLocaleString("pt-BR")}</span>
                         </div>
                         <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
-                          <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em VP (permuta)</span>
+                          <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em permuta</span>
                           <span className="text-emerald-400 text-sm font-black">R$ {vpPeriodo.toLocaleString("pt-BR")}</span>
                         </div>
                       </div>
                     )}
                     <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
                       Soma total das mensalidades por {calc.mesesPeriodo} meses.
-                      {temVpC && ` Desse total, R$ ${vpPeriodo.toLocaleString("pt-BR")} são abatidos em permuta.`}
+                      {temVpC && ` Desse total, R$ ${vpPeriodo.toLocaleString("pt-BR")} são pagos em permuta.`}
                     </span>
                   </div>
                 );
