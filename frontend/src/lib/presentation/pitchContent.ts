@@ -99,6 +99,18 @@ export const BENCHMARKS = {
     taxaResgateRecompra: 0.15,      // 15% recuperável com lembrete de troca
     cicloMeses: 18,
   },
+  suplementos: {
+    // Vazamento 1 — recompra dormida. É o ciclo mais curto de todos os
+    // segmentos atendidos: o pote acaba em ~45 dias e o cliente decide de novo.
+    // Se ninguém lembra, ele compra no marketplace ou simplesmente para.
+    clientesNoCicloMes: 80,          // clientes/mês que fecham o ciclo e não voltam
+    ticketMedio: 180,                // pote + complemento (conservador)
+    taxaResgateRecompra: 0.18,       // 18% recuperável com lembrete na hora certa
+    cicloDias: 45,
+    // Vazamento 2 — consulta no WhatsApp que morre sem resposta rápida.
+    consultasSemFechamentoMes: 50,
+    taxaResgateConsulta: 0.2,        // 20% recuperável com resposta imediata
+  },
 } as const;
 
 // Ocupação diluída ao mudar para um ponto maior: o público é o mesmo, o salão
@@ -126,6 +138,19 @@ export function estimateOpticalLoss() {
   const mensal = orcamentoMensal + recompraMensal;
   const anual = mensal * 12;
   return { orcamentoMensal, recompraMensal, mensal, anual };
+}
+
+// Suplementos — mesma lógica de dois vazamentos das óticas, com um agravante:
+// aqui o ciclo é de dias, não de anos. Toda vez que o pote acaba o cliente
+// decide de novo onde comprar, e o marketplace está a um toque de distância.
+// A base é o ativo; sem lembrete na hora certa ela evapora sozinha.
+export function estimateSupplementLoss() {
+  const b = BENCHMARKS.suplementos;
+  const recompraMensal = b.clientesNoCicloMes * b.ticketMedio * b.taxaResgateRecompra;
+  const consultaMensal = b.consultasSemFechamentoMes * b.ticketMedio * b.taxaResgateConsulta;
+  const mensal = recompraMensal + consultaMensal;
+  const anual = mensal * 12;
+  return { recompraMensal, consultaMensal, mensal, anual };
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +506,124 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
       ];
     },
   },
+
+  suplementos: {
+    id: "suplementos",
+    label: "Suplementos Alimentares",
+    focus: "A base que compra sozinha: recompra no ciclo certo e resposta imediata (suplementos).",
+    accent: "#059669",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "sua loja";
+      const { recompraMensal, consultaMensal, mensal, anual } = estimateSupplementLoss();
+      const b = BENCHMARKS.suplementos;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "A Base Que Compra Sozinha.",
+          subtitle: `A ${nome} para de vender pote por pote. O cliente volta no ciclo certo, sem você correr atrás.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "O pote acaba e ele compra em outro lugar.",
+          body:
+            `O cliente comprou, gostou e sumiu. Quando o pote acabou, ele não lembrou da sua loja. ` +
+            `Abriu o aplicativo, achou dois reais mais barato e fechou. Você não perdeu para o preço. Perdeu para o silêncio.`,
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1581269631092-f5cbb136ea2e?auto=format&fit=crop&w=900&q=70",
+              label: "O pote acabando em casa, e ninguém avisa",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1739289696449-cba3a5ef085d?auto=format&fit=crop&w=900&q=70",
+              label: "Cliente de volta na loja, com GD + Vexo",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "Seu maior ativo está dormindo.",
+          body:
+            `Seu ciclo é de ${b.cicloDias} dias. A cada ${b.cicloDias} dias o cliente decide de novo onde comprar, e o marketplace está a um toque. ` +
+            `Cerca de ${b.clientesNoCicloMes} clientes por mês fecham o ciclo sem receber um lembrete. Isso vale ${milhar(recompraMensal * 12)} por ano. ` +
+            `Some as ${b.consultasSemFechamentoMes} perguntas por mês no WhatsApp que esfriam antes da resposta e vão mais ${milhar(consultaMensal * 12)}.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "receita que já é sua e escapa por falta de lembrete e de resposta na hora",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Recompra.",
+          steps: [
+            "Atraímos quem treina na sua região e está comprando suplemento agora, não quem só caça promoção.",
+            "Nossa Recepcionista Digital 24h responde no WhatsApp em 3 segundos, tira dúvida de uso e já fecha o pedido.",
+            `O Lembrete de Recompra fala com o cliente quando o pote dele está acabando, no dia ${b.cicloDias}, sozinho.`,
+            "O Resgate Automático volta a falar com quem perguntou preço e não comprou, antes de ele fechar no aplicativo.",
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital traz gente nova e constrói sua autoridade. A Vexo cuida da resposta, do resgate e da recompra no piloto automático. Juntas, transformam a ${nome} em ponto fixo de reabastecimento.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Atração & Autoridade",
+              items: [
+                "Sistema de Atração de Clientes na sua região",
+                "Conteúdo que educa sobre uso e dosagem, e justifica o produto certo",
+                "Sua loja achada no Google na hora da recompra",
+                "Reputação forte: mais avaliações e prova social",
+                "Campanhas para os picos do ano (janeiro, verão, Black Friday)",
+                "Marca com cara de referência, não de mais uma loja de whey",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Resposta, Resgate & Recompra",
+              items: [
+                "Recepcionista Digital 24h no seu WhatsApp",
+                `Lembrete de recompra disparado no ciclo de ${b.cicloDias} dias`,
+                "Resgate automático de quem perguntou e não comprou",
+                "Cada cliente, pedido e ciclo registrado num só lugar",
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body:
+            `Imagine a ${nome} com o mês já começando vendido. A base antiga voltando sozinha no ciclo. ` +
+            `Você vendendo o produto certo para quem já confia em você, em vez de brigar por centavos com o aplicativo.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo do silêncio.",
+          body: `Quanto a ${nome} deixa na mesa todo mês vendendo bem e nunca lembrando o cliente na hora que o pote acaba?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o preço estimado de não trabalhar a recompra nem responder na hora",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um ciclo. Cada pote que acaba em silêncio é um cliente que vira do concorrente. A virada começa hoje.",
+        },
+      ];
+    },
+  },
 };
 
 // Mapeamento de segment_id específico -> grupo. Adicione novos ids aqui conforme
@@ -504,6 +647,10 @@ const SEGMENT_ID_TO_GROUP: Record<string, string> = {
   // Óticas
   otica: "otica",
   oticas: "otica",
+  suplementos: "suplementos",
+  suplemento: "suplementos",
+  suplementos_alimentares: "suplementos",
+  nutricao_esportiva: "suplementos",
   optica: "otica",
   opticas: "otica",
 };
@@ -514,6 +661,11 @@ export const DEFAULT_GROUP_ID = "entretenimento_local";
 // do app é um UUID, então resolvemos pelo texto: "Clínicas de Saúde",
 // "Odontologia", "Food Service", etc.).
 const GROUP_KEYWORDS: Record<string, string[]> = {
+  suplementos: [
+    "suplemento", "suplementos", "whey", "creatina", "nutricao", "nutrição",
+    "nutri esportiva", "academia", "fitness", "hipertrofia", "proteina", "proteína",
+    "pre-treino", "pré-treino", "vitamina", "emporio saudavel", "empório saudável",
+  ],
   otica: [
     "otica", "ótica", "oticas", "óticas", "optica", "óptica", "oculos", "óculos",
     "lente", "armacao", "armação", "grau", "multifocal", "visao", "visão", "eyewear",
