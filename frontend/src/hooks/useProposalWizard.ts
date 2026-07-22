@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { fetchApi } from "@/lib/api";
 import type { PaymentTerm } from "@/lib/geracaoDigital/paymentTerms";
+import { computeVpFromItems } from "@/lib/geracaoDigital/proposalCalculator";
 
 interface UseProposalWizardProps {
   clientId: string;
@@ -64,7 +65,8 @@ export function useProposalWizard({
     setEditingProposalId(null);
   };
 
-  const handleCreateDirectProposal = async () => {
+  // `formasFixas` vem do editor de formas de pagamento, que vive no wizard.
+  const handleCreateDirectProposal = async (formasFixas: any[] = []) => {
     if (!newProspect.trim()) {
       toast({ title: "Nome obrigatório", description: "Informe o nome do prospect.", variant: "destructive" });
       return;
@@ -76,7 +78,11 @@ export function useProposalWizard({
 
       const finalItems: any[] = [];
 
-      let totalVp = 0;
+      // VP NÃO é mais somado aqui item a item. Antes fazíamos `totalVp += vp`
+      // em 4 laços (pacote GD, pacote Vexo, avulsos GD, avulsos Vexo) sem
+      // dedupe: produto que está no pacote E marcado como avulso contava 2x,
+      // e ao editar (que pré-marca o conteúdo do pacote) o VP multiplicava.
+      // Agora o total sai de computeVpFromItems(), a mesma regra dos valores.
 
       // 1. Add GD package item
       const selectedGdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
@@ -87,7 +93,6 @@ export function useProposalWizard({
         const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
         const valorTabela = Number(selectedGdPkg.valor_tabela || 0);
         const vp = selectedGdPkg.valor_vp ? Number(selectedGdPkg.valor_vp) : 0;
-        if (vp > 0) totalVp += vp;
 
         finalItems.push({
           product_id: null,
@@ -124,7 +129,6 @@ export function useProposalWizard({
         const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
         const valorTabela = Number(selectedVexoPkg.valor_tabela || 0);
         const vp = selectedVexoPkg.valor_vp ? Number(selectedVexoPkg.valor_vp) : 0;
-        if (vp > 0) totalVp += vp;
 
         finalItems.push({
           product_id: null,
@@ -152,43 +156,8 @@ export function useProposalWizard({
         }
       }
 
-      // 3. Add Vexo avulso modules
-      Object.entries(newVexoAvulsoIds).forEach(([id, checked]) => {
-        if (checked) {
-          const prod = vexoProducts.find(p => p.id === id);
-          if (prod) {
-            const vp = prod.valor_vp ? Number(prod.valor_vp) : 0;
-            if (vp > 0) totalVp += vp;
-            finalItems.push({
-              product_id: prod.id,
-              descricao: `Vexo OS: ${prod.nome}`,
-              categoria: "vexo",
-              valor: Number(prod.valor || 0),
-              valor_vp: vp > 0 ? vp : null,
-              recorrencia: prod.recorrencia || "mensal"
-            });
-          }
-        }
-      });
-
-      // 3b. Add GD avulso modules
-      Object.entries(newGdAvulsoIds).forEach(([id, checked]) => {
-        if (checked) {
-          const prod = gdProducts.find(p => p.id === id);
-          if (prod) {
-            const vp = prod.valor_vp ? Number(prod.valor_vp) : 0;
-            if (vp > 0) totalVp += vp;
-            finalItems.push({
-              product_id: prod.id,
-              descricao: `GD: ${prod.nome}`,
-              categoria: "gd",
-              valor: Number(prod.valor_padrao || 0),
-              valor_vp: vp > 0 ? vp : null,
-              recorrencia: prod.recorrencia || "mensal"
-            });
-          }
-        }
-      });
+      // Não existe avulso com valor: o escopo do plano é a única fonte
+      // de serviços da proposta. Ver lib/geracaoDigital/plano.ts.
 
       const body: any = {
         client_id: clientId,
@@ -200,7 +169,10 @@ export function useProposalWizard({
         pacotes_ofertados: newPacotesOfertados,
         itens: finalItems,
         cobrar_setup: newCobrarSetup,
-        valor_setup_vexo: newCobrarSetup ? Number(newValorSetup || 0) : null,
+        // Guarda o valor mesmo com a cobrança desligada: é o que permite
+        // exibir "R$ 3.000 (riscado) Isento" na proposta. O cálculo ignora
+        // quando cobrar_setup = false.
+        valor_setup_vexo: Number(newValorSetup || 0) || null,
         periodo_plano: (() => {
           const gdPkg = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
           const vexoPkg = availablePackages.find(p => p.id === newPackageVexoId && p.tipo === "vexo");
@@ -210,10 +182,13 @@ export function useProposalWizard({
         condicoes: newCondicoes || undefined,
         payment_link: newPaymentLink || null,
         carencia_dias: newCarencia !== "" ? Number(newCarencia) : null,
-        valor_vp: totalVp > 0 ? totalVp : null,
+        valor_vp: computeVpFromItems(finalItems) > 0 ? computeVpFromItems(finalItems) : null,
         // Condições de pagamento ofertadas ao cliente (menu na proposta pública).
         condicoes_pagamento: {
-          ofertadas: availableTerms.filter((t) => newOfferedTermIds.includes(t.id)),
+          ofertadas: [
+            ...formasFixas,
+            ...availableTerms.filter((t) => newOfferedTermIds.includes(t.id)),
+          ],
           escolhida: null
         }
       };

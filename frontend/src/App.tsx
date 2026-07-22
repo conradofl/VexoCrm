@@ -41,9 +41,8 @@ import GeracaoDigitalProposals from "./pages/GeracaoDigitalProposals";
 import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
 import PresentationPreview from "./pages/PresentationPreview";
 import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
-import GeracaoDigitalPaymentTerms from "./pages/GeracaoDigitalPaymentTerms";
 import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
-import GeracaoDigitalNegotiationPage from "./pages/GeracaoDigitalNegotiationPage";
+import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPresentation";
 
 const queryClient = new QueryClient();
 
@@ -326,14 +325,6 @@ const App = () => (
                 }
               />
               <Route
-                path="condicoes-gd"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <GeracaoDigitalPaymentTerms />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="contratos-gd"
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
@@ -392,11 +383,12 @@ const App = () => (
                 }
               />
              </Route>
+             {/* Apresentação da proposta — abre direto, sem passar pelo setup. */}
              <Route
-               path="/crm/propostas-gd/negociacao/:id"
+               path="/crm/propostas-gd/:id/apresentacao"
                element={
                  <ProtectedRoute allowedRoles={["internal"]}>
-                   <GeracaoDigitalNegotiationPage />
+                   <GeracaoDigitalProposalPresentation />
                  </ProtectedRoute>
                }
              />

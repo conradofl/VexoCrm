@@ -4,6 +4,31 @@ import { getSlackQueue } from "../geracaoDigital/slackQueue.js";
 import { processEvolutionMessageToSlack } from "../geracaoDigital/slackMirrorIn.js";
 import { processSlackMessageToEvolution } from "../geracaoDigital/slackMirrorOut.js";
 
+// Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
+// grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
+// item "pontual" ficar fora do setup e entrar no valor recorrente — inflado
+// depois pelos meses do período. Espelha isCobrancaUnica do
+// frontend/src/lib/geracaoDigital/proposalCalculator.ts.
+const RECORRENCIAS_UNICAS = new Set(["unico", "único", "pontual", "avulso", "unica", "única"]);
+const isCobrancaUnica = (item) =>
+  RECORRENCIAS_UNICAS.has(String(item?.recorrencia ?? "mensal").trim().toLowerCase());
+const isCobrancaMensal = (item) => !isCobrancaUnica(item);
+
+// PACOTE FECHADO: escolheu pacote, o preço do pacote É o preço. Nada de avulso,
+// pontual ou extra entra em setup nem em mensalidade; o único setup cobrável é
+// o do sistema Vexo, somado à parte. Espelha proposalCalculator.ts no frontend.
+const isLinhaDePacote = (item) => {
+  const d = String(item?.descricao || "");
+  return d.startsWith("Pacote:") || d.startsWith("Pacote Vexo:");
+};
+const temPacote = (items) => (items || []).some(isLinhaDePacote);
+const soma = (items, pred) =>
+  (items || []).filter(pred).reduce((sum, i) => sum + Number(i.valor || 0), 0);
+
+const somaSetup = (items) => (temPacote(items) ? 0 : soma(items, isCobrancaUnica));
+const somaRecorrente = (items) =>
+  temPacote(items) ? soma(items, isLinhaDePacote) : soma(items, isCobrancaMensal);
+
 export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, requireInternalPageAccess) {
   // POST /api/geracao-digital/briefing
   app.post("/api/geracao-digital/briefing", requireFirebaseAuth, async (req, res) => {
@@ -1462,8 +1487,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const setupVexo = cobrar_setup ? Number(valor_setup_vexo || 0) : 0;
 
       // Recalculate totals
-      const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorSetup = somaSetup(finalItems);
+      const valorRecorrente = somaRecorrente(finalItems);
       const computedTotal = valorSetup + valorRecorrente + setupVexo;
 
       const hasSegmentLogo = await proposalHasSegmentLogo();
@@ -1521,8 +1546,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const formatted = result.rows.map(row => {
         const items = Array.isArray(row.itens) ? row.itens : [];
-        const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-        const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+        const valorSetup = somaSetup(items);
+        const valorRecorrente = somaRecorrente(items);
         return {
           ...row,
           valor_setup: valorSetup,
@@ -1593,8 +1618,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const row = result.rows[0];
       const items = Array.isArray(row.itens) ? row.itens : [];
-      const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorSetup = somaSetup(items);
+      const valorRecorrente = somaRecorrente(items);
       // Prefere segmento/logo da própria proposta (row.segment_id vindo de p.*,
       // presente só se a coluna existe); senão cai no da apresentação vinculada.
       const segmentId = row.segment_id ?? row.pres_segment_id ?? null;
@@ -1620,7 +1645,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   app.put("/api/gd/proposals/:id", requireFirebaseAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento, package_id, package_vexo_id, valor_vp, pacotes_ofertados } = req.body;
+      const { client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento, package_id, package_vexo_id, valor_vp, pacotes_ofertados, segment_id, prospect_logo } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
       // Validate payment_link format (http/https)
@@ -1652,8 +1677,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         : (current.valor_setup_vexo !== null ? Number(current.valor_setup_vexo) : null);
       const setupVexo = finalCobrarSetup ? Number(finalValorSetupVexo || 0) : 0;
 
-      const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorSetup = somaSetup(finalItems);
+      const valorRecorrente = somaRecorrente(finalItems);
       const valorTotal = valorSetup + valorRecorrente + setupVexo;
 
       const PERIODOS_VALIDOS = ["mensal", "trimestral", "semestral", "anual"];
@@ -1674,6 +1699,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const finalValorVp = valor_vp !== undefined
         ? (valor_vp !== null ? Number(valor_vp) : null)
         : (current.valor_vp !== null ? Number(current.valor_vp) : null);
+
+      // segment_id/prospect_logo faltavam no PUT: o wizard os enviava e o
+      // backend descartava calado, então editar uma proposta apagava o
+      // segmento da apresentação e a logo do cliente. Colunas condicionais —
+      // mesma checagem usada no POST.
+      const podeSegLogo = await proposalHasSegmentLogo();
+      const segLogoSet = podeSegLogo
+        ? ",\n             segment_id = COALESCE($23, segment_id),\n             prospect_logo = COALESCE($24, prospect_logo)"
+        : "";
 
       const result = await pool.query(
         `UPDATE public.gd_proposals
@@ -1696,7 +1730,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              package_id = $17,
              package_vexo_id = $18,
              valor_vp = $21,
-             pacotes_ofertados = $22
+             pacotes_ofertados = $22${segLogoSet}
          WHERE id = $19 AND tenant_id = $20 RETURNING *`,
         [
           prospect_name,
@@ -1720,7 +1754,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           id,
           tenantId,
           finalValorVp,
-          finalPacotesOfertados ? JSON.stringify(finalPacotesOfertados) : null
+          finalPacotesOfertados ? JSON.stringify(finalPacotesOfertados) : null,
+          // Só entram quando as colunas existem: pg rejeita parâmetro a mais.
+          ...(podeSegLogo ? [segment_id ?? null, prospect_logo ?? null] : [])
         ]
       );
 
@@ -1883,8 +1919,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       const row = result.rows[0];
       const items = Array.isArray(row.itens) ? row.itens : [];
-      const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorSetup = somaSetup(items);
+      const valorRecorrente = somaRecorrente(items);
 
       res.json({
         success: true,
@@ -2007,8 +2043,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         if (extras.length > 0) items = [...items, ...extras];
       }
 
-      const valorSetup = items.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorRecorrente = items.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorSetup = somaSetup(items);
+      const valorRecorrente = somaRecorrente(items);
 
       res.json({
         success: true,
@@ -2104,8 +2140,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
 
       // Recalculate totals
-      const valorSetup = finalItems.filter(i => i.recorrencia === "unico").reduce((sum, i) => sum + Number(i.valor || 0), 0);
-      const valorRecorrente = finalItems.filter(i => i.recorrencia === "mensal").reduce((sum, i) => sum + Number(i.valor || 0), 0);
+      const valorSetup = somaSetup(finalItems);
+      const valorRecorrente = somaRecorrente(finalItems);
       const valorTotal = valorSetup + valorRecorrente;
 
       // Update proposal in DB — período do plano acompanha o pacote escolhido

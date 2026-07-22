@@ -75,3 +75,4 @@ _memoria/
 # Arquivo temporario para importar envs na Vercel (contem chaves)
 .env.vercel
 frontend/.env.vercel
+backups/
