@@ -53,14 +53,15 @@ export async function syncPlanoPackages(opts: {
     porPeriodo.delete(payload.periodo);
   }
 
-  // Prazos que saíram da oferta: apaga a linha para não virar lixo no catálogo.
-  for (const orfa of porPeriodo.values()) {
-    try {
-      await fetchApi(`/api/gd/packages/${orfa.id}`, { method: "DELETE", headers });
-    } catch {
-      // Falha aqui não invalida o plano: a linha só deixa de ser ofertada.
-    }
-  }
+  // Prazos que saíram da oferta apenas DEIXAM DE SER OFERTADOS — a linha fica.
+  //
+  // Antes daqui saía um DELETE. Custou caro: qualquer hidratação incompleta do
+  // editor (o plano abrindo vazio por causa de uma corrida no carregamento dos
+  // pacotes) fazia "Aplicar plano" desativar as linhas de preço reais da
+  // proposta. Aconteceu com o Dr. Diogo: Trimestral, Semestral e Anual foram
+  // para ativo=false e sobrou um "Mensal" de R$ 1.
+  // Linhas ad_hoc não aparecem em lugar nenhum, então deixá-las não polui nada;
+  // apagar preço a partir de um estado de UI, sim, é destrutivo.
 
   // Ordem dos prazos = ordem de PERIODOS (mensal → anual), previsível na proposta.
   const ordenados = PERIODOS.map((p) => pacotes.find((x) => x.periodo === p.key)).filter(Boolean);

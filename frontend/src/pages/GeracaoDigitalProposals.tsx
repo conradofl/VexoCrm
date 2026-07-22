@@ -330,12 +330,12 @@ export default function GeracaoDigitalProposals() {
         if (p?.package_vexo_id) ids.add(p.package_vexo_id);
         (Array.isArray(p?.pacotes_ofertados) ? p.pacotes_ofertados : []).forEach((id: string) => { if (id) ids.add(id); });
       });
-      if (ids.size === 0) return;
+      if (ids.size === 0) return [] as any[];
       const token = await getIdToken();
       const headers: HeadersInit = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
       const res = await fetchApi(`/api/gd/packages?client_id=${clientId || ""}&ids=${Array.from(ids).join(",")}`, { headers });
-      if (!res.ok) return;
+      if (!res.ok) return [] as any[];
       const data = await res.json();
       if (data.success && Array.isArray(data.data)) {
         setAvailablePackages((prev) => {
@@ -343,9 +343,12 @@ export default function GeracaoDigitalProposals() {
           data.data.forEach((p: any) => map.set(p.id, p));
           return Array.from(map.values());
         });
+        return data.data as any[];
       }
+      return [] as any[];
     } catch (err) {
       console.error("Erro ao carregar pacotes referenciados:", err);
+      return [] as any[];
     }
   }
 
@@ -501,7 +504,10 @@ export default function GeracaoDigitalProposals() {
       const data = await res.json();
       if (data.success) {
         setProposals(data.data);
-        loadReferencedPackages(data.data);
+        // AGUARDA: selectProposal hidrata o editor de plano a partir dos
+        // pacotes referenciados. Sem o await, o editor abria vazio (escopo e
+        // preços zerados) mesmo com a proposta íntegra no banco.
+        const refPkgs = await loadReferencedPackages(data.data);
         if (data.data.length > 0) {
           // Mantém aberta a proposta em que o vendedor estava. Antes caía
           // sempre em data.data[0] — toda vez que loadProposals() rodava
@@ -509,7 +515,7 @@ export default function GeracaoDigitalProposals() {
           // para o primeiro cliente da lista.
           const alvoId = selectedProposalRef.current?.id || propostaIdUrl;
           const alvo = data.data.find((p: any) => p.id === alvoId) || data.data[0];
-          selectProposal(alvo);
+          selectProposal(alvo, refPkgs);
         }
       }
     } catch (err: any) {
@@ -525,7 +531,10 @@ export default function GeracaoDigitalProposals() {
     }
   }
 
-  const selectProposal = (prop: Proposal) => {
+  // `pkgsRecemCarregados`: o state availablePackages ainda não refletiu o
+  // fetch dos pacotes desta proposta (setState é assíncrono), então quem
+  // chama passa a lista direto. Sem isso o editor de plano abria zerado.
+  const selectProposal = (prop: Proposal, pkgsRecemCarregados: any[] = []) => {
     setSelectedProposal(prop);
     setProspectName(prop.prospect_name);
     setCondicoes(prop.condicoes);
@@ -572,9 +581,12 @@ export default function GeracaoDigitalProposals() {
     setEditPacotesOfertados(ofertados);
     // Reconstrói o plano (escopo × prazos) a partir das linhas de preço já
     // gravadas, para editar aqui com o mesmo editor do wizard.
+    const catalogo = [...availablePackages, ...pkgsRecemCarregados];
     setEditPlano(
       planoDeProposta(
-        availablePackages.filter((p: any) => ofertados.includes(p.id)),
+        ofertados
+          .map((pid) => catalogo.find((p: any) => p.id === pid))
+          .filter(Boolean),
         Array.isArray(prop.itens) ? prop.itens : []
       )
     );
