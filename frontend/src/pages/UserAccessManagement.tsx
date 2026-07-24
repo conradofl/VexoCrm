@@ -2055,6 +2055,8 @@ export default function UserAccessManagement() {
       const body = await readApiJson<{
         item?: AdminUserRecord;
         passwordResetLink?: string;
+        passwordResetEmailSent?: boolean;
+        passwordResetEmailError?: string | null;
         syncedExisting?: boolean;
       }>(res, "admin-user-create");
 
@@ -2064,7 +2066,14 @@ export default function UserAccessManagement() {
         message: body.syncedExisting
           ? `O usuario ${body.item?.email || payload.email} ja existia no Firebase Auth e teve o acesso sincronizado.`
           : `O usuario ${body.item?.email || payload.email} foi criado com sucesso.`,
-        details: body.passwordResetLink ? `Link de redefinicao: ${body.passwordResetLink}` : null,
+        // O backend só devolve o link quando o e-mail NÃO saiu. Antes a tela
+        // mostrava o link sempre, dando a impressão de que o convite tinha sido
+        // enviado quando na verdade nada era disparado.
+        details: body.passwordResetEmailSent
+          ? `Convite enviado por e-mail para ${body.item?.email || payload.email}.`
+          : body.passwordResetLink
+            ? `O e-mail nao pode ser enviado${body.passwordResetEmailError ? ` (${body.passwordResetEmailError})` : ""}. Repasse este link de definicao de senha ao usuario: ${body.passwordResetLink}`
+            : null,
       });
       setCreateDraft(buildCreateDraft());
       setCreateDialogOpen(false);
