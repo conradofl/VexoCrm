@@ -154,7 +154,15 @@ export default function GeracaoDigitalPitch() {
     setIsProcessingAI(true);
     // Reset fields
     setBriefingFields((prev) =>
-      prev.map((f) => ({ ...f, status: "pending", value: "", confidence: 0 }))
+      prev.map((f) => ({
+        ...f,
+        status: "pending",
+        value: "",
+        confidence: 0,
+        // Subcampos também precisam ser zerados, senão uma transcrição nova
+        // convivia com os valores da anterior.
+        subfields: f.subfields?.map((sf) => ({ ...sf, value: "" })),
+      }))
     );
 
     const extractedValues = deriveExtractedValues(transcriptText);
@@ -168,7 +176,7 @@ export default function GeracaoDigitalPitch() {
         playChime();
         toast({
           title: "Análise da IA Concluída!",
-          description: "Os 14 campos do briefing foram qualificados e preenchidos em tempo real.",
+          description: `Os campos do briefing foram qualificados e preenchidos em tempo real.`,
         });
         return;
       }
@@ -182,11 +190,23 @@ export default function GeracaoDigitalPitch() {
         setBriefingFields((prev) =>
           prev.map((f) => {
             if (f.id === fieldId) {
-              const val = extractedValues[fieldId] || "Preenchido com base nas respostas do briefing comercial.";
+              // Campos com subcampos (Público Alvo) recebem valor por subcampo,
+              // na chave "<campo>.<subcampo>". Antes só `value` era escrito e
+              // gênero, faixa etária, classe, interesses e outros detalhes
+              // ficavam vazios mesmo com a transcrição colada.
+              const subfields = f.subfields?.map((sf) => ({
+                ...sf,
+                value: extractedValues[`${f.id}.${sf.id}`] || sf.value,
+              }));
+              const temSub = !!subfields?.some((sf) => sf.value);
+              const val =
+                extractedValues[fieldId] ||
+                (temSub ? "" : "Preenchido com base nas respostas do briefing comercial.");
               return {
                 ...f,
                 status: "completed",
                 value: val,
+                subfields,
                 confidence: Math.round(85 + Math.random() * 14)
               };
             }

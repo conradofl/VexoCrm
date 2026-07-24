@@ -12,7 +12,7 @@ export const DEFAULT_THEME: CustomTheme = {
       themePreset: "indigo"
 };
 
-// Estado inicial dos 20 campos do formulário de briefing.
+// Estado inicial dos campos do formulário de briefing.
 export const DEFAULT_BRIEFING_FIELDS: BriefingField[] = [
     { 
       id: "produtos", 
@@ -39,11 +39,16 @@ export const DEFAULT_BRIEFING_FIELDS: BriefingField[] = [
     { id: "site", label: "Site", placeholder: "Domínio ativo (ex: www.empresa.com.br)", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "dominios_dns", label: "Domínios DNS", placeholder: "Servidor de hospedagem DNS (ex: Cloudflare, Registro.br)", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "whatsapp", label: "WhatsApp Business", placeholder: "Número comercial completo com DDD", status: "pending", value: "", confidence: 0, type: "text" },
-    { id: "concorrentes", label: "Maiores concorrentes", placeholder: "Quais empresas competem diretamente com o seu negócio?", status: "pending", value: "", confidence: 0, type: "text" },
+    { id: "concorrentes", label: "Principais concorrentes diretos", placeholder: "Quais empresas competem diretamente com o seu negócio?", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "inspiracao", label: "Perfis de inspiração", placeholder: "Quais marcas inspiram sua estética?", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "servicos", label: "Produtos e serviços", placeholder: "Descreva o core business do negócio", status: "pending", value: "", confidence: 0, type: "text" },
+    // --- Sobre o negócio / produto -------------------------------------------
+    { id: "ticket_margem", label: "Ticket médio e margem", placeholder: "Ex: ticket médio de R$ 800 com margem de 40%", status: "pending", value: "", confidence: 0, type: "text" },
+    { id: "diferencial", label: "Diferencial competitivo", placeholder: "O que faz o cliente escolher este negócio e não o concorrente?", status: "pending", value: "", confidence: 0, type: "textarea" },
+    { id: "ja_rodou_trafego", label: "Já rodou tráfego pago antes?", placeholder: "Histórico de investimento em mídia", status: "pending", value: "", confidence: 0, type: "radio", options: ["Sim", "Não", "Não sei"] },
+    { id: "trafego_historico", label: "Se sim: com quem, resultados, o que funcionou e o que não funcionou", placeholder: "Agência ou gestor anterior, verba, retorno obtido e aprendizados", status: "pending", value: "", confidence: 0, type: "textarea" },
     { id: "localizacao", label: "Localização", placeholder: "Região, bairros ou abrangência nacional", status: "pending", value: "", confidence: 0, type: "text" },
-    { id: "produtos_trafego", label: "Produtos trabalhados no tráfego", placeholder: "Foco principal das campanhas patrocinadas", status: "pending", value: "", confidence: 0, type: "text" },
+    { id: "produtos_trafego", label: "Produtos trabalhados no tráfego", placeholder: "Foco principal das campanhas patrocinadas", status: "pending", value: "", confidence: 0, type: "textarea" },
     { 
       id: "objetivo_trafego", 
       label: "Objetivo do tráfego", 
@@ -52,10 +57,24 @@ export const DEFAULT_BRIEFING_FIELDS: BriefingField[] = [
       value: "", 
       confidence: 0, 
       type: "checkboxes", 
-      options: ["Ganho de seguidores e visualização (posicionamento)", "Leads pro whatsapp business", "Formulários"] 
+      options: [
+        "Topo · Reconhecimento de marca (branding, awareness)",
+        "Topo · Alcance (máximo de pessoas impactadas)",
+        "Topo · Tráfego para site/rede social",
+        "Meio · Geração de leads (formulário, WhatsApp, e-mail)",
+        "Meio · Engajamento (curtidas, comentários, salvamentos, seguidores)",
+        "Meio · Visualização de vídeo (conteúdo educativo/institucional)",
+        "Fundo · Vendas diretas (e-commerce, catálogo)",
+        "Fundo · Conversão em site (compra, cadastro, agendamento)",
+        "Fundo · Remarketing (recuperar quem visitou/abandonou carrinho)"
+      ] 
     },
     { id: "verba", label: "Verba disponível", placeholder: "Orçamento mensal planejado para anúncios", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "tipo_pagamento", label: "Tipo de pagamento", placeholder: "Forma de pagamento de mídia", status: "pending", value: "", confidence: 0, type: "radio", options: ["Cartão de crédito virtual", "PIX", "Boleto"] },
+    // --- Verba ---------------------------------------------------------------
+    { id: "verba_periodicidade", label: "A verba é mensal, semanal ou por campanha?", placeholder: "Periodicidade do investimento", status: "pending", value: "", confidence: 0, type: "radio", options: ["Mensal", "Semanal", "Por campanha/período"] },
+    { id: "divisao_verba", label: "Divisão da verba entre Google e Meta", placeholder: "Ex: 60% Meta e 40% Google", status: "pending", value: "", confidence: 0, type: "text" },
+    { id: "sazonalidade", label: "Tem sazonalidade?", placeholder: "Datas comemorativas, lançamentos e promoções que puxam a demanda", status: "pending", value: "", confidence: 0, type: "textarea" },
     { 
       id: "publico_alvo", 
       label: "Público Alvo", 
@@ -66,12 +85,15 @@ export const DEFAULT_BRIEFING_FIELDS: BriefingField[] = [
       type: "text", 
       subfields: [
         { id: "genero", label: "Gênero", value: "" },
-        { id: "idade", label: "Idade", value: "" },
+        { id: "idade", label: "Faixa etária", value: "" },
         { id: "classe", label: "Classe social", value: "" },
-        { id: "interesses", label: "Interesses", value: "" },
+        { id: "interesses", label: "Interesses e comportamentos", value: "" },
         { id: "outros_detalhes", label: "Outros detalhes", value: "" }
       ] 
     },
+    // --- Público-alvo (complementa os subcampos de Público Alvo) --------------
+    { id: "dores_publico", label: "Dores e necessidades do público", placeholder: "Que problema o cliente quer resolver ao procurar este negócio?", status: "pending", value: "", confidence: 0, type: "textarea" },
+    { id: "base_existente", label: "Público já existente", placeholder: "Tem base de clientes, lista de e-mail ou seguidores para usar em remarketing?", status: "pending", value: "", confidence: 0, type: "textarea" },
     { id: "bloqueado", label: "Quais assuntos você não abordaria nos seus perfis?", placeholder: "Temas proibidos nos perfis (política, concorrência, termos sensíveis)", status: "pending", value: "", confidence: 0, type: "textarea" },
     { id: "temas", label: "Quais temas você acredita que tenha mais a ver com a sua empresa?", placeholder: "Assuntos ideais para engajar seu público", status: "pending", value: "", confidence: 0, type: "textarea" }
 ];
