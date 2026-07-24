@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Sparkles } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { toast } from "@/components/ui/use-toast";
@@ -40,6 +40,23 @@ export default function VexoPitch() {
 
   // Fullscreen Presentation State
   const [isPresenting, setIsPresenting] = useState<boolean>(false);
+
+  // Espelho do pitch da GD: esta apresentação é desenhada só em ESCURO e não
+  // tem variantes claras. Com o CRM em tema claro, componentes base saíam
+  // brancos dentro da tela preta. Força escuro enquanto apresenta e restaura
+  // ao sair, sem tocar na preferência salva do usuário.
+  useEffect(() => {
+    if (!isPresenting) return;
+    const el = document.documentElement;
+    const tinhaLight = el.classList.contains("light");
+    el.classList.remove("light");
+    el.classList.add("dark");
+    return () => {
+      if (!tinhaLight) return;
+      el.classList.remove("dark");
+      el.classList.add("light");
+    };
+  }, [isPresenting]);
   const [activeSlide, setActiveSlide] = useState<number>(1);
 
   // Guided Chat Simulator State

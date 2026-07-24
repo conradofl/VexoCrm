@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PageShell } from "@/components/PageShell";
 import { toast } from "@/components/ui/use-toast";
 import { API_BASE_URL } from "@/lib/api";
@@ -26,6 +26,26 @@ export default function GeracaoDigitalPitch() {
   const { user } = useAuth();
   // ─── STATE INITIALIZATION ──────────────────────────────────────────────────
   const [isPresenting, setIsPresenting] = useState<boolean>(false);
+
+  // A apresentação é desenhada só em claro e não tem variantes `dark:`. Como
+  // `darkMode: ["class"]` faz o Tailwind gerar `.dark &`, a variante casa pelo
+  // ANCESTRAL: com `.dark` no <html>, componentes base como o Input (que traz
+  // `dark:bg-[rgba(10,12,24,.92)]` embutido) saíam pretos dentro da tela branca.
+  // Escopar a paleta no container não resolvia, porque a classe no <html>
+  // continuava lá. Enquanto a apresentação está aberta (overlay em tela cheia,
+  // nada do CRM aparece atrás) o documento vai para claro e volta ao sair.
+  // A preferência salva do usuário não é tocada.
+  useEffect(() => {
+    if (!isPresenting) return;
+    const el = document.documentElement;
+    const tinhaDark = el.classList.contains("dark");
+    el.classList.remove("dark");
+    el.classList.add("light");
+    return () => {
+      el.classList.remove("light");
+      if (tinhaDark) el.classList.add("dark");
+    };
+  }, [isPresenting]);
   const [activeSlide, setActiveSlide] = useState<number>(1);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
 
