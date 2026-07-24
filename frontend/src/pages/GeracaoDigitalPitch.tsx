@@ -217,7 +217,13 @@ export default function GeracaoDigitalPitch() {
 
       {/* ─── FULLSCREEN PRESENTATION MODE (THE PITCH & BRIEFING SPA) ───────── */}
       {isPresenting && (
-        <div className="fixed inset-0 z-50 bg-slate-50 text-slate-900 overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
+        // `light` escopa a paleta clara aqui dentro. A apresentação é desenhada
+        // só em claro (o container já força bg-slate-50/text-slate-900 e os
+        // slides não têm nenhuma variante `dark:`), mas as variáveis CSS
+        // continuavam as do tema escuro do app: inputs e painéis do shadcn
+        // (bg-background, border-input) saíam pretos numa página branca.
+        // Agora a tela fica igual esteja o CRM em claro ou escuro.
+        <div className="light fixed inset-0 z-50 bg-slate-50 text-slate-900 overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
 
           {/* Soft Light Grid Overlay Backdrop */}
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0 opacity-50" />

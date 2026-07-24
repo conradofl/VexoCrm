@@ -135,7 +135,11 @@ export default function VexoPitch() {
           MODO APRESENTAÇÃO FULLSCREEN (SPA SLIDES DECK)
           ═══════════════════════════════════════════════════════════════════════ */}
       {isPresenting && (
-        <div className="fixed inset-0 z-50 bg-slate-950 text-white overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
+        // Espelho do pitch da GD: esta apresentação é desenhada só em ESCURO
+        // (bg-slate-950/text-white, sem variantes). Escopar `dark` mantém as
+        // variáveis do shadcn coerentes mesmo com o CRM em tema claro, senão
+        // inputs e painéis saem brancos dentro de uma tela preta.
+        <div className="dark fixed inset-0 z-50 bg-slate-950 text-white overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
 
           {/* Animação Estelar Background */}
           <div className="stars-layer">
