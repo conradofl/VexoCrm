@@ -502,7 +502,20 @@ export function Slide6Dispatch({
                               });
 
                               if (!response.ok) {
-                                throw new Error("Erro ao salvar e disparar o briefing.");
+                                // Mostra o motivo que o servidor deu. Antes a
+                                // mensagem era genérica e engolia coisas como
+                                // "SLACK_BOT_TOKEN não configurado" ou falta de
+                                // instância WhatsApp, deixando o usuário sem
+                                // saber por que o grupo não foi criado.
+                                const detalhe = await response
+                                  .json()
+                                  .then((j: any) => j?.error || j?.details || null)
+                                  .catch(() => null);
+                                throw new Error(
+                                  detalhe
+                                    ? `Erro ao disparar o briefing: ${detalhe}`
+                                    : `Erro ao salvar e disparar o briefing (HTTP ${response.status}).`
+                                );
                               }
 
                               const responseData = await response.json();
