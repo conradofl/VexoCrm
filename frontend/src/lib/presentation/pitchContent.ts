@@ -111,6 +111,33 @@ export const BENCHMARKS = {
     consultasSemFechamentoMes: 50,
     taxaResgateConsulta: 0.2,        // 20% recuperável com resposta imediata
   },
+  fotografia: {
+    // Vazamento 1 — base fria parada. A fotógrafa tem contatos que já a
+    // conhecem e nunca mais foram trabalhados. Foco corporativo (menos
+    // dependência de data, mais recorrência que casamento).
+    baseParada: 4000,
+    ticketEnsaio: 800,               // ensaio/retrato corporativo (conservador)
+    taxaReativacaoMes: 0.008,        // 0,8% da base responde e reagenda/mês
+    taxaFechaReativacao: 0.25,
+    // Vazamento 2 — lead novo que chega (Meta/Google) e não é agendado na hora.
+    leadsNovosMes: 25,
+    taxaResgateLead: 0.2,
+  },
+  consultoria: {
+    // Número dado pela cliente (Instituto Siqueira): ticket alto e vagas que
+    // ficam vazias por falta de máquina de atração/qualificação.
+    ticketMentoria: 12000,
+    vagasNaoPreenchidasMes: 3,       // 3 × 12.000 = 36.000 deixados na mesa/mês
+  },
+  uniformes: {
+    // ML Sports: opera a ~40% da capacidade (60% ociosa) e pode dobrar a
+    // produção. Máquina de vendas ativa preenche parte da ociosidade com o
+    // público certo (times, academias, escolas, empresas), não peça avulsa.
+    pedidosMes: 25,
+    ticketPedido: 1500,              // por pedido/kit em volume (conservador)
+    pedidosOciososRecuperaveisMes: 12, // metade do que a capacidade ociosa comporta
+    taxaVpMercado: 0.13,             // referência de VP que o cliente já paga
+  },
 } as const;
 
 // Ocupação diluída ao mudar para um ponto maior: o público é o mesmo, o salão
@@ -151,6 +178,33 @@ export function estimateSupplementLoss() {
   const mensal = recompraMensal + consultaMensal;
   const anual = mensal * 12;
   return { recompraMensal, consultaMensal, mensal, anual };
+}
+
+// Fotografia — base fria parada + contato novo sem agendamento na hora.
+export function estimatePhotographyLoss() {
+  const b = BENCHMARKS.fotografia;
+  const reativacaoMensal = b.baseParada * b.taxaReativacaoMes * b.taxaFechaReativacao * b.ticketEnsaio;
+  const leadMensal = b.leadsNovosMes * b.taxaResgateLead * b.ticketEnsaio;
+  const mensal = reativacaoMensal + leadMensal;
+  const anual = mensal * 12;
+  return { reativacaoMensal, leadMensal, mensal, anual };
+}
+
+// Consultoria/mentoria — vagas de ticket alto que ficam vazias. O número vem
+// da própria cliente, não de benchmark inventado.
+export function estimateConsultingLoss() {
+  const b = BENCHMARKS.consultoria;
+  const mensal = b.vagasNaoPreenchidasMes * b.ticketMentoria;
+  const anual = mensal * 12;
+  return { mensal, anual };
+}
+
+// Uniformes — capacidade ociosa que uma máquina de vendas ativa preenche.
+export function estimateUniformLoss() {
+  const b = BENCHMARKS.uniformes;
+  const mensal = b.pedidosOciososRecuperaveisMes * b.ticketPedido;
+  const anual = mensal * 12;
+  return { mensal, anual };
 }
 
 // ---------------------------------------------------------------------------
@@ -624,6 +678,354 @@ export const SEGMENT_GROUPS: Record<string, SegmentGroup> = {
       ];
     },
   },
+
+  fotografia: {
+    id: "fotografia",
+    label: "Fotografia",
+    focus: "Base fria reativada e agenda cheia no automático (fotografia corporativa).",
+    accent: "#0ea5e9",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "seu estúdio";
+      const { reativacaoMensal, leadMensal, mensal, anual } = estimatePhotographyLoss();
+      const b = BENCHMARKS.fotografia;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "A Agenda Cheia, no Automático.",
+          subtitle: `Menos dependência da Meta e mais ensaios corporativos. A ${nome} vira uma máquina de agendamento, não só um portfólio bonito.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "O talento existe, o movimento não.",
+          body:
+            `O trabalho é excelente, mas a agenda depende de uma rede que pode mudar as regras a qualquer momento. ` +
+            `Uma base inteira de clientes que já te conhecem está parada, e o contato novo que chega hoje espera resposta e desiste.`,
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1471341971476-ae15ff5dd4ea?auto=format&fit=crop&w=900&q=70",
+              label: "O estúdio montado, esperando cliente",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1615702669705-0d3002c6801c?auto=format&fit=crop&w=900&q=70",
+              label: "Ensaio corporativo em produção, com GD + Vexo",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "Seus clientes já existem. Estão parados.",
+          body:
+            `São cerca de ${b.baseParada.toLocaleString("pt-BR")} contatos que já passaram por você e ninguém trabalha. ` +
+            `Reativar essa base vale ${milhar(reativacaoMensal * 12)} por ano. Os ${b.leadsNovosMes} contatos novos por mês que chegam e não são agendados na hora somam outros ${milhar(leadMensal * 12)}.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "receita presente na sua base e nos contatos que hoje escapam por falta de retorno",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Agendamento.",
+          steps: [
+            `Reativamos seus ${b.baseParada.toLocaleString("pt-BR")} contatos com uma abordagem que aquece e chama para agendar, no piloto automático.`,
+            "Atraímos empresas que precisam de foto e vídeo corporativo na sua região, não quem só compara preço.",
+            "Nossa Recepcionista Digital 24h responde o WhatsApp em 3 segundos e marca o ensaio direto na sua agenda Google.",
+            "Vídeo e portfólio trabalhados para vender o corporativo, o serviço de maior ticket e mais recorrência.",
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital constrói sua atração e sua autoridade além da Meta. A Vexo reativa sua base e enche sua agenda sozinha. Juntas, tiram a ${nome} da dependência de uma rede só.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Atração & Autoridade",
+              items: [
+                "Sistema de Atração de empresas na sua região",
+                "Anúncios no Google para quem procura foto corporativa agora",
+                "Vídeo e portfólio que vendem o ensaio de maior ticket",
+                "Presença que não depende de uma rede social só",
+                "Marca com cara de estúdio de referência",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Reativação & Agenda",
+              items: [
+                "Reativação da base de contatos parada",
+                "Recepcionista Digital 24h no seu WhatsApp",
+                "Agendamento automático direto na sua agenda Google",
+                "Cada contato e cada ensaio registrado num só lugar",
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body:
+            `Imagine a ${nome} com a agenda corporativa cheia o mês todo, sem depender do humor de um algoritmo. ` +
+            `A base antiga voltando sozinha e cada novo contato virando ensaio marcado.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo da base parada.",
+          body: `Quanto a ${nome} deixa na mesa todo mês com uma base inteira de clientes que ninguém trabalha?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o preço estimado de não reativar a base nem agendar o contato na hora",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar mais um mês. Cada contato parado é um ensaio que não acontece. A virada começa hoje.",
+        },
+      ];
+    },
+  },
+
+  consultoria: {
+    id: "consultoria",
+    label: "Consultoria e Mentoria",
+    focus: "Vagas de ticket alto preenchidas com previsibilidade (consultoria e mentoria).",
+    accent: "#7c3aed",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "sua consultoria";
+      const { mensal, anual } = estimateConsultingLoss();
+      const b = BENCHMARKS.consultoria;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "Autoridade Que Enche a Agenda.",
+          subtitle: `A ${nome} deixa de depender de indicação e passa a atrair, qualificar e fechar mentoria de ticket alto com previsibilidade.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "A demanda existe. A vaga fica vazia.",
+          body:
+            `Você começou agora e cada hora sua vale muito. Sem uma máquina que atrai e qualifica antes, ` +
+            `o tempo vai embora em conversa que não fecha, e a vaga de ticket alto fica aberta esperando.`,
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1560372326-6db12716ff43?auto=format&fit=crop&w=900&q=70",
+              label: "A agenda vazia, decidindo tudo sozinha",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1573164574397-dd250bc8a598?auto=format&fit=crop&w=900&q=70",
+              label: "Mentoria acontecendo, com GD + Vexo",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "Cada vaga vazia custa caro.",
+          body:
+            `Com ticket de ${brl(b.ticketMentoria)}, bastam ${b.vagasNaoPreenchidasMes} vagas não preenchidas para ${milhar(mensal)} saírem da mesa todo mês. ` +
+            `Não é falta de demanda. É falta de um sistema que traz a cliente certa até você.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "é o que fica na mesa hoje com as vagas de ticket alto que não são preenchidas",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Autoridade e Vendas.",
+          steps: [
+            "Construímos sua autoridade para que a cliente certa chegue já reconhecendo seu valor.",
+            "Atraímos mulheres no momento de decisão, prontas para investir em mentoria, não curiosas.",
+            "Nossa Recepcionista Digital 24h qualifica cada contato e só leva à sua agenda quem tem perfil.",
+            "Follow-up automático mantém a conversa viva até a decisão, sem você correr atrás.",
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital constrói sua autoridade e atrai a cliente certa. A Vexo qualifica e fecha no piloto automático. Juntas, dão à ${nome} previsibilidade desde o começo.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Autoridade & Atração",
+              items: [
+                "Posicionamento que sustenta o ticket alto",
+                "Conteúdo que educa e prepara a cliente para decidir",
+                "Atração de mulheres no momento certo de investir",
+                "Prova social e reputação que constroem confiança",
+                "Marca de referência em mentoria feminina",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Qualificação & Fechamento",
+              items: [
+                "Recepcionista Digital 24h que qualifica cada contato",
+                "Só o perfil certo chega à sua agenda",
+                "Follow-up automático até a decisão",
+                "Cada cliente e cada conversa registrada num só lugar",
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body:
+            `Imagine a ${nome} com a agenda de mentoria cheia das clientes certas, sem depender de indicação. ` +
+            `Seu tempo dedicado a entregar resultado, não a caçar cliente.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo da vaga vazia.",
+          body: `Quanto a ${nome} deixa na mesa todo mês com as vagas de ticket alto que a demanda quer e o sistema não entrega?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o que fica na mesa hoje sem uma máquina de atração e qualificação",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa esperar. Cada mês sem sistema é uma vaga de ticket alto que não volta. A virada começa hoje.",
+        },
+      ];
+    },
+  },
+
+  uniformes: {
+    id: "uniformes",
+    label: "Confecção de Uniformes",
+    focus: "Capacidade ociosa preenchida com o público certo, não peça avulsa (confecção de uniformes).",
+    accent: "#ea580c",
+    buildSlides: ({ companyName }) => {
+      const nome = companyName?.trim() || "sua fábrica";
+      const { mensal, anual } = estimateUniformLoss();
+      const b = BENCHMARKS.uniformes;
+      return [
+        {
+          id: 1,
+          kind: "impact",
+          eyebrow: "APRESENTAÇÃO COMERCIAL",
+          title: "Máquina Rodando na Capacidade Cheia.",
+          subtitle: `A ${nome} para de depender de indicação e enche a produção ociosa com pedido de kit em volume, não peça avulsa.`,
+        },
+        {
+          id: 2,
+          kind: "pain",
+          eyebrow: "A DOR ATUAL",
+          title: "Máquina parada e tráfego queimado.",
+          body:
+            `A produção roda a 40% e o que sobra de capacidade não vira faturamento. ` +
+            `Os anúncios que você testou trouxeram quem quer uma camisa com o próprio nome, não o clube que pede kit fechado. Dinheiro gasto, venda que não veio.`,
+          compare: {
+            before: {
+              img: "https://images.unsplash.com/photo-1561053114-fbe0ffaa1440?auto=format&fit=crop&w=900&q=70",
+              label: "Uma máquina rodando, capacidade sobrando",
+            },
+            after: {
+              img: "https://images.unsplash.com/photo-1533548893636-3eac05d3bde7?auto=format&fit=crop&w=900&q=70",
+              label: "Time inteiro uniformizado, com GD + Vexo",
+            },
+          },
+        },
+        {
+          id: 3,
+          kind: "implication",
+          eyebrow: "A IMPLICAÇÃO",
+          title: "60% de capacidade parada é dinheiro parado.",
+          body:
+            `Você fecha cerca de ${b.pedidosMes} pedidos por mês operando a 40%. A produção pode dobrar. ` +
+            `Preencher parte dessa ociosidade com o público certo, times, academias, escolas e empresas, vale ${milhar(mensal)} por mês.`,
+          metric: {
+            value: `${milhar(anual)}/ano`,
+            caption: "é o faturamento que a capacidade ociosa comporta e hoje não acontece",
+          },
+        },
+        {
+          id: 4,
+          kind: "solution",
+          eyebrow: "A SOLUÇÃO",
+          title: "A Máquina de Vendas por Volume.",
+          steps: [
+            "Atraímos quem compra kit em volume, times, academias, escolas e empresas, não a peça avulsa que trava sua produção.",
+            "Nossa Recepcionista Digital 24h responde, qualifica o pedido pelo mínimo e já encaminha o orçamento.",
+            "Follow-up automático não deixa nenhum orçamento esfriar, o que resolve a perda por esquecimento.",
+            "Investimento em atração no patamar certo, mirado no público que fecha volume, não no clique barato.",
+          ],
+        },
+        {
+          id: 5,
+          kind: "partnership",
+          eyebrow: "A PARCERIA COMPLETA",
+          title: "Duas forças, um só resultado.",
+          subtitle: `A Geração Digital traz o pedido certo e constrói sua marca. A Vexo qualifica e não deixa orçamento esfriar. E aceitamos parte em permuta (VP), sem a mordida que você paga hoje.`,
+          fronts: [
+            {
+              label: "Geração Digital",
+              tag: "Atração & Marca",
+              items: [
+                "Sistema de Atração de clubes, academias e empresas",
+                "Atração mirada em quem fecha kit em volume",
+                "Identidade visual que sai da concentração em um público só",
+                "Portfólio que mostra a fábrica além do futebol",
+                "Presença ativa no lugar do Instagram parado",
+              ],
+            },
+            {
+              label: "Vexo OS",
+              tag: "Qualificação & Resgate",
+              items: [
+                "Recepcionista Digital 24h que qualifica o pedido",
+                "Follow-up automático para nenhum orçamento esfriar",
+                "Carteira de clientes registrada num só lugar",
+                `Parte do investimento em permuta (VP), sem a taxa de ${(b.taxaVpMercado * 100).toFixed(0)}% de mercado`,
+              ],
+            },
+          ],
+        },
+        {
+          id: 6,
+          kind: "vision",
+          eyebrow: "VISÃO DE FUTURO",
+          title: "Previsibilidade.",
+          body:
+            `Imagine a ${nome} com a produção cheia o mês todo, de pedido de volume, sem depender só de indicação. ` +
+            `Máquina rodando no talo e público diversificado além do futebol.`,
+        },
+        {
+          id: 7,
+          kind: "close",
+          eyebrow: "A DECISÃO",
+          title: "O custo da máquina parada.",
+          body: `Quanto a ${nome} deixa na mesa todo mês com 60% da capacidade parada e sem uma máquina de vendas ativa?`,
+          metric: {
+            value: `${milhar(mensal)}/mês`,
+            caption: "é o faturamento que a capacidade ociosa comporta e hoje não acontece",
+          },
+          punch: "A pergunta não é quanto custa começar. É quanto custa manter a máquina a 40%. Cada mês parado é volume que não volta. A virada começa hoje.",
+        },
+      ];
+    },
+  },
 };
 
 // Mapeamento de segment_id específico -> grupo. Adicione novos ids aqui conforme
@@ -653,6 +1055,19 @@ const SEGMENT_ID_TO_GROUP: Record<string, string> = {
   nutricao_esportiva: "suplementos",
   optica: "otica",
   opticas: "otica",
+  // Fotografia
+  fotografia: "fotografia",
+  fotografo: "fotografia",
+  fotografa: "fotografia",
+  // Consultoria e mentoria
+  consultoria: "consultoria",
+  mentoria: "consultoria",
+  consultoria_empresarial: "consultoria",
+  // Confecção de uniformes
+  uniformes: "uniformes",
+  uniforme: "uniformes",
+  confeccao: "uniformes",
+  confeccao_de_uniformes: "uniformes",
 };
 
 export const DEFAULT_GROUP_ID = "entretenimento_local";
@@ -665,6 +1080,18 @@ const GROUP_KEYWORDS: Record<string, string[]> = {
     "suplemento", "suplementos", "whey", "creatina", "nutricao", "nutrição",
     "nutri esportiva", "academia", "fitness", "hipertrofia", "proteina", "proteína",
     "pre-treino", "pré-treino", "vitamina", "emporio saudavel", "empório saudável",
+  ],
+  fotografia: [
+    "fotografia", "fotografo", "fotógrafo", "fotografa", "fotógrafa", "foto",
+    "ensaio", "estudio fotografico", "estúdio fotográfico", "retrato", "photography",
+  ],
+  consultoria: [
+    "consultoria", "consultor", "mentoria", "mentor", "mentora", "coach",
+    "coaching", "assessoria empresarial", "instituto",
+  ],
+  uniformes: [
+    "uniforme", "uniformes", "confeccao", "confecção", "fardamento", "malharia",
+    "costura", "camiseta", "dry fit", "esportivo", "sportswear", "têxtil", "textil",
   ],
   otica: [
     "otica", "ótica", "oticas", "óticas", "optica", "óptica", "oculos", "óculos",
