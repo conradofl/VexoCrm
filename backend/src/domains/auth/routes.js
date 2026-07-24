@@ -12,6 +12,51 @@ import {
   hasUserPermission,
 } from "../../userAccessScope.js";
 
+
+// ---------------------------------------------------------------------------
+// Convite de acesso por e-mail.
+//
+// `auth.generatePasswordResetLink()` do Firebase Admin apenas MONTA a URL — não
+// dispara e-mail nenhum. O checkbox "enviar e-mail de redefinição" gerava o
+// link, devolvia para a tela e ninguém nunca recebia nada. Aqui o link é de
+// fato enviado pelo Resend, e o resultado do envio volta para a UI para o admin
+// saber se precisa passar o acesso por outro canal.
+// ---------------------------------------------------------------------------
+async function enviarConviteDeAcesso({ email, displayName, link }) {
+  if (!process.env.RESEND_API_KEY) {
+    return { enviado: false, motivo: "RESEND_API_KEY não configurada no servidor" };
+  }
+  try {
+    const { ResendProvider } = await import("../../providers/ResendProvider.js");
+    const nome = (displayName || "").trim() || "Olá";
+    const html = `
+      <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#0f172a">
+        <h2 style="margin:0 0 16px;font-size:20px">${nome}, seu acesso ao Vexo OS está pronto</h2>
+        <p style="margin:0 0 16px;line-height:1.6">
+          Uma conta foi criada para <strong>${email}</strong>. Defina sua senha para entrar.
+        </p>
+        <p style="margin:0 0 24px">
+          <a href="${link}"
+             style="background:#4f46e5;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;display:inline-block;font-weight:bold">
+            Definir minha senha
+          </a>
+        </p>
+        <p style="margin:0 0 8px;font-size:12px;color:#64748b">
+          Se o botão não abrir, copie e cole este endereço no navegador:
+        </p>
+        <p style="margin:0 0 24px;font-size:12px;color:#64748b;word-break:break-all">${link}</p>
+        <p style="margin:0;font-size:12px;color:#94a3b8">
+          Este link é pessoal e expira. Se você não esperava este convite, ignore esta mensagem.
+        </p>
+      </div>`;
+    await ResendProvider.sendEmail(email, "Seu acesso ao Vexo OS", html, "Vexo OS");
+    return { enviado: true, motivo: null };
+  } catch (err) {
+    console.error("[auth] falha ao enviar convite de acesso:", err);
+    return { enviado: false, motivo: err instanceof Error ? err.message : "falha no envio" };
+  }
+}
+
 export function registerAuthRoutes(app, deps) {
   const {
     ACCESS_PERMISSION_KEYS,
@@ -313,8 +358,13 @@ export function registerAuthRoutes(app, deps) {
       await auth.setCustomUserClaims(user.uid, mergeManagedClaims({}, managedClaims));
 
       let passwordResetLink = null;
+      let passwordResetEmail = { enviado: false, motivo: null };
       if (sendPasswordReset) {
-        passwordResetLink = await auth.generatePasswordResetLink(email);
+        const link = await auth.generatePasswordResetLink(email);
+        passwordResetEmail = await enviarConviteDeAcesso({ email, displayName, link });
+        // O link é uma credencial: quem o tiver troca a senha da conta. Só volta
+        // para a tela quando o envio falhou e o admin precisa repassar à mão.
+        passwordResetLink = passwordResetEmail.enviado ? null : link;
       }
 
       const createdUser = await auth.getUser(user.uid);
@@ -322,6 +372,8 @@ export function registerAuthRoutes(app, deps) {
       res.status(201).json({
         item: mapAdminUserRecord(createdUser),
         passwordResetLink,
+        passwordResetEmailSent: passwordResetEmail.enviado,
+        passwordResetEmailError: passwordResetEmail.motivo,
       });
     } catch (error) {
       console.error("admin user create error:", error);
@@ -351,8 +403,11 @@ export function registerAuthRoutes(app, deps) {
           );
 
           let passwordResetLink = null;
+          let passwordResetEmail = { enviado: false, motivo: null };
           if (sendPasswordReset) {
-            passwordResetLink = await auth.generatePasswordResetLink(email);
+            const link = await auth.generatePasswordResetLink(email);
+            passwordResetEmail = await enviarConviteDeAcesso({ email, displayName, link });
+            passwordResetLink = passwordResetEmail.enviado ? null : link;
           }
 
           const syncedUser = await auth.getUser(existingUser.uid);
@@ -360,6 +415,8 @@ export function registerAuthRoutes(app, deps) {
           res.status(200).json({
             item: mapAdminUserRecord(syncedUser),
             passwordResetLink,
+            passwordResetEmailSent: passwordResetEmail.enviado,
+            passwordResetEmailError: passwordResetEmail.motivo,
             syncedExisting: true,
           });
           return;
