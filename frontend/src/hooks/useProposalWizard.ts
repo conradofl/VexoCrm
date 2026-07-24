@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { fetchApi } from "@/lib/api";
 import type { PaymentTerm } from "@/lib/geracaoDigital/paymentTerms";
-import { computeVpFromItems } from "@/lib/geracaoDigital/proposalCalculator";
 
 interface UseProposalWizardProps {
   clientId: string;
@@ -182,7 +181,17 @@ export function useProposalWizard({
         condicoes: newCondicoes || undefined,
         payment_link: newPaymentLink || null,
         carencia_dias: newCarencia !== "" ? Number(newCarencia) : null,
-        valor_vp: computeVpFromItems(finalItems) > 0 ? computeVpFromItems(finalItems) : null,
+        // Coluna valor_vp = VP MENSAL do prazo pré-selecionado. A página
+        // pública divide a mensalidade por ele, então tem que ser mensal, não
+        // o total do período. O VP do item (usado no resumo interno) segue
+        // sendo o do período; são consumidores diferentes.
+        valor_vp: (() => {
+          const gd = availablePackages.find(p => p.id === newPackageId && (p.tipo === "gd" || !p.tipo));
+          const PM: Record<string, number> = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
+          const m = gd && gd.periodo !== "unico" ? (PM[gd.periodo] ?? 1) : 1;
+          const vpMensal = gd?.valor_vp ? Math.round((Number(gd.valor_vp) / m) * 100) / 100 : 0;
+          return vpMensal > 0 ? vpMensal : null;
+        })(),
         // Condições de pagamento ofertadas ao cliente (menu na proposta pública).
         condicoes_pagamento: {
           ofertadas: [

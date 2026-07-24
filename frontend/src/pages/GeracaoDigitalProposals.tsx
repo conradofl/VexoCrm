@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { calculateProposalValues, isCobrancaUnica, isCobrancaMensal, temPacote, isLinhaDePacote } from "@/lib/geracaoDigital/proposalCalculator";
 import PlanoEditor from "@/components/geracaoDigital/PlanoEditor";
-import { type Plano, planoVazio, planoValido, planoDeProposta } from "@/lib/geracaoDigital/plano";
+import { type Plano, planoVazio, planoValido, planoDeProposta, vpMensalDoPrazo, PERIODOS } from "@/lib/geracaoDigital/plano";
 import FormasPagamentoEditor from "@/components/geracaoDigital/FormasPagamentoEditor";
 import { type FormasSelecionadas, formasVazias, formasParaTerms, termsParaFormas, termsLegados } from "@/lib/geracaoDigital/formasPagamento";
 import { syncPlanoPackages } from "@/lib/geracaoDigital/planoSync";
@@ -143,42 +143,6 @@ export default function GeracaoDigitalProposals() {
   const [planoSaving, setPlanoSaving] = useState<boolean>(false);
 
   // Regrava as linhas de preço desta proposta a partir do plano editado.
-  const handleSalvarPlano = async () => {
-    if (!planoValido(editPlano)) {
-      toast({
-        title: "Plano incompleto",
-        description: "Escolha ao menos 1 item no escopo e preencha o preço de ao menos 1 prazo.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setPlanoSaving(true);
-    try {
-      const r = await syncPlanoPackages({
-        plano: editPlano,
-        nomeBase: selectedProposal?.prospect_name || "Plano",
-        clientId,
-        gdProducts,
-        vexoProducts,
-        existentes: availablePackages.filter(
-          (p: any) => p?.ad_hoc && editPacotesOfertados.includes(p.id)
-        ),
-        getIdToken,
-      });
-      setAvailablePackages((prev) => {
-        const semAntigos = prev.filter((p: any) => !r.pacotes.some((n: any) => n.id === p.id));
-        return [...semAntigos, ...r.pacotes];
-      });
-      setEditPacotesOfertados(r.pacotesOfertados);
-      setEditPackageId(r.packageId);
-      setEditPackageVexoId("");
-      toast({ title: "Plano aplicado", description: "Salve a configuração para gravar na proposta." });
-    } catch (e: any) {
-      toast({ title: "Erro", description: e?.message || "Falha ao gravar o plano.", variant: "destructive" });
-    } finally {
-      setPlanoSaving(false);
-    }
-  };
   const [editValorVp, setEditValorVp] = useState<number>(0);
   const [vpActive, setVpActive] = useState<boolean>(false);
   const [editCarencia, setEditCarencia] = useState<string>("");
@@ -716,6 +680,7 @@ export default function GeracaoDigitalProposals() {
   // Save proposal updates
   const handleSaveProposal = async () => {
     if (!selectedProposal) return;
+    setPlanoSaving(true);
     try {
       const token = await getIdToken();
       const headers: HeadersInit = { "Content-Type": "application/json" };
@@ -723,11 +688,50 @@ export default function GeracaoDigitalProposals() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
+      // Salvar = aplicar o plano + gravar a proposta, num clique só.
+      // Antes eram DOIS botões: "Aplicar plano" gravava os preços por prazo e
+      // "Salvar Configuração" gravava o resto — mas o save NÃO sincronizava o
+      // plano. Quem digitava preços em Mensal/Trimestral/Semestral e clicava
+      // direto em Salvar perdia os valores (ficavam só no estado do React).
+      let catalogo = availablePackages;
+      let pkgId = editPackageId;
+      let pacotesOfertados = editPacotesOfertados;
+      if (planoValido(editPlano)) {
+        const r = await syncPlanoPackages({
+          plano: editPlano,
+          nomeBase: selectedProposal.prospect_name || "Plano",
+          clientId,
+          gdProducts,
+          vexoProducts,
+          existentes: availablePackages.filter(
+            (p: any) => p?.ad_hoc && editPacotesOfertados.includes(p.id)
+          ),
+          getIdToken,
+        });
+        catalogo = [
+          ...availablePackages.filter((p: any) => !r.pacotes.some((n: any) => n.id === p.id)),
+          ...r.pacotes,
+        ];
+        pkgId = r.packageId;
+        pacotesOfertados = r.pacotesOfertados;
+        setAvailablePackages(catalogo);
+        setEditPacotesOfertados(pacotesOfertados);
+        setEditPackageId(pkgId);
+      }
+
       // Construct finalItems array
       const finalItems: any[] = [];
 
       // 1. Add GD package item
-      const selectedGdPkg = availablePackages.find(p => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
+      const selectedGdPkg = catalogo.find(p => p.id === pkgId && (p.tipo === "gd" || !p.tipo));
+      // VP MENSAL do prazo selecionado (%, do plano). Alimenta o item (período)
+      // e a coluna valor_vp da proposta (mensal). Com plano válido, o % manda;
+      // senão, cai no VP manual antigo (vpActive/editValorVp).
+      const periodoSel = String(selectedGdPkg?.periodo || "");
+      const vpMensalPlano =
+        planoValido(editPlano) && (PERIODOS as readonly any[]).some((p) => p.key === periodoSel)
+          ? vpMensalDoPrazo(editPlano, periodoSel as any)
+          : (vpActive ? Number(editValorVp || 0) : 0);
       if (selectedGdPkg) {
         const val = Number(selectedGdPkg.valor || 0);
         const PERIOD_MONTHS: Record<string, number> = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
@@ -740,11 +744,19 @@ export default function GeracaoDigitalProposals() {
         const usaOverride = negociada > 0 && meses !== null;
         const mensalidadeFinalItem = usaOverride ? negociada : mensalidade;
 
+        // VP do prazo selecionado, derivado do % do plano. O valor_vp do item
+        // é o total do PERÍODO (o que computeVpFromItems soma no resumo). A
+        // coluna valor_vp da proposta guarda o MENSAL (o que a página pública
+        // usa para dividir a mensalidade).
+        const vpItemPeriodo =
+          meses && vpMensalPlano > 0 ? Math.round(vpMensalPlano * meses * 100) / 100 : null;
+
         finalItems.push({
           product_id: null,
           descricao: `Pacote: ${selectedGdPkg.nome} (${selectedGdPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
           categoria: "gd",
           valor: mensalidadeFinalItem,
+          valor_vp: vpItemPeriodo,
           valor_override: usaOverride || undefined,
           recorrencia: meses ? "mensal" : "unico",
           periodo: selectedGdPkg.periodo,
@@ -807,12 +819,13 @@ export default function GeracaoDigitalProposals() {
       const body = {
         client_id: clientId,
         prospect_name: prospectName,
-        package_id: editPackageId || null,
-        // NÃO reenviar pacotes_ofertados aqui. Este painel edita configuração
-        // (setup, condições, validade) — quem define o menu de pacotes é o
-        // wizard. Reenviar a lista daqui derrubava os pacotes ofertados de 3
-        // para 1 (reproduzido no Dr. Diogo). O PUT preserva o valor atual
-        // quando o campo vem `undefined`.
+        package_id: pkgId || null,
+        // Reenvia a lista de prazos ofertados, agora derivada do próprio plano
+        // na tela (pacotesOfertados). O clobber 3→1 do Dr. Diogo vinha de mandar
+        // uma lista vazia quando o editor abria zerado — bug já corrigido. Com
+        // a lista vindo do plano visível, reenviar é correto e necessário: é o
+        // que faz os prazos novos (Mensal/Trimestral/Semestral) entrarem.
+        pacotes_ofertados: pacotesOfertados,
         package_vexo_id: editPackageVexoId || null,
         itens: finalItems,
         condicoes,
@@ -829,15 +842,18 @@ export default function GeracaoDigitalProposals() {
           escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
         },
         periodo_plano: (() => {
-          const gdPkg = availablePackages.find((p: any) => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
-          const vexoPkg = availablePackages.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
+          const gdPkg = catalogo.find((p: any) => p.id === pkgId && (p.tipo === "gd" || !p.tipo));
+          const vexoPkg = catalogo.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
           return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
         })(),
         validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
         valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
         observacao_validade: observacaoValidade || null,
         carencia_dias: editCarencia !== "" ? Number(editCarencia) : null,
-        valor_vp: vpActive ? Number(editValorVp || 0) : null
+        // Coluna valor_vp = VP MENSAL do prazo selecionado (a página pública
+        // divide a mensalidade por ele). Vem do % do plano, com fallback no
+        // VP manual antigo.
+        valor_vp: vpMensalPlano > 0 ? vpMensalPlano : null
       };
 
       const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
@@ -869,6 +885,8 @@ export default function GeracaoDigitalProposals() {
         description: err.message || "Falha de comunicação com o servidor ao salvar proposta.",
         variant: "destructive"
       });
+    } finally {
+      setPlanoSaving(false);
     }
   };
 
@@ -1582,22 +1600,14 @@ export default function GeracaoDigitalProposals() {
                             gdProducts={gdProducts}
                             vexoProducts={vexoProducts}
                           />
-                          <div className="flex justify-end">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={planoSaving}
-                              onClick={handleSalvarPlano}
-                              className="text-xs border-purple-300 text-purple-650 dark:text-purple-300"
-                            >
-                              {planoSaving ? "Gravando plano..." : "Aplicar plano"}
-                            </Button>
-                          </div>
                         </div>
 
+                        {/* Um botão só: aplica o plano e grava a proposta. O
+                            "Aplicar plano" separado foi removido — era o passo
+                            que ninguém sabia que precisava dar. */}
                         <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-white/5">
-                          <Button size="sm" onClick={handleSaveProposal} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs">
-                            Salvar Configuração
+                          <Button size="sm" disabled={planoSaving} onClick={handleSaveProposal} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs">
+                            {planoSaving ? "Salvando..." : "Salvar Configuração"}
                           </Button>
                         </div>
                       </div>
@@ -1616,7 +1626,7 @@ export default function GeracaoDigitalProposals() {
                       const calc = calculateProposalValues(tempProposal, availablePackages);
 
                       return (
-                        <div className="grid gap-4 sm:grid-cols-3 bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-150 dark:border-slate-700">
+                        <div className={cn("grid gap-4 bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-150 dark:border-slate-700", calc.vpTotal > 0 ? "sm:grid-cols-4" : "sm:grid-cols-3")}>
                           <div className="space-y-1">
                             <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block dark:text-slate-400">Taxa de Setup</span>
                             <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 font-mono">
@@ -1643,6 +1653,19 @@ export default function GeracaoDigitalProposals() {
                                 {calc.compromissoFinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                               </h4>
                               <span className="text-[9px] text-slate-450 block">Soma recorrente por {calc.mesesPeriodo} meses</span>
+                            </div>
+                          )}
+
+                          {/* VP entra ao lado dos demais, com a mesma regra do
+                              cálculo — antes o vendedor não via de quanto era a
+                              permuta sem abrir a proposta pública. */}
+                          {calc.vpTotal > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-slate-550 uppercase font-black tracking-wider block dark:text-slate-400">Permuta (VP)</span>
+                              <h4 className="text-lg font-black text-emerald-600 font-mono">
+                                {calc.vpTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                              </h4>
+                              <span className="text-[9px] text-slate-450 block">no período, incluído na mensalidade</span>
                             </div>
                           )}
                         </div>

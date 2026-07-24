@@ -37,8 +37,11 @@ export interface Plano {
   precos: Record<PeriodoKey, number>;
   /** preço cheio mensal, para exibir riscado. 0 = sem riscado. */
   valorTabelaMensal: number;
-  /** parte da mensalidade aceita em permuta. 0 = sem VP. */
-  vpMensal: number;
+  /** % da mensalidade aceita em permuta, aplicada a TODOS os prazos. 0 = sem VP.
+   * Antes era um valor fixo em R$ (vpMensal), que não fazia sentido com vários
+   * prazos: 2.200 de VP num Anual de 2.400 e num Semestral de 6.000 é a mesma
+   * cara mas outra proporção. Percentual escala junto com cada prazo. */
+  vpPercent: number;
 }
 
 export const planoVazio = (): Plano => ({
@@ -46,8 +49,14 @@ export const planoVazio = (): Plano => ({
   vexoIds: [],
   precos: { mensal: 0, trimestral: 0, semestral: 0, anual: 0 },
   valorTabelaMensal: 0,
-  vpMensal: 0,
+  vpPercent: 0,
 });
+
+/** VP mensal de um prazo, derivado do percentual. */
+export function vpMensalDoPrazo(plano: Plano, periodo: PeriodoKey): number {
+  const mensal = Number(plano.precos[periodo] || 0);
+  return Math.round(mensal * (Number(plano.vpPercent || 0) / 100) * 100) / 100;
+}
 
 /** Prazos com preço preenchido — preencher É ofertar, sem checkbox separado. */
 export function prazosOfertados(plano: Plano): PeriodoKey[] {
@@ -115,7 +124,8 @@ export function planoParaPacotes(
       tipo: "gd",
       valor: Math.round(mensal * meses * 100) / 100,
       valor_tabela: tabela > mensal ? Math.round(tabela * meses * 100) / 100 : null,
-      valor_vp: Number(plano.vpMensal || 0) > 0 ? Number(plano.vpMensal) : null,
+      // VP do PERÍODO = % × mensalidade × meses. Escala com o prazo.
+      valor_vp: plano.vpPercent > 0 ? Math.round(vpMensalDoPrazo(plano, periodo) * meses * 100) / 100 : null,
       produtos_incluidos: produtos,
       ad_hoc: true,
     };
@@ -179,8 +189,9 @@ function hidratarPrecos(plano: Plano, linhas: any[]): void {
     if (!plano.valorTabelaMensal && Number(pk.valor_tabela || 0) > 0) {
       plano.valorTabelaMensal = Math.round((Number(pk.valor_tabela) / meses) * 100) / 100;
     }
-    if (!plano.vpMensal && Number(pk.valor_vp || 0) > 0) {
-      plano.vpMensal = Number(pk.valor_vp);
+    // Reconstrói o % a partir do VP e do valor gravados: pct = vp / valor × 100.
+    if (!plano.vpPercent && Number(pk.valor_vp || 0) > 0 && Number(pk.valor || 0) > 0) {
+      plano.vpPercent = Math.round((Number(pk.valor_vp) / Number(pk.valor)) * 100 * 10) / 10;
     }
   });
 }
