@@ -9,7 +9,12 @@ export function ThemeProvider({
   return (
     <NextThemesProvider
       attribute="class"
-      defaultTheme="dark"
+      // Claro é o padrão do produto. Telas como o pitch da Geração Digital são
+      // desenhadas só em claro (nenhuma variante `dark:`), então um usuário novo
+      // caindo em escuro via tokens globais escurecerem inputs e painéis dentro
+      // de uma página branca. Quem já usa o sistema tem a preferência salva no
+      // localStorage e não é afetado.
+      defaultTheme="light"
       enableSystem={false}
       disableTransitionOnChange
     >

@@ -208,7 +208,18 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             queryParams = [req.authAccess.clientIds];
         }
 
-        const instRes = await pool.query(queryStr, queryParams);
+        let instRes = await pool.query(queryStr, queryParams);
+          // Fallback: a consulta acima pode ser filtrada por clientIds do usuário.
+          // Quando o escopo dele não casa com o client_id da instância (slug vs
+          // uuid, claims ainda não sincronizadas depois de trocar o perfil), o
+          // resultado vinha vazio e o grupo do WhatsApp simplesmente não era
+          // criado, sem erro nenhum na tela. Cair para as instâncias ativas
+          // evita a falha silenciosa.
+          if (instRes.rows.length === 0 && queryParams.length > 0) {
+            instRes = await pool.query(
+              `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC`
+            );
+          }
           if (instRes.rows.length > 0) {
             let row = instRes.rows.find(r => r.client_id === 'geracao-digital') || instRes.rows[0];
             const urlStr = row.dispatch_webhook_url;
