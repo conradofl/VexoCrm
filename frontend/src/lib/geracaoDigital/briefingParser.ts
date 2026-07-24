@@ -149,6 +149,36 @@ export function deriveExtractedValues(transcriptText: string): Record<string, st
       }
 
       const publico = getAnswerForKeywords(["público", "publico", "persona"], "Não preenchido");
+
+      // Subcampos do Público Alvo. O parser devolvia só `publico_alvo` como um
+      // texto único, mas a tela renderiza esse campo em subcampos (gênero,
+      // faixa etária, classe, interesses, outros). Sem chave por subcampo eles
+      // ficavam vazios mesmo com a transcrição colada. As chaves usam o formato
+      // "publico_alvo.<id>" e são aplicadas em GeracaoDigitalPitch.
+      const genero = getAnswerForKeywords(["gênero", "genero", "homens", "mulheres"], "");
+      const idade = getAnswerForKeywords(["idade", "faixa etária", "faixa etaria", "anos"], "");
+      const classe = getAnswerForKeywords(["classe social", "classe", "poder aquisitivo"], "");
+      const interesses = getAnswerForKeywords(["interesses", "comportamento", "comportamentos", "hobbies"], "");
+      const outros_detalhes = getAnswerForKeywords(["outros detalhes", "detalhes do público", "detalhes do publico"], "");
+
+      // Campos novos do briefing expandido.
+      const ticket_margem = getAnswerForKeywords(["ticket médio", "ticket medio", "ticket", "margem"], "Não preenchido");
+      const diferencial = getAnswerForKeywords(["diferencial", "diferenciais", "vantagem competitiva"], "Não preenchido");
+      const dores_publico = getAnswerForKeywords(["dor", "dores", "necessidade", "necessidades", "problema"], "Não preenchido");
+      const base_existente = getAnswerForKeywords(["base de clientes", "lista de e-mail", "lista de email", "seguidores", "remarketing", "lookalike"], "Não preenchido");
+      const divisao_verba = getAnswerForKeywords(["divisão da verba", "divisao da verba", "google e meta", "meta e google"], "Não preenchido");
+      const sazonalidade = getAnswerForKeywords(["sazonalidade", "datas comemorativas", "lançamento", "lancamento", "promoção", "promocao"], "Não preenchido");
+
+      const trafegoAns = getAnswerForKeywords(["já rodou tráfego", "ja rodou trafego", "tráfego pago antes", "trafego pago antes", "agência anterior", "agencia anterior"], "");
+      let ja_rodou_trafego = "Não sei";
+      if (/\bn[ãa]o\b/i.test(trafegoAns)) ja_rodou_trafego = "Não";
+      if (/\bsim\b/i.test(trafegoAns)) ja_rodou_trafego = "Sim";
+      const trafego_historico = trafegoAns || "Não preenchido";
+
+      const verbaPeriodoAns = getAnswerForKeywords(["verba é", "verba e", "mensal", "semanal", "por campanha"], "").toLowerCase();
+      let verba_periodicidade = "Mensal";
+      if (verbaPeriodoAns.includes("semanal")) verba_periodicidade = "Semanal";
+      else if (verbaPeriodoAns.includes("campanha") || verbaPeriodoAns.includes("período") || verbaPeriodoAns.includes("periodo")) verba_periodicidade = "Por campanha/período";
       
       let bloqueado = getAnswerForKeywords(["bloqueado", "não abordar", "nunca falar"], "Não preenchido");
       if (bloqueado.toLowerCase().includes("bloqueado a gente deixou não preenchido") || bloqueado.toLowerCase().includes("bloqueado a gente deixou nao preenchido")) {
@@ -185,6 +215,20 @@ export function deriveExtractedValues(transcriptText: string): Record<string, st
         servicos: servicos.substring(0, 250),
         localizacao: atuacao.substring(0, 100),
         publico_alvo: publico.substring(0, 250),
+        "publico_alvo.genero": genero.substring(0, 120),
+        "publico_alvo.idade": idade.substring(0, 120),
+        "publico_alvo.classe": classe.substring(0, 120),
+        "publico_alvo.interesses": interesses.substring(0, 200),
+        "publico_alvo.outros_detalhes": outros_detalhes.substring(0, 200),
+        ticket_margem: ticket_margem.substring(0, 150),
+        diferencial: diferencial.substring(0, 250),
+        ja_rodou_trafego,
+        trafego_historico: trafego_historico.substring(0, 300),
+        dores_publico: dores_publico.substring(0, 250),
+        base_existente: base_existente.substring(0, 250),
+        verba_periodicidade,
+        divisao_verba: divisao_verba.substring(0, 120),
+        sazonalidade: sazonalidade.substring(0, 250),
         bloqueado: bloqueado.substring(0, 150),
         temas: temas.substring(0, 250),
         verba: verba.substring(0, 100),
