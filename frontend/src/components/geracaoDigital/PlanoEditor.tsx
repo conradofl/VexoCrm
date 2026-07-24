@@ -181,15 +181,27 @@ export default function PlanoEditor({ plano, onChange, gdProducts, vexoProducts 
           </div>
           <div className="space-y-1">
             <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-              Parte em VP / permuta (R$/mês, opcional)
+              VP / permuta (% da mensalidade, opcional)
             </Label>
-            <Input
-              type="number"
-              value={plano.vpMensal || ""}
-              onChange={(e) => onChange({ ...plano, vpMensal: Number(e.target.value) })}
-              placeholder="0"
-              className="h-8 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10"
-            />
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={plano.vpPercent || ""}
+                onChange={(e) =>
+                  onChange({ ...plano, vpPercent: Math.max(0, Math.min(100, Number(e.target.value))) })
+                }
+                placeholder="0"
+                className="h-8 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10"
+              />
+              <span className="text-xs text-slate-500 dark:text-slate-400">%</span>
+            </div>
+            {plano.vpPercent > 0 && ofertados.length > 0 && (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">
+                {plano.vpPercent}% em permuta, aplicado a todos os prazos
+              </span>
+            )}
           </div>
         </div>
 

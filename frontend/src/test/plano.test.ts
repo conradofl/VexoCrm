@@ -6,6 +6,7 @@ import {
   planoParaPacotes,
   planoDePacotes,
   planoDeProposta,
+  vpMensalDoPrazo,
   nomeDaLinha,
   mesesDoPeriodo,
   type Plano,
@@ -179,6 +180,46 @@ describe("dois estados: no plano ou fora da proposta", () => {
     const p = planoDeProposta([linhaSemestral], itensLegado);
     expect(p.precos.semestral).toBe(6000);
     expect(prazosOfertados(p)).toEqual(["semestral"]);
+  });
+});
+
+describe("VP em porcentagem — aplicado a todos os prazos", () => {
+  const planoComVp = (): Plano => ({
+    ...planoVazio(),
+    gdIds: ["g1"],
+    precos: { mensal: 2000, trimestral: 1800, semestral: 1600, anual: 1400 },
+    vpPercent: 40,
+  });
+
+  it("o VP escala com cada prazo, não é um valor fixo", () => {
+    const pacotes = planoParaPacotes(planoComVp(), "X", gdProducts, vexoProducts);
+    const anual = pacotes.find((p) => p.periodo === "anual")!;
+    const semestral = pacotes.find((p) => p.periodo === "semestral")!;
+    // 40% de 1.400/mês × 12 = 6.720 ; 40% de 1.600/mês × 6 = 3.840
+    expect(anual.valor_vp).toBe(1400 * 0.4 * 12);
+    expect(semestral.valor_vp).toBe(1600 * 0.4 * 6);
+    // proporções diferentes, mesmo percentual — o que o valor fixo não dava
+    expect(anual.valor_vp).not.toBe(semestral.valor_vp);
+  });
+
+  it("sem VP, valor_vp é null em todos", () => {
+    const p = { ...planoComVp(), vpPercent: 0 };
+    expect(planoParaPacotes(p, "X", gdProducts, vexoProducts).every((x) => x.valor_vp === null)).toBe(true);
+  });
+
+  it("reconstrói o percentual a partir do que está gravado", () => {
+    const pacotes = planoParaPacotes(planoComVp(), "X", gdProducts, vexoProducts).map((p, i) => ({
+      ...p,
+      id: `pk${i}`,
+      tipo: "gd",
+    }));
+    expect(planoDePacotes(pacotes).vpPercent).toBe(40);
+  });
+
+  it("vpMensalDoPrazo dá o VP mensal certo por prazo", () => {
+    const p = planoComVp();
+    expect(vpMensalDoPrazo(p, "anual")).toBe(1400 * 0.4);
+    expect(vpMensalDoPrazo(p, "mensal")).toBe(2000 * 0.4);
   });
 });
 
