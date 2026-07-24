@@ -1613,6 +1613,12 @@ export default function GeracaoDigitalProposals() {
                       </div>
                     )}
 
+                    {/* Resumo, escopo e info comercial: só no modo edição.
+                        Na visão de preview eles duplicavam o que o iframe
+                        (a própria proposta do cliente) já mostra, embaixo
+                        dele, confundindo quem só queria ver a proposta. */}
+                    {showConfig && (
+                      <>
                     {/* Resumo Financeiro */}
                     {(() => {
                       const tempProposal = {
@@ -1743,6 +1749,8 @@ export default function GeracaoDigitalProposals() {
                         </div>
                       </div>
                     </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
 
