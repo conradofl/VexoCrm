@@ -1335,6 +1335,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         presentation_id,
         package_id,
         package_vexo_id,
+        // Lista de prazos ofertados ao cliente. NÃO era lida aqui: o wizard
+        // criava as 4 linhas de preço, mandava os ids, e o POST descartava em
+        // silêncio — a proposta nascia com pacotes_ofertados NULL e a página
+        // pública mostrava um plano só.
+        pacotes_ofertados,
         prospect_name,
         segment_id,
         prospect_logo,
@@ -1496,7 +1501,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         (() => {
           const baseCols = [
             "tenant_id", "presentation_id", "package_id", "package_vexo_id", "prospect_name", "itens", "valor_total", "condicoes", "status",
-            "cobrar_setup", "valor_setup_vexo", "condicoes_pagamento", "periodo_plano", "validade_ate", "valor_apos_validade", "observacao_validade", "valor_vp"
+            "cobrar_setup", "valor_setup_vexo", "condicoes_pagamento", "periodo_plano", "validade_ate", "valor_apos_validade", "observacao_validade", "valor_vp",
+            "pacotes_ofertados"
           ];
           const cols = hasSegmentLogo ? [...baseCols, "segment_id", "prospect_logo"] : baseCols;
           const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -1520,7 +1526,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             validade_ate || null,
             valor_apos_validade !== null && valor_apos_validade !== "" ? Number(valor_apos_validade) : null,
             observacao_validade || null,
-            valor_vp !== null && valor_vp !== undefined ? Number(valor_vp) : null
+            valor_vp !== null && valor_vp !== undefined ? Number(valor_vp) : null,
+            Array.isArray(pacotes_ofertados) && pacotes_ofertados.length > 0
+              ? JSON.stringify(pacotes_ofertados)
+              : null
           ];
           return hasSegmentLogo ? [...base, segment_id || null, prospect_logo || null] : base;
         })()
