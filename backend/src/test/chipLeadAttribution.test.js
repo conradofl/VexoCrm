@@ -273,6 +273,73 @@ describe("Bloco 3 — Atribuição Real de Lead por Chip", () => {
       });
       expect(oficialOwner).toBeNull();
     });
+
+    it("devolve null quando instanceName é null ou undefined, mesmo havendo chip padrão com dono no tenant", async () => {
+      const customDb = {
+        query: vi.fn(async (sql, params = []) => {
+          if (sql.includes("FROM public.lead_client_evolution_instances")) {
+            return {
+              rows: [
+                {
+                  id: "inst-1",
+                  client_id: "geracao-digital",
+                  name: "GD Priscila",
+                  dispatch_webhook_url: "https://evo.vexo.com/instance/GD_Priscila",
+                  owner_uid: "uid-priscila-123",
+                  active: true,
+                  is_default: true,
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const ownerNull = await resolveEvolutionInstanceOwner({
+        clientId: "geracao-digital",
+        instanceName: null,
+        dbPool: customDb,
+      });
+      expect(ownerNull).toBeNull();
+
+      const ownerUndefined = await resolveEvolutionInstanceOwner({
+        clientId: "geracao-digital",
+        instanceName: undefined,
+        dbPool: customDb,
+      });
+      expect(ownerUndefined).toBeNull();
+    });
+
+    it("devolve null quando instanceName não bate com nenhum chip cadastrado, mesmo havendo chip padrão", async () => {
+      const customDb = {
+        query: vi.fn(async (sql, params = []) => {
+          if (sql.includes("FROM public.lead_client_evolution_instances")) {
+            return {
+              rows: [
+                {
+                  id: "inst-1",
+                  client_id: "geracao-digital",
+                  name: "GD Priscila",
+                  dispatch_webhook_url: "https://evo.vexo.com/instance/GD_Priscila",
+                  owner_uid: "uid-priscila-123",
+                  active: true,
+                  is_default: true,
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const ownerUnknown = await resolveEvolutionInstanceOwner({
+        clientId: "geracao-digital",
+        instanceName: "chip-inexistente-xyz",
+        dbPool: customDb,
+      });
+      expect(ownerUnknown).toBeNull();
+    });
   });
 
   describe("Controle de Acesso e Barreiras de 403 (isManagerOrAdmin unificado)", () => {

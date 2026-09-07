@@ -1594,7 +1594,8 @@ export async function validateWhatsappNumbersWithCache({ pool, webhookUrl, webho
 
 /**
  * Resolve o dono (owner_uid) do chip/instância que recebeu uma mensagem inbound.
- * Casa por instanceName (nome amigável, id ou sufixo da URL) ou cai na instância default.
+ * Casa por instanceName (nome amigável, id ou sufixo da URL).
+ * Sem correspondência = sem dono identificável (retorna null).
  * Devolve owner_uid (string) ou null.
  */
 export async function resolveEvolutionInstanceOwner({ clientId, instanceName = null, pool = null, dbPool = null }) {
@@ -1617,9 +1618,8 @@ export async function resolveEvolutionInstanceOwner({ clientId, instanceName = n
       }
     }
 
-    // Se não encontrou pelo nome do chip ou não veio instanceName, cai na padrão ou primeira ativa
-    const defaultInst = selectDefaultEvolutionInstance(instances);
-    return defaultInst?.owner_uid || null;
+    // Sem correspondência = sem dono identificável. NUNCA herdar do chip "padrão".
+    return null;
   } catch (err) {
     console.warn("[evolution-instances] Erro ao resolver dono do chip:", err?.message || err);
     return null;
