@@ -1,4 +1,4 @@
-import { RefreshCw, Save, Trash2 } from "lucide-react";
+import { RefreshCw, Save, Trash2, UserCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,12 @@ import { Switch } from "@/components/ui/switch";
 import { LeadClientEvolutionInstance } from "@/hooks/useLeadClients";
 import { EvolutionInstanceStatusBadge } from "./EvolutionInstanceStatusBadge";
 import { resolveChipLimit } from "@/lib/evolutionChips/utils";
+
+interface OperatorOption {
+  uid: string;
+  displayName?: string | null;
+  email?: string | null;
+}
 
 interface EvolutionInstanceCardProps {
   tenantId: string;
@@ -23,6 +29,9 @@ interface EvolutionInstanceCardProps {
   onDelete: () => void;
   onSyncNow?: () => void;
   canEdit: boolean;
+  canManageOwner?: boolean;
+  operatorOptions?: OperatorOption[];
+  onOwnerChange?: (newOwnerUid: string | null) => void;
   isSavePending: boolean;
   isDeletePending: boolean;
   isSyncPending?: boolean;
@@ -41,6 +50,9 @@ export function EvolutionInstanceCard({
   onDelete,
   onSyncNow,
   canEdit,
+  canManageOwner = false,
+  operatorOptions = [],
+  onOwnerChange,
   isSavePending,
   isDeletePending,
   isSyncPending = false,
@@ -186,6 +198,48 @@ export function EvolutionInstanceCard({
               onCheckedChange={onToggleWebhook}
               disabled={!canEdit || isSavePending}
             />
+          </div>
+        </div>
+
+        {/* Atribuição de Leads: Operador Responsável */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-200/50 bg-slate-50/50 p-3.5 text-xs dark:border-white/5 dark:bg-white/[0.01]">
+          <div className="space-y-0.5">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              <UserCheck className="h-3.5 w-3.5 text-sky-500" />
+              Operador Responsável
+            </span>
+            <p className="text-[10px] text-muted-foreground">
+              Novos leads deste chip serão atribuídos automaticamente a este operador.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canManageOwner && onOwnerChange ? (
+              <Select
+                value={instance.owner_uid || "none"}
+                onValueChange={(val) => onOwnerChange(val === "none" ? null : val)}
+                disabled={isSavePending || !canEdit}
+              >
+                <SelectTrigger className="h-8 w-[220px] text-xs rounded-xl bg-background">
+                  <SelectValue placeholder="Selecione um operador" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="none">Nenhum (compartilhado)</SelectItem>
+                  {operatorOptions.map((op) => (
+                    <SelectItem key={op.uid} value={op.uid}>
+                      {op.displayName || op.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge variant="outline" className="text-xs py-1 px-2.5 font-normal rounded-lg">
+                {instance.owner_uid
+                  ? operatorOptions.find((op) => op.uid === instance.owner_uid)?.displayName ||
+                    operatorOptions.find((op) => op.uid === instance.owner_uid)?.email ||
+                    instance.owner_uid
+                  : "Nenhum (compartilhado)"}
+              </Badge>
+            )}
           </div>
         </div>
       </div>

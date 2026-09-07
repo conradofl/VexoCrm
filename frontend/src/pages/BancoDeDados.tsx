@@ -35,6 +35,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { API_BASE_URL, fetchApi, readApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -93,6 +94,7 @@ export interface LeadIntelligenceItem {
   stage?: "buyer" | "open_budget" | "inquiry" | "cold" | "lost" | null;
   temperature?: "hot" | "warm" | "cold" | null;
   tags?: string[] | null;
+  assigned_to?: string | null;
   last_interaction_at?: string | null;
   extracted_from_wa?: boolean | null;
   raw_chat_summary?: string | null;
@@ -229,13 +231,24 @@ export function renderSourceBadge(sourceKey?: string | null) {
 
 export default function BancoDeDados() {
   const navigate = useNavigate();
-  const { isAuthenticated, getIdToken } = useAuth();
+  const { isAuthenticated, getIdToken, isAdminUser, canAccessInternalPage } = useAuth();
+  const canManageUsers = isAdminUser || canAccessInternalPage("usuarios");
   const crmClient = useOptionalCrmClient();
   // Usa selectedClientId (string, sempre setado pelo seletor de tenant do topo).
   // Antes usava selectedClient?.id, que fica null quando o objeto ainda não
   // resolveu na lista, caindo no fallback "infinie" (cliente removido) — o que
   // fazia instâncias e leads virem vazios nesta página.
   const clientId = crmClient?.selectedClientId || crmClient?.selectedClient?.id || "geracao-digital";
+
+  const adminUsersQuery = useAdminUsers();
+  const operatorOptions = useMemo(() => {
+    if (!adminUsersQuery.data) return [];
+    return adminUsersQuery.data.filter(
+      (u) =>
+        u.access?.role === "internal" &&
+        (!clientId || u.access.clientId === clientId || u.access.clientIds?.includes(clientId))
+    );
+  }, [adminUsersQuery.data, clientId]);
   const isAdvancedOriginsUnlocked =
     hasFeatureUnlocked(crmClient?.selectedClient, "origem_leads") ||
     resolveTenantPlan(crmClient?.selectedClient) === "avancado";
@@ -409,6 +422,8 @@ export default function BancoDeDados() {
   const [bulkStageValue, setBulkStageValue] = useState<"buyer" | "open_budget" | "inquiry" | "cold" | "lost">("cold");
   const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
   const [bulkTagValue, setBulkTagValue] = useState("");
+  const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
+  const [bulkAssignValue, setBulkAssignValue] = useState<string>("none");
 
   // Campaign Creation Wizard Modal State
   const [isCampaignWizardOpen, setIsCampaignWizardOpen] = useState(false);
@@ -1215,6 +1230,33 @@ export default function BancoDeDados() {
     }
   };
 
+  const handleUpdateLeadAssignedTo = async (leadId: string, newAssignedTo: string | null) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ assigned_to: newAssignedTo }),
+      });
+
+      if (!res.ok) {
+        const errorMsg = await readApiErrorMessage(res, "Falha ao reatribuir responsável.");
+        throw new Error(errorMsg);
+      }
+
+      toast.success("Responsável do lead atualizado!");
+      if (selectedLead && selectedLead.id === leadId) {
+        setSelectedLead({ ...selectedLead, assigned_to: newAssignedTo });
+      }
+      fetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao reatribuir responsável", { description: err.message });
+    }
+  };
+
   // Bulk Selection Actions
   const handleToggleSelectAll = () => {
     const pageIds = paginatedLeads.map((l) => l.id);
@@ -1286,6 +1328,38 @@ export default function BancoDeDados() {
       fetchLeads();
     } catch (err: any) {
       toast.error("Erro na tag em lote", { description: err.message });
+    }
+  };
+
+  const handleBulkAssignSubmit = async () => {
+    if (selectedLeadIds.length === 0) return;
+    try {
+      const token = await getIdToken();
+      const targetUid = bulkAssignValue === "none" ? null : bulkAssignValue;
+      const res = await fetchApi(`/api/leads/bulk-update`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId,
+          leadIds: selectedLeadIds,
+          updates: { assigned_to: targetUid },
+        }),
+      });
+
+      if (!res.ok) {
+        const errorMsg = await readApiErrorMessage(res, "Falha ao reatribuir leads em massa.");
+        throw new Error(errorMsg);
+      }
+
+      toast.success(`Responsável atualizado para ${selectedLeadIds.length} leads!`);
+      setIsBulkAssignModalOpen(false);
+      setSelectedLeadIds([]);
+      fetchLeads();
+    } catch (err: any) {
+      toast.error("Erro na reatribuição em lote", { description: err.message });
     }
   };
 
@@ -2110,6 +2184,7 @@ export default function BancoDeDados() {
                         />
                       </TableHead>
                       <TableHead className="w-[220px]">Contato / Nome</TableHead>
+                      <TableHead className="w-[130px]">Responsável</TableHead>
                       <TableHead className="w-[140px]">Origem</TableHead>
                       <TableHead className="w-[150px]">Telefone</TableHead>
                       <TableHead className="w-[140px]">Estágio</TableHead>
@@ -2169,6 +2244,18 @@ export default function BancoDeDados() {
                                 )}
                               </div>
                             </div>
+                          </TableCell>
+
+                          <TableCell className="text-xs">
+                            {lead.assigned_to ? (
+                              <Badge variant="outline" className="text-[10px] font-normal py-0.5 border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300">
+                                {operatorOptions.find((op) => op.uid === lead.assigned_to)?.displayName ||
+                                  operatorOptions.find((op) => op.uid === lead.assigned_to)?.email ||
+                                  "Atribuído"}
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground italic">Compartilhado</span>
+                            )}
                           </TableCell>
 
                           <TableCell>
@@ -2330,6 +2417,18 @@ export default function BancoDeDados() {
               <Clock className="w-3.5 h-3.5" />
               Lembrete avulso
             </Button>
+
+            {canManageUsers && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsBulkAssignModalOpen(true)}
+                className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-sky-400 hover:text-sky-300 font-semibold gap-1.5"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                Reatribuir Responsável
+              </Button>
+            )}
 
             <Button
               size="sm"
@@ -3458,6 +3557,39 @@ export default function BancoDeDados() {
                   Abrir Conversa no WhatsApp
                 </Button>
 
+                {/* Atribuição de Lead: Operador Responsável */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-sky-500" /> Operador Responsável
+                  </label>
+                  {canManageUsers ? (
+                    <Select
+                      value={selectedLead.assigned_to || "none"}
+                      onValueChange={(val) => handleUpdateLeadAssignedTo(selectedLead.id, val === "none" ? null : val)}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue placeholder="Selecione o responsável" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum (compartilhado)</SelectItem>
+                        {operatorOptions.map((op) => (
+                          <SelectItem key={op.uid} value={op.uid}>
+                            {op.displayName || op.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Badge variant="outline" className="text-xs py-1 px-2.5 font-normal">
+                      {selectedLead.assigned_to
+                        ? operatorOptions.find((op) => op.uid === selectedLead.assigned_to)?.displayName ||
+                          operatorOptions.find((op) => op.uid === selectedLead.assigned_to)?.email ||
+                          selectedLead.assigned_to
+                        : "Nenhum (compartilhado)"}
+                    </Badge>
+                  )}
+                </div>
+
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1">Alterar Estágio</label>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -3561,6 +3693,47 @@ export default function BancoDeDados() {
             </Button>
             <Button size="sm" onClick={handleBulkTagSubmit} className="bg-indigo-600 text-white">
               Adicionar Tag
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Bulk Reassign */}
+      <Dialog open={isBulkAssignModalOpen} onOpenChange={setIsBulkAssignModalOpen}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-sky-500" />
+              Reatribuir Responsável em Lote
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-3 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Selecione o operador responsável para os {selectedLeadIds.length} leads selecionados:
+            </p>
+            <Select
+              value={bulkAssignValue}
+              onValueChange={setBulkAssignValue}
+            >
+              <SelectTrigger className="h-9 text-xs bg-background">
+                <SelectValue placeholder="Selecione um operador" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nenhum (desatribuir / compartilhado)</SelectItem>
+                {operatorOptions.map((op) => (
+                  <SelectItem key={op.uid} value={op.uid}>
+                    {op.displayName || op.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsBulkAssignModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" onClick={handleBulkAssignSubmit} className="bg-sky-600 hover:bg-sky-700 text-white">
+              Reatribuir {selectedLeadIds.length} leads
             </Button>
           </DialogFooter>
         </DialogContent>

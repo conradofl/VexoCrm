@@ -41,13 +41,14 @@ import {
   Undo2,
   UserPlus,
   CheckCheck,
-  ChevronUp,
   Clock3,
+  UserCheck,
 } from "lucide-react";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
+import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchApi } from "@/lib/api";
+import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "sonner";
 import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -508,7 +509,17 @@ export default function WhatsAppInbox({
     );
   }, [rawMessages, internalNotes, selectedChatId]);
 
-  const { getIdToken } = useAuth();
+  const { getIdToken, isAdminUser, canAccessInternalPage } = useAuth();
+  const canManageUsers = isAdminUser || canAccessInternalPage("usuarios");
+  const adminUsersQuery = useAdminUsers();
+  const operatorOptions = useMemo(() => {
+    if (!adminUsersQuery.data) return [];
+    return adminUsersQuery.data.filter(
+      (u) =>
+        u.access?.role === "internal" &&
+        (!clientId || u.access.clientId === clientId || u.access.clientIds?.includes(clientId))
+    );
+  }, [adminUsersQuery.data, clientId]);
   const [reabrirPending, setReabrirPending] = useState(false);
 
   const selectedChat = useMemo(() => {
@@ -2089,6 +2100,60 @@ export default function WhatsAppInbox({
                     </Badge>
                   )}
                 </div>
+
+                {/* Operador Responsável do Lead */}
+                {matchedLead && (
+                  <div className="w-full mt-2 pt-2 border-t border-border/40 flex items-center justify-between gap-2 text-left">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                      <UserCheck className="h-3 w-3 text-sky-500" />
+                      Responsável:
+                    </span>
+                    {canManageUsers ? (
+                      <select
+                        value={matchedLead.assigned_to || "none"}
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          const targetUid = val === "none" ? null : val;
+                          try {
+                            const token = await getIdToken();
+                            const res = await fetchApi(`/api/leads/${matchedLead.id}`, {
+                              method: "PATCH",
+                              headers: {
+                                Authorization: `Bearer ${token}`,
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({ assigned_to: targetUid }),
+                            });
+                            if (!res.ok) {
+                              const err = await readApiErrorMessage(res, "Falha ao reatribuir lead.");
+                              throw new Error(err);
+                            }
+                            toast.success("Responsável atualizado!");
+                            refetchLeads();
+                          } catch (err: any) {
+                            toast.error("Erro ao reatribuir", { description: err.message });
+                          }
+                        }}
+                        className="h-6 text-[11px] px-1.5 py-0 rounded-md border border-input bg-background text-foreground"
+                      >
+                        <option value="none">Compartilhado</option>
+                        {operatorOptions.map((op) => (
+                          <option key={op.uid} value={op.uid}>
+                            {op.displayName || op.email}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] py-0.5 px-2 font-normal border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300">
+                        {matchedLead.assigned_to
+                          ? operatorOptions.find((op) => op.uid === matchedLead.assigned_to)?.displayName ||
+                            operatorOptions.find((op) => op.uid === matchedLead.assigned_to)?.email ||
+                            matchedLead.assigned_to
+                          : "Compartilhado"}
+                      </Badge>
+                    )}
+                  </div>
+                )}
 
                 {Boolean(matchedLead?.dados?.precisa_atencao_humana || (matchedLead as any)?.precisa_atencao_humana) && (
                   <div className="w-full mt-2.5 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-left flex items-start gap-2">

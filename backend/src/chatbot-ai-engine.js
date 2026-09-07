@@ -18,6 +18,7 @@ import { LEADS_OUTLIER_TEMPERATURE } from "./services/leadImport.js";
 import { resolveMessageId } from "./services/inboundGuard.js";
 import { extractJsonFromLlmText, validateOutboundMessage, stripReasoningBlocks } from "./services/jsonExtractor.js";
 import { maskPhoneForLog } from "./services/tenant.js";
+import { resolveEvolutionInstanceOwner } from "./services/evolution.js";
 
 /**
  * Chatbot AI Engine
@@ -1833,6 +1834,16 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
 
   if (isPrimeiroRecontato && (aiResponse.classificacao || existing?.lead_temperature)) {
     payload.lead_temperature = aiResponse.classificacao || existing.lead_temperature;
+  }
+
+  // Bloco 3: Atribuição de Lead por Chip
+  // Se for novo lead (!existing?.id), resolve o owner_uid do chip que recebeu a mensagem
+  if (!existing?.id) {
+    const chipOwnerUid = await resolveEvolutionInstanceOwner({ clientId, instanceName }).catch(() => null);
+    payload.assigned_to = chipOwnerUid || null;
+  } else {
+    // Lead existente: NUNCA altera assigned_to (preserva 2.126 históricos e atribuições existentes)
+    delete payload.assigned_to;
   }
 
   // Gravacao do lead. O erro E VERIFICADO: este cliente nao lanca excecao, devolve

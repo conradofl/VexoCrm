@@ -15,6 +15,7 @@ import { applyCorsHeaders } from "../../services/corsPolicy.js";
 import { upsertLeadByPhone, isRealName } from "../../services/leadUpsert.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
 import { OutlierQualificationBot } from "../../hardcoded-chatbot-outlier.js";
+import { resolveEvolutionInstanceOwner } from "../../services/evolution.js";
 
 const SQL_CANONICAL_PHONE = (col) => `
   CASE
@@ -869,19 +870,27 @@ export function registerChatbotRoutes(app, deps) {
     const leadSource = "inbound";
 
     try {
-      // 1. Tentar pegar o nome das mensagens se não veio no body
+      // 1. Tentar pegar o nome e instância das mensagens se não veio no body
       let finalName = contactName;
-      if (!finalName) {
-        const nameQuery = await pgDatabasePool.query(
-          `SELECT contact_name FROM public.lead_messages 
-           WHERE client_id = $1 AND (${SQL_CANONICAL_PHONE("phone")} = $2 OR phone = $2) AND contact_name IS NOT NULL 
-           ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
-          [clientId, phone]
-        );
-        if (nameQuery.rows[0]?.contact_name && isRealName(nameQuery.rows[0].contact_name)) {
-          finalName = nameQuery.rows[0].contact_name;
-        }
+      let msgInstanceName = req.body?.instanceName || null;
+      const msgQuery = await pgDatabasePool.query(
+        `SELECT contact_name, instance_name FROM public.lead_messages 
+         WHERE client_id = $1 AND (${SQL_CANONICAL_PHONE("phone")} = $2 OR phone = $2)
+         ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
+        [clientId, phone]
+      );
+      if (!finalName && msgQuery.rows[0]?.contact_name && isRealName(msgQuery.rows[0].contact_name)) {
+        finalName = msgQuery.rows[0].contact_name;
       }
+      if (!msgInstanceName && msgQuery.rows[0]?.instance_name) {
+        msgInstanceName = msgQuery.rows[0].instance_name;
+      }
+
+      const assignedOwnerUid = await resolveEvolutionInstanceOwner({
+        clientId,
+        instanceName: msgInstanceName,
+        pool: pgDatabasePool,
+      });
 
       // 2. Upsert do lead na tabela public.leads
       await upsertLeadByPhone(pgDatabasePool, clientId, phone, {
@@ -890,6 +899,7 @@ export function registerChatbotRoutes(app, deps) {
         lead_origin: leadSource,
         lead_source: leadSource,
         status: "NOVO",
+        assigned_to: assignedOwnerUid || null,
         qualificacao: "Lead inbound cadastrado via WhatsApp",
         historico: `Lead cadastrado a partir do WhatsApp Inbox em ${new Date().toLocaleString("pt-BR")}`,
       });
@@ -954,17 +964,24 @@ export function registerChatbotRoutes(app, deps) {
         if (!phone) continue;
 
         let finalName = isRealName(item.name) ? normalizeString(item.name) : null;
-        if (!finalName) {
-          const nameQuery = await pgDatabasePool.query(
-            `SELECT contact_name FROM public.lead_messages 
-             WHERE client_id = $1 AND (${SQL_CANONICAL_PHONE("phone")} = $2 OR phone = $2) AND contact_name IS NOT NULL 
-             ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
-            [clientId, phone]
-          );
-          if (nameQuery.rows[0]?.contact_name && isRealName(nameQuery.rows[0].contact_name)) {
-            finalName = nameQuery.rows[0].contact_name;
-          }
+        let itemInstanceName = item.instanceName || null;
+        const msgQuery = await pgDatabasePool.query(
+          `SELECT contact_name, instance_name FROM public.lead_messages 
+           WHERE client_id = $1 AND (${SQL_CANONICAL_PHONE("phone")} = $2 OR phone = $2)
+           ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
+          [clientId, phone]
+        );
+        if (!finalName && msgQuery.rows[0]?.contact_name && isRealName(msgQuery.rows[0].contact_name)) {
+          finalName = msgQuery.rows[0].contact_name;
         }
+        if (!itemInstanceName && msgQuery.rows[0]?.instance_name) {
+          itemInstanceName = msgQuery.rows[0].instance_name;
+        }
+        const assignedOwnerUid = await resolveEvolutionInstanceOwner({
+          clientId,
+          instanceName: itemInstanceName,
+          pool: pgDatabasePool,
+        });
 
         await upsertLeadByPhone(pgDatabasePool, clientId, phone, {
           nome: finalName || null,
@@ -972,6 +989,7 @@ export function registerChatbotRoutes(app, deps) {
           lead_origin: leadSource,
           lead_source: leadSource,
           status: "NOVO",
+          assigned_to: assignedOwnerUid || null,
           qualificacao: "Lead inbound cadastrado via WhatsApp (em lote)",
           historico: `Lead cadastrado em lote a partir do WhatsApp Inbox em ${new Date().toLocaleString("pt-BR")}`,
         });

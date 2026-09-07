@@ -17,7 +17,7 @@
 import { createLeadMessaging } from "../shared/leadMessaging.js";
 import { syncEvolutionInstanceChatsAndMessages } from "../../services/evolution.js";
 import { whatsappSessionManager } from "../../whatsapp.js";
-import { propagateTenantPermissions } from "../../access/claims.js";
+import { propagateTenantPermissions, isManagerOrAdmin } from "../../access/claims.js";
 import { makeChipLimitGuard } from "../../access/chipLimitGate.js";
 
 // Trava de backend contra o martelo em /instance/fetchInstances da Evolution (incidente
@@ -602,6 +602,10 @@ export function registerIntegrationsRoutes(app, deps) {
     if (Object.prototype.hasOwnProperty.call(body, "active")) {
       addUpdate("active = ?", body.active !== false);
     }
+    if (Object.prototype.hasOwnProperty.call(body, "ownerUid") || Object.prototype.hasOwnProperty.call(body, "owner_uid")) {
+      const ownerVal = body.ownerUid !== undefined ? body.ownerUid : body.owner_uid;
+      addUpdate("owner_uid = ?", normalizeString(ownerVal) || null);
+    }
 
     if (updates.length === 0) {
       sendError(res, 400, "NO_UPDATES", "No valid fields to update");
@@ -973,6 +977,23 @@ export function registerIntegrationsRoutes(app, deps) {
         if (!existing) {
           sendError(res, 404, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found");
           return;
+        }
+
+        const requestedOwnerUid = req.body?.ownerUid !== undefined ? req.body.ownerUid : req.body?.owner_uid;
+        if (requestedOwnerUid !== undefined) {
+          const normalizedNew = normalizeString(requestedOwnerUid) || null;
+          const normalizedCurrent = normalizeString(existing.owner_uid) || null;
+          if (normalizedNew !== normalizedCurrent) {
+            if (!isManagerOrAdmin(req.authAccess)) {
+              sendError(
+                res,
+                403,
+                "FORBIDDEN",
+                "Apenas gestores ou administradores podem alterar o operador responsável pelo chip"
+              );
+              return;
+            }
+          }
         }
 
         const saved = await upsertLeadClientEvolutionInstance(tenantId, req.body || {}, req.authAccess, existing);

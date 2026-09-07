@@ -55,6 +55,7 @@ export function maskEvolutionInstance(row) {
       ? "active"
       : "disconnected",
     daily_limit_override: row.daily_limit_override != null ? Number(row.daily_limit_override) : null,
+    owner_uid: row.owner_uid || null,
     sent_count_today: row.sent_count_today != null ? Number(row.sent_count_today) : 0,
     webhook_enabled: row.webhook_enabled === true,
     // Preenchido quando a configuracao remota do webhook falhou no salvamento.
@@ -104,6 +105,7 @@ export async function ensureLeadClientEvolutionInstancesTable() {
         dispatch_webhook_url TEXT NOT NULL,
         dispatch_webhook_token TEXT,
         inbound_bearer_token TEXT,
+        owner_uid TEXT NULL,
         active BOOLEAN NOT NULL DEFAULT true,
         is_default BOOLEAN NOT NULL DEFAULT false,
         webhook_enabled BOOLEAN NOT NULL DEFAULT false,
@@ -123,6 +125,11 @@ export async function ensureLeadClientEvolutionInstancesTable() {
     `).catch(() => {});
 
     await pgDatabasePool.query(`
+      ALTER TABLE public.lead_client_evolution_instances
+        ADD COLUMN IF NOT EXISTS owner_uid TEXT NULL
+    `).catch(() => {});
+
+    await pgDatabasePool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_client_evolution_default
         ON public.lead_client_evolution_instances (client_id)
         WHERE is_default = true
@@ -131,6 +138,11 @@ export async function ensureLeadClientEvolutionInstancesTable() {
     await pgDatabasePool.query(`
       CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_client
         ON public.lead_client_evolution_instances (client_id, active)
+    `).catch(() => {});
+
+    await pgDatabasePool.query(`
+      CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_owner_uid
+        ON public.lead_client_evolution_instances (client_id, owner_uid)
     `).catch(() => {});
 
     await pgDatabasePool.query(`
@@ -159,15 +171,18 @@ export function selectDefaultEvolutionInstance(instances = []) {
   return active.find((i) => i.is_default === true) || active[0] || null;
 }
 
-export async function getLeadClientEvolutionInstances(clientId) {
+export async function getLeadClientEvolutionInstances(clientId, pool = null) {
   if (!clientId) return [];
-  if (!pgDatabasePool) return [];
+  const db = pool || pgDatabasePool;
+  if (!db) return [];
   try {
-    await ensureLeadClientEvolutionInstancesTable();
-    const { rows } = await pgDatabasePool.query(
+    if (db === pgDatabasePool) {
+      await ensureLeadClientEvolutionInstancesTable();
+    }
+    const { rows } = await db.query(
       `
         SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
-               i.inbound_bearer_token, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
+               i.inbound_bearer_token, i.owner_uid, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
                i.webhook_enabled,
                i.created_at, i.updated_at, i.updated_by_email,
                COALESCE(u.sent_count, 0) AS sent_count_today
@@ -199,7 +214,7 @@ export async function getLeadClientEvolutionInstancesMap(clientIds) {
     const { rows } = await pgDatabasePool.query(
       `
         SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
-               i.inbound_bearer_token, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
+               i.inbound_bearer_token, i.owner_uid, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
                i.webhook_enabled,
                i.created_at, i.updated_at, i.updated_by_email,
                COALESCE(u.sent_count, 0) AS sent_count_today
@@ -226,8 +241,8 @@ export async function getLeadClientEvolutionInstancesMap(clientIds) {
   }
 }
 
-export async function getDefaultLeadClientEvolutionInstance(clientId) {
-  const instances = await getLeadClientEvolutionInstances(clientId);
+export async function getDefaultLeadClientEvolutionInstance(clientId, pool = null) {
+  const instances = await getLeadClientEvolutionInstances(clientId, pool);
   return selectDefaultEvolutionInstance(instances);
 }
 
@@ -847,6 +862,12 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
   const dailyLimitOverride =
     rawLimit == null ? null : Number.isInteger(Number(rawLimit)) && Number(rawLimit) > 0 ? Number(rawLimit) : null;
 
+  const ownerUid = Object.prototype.hasOwnProperty.call(body, "ownerUid")
+    ? (normalizeString(body.ownerUid) || null)
+    : Object.prototype.hasOwnProperty.call(body, "owner_uid")
+    ? (normalizeString(body.owner_uid) || null)
+    : (existing?.owner_uid || null);
+
   const webhookEnabled = Object.prototype.hasOwnProperty.call(body, "webhookEnabled")
     ? body.webhookEnabled === true
     : existing?.webhook_enabled === true;
@@ -858,6 +879,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
     chip_state: chipState,
     connection_state: connectionState,
     daily_limit_override: dailyLimitOverride,
+    owner_uid: ownerUid,
     dispatch_webhook_token:
       Object.prototype.hasOwnProperty.call(body, "dispatchWebhookToken")
         ? body.dispatchWebhookToken === null
@@ -909,10 +931,11 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
               updated_at = now(),
               updated_by_uid = $10,
               updated_by_email = $11,
-              connection_state = $12
-          WHERE id = $13 AND client_id = $14
+              connection_state = $12,
+              owner_uid = $13
+          WHERE id = $14 AND client_id = $15
           RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-                    inbound_bearer_token, active, is_default, chip_state, connection_state, daily_limit_override,
+                    inbound_bearer_token, owner_uid, active, is_default, chip_state, connection_state, daily_limit_override,
                     webhook_enabled,
                     created_at, updated_at, updated_by_email
         `,
@@ -929,6 +952,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
           payload.updated_by_uid,
           payload.updated_by_email,
           payload.connection_state,
+          payload.owner_uid,
           existing.id,
           clientId,
         ]
@@ -951,10 +975,10 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
         `
           INSERT INTO public.lead_client_evolution_instances
             (client_id, name, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token,
-             active, is_default, chip_state, connection_state, daily_limit_override, webhook_enabled, updated_by_uid, updated_by_email)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             owner_uid, active, is_default, chip_state, connection_state, daily_limit_override, webhook_enabled, updated_by_uid, updated_by_email)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           RETURNING id, client_id, name, dispatch_webhook_url, dispatch_webhook_token,
-                    inbound_bearer_token, active, is_default, chip_state, connection_state, daily_limit_override,
+                    inbound_bearer_token, owner_uid, active, is_default, chip_state, connection_state, daily_limit_override,
                     webhook_enabled,
                     created_at, updated_at, updated_by_email
         `,
@@ -964,6 +988,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
           payload.dispatch_webhook_url,
           payload.dispatch_webhook_token,
           payload.inbound_bearer_token,
+          payload.owner_uid,
           payload.active,
           shouldDefault,
           payload.chip_state,
@@ -1566,3 +1591,38 @@ export async function validateWhatsappNumbersWithCache({ pool, webhookUrl, webho
 
   return resultMap;
 }
+
+/**
+ * Resolve o dono (owner_uid) do chip/instância que recebeu uma mensagem inbound.
+ * Casa por instanceName (nome amigável, id ou sufixo da URL) ou cai na instância default.
+ * Devolve owner_uid (string) ou null.
+ */
+export async function resolveEvolutionInstanceOwner({ clientId, instanceName = null, pool = null, dbPool = null }) {
+  const db = pool || dbPool || pgDatabasePool;
+  if (!clientId || !db) return null;
+  try {
+    const instances = await getLeadClientEvolutionInstances(clientId, db);
+    if (!instances || instances.length === 0) return null;
+
+    const alvo = normalizeString(instanceName);
+    if (alvo) {
+      const casada = instances.find((inst) => {
+        const daUrl = inst.dispatch_webhook_url
+          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
+          : null;
+        return inst.name === alvo || inst.id === alvo || daUrl === alvo;
+      });
+      if (casada) {
+        return casada.owner_uid || null;
+      }
+    }
+
+    // Se não encontrou pelo nome do chip ou não veio instanceName, cai na padrão ou primeira ativa
+    const defaultInst = selectDefaultEvolutionInstance(instances);
+    return defaultInst?.owner_uid || null;
+  } catch (err) {
+    console.warn("[evolution-instances] Erro ao resolver dono do chip:", err?.message || err);
+    return null;
+  }
+}
+

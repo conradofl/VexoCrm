@@ -20,9 +20,11 @@ import {
   getDefaultLeadClientEvolutionInstance,
   getEvolutionAdminConfig,
   getLeadClientEvolutionInstances,
+  resolveEvolutionInstanceOwner,
 } from "../../services/evolution.js";
 
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
+import { isManagerOrAdmin } from "../../access/claims.js";
 
 function sanitizePhoneE164(phoneInput, defaultDdd = null) {
   const s = sanitizePhone(phoneInput, defaultDdd);
@@ -976,7 +978,7 @@ export function registerLeadsRoutes(app, deps) {
 
     try {
       let instance = null;
-      const allInstances = await getLeadClientEvolutionInstances(clientId);
+      const allInstances = await getLeadClientEvolutionInstances(clientId, pgDatabasePool);
 
       if (explicitInstanceId) {
         instance = allInstances.find((i) => i.id === explicitInstanceId) || null;
@@ -985,7 +987,7 @@ export function registerLeadsRoutes(app, deps) {
       }
 
       if (!instance) {
-        instance = await getDefaultLeadClientEvolutionInstance(clientId);
+        instance = await getDefaultLeadClientEvolutionInstance(clientId, pgDatabasePool);
       }
 
       if (!instance || !instance.dispatch_webhook_url) {
@@ -1004,6 +1006,16 @@ export function registerLeadsRoutes(app, deps) {
       }
 
       const apiKey = instance.dispatch_webhook_token || getEvolutionAdminConfig().apiKey;
+
+      // Bloco 3: Resolve o operador responsável pelo chip de onde as conversas/contatos estão sendo extraídos
+      let chipOwnerUid = instance?.owner_uid || null;
+      if (!chipOwnerUid && instanceName) {
+        chipOwnerUid = await resolveEvolutionInstanceOwner({
+          clientId,
+          instanceName: instance?.name || instanceName,
+          pool: pgDatabasePool,
+        });
+      }
 
       // Evolution v2: findChats é POST (com body), não GET. GET dava HTTP 404.
       const chatsRes = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
@@ -1203,6 +1215,26 @@ export function registerLeadsRoutes(app, deps) {
         // extração retornava 0 sem pista). ON CONFLICT (client_id, telefone)
         // deduplica: rodar a extração várias vezes atualiza em vez de duplicar.
         try {
+          // Bloco 3: herda dono do chip de onde a conversa foi extraída (ou busca da mensagem)
+          let chatOwnerUid = chipOwnerUid;
+          if (!chatOwnerUid) {
+            try {
+              const msgQuery = await pgDatabasePool.query(
+                `SELECT instance_name FROM public.lead_messages 
+                 WHERE client_id = $1 AND phone = $2 AND instance_name IS NOT NULL 
+                 ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
+                [clientId, telefoneKey]
+              );
+              if (msgQuery.rows[0]?.instance_name) {
+                chatOwnerUid = await resolveEvolutionInstanceOwner({
+                  clientId,
+                  instanceName: msgQuery.rows[0].instance_name,
+                  pool: pgDatabasePool,
+                });
+              }
+            } catch {}
+          }
+
           // telefone sem "+" para casar com lead_messages.phone (sync) e
           // deduplicar entre extração e sincronização (mesma chave).
           const telefoneKey = formattedPhone.replace(/^\+/, "");
@@ -1214,6 +1246,7 @@ export function registerLeadsRoutes(app, deps) {
             tags: Array.isArray(classification.tags) ? classification.tags : [],
             extracted_from_wa: true,
             lead_source: "extracao_whatsapp",
+            assigned_to: chatOwnerUid || null,
             dados: {
               origem: "WhatsApp Extração",
               lead_source_bruto: "WhatsApp Extração",
@@ -1250,6 +1283,7 @@ export function registerLeadsRoutes(app, deps) {
             tags: ["agenda-whatsapp"],
             extracted_from_wa: true,
             lead_source: "extracao_whatsapp",
+            assigned_to: chipOwnerUid || null,
             dados: {
               origem: "WhatsApp Agenda",
               lead_source_bruto: "WhatsApp Agenda",
@@ -1449,6 +1483,16 @@ export function registerLeadsRoutes(app, deps) {
     }
 
     try {
+      const rawAssignedTo = req.body?.assigned_to !== undefined ? req.body.assigned_to : req.body?.assignedTo;
+      let assignedToVal = undefined;
+      if (rawAssignedTo !== undefined) {
+        if (!isManagerOrAdmin(req.authAccess)) {
+          sendError(res, 403, "FORBIDDEN", "Apenas gestores ou administradores podem definir o operador responsável");
+          return;
+        }
+        assignedToVal = rawAssignedTo ? String(rawAssignedTo).trim() : null;
+      }
+
       const payload = {
         client_id: clientId,
         telefone: phone,
@@ -1457,6 +1501,7 @@ export function registerLeadsRoutes(app, deps) {
         stage: normalizeString(req.body?.stage) || 'cold',
         temperature: normalizeString(req.body?.temperature) || 'warm',
         tags: Array.isArray(req.body?.tags) ? req.body.tags : [],
+        assigned_to: assignedToVal,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -1467,6 +1512,7 @@ export function registerLeadsRoutes(app, deps) {
         stage: payload.stage,
         temperature: payload.temperature,
         tags: payload.tags,
+        assigned_to: assignedToVal,
       });
 
       const variants = buildPhoneLookupVariants(phone);
@@ -1506,6 +1552,14 @@ export function registerLeadsRoutes(app, deps) {
       if (req.body.stage !== undefined) updates.stage = req.body.stage;
       if (req.body.temperature !== undefined) updates.temperature = req.body.temperature;
       if (req.body.nome !== undefined) updates.nome = req.body.nome;
+      if (req.body.assigned_to !== undefined || req.body.assignedTo !== undefined) {
+        if (!isManagerOrAdmin(req.authAccess)) {
+          sendError(res, 403, "FORBIDDEN", "Apenas gestores ou administradores podem reatribuir leads");
+          return;
+        }
+        const val = req.body.assigned_to !== undefined ? req.body.assigned_to : req.body.assignedTo;
+        updates.assigned_to = val ? String(val).trim() : null;
+      }
       updates.updated_at = new Date().toISOString();
 
       if (tagsArray !== undefined && pgDatabasePool) {
@@ -1557,12 +1611,22 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
 
-    const { stage, temperature, addTag } = req.body?.updates || {};
+    const { stage, temperature, addTag, assigned_to, assignedTo } = req.body?.updates || {};
+    const targetAssignedTo = assigned_to !== undefined ? assigned_to : assignedTo;
+    if (targetAssignedTo !== undefined) {
+      if (!isManagerOrAdmin(req.authAccess)) {
+        sendError(res, 403, "FORBIDDEN", "Apenas gestores ou administradores podem reatribuir leads");
+        return;
+      }
+    }
 
     try {
       const updates = { updated_at: new Date().toISOString() };
       if (stage) updates.stage = stage;
       if (temperature) updates.temperature = temperature;
+      if (targetAssignedTo !== undefined) {
+        updates.assigned_to = targetAssignedTo ? String(targetAssignedTo).trim() : null;
+      }
 
       if (Object.keys(updates).length > 1) {
         await supabase

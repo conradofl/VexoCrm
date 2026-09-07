@@ -74,6 +74,10 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
     if (!sanitizedFields.lead_origin) sanitizedFields.lead_origin = sanitizedFields.origem;
     delete sanitizedFields.origem;
   }
+  if (sanitizedFields.assignedTo !== undefined) {
+    if (!sanitizedFields.assigned_to) sanitizedFields.assigned_to = sanitizedFields.assignedTo;
+    delete sanitizedFields.assignedTo;
+  }
 
   // 1. Busca se o lead já existe por telefone ou phone
   const existingRes = await pool.query(
@@ -92,6 +96,11 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
   if (existing) {
     // ── UPDATE ─────────────────────────────────────────────────────────────
     const updates = { ...sanitizedFields };
+
+    // Regra de Ouro (Bloco 3): nunca sobrescrever assigned_to de lead existente via upsert de mensagem.
+    // Preserva os 2.126 leads históricos sem backfill e preserva qualquer atribuição prévia.
+    delete updates.assigned_to;
+    delete updates.assignedTo;
 
     // Regra de ouro: não sobrescrever nome bom existente se o novo nome for vazio/placeholder
     if (preserveExistingName && isRealName(existing.nome)) {

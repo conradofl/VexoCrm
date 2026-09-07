@@ -81,6 +81,7 @@ export interface LeadClientEvolutionInstancePayload {
   dispatchWebhookUrl?: string | null;
   dispatchWebhookToken?: string | null;
   inboundBearerToken?: string | null;
+  ownerUid?: string | null;
   active?: boolean;
   isDefault?: boolean;
   chipState?: "cold" | "warm";
@@ -95,6 +96,7 @@ export interface LeadClientEvolutionInstance {
   dispatch_webhook_url: string | null;
   has_dispatch_webhook_token: boolean;
   inbound_bearer_token_label?: string | null;
+  owner_uid?: string | null;
   active: boolean;
   is_default: boolean;
   chip_state: "cold" | "warm";

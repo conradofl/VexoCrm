@@ -1311,3 +1311,13 @@ export async function propagateTenantPermissions(tenantId, allowedTabs) {
 
   return { updatedUsers, skippedUsers };
 }
+
+export function isManagerOrAdmin(access) {
+  if (!access) return false;
+  if (access.isFixedAdmin || access.isAdmin || access.isAdminUser || access.role === "superadmin") return true;
+  if (access.preset === "admin_vexo" || access.preset === "gestor") return true;
+  if (access.approvalLevel === "manager" || access.approvalLevel === "director") return true;
+  if (Array.isArray(access.internalPages) && access.internalPages.includes("usuarios")) return true;
+  if (Array.isArray(access.permissions) && (access.permissions.includes("users.manage") || access.permissions.includes("users.view"))) return true;
+  return false;
+}

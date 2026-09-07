@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { useAdminUsers } from "@/hooks/useAdminUsers";
 import {
   useDeleteLeadClientEvolutionInstance,
   useProvisionLeadClientEvolutionInstance,
@@ -22,6 +24,19 @@ interface Props {
 }
 
 export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
+  const { isAdminUser, canAccessInternalPage } = useAuth();
+  const canManageOwner = canEdit && (isAdminUser || canAccessInternalPage("usuarios"));
+  const adminUsersQuery = useAdminUsers();
+
+  const operatorOptions = useMemo(() => {
+    if (!adminUsersQuery.data) return [];
+    return adminUsersQuery.data.filter(
+      (u) =>
+        u.access?.role === "internal" &&
+        (!tenant.id || u.access.clientId === tenant.id || u.access.clientIds?.includes(tenant.id))
+    );
+  }, [adminUsersQuery.data, tenant.id]);
+
   const saveEvolutionInstance = useSaveLeadClientEvolutionInstance();
   const provisionEvolutionInstance = useProvisionLeadClientEvolutionInstance();
   const deleteEvolutionInstance = useDeleteLeadClientEvolutionInstance();
@@ -118,7 +133,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
   // Instance action helpers
   const handleUpdateEvolutionInstance = async (
     instance: LeadClientEvolutionInstance,
-    patch: { active?: boolean; isDefault?: boolean; webhookEnabled?: boolean }
+    patch: { active?: boolean; isDefault?: boolean; webhookEnabled?: boolean; ownerUid?: string | null }
   ) => {
     try {
       const salva = await saveEvolutionInstance.mutateAsync({
@@ -129,6 +144,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
         active: patch.active ?? instance.active,
         isDefault: patch.isDefault ?? instance.is_default,
         webhookEnabled: patch.webhookEnabled ?? instance.webhook_enabled,
+        ownerUid: patch.ownerUid !== undefined ? patch.ownerUid : (instance.owner_uid ?? null),
       });
       // O chip salvou, mas a Evolution pode ter recusado o webhook. Antes isso
       // so aparecia no log do servidor e o numero ficava mudo sem aviso.
@@ -145,7 +161,9 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
           ? "Evolution padrao atualizada"
           : patch.webhookEnabled !== undefined
             ? "Integração de webhook atualizada"
-            : "Evolution atualizada",
+            : patch.ownerUid !== undefined
+              ? "Operador responsável atualizado"
+              : "Evolution atualizada",
         description: `${tenant.name}: ${instance.name}`,
       });
     } catch (err) {
@@ -294,6 +312,9 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                   onDelete={() => void handleDeleteEvolutionInstance(instance)}
                   onSyncNow={() => void handleSyncInstance(instance)}
                   canEdit={canEdit}
+                  canManageOwner={canManageOwner}
+                  operatorOptions={operatorOptions}
+                  onOwnerChange={(newOwnerUid) => void handleUpdateEvolutionInstance(instance, { ownerUid: newOwnerUid })}
                   isSavePending={saveEvolutionInstance.isPending}
                   isDeletePending={deleteEvolutionInstance.isPending}
                   isSyncPending={syncingInstanceId === instance.id}

@@ -31,6 +31,7 @@ export interface LeadRow {
   dados: Record<string, unknown> | null;
   data_hora: string | null;
   qualificacao: string | null;
+  assigned_to?: string | null;
   created_at: string;
   updated_at: string;
 }
