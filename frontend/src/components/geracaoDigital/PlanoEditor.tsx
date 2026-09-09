@@ -254,6 +254,8 @@ export default function PlanoEditor({ plano, onChange, gdProducts, vexoProducts,
             const mensal = Number(plano.precos[p.key] || 0);
             const on = mensal > 0;
             const meses = mesesDoPeriodo(p.key);
+            const descPeriodo = Number(plano.descontosPorPeriodo?.[p.key] || 0);
+            const mensalFinal = Math.max(0, mensal * (1 - descPeriodo / 100));
             return (
               <div
                 key={p.key}
@@ -278,11 +280,45 @@ export default function PlanoEditor({ plano, onChange, gdProducts, vexoProducts,
                   />
                   <span className="text-[10px] text-slate-500 dark:text-slate-400">/mês</span>
                 </div>
+                {on && (
+                  <div className="flex items-center gap-1.5 ml-2">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">Desc:</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={plano.descontosPorPeriodo?.[p.key] !== undefined && plano.descontosPorPeriodo?.[p.key] !== 0 ? plano.descontosPorPeriodo[p.key] : ""}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const val = raw === "" ? 0 : Math.max(0, Math.min(100, Number(raw)));
+                        const novosDescontos = {
+                          ...(plano.descontosPorPeriodo || { mensal: 0, trimestral: 0, semestral: 0, anual: 0 }),
+                          [p.key]: val,
+                        };
+                        onChange({
+                          ...plano,
+                          descontosPorPeriodo: novosDescontos,
+                        });
+                      }}
+                      placeholder="0"
+                      className="h-8 w-16 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10"
+                    />
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">%</span>
+                  </div>
+                )}
                 <span className="text-[10px] text-slate-500 dark:text-slate-400 ml-auto text-right">
                   {on ? (
-                    <>
-                      {meses}x · total {brl(mensal * meses)}
-                    </>
+                    descPeriodo > 0 ? (
+                      <>
+                        <span className="line-through text-slate-400 mr-1">{brl(mensal)}</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">{brl(mensalFinal)}/mês</span>
+                        <span className="block text-[9px] text-slate-400">total {brl(mensalFinal * meses)}</span>
+                      </>
+                    ) : (
+                      <>
+                        {meses}x · total {brl(mensal * meses)}
+                      </>
+                    )
                   ) : (
                     "não ofertado"
                   )}
@@ -292,8 +328,8 @@ export default function PlanoEditor({ plano, onChange, gdProducts, vexoProducts,
           })}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 pt-3 border-t border-dashed border-slate-200 dark:border-white/10">
-          <div className="space-y-1">
+        <div className="pt-3 border-t border-dashed border-slate-200 dark:border-white/10">
+          <div className="space-y-1 max-w-xs">
             <Label className="text-[10px] font-bold text-slate-700 dark:text-slate-300">
               Desconto no Setup (%)
             </Label>
@@ -317,41 +353,19 @@ export default function PlanoEditor({ plano, onChange, gdProducts, vexoProducts,
               <span className="text-xs text-slate-500">%</span>
             </div>
           </div>
-          <div className="space-y-1">
-            <Label className="text-[10px] font-bold text-slate-700 dark:text-slate-300">
-              Desconto na Mensalidade (%)
-            </Label>
-            <div className="flex items-center gap-1.5">
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                value={(plano as any).descontoMensalPorcentagem ?? (plano as any).desconto_mensal_pct ?? ""}
-                onChange={(e) => {
-                  const val = Math.max(0, Math.min(100, Number(e.target.value)));
-                  onChange({
-                    ...plano,
-                    descontoMensalPorcentagem: val,
-                    desconto_mensal_pct: val
-                  } as any);
-                }}
-                placeholder="0"
-                className="h-8 text-xs bg-white dark:bg-slate-800 border-slate-200 dark:border-white/10"
-              />
-              <span className="text-xs text-slate-500">%</span>
-            </div>
-          </div>
         </div>
 
         {/* RESUMO DE FATURAMENTO COM DESCONTOS REATIVOS */}
         {(() => {
           const descSetupPct = Math.max(0, Math.min(100, Number((plano as any).descontoSetupPorcentagem ?? (plano as any).desconto_setup_pct ?? 0)));
-          const descMensalPct = Math.max(0, Math.min(100, Number((plano as any).descontoMensalPorcentagem ?? (plano as any).desconto_mensal_pct ?? 0)));
+          const primeiroPrazo = PERIODOS.find((p) => Number(plano.precos[p.key] || 0) > 0);
+          const descMensalPct = primeiroPrazo && plano.descontosPorPeriodo?.[primeiroPrazo.key] !== undefined
+            ? Math.max(0, Math.min(100, Number(plano.descontosPorPeriodo[primeiroPrazo.key])))
+            : Math.max(0, Math.min(100, Number((plano as any).descontoMensalPorcentagem ?? (plano as any).desconto_mensal_pct ?? 0)));
 
           const setupOriginal = Number((plano as any).valorSetupVexo ?? (plano as any).valor_setup_vexo ?? 0);
           const setupFinal = Math.max(0, setupOriginal * (1 - descSetupPct / 100));
 
-          const primeiroPrazo = PERIODOS.find((p) => Number(plano.precos[p.key] || 0) > 0);
           const mensalOriginal = primeiroPrazo ? Number(plano.precos[primeiroPrazo.key] || 0) : 0;
           const mensalFinal = Math.max(0, mensalOriginal * (1 - descMensalPct / 100));
           const mesesCount = primeiroPrazo ? mesesDoPeriodo(primeiroPrazo.key) : 1;

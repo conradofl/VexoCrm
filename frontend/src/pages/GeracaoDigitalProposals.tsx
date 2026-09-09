@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { calculateProposalValues, isCobrancaUnica, isCobrancaMensal, temPacote, isLinhaDePacote } from "@/lib/geracaoDigital/proposalCalculator";
 import PlanoEditor from "@/components/geracaoDigital/PlanoEditor";
-import { type Plano, planoVazio, planoValido, planoDeProposta, vpMensalDoPrazo, PERIODOS } from "@/lib/geracaoDigital/plano";
+import { type Plano, type PeriodoKey, planoVazio, planoValido, planoDeProposta, vpMensalDoPrazo, PERIODOS } from "@/lib/geracaoDigital/plano";
 import FormasPagamentoEditor from "@/components/geracaoDigital/FormasPagamentoEditor";
 import { type FormasSelecionadas, formasVazias, formasParaTerms, termsParaFormas, termsLegados } from "@/lib/geracaoDigital/formasPagamento";
 import { syncPlanoPackages } from "@/lib/geracaoDigital/planoSync";
@@ -987,9 +987,17 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         // divide a mensalidade por ele). Vem do % do plano, com fallback no
         // VP manual antigo.
         valor_vp: vpMensalPlano > 0 ? vpMensalPlano : null,
+        vp_percent: Number(editPlano.vpPercent || 0) > 0 ? Number(editPlano.vpPercent) : null,
         condicoes_especiais: newCondicoes || (editPlano as any).condicoesEspeciais || null,
         desconto_setup_pct: (editPlano as any).descontoSetupPorcentagem ?? (editPlano as any).desconto_setup_pct ?? 0,
-        desconto_mensal_pct: (editPlano as any).descontoMensalPorcentagem ?? (editPlano as any).desconto_mensal_pct ?? 0,
+        descontos_por_periodo: editPlano.descontosPorPeriodo || null,
+        desconto_mensal_pct: (() => {
+          const p = (finalPeriodoPlano || "mensal") as PeriodoKey;
+          if (editPlano.descontosPorPeriodo && editPlano.descontosPorPeriodo[p] !== undefined) {
+            return Number(editPlano.descontosPorPeriodo[p] || 0);
+          }
+          return (editPlano as any).descontoMensalPorcentagem ?? (editPlano as any).desconto_mensal_pct ?? 0;
+        })(),
         vexo_plan: (editPlano as any).vexoPlan || null,
         vexo_price: (editPlano as any).vexoPlan === "essencial" ? 397 : (editPlano as any).vexoPlan === "avancado" ? 897 : 0,
         owner_company: isVexoCommercial ? "vexo" : ((selectedProposal as any).owner_company || "geracao-digital")
@@ -1770,6 +1778,8 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                                 itens: items,
                                 desconto_setup_pct: (editPlano as any).descontoSetupPorcentagem ?? (editPlano as any).desconto_setup_pct ?? 0,
                                 desconto_mensal_pct: (editPlano as any).descontoMensalPorcentagem ?? (editPlano as any).desconto_mensal_pct ?? 0,
+                                descontos_por_periodo: editPlano.descontosPorPeriodo,
+                                vp_percent: editPlano.vpPercent,
                               },
                               availablePackages
                             );

@@ -80,6 +80,10 @@ interface Proposal {
   package_id?: string | null;
   packages?: any[];
   owner_company?: string | null;
+  desconto_setup_pct?: number | null;
+  desconto_mensal_pct?: number | null;
+  descontos_por_periodo?: Record<string, any> | string | null;
+  vp_percent?: number | null;
 }
 
 export function isVexoProposal(prop: Proposal | null | undefined): boolean {
@@ -553,12 +557,46 @@ export default function GeracaoDigitalPublicProposal() {
               <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
                 {packages.map((pkg: any) => {
                   const isSelected = proposal.package_id === pkg.id || proposal.package_vexo_id === pkg.id;
+                  const periodoKey = pkg.periodo || 'mensal';
                   const periodoLabel = pkg.periodo ? (PERIODO_LABELS[pkg.periodo] || pkg.periodo) : null;
                   const meses = pkg.periodo === 'anual' ? 12 : pkg.periodo === 'semestral' ? 6 : pkg.periodo === 'trimestral' ? 3 : 1;
-                  const valorMensal = meses > 1 ? Number(pkg.valor || 0) / meses : Number(pkg.valor || 0);
+
+                  // Desconto deste prazo (prioriza descontos_por_periodo, fallback para desconto_mensal_pct)
+                  let rawDescontos = proposal.descontos_por_periodo ?? (proposal as any).descontosPorPeriodo;
+                  if (typeof rawDescontos === "string") {
+                    try { rawDescontos = JSON.parse(rawDescontos); } catch (_) { rawDescontos = null; }
+                  }
+                  let descPct = 0;
+                  const hasDescontosPorPeriodo = rawDescontos && typeof rawDescontos === "object" && Object.keys(rawDescontos).length > 0;
+                  if (hasDescontosPorPeriodo) {
+                    const pVal = (rawDescontos as Record<string, any>)[periodoKey];
+                    if (pVal !== undefined && pVal !== null && pVal !== "") {
+                      descPct = Math.max(0, Math.min(100, Number(pVal)));
+                    } else {
+                      descPct = 0;
+                    }
+                  } else {
+                    descPct = Math.max(0, Math.min(100, Number(proposal.desconto_mensal_pct || 0)));
+                  }
+
+                  const valorMensalOriginal = meses > 1 ? Number(pkg.valor || 0) / meses : Number(pkg.valor || 0);
+                  const valorMensalFinal = descPct > 0
+                    ? Math.round(valorMensalOriginal * (1 - descPct / 100) * 100) / 100
+                    : valorMensalOriginal;
                   const valorTabelaPeriodo = Number(pkg.valor_tabela || 0);
                   const valorTabelaMensal = valorTabelaPeriodo > 0 ? (meses > 1 ? valorTabelaPeriodo / meses : valorTabelaPeriodo) : 0;
-                  const temTabelaRiscada = valorTabelaMensal > valorMensal;
+
+                  // Se houver valor_tabela explícito maior que o valor mensal final:
+                  const temTabelaExplicita = valorTabelaMensal > valorMensalFinal;
+                  // Se houver desconto para aquele prazo e não houver valor_tabela explícito:
+                  const temDescontoSemTabela = !temTabelaExplicita && descPct > 0 && valorMensalOriginal > valorMensalFinal;
+                  const temValorRiscado = temTabelaExplicita || temDescontoSemTabela;
+                  const valorRiscado = temTabelaExplicita ? valorTabelaMensal : valorMensalOriginal;
+
+                  const totalPeriodo = descPct > 0
+                    ? Math.round(valorMensalFinal * meses * 100) / 100
+                    : Number(pkg.valor || 0);
+
                   return (
                     <button
                       key={pkg.id}
@@ -577,17 +615,24 @@ export default function GeracaoDigitalPublicProposal() {
                         )}
                       </div>
                       <div>
-                        {temTabelaRiscada && (
+                        {temValorRiscado && (
                           <span className="text-[11px] text-slate-400 line-through block font-mono">
-                            De R$ {valorTabelaMensal.toLocaleString("pt-BR")}/mês
+                            De R$ {valorRiscado.toLocaleString("pt-BR")}/mês
                           </span>
                         )}
-                        <span className="text-base font-black text-pink-500 font-mono">
-                          R$ {valorMensal.toLocaleString("pt-BR")}<span className="text-[10px] font-bold text-slate-400">/mês</span>
-                        </span>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-base font-black text-pink-500 font-mono">
+                            R$ {valorMensalFinal.toLocaleString("pt-BR")}<span className="text-[10px] font-bold text-slate-400">/mês</span>
+                          </span>
+                          {descPct > 0 && (
+                            <span className="text-[9px] font-extrabold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                              -{descPct}%
+                            </span>
+                          )}
+                        </div>
                         {meses > 1 && (
                           <span className="text-[9px] text-slate-500 block font-mono">
-                            Total: R$ {Number(pkg.valor || 0).toLocaleString("pt-BR")} ({meses} meses)
+                            Total: R$ {totalPeriodo.toLocaleString("pt-BR")} ({meses} meses)
                           </span>
                         )}
                       </div>

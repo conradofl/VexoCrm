@@ -35,6 +35,8 @@ export interface Plano {
   vexoIds: string[];
   /** R$/mês por prazo. 0 (ou ausente) = prazo não ofertado. */
   precos: Record<PeriodoKey, number>;
+  /** % de desconto na mensalidade por prazo. 0 (ou ausente) = sem desconto. */
+  descontosPorPeriodo: Record<PeriodoKey, number>;
   /** preço cheio mensal, para exibir riscado. 0 = sem riscado. */
   valorTabelaMensal: number;
   /** % da mensalidade aceita em permuta, aplicada a TODOS os prazos. 0 = sem VP.
@@ -54,12 +56,15 @@ export interface Plano {
   descontoMensalPorcentagem?: number;
   desconto_setup_pct?: number;
   desconto_mensal_pct?: number;
+  descontos_por_periodo?: Record<PeriodoKey, number> | null;
+  vp_percent?: number | null;
 }
 
 export const planoVazio = (): Plano => ({
   gdIds: [],
   vexoIds: [],
   precos: { mensal: 0, trimestral: 0, semestral: 0, anual: 0 },
+  descontosPorPeriodo: { mensal: 0, trimestral: 0, semestral: 0, anual: 0 },
   valorTabelaMensal: 0,
   vpPercent: 0,
   valorSetupVexo: 0,
@@ -243,8 +248,34 @@ export function planoDeProposta(pacotes: any[], itens: any[], proposal?: any): P
       plano.desconto_mensal_pct = d;
     }
 
-    // VP: se o plano ainda está com vpPercent = 0, mas a proposta gravou valor_vp ou os itens têm valor_vp
-    if (!plano.vpPercent) {
+    let rawDescontos = proposal.descontos_por_periodo ?? proposal.descontosPorPeriodo;
+    if (typeof rawDescontos === "string") {
+      try { rawDescontos = JSON.parse(rawDescontos); } catch (_) { rawDescontos = null; }
+    }
+    if (rawDescontos && typeof rawDescontos === "object" && Object.keys(rawDescontos).length > 0) {
+      plano.descontosPorPeriodo = {
+        mensal: Number((rawDescontos as any).mensal ?? 0),
+        trimestral: Number((rawDescontos as any).trimestral ?? 0),
+        semestral: Number((rawDescontos as any).semestral ?? 0),
+        anual: Number((rawDescontos as any).anual ?? 0),
+      };
+      plano.descontos_por_periodo = plano.descontosPorPeriodo;
+    } else if (proposal.desconto_mensal_pct !== undefined && proposal.desconto_mensal_pct !== null) {
+      const d = Number(proposal.desconto_mensal_pct);
+      plano.descontosPorPeriodo = {
+        mensal: d,
+        trimestral: d,
+        semestral: d,
+        anual: d,
+      };
+      plano.descontos_por_periodo = plano.descontosPorPeriodo;
+    }
+
+    // VP: prioriza vp_percent gravado; se não houver, deriva de valor_vp legado
+    if (proposal.vp_percent !== undefined && proposal.vp_percent !== null && Number(proposal.vp_percent) > 0) {
+      plano.vpPercent = Number(proposal.vp_percent);
+      plano.vp_percent = plano.vpPercent;
+    } else if (!plano.vpPercent) {
       const vpProp = Number(proposal.valor_vp || 0);
       if (vpProp > 0) {
         const pkgItem = (itens || []).find(

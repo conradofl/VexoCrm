@@ -124,6 +124,8 @@ export interface ProposalLike {
   cobrar_setup?: boolean;
   valor_setup_vexo?: number | string | null;
   valor_vp?: number | string | null;
+  vp_percent?: number | string | null;
+  vpPercent?: number | string | null;
   package_id?: string | null;
   package_vexo_id?: string | null;
   periodo_plano?: string | null;
@@ -132,6 +134,8 @@ export interface ProposalLike {
   desconto_mensal_pct?: number | null;
   descontoSetupPorcentagem?: number | null;
   descontoMensalPorcentagem?: number | null;
+  descontos_por_periodo?: Record<string, number | string | null | undefined> | string | null;
+  descontosPorPeriodo?: Record<string, number | string | null | undefined> | string | null;
   repasse_vexo_pct?: number | null;
   vexoPlan?: "essencial" | "avancado" | null;
 }
@@ -182,9 +186,32 @@ export function calculateProposalValues(
     }
   }
 
+  // Meses do contrato e prazo
+  const pkgItem = items.find(i =>
+    i.descricao?.startsWith("Pacote:") || i.descricao?.startsWith("Pacote Vexo:")
+  );
+  const planoPeriodoKey = String(proposal.periodo_plano || gdPkg?.periodo || vexoPkg?.periodo || pkgItem?.periodo || "mensal").toLowerCase();
+
   // Descontos em %
   const descontoSetupPorcentagem = Math.max(0, Math.min(100, Number(proposal.desconto_setup_pct ?? proposal.descontoSetupPorcentagem ?? 0)));
-  const descontoMensalPorcentagem = Math.max(0, Math.min(100, Number(proposal.desconto_mensal_pct ?? proposal.descontoMensalPorcentagem ?? 0)));
+
+  let rawDescontos = proposal.descontos_por_periodo ?? proposal.descontosPorPeriodo;
+  if (typeof rawDescontos === "string") {
+    try { rawDescontos = JSON.parse(rawDescontos); } catch (_) { rawDescontos = null; }
+  }
+  let descontoMensalPorcentagem = 0;
+  const hasDescontosPorPeriodo = rawDescontos && typeof rawDescontos === "object" && Object.keys(rawDescontos).length > 0;
+  if (hasDescontosPorPeriodo) {
+    const periodoVal = (rawDescontos as Record<string, any>)[planoPeriodoKey];
+    if (periodoVal !== undefined && periodoVal !== null && periodoVal !== "") {
+      descontoMensalPorcentagem = Math.max(0, Math.min(100, Number(periodoVal)));
+    } else {
+      descontoMensalPorcentagem = 0;
+    }
+  } else {
+    // Compatibilidade obrigatória: proposta que não tiver esse campo preenchido continua usando o desconto_mensal_pct atual para todos os prazos
+    descontoMensalPorcentagem = Math.max(0, Math.min(100, Number(proposal.desconto_mensal_pct ?? proposal.descontoMensalPorcentagem ?? 0)));
+  }
 
   const setupFinal = Math.max(0, setupOriginal * (1 - descontoSetupPorcentagem / 100));
 
@@ -239,11 +266,7 @@ export function calculateProposalValues(
   const mensalidadeFinal = Math.max(0, mensalidadeOriginal * (1 - descontoMensalPorcentagem / 100));
 
   // Meses do contrato
-  const pkgItem = items.find(i =>
-    i.descricao?.startsWith("Pacote:") || i.descricao?.startsWith("Pacote Vexo:")
-  );
   const mesesFromItem = pkgItem && Number(pkgItem.meses) > 0 ? Number(pkgItem.meses) : null;
-  const planoPeriodoKey = proposal.periodo_plano || gdPkg?.periodo || vexoPkg?.periodo || pkgItem?.periodo || "mensal";
   const mesesPeriodo = mesesFromItem || monthsForPeriod(planoPeriodoKey) || 1;
 
   const compromissoOriginal = mensalidadeOriginal * mesesPeriodo;
@@ -273,59 +296,68 @@ export function calculateProposalValues(
   let vpMensal = 0;
   let vpPeriodo = 0;
 
-  // 1. Lê do pacote selecionado no catálogo (se houver)
-  if (gdPkg && Number(gdPkg.valor_vp || 0) > 0) {
-    const months = monthsForPeriod(gdPkg.periodo) || 1;
-    const rawPkgVp = Number(gdPkg.valor_vp);
-    if (months > 1 && rawPkgVp >= gdMonthly && Math.round((rawPkgVp / months) * 100) / 100 < gdMonthly) {
-      vpMensal = Math.round((rawPkgVp / months) * 100) / 100;
-      vpPeriodo = rawPkgVp;
-    } else if (rawPkgVp < gdMonthly) {
-      vpMensal = rawPkgVp;
-      vpPeriodo = Math.round(rawPkgVp * months * 100) / 100;
-    } else {
-      vpMensal = Math.round((rawPkgVp / months) * 100) / 100;
-      vpPeriodo = rawPkgVp;
-    }
-  }
+  const explicitVpPercent = Number(proposal.vp_percent ?? (proposal as any).vpPercent ?? 0);
 
-  // 2. Se não encontrou no pacote, lê do item do pacote salvo
-  if (!vpMensal && savedGdPkgItem && Number(savedGdPkgItem.valor_vp || 0) > 0) {
-    const itemMeses = savedGdPkgItem.meses || mesesPeriodo || 1;
-    const rawItemVp = Number(savedGdPkgItem.valor_vp);
-    if (itemMeses > 1 && rawItemVp >= mensalidadeFinal && Math.round((rawItemVp / itemMeses) * 100) / 100 < mensalidadeFinal) {
-      vpMensal = Math.round((rawItemVp / itemMeses) * 100) / 100;
-      vpPeriodo = rawItemVp;
-    } else if (rawItemVp < mensalidadeFinal) {
-      vpMensal = rawItemVp;
-      vpPeriodo = Math.round(rawItemVp * itemMeses * 100) / 100;
-    } else {
-      vpMensal = Math.round((rawItemVp / itemMeses) * 100) / 100;
-      vpPeriodo = rawItemVp;
-    }
-  }
-
-  // 3. Fallback: lê de proposal.valor_vp ou deriva proporção de outros pacotes
-  if (!vpMensal) {
-    const rawPropVp = Number(proposal.valor_vp || 0);
-    if (rawPropVp > 0) {
-      if (rawPropVp >= mensalidadeFinal && mesesPeriodo > 1 && Math.round((rawPropVp / mesesPeriodo) * 100) / 100 < mensalidadeFinal) {
-        vpMensal = Math.round((rawPropVp / mesesPeriodo) * 100) / 100;
-        vpPeriodo = rawPropVp;
-      } else if (rawPropVp < mensalidadeFinal) {
-        vpMensal = rawPropVp;
-        vpPeriodo = Math.round(rawPropVp * mesesPeriodo * 100) / 100;
+  if (explicitVpPercent > 0) {
+    // O VP tem que ser percentual aplicado sobre a mensalidade já descontada.
+    // Ou seja: aplica o desconto primeiro, e só então fatia a proporção de permuta sobre o valor final.
+    vpMensal = Math.round((mensalidadeFinal * (explicitVpPercent / 100)) * 100) / 100;
+    vpPeriodo = Math.round((compromissoFinal * (explicitVpPercent / 100)) * 100) / 100;
+  } else {
+    // 1. Lê do pacote selecionado no catálogo (se houver)
+    if (gdPkg && Number(gdPkg.valor_vp || 0) > 0) {
+      const months = monthsForPeriod(gdPkg.periodo) || 1;
+      const rawPkgVp = Number(gdPkg.valor_vp);
+      if (months > 1 && rawPkgVp >= gdMonthly && Math.round((rawPkgVp / months) * 100) / 100 < gdMonthly) {
+        vpMensal = Math.round((rawPkgVp / months) * 100) / 100;
+        vpPeriodo = rawPkgVp;
+      } else if (rawPkgVp < gdMonthly) {
+        vpMensal = rawPkgVp;
+        vpPeriodo = Math.round(rawPkgVp * months * 100) / 100;
       } else {
-        vpMensal = Math.round((rawPropVp / mesesPeriodo) * 100) / 100;
-        vpPeriodo = rawPropVp;
+        vpMensal = Math.round((rawPkgVp / months) * 100) / 100;
+        vpPeriodo = rawPkgVp;
       }
-    } else {
-      const otherPkgWithVp = availablePackages.find(p => Number(p.valor_vp || 0) > 0 && Number(p.valor || 0) > 0);
-      if (otherPkgWithVp) {
-        const vpPct = Number(otherPkgWithVp.valor_vp) / Number(otherPkgWithVp.valor);
-        if (vpPct > 0 && vpPct < 1) {
-          vpMensal = Math.round(mensalidadeFinal * vpPct * 100) / 100;
-          vpPeriodo = Math.round(vpMensal * mesesPeriodo * 100) / 100;
+    }
+
+    // 2. Se não encontrou no pacote, lê do item do pacote salvo
+    if (!vpMensal && savedGdPkgItem && Number(savedGdPkgItem.valor_vp || 0) > 0) {
+      const itemMeses = savedGdPkgItem.meses || mesesPeriodo || 1;
+      const rawItemVp = Number(savedGdPkgItem.valor_vp);
+      if (itemMeses > 1 && rawItemVp >= mensalidadeFinal && Math.round((rawItemVp / itemMeses) * 100) / 100 < mensalidadeFinal) {
+        vpMensal = Math.round((rawItemVp / itemMeses) * 100) / 100;
+        vpPeriodo = rawItemVp;
+      } else if (rawItemVp < mensalidadeFinal) {
+        vpMensal = rawItemVp;
+        vpPeriodo = Math.round(rawItemVp * itemMeses * 100) / 100;
+      } else {
+        vpMensal = Math.round((rawItemVp / itemMeses) * 100) / 100;
+        vpPeriodo = rawItemVp;
+      }
+    }
+
+    // 3. Fallback: lê de proposal.valor_vp ou deriva proporção de outros pacotes
+    if (!vpMensal) {
+      const rawPropVp = Number(proposal.valor_vp || 0);
+      if (rawPropVp > 0) {
+        if (rawPropVp >= mensalidadeFinal && mesesPeriodo > 1 && Math.round((rawPropVp / mesesPeriodo) * 100) / 100 < mensalidadeFinal) {
+          vpMensal = Math.round((rawPropVp / mesesPeriodo) * 100) / 100;
+          vpPeriodo = rawPropVp;
+        } else if (rawPropVp < mensalidadeFinal) {
+          vpMensal = rawPropVp;
+          vpPeriodo = Math.round(rawPropVp * mesesPeriodo * 100) / 100;
+        } else {
+          vpMensal = Math.round((rawPropVp / mesesPeriodo) * 100) / 100;
+          vpPeriodo = rawPropVp;
+        }
+      } else {
+        const otherPkgWithVp = availablePackages.find(p => Number(p.valor_vp || 0) > 0 && Number(p.valor || 0) > 0);
+        if (otherPkgWithVp) {
+          const vpPct = Number(otherPkgWithVp.valor_vp) / Number(otherPkgWithVp.valor);
+          if (vpPct > 0 && vpPct < 1) {
+            vpMensal = Math.round(mensalidadeFinal * vpPct * 100) / 100;
+            vpPeriodo = Math.round(vpMensal * mesesPeriodo * 100) / 100;
+          }
         }
       }
     }
@@ -334,7 +366,9 @@ export function calculateProposalValues(
   const temVp = vpMensal > 0 && vpMensal < mensalidadeFinal;
   const dinheiroMensal = temVp ? Math.round((mensalidadeFinal - vpMensal) * 100) / 100 : mensalidadeFinal;
   const dinheiroPeriodo = temVp ? Math.round((compromissoFinal - vpPeriodo) * 100) / 100 : compromissoFinal;
-  const vpPercent = temVp && mensalidadeFinal > 0 ? Math.round((vpMensal / mensalidadeFinal) * 100 * 10) / 10 : 0;
+  const vpPercent = explicitVpPercent > 0
+    ? explicitVpPercent
+    : (temVp && mensalidadeFinal > 0 ? Math.round((vpMensal / mensalidadeFinal) * 100 * 10) / 10 : 0);
 
   // VP pela MESMA regra de dedupe
   const vpTotal = computeVpFromItems(items);

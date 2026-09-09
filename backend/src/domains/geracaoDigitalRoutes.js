@@ -287,6 +287,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexo_price NUMERIC DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexo_price NUMERIC DEFAULT 0`));
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS presentation_slides JSONB`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS presentation_slides JSONB`));
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS meeting_notes TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS meeting_notes TEXT`));
+      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`));
+      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
       await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
 
@@ -2018,7 +2020,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       // Setup Vexo opcional e condições de pagamento (campos opcionais)
       const { cobrar_setup = false, valor_setup_vexo = null, condicoes_pagamento = null } = req.body;
       const { periodo_plano = null, validade_ate = null, valor_apos_validade = null, observacao_validade = null, valor_vp = null } = req.body;
-      const { condicoes_especiais = null, desconto_setup_pct = 0, desconto_mensal_pct = 0, vexi_plan = null, vexi_price = 0, vexo_plan = null, vexo_price = 0 } = req.body;
+      const { condicoes_especiais = null, desconto_setup_pct = 0, desconto_mensal_pct = 0, vexi_plan = null, vexi_price = 0, vexo_plan = null, vexo_price = 0, descontos_por_periodo = null, vp_percent = null } = req.body;
       const PERIODOS_VALIDOS_POST = ["mensal", "trimestral", "semestral", "anual"];
       const postPeriodoPlano = PERIODOS_VALIDOS_POST.includes(periodo_plano) ? periodo_plano : null;
       const owner_company = req.body.owner_company || req.body.ownerCompany || (req.body.isVexo ? "vexo" : "geracao-digital");
@@ -2035,7 +2037,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           const baseCols = [
             "tenant_id", "presentation_id", "package_id", "package_vexo_id", "prospect_name", "itens", "valor_total", "condicoes", "status",
             "cobrar_setup", "valor_setup_vexo", "condicoes_pagamento", "periodo_plano", "validade_ate", "valor_apos_validade", "observacao_validade", "valor_vp",
-            "pacotes_ofertados", "owner_company", "condicoes_especiais", "desconto_setup_pct", "desconto_mensal_pct", "vexi_plan", "vexi_price", "vexo_plan", "vexo_price"
+            "pacotes_ofertados", "owner_company", "condicoes_especiais", "desconto_setup_pct", "desconto_mensal_pct", "vexi_plan", "vexi_price", "vexo_plan", "vexo_price",
+            "descontos_por_periodo", "vp_percent"
           ];
           const cols = hasSegmentLogo ? [...baseCols, "segment_id", "prospect_logo"] : baseCols;
           const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -2070,7 +2073,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             vexi_plan || vexo_plan || null,
             Number(vexi_price || vexo_price || 0),
             vexo_plan || vexi_plan || null,
-            Number(vexo_price || vexi_price || 0)
+            Number(vexo_price || vexi_price || 0),
+            descontos_por_periodo && typeof descontos_por_periodo === "object"
+              ? JSON.stringify(descontos_por_periodo)
+              : (typeof descontos_por_periodo === "string" ? descontos_por_periodo : null),
+            vp_percent !== null && vp_percent !== undefined && vp_percent !== "" ? Number(vp_percent) : null
           ];
           if (!hasSegmentLogo) return base;
           const rawSegment = custom_segment_name || customSegmentName || segment_id || null;
@@ -2271,6 +2278,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         ? (valor_vp !== null ? Number(valor_vp) : null)
         : (current.valor_vp !== null ? Number(current.valor_vp) : null);
 
+      const finalDescontosPorPeriodo = req.body.descontos_por_periodo !== undefined
+        ? (req.body.descontos_por_periodo && typeof req.body.descontos_por_periodo === "object"
+            ? JSON.stringify(req.body.descontos_por_periodo)
+            : (typeof req.body.descontos_por_periodo === "string" ? req.body.descontos_por_periodo : null))
+        : (current.descontos_por_periodo ? JSON.stringify(current.descontos_por_periodo) : null);
+      const finalVpPercent = req.body.vp_percent !== undefined
+        ? (req.body.vp_percent !== null && req.body.vp_percent !== "" ? Number(req.body.vp_percent) : null)
+        : (current.vp_percent !== null && current.vp_percent !== undefined ? Number(current.vp_percent) : null);
+
       const finalCondicoesEspeciais = condicoes_especiais !== undefined ? (condicoes_especiais || null) : current.condicoes_especiais;
       const finalDescontoSetupPct = desconto_setup_pct !== undefined ? Number(desconto_setup_pct || 0) : current.desconto_setup_pct;
       const finalDescontoMensalPct = desconto_mensal_pct !== undefined ? Number(desconto_mensal_pct || 0) : current.desconto_mensal_pct;
@@ -2372,7 +2388,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              vexo_plan = $28,
              vexo_price = $29,
              owner_company = COALESCE($30, owner_company),
-             presentation_slides = COALESCE($31, presentation_slides)${segLogoSet}
+             presentation_slides = COALESCE($31, presentation_slides),
+             descontos_por_periodo = $32,
+             vp_percent = $33${segLogoSet}
          WHERE id = $19 AND tenant_id = $20 RETURNING *`,
         [
           prospect_name,
@@ -2405,7 +2423,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalVexoPlan,
           finalVexoPrice,
           finalOwnerCompany || null,
-          finalPresentationSlides ? JSON.stringify(finalPresentationSlides) : null
+          finalPresentationSlides ? JSON.stringify(finalPresentationSlides) : null,
+          finalDescontosPorPeriodo,
+          finalVpPercent
         ]
       );
 
@@ -3090,7 +3110,7 @@ Condições: ${condicoes}`;
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo, valor_vp, meio_pagamento, carencia_dias, pacotes_ofertados, presentation_slides, owner_company, condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price, prospect_logo, segment_id
+        `SELECT id, tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo, valor_vp, meio_pagamento, carencia_dias, pacotes_ofertados, presentation_slides, owner_company, condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price, prospect_logo, segment_id, descontos_por_periodo, vp_percent
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );
@@ -3231,6 +3251,8 @@ Condições: ${condicoes}`;
         vexo_price: row.vexo_price,
         prospect_logo: row.prospect_logo,
         segment_id: row.segment_id,
+        descontos_por_periodo: row.descontos_por_periodo,
+        vp_percent: row.vp_percent !== null && row.vp_percent !== undefined ? Number(row.vp_percent) : null,
         valor_setup: valorSetup,
         valor_recorrente: valorRecorrente,
         packages: packagesRows
@@ -3292,8 +3314,24 @@ Condições: ${condicoes}`;
         let vpPeriodo = Number(selectedPkg.valor_vp || 0) > 0 ? Number(selectedPkg.valor_vp) : null;
         let vpMensal = meses && vpPeriodo ? Math.round((vpPeriodo / meses) * 100) / 100 : vpPeriodo;
 
-        // Se o pacote não tinha valor_vp diretamente gravado, mas a proposta já possuía uma taxa/percentual de VP:
-        if (!vpMensal && Number(proposal.valor_vp || 0) > 0) {
+        // Se a proposta possui vp_percent explícito:
+        if (Number(proposal.vp_percent || 0) > 0) {
+          const vpPct = Number(proposal.vp_percent) / 100;
+          let descPeriodo = Number(proposal.desconto_mensal_pct || 0);
+          let rawDescontos = proposal.descontos_por_periodo;
+          if (typeof rawDescontos === "string") {
+            try { rawDescontos = JSON.parse(rawDescontos); } catch (_) { rawDescontos = null; }
+          }
+          if (rawDescontos && typeof rawDescontos === "object" && selectedPkg.periodo in rawDescontos) {
+            const valP = rawDescontos[selectedPkg.periodo];
+            descPeriodo = (valP !== undefined && valP !== null && valP !== "") ? Math.max(0, Math.min(100, Number(valP))) : 0;
+          }
+          const mensalidadeFinal = Math.max(0, mensalidade * (1 - descPeriodo / 100));
+          const compromissoFinal = Math.max(0, val * (1 - descPeriodo / 100));
+          vpMensal = Math.round(mensalidadeFinal * vpPct * 100) / 100;
+          vpPeriodo = meses ? Math.round(compromissoFinal * vpPct * 100) / 100 : vpMensal;
+        } else if (!vpMensal && Number(proposal.valor_vp || 0) > 0) {
+          // Se o pacote não tinha valor_vp diretamente gravado, mas a proposta já possuía uma taxa/percentual de VP:
           const oldPkgItem = Array.isArray(proposal.itens) ? proposal.itens.find(i => i.descricao?.startsWith("Pacote:")) : null;
           const oldMensal = oldPkgItem ? Number(oldPkgItem.valor || 0) : Number(proposal.valor_total || 0);
           if (oldMensal > 0) {
@@ -3351,6 +3389,16 @@ Condições: ${condicoes}`;
         ? selectedPkg.periodo
         : (selectedPkg ? "mensal" : null);
 
+      let descPeriodo = Number(proposal.desconto_mensal_pct || 0);
+      let rawDescontos = proposal.descontos_por_periodo;
+      if (typeof rawDescontos === "string") {
+        try { rawDescontos = JSON.parse(rawDescontos); } catch (_) { rawDescontos = null; }
+      }
+      if (rawDescontos && typeof rawDescontos === "object" && periodoDoPacote in rawDescontos) {
+        const valP = rawDescontos[periodoDoPacote];
+        descPeriodo = (valP !== undefined && valP !== null && valP !== "") ? Math.max(0, Math.min(100, Number(valP))) : 0;
+      }
+
       // Coluna valor_vp da proposta guarda o VP MENSAL (a página pública
       // divide a mensalidade por ele e calcula o VP do período).
       let vpMensalParaSalvar = null;
@@ -3359,24 +3407,30 @@ Condições: ${condicoes}`;
         const PERIOD_MONTHS = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
         const meses = selectedPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedPkg.periodo] ?? 1);
         const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
-        let vpPeriodo = Number(selectedPkg.valor_vp || 0) > 0 ? Number(selectedPkg.valor_vp) : null;
-        let vpM = meses && vpPeriodo ? Math.round((vpPeriodo / meses) * 100) / 100 : vpPeriodo;
-        if (!vpM && Number(proposal.valor_vp || 0) > 0) {
-          const oldPkgItem = Array.isArray(proposal.itens) ? proposal.itens.find(i => i.descricao?.startsWith("Pacote:")) : null;
-          const oldMensal = oldPkgItem ? Number(oldPkgItem.valor || 0) : Number(proposal.valor_total || 0);
-          if (oldMensal > 0) {
-            const vpPct = Number(proposal.valor_vp) / oldMensal;
-            vpM = Math.round(mensalidade * vpPct * 100) / 100;
+
+        if (Number(proposal.vp_percent || 0) > 0) {
+          const mensalidadeFinal = Math.max(0, mensalidade * (1 - descPeriodo / 100));
+          vpMensalParaSalvar = Math.round(mensalidadeFinal * (Number(proposal.vp_percent) / 100) * 100) / 100;
+        } else {
+          let vpPeriodo = Number(selectedPkg.valor_vp || 0) > 0 ? Number(selectedPkg.valor_vp) : null;
+          let vpM = meses && vpPeriodo ? Math.round((vpPeriodo / meses) * 100) / 100 : vpPeriodo;
+          if (!vpM && Number(proposal.valor_vp || 0) > 0) {
+            const oldPkgItem = Array.isArray(proposal.itens) ? proposal.itens.find(i => i.descricao?.startsWith("Pacote:")) : null;
+            const oldMensal = oldPkgItem ? Number(oldPkgItem.valor || 0) : Number(proposal.valor_total || 0);
+            if (oldMensal > 0) {
+              const vpPct = Number(proposal.valor_vp) / oldMensal;
+              vpM = Math.round(mensalidade * vpPct * 100) / 100;
+            }
           }
+          vpMensalParaSalvar = vpM && vpM > 0 ? vpM : null;
         }
-        vpMensalParaSalvar = vpM && vpM > 0 ? vpM : null;
       }
 
       await pool.query(
         `UPDATE public.gd_proposals
-         SET package_id = $1, itens = $2, valor_total = $3, periodo_plano = COALESCE($5, periodo_plano), valor_vp = $6
+         SET package_id = $1, itens = $2, valor_total = $3, periodo_plano = COALESCE($5, periodo_plano), valor_vp = $6, desconto_mensal_pct = $7
          WHERE id = $4`,
-        [package_id, JSON.stringify(finalItems), valorTotal, id, periodoDoPacote, vpMensalParaSalvar]
+        [package_id, JSON.stringify(finalItems), valorTotal, id, periodoDoPacote, vpMensalParaSalvar, descPeriodo]
       );
 
       res.json({ success: true });

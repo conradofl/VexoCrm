@@ -51,6 +51,8 @@ export const CLASSIFIED_PUBLIC_COLUMNS = [
   "vexo_price",
   "prospect_logo",
   "segment_id",
+  "descontos_por_periodo",
+  "vp_percent",
 ];
 
 export const CLASSIFIED_INTERNAL_OR_SENSITIVE_COLUMNS = [

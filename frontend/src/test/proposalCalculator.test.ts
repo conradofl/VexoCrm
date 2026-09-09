@@ -402,4 +402,132 @@ describe("precificação de propostas e repasse Vexo OS em combos GD", () => {
     expect(cAnual.vpPeriodo).toBe(28800);
     expect(cAnual.dinheiroPeriodo).toBe(28800);
   });
+
+  describe("Descontos por prazo e VP sobre mensalidade com desconto", () => {
+    const pkgs = [
+      { id: "p-mensal", tipo: "gd", periodo: "mensal", valor: 5000 },
+      { id: "p-tri", tipo: "gd", periodo: "trimestral", valor: 9000 }, // 3000/mes
+      { id: "p-sem", tipo: "gd", periodo: "semestral", valor: 18000 }, // 3000/mes
+      { id: "p-anual", tipo: "gd", periodo: "anual", valor: 24000 }, // 2000/mes
+    ];
+
+    it("aplica desconto independente por prazo quando descontos_por_periodo é fornecido", () => {
+      const descontosPorPeriodo = {
+        mensal: 20,
+        trimestral: 0,
+        semestral: 10,
+        anual: 5,
+      };
+
+      // 1. Mensal: 5.000 com 20% de desconto => 4.000/mês
+      const cMensal = calculateProposalValues({
+        package_id: "p-mensal",
+        periodo_plano: "mensal",
+        descontos_por_periodo: descontosPorPeriodo,
+      }, pkgs);
+      expect(cMensal.descontoMensalPorcentagem).toBe(20);
+      expect(cMensal.mensalidadeOriginal).toBe(5000);
+      expect(cMensal.mensalidadeFinal).toBe(4000);
+      expect(cMensal.compromissoFinal).toBe(4000);
+
+      // 2. Trimestral: 3.000/mês com 0% de desconto => 3.000/mês
+      const cTri = calculateProposalValues({
+        package_id: "p-tri",
+        periodo_plano: "trimestral",
+        descontos_por_periodo: descontosPorPeriodo,
+      }, pkgs);
+      expect(cTri.descontoMensalPorcentagem).toBe(0);
+      expect(cTri.mensalidadeOriginal).toBe(3000);
+      expect(cTri.mensalidadeFinal).toBe(3000);
+      expect(cTri.compromissoFinal).toBe(9000);
+
+      // 3. Semestral: 3.000/mês com 10% de desconto => 2.700/mês
+      const cSem = calculateProposalValues({
+        package_id: "p-sem",
+        periodo_plano: "semestral",
+        descontos_por_periodo: descontosPorPeriodo,
+      }, pkgs);
+      expect(cSem.descontoMensalPorcentagem).toBe(10);
+      expect(cSem.mensalidadeOriginal).toBe(3000);
+      expect(cSem.mensalidadeFinal).toBe(2700);
+      expect(cSem.compromissoFinal).toBe(16200);
+
+      // 4. Anual: 2.000/mês com 5% de desconto => 1.900/mês
+      const cAnual = calculateProposalValues({
+        package_id: "p-anual",
+        periodo_plano: "anual",
+        descontos_por_periodo: descontosPorPeriodo,
+      }, pkgs);
+      expect(cAnual.descontoMensalPorcentagem).toBe(5);
+      expect(cAnual.mensalidadeOriginal).toBe(2000);
+      expect(cAnual.mensalidadeFinal).toBe(1900);
+      expect(cAnual.compromissoFinal).toBe(22800);
+    });
+
+    it("compatibilidade regressiva: usa desconto_mensal_pct quando descontos_por_periodo não existe", () => {
+      const propLegada = {
+        package_id: "p-tri",
+        periodo_plano: "trimestral",
+        desconto_mensal_pct: 15,
+      };
+      const calc = calculateProposalValues(propLegada, pkgs);
+      expect(calc.descontoMensalPorcentagem).toBe(15);
+      expect(calc.mensalidadeOriginal).toBe(3000);
+      expect(calc.mensalidadeFinal).toBe(2550); // 3000 - 15%
+      expect(calc.compromissoFinal).toBe(7650);
+    });
+
+    it("calcula VP como percentual sobre a mensalidade JÁ com desconto (não come o desconto)", () => {
+      // Caso real: Proposta 33d4d07a-e53b-4863-8bfe-1b72502a45f6
+      // Mensal: R$ 5.000 - 20% = R$ 4.000. VP de 50% => R$ 2.000 em permuta + R$ 2.000 em dinheiro.
+      const propMensal = {
+        package_id: "p-mensal",
+        periodo_plano: "mensal",
+        descontos_por_periodo: { mensal: 20, trimestral: 0 },
+        vp_percent: 50,
+      };
+      const cMensal = calculateProposalValues(propMensal, pkgs);
+      expect(cMensal.mensalidadeOriginal).toBe(5000);
+      expect(cMensal.mensalidadeFinal).toBe(4000);
+      expect(cMensal.temVp).toBe(true);
+      expect(cMensal.vpPercent).toBe(50);
+      expect(cMensal.vpMensal).toBe(2000);
+      expect(cMensal.dinheiroMensal).toBe(2000);
+      expect(cMensal.vpPeriodo).toBe(2000);
+      expect(cMensal.dinheiroPeriodo).toBe(2000);
+
+      // Trimestral: R$ 3.000/mês (total 9.000) com 20% desconto => R$ 2.400/mês (total 7.200).
+      // VP 50% => R$ 1.200 em permuta + R$ 1.200 em dinheiro / mês. Total VP = 3.600, Dinheiro = 3.600.
+      const propTri = {
+        package_id: "p-tri",
+        periodo_plano: "trimestral",
+        descontos_por_periodo: { mensal: 0, trimestral: 20 },
+        vp_percent: 50,
+      };
+      const cTri = calculateProposalValues(propTri, pkgs);
+      expect(cTri.mensalidadeOriginal).toBe(3000);
+      expect(cTri.mensalidadeFinal).toBe(2400);
+      expect(cTri.compromissoFinal).toBe(7200);
+      expect(cTri.temVp).toBe(true);
+      expect(cTri.vpPercent).toBe(50);
+      expect(cTri.vpMensal).toBe(1200);
+      expect(cTri.dinheiroMensal).toBe(1200);
+      expect(cTri.vpPeriodo).toBe(3600);
+      expect(cTri.dinheiroPeriodo).toBe(3600);
+    });
+
+    it("compatibilidade regressiva de VP: legado sem vp_percent preserva cálculo via valor_vp", () => {
+      const propLegadaVp = {
+        package_id: "p-mensal",
+        periodo_plano: "mensal",
+        valor_vp: 2500, // fixo legado
+      };
+      const calc = calculateProposalValues(propLegadaVp, pkgs);
+      expect(calc.mensalidadeFinal).toBe(5000);
+      expect(calc.temVp).toBe(true);
+      expect(calc.vpMensal).toBe(2500);
+      expect(calc.dinheiroMensal).toBe(2500);
+      expect(calc.vpPercent).toBe(50);
+    });
+  });
 });
