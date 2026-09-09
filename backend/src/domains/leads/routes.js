@@ -11,6 +11,7 @@ import {
   checkLeadClientTableStatus as checkDynamicLeadClientTableStatus,
   ensureLeadClientTable as ensureDynamicLeadClientTable,
   ensureLeadIntelligenceColumns,
+  ensureLeadsClientsTicketMedioColumn,
 } from "../../lead-client-tables.js";
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
@@ -302,7 +303,8 @@ export function registerLeadsRoutes(app, deps) {
     }
 
     try {
-      let query = supabase.from("leads_clients").select("id, name, created_at");
+      await ensureLeadsClientsTicketMedioColumn(pgDatabasePool);
+      let query = supabase.from("leads_clients").select("id, name, ticket_medio, created_at");
       const scopeMode =
         req.authAccess?.scopeMode || (req.authAccess?.role === "client" ? "assigned_clients" : "all_clients");
 
@@ -335,7 +337,7 @@ export function registerLeadsRoutes(app, deps) {
       }
 
       if (!data.length) {
-        data = [{ id: "geracao-digital", name: "Geração Digital", created_at: new Date().toISOString() }];
+        data = [{ id: "geracao-digital", name: "Geração Digital", ticket_medio: null, created_at: new Date().toISOString() }];
       }
 
       const clientIds = (data || []).map((client) => client.id).filter(Boolean);
@@ -349,6 +351,7 @@ export function registerLeadsRoutes(app, deps) {
         const settings = settingsMap[client.id] || null;
         return {
           ...client,
+          ticket_medio: client.ticket_medio != null ? Number(client.ticket_medio) : null,
           n8n_settings: maskN8nSettings(settings),
           n8n_onboarding_status: getN8nOnboardingStatus(settings),
         };
@@ -358,6 +361,128 @@ export function registerLeadsRoutes(app, deps) {
     } catch (error) {
       console.error("lead clients query error:", error);
       sendError(res, 500, "LEAD_CLIENTS_QUERY_FAILED", "Failed to query lead clients");
+    }
+  });
+
+  app.get("/api/lead-clients/:tenantId", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedTenantId = normalizeTenantKey(req.params.tenantId);
+    if (!requestedTenantId) {
+      sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+      return;
+    }
+
+    const tenantId = resolveAuthorizedClientId(req, res, requestedTenantId);
+    if (!tenantId) return;
+
+    try {
+      await ensureLeadsClientsTicketMedioColumn(pgDatabasePool);
+
+      const { data: tenant, error: tenantError } = await supabase
+        .from("leads_clients")
+        .select("id, name, ticket_medio, created_at")
+        .eq("id", tenantId)
+        .maybeSingle();
+
+      if (tenantError) throw tenantError;
+      if (!tenant) {
+        sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
+        return;
+      }
+
+      res.json({
+        item: {
+          ...tenant,
+          ticket_medio: tenant.ticket_medio != null ? Number(tenant.ticket_medio) : null,
+        },
+      });
+    } catch (error) {
+      console.error("lead client query error:", error);
+      sendError(res, 500, "LEAD_CLIENT_QUERY_FAILED", "Failed to query tenant");
+    }
+  });
+
+  app.patch("/api/lead-clients/:tenantId", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedTenantId = normalizeTenantKey(req.params.tenantId);
+    if (!requestedTenantId) {
+      sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+      return;
+    }
+
+    const tenantId = resolveAuthorizedClientId(req, res, requestedTenantId);
+    if (!tenantId) return;
+
+    // Escrita restrita a gestor/admin usando o isManagerOrAdmin unificado de access/claims.js
+    if (!isManagerOrAdmin(req.authAccess)) {
+      sendError(res, 403, "FORBIDDEN", "Apenas gestores ou administradores podem alterar as configurações da empresa");
+      return;
+    }
+
+    try {
+      await ensureLeadsClientsTicketMedioColumn(pgDatabasePool);
+
+      const { data: tenant, error: tenantError } = await supabase
+        .from("leads_clients")
+        .select("id, name, ticket_medio")
+        .eq("id", tenantId)
+        .maybeSingle();
+
+      if (tenantError) throw tenantError;
+      if (!tenant) {
+        sendError(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
+        return;
+      }
+
+      const updates = {};
+      const hasTicketMedio =
+        Object.prototype.hasOwnProperty.call(req.body || {}, "ticket_medio") ||
+        Object.prototype.hasOwnProperty.call(req.body || {}, "ticketMedio");
+
+      if (hasTicketMedio) {
+        const rawVal = req.body.ticket_medio !== undefined ? req.body.ticket_medio : req.body.ticketMedio;
+        if (rawVal === null || rawVal === "" || rawVal === undefined) {
+          updates.ticket_medio = null;
+        } else {
+          const num = Number(rawVal);
+          if (isNaN(num) || num < 0) {
+            sendError(res, 400, "INVALID_TICKET_MEDIO", "Ticket médio deve ser um número positivo ou nulo");
+            return;
+          }
+          updates.ticket_medio = num;
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        res.json({
+          item: {
+            ...tenant,
+            ticket_medio: tenant.ticket_medio != null ? Number(tenant.ticket_medio) : null,
+          },
+        });
+        return;
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("leads_clients")
+        .update(updates)
+        .eq("id", tenantId)
+        .select("id, name, ticket_medio, created_at")
+        .single();
+
+      if (updateError) throw updateError;
+
+      res.json({
+        item: {
+          ...updated,
+          ticket_medio: updated.ticket_medio != null ? Number(updated.ticket_medio) : null,
+        },
+      });
+    } catch (error) {
+      console.error("lead client patch error:", error);
+      sendError(res, 500, "LEAD_CLIENT_UPDATE_FAILED", "Failed to update tenant");
     }
   });
 
@@ -931,12 +1056,56 @@ export function registerLeadsRoutes(app, deps) {
       }
 
       const totalLeads = allItems.length;
-      const buyersCount = allItems.filter(l => l.stage === 'buyer' || l.status === 'cliente' || l.status === 'qualificado').length;
-      const openBudgetsCount = allItems.filter(l => l.stage === 'open_budget' || l.status === 'orcamento').length;
 
-      const openBudgetsSum = allItems
-        .filter(l => l.stage === 'open_budget' || l.status === 'orcamento')
-        .reduce((sum, l) => sum + (Number(l.potential_contract_value) || 2500), 0);
+      // 1. Fora das faixas primeiro: stage === 'buyer' e stage === 'lost'
+      const buyersCount = allItems.filter(
+        (l) => l.stage === "buyer" || l.status === "cliente" || l.status === "qualificado"
+      ).length;
+      const lostCount = allItems.filter((l) => l.stage === "lost").length;
+
+      const nonExcluded = allItems.filter(
+        (l) =>
+          !(l.stage === "buyer" || l.status === "cliente" || l.status === "qualificado") &&
+          l.stage !== "lost"
+      );
+
+      // 2. inNegotiationCount — stage === 'open_budget' ou status === 'orcamento'
+      const inNegotiation = nonExcluded.filter(
+        (l) => l.stage === "open_budget" || l.status === "orcamento"
+      );
+      const inNegotiationCount = inNegotiation.length;
+
+      // 3. inConversationCount — do que sobrou, os que têm raw_chat_summary preenchido (não nulo, não string vazia)
+      const afterNegotiation = nonExcluded.filter(
+        (l) => !(l.stage === "open_budget" || l.status === "orcamento")
+      );
+      const inConversation = afterNegotiation.filter(
+        (l) => Boolean(l.raw_chat_summary && String(l.raw_chat_summary).trim())
+      );
+      const inConversationCount = inConversation.length;
+
+      // 4. neverContactedCount — todo o resto. Cobre agenda, planilha e formulário
+      const neverContacted = afterNegotiation.filter(
+        (l) => !Boolean(l.raw_chat_summary && String(l.raw_chat_summary).trim())
+      );
+      const neverContactedCount = neverContacted.length;
+
+      const activeLeadsCount = inNegotiationCount + inConversationCount + neverContactedCount;
+
+      // Validação obrigatória: as três faixas + buyers + lost têm que somar totalLeads
+      const checkSum =
+        buyersCount + lostCount + inNegotiationCount + inConversationCount + neverContactedCount;
+      if (checkSum !== totalLeads) {
+        console.error(
+          `[leads-summary] Desvio detectado no fechamento das faixas: totalLeads=${totalLeads} vs checkSum=${checkSum} (buyers=${buyersCount}, lost=${lostCount}, inNegotiation=${inNegotiationCount}, inConversation=${inConversationCount}, neverContacted=${neverContactedCount})`
+        );
+      }
+
+      // estimatedRevenue soma apenas potential_contract_value reais sem fallback inventado
+      const openBudgetsSum = inNegotiation.reduce(
+        (sum, l) => sum + (Number(l.potential_contract_value) || 0),
+        0
+      );
 
       res.json({
         items: data || [],
@@ -946,9 +1115,14 @@ export function registerLeadsRoutes(app, deps) {
         summary: {
           totalLeads,
           buyersCount,
-          openBudgetsCount,
-          estimatedRevenue: openBudgetsSum
-        }
+          lostCount,
+          openBudgetsCount: inNegotiationCount,
+          inNegotiationCount,
+          inConversationCount,
+          neverContactedCount,
+          activeLeadsCount,
+          estimatedRevenue: openBudgetsSum,
+        },
       });
     } catch (error) {
       console.error("leads query error:", error);
@@ -957,7 +1131,17 @@ export function registerLeadsRoutes(app, deps) {
         total: 0,
         page: 1,
         limit: 2000,
-        summary: { totalLeads: 0, buyersCount: 0, openBudgetsCount: 0, estimatedRevenue: 0 }
+        summary: {
+          totalLeads: 0,
+          buyersCount: 0,
+          lostCount: 0,
+          openBudgetsCount: 0,
+          inNegotiationCount: 0,
+          inConversationCount: 0,
+          neverContactedCount: 0,
+          activeLeadsCount: 0,
+          estimatedRevenue: 0,
+        },
       });
     }
   });

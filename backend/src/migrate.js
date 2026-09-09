@@ -191,6 +191,12 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='whatsapp_chat_states')
       AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'whatsapp_chat_states_state_check')
     ) AS ok`,
+    "20260908180000_add_ticket_medio_to_leads_clients.sql": `SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'leads_clients'
+        AND column_name = 'ticket_medio'
+    ) AS ok`,
   };
 
   const query = checks[filename];

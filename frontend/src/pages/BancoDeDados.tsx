@@ -37,6 +37,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
+import { useUpdateLeadClientTicketMedio } from "@/hooks/useLeadClients";
+import { calculateBasePotential } from "@/lib/leads/basePotential";
 import { API_BASE_URL, fetchApi, readApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
@@ -106,7 +108,12 @@ export interface LeadIntelligenceItem {
 export interface SummaryStats {
   totalLeads: number;
   buyersCount: number;
+  lostCount?: number;
   openBudgetsCount: number;
+  inNegotiationCount?: number;
+  inConversationCount?: number;
+  neverContactedCount?: number;
+  activeLeadsCount?: number;
   estimatedRevenue: number;
 }
 
@@ -261,19 +268,23 @@ export default function BancoDeDados() {
   const [summary, setSummary] = useState<SummaryStats>({
     totalLeads: 0,
     buyersCount: 0,
+    lostCount: 0,
     openBudgetsCount: 0,
+    inNegotiationCount: 0,
+    inConversationCount: 0,
+    neverContactedCount: 0,
+    activeLeadsCount: 0,
     estimatedRevenue: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Ticket Médio Config (stored in localStorage)
-  const [ticketMedio, setTicketMedio] = useState<number>(() => {
-    const saved = localStorage.getItem(`vexo_ticket_medio_${clientId}`);
-    return saved ? Number(saved) : 2500;
-  });
+  // Ticket Médio Config (fonte de verdade: banco de dados via selectedClient)
+  const selectedClient = crmClient?.selectedClient;
+  const updateTicketMedioMutation = useUpdateLeadClientTicketMedio();
+  const ticketMedio = selectedClient?.ticket_medio != null ? Number(selectedClient.ticket_medio) : null;
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
-  const [tempTicketInput, setTempTicketInput] = useState(String(ticketMedio));
+  const [tempTicketInput, setTempTicketInput] = useState("");
   const [isOriginUpsellModalOpen, setIsOriginUpsellModalOpen] = useState(false);
   const [upsellWhatsappNumber, setUpsellWhatsappNumber] = useState("5511999999999");
 
@@ -878,15 +889,36 @@ export default function BancoDeDados() {
     }
   };
 
-  // Save Ticket Médio
-  const handleSaveTicketMedio = () => {
-    const val = Number(tempTicketInput.replace(/\D/g, "")) || 2500;
-    setTicketMedio(val);
-    localStorage.setItem(`vexo_ticket_medio_${clientId}`, String(val));
-    toast.success("Ticket Médio atualizado com sucesso!", {
-      description: `Novo valor: ${val.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
-    });
-    setIsTicketModalOpen(false);
+  // Save Ticket Médio no banco de dados (public.leads_clients)
+  const handleSaveTicketMedio = async () => {
+    const rawDigits = tempTicketInput.trim().replace(/\D/g, "");
+    if (!rawDigits) {
+      toast.error("Informe um valor válido para o ticket médio.");
+      return;
+    }
+    const val = Number(rawDigits);
+    if (val <= 0) {
+      toast.error("O ticket médio deve ser maior que zero.");
+      return;
+    }
+
+    try {
+      await updateTicketMedioMutation.mutateAsync({
+        tenantId: clientId,
+        ticketMedio: val,
+      });
+      try {
+        localStorage.removeItem(`vexo_ticket_medio_${clientId}`);
+      } catch {
+        // noop
+      }
+      toast.success("Ticket Médio atualizado com sucesso!", {
+        description: `Novo valor: ${val.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
+      });
+      setIsTicketModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao salvar ticket médio no banco.");
+    }
   };
 
   // Export Leads (Excel .xlsx)
@@ -1487,10 +1519,10 @@ export default function BancoDeDados() {
     return filteredLeads.slice(start, start + pageSize);
   }, [filteredLeads, currentPage, pageSize]);
 
-  // Dynamic calculation for Receita Oculta card
-  const computedRevenue = useMemo(() => {
-    return summary.openBudgetsCount * ticketMedio;
-  }, [summary.openBudgetsCount, ticketMedio]);
+  // Dynamic calculation for Potencial da Base (funil de 3 faixas)
+  const basePotential = useMemo(() => {
+    return calculateBasePotential(summary, ticketMedio);
+  }, [summary, ticketMedio]);
 
   // Unique tags across base (preserva tags conhecidas para o dropdown nunca sumir)
   const availableTags = useMemo(() => {
@@ -1912,32 +1944,129 @@ export default function BancoDeDados() {
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-emerald-500/30 dark:border-emerald-500/40 shadow-sm relative overflow-hidden">
+          <Card className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-emerald-500/30 dark:border-emerald-500/40 shadow-sm relative overflow-hidden flex flex-col justify-between">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
               <CardTitle className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
-                Receita Oculta na Base 💰
+                Potencial da Base 💼
               </CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setIsTicketModalOpen(true)}
+                onClick={() => {
+                  setTempTicketInput(ticketMedio != null ? String(ticketMedio) : "");
+                  setIsTicketModalOpen(true);
+                }}
                 className="h-6 w-6 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
                 title="Configurar Ticket Médio"
               >
                 <Settings className="w-3.5 h-3.5" />
               </Button>
             </CardHeader>
-            <CardContent>
-              <div className="text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-300 truncate">
-                {computedRevenue.toLocaleString("pt-BR", {
-                  style: "currency",
-                  currency: "BRL",
-                })}
-              </div>
-              <p className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5 font-medium flex items-center justify-between">
-                <span>Orçamentos x Ticket</span>
-                <span className="font-semibold">{ticketMedio.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
-              </p>
+            <CardContent className="space-y-2 pt-0">
+              {!basePotential.isConfigured ? (
+                <div className="py-2 text-center space-y-1.5">
+                  <p className="text-xs text-muted-foreground font-medium">
+                    Ticket médio não configurado
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setTempTicketInput("");
+                      setIsTicketModalOpen(true);
+                    }}
+                    className="h-7 text-xs border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                  >
+                    Configurar Ticket Médio
+                  </Button>
+                  <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
+                    <span>{basePotential.neverContactedCount.toLocaleString("pt-BR")} não abordados</span>
+                    <span>{basePotential.inConversationCount.toLocaleString("pt-BR")} em conversa</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Destaque Principal: Nunca Abordados */}
+                  <div>
+                    <div className="flex items-baseline justify-between gap-1">
+                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+                        Nunca Abordados
+                      </span>
+                      <span className="text-lg sm:text-xl font-black text-emerald-700 dark:text-emerald-300">
+                        {basePotential.neverContactedValue?.toLocaleString("pt-BR", {
+                          style: "currency",
+                          currency: "BRL",
+                          maximumFractionDigits: 0,
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80 text-right font-medium">
+                      {basePotential.neverContactedCount.toLocaleString("pt-BR")} contatos ×{" "}
+                      {ticketMedio?.toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                        maximumFractionDigits: 0,
+                      })}
+                    </p>
+                  </div>
+
+                  {/* Linha 2: Em Conversa */}
+                  <div className="border-t border-emerald-500/20 pt-1">
+                    <div className="flex items-baseline justify-between text-xs">
+                      <span className="text-muted-foreground font-medium">Em Conversa</span>
+                      <span className="font-bold text-foreground">
+                        {basePotential.inConversationValue?.toLocaleString("pt-BR", {
+                          style: "currency",
+                          currency: "BRL",
+                          maximumFractionDigits: 0,
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground text-right">
+                      {basePotential.inConversationCount.toLocaleString("pt-BR")} contatos ×{" "}
+                      {ticketMedio?.toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                        maximumFractionDigits: 0,
+                      })}
+                    </p>
+                  </div>
+
+                  {/* Linha 3: Em Negociação */}
+                  <div className="border-t border-emerald-500/20 pt-1">
+                    <div className="flex items-baseline justify-between text-xs">
+                      <span className="text-muted-foreground font-medium">Em Negociação</span>
+                      <span className="font-bold text-foreground">
+                        {basePotential.inNegotiationValue?.toLocaleString("pt-BR", {
+                          style: "currency",
+                          currency: "BRL",
+                          maximumFractionDigits: 0,
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground text-right">
+                      {basePotential.inNegotiationCount.toLocaleString("pt-BR")} contatos ×{" "}
+                      {ticketMedio?.toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                        maximumFractionDigits: 0,
+                      })}
+                    </p>
+                  </div>
+
+                  {/* Rodapé: Potencial Ativo Total */}
+                  <div className="border-t border-emerald-500/25 pt-1 flex items-center justify-between text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+                    <span title="Soma das 3 faixas ativas">Potencial Ativo</span>
+                    <span>
+                      {basePotential.totalActiveValue?.toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                        maximumFractionDigits: 0,
+                      })}
+                    </span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -3349,8 +3478,12 @@ export default function BancoDeDados() {
             <Button variant="outline" onClick={() => setIsTicketModalOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSaveTicketMedio} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-              Salvar Valor
+            <Button
+              onClick={handleSaveTicketMedio}
+              disabled={updateTicketMedioMutation.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {updateTicketMedioMutation.isPending ? "Salvando..." : "Salvar Valor"}
             </Button>
           </DialogFooter>
         </DialogContent>

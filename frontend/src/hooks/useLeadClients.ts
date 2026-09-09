@@ -5,6 +5,7 @@ import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 export interface LeadClient {
   id: string;
   name: string;
+  ticket_medio?: number | null;
   created_at?: string;
   leads_table?: LeadClientTableStatus;
   n8n_settings?: LeadClientN8nSettingsSummary;
@@ -597,3 +598,50 @@ export function useVerifyLeadClientTable() {
     },
   });
 }
+
+export function useUpdateLeadClientTicketMedio() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      tenantId,
+      ticketMedio,
+    }: {
+      tenantId: string;
+      ticketMedio: number | null;
+    }): Promise<LeadClient> => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuario nao autenticado.");
+      }
+
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ ticket_medio: ticketMedio }),
+        }
+      );
+
+      if (!res.ok) {
+        let message = await readApiErrorMessage(res, "Falha ao atualizar ticket medio");
+        if (res.status === 403) {
+          message = "Apenas gestores ou administradores podem alterar o ticket médio da empresa.";
+        }
+        throw new Error(message || `Erro ${res.status}`);
+      }
+
+      const data = await readApiJson<{ item?: LeadClient }>(res, "update_ticket_medio");
+      return data?.item || { id: tenantId, name: tenantId, ticket_medio: ticketMedio };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lead-clients"] });
+    },
+  });
+}
+

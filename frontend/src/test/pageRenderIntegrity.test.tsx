@@ -26,6 +26,9 @@ vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     clientId: "sonhare",
     isInternalUser: true,
+    isAuthenticated: true,
+    isAdminUser: true,
+    canAccessInternalPage: () => true,
     getIdToken: async () => "mock-token",
   }),
 }));
@@ -46,6 +49,7 @@ vi.mock("@/hooks/useCrmClient", () => ({
 vi.mock("@/hooks/useLeadClients", () => ({
   useLeadClients: () => ({ data: [mockTenant], isLoading: false }),
   useUpdateLeadClientN8nSettings: () => ({ mutateAsync: vi.fn() }),
+  useUpdateLeadClientTicketMedio: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/hooks/usePrompts", () => ({

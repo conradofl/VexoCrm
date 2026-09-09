@@ -165,3 +165,16 @@ export async function ensureLeadIntelligenceColumns(pgClientOrPool) {
   }
 }
 
+export async function ensureLeadsClientsTicketMedioColumn(pgClientOrPool) {
+  if (!pgClientOrPool) return;
+  try {
+    await pgClientOrPool.query(`
+      ALTER TABLE public.leads_clients
+        ADD COLUMN IF NOT EXISTS ticket_medio NUMERIC(12,2) NULL;
+    `);
+  } catch (err) {
+    console.warn("[lead-client-tables] Could not add ticket_medio column to leads_clients:", err?.message || err);
+  }
+}
+
+
