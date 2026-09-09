@@ -10,7 +10,6 @@ import {
   MessageCircle,
   Clock,
   Sparkles,
-  TrendingUp,
   UserCheck,
   AlertCircle,
   Plus,
@@ -53,7 +52,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -1524,6 +1524,42 @@ export default function BancoDeDados() {
     return calculateBasePotential(summary, ticketMedio);
   }, [summary, ticketMedio]);
 
+  const potentialSegments = useMemo(
+    () => [
+      {
+        id: "never_contacted",
+        title: "Nunca abordados",
+        count: basePotential.neverContactedCount,
+        value: basePotential.neverContactedValue,
+        explanation:
+          "Contatos na base que nunca trocaram mensagem com você. Vieram da agenda do WhatsApp, de planilha ou de formulário. É o volume ainda intocado.",
+        barColor: "bg-sky-500 hover:bg-sky-600 dark:bg-sky-600 dark:hover:bg-sky-500",
+        indicatorColor: "bg-sky-500",
+      },
+      {
+        id: "in_conversation",
+        title: "Em conversa",
+        count: basePotential.inConversationCount,
+        value: basePotential.inConversationValue,
+        explanation:
+          "Já trocaram mensagem com você, mas ainda não têm orçamento aberto.",
+        barColor: "bg-amber-500 hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500",
+        indicatorColor: "bg-amber-500",
+      },
+      {
+        id: "in_negotiation",
+        title: "Em negociação",
+        count: basePotential.inNegotiationCount,
+        value: basePotential.inNegotiationValue,
+        explanation:
+          "Têm orçamento aberto no funil. É o que está na mesa agora.",
+        barColor: "bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400",
+        indicatorColor: "bg-emerald-600",
+      },
+    ],
+    [basePotential]
+  );
+
   // Unique tags across base (preserva tags conhecidas para o dropdown nunca sumir)
   const availableTags = useMemo(() => {
     const set = new Set<string>(knownTags);
@@ -1881,221 +1917,186 @@ export default function BancoDeDados() {
           })()}
         </div>
 
-        {/* Header Métrico (Cards KPIs) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        {/* Header Métrico (Cards KPIs Compactos) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 items-start">
           <Card
             onClick={() => setActiveTab("all")}
             className={cn(
-              "bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 cursor-pointer hover:border-blue-500/50 hover:shadow-md transition-all",
+              "bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 cursor-pointer hover:border-blue-500/50 hover:shadow-md transition-all p-3",
               activeTab === "all" && "border-blue-500/60 bg-blue-500/[0.04]"
             )}
           >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
-              <CardTitle className="text-xs font-semibold text-muted-foreground">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-muted-foreground">
                 Total de Leads na Base
-              </CardTitle>
+              </span>
               <Database className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-xl sm:text-2xl font-bold text-foreground">{summary.totalLeads.toLocaleString("pt-BR")}</div>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Leads cadastrados e minerados</p>
-            </CardContent>
+            </div>
+            <div className="text-[20px] font-bold text-foreground mt-1">
+              {summary.totalLeads.toLocaleString("pt-BR")}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Leads cadastrados e minerados</p>
           </Card>
 
           <Card
             onClick={() => setActiveTab("buyer")}
             className={cn(
-              "bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 cursor-pointer hover:border-emerald-500/50 hover:shadow-md transition-all",
+              "bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 cursor-pointer hover:border-emerald-500/50 hover:shadow-md transition-all p-3",
               activeTab === "buyer" && "border-emerald-500/60 bg-emerald-500/[0.04]"
             )}
           >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
-              <CardTitle className="text-xs font-semibold text-muted-foreground">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-muted-foreground">
                 Compradores (Clientes 🟢)
-              </CardTitle>
+              </span>
               <UserCheck className="h-4 w-4 text-emerald-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-xl sm:text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                {summary.buyersCount.toLocaleString("pt-BR")}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Clientes ativos e confirmados</p>
-            </CardContent>
-          </Card>
-
-          <Card
-            onClick={() => setActiveTab("open_budget")}
-            className={cn(
-              "bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 cursor-pointer hover:border-amber-500/50 hover:shadow-md transition-all",
-              activeTab === "open_budget" && "border-amber-500/60 bg-amber-500/[0.04]"
-            )}
-          >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
-              <CardTitle className="text-xs font-semibold text-muted-foreground">
-                Orçamentos Abertos 🟡
-              </CardTitle>
-              <TrendingUp className="h-4 w-4 text-amber-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-xl sm:text-2xl font-bold text-amber-600 dark:text-amber-400">
-                {summary.openBudgetsCount.toLocaleString("pt-BR")}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Propostas em negociação</p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-emerald-500/30 dark:border-emerald-500/40 shadow-sm relative overflow-hidden flex flex-col justify-between">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
-              <CardTitle className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
-                Potencial da Base 💼
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  setTempTicketInput(ticketMedio != null ? String(ticketMedio) : "");
-                  setIsTicketModalOpen(true);
-                }}
-                className="h-6 w-6 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
-                title="Configurar Ticket Médio"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-2 pt-0">
-              {!basePotential.isConfigured ? (
-                <div className="py-2 text-center space-y-1.5">
-                  <p className="text-xs text-muted-foreground font-medium">
-                    Ticket médio não configurado
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setTempTicketInput("");
-                      setIsTicketModalOpen(true);
-                    }}
-                    className="h-7 text-xs border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
-                  >
-                    Configurar Ticket Médio
-                  </Button>
-                  <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
-                    <span>{basePotential.neverContactedCount.toLocaleString("pt-BR")} não abordados</span>
-                    <span>{basePotential.inConversationCount.toLocaleString("pt-BR")} em conversa</span>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {/* Destaque Principal: Nunca Abordados */}
-                  <div>
-                    <div className="flex items-baseline justify-between gap-1">
-                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
-                        Nunca Abordados
-                      </span>
-                      <span className="text-lg sm:text-xl font-black text-emerald-700 dark:text-emerald-300">
-                        {basePotential.neverContactedValue?.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                          maximumFractionDigits: 0,
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80 text-right font-medium">
-                      {basePotential.neverContactedCount.toLocaleString("pt-BR")} contatos ×{" "}
-                      {ticketMedio?.toLocaleString("pt-BR", {
-                        style: "currency",
-                        currency: "BRL",
-                        maximumFractionDigits: 0,
-                      })}
-                    </p>
-                  </div>
-
-                  {/* Linha 2: Em Conversa */}
-                  <div className="border-t border-emerald-500/20 pt-1">
-                    <div className="flex items-baseline justify-between text-xs">
-                      <span className="text-muted-foreground font-medium">Em Conversa</span>
-                      <span className="font-bold text-foreground">
-                        {basePotential.inConversationValue?.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                          maximumFractionDigits: 0,
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground text-right">
-                      {basePotential.inConversationCount.toLocaleString("pt-BR")} contatos ×{" "}
-                      {ticketMedio?.toLocaleString("pt-BR", {
-                        style: "currency",
-                        currency: "BRL",
-                        maximumFractionDigits: 0,
-                      })}
-                    </p>
-                  </div>
-
-                  {/* Linha 3: Em Negociação */}
-                  <div className="border-t border-emerald-500/20 pt-1">
-                    <div className="flex items-baseline justify-between text-xs">
-                      <span className="text-muted-foreground font-medium">Em Negociação</span>
-                      <span className="font-bold text-foreground">
-                        {basePotential.inNegotiationValue?.toLocaleString("pt-BR", {
-                          style: "currency",
-                          currency: "BRL",
-                          maximumFractionDigits: 0,
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground text-right">
-                      {basePotential.inNegotiationCount.toLocaleString("pt-BR")} contatos ×{" "}
-                      {ticketMedio?.toLocaleString("pt-BR", {
-                        style: "currency",
-                        currency: "BRL",
-                        maximumFractionDigits: 0,
-                      })}
-                    </p>
-                  </div>
-
-                  {/* Rodapé: Potencial Ativo Total */}
-                  <div className="border-t border-emerald-500/25 pt-1 flex items-center justify-between text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
-                    <span title="Soma das 3 faixas ativas">Potencial Ativo</span>
-                    <span>
-                      {basePotential.totalActiveValue?.toLocaleString("pt-BR", {
-                        style: "currency",
-                        currency: "BRL",
-                        maximumFractionDigits: 0,
-                      })}
-                    </span>
-                  </div>
-                </>
-              )}
-            </CardContent>
+            </div>
+            <div className="text-[20px] font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+              {summary.buyersCount.toLocaleString("pt-BR")}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Clientes ativos e confirmados</p>
           </Card>
 
           {/* Card Resumido de Origem / Ranking de Canais */}
-          <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+          <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-muted-foreground">
                 Ranking de Origem 📊
-              </CardTitle>
+              </span>
               <Sparkles className="h-4 w-4 text-purple-500" />
-            </CardHeader>
-            <CardContent className="pt-0">
-              {topSourceRanking.length === 0 ? (
-                <p className="text-xs text-muted-foreground mt-2">Sem origens registradas</p>
-              ) : (
-                <div className="space-y-1.5 mt-1">
-                  {topSourceRanking.map(([src, cnt]) => (
-                    <div key={src} className="flex items-center justify-between text-xs">
-                      <span className="truncate max-w-[100px] font-medium text-muted-foreground">{src}</span>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20 font-bold">
-                        {cnt}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
+            </div>
+            {topSourceRanking.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground mt-1">Sem origens registradas</p>
+            ) : (
+              <div className="space-y-1 mt-1">
+                {topSourceRanking.map(([src, cnt]) => (
+                  <div key={src} className="flex items-center justify-between text-xs">
+                    <span className="truncate max-w-[120px] font-medium text-muted-foreground">{src}</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20 font-bold">
+                      {cnt}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
+
+        {/* Faixa Potencial da Base (Largura Total) */}
+        <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800 p-3.5 sm:p-4 space-y-3">
+          {/* Cabeçalho */}
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold text-muted-foreground">
+                Potencial da base
+              </p>
+              <p className="text-2xl sm:text-[26px] font-bold text-foreground leading-tight mt-0.5">
+                {basePotential.isConfigured && basePotential.totalActiveValue != null
+                  ? basePotential.totalActiveValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
+                  : `${basePotential.activeLeadsCount.toLocaleString("pt-BR")} contatos ativos`}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setTempTicketInput(ticketMedio != null ? String(ticketMedio) : "");
+                setIsTicketModalOpen(true);
+              }}
+              className="h-8 gap-1.5 text-xs font-medium border-border/80 hover:bg-accent shrink-0"
+            >
+              <span>
+                {basePotential.isConfigured && ticketMedio != null
+                  ? `Ticket ${ticketMedio.toLocaleString("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                      maximumFractionDigits: 0,
+                    })}`
+                  : "Configurar ticket"}
+              </span>
+              <Settings className="w-3.5 h-3.5 text-muted-foreground" />
+            </Button>
+          </div>
+
+          {/* Barra empilhada proporcional */}
+          <div
+            role="group"
+            aria-label={`Divisão do potencial da base: ${basePotential.neverContactedCount.toLocaleString("pt-BR")} nunca abordados, ${basePotential.inConversationCount.toLocaleString("pt-BR")} em conversa, ${basePotential.inNegotiationCount.toLocaleString("pt-BR")} em negociação de ${basePotential.activeLeadsCount.toLocaleString("pt-BR")} contatos ativos`}
+            className="flex w-full h-[30px] rounded-lg overflow-hidden bg-muted/20 border border-border/40"
+          >
+            {basePotential.activeLeadsCount === 0 ? (
+              <div className="w-full h-full bg-muted/30" />
+            ) : (
+              potentialSegments.map((segment) => {
+                if (segment.count <= 0) return null;
+                const percentage = (segment.count / basePotential.activeLeadsCount) * 100;
+                return (
+                  <Popover key={segment.id}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={cn(
+                          "h-full transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer shrink",
+                          segment.barColor
+                        )}
+                        style={{
+                          width: `${percentage}%`,
+                          minWidth: "4px",
+                        }}
+                        title={`${segment.title}: ${segment.count.toLocaleString("pt-BR")}`}
+                        aria-label={`${segment.title}: ${segment.count.toLocaleString("pt-BR")}`}
+                      />
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 text-xs p-3 space-y-1.5" side="bottom" align="center">
+                      <div className="flex items-center gap-1.5 font-semibold text-foreground text-sm">
+                        <div className={cn("w-2 h-2 rounded-full shrink-0", segment.indicatorColor)} />
+                        <span>{segment.title}</span>
+                      </div>
+                      <p className="text-muted-foreground leading-relaxed">{segment.explanation}</p>
+                    </PopoverContent>
+                  </Popover>
+                );
+              })
+            )}
+          </div>
+
+          {/* Legenda em 3 colunas (empilha em 1 no mobile) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 pt-1">
+            {potentialSegments.map((segment) => (
+              <Popover key={segment.id}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-start gap-2.5 text-left p-1.5 -m-1.5 rounded-md hover:bg-muted/40 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer group"
+                  >
+                    <div className={cn("w-1 self-stretch rounded-full shrink-0 my-0.5", segment.indicatorColor)} />
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[11px] text-muted-foreground font-medium truncate">
+                        {segment.title} · {segment.count.toLocaleString("pt-BR")}
+                      </span>
+                      {basePotential.isConfigured && segment.value != null && (
+                        <span className="text-[17px] font-bold text-foreground leading-tight mt-0.5">
+                          {segment.value.toLocaleString("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                            maximumFractionDigits: 0,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 text-xs p-3 space-y-1.5" side="bottom" align="start">
+                  <div className="flex items-center gap-1.5 font-semibold text-foreground text-sm">
+                    <div className={cn("w-2 h-2 rounded-full shrink-0", segment.indicatorColor)} />
+                    <span>{segment.title}</span>
+                  </div>
+                  <p className="text-muted-foreground leading-relaxed">{segment.explanation}</p>
+                </PopoverContent>
+              </Popover>
+            ))}
+          </div>
+        </Card>
 
         {/* Barra de Abas e Busca */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border dark:border-zinc-800 pb-3">
