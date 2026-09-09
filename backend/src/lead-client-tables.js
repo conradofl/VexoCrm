@@ -150,6 +150,8 @@ export async function ensureLeadIntelligenceColumns(pgClientOrPool) {
         ADD COLUMN IF NOT EXISTS tenant_id UUID,
         ADD COLUMN IF NOT EXISTS phone TEXT,
         ADD COLUMN IF NOT EXISTS stage TEXT DEFAULT 'cold',
+        ADD COLUMN IF NOT EXISTS stage_source TEXT NULL,
+        ADD COLUMN IF NOT EXISTS lost_reason TEXT NULL,
         ADD COLUMN IF NOT EXISTS temperature TEXT DEFAULT 'warm',
         ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT ARRAY[]::text[],
         ADD COLUMN IF NOT EXISTS last_interaction_at TIMESTAMPTZ,

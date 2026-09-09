@@ -129,7 +129,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         {
           id: "lead-buyer-2",
           client_id: "gmca",
-          status: "cliente",
+          stage: "buyer",
           raw_chat_summary: "Já é cliente antigo",
         },
         {
@@ -152,6 +152,45 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         expect(data.summary.inConversationCount).toBe(0);
         expect(data.summary.neverContactedCount).toBe(0);
         expect(data.summary.activeLeadsCount).toBe(0);
+        expect(data.summary.totalLeads).toBe(3);
+      } finally {
+        await srv.close();
+      }
+    });
+
+    it("status ('cliente', 'qualificado', 'WON') NÃO alimenta buyersCount — somente stage === 'buyer' conta", async () => {
+      const leads = [
+        {
+          id: "lead-status-cliente",
+          client_id: "gmca",
+          stage: "cold",
+          status: "cliente",
+          raw_chat_summary: "Lead antigo",
+        },
+        {
+          id: "lead-status-qualificado",
+          client_id: "gmca",
+          stage: "cold",
+          status: "qualificado",
+          raw_chat_summary: "Qualificado no passado",
+        },
+        {
+          id: "lead-status-won",
+          client_id: "gmca",
+          stage: "cold",
+          status: "WON",
+          raw_chat_summary: "Fechamento antigo",
+        },
+      ];
+
+      const app = setupAppWithMockLeads(leads);
+      const srv = await startTestServer(app);
+      try {
+        const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.summary.buyersCount).toBe(0);
+        expect(data.summary.inConversationCount).toBe(3);
         expect(data.summary.totalLeads).toBe(3);
       } finally {
         await srv.close();

@@ -81,15 +81,17 @@ describe("Unificação de Gravação de Leads (leadUpsert / CSV / Webhooks / Wha
         // 3. UPDATE por ID
         if (text.startsWith("UPDATE public.leads")) {
           if (text.includes("WHERE id = $")) {
-            const id = params[params.length - 1];
+            const id = text.includes("WHERE id = $1") ? params[0] : params[params.length - 1];
             const lead = leads.find((l) => l.id === id);
             if (lead) {
               if (text.includes("nome = $1")) {
                 lead.nome = params[0];
                 if (params[1]) lead.stage = params[1];
-                if (params[2]) lead.temperature = params[2];
-                lead.tags = params[3];
-                lead.dados = typeof params[4] === "string" ? JSON.parse(params[4]) : params[4];
+                if (params[2]) lead.stage_source = params[2];
+                if (params[3]) lead.lost_reason = params[3];
+                if (params[4]) lead.temperature = params[4];
+                lead.tags = params[5];
+                lead.dados = typeof params[6] === "string" ? JSON.parse(params[6]) : params[6];
               } else {
                 const setMatch = text.match(/SET (.+) WHERE/i);
                 if (setMatch) {
@@ -288,5 +290,70 @@ describe("Unificação de Gravação de Leads (leadUpsert / CSV / Webhooks / Wha
     expect(result.totalCount).toBe(1000);
     expect(leads).toHaveLength(1000);
     expect(elapsedMs).toBeLessThan(1000); // Execução em milissegundos
+  });
+
+  it("Lead com stage_source='manual' NUNCA tem seu stage ou lost_reason sobrescritos por processos automáticos (upsert individual)", async () => {
+    const { pool, leads } = createMockDb();
+
+    // Lead inserido manualmente como buyer
+    leads.push({
+      id: "lead-manual-1",
+      client_id: "cliente-a",
+      telefone: "5511999998888",
+      phone: "5511999998888",
+      nome: "Carlos Silva",
+      stage: "buyer",
+      stage_source: "manual",
+      lost_reason: null,
+      tags: ["cliente-fechado"],
+      dados: { valor: 10000 },
+    });
+
+    // Processo automático (ex: extração do WhatsApp ou sincronização de mensagem) tenta atualizar para 'inquiry'
+    await upsertLeadByPhone(pool, "cliente-a", "5511999998888", {
+      stage: "inquiry",
+      stage_source: "auto",
+      lost_reason: null,
+      temperature: "warm",
+      tags: ["whatsapp-msg"],
+    });
+
+    expect(leads[0].stage).toBe("buyer");
+    expect(leads[0].stage_source).toBe("manual");
+    expect(leads[0].tags).toEqual(expect.arrayContaining(["cliente-fechado", "whatsapp-msg"]));
+  });
+
+  it("Lead com stage_source='manual' NUNCA tem seu stage sobrescrito por importação em lote (batch)", async () => {
+    const { pool, leads } = createMockDb();
+
+    // Lead manual como lost
+    leads.push({
+      id: "lead-manual-2",
+      client_id: "cliente-a",
+      telefone: "5511988887777",
+      phone: "5511988887777",
+      nome: "Mariana Souza",
+      stage: "lost",
+      stage_source: "manual",
+      lost_reason: "preco",
+      tags: ["perda-preco"],
+      dados: {},
+    });
+
+    // Planilha importada com stage 'cold' ou 'open_budget'
+    await upsertLeadsBatchByPhone(pool, "cliente-a", [
+      {
+        telefone: "5511988887777",
+        nome: "Mariana Souza",
+        stage: "open_budget",
+        stage_source: "auto",
+        temperature: "hot",
+        tags: ["planilha-2026"],
+      },
+    ]);
+
+    expect(leads[0].stage).toBe("lost");
+    expect(leads[0].stage_source).toBe("manual");
+    expect(leads[0].lost_reason).toBe("preco");
   });
 });

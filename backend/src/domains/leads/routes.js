@@ -40,11 +40,7 @@ function classifyChatContent(messages, contactName) {
   let temperature = "warm";
   const tagsSet = new Set();
 
-  if (/(comprei|paguei|fechado|comprovante|pix feito|pedido confirmado|boleto pago|adquirido|assinado|sou cliente)/i.test(fullText)) {
-    stage = "buyer";
-    temperature = "hot";
-    tagsSet.add("Cliente");
-  } else if (/(orçamento|orcamento|cotacao|cotação|valor|quanto custa|preço|preco|desconto|proposta|tabela|enviar valor)/i.test(fullText)) {
+  if (/(orçamento|orcamento|cotacao|cotação|valor|quanto custa|preço|preco|desconto|proposta|tabela|enviar valor)/i.test(fullText)) {
     stage = "open_budget";
     temperature = "hot";
     tagsSet.add("Orçamento");
@@ -52,10 +48,6 @@ function classifyChatContent(messages, contactName) {
     stage = "inquiry";
     temperature = "warm";
     tagsSet.add("Dúvida");
-  } else if (/(cancelar|não tenho interesse|nao tenho interesse|muito caro|desisti|não quero|nao quero|remover)/i.test(fullText)) {
-    stage = "lost";
-    temperature = "cold";
-    tagsSet.add("Perdido");
   }
 
   if (/(óculos|oculos|lente|armação|armacao|solar)/i.test(fullText)) {
@@ -1058,15 +1050,11 @@ export function registerLeadsRoutes(app, deps) {
       const totalLeads = allItems.length;
 
       // 1. Fora das faixas primeiro: stage === 'buyer' e stage === 'lost'
-      const buyersCount = allItems.filter(
-        (l) => l.stage === "buyer" || l.status === "cliente" || l.status === "qualificado"
-      ).length;
+      const buyersCount = allItems.filter((l) => l.stage === "buyer").length;
       const lostCount = allItems.filter((l) => l.stage === "lost").length;
 
       const nonExcluded = allItems.filter(
-        (l) =>
-          !(l.stage === "buyer" || l.status === "cliente" || l.status === "qualificado") &&
-          l.stage !== "lost"
+        (l) => l.stage !== "buyer" && l.stage !== "lost"
       );
 
       // 2. inNegotiationCount — stage === 'open_budget' ou status === 'orcamento'
@@ -1426,6 +1414,7 @@ export function registerLeadsRoutes(app, deps) {
             phone: telefoneKey,
             nome: name,
             stage: classification.stage,
+            stage_source: "auto",
             temperature: classification.temperature,
             tags: Array.isArray(classification.tags) ? classification.tags : [],
             extracted_from_wa: true,
@@ -1463,6 +1452,7 @@ export function registerLeadsRoutes(app, deps) {
             phone: telefoneKey,
             nome: isRealName(ct.name) ? normalizeString(ct.name) : formatted,
             stage: "cold",
+            stage_source: "auto",
             temperature: "cold",
             tags: ["agenda-whatsapp"],
             extracted_from_wa: true,
@@ -1733,7 +1723,23 @@ export function registerLeadsRoutes(app, deps) {
       }
 
       const updates = {};
-      if (req.body.stage !== undefined) updates.stage = req.body.stage;
+      if (req.body.stage !== undefined) {
+        updates.stage = req.body.stage;
+        updates.stage_source = req.body.stage_source || "manual";
+        if (req.body.stage !== "lost" && req.body.lost_reason === undefined) {
+          updates.lost_reason = null;
+        }
+      } else if (req.body.stage_source !== undefined) {
+        updates.stage_source = req.body.stage_source;
+      }
+      if (req.body.lost_reason !== undefined) {
+        updates.lost_reason = req.body.lost_reason ? String(req.body.lost_reason).trim() : null;
+      }
+      if (req.body.potential_contract_value !== undefined) {
+        updates.potential_contract_value = req.body.potential_contract_value !== null && req.body.potential_contract_value !== ""
+          ? Number(req.body.potential_contract_value)
+          : null;
+      }
       if (req.body.temperature !== undefined) updates.temperature = req.body.temperature;
       if (req.body.nome !== undefined) updates.nome = req.body.nome;
       if (req.body.assigned_to !== undefined || req.body.assignedTo !== undefined) {
@@ -1795,7 +1801,7 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
 
-    const { stage, temperature, addTag, assigned_to, assignedTo } = req.body?.updates || {};
+    const { stage, stage_source, lost_reason, potential_contract_value, temperature, addTag, assigned_to, assignedTo } = req.body?.updates || {};
     const targetAssignedTo = assigned_to !== undefined ? assigned_to : assignedTo;
     if (targetAssignedTo !== undefined) {
       if (!isManagerOrAdmin(req.authAccess)) {
@@ -1806,7 +1812,23 @@ export function registerLeadsRoutes(app, deps) {
 
     try {
       const updates = { updated_at: new Date().toISOString() };
-      if (stage) updates.stage = stage;
+      if (stage) {
+        updates.stage = stage;
+        updates.stage_source = stage_source || "manual";
+        if (stage !== "lost" && lost_reason === undefined) {
+          updates.lost_reason = null;
+        }
+      } else if (stage_source !== undefined) {
+        updates.stage_source = stage_source;
+      }
+      if (lost_reason !== undefined) {
+        updates.lost_reason = lost_reason ? String(lost_reason).trim() : null;
+      }
+      if (potential_contract_value !== undefined) {
+        updates.potential_contract_value = potential_contract_value !== null && potential_contract_value !== ""
+          ? Number(potential_contract_value)
+          : null;
+      }
       if (temperature) updates.temperature = temperature;
       if (targetAssignedTo !== undefined) {
         updates.assigned_to = targetAssignedTo ? String(targetAssignedTo).trim() : null;

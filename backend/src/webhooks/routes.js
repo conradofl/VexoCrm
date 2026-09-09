@@ -126,13 +126,16 @@ export function registerWebhooksRoutes(app) {
         return res.status(400).json({ error: "Missing phone number to match conversion" });
       }
 
-      // Atualiza valor de contrato (buscando na tabela de leads base ou follow-up)
+      // Atualiza status e estágio para buyer com stage_source='integration'
       const updateQuery = await pgDatabasePool.query(`
         UPDATE public.leads 
         SET status = 'WON', 
+            stage = 'buyer',
+            stage_source = 'integration',
+            potential_contract_value = CASE WHEN $3::numeric > 0 THEN $3::numeric ELSE potential_contract_value END,
             updated_at = now(),
-            historico = CONCAT(historico, '\n[Conversão] Fechamento via Webhook: R$ ', $3::text)
-        WHERE client_id = $1 AND telefone = $2
+            historico = CONCAT(COALESCE(historico, ''), '\n[Conversão] Fechamento via Webhook: R$ ', $3::text)
+        WHERE client_id = $1 AND (telefone = $2 OR phone = $2)
         RETURNING id
       `, [tenant_id, phone, value]);
 

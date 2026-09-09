@@ -26,6 +26,7 @@ import {
   FileText,
   Filter,
   CheckCircle2,
+  XCircle,
   ChevronDown,
   Lock,
   Target,
@@ -94,6 +95,9 @@ export interface LeadIntelligenceItem {
   phone?: string | null;
   nome: string | null;
   stage?: "buyer" | "open_budget" | "inquiry" | "cold" | "lost" | null;
+  stage_source?: "manual" | "auto" | "integration" | null;
+  lost_reason?: string | null;
+  potential_contract_value?: number | null;
   temperature?: "hot" | "warm" | "cold" | null;
   tags?: string[] | null;
   assigned_to?: string | null;
@@ -104,6 +108,15 @@ export interface LeadIntelligenceItem {
   updated_at?: string;
   [key: string]: any;
 }
+
+export const LOST_REASONS = [
+  { id: "preco", label: "Preço elevado / fora do orçamento" },
+  { id: "prazo", label: "Prazo de entrega / atendimento" },
+  { id: "comprou_outro", label: "Comprou de outro fornecedor" },
+  { id: "sumiu", label: "Sumiu / Não respondeu mais" },
+  { id: "perfil", label: "Não era o perfil do produto" },
+  { id: "outro", label: "Outro motivo" },
+];
 
 export interface SummaryStats {
   totalLeads: number;
@@ -431,10 +444,21 @@ export default function BancoDeDados() {
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [isBulkStageModalOpen, setIsBulkStageModalOpen] = useState(false);
   const [bulkStageValue, setBulkStageValue] = useState<"buyer" | "open_budget" | "inquiry" | "cold" | "lost">("cold");
+  const [bulkContractValue, setBulkContractValue] = useState("");
+  const [bulkLostReason, setBulkLostReason] = useState("preco");
   const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
   const [bulkTagValue, setBulkTagValue] = useState("");
   const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
   const [bulkAssignValue, setBulkAssignValue] = useState<string>("none");
+
+  // Modais dedicados: Marcar como Cliente e Marcar como Perdido
+  const [isMarkAsClientModalOpen, setIsMarkAsClientModalOpen] = useState(false);
+  const [markAsClientTarget, setMarkAsClientTarget] = useState<{ type: "single"; leadId: string } | { type: "bulk"; leadIds: string[] } | null>(null);
+  const [markAsClientValue, setMarkAsClientValue] = useState("");
+
+  const [isMarkAsLostModalOpen, setIsMarkAsLostModalOpen] = useState(false);
+  const [markAsLostTarget, setMarkAsLostTarget] = useState<{ type: "single"; leadId: string } | { type: "bulk"; leadIds: string[] } | null>(null);
+  const [markAsLostReason, setMarkAsLostReason] = useState("preco");
 
   // Campaign Creation Wizard Modal State
   const [isCampaignWizardOpen, setIsCampaignWizardOpen] = useState(false);
@@ -1306,10 +1330,154 @@ export default function BancoDeDados() {
     );
   };
 
+  const openMarkAsClientModal = (target: { type: "single"; leadId: string } | { type: "bulk"; leadIds: string[] }) => {
+    setMarkAsClientTarget(target);
+    if (target.type === "single" && selectedLead?.id === target.leadId) {
+      setMarkAsClientValue(selectedLead.potential_contract_value ? String(selectedLead.potential_contract_value) : "");
+    } else {
+      setMarkAsClientValue("");
+    }
+    setIsMarkAsClientModalOpen(true);
+  };
+
+  const handleConfirmMarkAsClient = async () => {
+    if (!markAsClientTarget) return;
+    try {
+      const token = await getIdToken();
+      const parsedValue = markAsClientValue.trim() ? parseFloat(markAsClientValue.replace(",", ".")) : null;
+
+      if (markAsClientTarget.type === "single") {
+        const res = await fetch(`${API_BASE_URL}/api/leads/${markAsClientTarget.leadId}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            stage: "buyer",
+            stage_source: "manual",
+            potential_contract_value: parsedValue,
+          }),
+        });
+        if (!res.ok) throw new Error("Falha ao marcar como cliente.");
+        toast.success("Lead marcado como Cliente!");
+        if (selectedLead && selectedLead.id === markAsClientTarget.leadId) {
+          setSelectedLead({
+            ...selectedLead,
+            stage: "buyer",
+            stage_source: "manual",
+            potential_contract_value: parsedValue,
+          });
+        }
+      } else {
+        const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clientId,
+            leadIds: markAsClientTarget.leadIds,
+            updates: {
+              stage: "buyer",
+              stage_source: "manual",
+              potential_contract_value: parsedValue,
+            },
+          }),
+        });
+        if (!res.ok) throw new Error("Falha ao atualizar leads em lote.");
+        toast.success(`${markAsClientTarget.leadIds.length} leads marcados como Cliente!`);
+        setSelectedLeadIds([]);
+      }
+      setIsMarkAsClientModalOpen(false);
+      fetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao marcar como cliente", { description: err.message });
+    }
+  };
+
+  const openMarkAsLostModal = (target: { type: "single"; leadId: string } | { type: "bulk"; leadIds: string[] }) => {
+    setMarkAsLostTarget(target);
+    if (target.type === "single" && selectedLead?.id === target.leadId) {
+      setMarkAsLostReason(selectedLead.lost_reason || "preco");
+    } else {
+      setMarkAsLostReason("preco");
+    }
+    setIsMarkAsLostModalOpen(true);
+  };
+
+  const handleConfirmMarkAsLost = async () => {
+    if (!markAsLostTarget) return;
+    try {
+      const token = await getIdToken();
+      if (markAsLostTarget.type === "single") {
+        const res = await fetch(`${API_BASE_URL}/api/leads/${markAsLostTarget.leadId}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            stage: "lost",
+            stage_source: "manual",
+            lost_reason: markAsLostReason,
+          }),
+        });
+        if (!res.ok) throw new Error("Falha ao marcar como perdido.");
+        toast.success("Lead marcado como Perdido!");
+        if (selectedLead && selectedLead.id === markAsLostTarget.leadId) {
+          setSelectedLead({
+            ...selectedLead,
+            stage: "lost",
+            stage_source: "manual",
+            lost_reason: markAsLostReason,
+          });
+        }
+      } else {
+        const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clientId,
+            leadIds: markAsLostTarget.leadIds,
+            updates: {
+              stage: "lost",
+              stage_source: "manual",
+              lost_reason: markAsLostReason,
+            },
+          }),
+        });
+        if (!res.ok) throw new Error("Falha ao atualizar leads em lote.");
+        toast.success(`${markAsLostTarget.leadIds.length} leads marcados como Perdido!`);
+        setSelectedLeadIds([]);
+      }
+      setIsMarkAsLostModalOpen(false);
+      fetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao marcar como perdido", { description: err.message });
+    }
+  };
+
   const handleBulkStageSubmit = async () => {
     if (selectedLeadIds.length === 0) return;
     try {
       const token = await getIdToken();
+      const updates: any = {
+        stage: bulkStageValue,
+        stage_source: "manual",
+      };
+      if (bulkStageValue === "buyer") {
+        updates.potential_contract_value = bulkContractValue.trim()
+          ? parseFloat(bulkContractValue.replace(",", "."))
+          : null;
+      } else if (bulkStageValue === "lost") {
+        updates.lost_reason = bulkLostReason || "preco";
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
         method: "POST",
         headers: {
@@ -1319,7 +1487,7 @@ export default function BancoDeDados() {
         body: JSON.stringify({
           clientId,
           leadIds: selectedLeadIds,
-          updates: { stage: bulkStageValue },
+          updates,
         }),
       });
 
@@ -1327,6 +1495,7 @@ export default function BancoDeDados() {
 
       toast.success(`Estágio alterado para ${selectedLeadIds.length} leads!`);
       setIsBulkStageModalOpen(false);
+      setBulkContractValue("");
       setSelectedLeadIds([]);
       fetchLeads();
     } catch (err: any) {
@@ -1590,16 +1759,28 @@ export default function BancoDeDados() {
   };
 
   // Badges & Temperature Helpers
-  const getStageBadge = (stage?: string | null) => {
+  const getStageBadge = (stage?: string | null, lostReason?: string | null, stageSource?: string | null) => {
     switch (stage) {
       case "buyer":
-        return <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">Comprador 🟢</Badge>;
+        return (
+          <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-1">
+            Comprador 🟢
+            {stageSource === "manual" && <span className="text-[10px] opacity-75 font-normal">(Manual)</span>}
+            {stageSource === "integration" && <span className="text-[10px] opacity-75 font-normal">(Webhook)</span>}
+          </Badge>
+        );
       case "open_budget":
         return <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30">Orçamento Aberto 🟡</Badge>;
       case "inquiry":
         return <Badge className="bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30">Em Dúvida 🔵</Badge>;
       case "lost":
-        return <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30">Perdido 🔴</Badge>;
+        const reasonObj = LOST_REASONS.find((r) => r.id === lostReason);
+        return (
+          <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30 gap-1" title={reasonObj?.label || lostReason || undefined}>
+            Perdido 🔴
+            {lostReason && <span className="text-[10px] opacity-75 font-normal">({reasonObj?.id || lostReason})</span>}
+          </Badge>
+        );
       case "cold":
       default:
         return <Badge className="bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30">Lead Frio ⚪</Badge>;
@@ -2396,7 +2577,7 @@ export default function BancoDeDados() {
                             {displayPhone}
                           </TableCell>
 
-                          <TableCell>{getStageBadge(lead.stage)}</TableCell>
+                          <TableCell>{getStageBadge(lead.stage, lead.lost_reason, lead.stage_source)}</TableCell>
 
                           <TableCell>{getTemperatureBadge(lead.temperature)}</TableCell>
 
@@ -2426,15 +2607,35 @@ export default function BancoDeDados() {
                           </TableCell>
 
                           <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleSendWhatsApp(displayPhone, displayName)}
-                              className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5" />
-                              WA
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Marcar como Cliente"
+                                onClick={() => openMarkAsClientModal({ type: "single", leadId: lead.id })}
+                                className="h-8 w-8 p-0 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Marcar como Perdido"
+                                onClick={() => openMarkAsLostModal({ type: "single", leadId: lead.id })}
+                                className="h-8 w-8 p-0 text-rose-600 border-rose-500/30 hover:bg-rose-500/10 dark:text-rose-400"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleSendWhatsApp(displayPhone, displayName)}
+                                className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                WA
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -2559,6 +2760,26 @@ export default function BancoDeDados() {
                 Reatribuir Responsável
               </Button>
             )}
+
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => openMarkAsClientModal({ type: "bulk", leadIds: selectedLeadIds })}
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 font-semibold gap-1.5"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Marcar Cliente ({selectedLeadIds.length})
+            </Button>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => openMarkAsLostModal({ type: "bulk", leadIds: selectedLeadIds })}
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 font-semibold gap-1.5"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Marcar Perdido ({selectedLeadIds.length})
+            </Button>
 
             <Button
               size="sm"
@@ -3724,13 +3945,38 @@ export default function BancoDeDados() {
                   )}
                 </div>
 
+                {/* Indicador de Status especial (Buyer ou Lost) */}
+                {selectedLead.stage === "buyer" && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 block">Cliente Confirmado</span>
+                      <span className="text-muted-foreground text-[11px]">
+                        Origem: {selectedLead.stage_source === "integration" ? "Integração / Webhook" : "Manual"}
+                      </span>
+                    </div>
+                    {selectedLead.potential_contract_value ? (
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                        R$ {Number(selectedLead.potential_contract_value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+                {selectedLead.stage === "lost" && (
+                  <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-2.5 text-xs">
+                    <span className="font-semibold text-rose-600 dark:text-rose-400 block">Negócio Perdido</span>
+                    <span className="text-muted-foreground text-[11px]">
+                      Motivo: {LOST_REASONS.find((r) => r.id === selectedLead.lost_reason)?.label || selectedLead.lost_reason || "Não informado"}
+                    </span>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1">Alterar Estágio</label>
                   <div className="grid grid-cols-2 gap-1.5">
                     <Button
                       size="sm"
                       variant={selectedLead.stage === "buyer" ? "default" : "outline"}
-                      onClick={() => handleUpdateLeadStage(selectedLead.id, "buyer")}
+                      onClick={() => openMarkAsClientModal({ type: "single", leadId: selectedLead.id })}
                       className="text-xs"
                     >
                       Comprador 🟢
@@ -3754,7 +4000,7 @@ export default function BancoDeDados() {
                     <Button
                       size="sm"
                       variant={selectedLead.stage === "lost" ? "default" : "outline"}
-                      onClick={() => handleUpdateLeadStage(selectedLead.id, "lost")}
+                      onClick={() => openMarkAsLostModal({ type: "single", leadId: selectedLead.id })}
                       className="text-xs"
                     >
                       Perdido 🔴
@@ -3779,22 +4025,59 @@ export default function BancoDeDados() {
 
       {/* Modal Bulk Change Stage */}
       <Dialog open={isBulkStageModalOpen} onOpenChange={setIsBulkStageModalOpen}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">Alterar Estágio em Lote</DialogTitle>
           </DialogHeader>
-          <div className="py-3">
-            <select
-              value={bulkStageValue}
-              onChange={(e: any) => setBulkStageValue(e.target.value)}
-              className="w-full h-9 px-3 rounded-md border border-input bg-background text-xs"
-            >
-              <option value="cold">Lead Frio ⚪</option>
-              <option value="inquiry">Em Dúvida 🔵</option>
-              <option value="open_budget">Orçamento Aberto 🟡</option>
-              <option value="buyer">Comprador 🟢</option>
-              <option value="lost">Perdido 🔴</option>
-            </select>
+          <div className="py-3 space-y-3">
+            <div>
+              <label className="text-xs font-medium text-foreground block mb-1">Novo Estágio</label>
+              <select
+                value={bulkStageValue}
+                onChange={(e: any) => setBulkStageValue(e.target.value)}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-xs"
+              >
+                <option value="cold">Lead Frio ⚪</option>
+                <option value="inquiry">Em Dúvida 🔵</option>
+                <option value="open_budget">Orçamento Aberto 🟡</option>
+                <option value="buyer">Comprador 🟢</option>
+                <option value="lost">Perdido 🔴</option>
+              </select>
+            </div>
+
+            {bulkStageValue === "buyer" && (
+              <div>
+                <label className="text-xs font-medium text-foreground block mb-1">
+                  Valor do Contrato Fechado (R$, opcional)
+                </label>
+                <Input
+                  type="number"
+                  placeholder="Ex: 5000"
+                  value={bulkContractValue}
+                  onChange={(e) => setBulkContractValue(e.target.value)}
+                  className="text-xs h-9"
+                />
+              </div>
+            )}
+
+            {bulkStageValue === "lost" && (
+              <div>
+                <label className="text-xs font-medium text-foreground block mb-1">
+                  Motivo da Perda
+                </label>
+                <select
+                  value={bulkLostReason}
+                  onChange={(e) => setBulkLostReason(e.target.value)}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-xs"
+                >
+                  {LOST_REASONS.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setIsBulkStageModalOpen(false)}>
@@ -3802,6 +4085,88 @@ export default function BancoDeDados() {
             </Button>
             <Button size="sm" onClick={handleBulkStageSubmit} className="bg-indigo-600 text-white">
               Aplicar a {selectedLeadIds.length} leads
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Marcar como Cliente */}
+      <Dialog open={isMarkAsClientModalOpen} onOpenChange={setIsMarkAsClientModalOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-4 h-4" />
+              Marcar como Cliente
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {markAsClientTarget?.type === "bulk"
+                ? `Confirmar fechamento de negócio para os ${markAsClientTarget.leadIds.length} leads selecionados. Este status é manual e protegido contra inteligência automática.`
+                : "Confirmar que o lead fechou negócio. Este status é manual e protegido contra inteligência automática."}
+            </p>
+            <div>
+              <label className="text-xs font-semibold text-foreground block mb-1">
+                Valor do Contrato Fechado (R$, opcional)
+              </label>
+              <Input
+                type="number"
+                placeholder="Ex: 5000"
+                value={markAsClientValue}
+                onChange={(e) => setMarkAsClientValue(e.target.value)}
+                className="text-xs h-9"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsMarkAsClientModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" onClick={handleConfirmMarkAsClient} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              Confirmar Cliente 🟢
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Marcar como Perdido */}
+      <Dialog open={isMarkAsLostModalOpen} onOpenChange={setIsMarkAsLostModalOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+              <XCircle className="w-4 h-4" />
+              Marcar como Perdido
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {markAsLostTarget?.type === "bulk"
+                ? `Indique o motivo pelo qual estes ${markAsLostTarget.leadIds.length} leads não avançaram:`
+                : "Indique o motivo pelo qual este lead não avançou:"}
+            </p>
+            <div>
+              <label className="text-xs font-semibold text-foreground block mb-1">
+                Motivo da Perda
+              </label>
+              <select
+                value={markAsLostReason}
+                onChange={(e) => setMarkAsLostReason(e.target.value)}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-xs"
+              >
+                {LOST_REASONS.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsMarkAsLostModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" onClick={handleConfirmMarkAsLost} className="bg-rose-600 hover:bg-rose-700 text-white">
+              Confirmar Perdido 🔴
             </Button>
           </DialogFooter>
         </DialogContent>

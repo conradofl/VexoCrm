@@ -81,7 +81,7 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
 
   // 1. Busca se o lead já existe por telefone ou phone
   const existingRes = await pool.query(
-    `SELECT id, nome, tags, dados
+    `SELECT id, nome, tags, dados, stage, stage_source, lost_reason
      FROM public.leads
      WHERE client_id = $1 AND (telefone = $2 OR phone = $2 OR telefone = $3 OR phone = $3)
      LIMIT 1`,
@@ -101,6 +101,14 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
     // Preserva os 2.126 leads históricos sem backfill e preserva qualquer atribuição prévia.
     delete updates.assigned_to;
     delete updates.assignedTo;
+
+    // Regra de Ouro (Bloco 1): se o lead já possui stage_source = 'manual',
+    // processos automáticos nunca podem sobrescrever stage, stage_source ou lost_reason.
+    if (existing.stage_source === "manual" && updates.stage_source !== "manual") {
+      delete updates.stage;
+      delete updates.stage_source;
+      delete updates.lost_reason;
+    }
 
     // Regra de ouro: não sobrescrever nome bom existente se o novo nome for vazio/placeholder
     if (preserveExistingName && isRealName(existing.nome)) {
@@ -153,6 +161,9 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
     phone: cleanPhone,
     ...sanitizedFields,
   };
+  if (insertPayload.stage && !insertPayload.stage_source) {
+    insertPayload.stage_source = "auto";
+  }
 
   const cols = Object.keys(insertPayload).filter((k) => insertPayload[k] !== undefined);
   const insertCols = cols.map((c) => `"${c}"`).join(", ");
@@ -257,7 +268,7 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
 
     // Busca existentes no banco de uma vez só
     const existingQuery = await pool.query(
-      `SELECT id, telefone, phone, nome, tags, dados
+      `SELECT id, telefone, phone, nome, tags, dados, stage, stage_source, lost_reason
        FROM public.leads
        WHERE client_id = $1 AND (telefone = ANY($2::text[]) OR phone = ANY($2::text[]))`,
       [clientId, chunkPhones]
@@ -284,7 +295,7 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
     // ── INSERT EM LOTE (Novos) ──────────────────────────────────────────────
     if (toInsert.length > 0) {
       // Lista padrão de colunas suportadas
-      const standardCols = ["client_id", "telefone", "phone", "nome", "stage", "temperature", "tags", "dados", "created_at", "updated_at"];
+      const standardCols = ["client_id", "telefone", "phone", "nome", "stage", "stage_source", "lost_reason", "temperature", "tags", "dados", "created_at", "updated_at"];
       const valueRows = [];
       const queryParams = [];
 
@@ -307,20 +318,26 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         queryParams.push(item.stage || "cold");
         rowPlaceholders.push(`$${offset + 5}`);
 
-        queryParams.push(item.temperature || "warm");
+        queryParams.push(item.stage_source || (item.stage ? "auto" : null));
         rowPlaceholders.push(`$${offset + 6}`);
 
-        queryParams.push(Array.isArray(item.tags) ? item.tags : []);
+        queryParams.push(item.lost_reason || null);
         rowPlaceholders.push(`$${offset + 7}`);
 
-        queryParams.push(typeof item.dados === "object" && item.dados ? JSON.stringify(item.dados) : "{}");
+        queryParams.push(item.temperature || "warm");
         rowPlaceholders.push(`$${offset + 8}`);
 
-        queryParams.push(item.created_at || new Date().toISOString());
+        queryParams.push(Array.isArray(item.tags) ? item.tags : []);
         rowPlaceholders.push(`$${offset + 9}`);
 
-        queryParams.push(new Date().toISOString());
+        queryParams.push(typeof item.dados === "object" && item.dados ? JSON.stringify(item.dados) : "{}");
         rowPlaceholders.push(`$${offset + 10}`);
+
+        queryParams.push(item.created_at || new Date().toISOString());
+        rowPlaceholders.push(`$${offset + 11}`);
+
+        queryParams.push(new Date().toISOString());
+        rowPlaceholders.push(`$${offset + 12}`);
 
         valueRows.push(`(${rowPlaceholders.join(", ")})`);
       }
@@ -355,18 +372,27 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         ...(typeof lead.dados === "object" && lead.dados ? lead.dados : {}),
       };
 
+      const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";
+      const finalStage = isManualProtected ? existing.stage : (lead.stage !== undefined ? (lead.stage || null) : existing.stage);
+      const finalStageSource = isManualProtected ? existing.stage_source : (lead.stage_source !== undefined ? (lead.stage_source || null) : existing.stage_source);
+      const finalLostReason = isManualProtected ? existing.lost_reason : (lead.lost_reason !== undefined ? (lead.lost_reason || null) : existing.lost_reason);
+
       await pool.query(
         `UPDATE public.leads
          SET nome = $1,
              stage = COALESCE($2, stage),
-             temperature = COALESCE($3, temperature),
-             tags = $4,
-             dados = $5,
+             stage_source = COALESCE($3, stage_source),
+             lost_reason = $4,
+             temperature = COALESCE($5, temperature),
+             tags = $6,
+             dados = $7,
              updated_at = now()
-         WHERE id = $6`,
+         WHERE id = $8`,
         [
           finalName || existing.nome || lead.telefone,
-          lead.stage || null,
+          finalStage,
+          finalStageSource,
+          finalLostReason,
           lead.temperature || null,
           mergedTags,
           JSON.stringify(mergedDados),
