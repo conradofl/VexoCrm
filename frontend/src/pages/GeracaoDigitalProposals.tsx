@@ -945,6 +945,12 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         });
       }
 
+      const finalPeriodoPlano = (() => {
+        const gdPkg = catalogo.find((p: any) => p.id === pkgId && (p.tipo === "gd" || !p.tipo));
+        const vexoPkg = catalogo.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
+        return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
+      })();
+
       const body = {
         client_id: clientId,
         prospect_name: prospectName,
@@ -969,14 +975,10 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         condicoes_pagamento: {
           // Formas fixas primeiro; condições legadas da biblioteca seguem
           // sendo gravadas enquanto estiverem marcadas.
-          ofertadas: [...formasParaTerms(formasPgto), ...legadosPgto],
+          ofertadas: [...formasParaTerms(formasPgto, finalPeriodoPlano), ...legadosPgto],
           escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
         },
-        periodo_plano: (() => {
-          const gdPkg = catalogo.find((p: any) => p.id === pkgId && (p.tipo === "gd" || !p.tipo));
-          const vexoPkg = catalogo.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
-          return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
-        })(),
+        periodo_plano: finalPeriodoPlano,
         validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
         valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
         observacao_validade: observacaoValidade || null,

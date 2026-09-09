@@ -488,7 +488,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
 
           const selectedPaymentMethods = formasPgto.marcadas.map((id) => {
             const def = TODAS_FORMAS.find((f) => f.id === id);
-            const n = parcelasDe(formasPgto, id);
+            const n = parcelasDe(formasPgto, id, mesesPlano);
             return {
               id,
               label: def?.label || id,
@@ -701,7 +701,7 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                 <Button variant="outline" onClick={() => setWizardStep(3)} className="border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                   Voltar
                 </Button>
-                <Button onClick={() => handleCreateDirectProposal(formasParaTerms(formasPgto))} className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-800 hover:to-indigo-700 text-white font-black text-xs px-8 shadow-md">
+                <Button onClick={() => handleCreateDirectProposal(formasParaTerms(formasPgto, mesesPlano))} className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-800 hover:to-indigo-700 text-white font-black text-xs px-8 shadow-md">
                   Confirmar & Criar Proposta
                 </Button>
               </div>

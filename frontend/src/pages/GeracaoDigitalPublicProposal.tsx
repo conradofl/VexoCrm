@@ -398,8 +398,12 @@ export default function GeracaoDigitalPublicProposal() {
     !condSetupEscolhida ? "à vista" : null,
     meioSetupPub ? `no ${meioSetupPub}` : null,
   ].filter(Boolean).join(" · ");
+  const baseMensalEscolhida =
+    condMensalEscolhida && (condMensalEscolhida.id === "cartao_parcelado_periodo" || condMensalEscolhida.id === "cartao_total_parcelado")
+      ? calc.compromissoFinal
+      : mensalFinalVal;
   const pagamentoMensalidade = [
-    condMensalEscolhida ? computePaymentBreakdown(condMensalEscolhida, mensalFinalVal).linhas[0] : "faturamento mensal recorrente",
+    condMensalEscolhida ? computePaymentBreakdown(condMensalEscolhida, baseMensalEscolhida).linhas[0] : "faturamento mensal recorrente",
     meioMensalPub ? `no ${meioMensalPub}` : null,
   ].filter(Boolean).join(" · ");
   const temResumoPagamento = !!(meioSetupPub || meioMensalPub || chosenTerm);
@@ -693,7 +697,7 @@ export default function GeracaoDigitalPublicProposal() {
                   // inteiro, não sobre a mensalidade — senão 12x sairia de uma
                   // parcela só.
                   const base =
-                    term.id === "cartao_total_parcelado"
+                    term.id === "cartao_total_parcelado" || term.id === "cartao_parcelado_periodo"
                       ? calc.compromissoFinal
                       : aplicaA === "mensalidade"
                         ? calc.mensalidadeFinal
@@ -853,17 +857,21 @@ export default function GeracaoDigitalPublicProposal() {
                   const valorTabelaPeriodo = pkgItem ? Number(pkgItem.valor_tabela || 0) : 0;
                   const mesesItem = pkgItem ? (pkgItem.meses || calc.mesesPeriodo || 1) : 1;
                   const rawTabelaMensal = valorTabelaPeriodo > 0 ? Math.round((valorTabelaPeriodo / mesesItem) * 100) / 100 : Number((proposal as any).valor_tabela_mensal || 0);
-                  const temPrecoCheio = rawTabelaMensal > mensalFinalVal;
+                  const temTabelaExplicita = rawTabelaMensal > mensalFinalVal;
+                  const temDescontoPercentual = !temTabelaExplicita && calc.descontoMensalPorcentagem > 0 && calc.mensalidadeOriginal > mensalFinalVal;
+                  const temPrecoCheio = temTabelaExplicita || temDescontoPercentual;
+                  const valorRiscado = temTabelaExplicita ? rawTabelaMensal : calc.mensalidadeOriginal;
+                  const badgeTexto = temTabelaExplicita ? "Condição Especial" : `-${calc.descontoMensalPorcentagem}%`;
 
                   return (
                     <>
                       {temPrecoCheio && (
                         <div className="flex items-center gap-2 pt-0.5 pb-1">
                           <span className="text-slate-400 line-through font-bold text-lg">
-                            R$ {rawTabelaMensal.toLocaleString("pt-BR")}/mês
+                            R$ {valorRiscado.toLocaleString("pt-BR")}/mês
                           </span>
                           <span className="text-emerald-400 text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                            Condição Especial
+                            {badgeTexto}
                           </span>
                         </div>
                       )}

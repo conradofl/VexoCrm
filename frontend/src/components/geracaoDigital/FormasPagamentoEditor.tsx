@@ -41,11 +41,12 @@ export default function FormasPagamentoEditor({
   condicaoEspecialTexto,
   onCondicaoEspecialChange,
 }: Props) {
-  const baseDe = (def: FormaDef) => totalSetup;
+  const baseDe = (def: FormaDef) =>
+    def.aplica_a === "mensalidade" ? mensalidade * (meses || 1) : totalSetup;
 
   const Linha = ({ def }: { def: FormaDef }) => {
     const on = formas.marcadas.includes(def.id);
-    const n = parcelasDe(formas, def.id);
+    const n = parcelasDe(formas, def.id, meses);
     const base = baseDe(def);
 
     return (
@@ -81,7 +82,7 @@ export default function FormasPagamentoEditor({
                   type="button"
                   aria-label="Mais uma parcela"
                   disabled={n >= MAX_PARCELAS}
-                  onClick={() => onChange(ajustarParcelas(formas, def.id, 1))}
+                  onClick={() => onChange(ajustarParcelas(formas, def.id, 1, meses))}
                   className="text-slate-400 hover:text-purple-600 disabled:opacity-30 leading-none"
                 >
                   <ChevronUp className="h-3 w-3" />
@@ -90,7 +91,7 @@ export default function FormasPagamentoEditor({
                   type="button"
                   aria-label="Menos uma parcela"
                   disabled={n <= 1}
-                  onClick={() => onChange(ajustarParcelas(formas, def.id, -1))}
+                  onClick={() => onChange(ajustarParcelas(formas, def.id, -1, meses))}
                   className="text-slate-400 hover:text-purple-600 disabled:opacity-30 leading-none"
                 >
                   <ChevronDown className="h-3 w-3" />

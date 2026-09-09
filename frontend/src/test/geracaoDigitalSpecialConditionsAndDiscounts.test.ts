@@ -132,3 +132,77 @@ describe("DEFEITO 2: Formas de Pagamento e Ausência de 'Desconto' Não Concedid
     expect(labelCorrigido.toLowerCase()).not.toContain("desconto");
   });
 });
+
+describe("DEFEITO 3: Desconto na Mensalidade e Preço Riscado na Proposta Pública", () => {
+  const resolvePrecoCheioMensal = ({
+    valorTabelaPeriodo = 0,
+    mesesItem = 1,
+    valorTabelaMensal = 0,
+    mensalFinalVal,
+    mensalidadeOriginal,
+    descontoMensalPorcentagem,
+  }: {
+    valorTabelaPeriodo?: number;
+    mesesItem?: number;
+    valorTabelaMensal?: number;
+    mensalFinalVal: number;
+    mensalidadeOriginal: number;
+    descontoMensalPorcentagem: number;
+  }) => {
+    const rawTabelaMensal =
+      valorTabelaPeriodo > 0
+        ? Math.round((valorTabelaPeriodo / mesesItem) * 100) / 100
+        : Number(valorTabelaMensal || 0);
+    const temTabelaExplicita = rawTabelaMensal > mensalFinalVal;
+    const temDescontoPercentual =
+      !temTabelaExplicita &&
+      descontoMensalPorcentagem > 0 &&
+      mensalidadeOriginal > mensalFinalVal;
+    const temPrecoCheio = temTabelaExplicita || temDescontoPercentual;
+    const valorRiscado = temTabelaExplicita ? rawTabelaMensal : mensalidadeOriginal;
+    const badgeTexto = temTabelaExplicita
+      ? "Condição Especial"
+      : `-${descontoMensalPorcentagem}%`;
+
+    return {
+      temPrecoCheio,
+      valorRiscado,
+      badgeTexto,
+    };
+  };
+
+  it("Caso Big Jhow: mensal de R$ 8.000 com 25% de desconto exibe R$ 8.000 riscado e badge -25%", () => {
+    const res = resolvePrecoCheioMensal({
+      mensalidadeOriginal: 8000,
+      mensalFinalVal: 6000,
+      descontoMensalPorcentagem: 25,
+    });
+
+    expect(res.temPrecoCheio).toBe(true);
+    expect(res.valorRiscado).toBe(8000);
+    expect(res.badgeTexto).toBe("-25%");
+  });
+
+  it("Preço de tabela explícito prevalece e mantém badge 'Condição Especial'", () => {
+    const res = resolvePrecoCheioMensal({
+      valorTabelaMensal: 10000,
+      mensalidadeOriginal: 8000,
+      mensalFinalVal: 6000,
+      descontoMensalPorcentagem: 25,
+    });
+
+    expect(res.temPrecoCheio).toBe(true);
+    expect(res.valorRiscado).toBe(10000);
+    expect(res.badgeTexto).toBe("Condição Especial");
+  });
+
+  it("Sem desconto e sem tabela: não exibe riscado", () => {
+    const res = resolvePrecoCheioMensal({
+      mensalidadeOriginal: 6000,
+      mensalFinalVal: 6000,
+      descontoMensalPorcentagem: 0,
+    });
+
+    expect(res.temPrecoCheio).toBe(false);
+  });
+});

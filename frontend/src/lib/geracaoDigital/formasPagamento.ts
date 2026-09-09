@@ -14,7 +14,12 @@ import type { PaymentTerm, PaymentTermAplicaA } from "./paymentTerms";
 // ---------------------------------------------------------------------------
 
 export type FormaSetupId = "pix_avista" | "entrada_pix_30d" | "cartao_parcelado";
-export type FormaMensalId = "cartao_recorrente" | "boleto_recorrente" | "pix_recorrente" | "pix_avista_projeto";
+export type FormaMensalId =
+  | "cartao_recorrente"
+  | "boleto_recorrente"
+  | "pix_recorrente"
+  | "cartao_parcelado_periodo"
+  | "pix_avista_projeto";
 export type FormaId = FormaSetupId | FormaMensalId;
 
 export interface FormaDef {
@@ -35,6 +40,7 @@ export const FORMAS_MENSALIDADE: FormaDef[] = [
   { id: "cartao_recorrente", label: "Cartão Recorrente (Sem comprometer limite)", aplica_a: "mensalidade", parcelavel: false },
   { id: "boleto_recorrente", label: "Boleto Bancário Recorrente (Exclusivo PJ)", aplica_a: "mensalidade", parcelavel: false },
   { id: "pix_recorrente", label: "Pix Recorrente", aplica_a: "mensalidade", parcelavel: false },
+  { id: "cartao_parcelado_periodo", label: "Parcelado no Cartão", aplica_a: "mensalidade", parcelavel: true },
   { id: "pix_avista_projeto", label: "Pix à Vista (Pagamento Único / Projeto Pontual)", aplica_a: "mensalidade", parcelavel: false },
 ];
 
@@ -50,9 +56,32 @@ export interface FormasSelecionadas {
 
 export const formasVazias = (): FormasSelecionadas => ({ marcadas: [], parcelas: {} });
 
-export function parcelasDe(formas: FormasSelecionadas, id: FormaId): number {
+export function defaultParcelasPorPeriodo(periodoOuMeses?: string | number | null): number {
+  if (typeof periodoOuMeses === "number") {
+    return periodoOuMeses >= 1 ? Math.min(MAX_PARCELAS, Math.round(periodoOuMeses)) : 1;
+  }
+  if (typeof periodoOuMeses === "string") {
+    const p = periodoOuMeses.trim().toLowerCase();
+    if (p === "trimestral") return 3;
+    if (p === "semestral") return 6;
+    if (p === "anual") return 12;
+    if (p === "mensal") return 1;
+    const num = Number(p);
+    if (!isNaN(num) && num >= 1) {
+      return Math.min(MAX_PARCELAS, Math.round(num));
+    }
+  }
+  return 1;
+}
+
+export function parcelasDe(
+  formas: FormasSelecionadas,
+  id: FormaId,
+  periodoOuMeses?: string | number | null
+): number {
   const n = Number(formas.parcelas?.[id] || 0);
   if (n >= 1) return Math.min(n, MAX_PARCELAS);
+  if (id === "cartao_parcelado_periodo") return defaultParcelasPorPeriodo(periodoOuMeses);
   return id === "cartao_parcelado" ? 3 : 1;
 }
 
@@ -60,9 +89,10 @@ export function parcelasDe(formas: FormasSelecionadas, id: FormaId): number {
 export function ajustarParcelas(
   formas: FormasSelecionadas,
   id: FormaId,
-  delta: number
+  delta: number,
+  periodoOuMeses?: string | number | null
 ): FormasSelecionadas {
-  const atual = parcelasDe(formas, id);
+  const atual = parcelasDe(formas, id, periodoOuMeses);
   const proximo = Math.max(1, Math.min(MAX_PARCELAS, atual + delta));
   return { ...formas, parcelas: { ...formas.parcelas, [id]: proximo } };
 }
@@ -76,9 +106,17 @@ export function alternarForma(formas: FormasSelecionadas, id: FormaId): FormasSe
 }
 
 /** Nome exibido, já com as parcelas quando houver. */
-export function nomeDaForma(formas: FormasSelecionadas, def: FormaDef): string {
+export function nomeDaForma(
+  formas: FormasSelecionadas,
+  def: FormaDef,
+  periodoOuMeses?: string | number | null
+): string {
   if (!def.parcelavel) return def.label;
-  return `${def.label} em ${parcelasDe(formas, def.id)}x`;
+  const n = parcelasDe(formas, def.id, periodoOuMeses);
+  if (def.id === "cartao_parcelado_periodo") {
+    return n === 1 ? "Parcelado no Cartão em 1x" : `Parcelado no Cartão em até ${n}x`;
+  }
+  return `${def.label} em ${n}x`;
 }
 
 /**
@@ -86,10 +124,13 @@ export function nomeDaForma(formas: FormasSelecionadas, def: FormaDef): string {
  * já usa. Ids são estáveis (o próprio id da forma) para que a escolha do
  * cliente sobreviva a uma reedição da proposta.
  */
-export function formasParaTerms(formas: FormasSelecionadas): PaymentTerm[] {
+export function formasParaTerms(
+  formas: FormasSelecionadas,
+  periodoOuMeses?: string | number | null
+): PaymentTerm[] {
   return TODAS_FORMAS.filter((def) => formas.marcadas.includes(def.id)).map((def) => {
-    const n = parcelasDe(formas, def.id);
-    const base = { id: def.id, nome: nomeDaForma(formas, def), ativo: true, aplica_a: def.aplica_a };
+    const n = parcelasDe(formas, def.id, periodoOuMeses);
+    const base = { id: def.id, nome: nomeDaForma(formas, def, periodoOuMeses), ativo: true, aplica_a: def.aplica_a };
 
     switch (def.id) {
       case "pix_avista":
@@ -97,6 +138,8 @@ export function formasParaTerms(formas: FormasSelecionadas): PaymentTerm[] {
       case "entrada_pix_30d":
         return { ...base, tipo: "custom", config: { meio: "pix", descricao: "Entrada no Pix + 30 dias no Pix" } };
       case "cartao_parcelado":
+        return { ...base, tipo: "parcelado_cartao", config: { meio: "cartao", num_parcelas: n } };
+      case "cartao_parcelado_periodo":
         return { ...base, tipo: "parcelado_cartao", config: { meio: "cartao", num_parcelas: n } };
       case "cartao_recorrente":
         return { ...base, tipo: "custom", config: { meio: "cartao", descricao: "Cartão Recorrente (Sem comprometer limite)" } };
