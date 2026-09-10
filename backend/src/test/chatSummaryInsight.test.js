@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { formatSummaryOutput, summarizeChatWithAI, DEFAULT_SUMMARY_PROMPT } from "../domains/leads/chatInsight.js";
+import {
+  formatSummaryOutput,
+  summarizeChatWithAI,
+  DEFAULT_SUMMARY_PROMPT,
+  temConversaComercial,
+} from "../domains/leads/chatInsight.js";
 
 describe("Resumo de Conversa do WhatsApp (chatInsight)", () => {
   it("DEFAULT_SUMMARY_PROMPT contém as 4 seções padronizadas e regras estritas", () => {
@@ -143,5 +148,54 @@ describe("Resumo de Conversa do WhatsApp (chatInsight)", () => {
       expect(sanitized).not.toContain("Dar continuidade ao contato comercial");
       expect(sanitized).not.toContain("qualificar o interesse");
     }
+  });
+
+  describe("Saída de Escape 🚫 (Conversa Pessoal / Sem Oportunidade Comercial)", () => {
+    it("DEFAULT_SUMMARY_PROMPT contém marcador 🚫 e regras contra transformar piada/comentário casual em compra", () => {
+      expect(DEFAULT_SUMMARY_PROMPT).toContain("🚫");
+      expect(DEFAULT_SUMMARY_PROMPT).toContain("Só use 🚫 quando não houver NADA comercial");
+      expect(DEFAULT_SUMMARY_PROMPT).toContain("Citar um produto ou serviço de passagem, sem querer comprar, é 🚫");
+      expect(DEFAULT_SUMMARY_PROMPT).toContain("Nunca transforme comentário casual ou piada em intenção de compra");
+    });
+
+    it("Caso Real (lead 5534998209727): papo pessoal sobre IA entre amigos devolve linha única com 🚫", () => {
+      const rawAiOutput = "🚫 Conversa pessoal entre amigos — menção casual a IA sem intenção de compra";
+      const formatted = formatSummaryOutput(rawAiOutput);
+      expect(formatted).toBe("🚫 Conversa pessoal entre amigos — menção casual a IA sem intenção de compra");
+      expect(formatted).not.toContain("🎯");
+      expect(formatted).not.toContain("📋");
+    });
+
+    it("Normaliza formato com colchetes ou markdown: '🚫 [Conversa pessoal]' vira '🚫 Conversa pessoal'", () => {
+      const rawAiOutput = "🚫 [Conversa pessoal com amigo falando de futebol e piadas]";
+      const formatted = formatSummaryOutput(rawAiOutput);
+      expect(formatted).toBe("🚫 Conversa pessoal com amigo falando de futebol e piadas");
+    });
+
+    it("Tolerância JSON: objeto com escape/nao_lead é formatado como linha única com 🚫", () => {
+      const jsonOutput = {
+        nao_lead: true,
+        motivo: "Troca de fotos de família sem interesse comercial",
+      };
+      const formatted = formatSummaryOutput(jsonOutput);
+      expect(formatted).toBe("🚫 Troca de fotos de família sem interesse comercial");
+    });
+
+    it("Helper temConversaComercial: identifica corretamente conversas comerciais vs pessoais/vazias", () => {
+      // Comercial real
+      expect(temConversaComercial({ raw_chat_summary: "🎯 Quer viajar\n📋 2 adultos" })).toBe(true);
+      expect(temConversaComercial("🎯 Quer viajar\n📋 2 adultos")).toBe(true);
+
+      // Conversa pessoal (escape 🚫)
+      expect(temConversaComercial({ raw_chat_summary: "🚫 Conversa pessoal entre amigos" })).toBe(false);
+      expect(temConversaComercial("🚫 Sem oportunidade comercial")).toBe(false);
+
+      // Vazios / Nulos
+      expect(temConversaComercial({ raw_chat_summary: null })).toBe(false);
+      expect(temConversaComercial({ raw_chat_summary: "" })).toBe(false);
+      expect(temConversaComercial({ raw_chat_summary: "   " })).toBe(false);
+      expect(temConversaComercial(null)).toBe(false);
+      expect(temConversaComercial(undefined)).toBe(false);
+    });
   });
 });

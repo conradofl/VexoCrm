@@ -238,6 +238,54 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
       }
     });
 
+    it("Lead com resumo comercial conta em conversa; lead com resumo começando em 🚫 conta em nunca abordados e soma bate", async () => {
+      const leads = [
+        // 1 Comprador
+        { id: "buyer-1", client_id: "gmca", stage: "buyer" },
+        // 1 Perdido
+        { id: "lost-1", client_id: "gmca", stage: "lost" },
+        // 1 Em negociação
+        { id: "neg-1", client_id: "gmca", stage: "open_budget", raw_chat_summary: "Pediu proposta formal", potential_contract_value: 3000 },
+        // 2 Em conversa comercial legítima
+        { id: "conv-1", client_id: "gmca", stage: "cold", raw_chat_summary: "🎯 Quer consultoria\n📋 1 empresa" },
+        { id: "conv-2", client_id: "gmca", stage: "cold", raw_chat_summary: "🎯 Pacote de viagem\n📋 2 adultos" },
+        // 2 Com resumo de escape 🚫 (conversa pessoal / sem oportunidade comercial) -> devem cair em nunca abordados!
+        { id: "pessoal-1", client_id: "gmca", stage: "cold", raw_chat_summary: "🚫 Conversa pessoal entre amigos" },
+        { id: "pessoal-2", client_id: "gmca", stage: "cold", raw_chat_summary: "🚫 [Citou o serviço casualmente sem querer comprar]" },
+        // 2 Sem conversa alguma (nunca abordados tradicionais)
+        { id: "nunca-1", client_id: "gmca", stage: "cold", raw_chat_summary: null },
+        { id: "nunca-2", client_id: "gmca", stage: "cold", raw_chat_summary: "" },
+      ];
+
+      const app = setupAppWithMockLeads(leads);
+      const srv = await startTestServer(app);
+      try {
+        const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
+        expect(res.status).toBe(200);
+        const data = await res.json();
+
+        expect(data.summary.buyersCount).toBe(1);
+        expect(data.summary.lostCount).toBe(1);
+        expect(data.summary.inNegotiationCount).toBe(1);
+        expect(data.summary.inConversationCount).toBe(2);
+        // neverContacted deve ser 2 (pessoais com 🚫) + 2 (sem resumo) = 4
+        expect(data.summary.neverContactedCount).toBe(4);
+        expect(data.summary.activeLeadsCount).toBe(7); // 1 + 2 + 4
+        expect(data.summary.totalLeads).toBe(9);
+
+        // A soma de todas as faixas + compradores + perdidos fecha perfeitamente
+        const sum =
+          data.summary.buyersCount +
+          data.summary.lostCount +
+          data.summary.inNegotiationCount +
+          data.summary.inConversationCount +
+          data.summary.neverContactedCount;
+        expect(sum).toBe(data.summary.totalLeads);
+      } finally {
+        await srv.close();
+      }
+    });
+
     it("Soma das faixas + buyers + lost igual a totalLeads (fechamento estrito com referência GMCA)", async () => {
       const leads = [];
 

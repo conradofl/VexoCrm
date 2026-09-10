@@ -1168,13 +1168,22 @@ export default function BancoDeDados() {
     }
   };
 
-  // Open WhatsApp Web
-  const handleSendWhatsApp = (phone: string, name?: string | null) => {
-    const digits = phone.replace(/\D/g, "");
-    if (!digits) return;
-    const cleanPhone = digits.startsWith("55") ? digits : `55${digits}`;
-    const text = encodeURIComponent(`Olá ${name || ""}! Como podemos te ajudar hoje?`);
-    window.open(`https://web.whatsapp.com/send?phone=${cleanPhone}&text=${text}`, "_blank");
+  // Ação de WhatsApp: abre conversa interna no Vexo se já houver histórico ou WhatsApp Web se nunca conversou
+  const handleSendWhatsApp = (phone: string, name?: string | null, rawChatSummary?: string | null) => {
+    const rawStr = String(phone || "").trim();
+    if (!rawStr) return;
+    const canonical = sanitizePhone(rawStr);
+    const digits = rawStr.replace(/\D/g, "");
+    const cleanPhone = canonical || (digits.startsWith("55") ? digits : `55${digits}`);
+    if (!cleanPhone) return;
+
+    const hasChat = Boolean(rawChatSummary && String(rawChatSummary).trim().length > 0);
+    if (hasChat) {
+      navigate(`/crm/whatsapp?phone=${cleanPhone}`);
+    } else {
+      const text = encodeURIComponent(`Olá ${name || ""}! Como podemos te ajudar hoje?`);
+      window.open(`https://web.whatsapp.com/send?phone=${cleanPhone}&text=${text}`, "_blank");
+    }
   };
 
   // Lead Detail Sheet Actions
@@ -2502,7 +2511,7 @@ export default function BancoDeDados() {
                       <TableHead className="w-[120px]">Temperatura</TableHead>
                       <TableHead>Tags & Interesses</TableHead>
                       <TableHead className="w-[150px]">Última Conversa</TableHead>
-                      <TableHead className="text-right w-[120px]">Ação</TableHead>
+                      <TableHead className="text-right w-[210px]">Ação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2629,11 +2638,12 @@ export default function BancoDeDados() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleSendWhatsApp(displayPhone, displayName)}
-                                className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400"
+                                title={Boolean(lead.raw_chat_summary && String(lead.raw_chat_summary).trim().length > 0) ? "Abrir conversa" : "Iniciar conversa"}
+                                onClick={() => handleSendWhatsApp(displayPhone, displayName, lead.raw_chat_summary)}
+                                className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400 font-medium px-2.5 whitespace-nowrap"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
-                                WA
+                                {Boolean(lead.raw_chat_summary && String(lead.raw_chat_summary).trim().length > 0) ? "Abrir conversa" : "Iniciar conversa"}
                               </Button>
                             </div>
                           </TableCell>
@@ -3841,17 +3851,46 @@ export default function BancoDeDados() {
               </div>
 
               {/* Resumo da IA */}
-              <div className="bg-muted/40 border border-border rounded-lg p-3 space-y-1">
-                <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" /> Resumo Semântico da IA
-                </span>
-                {/* O resumo vem em linhas (pontos-chave / diagnóstico / próxima
-                    ação). whitespace-pre-line preserva a quebra; sem itálico e
-                    sem aspas, porque não é mais citação da conversa. */}
-                <p className="text-xs text-foreground/90 leading-relaxed whitespace-pre-line">
-                  {selectedLead.raw_chat_summary || "Sem histórico recente analisado."}
-                </p>
-              </div>
+              {selectedLead.raw_chat_summary?.startsWith("🚫") ? (
+                <div className="bg-muted/30 border border-border/70 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                    <span className="text-sm">🚫</span>
+                    <span>Conversa pessoal — sem oportunidade comercial</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground/80 italic leading-relaxed whitespace-pre-line">
+                    {selectedLead.raw_chat_summary.replace(/^🚫\uFE0F?\s*/u, "") || "Nenhuma intenção comercial detectada."}
+                  </p>
+                  {selectedLead.stage !== "lost" && (
+                    <div className="pt-1.5 border-t border-border/40">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setMarkAsLostTarget({ type: "single", leadId: selectedLead.id });
+                          setMarkAsLostReason("perfil");
+                          setIsMarkAsLostModalOpen(true);
+                        }}
+                        className="h-7 text-xs gap-1.5 text-rose-600 border-rose-500/30 hover:bg-rose-500/10 dark:text-rose-400"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Marcar como Perdido (Não era o perfil)
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-muted/40 border border-border rounded-lg p-3 space-y-1">
+                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" /> Resumo Semântico da IA
+                  </span>
+                  {/* O resumo vem em linhas (pontos-chave / diagnóstico / próxima
+                      ação). whitespace-pre-line preserva a quebra; sem itálico e
+                      sem aspas, porque não é mais citação da conversa. */}
+                  <p className="text-xs text-foreground/90 leading-relaxed whitespace-pre-line">
+                    {selectedLead.raw_chat_summary || "Sem histórico recente analisado."}
+                  </p>
+                </div>
+              )}
 
               {/* Tags Management */}
               <div className="space-y-2">
@@ -3906,10 +3945,10 @@ export default function BancoDeDados() {
               <div className="space-y-3 pt-4 border-t border-border">
                 <Button
                   className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-2"
-                  onClick={() => handleSendWhatsApp(selectedLead.phone || selectedLead.telefone, selectedLead.nome)}
+                  onClick={() => handleSendWhatsApp(selectedLead.phone || selectedLead.telefone, selectedLead.nome, selectedLead.raw_chat_summary)}
                 >
                   <MessageCircle className="w-4 h-4" />
-                  Abrir Conversa no WhatsApp
+                  {Boolean(selectedLead.raw_chat_summary && String(selectedLead.raw_chat_summary).trim().length > 0) ? "Abrir conversa" : "Iniciar conversa"}
                 </Button>
 
                 {/* Atribuição de Lead: Operador Responsável */}

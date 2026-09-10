@@ -2254,9 +2254,21 @@ export default function WhatsAppInbox({
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-muted/20 p-3 space-y-2 text-xs">
                   {currentChatSummary ? (
-                    <div className="space-y-1.5 whitespace-pre-line text-foreground leading-relaxed text-[11px]">
-                      {currentChatSummary}
-                    </div>
+                    currentChatSummary.startsWith("🚫") ? (
+                      <div className="space-y-1.5 text-[11px] text-muted-foreground bg-muted/40 p-2.5 rounded-xl border border-border/60">
+                        <div className="font-semibold flex items-center gap-1.5 text-foreground/80">
+                          <span>🚫</span>
+                          <span>Conversa pessoal — sem oportunidade comercial</span>
+                        </div>
+                        <p className="italic text-muted-foreground/90 whitespace-pre-line leading-relaxed">
+                          {currentChatSummary.replace(/^🚫\uFE0F?\s*/u, "") || "Nenhuma intenção comercial detectada."}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 whitespace-pre-line text-foreground leading-relaxed text-[11px]">
+                        {currentChatSummary}
+                      </div>
+                    )
                   ) : matchedLead && (matchedLead.interesse || matchedLead.objetivo || matchedLead.cidade || matchedLead.credito) ? (
                     <div className="space-y-1.5">
                       {matchedLead.interesse && (

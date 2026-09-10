@@ -17,15 +17,22 @@ export const DEFAULT_SUMMARY_PROMPT = `Você resume conversas de WhatsApp para o
 
 Ele abre o chat depois de dias e precisa lembrar em dez segundos o que já foi combinado.
 
-FORMATO EXATO, no máximo seis linhas:
+FORMATO PADRÃO (no máximo seis linhas):
 
 🎯 [o que a pessoa quer, uma linha]
 📋 [fatos já estabelecidos: quantas pessoas, datas, destino, valores, nomes. Literal, tirado da conversa]
 🤝 [o que foi combinado ou prometido]
 ⏭️ [próximo passo concreto, uma linha]
 
+SAÍDA DE ESCAPE (QUANDO NÃO HOUVER NENHUMA OPORTUNIDADE COMERCIAL):
+Quando não houver NENHUMA intenção comercial (conversa puramente pessoal, amigos, família, spam ou comentário casual sem interesse de compra), responda em UMA LINHA SÓ:
+🚫 [por que não é oportunidade comercial, poucas palavras]
+
 REGRAS
-· 📋 é a linha mais importante. São os fatos que se esquecem: "2 adultos e 1 criança de 4 anos", "quer ir em janeiro", "orçamento até 8 mil". Varra a conversa INTEIRA, não só as últimas mensagens.
+· Só use 🚫 quando não houver NADA comercial. Na dúvida, prefira as quatro linhas com "nada ainda".
+· Citar um produto ou serviço de passagem, sem querer comprar, é 🚫.
+· Nunca transforme comentário casual ou piada em intenção de compra (exemplo: "o cara bota i.a pra falar com o amigo" não significa querer comprar IA).
+· 📋 é a linha mais importante quando houver oportunidade. São os fatos que se esquecem: "2 adultos e 1 criança de 4 anos", "quer ir em janeiro", "orçamento até 8 mil". Varra a conversa INTEIRA, não só as últimas mensagens.
 · Nunca invente. O que não foi dito não entra.
 · Bloco sem conteúdo real recebe "nada ainda". Nunca preencha com frase de efeito.
 · ⏭️ jamais pode ser "dar continuidade ao contato comercial" nem "qualificar o interesse". Isso não diz nada. Tem que ser a ação exata: "cotar Maceió em janeiro para 2 adultos e 1 criança".
@@ -47,23 +54,30 @@ REGRAS
 export const SUMMARY_OUTPUT_CONTRACT = `
 
 ═══════════════════════════════════════════════════════════════
-FORMATO DE SAÍDA OBRIGATÓRIO — QUATRO LINHAS, UMA POR MARCADOR
+FORMATO DE SAÍDA OBRIGATÓRIO
 ═══════════════════════════════════════════════════════════════
-Responda EXATAMENTE nestas quatro linhas, cada uma começando pelo seu emoji,
-sem texto antes ou depois, sem markdown, sem numeração:
+Se houver oportunidade comercial ou intenção de compra, responda EXATAMENTE nestas quatro linhas, cada uma começando pelo seu emoji, sem texto antes ou depois, sem markdown, sem numeração:
 
 🎯 [o que a pessoa quer]
 📋 [fatos já estabelecidos, literais da conversa]
 🤝 [o que foi combinado ou prometido]
 ⏭️ [próximo passo concreto]
 
-Linha sem conteúdo real recebe exatamente "nada ainda". Nunca invente.`;
+Linha sem conteúdo real recebe exatamente "nada ainda". Nunca invente.
+
+Se NÃO houver nenhuma intenção comercial (conversa pessoal entre amigos/família, menção casual sem interesse de compra, engano):
+Responda em UMA LINHA SÓ:
+🚫 [por que não é oportunidade comercial, poucas palavras]
+
+Regras de escape:
+· Só use 🚫 quando não houver nada comercial. Na dúvida, prefira as quatro linhas com "nada ainda".
+· Citar um produto de passagem, sem querer comprar, é 🚫.
+· Nunca transforme comentário casual em intenção de compra.`;
 
 export function buildSummarySystemPrompt(promptDoUsuario) {
   const base = String(promptDoUsuario || "").trim();
-  // Prompt que ja traz os quatro marcadores nao recebe o contrato de novo:
-  // duplicar instrucao e o que confunde o modelo.
-  const jaTemContrato = ["🎯", "📋", "🤝", "⏭"].every((marcador) => base.includes(marcador));
+  // Prompt que ja traz os quatro marcadores e o marcador de escape nao recebe o contrato de novo
+  const jaTemContrato = ["🎯", "📋", "🤝", "⏭", "🚫"].every((marcador) => base.includes(marcador));
   return jaTemContrato ? base : `${base}${SUMMARY_OUTPUT_CONTRACT}`;
 }
 
@@ -82,6 +96,20 @@ function getModel() {
  */
 export function formatSummaryOutput(raw) {
   if (!raw) return null;
+
+  // 0. Detecção de saída de escape (🚫): conversa sem oportunidade comercial
+  if (typeof raw === "string") {
+    const trimmedRaw = raw.trim();
+    const lines = trimmedRaw.split("\n").map((l) => l.trim()).filter(Boolean);
+    const escapeLine = lines.find((l) => /🚫/u.test(l));
+    if (escapeLine) {
+      const reason = escapeLine
+        .replace(/^.*?🚫\uFE0F?\s*(\[|:\s*)?/u, "")
+        .replace(/\]\s*$/, "")
+        .trim();
+      return `🚫 ${reason || "Conversa pessoal — sem oportunidade comercial"}`.slice(0, 500);
+    }
+  }
 
   let objetivo = "";
   let fatos = "";
@@ -107,6 +135,10 @@ export function formatSummaryOutput(raw) {
   }
 
   if (parsed && typeof parsed === "object") {
+    if (parsed.nao_e_lead || parsed.nao_lead || parsed.sem_oportunidade || String(parsed.objetivo || "").includes("🚫")) {
+      const reason = parsed.motivo || parsed.razao || String(parsed.objetivo || "").replace(/^.*?🚫\uFE0F?\s*(\[|:\s*)?/u, "").replace(/\]\s*$/, "").trim();
+      return `🚫 ${reason || "Conversa pessoal — sem oportunidade comercial"}`.slice(0, 500);
+    }
     objetivo = String(parsed.objetivo || parsed.o_que_quer || parsed.interesse || "").trim();
     fatos = String(parsed.fatos || parsed.fatos_estabelecidos || parsed.pontos_chave || "").trim();
     combinados = String(parsed.combinados || parsed.o_que_foi_combinado || parsed.acordos || "").trim();
@@ -326,3 +358,31 @@ export async function summarizeChatWithAI(messages, contactName, options = {}) {
     error: lastError || "Falha na chamada ao modelo de IA.",
   };
 }
+
+/**
+ * Determina se o lead possui uma conversa com oportunidade comercial real.
+ * Retorna true se houver raw_chat_summary preenchido e que NÃO comece com 🚫
+ * (pois 🚫 indica conversa pessoal, piada, família ou sem oportunidade comercial).
+ *
+ * Aceita um objeto lead (com raw_chat_summary) ou a própria string de resumo.
+ *
+ * @param {object|string|null} leadOuSummary
+ * @returns {boolean}
+ */
+export function temConversaComercial(leadOuSummary) {
+  if (!leadOuSummary) return false;
+  const summary =
+    typeof leadOuSummary === "object"
+      ? leadOuSummary.raw_chat_summary || leadOuSummary.summary
+      : leadOuSummary;
+
+  if (!summary || typeof summary !== "string") return false;
+  const trimmed = summary.trim();
+  if (!trimmed) return false;
+
+  // Se começar com 🚫, é conversa pessoal / sem oportunidade comercial
+  if (/^🚫/u.test(trimmed)) return false;
+
+  return true;
+}
+

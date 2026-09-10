@@ -16,7 +16,7 @@ import {
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
 import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadUpsert.js";
-import { summarizeChatWithAI } from "./chatInsight.js";
+import { summarizeChatWithAI, temConversaComercial } from "./chatInsight.js";
 import {
   getDefaultLeadClientEvolutionInstance,
   getEvolutionAdminConfig,
@@ -1063,19 +1063,15 @@ export function registerLeadsRoutes(app, deps) {
       );
       const inNegotiationCount = inNegotiation.length;
 
-      // 3. inConversationCount — do que sobrou, os que têm raw_chat_summary preenchido (não nulo, não string vazia)
+      // 3. inConversationCount — do que sobrou, os que têm conversa comercial real (não nulo e não começa com 🚫)
       const afterNegotiation = nonExcluded.filter(
         (l) => !(l.stage === "open_budget" || l.status === "orcamento")
       );
-      const inConversation = afterNegotiation.filter(
-        (l) => Boolean(l.raw_chat_summary && String(l.raw_chat_summary).trim())
-      );
+      const inConversation = afterNegotiation.filter((l) => temConversaComercial(l));
       const inConversationCount = inConversation.length;
 
-      // 4. neverContactedCount — todo o resto. Cobre agenda, planilha e formulário
-      const neverContacted = afterNegotiation.filter(
-        (l) => !Boolean(l.raw_chat_summary && String(l.raw_chat_summary).trim())
-      );
+      // 4. neverContactedCount — todo o resto (sem histórico OU conversa pessoal 🚫). Cobre agenda, planilha e formulário
+      const neverContacted = afterNegotiation.filter((l) => !temConversaComercial(l));
       const neverContactedCount = neverContacted.length;
 
       const activeLeadsCount = inNegotiationCount + inConversationCount + neverContactedCount;
