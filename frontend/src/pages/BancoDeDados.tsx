@@ -33,6 +33,10 @@ import {
   Puzzle,
   Bot,
   RotateCcw,
+  MoreHorizontal,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
@@ -75,6 +79,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -1666,6 +1671,24 @@ export default function BancoDeDados() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
   }, [leads]);
 
+  // Sorting State
+  const [sortColumn, setSortColumn] = useState<"contato" | "ultima_conversa" | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleToggleSort = (column: "contato" | "ultima_conversa") => {
+    if (sortColumn === column) {
+      if (sortDirection === "asc") {
+        setSortDirection("desc");
+      } else {
+        setSortColumn(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  };
+
   // Local filtered search list
   const filteredLeads = useMemo(() => {
     return leads.filter((item) => {
@@ -1684,18 +1707,80 @@ export default function BancoDeDados() {
     });
   }, [leads, searchQuery, activeTab, selectedTag, selectedSource, selectedChannel]);
 
-  // Reset pagination when filters or search change
+  // Sorted list based on column header clicks
+  const sortedLeads = useMemo(() => {
+    if (!sortColumn) return filteredLeads;
+    return [...filteredLeads].sort((a, b) => {
+      if (sortColumn === "contato") {
+        const nameA = (a.nome || "").toLowerCase();
+        const nameB = (b.nome || "").toLowerCase();
+        const cmp = nameA.localeCompare(nameB);
+        return sortDirection === "asc" ? cmp : -cmp;
+      }
+      if (sortColumn === "ultima_conversa") {
+        const timeA = new Date(a.last_interaction_at || a.created_at || 0).getTime();
+        const timeB = new Date(b.last_interaction_at || b.created_at || 0).getTime();
+        return sortDirection === "asc" ? timeA - timeB : timeB - timeA;
+      }
+      return 0;
+    });
+  }, [filteredLeads, sortColumn, sortDirection]);
+
+  // Contagens por estágio sincronizadas para abas e filtros.
+  // cold é contado sobre a lista carregada (limit=2500), então passa a divergir do real quando a base ultrapassar esse teto.
+  const stageCounts = useMemo(() => {
+    let buyers = 0;
+    let openBudgets = 0;
+    let cold = 0;
+    let lost = 0;
+    for (const l of leads) {
+      if (l.stage === "buyer") buyers++;
+      else if (l.stage === "open_budget") openBudgets++;
+      else if (l.stage === "lost") lost++;
+      else cold++;
+    }
+    return {
+      all: leads.length,
+      buyer: summary.buyersCount ?? buyers,
+      open_budget: summary.openBudgetsCount ?? openBudgets,
+      cold: cold,
+      lost: summary.lostCount ?? lost,
+    };
+  }, [leads, summary]);
+
+  const getTemperatureDot = (temp?: string | null) => {
+    switch (temp) {
+      case "hot":
+        return { color: "#D85A30", label: "Quente" };
+      case "warm":
+        return { color: "#EF9F27", label: "Morno" };
+      case "cold":
+      default:
+        return { color: "#378ADD", label: "Frio" };
+    }
+  };
+
+  const formatShortDate = (dateStr?: string | null): string => {
+    if (!dateStr) return "-";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "-";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    return `${day}/${month}`;
+  };
+
+  // Reset pagination when filters, search or sort change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, pageSize]);
+  }, [searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, pageSize, sortColumn, sortDirection]);
 
   const totalFilteredLeads = filteredLeads.length;
   const totalPages = Math.max(1, Math.ceil(totalFilteredLeads / pageSize));
 
   const paginatedLeads = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return filteredLeads.slice(start, start + pageSize);
-  }, [filteredLeads, currentPage, pageSize]);
+    return sortedLeads.slice(start, start + pageSize);
+  }, [sortedLeads, currentPage, pageSize]);
 
   // Dynamic calculation for Potencial da Base (funil de 3 faixas)
   const basePotential = useMemo(() => {
@@ -1772,27 +1857,27 @@ export default function BancoDeDados() {
     switch (stage) {
       case "buyer":
         return (
-          <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-1">
+          <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-1 text-[11px] py-[2px] px-[8px] font-medium">
             Comprador 🟢
             {stageSource === "manual" && <span className="text-[10px] opacity-75 font-normal">(Manual)</span>}
             {stageSource === "integration" && <span className="text-[10px] opacity-75 font-normal">(Webhook)</span>}
           </Badge>
         );
       case "open_budget":
-        return <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30">Orçamento Aberto 🟡</Badge>;
+        return <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[11px] py-[2px] px-[8px] font-medium">Orçamento Aberto 🟡</Badge>;
       case "inquiry":
-        return <Badge className="bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30">Em Dúvida 🔵</Badge>;
+        return <Badge className="bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30 text-[11px] py-[2px] px-[8px] font-medium">Em Dúvida 🔵</Badge>;
       case "lost":
         const reasonObj = LOST_REASONS.find((r) => r.id === lostReason);
         return (
-          <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30 gap-1" title={reasonObj?.label || lostReason || undefined}>
+          <Badge className="bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30 gap-1 text-[11px] py-[2px] px-[8px] font-medium" title={reasonObj?.label || lostReason || undefined}>
             Perdido 🔴
             {lostReason && <span className="text-[10px] opacity-75 font-normal">({reasonObj?.id || lostReason})</span>}
           </Badge>
         );
       case "cold":
       default:
-        return <Badge className="bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30">Lead Frio ⚪</Badge>;
+        return <Badge className="bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30 text-[11px] py-[2px] px-[8px] font-medium">Lead Frio ⚪</Badge>;
     }
   };
 
@@ -2295,41 +2380,56 @@ export default function BancoDeDados() {
               variant="ghost"
               size="sm"
               onClick={() => setActiveTab("all")}
-              className={cn("rounded-full text-xs", activeTab === "all" && "border border-primary/60 bg-primary/5 font-semibold hover:bg-primary/10")}
+              className={cn(
+                "rounded-full text-xs text-muted-foreground hover:text-foreground",
+                activeTab === "all" && "bg-muted font-medium text-foreground shadow-sm"
+              )}
             >
-              Todas ({summary.totalLeads})
+              Todas <span className="ml-1 text-foreground/80 font-normal">({stageCounts.all})</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setActiveTab("buyer")}
-              className={cn("rounded-full text-xs text-emerald-600 dark:text-emerald-400", activeTab === "buyer" && "border border-emerald-500/60 bg-emerald-500/5 font-semibold hover:bg-emerald-500/10")}
+              className={cn(
+                "rounded-full text-xs text-muted-foreground hover:text-foreground",
+                activeTab === "buyer" && "bg-muted font-medium text-foreground shadow-sm"
+              )}
             >
-              Clientes 🟢 ({summary.buyersCount})
+              Compradores <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-semibold">({stageCounts.buyer})</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setActiveTab("open_budget")}
-              className={cn("rounded-full text-xs text-amber-600 dark:text-amber-400", activeTab === "open_budget" && "border border-amber-500/60 bg-amber-500/5 font-semibold hover:bg-amber-500/10")}
+              className={cn(
+                "rounded-full text-xs text-muted-foreground hover:text-foreground",
+                activeTab === "open_budget" && "bg-muted font-medium text-foreground shadow-sm"
+              )}
             >
-              Orçamentos Abertos 🟡 ({summary.openBudgetsCount})
+              Orçamentos Abertos <span className="ml-1 text-amber-600 dark:text-amber-400 font-semibold">({stageCounts.open_budget})</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setActiveTab("cold")}
-              className={cn("rounded-full text-xs text-blue-600 dark:text-blue-400", activeTab === "cold" && "border border-blue-500/60 bg-blue-500/5 font-semibold hover:bg-blue-500/10")}
+              className={cn(
+                "rounded-full text-xs text-muted-foreground hover:text-foreground",
+                activeTab === "cold" && "bg-muted font-medium text-foreground shadow-sm"
+              )}
             >
-              Leads Frios 🔵
+              Leads Frios <span className="ml-1 text-blue-600 dark:text-blue-400 font-semibold">({stageCounts.cold})</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setActiveTab("lost")}
-              className={cn("rounded-full text-xs text-rose-600 dark:text-rose-400", activeTab === "lost" && "border border-rose-500/60 bg-rose-500/5 font-semibold hover:bg-rose-500/10")}
+              className={cn(
+                "rounded-full text-xs text-muted-foreground hover:text-foreground",
+                activeTab === "lost" && "bg-muted font-medium text-foreground shadow-sm"
+              )}
             >
-              Perdidos 🔴
+              Perdidos <span className="ml-1 text-rose-600 dark:text-rose-400 font-semibold">({stageCounts.lost})</span>
             </Button>
           </div>
 
@@ -2343,20 +2443,6 @@ export default function BancoDeDados() {
                 className="pl-8 text-xs h-9"
               />
             </div>
-
-            {/* Filtro Origem de Marketing */}
-            <select
-              value={selectedSource}
-              onChange={(e) => setSelectedSource(e.target.value)}
-              className="h-9 px-3 rounded-md border border-input bg-background text-xs text-foreground focus:ring-1 focus:ring-ring"
-            >
-              <option value="">Todas as Origens</option>
-              {availableSources.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
 
             {(availableTags.length > 0 || selectedTag) && (
               <select
@@ -2494,8 +2580,8 @@ export default function BancoDeDados() {
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-b border-border dark:border-zinc-800 bg-muted/40">
-                      <TableHead className="w-[40px] px-3">
+                    <TableRow className="border-b border-border dark:border-zinc-800 bg-muted/40 text-[10px] uppercase tracking-wider font-semibold">
+                      <TableHead className="w-[40px] px-3 py-[10px]">
                         <input
                           type="checkbox"
                           checked={paginatedLeads.length > 0 && paginatedLeads.every((l) => selectedLeadIds.includes(l.id))}
@@ -2503,15 +2589,152 @@ export default function BancoDeDados() {
                           className="rounded border-input text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                         />
                       </TableHead>
-                      <TableHead className="w-[220px]">Contato / Nome</TableHead>
-                      <TableHead className="w-[130px]">Responsável</TableHead>
-                      <TableHead className="w-[140px]">Origem</TableHead>
-                      <TableHead className="w-[150px]">Telefone</TableHead>
-                      <TableHead className="w-[140px]">Estágio</TableHead>
-                      <TableHead className="w-[120px]">Temperatura</TableHead>
-                      <TableHead>Tags & Interesses</TableHead>
-                      <TableHead className="w-[150px]">Última Conversa</TableHead>
-                      <TableHead className="text-right w-[210px]">Ação</TableHead>
+                      <TableHead className="w-[280px] py-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSort("contato")}
+                          className={cn(
+                            "inline-flex items-center gap-1 hover:text-foreground font-semibold uppercase tracking-wider text-[10px] transition-colors",
+                            sortColumn === "contato" ? "text-indigo-600 dark:text-indigo-400 font-bold" : "text-muted-foreground"
+                          )}
+                          title="Ordenar por Contato"
+                        >
+                          <span>Contato</span>
+                          {sortColumn === "contato" ? (
+                            sortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40 hover:opacity-80" />
+                          )}
+                        </button>
+                      </TableHead>
+                      <TableHead className="w-[160px] py-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn(
+                            "text-[10px] uppercase tracking-wider font-semibold",
+                            selectedSource ? "text-indigo-600 dark:text-indigo-400 font-bold" : "text-muted-foreground"
+                          )}>
+                            Origem
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "p-1 rounded hover:bg-muted transition-colors",
+                                  selectedSource ? "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                                title={selectedSource ? `Origem filtrada: ${selectedSource}` : "Filtrar por Origem"}
+                              >
+                                <Filter className={cn("w-3 h-3", selectedSource && "fill-indigo-600 dark:fill-indigo-400")} />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-48 max-h-64 overflow-y-auto">
+                              <DropdownMenuItem
+                                onClick={() => setSelectedSource("")}
+                                className={cn("text-xs cursor-pointer", !selectedSource && "font-semibold text-indigo-600 dark:text-indigo-400")}
+                              >
+                                Todas as Origens
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {availableSources.map((s) => (
+                                <DropdownMenuItem
+                                  key={s}
+                                  onClick={() => setSelectedSource(s)}
+                                  className={cn("text-xs cursor-pointer truncate", selectedSource === s && "font-semibold text-indigo-600 dark:text-indigo-400")}
+                                >
+                                  {s}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[160px] py-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn(
+                            "text-[10px] uppercase tracking-wider font-semibold",
+                            activeTab !== "all" ? "text-indigo-600 dark:text-indigo-400 font-bold" : "text-muted-foreground"
+                          )}>
+                            Estágio
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "p-1 rounded hover:bg-muted transition-colors",
+                                  activeTab !== "all" ? "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                                title={activeTab !== "all" ? `Estágio filtrado: ${activeTab}` : "Filtrar por Estágio"}
+                              >
+                                <Filter className={cn("w-3 h-3", activeTab !== "all" && "fill-indigo-600 dark:fill-indigo-400")} />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-48">
+                              <DropdownMenuItem
+                                onClick={() => setActiveTab("all")}
+                                className={cn("text-xs cursor-pointer", activeTab === "all" && "font-semibold text-indigo-600 dark:text-indigo-400")}
+                              >
+                                Todos ({stageCounts.all})
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setActiveTab("buyer")}
+                                className={cn("text-xs cursor-pointer text-emerald-600 dark:text-emerald-400", activeTab === "buyer" && "font-semibold bg-emerald-50 dark:bg-emerald-950/40")}
+                              >
+                                Comprador 🟢 ({stageCounts.buyer})
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setActiveTab("open_budget")}
+                                className={cn("text-xs cursor-pointer text-amber-600 dark:text-amber-400", activeTab === "open_budget" && "font-semibold bg-amber-50 dark:bg-amber-950/40")}
+                              >
+                                Orçamento Aberto 🟡 ({stageCounts.open_budget})
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setActiveTab("cold")}
+                                className={cn("text-xs cursor-pointer text-blue-600 dark:text-blue-400", activeTab === "cold" && "font-semibold bg-blue-50 dark:bg-blue-950/40")}
+                              >
+                                Lead Frio 🔵 ({stageCounts.cold})
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setActiveTab("lost")}
+                                className={cn("text-xs cursor-pointer text-rose-600 dark:text-rose-400", activeTab === "lost" && "font-semibold bg-rose-50 dark:bg-rose-950/40")}
+                              >
+                                Perdido 🔴 ({stageCounts.lost})
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[150px] py-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSort("ultima_conversa")}
+                          className={cn(
+                            "inline-flex items-center gap-1 hover:text-foreground font-semibold uppercase tracking-wider text-[10px] transition-colors",
+                            sortColumn === "ultima_conversa" ? "text-indigo-600 dark:text-indigo-400 font-bold" : "text-muted-foreground"
+                          )}
+                          title="Ordenar por Última conversa"
+                        >
+                          <span>Última conversa</span>
+                          {sortColumn === "ultima_conversa" ? (
+                            sortDirection === "asc" ? (
+                              <ArrowUp className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-40 hover:opacity-80" />
+                          )}
+                        </button>
+                      </TableHead>
+                      <TableHead className="text-right w-[170px] py-[10px] text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+                        Ação
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2519,14 +2742,13 @@ export default function BancoDeDados() {
                       const displayPhone = lead.phone || lead.telefone || "";
                       const displayName = lead.nome || "Sem Nome";
                       const isSelected = selectedLeadIds.includes(lead.id);
-                      const lastInteraction = lead.last_interaction_at
-                        ? new Date(lead.last_interaction_at).toLocaleString("pt-BR", {
-                            dateStyle: "short",
-                            timeStyle: "short",
-                          })
+                      const tempDot = getTemperatureDot(lead.temperature);
+                      const shortDate = formatShortDate(lead.last_interaction_at || lead.created_at);
+                      const fullDate = lead.last_interaction_at
+                        ? new Date(lead.last_interaction_at).toLocaleString("pt-BR")
                         : lead.created_at
-                        ? new Date(lead.created_at).toLocaleDateString("pt-BR")
-                        : "-";
+                        ? new Date(lead.created_at).toLocaleString("pt-BR")
+                        : undefined;
 
                       return (
                         <TableRow
@@ -2539,7 +2761,7 @@ export default function BancoDeDados() {
                             setIsDetailSheetOpen(true);
                           }}
                         >
-                          <TableCell className="px-3" onClick={(e) => e.stopPropagation()}>
+                          <TableCell className="px-3 py-[10px]" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={isSelected}
@@ -2548,17 +2770,23 @@ export default function BancoDeDados() {
                             />
                           </TableCell>
 
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                          {/* Coluna 1: Contato */}
+                          <TableCell className="text-[12.5px] py-[10px] font-medium max-w-[280px]">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className="inline-block w-[7px] h-[7px] rounded-full shrink-0"
+                                style={{ backgroundColor: tempDot.color }}
+                                title={`Temperatura: ${tempDot.label}`}
+                              />
+                              <div className="w-7 h-7 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-[11px] shrink-0">
                                 {displayName.substring(0, 2).toUpperCase()}
                               </div>
-                              <div className="flex flex-col">
-                                <span className="text-sm font-semibold text-foreground line-clamp-1">
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="text-[12.5px] font-semibold text-foreground truncate block" title={displayName}>
                                   {displayName}
                                 </span>
                                 {lead.extracted_from_wa && (
-                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1 shrink-0">
                                     <Sparkles className="w-2.5 h-2.5" /> Extraído via WA
                                   </span>
                                 )}
@@ -2566,85 +2794,77 @@ export default function BancoDeDados() {
                             </div>
                           </TableCell>
 
-                          <TableCell className="text-xs">
-                            {lead.assigned_to ? (
-                              <Badge variant="outline" className="text-[10px] font-normal py-0.5 border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300">
-                                {operatorOptions.find((op) => op.uid === lead.assigned_to)?.displayName ||
-                                  operatorOptions.find((op) => op.uid === lead.assigned_to)?.email ||
-                                  "Atribuído"}
-                              </Badge>
-                            ) : (
-                              <span className="text-[11px] text-muted-foreground italic">Compartilhado</span>
-                            )}
-                          </TableCell>
-
-                          <TableCell>
+                          {/* Coluna 2: Origem */}
+                          <TableCell className="text-[11.5px] py-[10px]">
                             {renderSourceBadge(getLeadSource(lead))}
                           </TableCell>
 
-                          <TableCell className="text-xs font-mono text-muted-foreground">
-                            {displayPhone}
+                          {/* Coluna 3: Estágio */}
+                          <TableCell className="text-[12.5px] py-[10px]">
+                            {getStageBadge(lead.stage, lead.lost_reason, lead.stage_source)}
                           </TableCell>
 
-                          <TableCell>{getStageBadge(lead.stage, lead.lost_reason, lead.stage_source)}</TableCell>
-
-                          <TableCell>{getTemperatureBadge(lead.temperature)}</TableCell>
-
-                          <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {Array.isArray(lead.tags) && lead.tags.length > 0 ? (
-                                lead.tags.map((tag, idx) => (
-                                  <Badge
-                                    key={idx}
-                                    variant="secondary"
-                                    className="text-[10px] px-1.5 py-0 bg-secondary/60 text-secondary-foreground"
-                                  >
-                                    {tag}
-                                  </Badge>
-                                ))
-                              ) : (
-                                <span className="text-xs text-muted-foreground italic">-</span>
-                              )}
+                          {/* Coluna 4: Última conversa */}
+                          <TableCell className="text-[11.5px] py-[10px] text-muted-foreground">
+                            <div className="flex items-center gap-1.5 tabular-nums font-mono text-[11.5px]" title={fullDate}>
+                              <Clock className="w-3 h-3 shrink-0 text-muted-foreground/70" />
+                              <span>{shortDate}</span>
                             </div>
                           </TableCell>
 
-                          <TableCell className="text-xs text-muted-foreground">
-                            <div className="flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {lastInteraction}
-                            </div>
-                          </TableCell>
-
-                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                title="Marcar como Cliente"
-                                onClick={() => openMarkAsClientModal({ type: "single", leadId: lead.id })}
-                                className="h-8 w-8 p-0 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                title="Marcar como Perdido"
-                                onClick={() => openMarkAsLostModal({ type: "single", leadId: lead.id })}
-                                className="h-8 w-8 p-0 text-rose-600 border-rose-500/30 hover:bg-rose-500/10 dark:text-rose-400"
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                              </Button>
+                          {/* Coluna 5: Ação */}
+                          <TableCell className="text-right py-[10px]" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1.5">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 title={Boolean(lead.raw_chat_summary && String(lead.raw_chat_summary).trim().length > 0) ? "Abrir conversa" : "Iniciar conversa"}
                                 onClick={() => handleSendWhatsApp(displayPhone, displayName, lead.raw_chat_summary)}
-                                className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400 font-medium px-2.5 whitespace-nowrap"
+                                className="h-7 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10 dark:text-emerald-400 font-medium px-2.5 whitespace-nowrap"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
                                 {Boolean(lead.raw_chat_summary && String(lead.raw_chat_summary).trim().length > 0) ? "Abrir conversa" : "Iniciar conversa"}
                               </Button>
+
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                    title="Mais ações"
+                                  >
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuItem
+                                    onClick={() => openMarkAsClientModal({ type: "single", leadId: lead.id })}
+                                    className="text-xs gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 focus:bg-emerald-50 dark:focus:bg-emerald-950/40"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Marcar como Comprador
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => openMarkAsLostModal({ type: "single", leadId: lead.id })}
+                                    className="text-xs gap-2 cursor-pointer text-rose-600 dark:text-rose-400 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/40"
+                                  >
+                                    <XCircle className="w-3.5 h-3.5" />
+                                    Marcar como Perdido
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedLead(lead);
+                                      setIsDetailSheetOpen(true);
+                                    }}
+                                    className="text-xs gap-2 cursor-pointer"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                                    Ver detalhes
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -2652,6 +2872,20 @@ export default function BancoDeDados() {
                     })}
                   </TableBody>
                 </Table>
+
+                {/* Legenda de Temperatura */}
+                <div className="flex items-center gap-4 text-[11px] text-muted-foreground px-4 py-2 border-t border-border/60 bg-muted/10">
+                  <span className="font-medium text-muted-foreground/80">Temperatura:</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block w-[7px] h-[7px] rounded-full" style={{ backgroundColor: "#D85A30" }} /> Quente
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block w-[7px] h-[7px] rounded-full" style={{ backgroundColor: "#EF9F27" }} /> Morno
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block w-[7px] h-[7px] rounded-full" style={{ backgroundColor: "#378ADD" }} /> Frio
+                  </span>
+                </div>
               </div>
             )}
 
@@ -2732,107 +2966,104 @@ export default function BancoDeDados() {
 
         {/* Barra Flutuante de Ações em Lote (Bulk Actions) */}
         {selectedLeadIds.length > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-zinc-700 animate-in fade-in slide-in-from-bottom-4">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-500 text-white">
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 border border-zinc-700 dark:border-zinc-300 animate-in fade-in slide-in-from-bottom-4">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-500 text-white shrink-0">
               {selectedLeadIds.length} selecionados
             </span>
 
-            <div className="h-4 w-px bg-zinc-700 dark:bg-zinc-300" />
+            <div className="h-4 w-px bg-zinc-700 dark:bg-zinc-300 shrink-0" />
 
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsFollowupModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-indigo-400 hover:text-indigo-300 font-semibold gap-1.5"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              Aplicar Follow-up
-            </Button>
-
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsSingleReminderModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 font-semibold gap-1.5"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              Lembrete avulso
-            </Button>
-
-            {canManageUsers && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsBulkAssignModalOpen(true)}
-                className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-sky-400 hover:text-sky-300 font-semibold gap-1.5"
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                Reatribuir Responsável
-              </Button>
-            )}
-
+            {/* Ação 1: Comprador */}
             <Button
               size="sm"
               variant="ghost"
               onClick={() => openMarkAsClientModal({ type: "bulk", leadIds: selectedLeadIds })}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 font-semibold gap-1.5"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 dark:text-emerald-600 dark:hover:text-emerald-700 font-semibold gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Marcar Cliente ({selectedLeadIds.length})
+              Comprador ({selectedLeadIds.length})
             </Button>
 
+            {/* Ação 2: Perdido */}
             <Button
               size="sm"
               variant="ghost"
               onClick={() => openMarkAsLostModal({ type: "bulk", leadIds: selectedLeadIds })}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 font-semibold gap-1.5"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 dark:text-rose-600 dark:hover:text-rose-700 font-semibold gap-1.5"
             >
               <XCircle className="w-3.5 h-3.5" />
-              Marcar Perdido ({selectedLeadIds.length})
+              Perdido ({selectedLeadIds.length})
             </Button>
 
+            {/* Ação 3: Estágio ▾ */}
             <Button
               size="sm"
               variant="ghost"
               onClick={() => setIsBulkStageModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1"
             >
-              Alterar Estágio
+              Estágio <ChevronDown className="w-3 h-3 opacity-70" />
             </Button>
 
+            {/* Ação 4: Tag */}
             <Button
               size="sm"
               variant="ghost"
               onClick={() => setIsBulkTagModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1.5"
             >
-              Adicionar Tag
+              <TagIcon className="w-3.5 h-3.5" />
+              Tag
             </Button>
 
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={handleExportXLSX}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200"
-            >
-              Exportar
-            </Button>
-
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={handleBulkDeleteSubmit}
-              className="text-xs h-8 text-rose-400 hover:text-rose-300 hover:bg-rose-900/30"
-            >
-              <Trash2 className="w-3.5 h-3.5 mr-1" />
-              Excluir
-            </Button>
+            {/* Menu ⋯ (Mais Ações) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs h-8 w-8 p-0 hover:bg-zinc-800 dark:hover:bg-zinc-200"
+                  title="Mais ações"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setIsFollowupModalOpen(true)} className="text-xs gap-2 cursor-pointer">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  Aplicar follow-up
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setIsSingleReminderModalOpen(true)} className="text-xs gap-2 cursor-pointer">
+                  <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                  Lembrete avulso
+                </DropdownMenuItem>
+                {canManageUsers && (
+                  <DropdownMenuItem onClick={() => setIsBulkAssignModalOpen(true)} className="text-xs gap-2 cursor-pointer">
+                    <UserCheck className="w-3.5 h-3.5 text-sky-500" />
+                    Reatribuir responsável
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleExportXLSX} className="text-xs gap-2 cursor-pointer">
+                  <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                  Exportar seleção
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleBulkDeleteSubmit}
+                  className="text-xs gap-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/40 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Excluir
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <Button
               size="icon"
               variant="ghost"
               onClick={() => setSelectedLeadIds([])}
-              className="h-7 w-7 text-zinc-400 hover:text-white"
+              className="h-7 w-7 text-zinc-400 hover:text-white dark:hover:text-zinc-900"
+              title="Limpar seleção"
             >
               <X className="w-4 h-4" />
             </Button>
