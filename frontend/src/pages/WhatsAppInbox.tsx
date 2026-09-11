@@ -99,6 +99,7 @@ import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
 import { MediaMessage } from "@/components/MediaMessage";
 import { API_BASE_URL } from "@/lib/api";
 import { sanitizePhone } from "@/lib/phone";
+import { formatHeaderCount } from "@/lib/messageFormatting";
 
 interface InternalNote {
   id: string;
@@ -574,6 +575,7 @@ export default function WhatsAppInbox({
 
   // Lista de conversas já filtradas pelo servidor conforme aba e busca
   const filteredChats = useMemo(() => chats, [chats]);
+  const totalChatsCount = chatsQuery.total ?? chats.length;
 
   const handleReabrirAtendimento = async () => {
     if (!selectedChat || !clientId) return;
@@ -1028,8 +1030,11 @@ export default function WhatsAppInbox({
                   <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
                   Conversas
                 </span>
-                <span className="text-[11px] font-semibold text-muted-foreground font-mono">
-                  {filteredChats.length} de {chats.length}
+                <span
+                  className="text-[11px] font-semibold text-muted-foreground font-mono"
+                  title={`Total no banco: ${totalChatsCount} | Carregadas na tela: ${filteredChats.length}`}
+                >
+                  {formatHeaderCount(filteredChats.length, totalChatsCount)}
                 </span>
               </div>
 

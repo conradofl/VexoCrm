@@ -39,3 +39,17 @@ export function normalizeMessageText(raw: string | null | undefined): string {
 
   return cleanedParagraphs.filter(Boolean).join("\n\n");
 }
+
+/**
+ * Formata o totalizador do cabeçalho da lista de conversas do Inbox:
+ * - Se total > loaded: "Mostrando 40 de 458"
+ * - Se total <= loaded: "15 conversas" ou "1 conversa" ou "0 conversas"
+ */
+export function formatHeaderCount(loaded: number, total: number): string {
+  const safeLoaded = Math.max(0, loaded || 0);
+  const safeTotal = Math.max(0, total || 0);
+  if (safeTotal > safeLoaded) {
+    return `Mostrando ${safeLoaded} de ${safeTotal}`;
+  }
+  return `${safeLoaded} conversa${safeLoaded === 1 ? "" : "s"}`;
+}

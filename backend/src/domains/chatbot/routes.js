@@ -492,6 +492,7 @@ export function registerChatbotRoutes(app, deps) {
       let total = 0;
       let items = [];
       let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0 };
+      let lastQueryInfo = { step: "init", sql: null, params: null };
 
       try {
         // 1. Apura contadores gerais para as abas
@@ -540,6 +541,7 @@ export function registerChatbotRoutes(app, deps) {
           LEFT JOIN public.whatsapp_chat_states cs ON cs.client_id = $1 AND cs.phone = m.phone
         `;
         const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
+        lastQueryInfo = { step: "countsQuery (contadores das abas)", sql: countsQueryText, params: countsParams };
         const countsRes = await pgDatabasePool.query(countsQueryText, countsParams);
         const countsRow = countsRes.rows[0];
         if (countsRow) {
@@ -588,6 +590,7 @@ export function registerChatbotRoutes(app, deps) {
           ${searchFilter}
         `;
 
+        lastQueryInfo = { step: "countQuery (total da aba atual)", sql: countQueryText, params: queryParams };
         const countRes = await pgDatabasePool.query(countQueryText, queryParams);
         total = countRes.rows[0]?.total || 0;
 
@@ -671,6 +674,7 @@ export function registerChatbotRoutes(app, deps) {
           LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
         `;
 
+        lastQueryInfo = { step: "queryText (itens paginados)", sql: queryText, params: queryParamsWithPaging };
         const result = await pgDatabasePool.query(queryText, queryParamsWithPaging);
         items = result.rows.map((row) => {
           const timestampVal = row.effective_timestamp ? Math.floor(new Date(row.effective_timestamp).getTime() / 1000) : null;
@@ -714,7 +718,34 @@ export function registerChatbotRoutes(app, deps) {
           };
         });
       } catch (pgErr) {
-        console.warn("[whatsapp/chats] Postgres query warning/fallback:", pgErr?.message);
+        const safeParams = (lastQueryInfo.params || []).map((param) => {
+          if (typeof param === "string" && search && param.toLowerCase().includes(search.toLowerCase())) {
+            return "[TERMO_BUSCA_MASCARADO]";
+          }
+          return param;
+        });
+
+        const safeSql = lastQueryInfo.sql
+          ? lastQueryInfo.sql.length > 500
+            ? `${lastQueryInfo.sql.slice(0, 500)}... [truncado]`
+            : lastQueryInfo.sql
+          : null;
+
+        console.error("[whatsapp/chats] Falha na consulta PostgreSQL no inbox:", {
+          step: lastQueryInfo.step,
+          message: pgErr?.message,
+          code: pgErr?.code,
+          detail: pgErr?.detail,
+          hint: pgErr?.hint,
+          clientId,
+          tab: rawTab,
+          hasSearch: Boolean(search),
+          instanceName: rawInstanceName,
+          instanceAliases,
+          params: safeParams,
+          sql: safeSql,
+          stack: pgErr?.stack,
+        });
       }
 
       res.json({
@@ -725,7 +756,12 @@ export function registerChatbotRoutes(app, deps) {
         hasMore: offset + items.length < (total || items.length),
       });
     } catch (error) {
-      console.warn("whatsapp chats endpoint warning:", error?.message || error);
+      console.error("[whatsapp/chats] Erro fatal no endpoint:", {
+        message: error?.message,
+        clientId: _req.query?.clientId,
+        query: _req.query,
+        stack: error?.stack,
+      });
       res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0 }, nextOffset: 0, hasMore: false });
     }
   });

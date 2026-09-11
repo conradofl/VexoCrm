@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { formatHeaderCount } from "../lib/messageFormatting";
 
 describe("WhatsAppInbox exports, sorting and polling utilities", () => {
   it("formats timestamps and previews without errors", () => {
@@ -163,5 +164,22 @@ describe("WhatsAppInbox exports, sorting and polling utilities", () => {
     expect(unmutedChat.agentMutedAt).toBeNull();
     expect(unmutedChat.agentMutedReason).toBeNull();
     expect(unmutedChat.state).toBe("ativa");
+  });
+
+  it("formats the header counter correctly with total vs loaded items", () => {
+    // Caso 1: Paginação inicial (40 de 458 conversas totais)
+    expect(formatHeaderCount(40, 458)).toBe("Mostrando 40 de 458");
+
+    // Caso 2: Segunda página carregada (80 de 458 conversas)
+    expect(formatHeaderCount(80, 458)).toBe("Mostrando 80 de 458");
+
+    // Caso 3: Todas as conversas carregadas (15 de 15)
+    expect(formatHeaderCount(15, 15)).toBe("15 conversas");
+
+    // Caso 4: Uma conversa isolada
+    expect(formatHeaderCount(1, 1)).toBe("1 conversa");
+
+    // Caso 5: Nenhuma conversa
+    expect(formatHeaderCount(0, 0)).toBe("0 conversas");
   });
 });

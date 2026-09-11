@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMessageText } from "../lib/messageFormatting";
+import { normalizeMessageText, formatHeaderCount } from "../lib/messageFormatting";
 
 describe("Normalização de Quebras de Linha em Bolhas (normalizeMessageText)", () => {
   it("converte quebras de linha simples no meio de frases em espaços", () => {
@@ -22,5 +22,13 @@ describe("Normalização de Quebras de Linha em Bolhas (normalizeMessageText)", 
   it("converte caso real de corte artificial de ~60 colunas", () => {
     const raw = "Vi seu contato e queria te mostrar uma coisa rapida que a gente\nmontou pra quem vende pelo WhatsApp.";
     expect(normalizeMessageText(raw)).toBe("Vi seu contato e queria te mostrar uma coisa rapida que a gente montou pra quem vende pelo WhatsApp.");
+  });
+
+  it("formata contadores de cabeçalho do inbox (formatHeaderCount) com paginação e total", () => {
+    expect(formatHeaderCount(40, 458)).toBe("Mostrando 40 de 458");
+    expect(formatHeaderCount(80, 458)).toBe("Mostrando 80 de 458");
+    expect(formatHeaderCount(15, 15)).toBe("15 conversas");
+    expect(formatHeaderCount(1, 1)).toBe("1 conversa");
+    expect(formatHeaderCount(0, 0)).toBe("0 conversas");
   });
 });

@@ -1818,6 +1818,8 @@ export async function validateWhatsappNumbersWithCache({ pool, webhookUrl, webho
  * - aliases: lista de todos os formatos conhecidos do chip para uso em WHERE instance_name = ANY($n)
  * - chip: o objeto da instância em lead_client_evolution_instances
  */
+const warnedUnmappedChips = new Map();
+
 export async function resolveInstanceIdentifier({ clientId, identifier = null, pool = null, dbPool = null }) {
   const db = pool || dbPool || pgDatabasePool;
   if (!clientId || !db) return { canonicalName: null, aliases: [], chip: null };
@@ -1860,6 +1862,31 @@ export async function resolveInstanceIdentifier({ clientId, identifier = null, p
       if (matched.name) aliasesSet.add(matched.name);
       if (matched.id) aliasesSet.add(matched.id);
       if (urlSuffix) aliasesSet.add(urlSuffix);
+    }
+  }
+
+  if (requested.length > 0 && !matchedChip) {
+    const warnKey = `${clientId}:${raw}`;
+    const now = Date.now();
+    const lastWarn = warnedUnmappedChips.get(warnKey) || 0;
+    // Rate-limit: avisa no máximo 1 vez a cada 10 minutos por combinação tenant:chip
+    // para não inundar logs durante syncs massivos de histórico (ex: GMCA)
+    if (now - lastWarn > 10 * 60 * 1000) {
+      warnedUnmappedChips.set(warnKey, now);
+      if (warnedUnmappedChips.size > 500) {
+        const oldestKey = warnedUnmappedChips.keys().next().value;
+        if (oldestKey) warnedUnmappedChips.delete(oldestKey);
+      }
+      const knownChips = (instances || []).map((inst) => {
+        const urlSuffix = inst.dispatch_webhook_url
+          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
+          : null;
+        return `"${inst.name || "sem-nome"}" (id: ${inst.id}${urlSuffix ? `, urlSuffix: ${urlSuffix}` : ""})`;
+      });
+      console.warn(
+        `[resolveInstanceIdentifier] Identificador de chip "${raw}" não corresponde a nenhum chip cadastrado para o tenant "${clientId}". Chips cadastrados (${instances?.length || 0}):`,
+        knownChips.length > 0 ? knownChips.join(", ") : "[nenhum chip cadastrado]"
+      );
     }
   }
 
