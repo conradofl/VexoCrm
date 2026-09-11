@@ -30,6 +30,10 @@ export interface WhatsAppChat {
   attendedAt?: string | null;
   /** Quem marcou como atendido */
   attendedBy?: string | null;
+  /** Data/hora em que o agente foi pausado por conversa não-comercial */
+  agentMutedAt?: string | null;
+  /** Motivo da detecção de conversa não-comercial */
+  agentMutedReason?: string | null;
   /** Foto do perfil do WhatsApp (URL temporária da Evolution). */
   profilePic?: string | null;
 }
@@ -308,6 +312,32 @@ export function useAttendChat(clientId: string | null) {
       });
 
       return parseApiResponse<{ success: boolean; phone: string; attended_at: string; attended_by: string }>(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
+  });
+}
+
+export function useUnmuteChat(clientId: string | null) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ phone }: { phone: string }) => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/chats/unmute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ clientId, phone }),
+      });
+
+      return parseApiResponse<{ success: boolean; phone: string }>(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });

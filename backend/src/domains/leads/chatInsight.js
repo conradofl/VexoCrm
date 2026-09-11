@@ -361,28 +361,7 @@ export async function summarizeChatWithAI(messages, contactName, options = {}) {
 
 /**
  * Determina se o lead possui uma conversa com oportunidade comercial real.
- * Retorna true se houver raw_chat_summary preenchido e que NÃO comece com 🚫
- * (pois 🚫 indica conversa pessoal, piada, família ou sem oportunidade comercial).
- *
- * Aceita um objeto lead (com raw_chat_summary) ou a própria string de resumo.
- *
- * @param {object|string|null} leadOuSummary
- * @returns {boolean}
+ * Re-exportado de services/conversationInsightHelper.js para compatibilidade.
  */
-export function temConversaComercial(leadOuSummary) {
-  if (!leadOuSummary) return false;
-  const summary =
-    typeof leadOuSummary === "object"
-      ? leadOuSummary.raw_chat_summary || leadOuSummary.summary
-      : leadOuSummary;
-
-  if (!summary || typeof summary !== "string") return false;
-  const trimmed = summary.trim();
-  if (!trimmed) return false;
-
-  // Se começar com 🚫, é conversa pessoal / sem oportunidade comercial
-  if (/^🚫/u.test(trimmed)) return false;
-
-  return true;
-}
+export { temConversaComercial } from "../../services/conversationInsightHelper.js";
 

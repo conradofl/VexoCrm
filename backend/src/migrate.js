@@ -197,6 +197,15 @@ async function isAlreadyApplied(pool, filename) {
         AND table_name = 'leads_clients'
         AND column_name = 'ticket_medio'
     ) AS ok`,
+    "20260911120000_add_agent_muted_to_whatsapp_chat_states.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='whatsapp_chat_states')
+      OR EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'whatsapp_chat_states'
+          AND column_name = 'agent_muted_at'
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

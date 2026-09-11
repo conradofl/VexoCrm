@@ -32,14 +32,21 @@ export function resolveInboundScope(tenantSettings) {
  * @param {string}  params.scope           resolveInboundScope(tenantSettings)
  * @param {boolean} params.isKnownLead     existe registro de lead com esse telefone
  * @param {boolean} params.hasCampaignMatch telefone casa com alguma campanha
+ * @param {boolean} [params.isSdrNumber=false] número pertence à equipe SDR
+ * @param {boolean} [params.isAgentMuted=false] conversa silenciada por detecção de não-comercial
  */
-export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSdrNumber = false }) {
+export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSdrNumber = false, isAgentMuted = false }) {
   // O SDR e equipe, nao lead. Ele RECEBE o briefing; se a chegada desse briefing
   // fosse tratada como mensagem de lead, o chatbot responderia, qualificaria e
   // mandaria outro briefing — o loop que voltou quando o destino virou lista.
   // Esta trava vale inclusive no escopo "all", porque nao e sobre quem o cliente
   // quer atender: e sobre nao conversar com a propria notificacao.
   if (isSdrNumber) return { engage: false, reason: "numero_e_do_sdr" };
+
+  // Conversa sem intenção comercial (pessoal, família, pedido de comida, engano):
+  // o robô fica silenciado para evitar constrangimento e cortar custo de LLM.
+  // A conversa continua ativa na tela de Conversas para atendimento humano.
+  if (isAgentMuted) return { engage: false, reason: "conversa_nao_comercial" };
 
   if (scope === INBOUND_SCOPE_ALL) return { engage: true, reason: null };
   if (isKnownLead) return { engage: true, reason: null };

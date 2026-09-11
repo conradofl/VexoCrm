@@ -80,6 +80,13 @@ import {
   isWithinSendWindow,
   resolveSendWindowConfig,
 } from "../../services/sendWindow.js";
+import {
+  evaluateAgentMuteGuards,
+  isChatAgentMuted,
+  countTenantMutedToday,
+  recordAgentMute,
+  clearAgentMute,
+} from "../../services/agentMuteGuard.js";
 
 export function registerChatbotRoutes(app, deps) {
   const {
@@ -436,6 +443,8 @@ export function registerChatbotRoutes(app, deps) {
         );
         CREATE INDEX IF NOT EXISTS idx_whatsapp_chat_states_client_state
           ON public.whatsapp_chat_states (client_id, state);
+        ALTER TABLE public.whatsapp_chat_states ADD COLUMN IF NOT EXISTS agent_muted_at TIMESTAMPTZ NULL;
+        ALTER TABLE public.whatsapp_chat_states ADD COLUMN IF NOT EXISTS agent_muted_reason TEXT NULL;
       `).catch(() => {});
     } catch(e) {}
 
@@ -683,7 +692,9 @@ export function registerChatbotRoutes(app, deps) {
             cs.source as chat_state_source,
             cs.changed_by as chat_state_changed_by,
             cs.attended_at as chat_attended_at,
-            cs.attended_by as chat_attended_by
+            cs.attended_by as chat_attended_by,
+            cs.agent_muted_at,
+            cs.agent_muted_reason
           FROM latest_messages m
           LEFT JOIN public."${leadsTable}" l ON ${SQL_CANONICAL_PHONE("l.telefone")} = m.phone AND l.client_id = $1
           LEFT JOIN public.whatsapp_chat_states cs ON cs.client_id = $1 AND cs.phone = m.phone
@@ -723,6 +734,8 @@ export function registerChatbotRoutes(app, deps) {
             muted: false,
             attendedAt: row.chat_attended_at || null,
             attendedBy: row.chat_attended_by || null,
+            agentMutedAt: row.agent_muted_at ? new Date(row.agent_muted_at).toISOString() : null,
+            agentMutedReason: row.agent_muted_reason || null,
             lastMessage: {
               id: null,
               body: row.message_text || "",
@@ -851,6 +864,27 @@ export function registerChatbotRoutes(app, deps) {
     } catch (err) {
       console.error("[whatsapp/chats/attend] erro:", err?.message || err);
       sendError(res, 500, "ATTEND_ERROR", err?.message || "Erro ao marcar conversa como atendida");
+    }
+  });
+
+  // POST /api/whatsapp/chats/unmute — reativa o agente na conversa (limpa agent_muted_at e agent_muted_reason)
+  app.post("/api/whatsapp/chats/unmute", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = resolveAuthorizedClientId(req, res, req.body?.clientId);
+    if (!clientId) return;
+
+    const phone = sanitizePhone(req.body?.phone);
+    if (!phone) {
+      sendError(res, 400, "INVALID_PHONE", "Telefone é obrigatório");
+      return;
+    }
+
+    try {
+      await clearAgentMute(pgDatabasePool, { clientId, phone });
+      res.json({ success: true, phone });
+    } catch (err) {
+      console.error("[whatsapp/chats/unmute] erro:", err?.message || err);
+      sendError(res, 500, "UNMUTE_ERROR", err?.message || "Erro ao reativar agente na conversa");
     }
   });
 
@@ -1967,6 +2001,13 @@ export function registerChatbotRoutes(app, deps) {
             [clientId, phone, classified.reason || "Automação / Robô detectado"]
           );
         }
+
+        // 3. Se um humano responder manualmente pelo celular (fromMe), o silenciamento do robô se desfaz sozinho
+        if (fromMe) {
+          await clearAgentMute(pgDatabasePool, { clientId, phone }).catch((err) => {
+            console.warn("[chatbot-webhook] erro ao limpar silenciamento do agente com resposta manual (fromMe):", err?.message || err);
+          });
+        }
       }
     } catch (reactivateErr) {
       console.warn("[chatbot-webhook] erro ao auto-reativar conversa:", reactivateErr?.message || reactivateErr);
@@ -2247,18 +2288,28 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // Quem o chatbot pode atender. Escopo padrão ('leads_only') só engaja lead conhecido do tenant ou campanha.
+    const isAgentMuted = await isChatAgentMuted(pgDatabasePool, clientId, phone);
     const escopoInbound = resolveInboundScope(tenantSettings);
     const telefoneEhSdr = resolveTenantSdrNumbers(tenantSettings).includes(normalizeSdrNumber(phone));
-    if (escopoInbound !== INBOUND_SCOPE_ALL || telefoneEhSdr) {
-      const leadConhecido = telefoneEhSdr ? false : await telefoneEhLeadConhecido(clientId, phone);
+    if (isAgentMuted || escopoInbound !== INBOUND_SCOPE_ALL || telefoneEhSdr) {
+      const leadConhecido = (telefoneEhSdr || isAgentMuted) ? false : await telefoneEhLeadConhecido(clientId, phone);
       const decisao = shouldEngageInbound({
         scope: escopoInbound,
         isKnownLead: leadConhecido,
         hasCampaignMatch: temCampanhaParaEsteTelefone,
         isSdrNumber: telefoneEhSdr,
+        isAgentMuted,
       });
       if (!decisao.engage) {
-        descartar(decisao.reason, { clientId, phone: maskPhoneForLog(phone), escopo: escopoInbound });
+        descartar(decisao.reason, {
+          clientId,
+          phone: maskPhoneForLog(phone),
+          escopo: escopoInbound,
+          isKnownLead: leadConhecido,
+          hasCampaignMatch: temCampanhaParaEsteTelefone,
+          isSdrNumber: telefoneEhSdr,
+          isAgentMuted,
+        });
         return;
       }
     }
@@ -2291,6 +2342,39 @@ export function registerChatbotRoutes(app, deps) {
             inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
             instanceName,
           });
+
+          // Verificação de intenção não-comercial com as 5 travas de segurança
+          if (aiResponse?.nao_comercial === true) {
+            const dailyMutedCount = await countTenantMutedToday(pgDatabasePool, clientId);
+            const guardDecision = evaluateAgentMuteGuards({
+              lead: aiResponse._existingLead,
+              hasCampaignMatch: temCampanhaParaEsteTelefone,
+              dailyMutedCount,
+              dailyLimit: 20,
+            });
+
+            if (guardDecision.canMute) {
+              console.log("[chatbot-webhook] conversa marcada como nao_comercial — silenciando agente", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+                reason: aiResponse.motivo_nao_comercial || "Conversa não-comercial",
+              });
+              await recordAgentMute(pgDatabasePool, {
+                clientId,
+                phone,
+                reason: aiResponse.motivo_nao_comercial || "Conversa não-comercial",
+              });
+              // Aborta o envio da resposta: o robô não qualifica nem responde a conversa pessoal/engano
+              return;
+            } else {
+              console.warn("[chatbot-webhook] IA detectou conversa nao_comercial, mas trava de seguranca bloqueou silenciamento:", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+                blockedBy: guardDecision.blockedBy,
+                iaReason: aiResponse.motivo_nao_comercial,
+              });
+            }
+          }
 
           if (!aiResponse?.mensagem || !String(aiResponse.mensagem).trim()) {
             console.warn("[chatbot-webhook] Resposta ausente ou vazia — nenhum envio realizado.", {
@@ -2709,6 +2793,8 @@ export function registerChatbotRoutes(app, deps) {
           classificacao: aiResponse.classificacao,
           spin_fase: aiResponse.spin_fase,
           finalizado: aiResponse.finalizado,
+          nao_comercial: aiResponse.nao_comercial === true,
+          motivo_nao_comercial: aiResponse.motivo_nao_comercial || null,
           agente: inboundConfig ? "inbound" : "tenant",
           dados: aiResponse.dados || {},
           contratoQuebrado: aiResponse.contratoQuebrado === true,

@@ -65,6 +65,28 @@ describe("escopo de inbound: quem o chatbot pode atender", () => {
       shouldEngageInbound({ scope: INBOUND_SCOPE_ALL, isKnownLead: false, hasCampaignMatch: false }).engage
     ).toBe(true);
   });
+
+  it("numero de SDR NAO engaja mesmo em escopo 'all'", () => {
+    const decisao = shouldEngageInbound({
+      scope: INBOUND_SCOPE_ALL,
+      isKnownLead: true,
+      hasCampaignMatch: true,
+      isSdrNumber: true,
+    });
+    expect(decisao.engage).toBe(false);
+    expect(decisao.reason).toBe("numero_e_do_sdr");
+  });
+
+  it("conversa silenciada (isAgentMuted: true) NAO engaja mesmo em escopo 'all' ou lead conhecido", () => {
+    const decisao = shouldEngageInbound({
+      scope: INBOUND_SCOPE_ALL,
+      isKnownLead: true,
+      hasCampaignMatch: true,
+      isAgentMuted: true,
+    });
+    expect(decisao.engage).toBe(false);
+    expect(decisao.reason).toBe("conversa_nao_comercial");
+  });
 });
 
 describe("destino da notificacao de SDR", () => {

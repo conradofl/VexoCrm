@@ -848,12 +848,21 @@ Schema JSON obrigatório:
   "lead_source": "Instagram" | "Google Ads" | "Facebook Ads" | "TikTok" | "Indicação" | "Formulário" | "WhatsApp" | "Outro" | null,
   "classificacao": "QUENTE" | "MORNO" | "FRIO",
   "spin_fase": "situacao" | "problema" | "implicacao" | "necessidade" | null,
-  "finalizado": true | false
+  "finalizado": true | false,
+  "nao_comercial": true | false,
+  "motivo_nao_comercial": "string curta — motivo quando nao_comercial for true (ex: 'pedido de comida', 'conversa pessoal', 'engano'), ou null"
 }
 
 RASTREAMENTO DE ORIGEM DO LEAD:
 • Se a origem do lead (lead_source ou origem_marketing nos dados) ainda não estiver definida, faça uma pergunta leve e natural durante a conversa para saber como ele conheceu a empresa (ex.: "Por sinal, como nos conheceu? Instagram, indicação, Google?").
 • Sempre preencha o campo "lead_source" (ou "origem_marketing" dentro de "dados") assim que identificar o canal de origem (ex.: Instagram, Google Ads, Facebook Ads, TikTok, Indicação, Formulário, WhatsApp, etc.).
+
+DETECÇÃO DE CONVERSA NÃO-COMERCIAL (SILENCIAMENTO DO AGENTE):
+• Marque "nao_comercial": true e informe "motivo_nao_comercial" com um texto curto (ex.: "pedido de comida", "conversa pessoal", "engano") caso a mensagem seja claramente:
+  - Conversa pessoal (amigos, familiares, pedidos de comida/lanche, assuntos domésticos).
+  - Engano ou número errado (a pessoa procurava outra pessoa ou serviço alheio ao negócio).
+  - Reação a status ou mensagem isolada sem nenhum contexto comercial.
+• REGRA EXPLÍCITA: Na dúvida, marque "nao_comercial": false e "motivo_nao_comercial": null. É melhor responder uma mensagem a mais do que calar um cliente real.
 
 REGRA CRÍTICA — quando setar "finalizado": true:
 • Sempre que você emitir a mensagem final de encerramento (ex.: "Fechado. Vou passar pro consultor...", "Vou repassar pro nosso time", ou qualquer despedida que sinalize que o consultor humano vai assumir).
@@ -1159,6 +1168,11 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
         classificacao: extractValidClassificacao(raw.classificacao),
         finalizado: raw.finalizado === true,
         spin_fase: VALID_SPIN_FASES.has(raw.spin_fase) ? raw.spin_fase : null,
+        nao_comercial: raw.nao_comercial === true,
+        motivo_nao_comercial:
+          raw.nao_comercial === true && typeof raw.motivo_nao_comercial === "string"
+            ? raw.motivo_nao_comercial.trim().slice(0, 150)
+            : null,
         contratoQuebrado: true,
       };
     }
@@ -1170,6 +1184,11 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
       classificacao: extractValidClassificacao(raw.classificacao),
       finalizado: raw.finalizado === true,
       spin_fase: VALID_SPIN_FASES.has(raw.spin_fase) ? raw.spin_fase : null,
+      nao_comercial: raw.nao_comercial === true,
+      motivo_nao_comercial:
+        raw.nao_comercial === true && typeof raw.motivo_nao_comercial === "string"
+          ? raw.motivo_nao_comercial.trim().slice(0, 150)
+          : null,
     };
   }
 
@@ -1194,6 +1213,11 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
           classificacao: extractValidClassificacao(parsed.classificacao),
           finalizado: parsed.finalizado === true,
           spin_fase: VALID_SPIN_FASES.has(parsed.spin_fase) ? parsed.spin_fase : null,
+          nao_comercial: parsed.nao_comercial === true,
+          motivo_nao_comercial:
+            parsed.nao_comercial === true && typeof parsed.motivo_nao_comercial === "string"
+              ? parsed.motivo_nao_comercial.trim().slice(0, 150)
+              : null,
           contratoQuebrado: true,
         };
       }
@@ -1206,6 +1230,11 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
         classificacao: extractValidClassificacao(parsed.classificacao),
         finalizado: parsed.finalizado === true,
         spin_fase: VALID_SPIN_FASES.has(parsed.spin_fase) ? parsed.spin_fase : null,
+        nao_comercial: parsed.nao_comercial === true,
+        motivo_nao_comercial:
+          parsed.nao_comercial === true && typeof parsed.motivo_nao_comercial === "string"
+            ? parsed.motivo_nao_comercial.trim().slice(0, 150)
+            : null,
       };
     }
   } catch (_) {}
@@ -1226,6 +1255,8 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
       classificacao: null,
       finalizado: false,
       spin_fase: null,
+      nao_comercial: false,
+      motivo_nao_comercial: null,
       contratoQuebrado: true,
     };
   }
@@ -1245,6 +1276,8 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
     classificacao: null,
     finalizado: false,
     spin_fase: null,
+    nao_comercial: false,
+    motivo_nao_comercial: null,
     contratoQuebrado: true,
   };
 }
@@ -1498,7 +1531,7 @@ export async function processBatch({
     // modelo nao classifica no turno. Sem estar no SELECT, existing.status era
     // sempre undefined e a "preservacao" gravava null — a classificacao anterior
     // era apagada justamente no turno em que se queria protege-la.
-    .select("id, dados, historico, status, lead_source, status_conversa, finalizado, updated_at, lead_temperature")
+    .select("id, dados, historico, status, lead_source, status_conversa, finalizado, updated_at, lead_temperature, stage, stage_source, raw_chat_summary")
     .eq("client_id", clientId)
     .eq("telefone", phone)
     .order("created_at", { ascending: false })
@@ -1880,6 +1913,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     _recontato: isPrimeiroRecontato,
     _history: newHistory,
     _dados: dadosToSave,
+    _existingLead: existing,
     _persistErro: persistErro ? persistErro.message || String(persistErro) : null,
     _repetiuUltimaFala: repetiuUltimaFala,
   };

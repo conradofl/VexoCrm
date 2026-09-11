@@ -35,6 +35,7 @@ import {
   Archive,
   ArchiveRestore,
   Bot,
+  BotOff,
   Users,
   MoreVertical,
   CheckSquare,
@@ -87,6 +88,7 @@ import {
   useUpdateChatState,
   useBulkUpdateChatState,
   useAttendChat,
+  useUnmuteChat,
   useCreateLeadFromChat,
   useBulkCreateLeadsFromChats,
   type WhatsAppChat,
@@ -119,6 +121,7 @@ type TimelineItem =
       type: "internal_note";
       hasMedia: false;
       isInternalNote: true;
+      senderType?: string | null;
     };
 
 function formatTimestamp(timestamp: number | null, withDate = false) {
@@ -345,6 +348,7 @@ export default function WhatsAppInbox({
   const updateChatState = useUpdateChatState(clientId);
   const bulkUpdateChatState = useBulkUpdateChatState(clientId);
   const attendChat = useAttendChat(clientId);
+  const unmuteChat = useUnmuteChat(clientId);
   const createLeadMutation = useCreateLeadFromChat(clientId);
   const bulkCreateLeadsMutation = useBulkCreateLeadsFromChats(clientId);
   const messagesQuery = useWhatsAppMessages(clientId, instanceFilter, selectedChatId, canLoadInbox);
@@ -521,7 +525,7 @@ export default function WhatsAppInbox({
   }, [adminUsersQuery.data, clientId]);
   const [reabrirPending, setReabrirPending] = useState(false);
 
-  const selectedChat = useMemo(() => {
+  const selectedChat = useMemo<WhatsAppChat | null>(() => {
     if (!selectedChatId) return null;
     const found = chats.find((chat) => chat.id === selectedChatId);
     if (found) return found;
@@ -540,6 +544,8 @@ export default function WhatsAppInbox({
       pinned: false,
       muted: false,
       lastMessage: null,
+      leadOrigin: null,
+      sourceCampaignId: null,
     };
   }, [chats, selectedChatId, leads]);
 
@@ -661,6 +667,19 @@ export default function WhatsAppInbox({
       toast.success("Conversa marcada como atendida!");
     } catch (err: any) {
       toast.error(err?.message || "Erro ao marcar como atendida.");
+    }
+  };
+
+  const handleUnmuteAgent = async () => {
+    if (!selectedChat) return;
+    try {
+      await unmuteChat.mutateAsync({
+        phone: selectedChat.id,
+      });
+      toast.success("Agente de IA reativado para esta conversa!");
+      chatsQuery.refetch?.();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao reativar agente.");
     }
   };
 
@@ -1386,6 +1405,15 @@ export default function WhatsAppInbox({
                               <span>Novo Número</span>
                             </span>
                           )}
+                          {chat.agentMutedAt && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 border border-slate-500/30 px-1.5 py-0.5 text-[9px] font-semibold text-slate-700 dark:text-slate-300"
+                              title={chat.agentMutedReason ? `Agente pausado: ${chat.agentMutedReason}` : "Agente pausado · conversa pessoal"}
+                            >
+                              <BotOff className="h-2.5 w-2.5 text-slate-600 dark:text-slate-400 shrink-0" />
+                              <span>Agente pausado · {chat.agentMutedReason || "conversa pessoal"}</span>
+                            </span>
+                          )}
                           {chat.state === "automacao" && !chat.isNumberChange && (
                             <span
                               className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 text-[9px] font-bold text-purple-700 dark:text-purple-300"
@@ -1633,6 +1661,16 @@ export default function WhatsAppInbox({
                             Grupo
                           </Badge>
                         )}
+                        {selectedChat?.agentMutedAt && (
+                          <Badge
+                            variant="outline"
+                            className="h-4 px-1.5 text-[9px] font-bold border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300 gap-1 shrink-0 cursor-help"
+                            title={selectedChat.agentMutedReason ? `Agente pausado: ${selectedChat.agentMutedReason}` : "Agente pausado · conversa pessoal"}
+                          >
+                            <BotOff className="h-2.5 w-2.5 text-slate-600 dark:text-slate-400 shrink-0" />
+                            <span className="truncate">Agente pausado · {selectedChat.agentMutedReason || "conversa pessoal"}</span>
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-[11px] text-muted-foreground truncate">{displayPhone}</p>
                     </div>
@@ -1642,7 +1680,19 @@ export default function WhatsAppInbox({
                   {selectedChat && (
                     <div className="flex items-center gap-1.5 shrink-0">
                       {/* Botão Primário Contextual */}
-                      {!matchedLead && !selectedChat.isGroup ? (
+                      {selectedChat.agentMutedAt ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1 text-xs rounded-xl border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer shadow-xs"
+                          onClick={handleUnmuteAgent}
+                          disabled={unmuteChat.isPending}
+                          title="Reativar agente de IA nesta conversa"
+                        >
+                          <Bot className="h-3.5 w-3.5 text-emerald-600" />
+                          <span>{unmuteChat.isPending ? "Reativando..." : "Reativar agente"}</span>
+                        </Button>
+                      ) : !matchedLead && !selectedChat.isGroup ? (
                         <Button
                           variant="default"
                           size="sm"
@@ -1750,6 +1800,18 @@ export default function WhatsAppInbox({
                             >
                               <CheckCheck className="h-3.5 w-3.5 text-emerald-600" />
                               <span>Marcar como Atendido</span>
+                            </DropdownMenuItem>
+                          )}
+
+                          {/* Reativar agente se estiver pausado */}
+                          {selectedChat.agentMutedAt && (
+                            <DropdownMenuItem
+                              onClick={handleUnmuteAgent}
+                              disabled={unmuteChat.isPending}
+                              className="gap-2 cursor-pointer text-emerald-700 dark:text-emerald-300 font-semibold"
+                            >
+                              <Bot className="h-3.5 w-3.5 text-emerald-600" />
+                              <span>Reativar Agente IA</span>
                             </DropdownMenuItem>
                           )}
 

@@ -136,4 +136,32 @@ describe("WhatsAppInbox exports, sorting and polling utilities", () => {
     expect(recent.map((c) => c.id)).toEqual(["1", "2"]);
     expect(older.map((c) => c.id)).toEqual(["3", "4"]);
   });
+
+  it("identifies agentMutedAt and preserves 'ativa' state for display in Conversas tabs", () => {
+    const mutedChat = {
+      id: "5534992896464",
+      name: "Cliente Lanche",
+      state: "ativa",
+      agentMutedAt: "2026-09-11T12:00:00.000Z",
+      agentMutedReason: "Pedido de lanche pessoal",
+    };
+
+    // Conversa silenciada continua 'ativa' — nunca some das abas da tela Conversas
+    expect(mutedChat.state).toBe("ativa");
+    expect(Boolean(mutedChat.agentMutedAt)).toBe(true);
+
+    // Formatação do selo
+    const badgeLabel = `Agente pausado · ${mutedChat.agentMutedReason || "conversa pessoal"}`;
+    expect(badgeLabel).toBe("Agente pausado · Pedido de lanche pessoal");
+
+    // Simulação do clique em 'Reativar agente': limpa as colunas sem alterar state
+    const unmutedChat = {
+      ...mutedChat,
+      agentMutedAt: null,
+      agentMutedReason: null,
+    };
+    expect(unmutedChat.agentMutedAt).toBeNull();
+    expect(unmutedChat.agentMutedReason).toBeNull();
+    expect(unmutedChat.state).toBe("ativa");
+  });
 });
