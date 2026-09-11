@@ -1,6 +1,7 @@
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
 import { supabase as liveSupabase } from "../../services/database.js";
 import { maskPhoneForLog } from "../../services/tenant.js";
+import { resolveInstanceIdentifier } from "../../services/evolution.js";
 
 /**
  * Detecta JID de GRUPO / broadcast no inbound da Evolution. Resposta de lead legítima
@@ -136,6 +137,19 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
       }
     }
 
+    let canonicalInstanceName = instanceName || null;
+    if (canonicalInstanceName) {
+      try {
+        const { canonicalName } = await resolveInstanceIdentifier({
+          clientId,
+          identifier: canonicalInstanceName,
+        });
+        if (canonicalName) canonicalInstanceName = canonicalName;
+      } catch (err) {
+        // Fallback seguro mantendo o identificador recebido se falhar
+      }
+    }
+
     const payload = {
       client_id: clientId,
       lead_id: resolvedLeadId,
@@ -148,7 +162,7 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
       delivered_at: deliveredAt || new Date().toISOString(),
       message_timestamp: messageTimestamp || deliveredAt || new Date().toISOString(),
       meta: meta && typeof meta === "object" ? meta : {},
-      instance_name: instanceName,
+      instance_name: canonicalInstanceName || instanceName || null,
       wa_message_id: waMessageId || null,
     };
 

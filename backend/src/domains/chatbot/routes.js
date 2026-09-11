@@ -15,7 +15,7 @@ import { applyCorsHeaders } from "../../services/corsPolicy.js";
 import { upsertLeadByPhone, isRealName } from "../../services/leadUpsert.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
 import { OutlierQualificationBot } from "../../hardcoded-chatbot-outlier.js";
-import { resolveEvolutionInstanceOwner } from "../../services/evolution.js";
+import { resolveEvolutionInstanceOwner, resolveInstanceIdentifier } from "../../services/evolution.js";
 
 const SQL_CANONICAL_PHONE = (col) => `
   CASE
@@ -126,50 +126,14 @@ export function registerChatbotRoutes(app, deps) {
 
   // Aceita um chip ou VÁRIOS separados por vírgula ("Chip A,Chip B") — o inbox
   // permite selecionar mais de um chip ao mesmo tempo. Devolve todos os aliases
-  // (nome amigável, id e nome extraído da URL da Evolution) de cada um.
+  // (nome amigável, id e nome extraído da URL da Evolution) via helper único canônico.
   async function resolveInstanceNameAliases(clientId, rawInstanceName) {
-    if (!rawInstanceName || rawInstanceName === "all") return null;
-
-    const requested = String(rawInstanceName)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (requested.length === 0) return null;
-
-    let allInstances;
-    try {
-      allInstances = await getLeadClientEvolutionInstances(clientId);
-    } catch (err) {
-      console.error("[chatbot-aliases] falha de leitura no banco ao buscar instâncias Evolution para aliases", {
-        clientId,
-        rawInstanceName,
-        error: err?.message || String(err),
-      });
-      // Degradação com log: como é rota de listagem/filtro visual de tela (inbox),
-      // degrada utilizando os próprios nomes literais requisitados em vez de silenciar ou retornar vazio.
-      return requested;
-    }
-    const aliases = new Set();
-
-    for (const wanted of requested) {
-      aliases.add(wanted);
-      const matched = allInstances.find((inst) => {
-        const urlName = inst.dispatch_webhook_url
-          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
-          : null;
-        return inst.name === wanted || inst.id === wanted || urlName === wanted;
-      });
-      if (matched) {
-        if (matched.name) aliases.add(matched.name);
-        if (matched.id) aliases.add(matched.id);
-        if (matched.dispatch_webhook_url) {
-          const urlName = matched.dispatch_webhook_url.split("/").filter(Boolean).pop();
-          if (urlName) aliases.add(urlName);
-        }
-      }
-    }
-
-    return Array.from(aliases);
+    const { aliases } = await resolveInstanceIdentifier({
+      clientId,
+      identifier: rawInstanceName,
+      pool: pgDatabasePool,
+    });
+    return aliases && aliases.length > 0 ? aliases : null;
   }
 
   /**
@@ -1910,7 +1874,13 @@ export function registerChatbotRoutes(app, deps) {
       return;
     }
 
-    const instanceName = body.instance || body.instanceName || req.query.instanceName || req.query.instance || null;
+    const rawInstanceName = body.instance || body.instanceName || req.query.instanceName || req.query.instance || null;
+    const { canonicalName: resolvedInstanceName } = await resolveInstanceIdentifier({
+      clientId,
+      identifier: rawInstanceName,
+      pool: pgDatabasePool,
+    });
+    const instanceName = resolvedInstanceName || rawInstanceName;
 
     // Detectar tipo e extrair conteúdo da mensagem
     let messageData = null;

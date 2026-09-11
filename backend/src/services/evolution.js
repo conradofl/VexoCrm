@@ -1593,36 +1593,82 @@ export async function validateWhatsappNumbersWithCache({ pool, webhookUrl, webho
 }
 
 /**
+ * Helper canônico único para resolver qualquer identificador de chip (nome amigável,
+ * UUID da tabela lead_client_evolution_instances ou sufixo da URL dispatch_webhook_url).
+ * Garante que webhook inbound, disparos de campanha, sincronização e filtros do inbox
+ * utilizem exatamente a mesma lógica de correspondência e aliases.
+ *
+ * Aceita qualquer um dos três formatos:
+ * 1. name (amigável, ex: "GD Priscila")
+ * 2. id (UUID, ex: "73ba3e2a-d8c6-4502-a83c-6d6cf1e82d21")
+ * 3. urlSuffix (último segmento da URL do dispatch_webhook_url, ex: "geracao-digital-gd-priscila")
+ * Aceita também múltiplos identificadores separados por vírgula ("Chip 1,Chip 2") para filtros.
+ *
+ * Devolve:
+ * - canonicalName: a forma canônica da instância (urlSuffix da Evolution, ou name)
+ * - aliases: lista de todos os formatos conhecidos do chip para uso em WHERE instance_name = ANY($n)
+ * - chip: o objeto da instância em lead_client_evolution_instances
+ */
+export async function resolveInstanceIdentifier({ clientId, identifier = null, pool = null, dbPool = null }) {
+  const db = pool || dbPool || pgDatabasePool;
+  if (!clientId || !db) return { canonicalName: null, aliases: [], chip: null };
+
+  const raw = identifier != null ? String(identifier).trim() : "";
+  if (!raw || raw === "all") return { canonicalName: null, aliases: [], chip: null };
+
+  const requested = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (requested.length === 0) return { canonicalName: null, aliases: [], chip: null };
+
+  let instances = [];
+  try {
+    instances = await getLeadClientEvolutionInstances(clientId, db);
+  } catch (err) {
+    console.warn("[resolveInstanceIdentifier] Erro ao buscar instâncias:", err?.message || err);
+    return { canonicalName: requested[0], aliases: requested, chip: null };
+  }
+
+  const aliasesSet = new Set();
+  let firstCanonical = null;
+  let matchedChip = null;
+
+  for (const wanted of requested) {
+    aliasesSet.add(wanted);
+    const matched = (instances || []).find((inst) => {
+      const urlSuffix = inst.dispatch_webhook_url
+        ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
+        : null;
+      return inst.name === wanted || inst.id === wanted || urlSuffix === wanted;
+    });
+
+    if (matched) {
+      if (!matchedChip) matchedChip = matched;
+      const urlSuffix = matched.dispatch_webhook_url
+        ? matched.dispatch_webhook_url.split("/").filter(Boolean).pop()
+        : null;
+      const canonical = urlSuffix || matched.name || matched.id;
+      if (!firstCanonical) firstCanonical = canonical;
+
+      if (matched.name) aliasesSet.add(matched.name);
+      if (matched.id) aliasesSet.add(matched.id);
+      if (urlSuffix) aliasesSet.add(urlSuffix);
+    }
+  }
+
+  return {
+    canonicalName: firstCanonical || requested[0],
+    aliases: Array.from(aliasesSet),
+    chip: matchedChip,
+  };
+}
+
+/**
  * Resolve o dono (owner_uid) do chip/instância que recebeu uma mensagem inbound.
- * Casa por instanceName (nome amigável, id ou sufixo da URL).
- * Sem correspondência = sem dono identificável (retorna null).
+ * Delega para resolveInstanceIdentifier para garantir regra única de correspondência.
  * Devolve owner_uid (string) ou null.
  */
 export async function resolveEvolutionInstanceOwner({ clientId, instanceName = null, pool = null, dbPool = null }) {
-  const db = pool || dbPool || pgDatabasePool;
-  if (!clientId || !db) return null;
-  try {
-    const instances = await getLeadClientEvolutionInstances(clientId, db);
-    if (!instances || instances.length === 0) return null;
-
-    const alvo = normalizeString(instanceName);
-    if (alvo) {
-      const casada = instances.find((inst) => {
-        const daUrl = inst.dispatch_webhook_url
-          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
-          : null;
-        return inst.name === alvo || inst.id === alvo || daUrl === alvo;
-      });
-      if (casada) {
-        return casada.owner_uid || null;
-      }
-    }
-
-    // Sem correspondência = sem dono identificável. NUNCA herdar do chip "padrão".
-    return null;
-  } catch (err) {
-    console.warn("[evolution-instances] Erro ao resolver dono do chip:", err?.message || err);
-    return null;
-  }
+  const { chip } = await resolveInstanceIdentifier({ clientId, identifier: instanceName, pool, dbPool });
+  return chip?.owner_uid || null;
 }
+
 

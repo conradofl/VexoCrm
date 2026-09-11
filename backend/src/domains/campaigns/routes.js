@@ -29,6 +29,7 @@ import {
   isEvolutionOpenState,
   checkWhatsappNumbers,
   validateWhatsappNumbersWithCache,
+  resolveInstanceIdentifier,
 } from "../../services/evolution.js";
 import {
   dispatchCampaignSequence,
@@ -2394,7 +2395,9 @@ export function registerCampaignsRoutes(app, deps) {
       onLeadClaimRollback: rollbackClaimLead,
       onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
         try {
-          const chipName = activeChip?.instanceId || activeChip?.instanceName || instanceName || null;
+          const rawChip = activeChip?.instanceId || activeChip?.instanceName || instanceName || null;
+          const { canonicalName } = await resolveInstanceIdentifier({ clientId, identifier: rawChip });
+          const chipName = canonicalName || rawChip;
           await appendLeadMessage({
             clientId,
             campaignId: campaign.id,
