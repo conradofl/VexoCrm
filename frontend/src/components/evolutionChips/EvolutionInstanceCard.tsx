@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
-import { LeadClientEvolutionInstance } from "@/hooks/useLeadClients";
+import { LeadClientEvolutionInstance, useEvolutionInstanceSyncStatus } from "@/hooks/useLeadClients";
 import { EvolutionInstanceStatusBadge } from "./EvolutionInstanceStatusBadge";
 import { resolveChipLimit } from "@/lib/evolutionChips/utils";
 
@@ -62,6 +62,9 @@ export function EvolutionInstanceCard({
   const pct = displayLimit > 0 ? Math.min(100, Math.round((sent / displayLimit) * 100)) : 0;
   const barColor =
     pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-400" : "bg-emerald-500";
+
+  const { data: syncProgress } = useEvolutionInstanceSyncStatus(tenantId, instance.id);
+  const isSyncActive = isSyncPending || syncProgress?.status === "running";
 
   return (
     <div
@@ -171,34 +174,82 @@ export function EvolutionInstanceCard({
         </div>
 
         {/* Integração de Webhook (Inbox / Conversas) */}
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200/50 bg-slate-50/50 p-3.5 text-xs dark:border-white/5 dark:bg-white/[0.01]">
-          <div className="space-y-0.5">
-            <span className="font-semibold text-foreground">Sincronizar Conversas no CRM</span>
-            <p className="text-[10px] text-muted-foreground">
-              Espelha em tempo real as mensagens recebidas e enviadas deste chip na aba "Conversas".
+        <div className="flex flex-col gap-2.5 rounded-xl border border-slate-200/50 bg-slate-50/50 p-3.5 text-xs dark:border-white/5 dark:bg-white/[0.01]">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <span className="font-semibold text-foreground">Sincronizar Conversas no CRM</span>
+              <p className="text-[10px] text-muted-foreground">
+                Espelha em tempo real as mensagens recebidas e enviadas deste chip na aba "Conversas".
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              {canEdit && onSyncNow && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg text-[11px]"
+                  disabled={isSyncActive}
+                  onClick={onSyncNow}
+                  title="Importa o histórico de conversas deste chip para a aba Conversas"
+                >
+                  <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isSyncActive && "animate-spin")} />
+                  {syncProgress?.status === "running"
+                    ? `Sincronizando (${syncProgress.processed_chats}/${syncProgress.total_chats || "..."})`
+                    : isSyncPending
+                      ? "Iniciando..."
+                      : "Sincronizar agora"}
+                </Button>
+              )}
+              <Switch
+                checked={instance.webhook_enabled}
+                onCheckedChange={onToggleWebhook}
+                disabled={!canEdit || isSavePending}
+              />
+            </div>
+          </div>
+
+          {/* Progresso visível da sincronização em tempo real */}
+          {syncProgress?.status === "running" && (
+            <div className="mt-1 space-y-1.5 border-t border-slate-200/60 pt-2 dark:border-white/5">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  Progresso: {syncProgress.processed_chats} de {syncProgress.total_chats} conversas
+                </span>
+                <span>
+                  Lote {syncProgress.current_batch || 1} de {syncProgress.total_batches || 1}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
+                <div
+                  className="h-full bg-sky-500 transition-all duration-300"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(
+                        ((syncProgress.processed_chats || 0) / Math.max(1, syncProgress.total_chats || 1)) * 100
+                      )
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[9px] text-muted-foreground">
+                {syncProgress.synced_chats} conversas sincronizadas ({syncProgress.inserted_messages} mensagens novas gravadas em lotes com pausa).
+              </p>
+            </div>
+          )}
+
+          {syncProgress?.status === "deferred" && syncProgress.blocked_by_campaign && (
+            <div className="mt-1 rounded-lg bg-amber-500/10 p-2 text-[10px] text-amber-700 dark:text-amber-400">
+              ⚠️ Sincronização em espera: a campanha "{syncProgress.blocked_by_campaign}" está em disparo ativo neste tenant.
+            </div>
+          )}
+
+          {syncProgress?.status === "completed" && syncProgress.synced_chats > 0 && (
+            <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+              ✓ Histórico sincronizado: {syncProgress.synced_chats} conversas ({syncProgress.inserted_messages} mensagens).
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {canEdit && onSyncNow && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-lg text-[11px]"
-                disabled={isSyncPending}
-                onClick={onSyncNow}
-                title="Importa o histórico de conversas deste chip para a aba Conversas"
-              >
-                <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isSyncPending && "animate-spin")} />
-                {isSyncPending ? "Sincronizando..." : "Sincronizar agora"}
-              </Button>
-            )}
-            <Switch
-              checked={instance.webhook_enabled}
-              onCheckedChange={onToggleWebhook}
-              disabled={!canEdit || isSavePending}
-            />
-          </div>
+          )}
         </div>
 
         {/* Atribuição de Leads: Operador Responsável */}

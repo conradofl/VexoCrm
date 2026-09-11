@@ -15,7 +15,7 @@
 // módulo invoca a mesma factory (sem duplicar a função) e usa só maskSecretPresence.
 
 import { createLeadMessaging } from "../shared/leadMessaging.js";
-import { syncEvolutionInstanceChatsAndMessages } from "../../services/evolution.js";
+import { syncEvolutionInstanceChatsAndMessages, getEvolutionInstanceSyncProgress } from "../../services/evolution.js";
 import { whatsappSessionManager } from "../../whatsapp.js";
 import { propagateTenantPermissions, isManagerOrAdmin } from "../../access/claims.js";
 import { makeChipLimitGuard } from "../../access/chipLimitGate.js";
@@ -1061,6 +1061,8 @@ export function registerIntegrationsRoutes(app, deps) {
   // chip para a aba Conversas. É explícito e síncrono de propósito: antes o sync
   // só acontecia como efeito colateral de salvar o webhook, então não havia como
   // sincronizar um chip específico (o 2º chip nunca puxava as conversas).
+  // POST .../evolution-instances/:instanceId/sync — importa as conversas deste
+  // chip para a aba Conversas em background, em lotes controlados com proteção anti-sobrecarga.
   app.post(
     "/api/lead-clients/:tenantId/evolution-instances/:instanceId/sync",
     requireFirebaseAuth,
@@ -1088,21 +1090,50 @@ export function registerIntegrationsRoutes(app, deps) {
           return;
         }
 
-        // Responde IMEDIATAMENTE e sincroniza em background: importar o
-        // histórico (chats + mensagens + perfis) leva minutos, e o proxy do
-        // frontend corta requisições longas — a tela mostrava "signal is
-        // aborted without reason" mesmo com o sync rodando até o fim.
+        // 1. Verificação prévia de campanha em andamento: não aceita o sync e avisa o usuário
+        const { rows: runningDispatches } = await pgDatabasePool.query(
+          `SELECT id, name FROM public.campaign_dispatches WHERE client_id = $1 AND status = 'running' LIMIT 1`,
+          [tenantId]
+        ).catch(() => ({ rows: [] }));
+
+        if (runningDispatches && runningDispatches.length > 0) {
+          const campaignName = runningDispatches[0].name || "Disparo de Campanha";
+          res.status(200).json({
+            success: false,
+            deferred: true,
+            campaignName,
+            instance: inst.name,
+            message: `Sincronização adiada: a campanha "${campaignName}" está em disparo ativo. Aguarde o término para sincronizar o histórico.`,
+          });
+          return;
+        }
+
+        // 2. Verificação prévia de sincronização concorrente no mesmo chip
+        const currentProgress = await getEvolutionInstanceSyncProgress(tenantId, instanceId, pgDatabasePool);
+        if (currentProgress && currentProgress.status === "running") {
+          res.status(200).json({
+            success: true,
+            running: true,
+            instance: inst.name,
+            progress: currentProgress,
+            message: `Sincronização já em andamento para este chip (${currentProgress.processed_chats}/${currentProgress.total_chats} conversas processadas).`,
+          });
+          return;
+        }
+
+        // 3. Responde IMEDIATAMENTE (202 Accepted) e sincroniza em background em lotes
         res.status(202).json({
           success: true,
           started: true,
           instance: inst.name,
-          message: "Sincronização iniciada. As conversas aparecem conforme forem importadas.",
+          message: "Sincronização iniciada. O progresso é exibido no card da conexão.",
         });
 
         syncEvolutionInstanceChatsAndMessages(
           tenantId,
           inst.dispatch_webhook_url,
-          inst.dispatch_webhook_token
+          inst.dispatch_webhook_token,
+          { instanceId: inst.id }
         )
           .then((r) => {
             console.info(
@@ -1115,6 +1146,34 @@ export function registerIntegrationsRoutes(app, deps) {
       } catch (error) {
         console.error("[evolution-sync] erro:", error?.message || error);
         sendError(res, 500, "SYNC_ERROR", error?.message || "Erro ao sincronizar conversas");
+      }
+    }
+  );
+
+  // GET .../evolution-instances/:instanceId/sync-status — consulta o progresso da sincronização de um chip
+  app.get(
+    "/api/lead-clients/:tenantId/evolution-instances/:instanceId/sync-status",
+    requireFirebaseAuth,
+    requireAnyInternalPageAccess(["conexoes", "empresas"]),
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      const instanceId = normalizeString(req.params?.instanceId);
+      if (!tenantId || !parseOptionalUuid(instanceId)) {
+        sendError(res, 400, "INVALID_BODY", "Invalid tenant or Evolution instance id");
+        return;
+      }
+
+      try {
+        const progress = await getEvolutionInstanceSyncProgress(tenantId, instanceId, pgDatabasePool);
+        res.json({
+          success: true,
+          progress,
+        });
+      } catch (error) {
+        console.error("[evolution-sync-status] erro:", error?.message || error);
+        sendError(res, 500, "SYNC_STATUS_ERROR", error?.message || "Erro ao consultar status de sincronização");
       }
     }
   );

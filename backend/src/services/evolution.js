@@ -246,47 +246,185 @@ export async function getDefaultLeadClientEvolutionInstance(clientId, pool = nul
   return selectDefaultEvolutionInstance(instances);
 }
 
-export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWebhookUrl, dispatchWebhookToken) {
+let syncProgressTableEnsured = false;
+export async function ensureSyncProgressTable(pool = null) {
+  const db = pool || pgDatabasePool;
+  if (!db || syncProgressTableEnsured) return;
   try {
-    if (!dispatchWebhookUrl) return;
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.whatsapp_instance_sync_progress (
+        client_id TEXT NOT NULL,
+        instance_id TEXT NOT NULL,
+        instance_name TEXT,
+        status TEXT NOT NULL DEFAULT 'idle',
+        total_chats INTEGER NOT NULL DEFAULT 0,
+        processed_chats INTEGER NOT NULL DEFAULT 0,
+        synced_chats INTEGER NOT NULL DEFAULT 0,
+        inserted_messages INTEGER NOT NULL DEFAULT 0,
+        last_remote_jid TEXT,
+        current_batch INTEGER NOT NULL DEFAULT 0,
+        total_batches INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT,
+        blocked_by_campaign TEXT,
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (client_id, instance_id)
+      )
+    `);
+    syncProgressTableEnsured = true;
+  } catch (err) {
+    console.warn("[sync-evolution] Erro ao assegurar tabela whatsapp_instance_sync_progress:", err?.message || err);
+  }
+}
 
-    const urlObj = new URL(dispatchWebhookUrl);
-    const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-    const parts = urlObj.pathname.split("/");
-    const instanceName = parts[parts.length - 1];
+// ATENÇÃO DE ESCALABILIDADE (Multi-Processo / Multi-Container):
+// activeSyncsByChip é um Set em memória para este processo/container do Node.js.
+// Ele impede cliques duplos e chamadas concorrentes paralelas no mesmo container (caso padrão de hoje).
+// Caso a infraestrutura do backend seja escalada horizontalmente para rodar com mais de uma réplica/container,
+// este lock em memória não atravessa processos. Quando isso ocorrer, substituir por um lock distribuído
+// ou lock transacional a nível de banco de dados (ex: pg_try_advisory_xact_lock no Postgres ou checagem com
+// SELECT FOR UPDATE / status='running' com timestamp recente na tabela public.whatsapp_instance_sync_progress)
+// para garantir que duas réplicas não sincronizem o mesmo chip simultaneamente contra a Evolution.
+const activeSyncsByChip = new Set();
 
-    if (!instanceName) return;
+export async function getEvolutionInstanceSyncProgress(clientId, instanceId, pool = null) {
+  const db = pool || pgDatabasePool;
+  if (!clientId || !instanceId || !db) {
+    return {
+      status: "idle",
+      total_chats: 0,
+      processed_chats: 0,
+      synced_chats: 0,
+      inserted_messages: 0,
+      current_batch: 0,
+      total_batches: 0,
+    };
+  }
+  await ensureSyncProgressTable(db);
+  try {
+    const { rows } = await db.query(
+      `SELECT * FROM public.whatsapp_instance_sync_progress WHERE client_id = $1 AND instance_id = $2`,
+      [clientId, instanceId]
+    );
+    if (rows[0]) {
+      const r = rows[0];
+      const lockKey = `${clientId}:${instanceId}`;
+      const isActuallyRunning = activeSyncsByChip.has(lockKey);
+      const isStale =
+        r.status === "running" &&
+        !isActuallyRunning &&
+        Date.now() - new Date(r.updated_at).getTime() > 5 * 60 * 1000;
+      if (isStale) {
+        return {
+          ...r,
+          status: "failed",
+          error_message: "Sincronização interrompida",
+        };
+      }
+      return r;
+    }
+  } catch (err) {
+    console.warn("[getEvolutionInstanceSyncProgress] Erro ao consultar progresso:", err?.message || err);
+  }
+  return {
+    status: "idle",
+    total_chats: 0,
+    processed_chats: 0,
+    synced_chats: 0,
+    inserted_messages: 0,
+    current_batch: 0,
+    total_batches: 0,
+  };
+}
+
+export async function syncEvolutionInstanceChatsAndMessages(
+  clientId,
+  dispatchWebhookUrl,
+  dispatchWebhookToken,
+  options = {}
+) {
+  const db = options.pool || pgDatabasePool;
+  const batchSize = Math.max(1, Number(options.batchSize) || 15);
+  const batchPauseMs = Math.max(100, Number(options.batchPauseMs) || 1200);
+
+  if (!dispatchWebhookUrl) return { error: "URL do webhook ausente" };
+
+  const urlObj = new URL(dispatchWebhookUrl);
+  const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+  const parts = urlObj.pathname.split("/");
+  const instanceName = parts[parts.length - 1];
+
+  if (!instanceName) return { error: "Nome da instância ausente na URL" };
+
+  let instanceId = options.instanceId || null;
+  if (!instanceId && db) {
+    try {
+      const { rows } = await db.query(
+        `SELECT id FROM public.lead_client_evolution_instances WHERE client_id = $1 AND dispatch_webhook_url = $2 LIMIT 1`,
+        [clientId, dispatchWebhookUrl]
+      );
+      if (rows[0]?.id) instanceId = rows[0].id;
+    } catch {}
+  }
+  const effectiveInstanceId = instanceId || instanceName;
+  const lockKey = `${clientId}:${effectiveInstanceId}`;
+
+  // Bloqueio de concorrência por chip: impede disparos sobrepostos no mesmo chip
+  if (activeSyncsByChip.has(lockKey)) {
+    console.warn(`[sync-evolution] Sincronização já em andamento para ${lockKey}. Ignorando chamada concorrente.`);
+    return {
+      instanceName,
+      running: true,
+      message: "Sincronização já em andamento para este chip.",
+    };
+  }
+
+  // Trava imediata síncrona contra corridas de microtasks/event loop
+  activeSyncsByChip.add(lockKey);
+
+  try {
+    await ensureSyncProgressTable(db);
 
     // Proteção de concorrência: se houver disparo em lote 'running' neste tenant, adia o sync
-    // para não sobrecarregar o socket Baileys com centenas de requisições findMessages simultâneas.
-    if (pgDatabasePool) {
-      const { rows: runningDispatches } = await pgDatabasePool.query(
+    // e avisa explicitamente com o nome da campanha que está bloqueando.
+    if (db) {
+      const { rows: runningDispatches } = await db.query(
         `SELECT id, name FROM public.campaign_dispatches WHERE client_id = $1 AND status = 'running' LIMIT 1`,
         [clientId]
       ).catch(() => ({ rows: [] }));
 
       if (runningDispatches && runningDispatches.length > 0) {
+        const campaignName = runningDispatches[0].name || "Disparo ativo";
         console.warn(
-          `[sync-evolution] Disparo em lote ativo no tenant (${runningDispatches[0].name}). Sincronização de histórico adiada para evitar sobrecarga no chip.`
+          `[sync-evolution] Disparo em lote ativo no tenant (${campaignName}). Sincronização de histórico adiada para evitar sobrecarga no chip.`
         );
+        await db.query(
+          `INSERT INTO public.whatsapp_instance_sync_progress
+             (client_id, instance_id, instance_name, status, blocked_by_campaign, updated_at)
+           VALUES ($1, $2, $3, 'deferred', $4, now())
+           ON CONFLICT (client_id, instance_id) DO UPDATE SET
+             status = 'deferred',
+             blocked_by_campaign = EXCLUDED.blocked_by_campaign,
+             updated_at = now()`,
+          [clientId, effectiveInstanceId, instanceName, campaignName]
+        ).catch(() => {});
+
         return {
           instanceName,
-          chats: 0,
-          synced: 0,
-          messages: 0,
-          skipped: true,
-          reason: "dispatch_in_progress",
+          deferred: true,
+          campaignName,
+          message: `Sincronização adiada: a campanha "${campaignName}" está em disparo ativo neste tenant.`,
         };
       }
     }
-
     const apiKey = dispatchWebhookToken || getEvolutionAdminConfig().apiKey;
 
     // Sync Incremental: descobre a data da mensagem mais recente já gravada para esta instância
     let latestKnownTimestamp = null;
-    if (pgDatabasePool) {
+    if (db) {
       try {
-        const { rows: tsRows } = await pgDatabasePool.query(
+        const { rows: tsRows } = await db.query(
           `SELECT MAX(message_timestamp) as latest_ts 
            FROM public.lead_messages 
            WHERE client_id = $1 AND instance_name = $2`,
@@ -306,8 +444,6 @@ export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWe
     );
 
     // 1. Fetch chats from Evolution API.
-    // Evolution v2: /chat/findChats/{instance} é POST (com body), não GET. Como
-    // GET dava HTTP 404, o backfill de conversas nunca acontecia.
     const chatsResponse = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: apiKey },
@@ -316,29 +452,98 @@ export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWe
 
     if (!chatsResponse.ok) {
       console.warn(`[sync-evolution] Failed to fetch chats for ${instanceName}: HTTP ${chatsResponse.status}`);
+      if (db) {
+        await db.query(
+          `INSERT INTO public.whatsapp_instance_sync_progress
+             (client_id, instance_id, instance_name, status, error_message, updated_at)
+           VALUES ($1, $2, $3, 'failed', $4, now())
+           ON CONFLICT (client_id, instance_id) DO UPDATE SET
+             status = 'failed',
+             error_message = EXCLUDED.error_message,
+             updated_at = now()`,
+          [clientId, effectiveInstanceId, instanceName, `HTTP ${chatsResponse.status}`]
+        ).catch(() => {});
+      }
       return { instanceName, chats: 0, synced: 0, messages: 0, error: `HTTP ${chatsResponse.status}` };
     }
 
     const rawChats = await chatsResponse.json();
-    // v2 pode devolver array direto ou paginado ({ records: [...] }).
     const chats = Array.isArray(rawChats) ? rawChats : (rawChats?.records || rawChats?.chats || []);
     if (!Array.isArray(chats)) {
       console.warn(`[sync-evolution] Evolution API did not return an array of chats:`, rawChats);
       return { instanceName, chats: 0, synced: 0, messages: 0, error: "resposta inválida da Evolution" };
     }
-    // Contadores para dar feedback real ao usuário (o botão "Sincronizar agora"
-    // mostra quantas conversas/mensagens entraram, em vez de "não aconteceu nada").
+
+    // Ordenação determinística estável: evita pular conversas caso a lista retorne em ordem
+    // de recência da Evolution e novos chats/mensagens desloquem os índices durante falha e retomada.
+    chats.sort((a, b) => {
+      const idA = String(a.remoteJid || a.id || "").toLowerCase();
+      const idB = String(b.remoteJid || b.id || "").toLowerCase();
+      return idA.localeCompare(idB);
+    });
+
+    // Checkpoint anterior: se o sync anterior falhou, verifica se dá para retomar a partir do último JID
+    let startIndex = 0;
     let syncedChats = 0;
     let insertedMessages = 0;
+    if (db) {
+      try {
+        const { rows: prevRows } = await db.query(
+          `SELECT status, last_remote_jid, processed_chats, synced_chats, inserted_messages
+           FROM public.whatsapp_instance_sync_progress
+           WHERE client_id = $1 AND instance_id = $2`,
+          [clientId, effectiveInstanceId]
+        );
+        const prev = prevRows[0];
+        if (prev && prev.status === "failed" && prev.last_remote_jid) {
+          const foundIdx = chats.findIndex(
+            (c) => (c.remoteJid || c.id) === prev.last_remote_jid
+          );
+          if (foundIdx >= 0 && foundIdx < chats.length - 1) {
+            startIndex = foundIdx + 1;
+            syncedChats = prev.synced_chats || 0;
+            insertedMessages = prev.inserted_messages || 0;
+            console.info(
+              `[sync-evolution] Retomando sincronização de ${instanceName} a partir do chat ${startIndex + 1} de ${chats.length} (checkpoint: ${prev.last_remote_jid})`
+            );
+          }
+        }
+      } catch (chkErr) {
+        console.warn("[sync-evolution] Erro ao checar checkpoint prévio:", chkErr?.message || chkErr);
+      }
+    }
 
-    console.info(`[sync-evolution] Found ${chats.length} chats. Syncing messages for the top 200 chats...`);
+    const totalBatches = Math.ceil(chats.length / batchSize);
 
-    // Catálogo de contatos da instância: resolve o NOME (pushName que a pessoa
-    // configurou no WhatsApp dela) e, quando disponível, o TELEFONE real de um
-    // contato LID. Sem isso a conversa aparece como "224777281249297@lid" e sem
-    // nome, porque o findChats de contatos LID nem sempre traz remoteJidAlt.
-    const contactNameByKey = new Map(); // dígitos do jid -> nome
-    const phoneByLid = new Map();       // dígitos do LID  -> telefone real
+    // Registra início do sync com status 'running' no banco
+    if (db) {
+      await db.query(
+        `INSERT INTO public.whatsapp_instance_sync_progress
+           (client_id, instance_id, instance_name, status, total_chats, processed_chats, synced_chats, inserted_messages, total_batches, current_batch, started_at, updated_at)
+         VALUES ($1, $2, $3, 'running', $4, $5, $6, $7, $8, $9, now(), now())
+         ON CONFLICT (client_id, instance_id) DO UPDATE SET
+           status = 'running',
+           total_chats = EXCLUDED.total_chats,
+           processed_chats = EXCLUDED.processed_chats,
+           synced_chats = EXCLUDED.synced_chats,
+           inserted_messages = EXCLUDED.inserted_messages,
+           total_batches = EXCLUDED.total_batches,
+           current_batch = EXCLUDED.current_batch,
+           error_message = NULL,
+           blocked_by_campaign = NULL,
+           started_at = COALESCE(public.whatsapp_instance_sync_progress.started_at, now()),
+           updated_at = now()`,
+        [clientId, effectiveInstanceId, instanceName, chats.length, startIndex, syncedChats, insertedMessages, totalBatches, Math.floor(startIndex / batchSize) + 1]
+      ).catch(() => {});
+    }
+
+    console.info(
+      `[sync-evolution] Found ${chats.length} chats. Syncing all chats in batches of ${batchSize} with ${batchPauseMs}ms pauses (starting at chat ${startIndex + 1})...`
+    );
+
+    // Catálogo de contatos da instância: resolve o NOME e o TELEFONE de contatos LID
+    const contactNameByKey = new Map();
+    const phoneByLid = new Map();
     try {
       const ctRes = await fetch(`${baseUrl}/chat/findContacts/${encodeURIComponent(instanceName)}`, {
         method: "POST",
@@ -353,7 +558,6 @@ export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWe
           const digits = jid.split("@")[0].replace(/\D/g, "");
           const nm = String(ct?.pushName || ct?.name || ct?.verifiedName || "").trim();
           if (digits && nm && !/^(você|voce)$/i.test(nm)) contactNameByKey.set(digits, nm);
-          // alguns registros trazem o telefone correspondente ao LID
           const alt = String(ct?.remoteJidAlt || ct?.jid || "");
           if (jid.includes("@lid") && alt.includes("@s.whatsapp.net")) {
             phoneByLid.set(digits, alt.split("@")[0].replace(/\D/g, ""));
@@ -364,39 +568,38 @@ export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWe
       console.warn("[sync-evolution] findContacts indisponível:", e.message);
     }
 
-    // Mapa persistente LID -> telefone: o mesmo contato tem o mesmo LID em
-    // qualquer chip, então um vínculo descoberto por um chip serve para todos.
-    // (Verificado: o LID 60640710402218 traz remoteJidAlt num chip e não noutro.)
+    // Mapa persistente LID -> telefone
     const lidMap = new Map();
-    try {
-      await pgDatabasePool.query(`
-        CREATE TABLE IF NOT EXISTS public.whatsapp_lid_map (
-          lid TEXT PRIMARY KEY,
-          phone TEXT,
-          contact_name TEXT,
-          first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`).catch(() => {});
-      // Perfil público (fetchProfile): unica identificacao disponivel para
-      // contatos LID sem telefone/pushName — foto, descricao do negocio, site.
-      await pgDatabasePool.query(`ALTER TABLE public.whatsapp_lid_map ALTER COLUMN phone DROP NOT NULL`).catch(() => {});
-      await pgDatabasePool.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_pic TEXT`).catch(() => {});
-      await pgDatabasePool.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS description TEXT`).catch(() => {});
-      await pgDatabasePool.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS website TEXT`).catch(() => {});
-      await pgDatabasePool.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_checked BOOLEAN DEFAULT false`).catch(() => {});
-      const { rows: lidRows } = await pgDatabasePool.query(
-        "SELECT lid, phone, contact_name, profile_pic, profile_checked FROM public.whatsapp_lid_map"
-      );
-      for (const r of lidRows) lidMap.set(r.lid, {
-        phone: r.phone, name: r.contact_name, pic: r.profile_pic, checked: r.profile_checked === true,
-      });
-    } catch (e) {
-      console.warn("[sync-evolution] lid_map indisponível:", e.message);
+    if (db) {
+      try {
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS public.whatsapp_lid_map (
+            lid TEXT PRIMARY KEY,
+            phone TEXT,
+            contact_name TEXT,
+            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ALTER COLUMN phone DROP NOT NULL`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_pic TEXT`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS description TEXT`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS website TEXT`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_checked BOOLEAN DEFAULT false`).catch(() => {});
+        const { rows: lidRows } = await db.query(
+          "SELECT lid, phone, contact_name, profile_pic, profile_checked FROM public.whatsapp_lid_map"
+        );
+        for (const r of lidRows) lidMap.set(r.lid, {
+          phone: r.phone, name: r.contact_name, pic: r.profile_pic, checked: r.profile_checked === true,
+        });
+      } catch (e) {
+        console.warn("[sync-evolution] lid_map indisponível:", e.message);
+      }
     }
+
     const rememberLid = async (lid, ph, nm) => {
-      if (!lid || !ph) return;
+      if (!lid || !ph || !db) return;
       lidMap.set(lid, { phone: ph, name: nm || lidMap.get(lid)?.name || null });
-      await pgDatabasePool.query(
+      await db.query(
         `INSERT INTO public.whatsapp_lid_map (lid, phone, contact_name)
          VALUES ($1, $2, $3)
          ON CONFLICT (lid) DO UPDATE SET
@@ -407,326 +610,212 @@ export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWe
       ).catch(() => {});
     };
 
-    // Sincroniza até 200 chats (número comercial tem muitas conversas por dia).
-    const topChats = chats.slice(0, 200);
+    // Processamento de TODOS os chats em lotes de batchSize (padrão 15)
+    for (let i = startIndex; i < chats.length; i += batchSize) {
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      const batchChats = chats.slice(i, i + batchSize);
 
-    for (const chat of topChats) {
-      // A aba Conversas mostra TUDO que existe no WhatsApp do chip: contato
-      // individual, grupo e LID sem telefone conhecido. Filtrar grupo/LID aqui
-      // (regra que só faz sentido para EXTRAIR LEAD, onde é preciso um telefone
-      // discável) zerava a sincronização de chips cujas conversas são grupos —
-      // era por isso que o segundo chip nunca aparecia.
-      const remoteJid = chat.remoteJid || chat.id;
-      if (!remoteJid || remoteJid.includes("@broadcast")) continue;
+      for (const chat of batchChats) {
+        const remoteJid = chat.remoteJid || chat.id;
+        if (!remoteJid || remoteJid.includes("@broadcast")) continue;
 
-      const isGroup = remoteJid.includes("@g.us");
-      const jidDigits = remoteJid.split("@")[0].replace(/\D/g, "");
+        const isGroup = remoteJid.includes("@g.us");
+        const jidDigits = remoteJid.split("@")[0].replace(/\D/g, "");
 
-      // FONTE PRIMÁRIA: o próprio objeto do chat. Em contatos LID o telefone real
-      // vem em lastMessage.key.remoteJidAlt e o nome em pushName — os dois já
-      // chegam no findChats. Só se faltar aqui é que vamos procurar nas mensagens.
-      let phone = "";
-      let chatName = "";
+        let phone = "";
+        let chatName = "";
 
-      if (!isGroup) {
-        const altCandidates = [
-          chat?.lastMessage?.key?.remoteJidAlt,
-          chat?.lastMessage?.key?.participantAlt,
-          chat?.lastMessage?.key?.senderPn,
-          remoteJid.includes("@s.whatsapp.net") ? remoteJid : null,
-        ];
-        for (const c of altCandidates) {
-          const v = String(c || "");
-          if (v.includes("@s.whatsapp.net")) { phone = v.split("@")[0]; break; }
-        }
-      }
-      {
-        const nm = String(chat?.pushName || chat?.name || "").trim();
-        if (nm && !/^(você|voce)$/i.test(nm) && !/^\+?\d[\d\s\-()]*$/.test(nm)) chatName = nm;
-      }
-
-      // Vínculo já descoberto antes (por este ou por outro chip).
-      let knownEntry = null;
-      if (!isGroup) {
-        knownEntry = lidMap.get(remoteJid) || lidMap.get(jidDigits) || null;
-        if (knownEntry) {
-          if (!phone && knownEntry.phone) phone = knownEntry.phone;
-          if (!chatName && knownEntry.name) chatName = knownEntry.name;
-        }
-      }
-
-      // Sem nome e sem telefone: o perfil público é a única identificação que a
-      // API oferece para contatos LID (fetchProfile traz foto, descrição do
-      // negócio e site — não traz nome nem número). Consulta uma vez por LID.
-      if (!isGroup && !chatName && remoteJid.includes("@lid") && !knownEntry?.checked) {
-        try {
-          const pf = await fetch(`${baseUrl}/chat/fetchProfile/${encodeURIComponent(instanceName)}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", apikey: apiKey },
-            body: JSON.stringify({ number: remoteJid }),
-          });
-          if (pf.ok) {
-            const prof = await pf.json();
-            const desc = String(prof?.description || "").trim();
-            const site = String(prof?.website || "").trim();
-            // Nome legível a partir do que existe: descrição do negócio ou o
-            // domínio do site. Não inventa: são dados do próprio perfil.
-            let derived = desc;
-            if (!derived && site) {
-              try {
-                const host = new URL(site.startsWith("http") ? site : `https://${site}`).hostname;
-                derived = host.replace(/^www\./, "").split(".")[0];
-              } catch { /* site inválido */ }
-            }
-            if (derived) chatName = derived;
-            await pgDatabasePool.query(
-              `INSERT INTO public.whatsapp_lid_map (lid, contact_name, profile_pic, description, website, profile_checked)
-               VALUES ($1, $2, $3, $4, $5, true)
-               ON CONFLICT (lid) DO UPDATE SET
-                 contact_name = COALESCE(NULLIF(public.whatsapp_lid_map.contact_name, ''), EXCLUDED.contact_name),
-                 profile_pic = COALESCE(EXCLUDED.profile_pic, public.whatsapp_lid_map.profile_pic),
-                 description = COALESCE(EXCLUDED.description, public.whatsapp_lid_map.description),
-                 website = COALESCE(EXCLUDED.website, public.whatsapp_lid_map.website),
-                 profile_checked = true,
-                 updated_at = now()`,
-              [remoteJid, derived || null, prof?.picture || null, desc || null, site || null]
-            ).catch(() => {});
-            lidMap.set(remoteJid, { ...(knownEntry || {}), name: derived || knownEntry?.name || null, checked: true });
-          }
-        } catch (e) { /* perfil indisponível: segue sem nome */ }
-      }
-      // Descobriu agora -> memoriza para os outros chips/conversas.
-      if (!isGroup && phone && remoteJid.includes("@lid")) {
-        await rememberLid(remoteJid, phone, chatName);
-      }
-
-      // 2. Fetch messages for each of the top chats (incremental quando houver timestamp de corte)
-      try {
-        const messageLimit = latestKnownTimestamp ? 25 : 60;
-        const msgsResponse = await fetch(`${baseUrl}/chat/findMessages/${encodeURIComponent(instanceName)}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: apiKey
-          },
-          body: JSON.stringify({
-            where: {
-              key: {
-                remoteJid: remoteJid
-              }
-            },
-            // Janela de busca: reduzida para 25 em sync incremental para aliviar o Baileys
-            limit: messageLimit
-          })
-        });
-
-        if (!msgsResponse.ok) {
-          console.warn(`[sync-evolution] Failed to fetch messages for chat ${remoteJid}: HTTP ${msgsResponse.status}`);
-          continue;
-        }
-
-        const msgsData = await msgsResponse.json();
-        // Evolution v2: findMessages devolve { messages: { records: [...] } }.
-        // O acesso antigo (msgsData?.messages) pegava o OBJETO paginado, não o
-        // array, e o `if (!Array.isArray) continue` pulava tudo (0 inseridas).
-        const messages = Array.isArray(msgsData)
-          ? msgsData
-          : Array.isArray(msgsData?.messages?.records)
-            ? msgsData.messages.records
-            : Array.isArray(msgsData?.records)
-              ? msgsData.records
-              : Array.isArray(msgsData?.messages)
-                ? msgsData.messages
-                : [];
-
-        // Telefone e nome REAIS vêm das mensagens: em contatos LID o número
-        // aparece em key.remoteJidAlt e o nome (pushName que a pessoa configurou
-        // no WhatsApp dela) nas mensagens recebidas. O objeto do chat costuma vir
-        // sem esses dados, e era por isso que a lista mostrava o LID cru e sem nome.
-        for (const m of messages) {
-          if (!phone) {
-            // O telefone aparece em campos diferentes conforme o tipo de mensagem
-            // e a versao da Evolution; tenta todos os conhecidos.
-            const candidates = [
-              m?.key?.remoteJidAlt,
-              m?.key?.participantAlt,
-              m?.key?.senderPn,
-              m?.participant,
-              m?.key?.participant,
-              m?.contextInfo?.participant,
-            ];
-            for (const c of candidates) {
-              const v = String(c || "");
-              if (v.includes("@s.whatsapp.net")) { phone = v.split("@")[0]; break; }
-            }
-          }
-          if (!chatName && m?.key?.fromMe === false) {
-            const nm = String(m?.pushName || "").trim();
-            if (nm && !/^(você|voce)$/i.test(nm) && !/^\+?\d[\d\s\-()]*$/.test(nm)) chatName = nm;
-          }
-          if (phone && chatName) break;
-        }
-
-        // Fallbacks: catálogo de contatos e o próprio objeto do chat.
-        if (!phone && !isGroup) phone = phoneByLid.get(jidDigits) || "";
-        if (!phone) phone = remoteJid.includes("@s.whatsapp.net") ? remoteJid.split("@")[0] : remoteJid;
-        if (!chatName) {
-          const cands = [
-            String(chat.pushName || "").trim(),
-            String(chat.name || "").trim(),
-            contactNameByKey.get(jidDigits),
-            contactNameByKey.get(String(phone).replace(/\D/g, "")),
+        if (!isGroup) {
+          const altCandidates = [
+            chat?.lastMessage?.key?.remoteJidAlt,
+            chat?.lastMessage?.key?.participantAlt,
+            chat?.lastMessage?.key?.senderPn,
+            remoteJid.includes("@s.whatsapp.net") ? remoteJid : null,
           ];
-          chatName = cands.find(
-            (n) => n && !/^(você|voce)$/i.test(n) && !/^\+?\d[\d\s\-()]*$/.test(n)
-          ) || "";
+          for (const c of altCandidates) {
+            const v = String(c || "");
+            if (v.includes("@s.whatsapp.net")) { phone = v.split("@")[0]; break; }
+          }
         }
-        // Telefone descoberto nas mensagens -> memoriza o vínculo do LID.
-        if (phone && remoteJid.includes("@lid")) {
+        {
+          const nm = String(chat?.pushName || chat?.name || "").trim();
+          if (nm && !/^(você|voce)$/i.test(nm) && !/^\+?\d[\d\s\-()]*$/.test(nm)) chatName = nm;
+        }
+
+        let knownEntry = null;
+        if (!isGroup) {
+          knownEntry = lidMap.get(remoteJid) || lidMap.get(jidDigits) || null;
+          if (knownEntry) {
+            if (!phone && knownEntry.phone) phone = knownEntry.phone;
+            if (!chatName && knownEntry.name) chatName = knownEntry.name;
+          }
+        }
+
+        if (!isGroup && !chatName && remoteJid.includes("@lid") && !knownEntry?.checked) {
+          try {
+            const pf = await fetch(`${baseUrl}/chat/fetchProfile/${encodeURIComponent(instanceName)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: apiKey },
+              body: JSON.stringify({ number: remoteJid }),
+            });
+            if (pf.ok) {
+              const prof = await pf.json();
+              const desc = String(prof?.description || "").trim();
+              const site = String(prof?.website || "").trim();
+              let derived = desc;
+              if (!derived && site) {
+                try {
+                  const host = new URL(site.startsWith("http") ? site : `https://${site}`).hostname;
+                  derived = host.replace(/^www\./, "").split(".")[0];
+                } catch {}
+              }
+              if (derived) chatName = derived;
+              if (db) {
+                await db.query(
+                  `INSERT INTO public.whatsapp_lid_map (lid, contact_name, profile_pic, description, website, profile_checked)
+                   VALUES ($1, $2, $3, $4, $5, true)
+                   ON CONFLICT (lid) DO UPDATE SET
+                     contact_name = COALESCE(NULLIF(public.whatsapp_lid_map.contact_name, ''), EXCLUDED.contact_name),
+                     profile_pic = COALESCE(EXCLUDED.profile_pic, public.whatsapp_lid_map.profile_pic),
+                     description = COALESCE(EXCLUDED.description, public.whatsapp_lid_map.description),
+                     website = COALESCE(EXCLUDED.website, public.whatsapp_lid_map.website),
+                     profile_checked = true,
+                     updated_at = now()`,
+                  [remoteJid, derived || null, prof?.picture || null, desc || null, site || null]
+                ).catch(() => {});
+              }
+              lidMap.set(remoteJid, { ...(knownEntry || {}), name: derived || knownEntry?.name || null, checked: true });
+            }
+          } catch (e) {}
+        }
+        if (!isGroup && phone && remoteJid.includes("@lid")) {
           await rememberLid(remoteJid, phone, chatName);
         }
-        if (!phone) continue;
 
-        // Sem mensagens não há o que inserir, mas o chat já foi resolvido acima
-        // (telefone/nome do objeto do chat) — não descarta a conversa por isso.
-        if (!Array.isArray(messages)) continue;
+        // 2. Fetch messages for each chat
+        try {
+          const messageLimit = latestKnownTimestamp ? 25 : 60;
+          const msgsResponse = await fetch(`${baseUrl}/chat/findMessages/${encodeURIComponent(instanceName)}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: apiKey,
+            },
+            body: JSON.stringify({
+              where: {
+                key: {
+                  remoteJid: remoteJid,
+                },
+              },
+              limit: messageLimit,
+            }),
+          });
 
-        // Resolve lead details once per chat
-        const leadRes = await pgDatabasePool.query(
-          `
-            SELECT id, source_campaign_id 
-            FROM public.leads 
-            WHERE client_id = $1 AND (telefone = $2 OR telefone = $3 OR telefone = $4)
-            ORDER BY created_at DESC 
-            LIMIT 1
-          `,
-          [
-            clientId,
-            phone,
-            phone.replace(/^55/, ""),
-            phone.startsWith("55") ? phone : `55${phone}`
-          ]
-        );
-        const leadId = leadRes.rows[0]?.id || null;
-        const campaignId = leadRes.rows[0]?.source_campaign_id || null;
-
-        for (const msg of messages) {
-          const fromMe = msg.key?.fromMe === true;
-          const messageText = 
-            msg.message?.conversation || 
-            msg.message?.extendedTextMessage?.text || 
-            msg.messageText || 
-            "";
-
-          if (!messageText) continue;
-
-          const timestamp = msg.messageTimestamp 
-            ? new Date(msg.messageTimestamp * 1000) 
-            : new Date();
-
-          // Sync Incremental: mensagens chegam da mais recente para a mais antiga.
-          // Se encontramos uma mensagem anterior ou igual ao corte já gravado,
-          // interrompe o processamento deste chat para poupar CPU e I/O.
-          if (latestKnownTimestamp && timestamp <= latestKnownTimestamp) {
-            break;
+          if (!msgsResponse.ok) {
+            console.warn(`[sync-evolution] Failed to fetch messages for chat ${remoteJid}: HTTP ${msgsResponse.status}`);
+            continue;
           }
 
-          const waMessageId = msg.key?.id ? String(msg.key.id).trim() : null;
+          const msgsData = await msgsResponse.json();
+          const messages = Array.isArray(msgsData)
+            ? msgsData
+            : Array.isArray(msgsData?.messages?.records)
+              ? msgsData.messages.records
+              : Array.isArray(msgsData?.records)
+                ? msgsData.records
+                : Array.isArray(msgsData?.messages)
+                  ? msgsData.messages
+                  : [];
 
-          if (waMessageId) {
-            try {
-              const insertRes = await pgDatabasePool.query(
-                `
-                  INSERT INTO public.lead_messages 
-                    (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, message_timestamp, meta, instance_name, contact_name, is_group, wa_message_id)
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13, $14)
-                  ON CONFLICT (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
-                  RETURNING id
-                `,
-                [
-                  clientId,
-                  leadId,
-                  campaignId,
-                  phone,
-                  fromMe ? "user" : "lead",
-                  fromMe ? "outbound" : "inbound",
-                  messageText,
-                  timestamp,
-                  timestamp,
-                  JSON.stringify({}),
-                  instanceName,
-                  chatName || null,
-                  isGroup,
-                  waMessageId
-                ]
-              );
-              if (insertRes.rowCount > 0) {
-                insertedMessages++;
-              }
-            } catch (fkErr) {
-              // Se violar FK em campaign_id, tenta novamente com campaign_id: null
-              if (fkErr.code === "23503" || String(fkErr.message).includes("foreign key")) {
-                const retryRes = await pgDatabasePool.query(
-                  `
-                    INSERT INTO public.lead_messages 
-                      (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, message_timestamp, meta, instance_name, contact_name, is_group, wa_message_id)
-                    VALUES ($1, $2, NULL, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13, $14)
-                    ON CONFLICT (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
-                    RETURNING id
-                  `,
-                  [
-                    clientId,
-                    leadId,
-                    phone,
-                    fromMe ? "user" : "lead",
-                    fromMe ? "outbound" : "inbound",
-                    messageText,
-                    timestamp,
-                    timestamp,
-                    JSON.stringify({}),
-                    instanceName,
-                    chatName || null,
-                    isGroup,
-                    waMessageId
-                  ]
-                );
-                if (retryRes.rowCount > 0) {
-                  insertedMessages++;
-                }
-              } else {
-                console.warn("[sync-evolution] Insert error with wa_message_id:", fkErr.message || fkErr);
+          for (const m of messages) {
+            if (!phone) {
+              const candidates = [
+                m?.key?.remoteJidAlt,
+                m?.key?.participantAlt,
+                m?.key?.senderPn,
+                m?.participant,
+                m?.key?.participant,
+                m?.contextInfo?.participant,
+              ];
+              for (const c of candidates) {
+                const v = String(c || "");
+                if (v.includes("@s.whatsapp.net")) { phone = v.split("@")[0]; break; }
               }
             }
-          } else {
-            // Fallback caso a mensagem não traga key.id
-            try {
-              const checkRes = await pgDatabasePool.query(
-                `
-                  SELECT id 
-                  FROM public.lead_messages
-                  WHERE client_id = $1 AND phone = $2 AND message_text = $3
-                    AND (
-                      (message_timestamp >= $4 AND message_timestamp <= $5)
-                      OR (created_at >= $4 AND created_at <= $5)
-                    )
-                  LIMIT 1
-                `,
-                [
-                  clientId,
-                  phone,
-                  messageText,
-                  new Date(timestamp.getTime() - 5000),
-                  new Date(timestamp.getTime() + 5000)
-                ]
-              );
+            if (!chatName && m?.key?.fromMe === false) {
+              const nm = String(m?.pushName || "").trim();
+              if (nm && !/^(você|voce)$/i.test(nm) && !/^\+?\d[\d\s\-()]*$/.test(nm)) chatName = nm;
+            }
+            if (phone && chatName) break;
+          }
 
-              if (checkRes.rowCount === 0) {
-                await pgDatabasePool.query(
-                  `
-                    INSERT INTO public.lead_messages 
-                      (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, message_timestamp, meta, instance_name, contact_name, is_group)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13)
-                  `,
+          if (!phone && !isGroup) phone = phoneByLid.get(jidDigits) || "";
+          if (!phone) phone = remoteJid.includes("@s.whatsapp.net") ? remoteJid.split("@")[0] : remoteJid;
+          if (!chatName) {
+            const cands = [
+              String(chat.pushName || "").trim(),
+              String(chat.name || "").trim(),
+              contactNameByKey.get(jidDigits),
+              contactNameByKey.get(String(phone).replace(/\D/g, "")),
+            ];
+            chatName = cands.find(
+              (n) => n && !/^(você|voce)$/i.test(n) && !/^\+?\d[\d\s\-()]*$/.test(n)
+            ) || "";
+          }
+          if (phone && remoteJid.includes("@lid")) {
+            await rememberLid(remoteJid, phone, chatName);
+          }
+          if (!phone) continue;
+          if (!Array.isArray(messages)) continue;
+
+          let leadId = null;
+          let campaignId = null;
+          if (db) {
+            const leadRes = await db.query(
+              `SELECT id, source_campaign_id 
+               FROM public.leads 
+               WHERE client_id = $1 AND (telefone = $2 OR telefone = $3 OR telefone = $4)
+               ORDER BY created_at DESC 
+               LIMIT 1`,
+              [
+                clientId,
+                phone,
+                phone.replace(/^55/, ""),
+                phone.startsWith("55") ? phone : `55${phone}`,
+              ]
+            ).catch(() => ({ rows: [] }));
+            leadId = leadRes.rows[0]?.id || null;
+            campaignId = leadRes.rows[0]?.source_campaign_id || null;
+          }
+
+          for (const msg of messages) {
+            const fromMe = msg.key?.fromMe === true;
+            const messageText =
+              msg.message?.conversation ||
+              msg.message?.extendedTextMessage?.text ||
+              msg.messageText ||
+              "";
+
+            if (!messageText) continue;
+
+            const timestamp = msg.messageTimestamp
+              ? new Date(msg.messageTimestamp * 1000)
+              : new Date();
+
+            if (latestKnownTimestamp && timestamp <= latestKnownTimestamp) {
+              break;
+            }
+
+            const waMessageId = msg.key?.id ? String(msg.key.id).trim() : null;
+
+            if (waMessageId && db) {
+              try {
+                const insertRes = await db.query(
+                  `INSERT INTO public.lead_messages 
+                     (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, message_timestamp, meta, instance_name, contact_name, is_group, wa_message_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13, $14)
+                   ON CONFLICT (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
+                   RETURNING id`,
                   [
                     clientId,
                     leadId,
@@ -740,29 +829,153 @@ export async function syncEvolutionInstanceChatsAndMessages(clientId, dispatchWe
                     JSON.stringify({}),
                     instanceName,
                     chatName || null,
-                    isGroup
+                    isGroup,
+                    waMessageId,
                   ]
                 );
-                insertedMessages++;
+                if (insertRes.rowCount > 0) {
+                  insertedMessages++;
+                }
+              } catch (fkErr) {
+                if (fkErr.code === "23503" || String(fkErr.message).includes("foreign key")) {
+                  const retryRes = await db.query(
+                    `INSERT INTO public.lead_messages 
+                       (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, message_timestamp, meta, instance_name, contact_name, is_group, wa_message_id)
+                     VALUES ($1, $2, NULL, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13, $14)
+                     ON CONFLICT (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
+                     RETURNING id`,
+                    [
+                      clientId,
+                      leadId,
+                      phone,
+                      fromMe ? "user" : "lead",
+                      fromMe ? "outbound" : "inbound",
+                      messageText,
+                      timestamp,
+                      timestamp,
+                      JSON.stringify({}),
+                      instanceName,
+                      chatName || null,
+                      isGroup,
+                      waMessageId,
+                    ]
+                  ).catch(() => ({ rowCount: 0 }));
+                  if (retryRes.rowCount > 0) {
+                    insertedMessages++;
+                  }
+                }
               }
-            } catch (fallbackErr) {
-              console.warn("[sync-evolution] Fallback insert error:", fallbackErr.message || fallbackErr);
+            } else if (db) {
+              try {
+                const checkRes = await db.query(
+                  `SELECT id 
+                   FROM public.lead_messages
+                   WHERE client_id = $1 AND phone = $2 AND message_text = $3
+                     AND (
+                       (message_timestamp >= $4 AND message_timestamp <= $5)
+                       OR (created_at >= $4 AND created_at <= $5)
+                     )
+                   LIMIT 1`,
+                  [
+                    clientId,
+                    phone,
+                    messageText,
+                    new Date(timestamp.getTime() - 5000),
+                    new Date(timestamp.getTime() + 5000),
+                  ]
+                );
+
+                if (checkRes.rowCount === 0) {
+                  await db.query(
+                    `INSERT INTO public.lead_messages 
+                       (client_id, lead_id, campaign_id, phone, sender_type, direction, message_text, created_at, delivered_at, message_timestamp, meta, instance_name, contact_name, is_group)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13)`,
+                    [
+                      clientId,
+                      leadId,
+                      campaignId,
+                      phone,
+                      fromMe ? "user" : "lead",
+                      fromMe ? "outbound" : "inbound",
+                      messageText,
+                      timestamp,
+                      timestamp,
+                      JSON.stringify({}),
+                      instanceName,
+                      chatName || null,
+                      isGroup,
+                    ]
+                  ).catch(() => {});
+                  insertedMessages++;
+                }
+              } catch (fallbackErr) {}
             }
           }
+          syncedChats++;
+          // Micro-throttle de 80ms entre chats dentro do lote para estabilidade do socket Baileys
+          await new Promise((r) => setTimeout(r, 80));
+        } catch (chatErr) {
+          console.error(`[sync-evolution] Error syncing messages for chat ${remoteJid}:`, chatErr.message || chatErr);
         }
-        syncedChats++;
+      }
 
-        // Throttle de 100ms entre chats para não saturar o socket Baileys da Evolution
-        await new Promise((r) => setTimeout(r, 100));
-      } catch (chatErr) {
-        console.error(`[sync-evolution] Error syncing messages for chat ${remoteJid}:`, chatErr.message || chatErr);
+      // Checkpoint após término de cada lote de 15 conversas
+      const processedCount = Math.min(i + batchChats.length, chats.length);
+      const lastChatInBatch = batchChats[batchChats.length - 1];
+      const lastRemoteJid = lastChatInBatch ? (lastChatInBatch.remoteJid || lastChatInBatch.id) : null;
+
+      if (db) {
+        await db.query(
+          `UPDATE public.whatsapp_instance_sync_progress
+           SET processed_chats = $1,
+               synced_chats = $2,
+               inserted_messages = $3,
+               current_batch = $4,
+               last_remote_jid = $5,
+               updated_at = now()
+           WHERE client_id = $6 AND instance_id = $7`,
+          [processedCount, syncedChats, insertedMessages, batchNumber, lastRemoteJid, clientId, effectiveInstanceId]
+        ).catch(() => {});
+      }
+
+      // Pausa controlada (padrão 1.2s) entre lotes para não sobrecarregar a Evolution
+      if (i + batchSize < chats.length) {
+        await new Promise((r) => setTimeout(r, batchPauseMs));
       }
     }
+
+    // Marca conclusão com sucesso
+    if (db) {
+      await db.query(
+        `UPDATE public.whatsapp_instance_sync_progress
+         SET status = 'completed',
+             processed_chats = total_chats,
+             synced_chats = $1,
+             inserted_messages = $2,
+             finished_at = now(),
+             updated_at = now()
+         WHERE client_id = $3 AND instance_id = $4`,
+        [syncedChats, insertedMessages, clientId, effectiveInstanceId]
+      ).catch(() => {});
+    }
+
     console.info(`[sync-evolution] Instance ${instanceName}: ${syncedChats} conversas processadas, ${insertedMessages} mensagens novas.`);
     return { instanceName, chats: chats.length, synced: syncedChats, messages: insertedMessages, error: null };
   } catch (err) {
     console.error(`[sync-evolution] Background sync error:`, err.message || err);
+    if (db) {
+      await db.query(
+        `UPDATE public.whatsapp_instance_sync_progress
+         SET status = 'failed',
+             error_message = $1,
+             updated_at = now()
+         WHERE client_id = $2 AND instance_id = $3`,
+        [err?.message || "erro no sync", clientId, effectiveInstanceId]
+      ).catch(() => {});
+    }
     return { instanceName: null, chats: 0, synced: 0, messages: 0, error: err?.message || "erro no sync" };
+  } finally {
+    activeSyncsByChip.delete(lockKey);
   }
 }
 
@@ -1593,11 +1806,7 @@ export async function validateWhatsappNumbersWithCache({ pool, webhookUrl, webho
 }
 
 /**
- * Helper canônico único para resolver qualquer identificador de chip (nome amigável,
- * UUID da tabela lead_client_evolution_instances ou sufixo da URL dispatch_webhook_url).
- * Garante que webhook inbound, disparos de campanha, sincronização e filtros do inbox
- * utilizem exatamente a mesma lógica de correspondência e aliases.
- *
+ * Helper único de resolução de identificador de chip / instância Evolution.
  * Aceita qualquer um dos três formatos:
  * 1. name (amigável, ex: "GD Priscila")
  * 2. id (UUID, ex: "73ba3e2a-d8c6-4502-a83c-6d6cf1e82d21")
@@ -1670,5 +1879,4 @@ export async function resolveEvolutionInstanceOwner({ clientId, instanceName = n
   const { chip } = await resolveInstanceIdentifier({ clientId, identifier: instanceName, pool, dbPool });
   return chip?.owner_uid || null;
 }
-
 

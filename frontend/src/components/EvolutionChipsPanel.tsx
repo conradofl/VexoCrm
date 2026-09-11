@@ -50,15 +50,34 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
   const handleSyncInstance = async (instance: LeadClientEvolutionInstance) => {
     setSyncingInstanceId(instance.id);
     try {
-      await syncEvolutionInstance.mutateAsync(instance.id);
+      const res = await syncEvolutionInstance.mutateAsync(instance.id);
+      if (res?.deferred) {
+        toast({
+          title: "Sincronização adiada",
+          description:
+            res.message ||
+            `A campanha "${res.campaignName}" está em disparo ativo. Aguarde a finalização do disparo para sincronizar.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (res?.running) {
+        toast({
+          title: "Sincronização em andamento",
+          description:
+            res.message ||
+            `Este chip já possui uma sincronização em andamento (${res.progress?.processed_chats || 0}/${res.progress?.total_chats || 0} conversas).`,
+        });
+        return;
+      }
       toast({
         title: "Sincronização iniciada",
-        description: `${instance.name}: importando o histórico em segundo plano. As conversas aparecem na aba "Conversas" conforme forem chegando.`,
+        description: `${instance.name}: importando o histórico em lotes com proteção contra sobrecarga. O progresso é exibido no card.`,
       });
       // Recarrega a lista depois de um tempo, já com parte do histórico.
       setTimeout(() => {
         queryClientRef.invalidateQueries({ queryKey: ["whatsapp-chats"] });
-      }, 15000);
+      }, 10000);
     } catch (e) {
       toast({
         title: "Falha ao sincronizar",

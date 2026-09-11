@@ -526,6 +526,36 @@ export function useLeadClientEvolutionInstanceStatus(tenantId: string, instanceI
   });
 }
 
+export interface EvolutionInstanceSyncProgress {
+  client_id: string;
+  instance_id: string;
+  instance_name?: string | null;
+  status: "idle" | "running" | "completed" | "failed" | "deferred";
+  total_chats: number;
+  processed_chats: number;
+  synced_chats: number;
+  inserted_messages: number;
+  last_remote_jid?: string | null;
+  current_batch: number;
+  total_batches: number;
+  error_message?: string | null;
+  blocked_by_campaign?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SyncLeadClientEvolutionInstanceResult {
+  success: boolean;
+  started?: boolean;
+  deferred?: boolean;
+  running?: boolean;
+  campaignName?: string;
+  instance?: string;
+  message?: string;
+  progress?: EvolutionInstanceSyncProgress;
+}
+
 /**
  * Importa as conversas de UM chip para a aba Conversas. Explícito: antes o sync
  * só rodava como efeito colateral de salvar o webhook, então não havia como
@@ -536,7 +566,7 @@ export function useSyncLeadClientEvolutionInstance(tenantId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (instanceId: string) => {
+    mutationFn: async (instanceId: string): Promise<SyncLeadClientEvolutionInstanceResult> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
 
@@ -555,15 +585,44 @@ export function useSyncLeadClientEvolutionInstance(tenantId: string) {
       if (!res.ok) {
         throw new Error(data?.error?.message || "Falha ao sincronizar conversas deste chip.");
       }
-      return data as {
-        instance: string;
-        started?: boolean;
-        message?: string;
-      };
+      return data as SyncLeadClientEvolutionInstanceResult;
     },
-    onSuccess: () => {
+    onSuccess: (_, instanceId) => {
+      queryClient.invalidateQueries({ queryKey: ["evolution-instance-sync-status", tenantId, instanceId] });
       queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
       queryClient.invalidateQueries({ queryKey: ["whatsapp-messages"] });
+    },
+  });
+}
+
+/**
+ * Consulta o progresso em tempo real da sincronização de histórico de um chip.
+ * Quando o status for 'running', atualiza via polling a cada 2 segundos.
+ */
+export function useEvolutionInstanceSyncStatus(tenantId: string, instanceId: string | null) {
+  const { getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["evolution-instance-sync-status", tenantId, instanceId],
+    queryFn: async () => {
+      if (!instanceId) return null;
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+
+      const res = await fetchApi(
+        `/api/lead-clients/${encodeURIComponent(tenantId)}/evolution-instances/${encodeURIComponent(instanceId)}/sync-status`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return null;
+      return (data?.progress || null) as EvolutionInstanceSyncProgress | null;
+    },
+    enabled: Boolean(tenantId && instanceId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "running" ? 2000 : false;
     },
   });
 }
