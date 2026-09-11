@@ -26,6 +26,7 @@ import {
   Check,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   ShieldAlert,
   Inbox,
   User,
@@ -41,8 +42,6 @@ import {
   Undo2,
   UserPlus,
   CheckCheck,
-  Clock3,
-  UserCheck,
 } from "lucide-react";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
