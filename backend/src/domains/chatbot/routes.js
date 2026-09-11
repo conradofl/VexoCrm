@@ -573,9 +573,9 @@ export function registerChatbotRoutes(app, deps) {
                 AND (cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")})
             )::integer as awaiting_count
           FROM latest_messages m
-          LEFT JOIN public.whatsapp_chat_states cs ON cs.client_id = $1 AND cs.phone = m.phone;
         `;
-        const countsRes = await pgDatabasePool.query(countsQueryText, [clientId]);
+        const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
+        const countsRes = await pgDatabasePool.query(countsQueryText, countsParams);
         const countsRow = countsRes.rows[0];
         if (countsRow) {
           counts = {
