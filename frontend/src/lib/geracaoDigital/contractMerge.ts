@@ -6,19 +6,25 @@ export function buildSignatureBlock(data: Record<string, any>): string {
   return `\n\n____________________________________________________\nContratada: ${contratada}${espaco}\n____________________________________________________\nContratante: ${contratante}`;
 }
 
+export const CONTRACT_FILL_LINE = "______________________________";
+
 export function applyContractMerge(template: string, data: Record<string, string>): string {
   if (!template) return "";
   
   let result = template;
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key, value] of Object.entries(data || {})) {
     const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
-    result = result.replace(regex, value || "");
+    const val = value != null ? String(value).trim() : "";
+    result = result.replace(regex, val || CONTRACT_FILL_LINE);
   }
+
+  // Varre qualquer {{marcador}} restante que não foi preenchido e troca por linha de preenchimento
+  result = result.replace(/\{\{[^}]+\}\}/g, CONTRACT_FILL_LINE);
 
   // Se o template não possui o bloco de assinaturas, anexa as assinaturas dinâmicas
   const jaPossuiAssinaturas = /Contratada:\s*.*?\n.*?Contratante:/is.test(result) || result.includes("________________");
   if (!jaPossuiAssinaturas) {
-    result += buildSignatureBlock(data);
+    result += buildSignatureBlock(data || {});
   }
 
   return result;

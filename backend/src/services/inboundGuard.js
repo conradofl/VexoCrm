@@ -20,6 +20,24 @@ export function resolveInboundEventName(body) {
   return String(bruto || "").trim().toLowerCase().replace(/_/g, ".");
 }
 
+/**
+ * Detecta JID de GRUPO / broadcast no inbound da Evolution. Resposta de lead legítima
+ * vem SEMPRE de número individual (@s.whatsapp.net); grupo (@g.us) nunca é lead.
+ * IMPORTANTE: receber o remoteJid CRU (antes de sanitizePhone, que stripa o "@g.us").
+ * Regra: @g.us | @broadcast | user-part com hífen | user-part numérico > 15 dígitos.
+ */
+export function isGroupJid(rawJid) {
+  const s = String(rawJid ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (s.includes("@g.us")) return true;
+  if (s.includes("@broadcast")) return true;
+  const userPart = s.split("@")[0];
+  if (userPart.includes("-")) return true;
+  const digits = userPart.replace(/\D/g, "");
+  if (digits.length > 15) return true;
+  return false;
+}
+
 /** Cobre os formatos ja vistos: data.key.key, key solto e o campo plano. */
 export function isFromMe(body) {
   return (

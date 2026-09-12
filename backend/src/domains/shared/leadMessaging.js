@@ -3,25 +3,8 @@ import { supabase as liveSupabase } from "../../services/database.js";
 import { maskPhoneForLog } from "../../services/tenant.js";
 import { resolveInstanceIdentifier } from "../../services/evolution.js";
 
-/**
- * Detecta JID de GRUPO / broadcast no inbound da Evolution. Resposta de lead legítima
- * vem SEMPRE de número individual (@s.whatsapp.net); grupo (@g.us) nunca é lead.
- * IMPORTANTE: receber o remoteJid CRU (antes de sanitizePhone, que stripa o "@g.us").
- * Regra (conservadora p/ não descartar individual): @g.us | @broadcast | user-part com
- * hífen (formato legado phone-timestamp) | user-part numérico > 15 dígitos (ids de grupo
- * têm 18+; individual BR ≤ 13).
- */
-export function isGroupJid(rawJid) {
-  const s = String(rawJid ?? "").trim().toLowerCase();
-  if (!s) return false;
-  if (s.includes("@g.us")) return true;
-  if (s.includes("@broadcast")) return true;
-  const userPart = s.split("@")[0];
-  if (userPart.includes("-")) return true;
-  const digits = userPart.replace(/\D/g, "");
-  if (digits.length > 15) return true;
-  return false;
-}
+import { isGroupJid } from "../../services/inboundGuard.js";
+export { isGroupJid };
 
 /**
  * Factory: recebe as deps que appendLeadMessage/maskSecretPresence capturavam via
@@ -55,6 +38,7 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
     instanceName = null,
     waMessageId = null,
     messageTimestamp = null,
+    mediaPath = null,
   }) {
     const supabase = injectedSupabase || liveSupabase;
     if (!supabase) {
@@ -164,14 +148,24 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
       meta: meta && typeof meta === "object" ? meta : {},
       instance_name: canonicalInstanceName || instanceName || null,
       wa_message_id: waMessageId || null,
+      media_path: mediaPath || null,
     };
 
     let { error } = await supabase.from("lead_messages").insert(payload);
+
+    // Se falhar por coluna media_path inexistente, tenta sem ela
+    if (error && String(error.message).includes("media_path")) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.media_path;
+      const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);
+      error = retryRes.error;
+    }
 
     // Se falhar por coluna message_timestamp inexistente, tenta sem ela
     if (error && String(error.message).includes("message_timestamp")) {
       const fallbackPayload = { ...payload };
       delete fallbackPayload.message_timestamp;
+      delete fallbackPayload.media_path;
       const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);
       error = retryRes.error;
     }

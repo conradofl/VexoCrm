@@ -56,6 +56,7 @@ export interface WhatsAppMessage {
   timestamp: number | null;
   type: string | null;
   hasMedia: boolean;
+  mediaPath?: string | null;
   waMessageId?: string | null;
   phone?: string | null;
   direction?: string | null;
@@ -643,6 +644,47 @@ export function useSendWhatsAppMessage(clientId: string | null, chatId: string |
       });
 
       return parseApiResponse<{ item: WhatsAppMessage }>(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-messages", clientId] });
+    },
+  });
+}
+
+export interface SendWhatsAppMediaParams {
+  mediaType: "audio" | "image" | "video" | "document";
+  base64: string;
+  mimetype?: string;
+  fileName?: string;
+  caption?: string;
+}
+
+export function useSendWhatsAppMediaMessage(clientId: string | null, chatId: string | null) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: SendWhatsAppMediaParams) => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuário não autenticado.");
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/messages/media`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId,
+          chatId,
+          ...params,
+        }),
+      });
+
+      return parseApiResponse<{ success: boolean; item: WhatsAppMessage }>(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-chats", clientId] });

@@ -5,27 +5,35 @@ import { API_BASE_URL } from "@/lib/api";
 export type MediaType = "audio" | "image" | "video" | "document" | "sticker";
 
 export interface MediaMessage {
-  messageId: string;
+  messageId?: string;
+  waMessageId?: string;
   mediaType: MediaType;
-  mimeType: string;
+  mimeType: string | null;
   dataUrl: string | null;
   url: string | null;
   transcription: string | null;
   description: string | null;
   fileName: string | null;
+  expired?: boolean;
+  source?: string;
 }
 
-export function useMediaMessage(messageId: string | null, hasMedia: boolean) {
+export function useMediaMessage(messageId: string | null, hasMedia: boolean, clientId?: string | null) {
   const { getIdToken } = useAuth();
 
   return useQuery({
-    queryKey: ["media-message", messageId],
+    queryKey: ["media-message", messageId, clientId],
     enabled: hasMedia && !!messageId,
     queryFn: async (): Promise<MediaMessage | null> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
 
-      const res = await fetch(`${API_BASE_URL}/api/media/${encodeURIComponent(messageId!)}`, {
+      const params = new URLSearchParams({ format: "json" });
+      if (clientId) {
+        params.set("clientId", clientId);
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/media/${encodeURIComponent(messageId!)}?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 

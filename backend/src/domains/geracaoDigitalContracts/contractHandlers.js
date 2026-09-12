@@ -16,13 +16,19 @@ function formatExtenseDate() {
   return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
 }
 
+export const CONTRACT_FILL_LINE = "______________________________";
+
 // Mail merge function
-function applyMerge(template, data) {
+export function applyMerge(template, data = {}) {
+  if (!template) return "";
   let result = template;
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key, value] of Object.entries(data || {})) {
     const regex = new RegExp(`{{${key}}}`, "g");
-    result = result.replace(regex, value || "");
+    const val = value != null ? String(value).trim() : "";
+    result = result.replace(regex, val || CONTRACT_FILL_LINE);
   }
+  // Varre qualquer {{marcador}} restante que não foi preenchido e troca por linha de preenchimento
+  result = result.replace(/\{\{[^}]+\}\}/g, CONTRACT_FILL_LINE);
   return result;
 }
 
@@ -323,7 +329,7 @@ function renderFormattedParagraph(doc, text, options = {}) {
 }
 
 // Renderização do documento (mesmo layout do preview da tela).
-async function renderContractPdf(templateConteudo, dados) {
+export async function renderContractPdf(templateConteudo, dados) {
   {
     const mergedContent = applyMerge(templateConteudo, dados);
 

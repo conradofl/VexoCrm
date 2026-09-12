@@ -15,10 +15,11 @@ import {
 import { getLeadClientN8nSettings } from "./services/n8nSettings.js";
 import { qualifyLead } from "./hardcoded-chatbot-persistence.js";
 import { LEADS_OUTLIER_TEMPERATURE } from "./services/leadImport.js";
-import { resolveMessageId } from "./services/inboundGuard.js";
+import { resolveMessageId, isGroupJid, isFromMe } from "./services/inboundGuard.js";
 import { extractJsonFromLlmText, validateOutboundMessage, stripReasoningBlocks } from "./services/jsonExtractor.js";
 import { maskPhoneForLog } from "./services/tenant.js";
-import { resolveEvolutionInstanceOwner } from "./services/evolution.js";
+import { resolveEvolutionInstanceOwner, fetchMediaBase64FromEvolution } from "./services/evolution.js";
+import { saveMediaBuffer } from "./services/storage.js";
 
 /**
  * Chatbot AI Engine
@@ -529,6 +530,7 @@ export function extractMediaBase64(evolutionBody) {
     msg.audioMessage?.base64 ||
     msg.pttMessage?.base64 ||
     msg.imageMessage?.base64 ||
+    msg.stickerMessage?.base64 ||
     null
   );
 }
@@ -539,11 +541,15 @@ export function extractMediaMimetype(evolutionBody) {
     msg.audioMessage?.mimetype ||
     msg.pttMessage?.mimetype ||
     msg.imageMessage?.mimetype ||
+    msg.stickerMessage?.mimetype ||
+    (msg.stickerMessage ? "image/webp" : null) ||
     null
   );
 }
 
 // ─── Transcrição de áudio via Groq Whisper ───────────────────────────────────
+
+export const AUDIO_TRANSCRIPTION_TIMEOUT_MS = Number(process.env.AUDIO_TRANSCRIPTION_TIMEOUT_MS || 8000);
 
 export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
   if (!groqKey()) {
@@ -551,6 +557,7 @@ export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
     return null;
   }
 
+  const startMs = Date.now();
   try {
     const ext = mimetype.includes("ogg") ? "ogg" : mimetype.includes("mp4") ? "mp4" : mimetype.includes("mpeg") ? "mp3" : "ogg";
     const buffer = Buffer.from(base64Data, "base64");
@@ -566,27 +573,44 @@ export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
       method: "POST",
       headers: { Authorization: `Bearer ${groqKey()}` },
       body: formData,
+      signal: AbortSignal.timeout(AUDIO_TRANSCRIPTION_TIMEOUT_MS),
     });
+
+    const durationMs = Date.now() - startMs;
 
     if (!res.ok) {
       const err = await res.text();
-      console.error("[chatbot-ai] Whisper error:", err.slice(0, 200));
+      console.error(`[chatbot-ai] Whisper error (${durationMs}ms):`, err.slice(0, 200));
       return null;
     }
 
     const data = await res.json();
-    return data.text || null;
+    const text = data.text || null;
+    if (text) {
+      console.log(`[chatbot-ai] Audio transcribed in ${durationMs}ms:`, text.slice(0, 80));
+    }
+    return text;
   } catch (err) {
-    console.error("[chatbot-ai] transcribeAudio error:", err.message);
+    const durationMs = Date.now() - startMs;
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      console.warn(
+        `[chatbot-ai] Transcrição de áudio atingiu timeout (${durationMs}ms > ${AUDIO_TRANSCRIPTION_TIMEOUT_MS}ms) — fallback para [áudio]`
+      );
+    } else {
+      console.error(`[chatbot-ai] transcribeAudio error (${durationMs}ms):`, err.message);
+    }
     return null;
   }
 }
 
 // ─── Descrição de imagem via Groq Vision ─────────────────────────────────────
 
+export const IMAGE_DESCRIPTION_TIMEOUT_MS = Number(process.env.IMAGE_DESCRIPTION_TIMEOUT_MS || 10000);
+
 export async function describeImage(base64Data, mimetype = "image/jpeg", caption = "") {
   if (!groqKey()) return null;
 
+  const startMs = Date.now();
   try {
     const dataUrl = `data:${mimetype};base64,${base64Data}`;
     const userContent = [
@@ -613,30 +637,50 @@ export async function describeImage(base64Data, mimetype = "image/jpeg", caption
         messages: [{ role: "user", content: userContent }],
         max_tokens: 200,
       }),
+      signal: AbortSignal.timeout(IMAGE_DESCRIPTION_TIMEOUT_MS),
     });
 
+    const durationMs = Date.now() - startMs;
+
     if (!res.ok) {
-      // Corpo do erro junto: sem ele, "Vision error: 400" nao dizia se o
-      // problema era o modelo descontinuado, a chave ou a imagem.
       const detalhe = await res.text().catch(() => "");
       console.error(
-        `[chatbot-ai] Vision error ${res.status} (modelo "${GROQ_VISION_MODEL}"):`,
+        `[chatbot-ai] Vision error ${res.status} (${durationMs}ms, modelo "${GROQ_VISION_MODEL}"):`,
         detalhe.slice(0, 300)
       );
       return null;
     }
 
     const data = await res.json();
-    return data.choices?.[0]?.message?.content || null;
+    const content = data.choices?.[0]?.message?.content || null;
+    if (content) {
+      console.log(`[chatbot-ai] Image described in ${durationMs}ms:`, content.slice(0, 80));
+    }
+    return content;
   } catch (err) {
-    console.error("[chatbot-ai] describeImage error:", err.message);
+    const durationMs = Date.now() - startMs;
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      console.warn(
+        `[chatbot-ai] Descrição de imagem atingiu timeout (${durationMs}ms > ${IMAGE_DESCRIPTION_TIMEOUT_MS}ms) — fallback para legenda/imagem`
+      );
+    } else {
+      console.error(`[chatbot-ai] describeImage error (${durationMs}ms):`, err.message);
+    }
     return null;
   }
 }
 
 // ─── Processamento de mensagem recebida (tipo + conteúdo) ────────────────────
 
-export async function resolveMessageContent(evolutionBody) {
+export async function resolveMessageContent(evolutionBody, options = {}) {
+  const {
+    clientId = null,
+    instanceName = null,
+    pgDatabasePool = null,
+    fromMe: forcedFromMe = null,
+    isGroup: forcedIsGroup = null,
+  } = options;
+
   const type = detectMessageType(evolutionBody);
   const caption = evolutionBody?.data?.message?.imageMessage?.caption || "";
   const waMessageId = resolveMessageId(evolutionBody) || null;
@@ -660,39 +704,91 @@ export async function resolveMessageContent(evolutionBody) {
     return { type, text: extractTextFromBody(evolutionBody) || "", waMessageId, messageTimestamp };
   }
 
-  if (type === "audio") {
-    const base64 = extractMediaBase64(evolutionBody);
-    const mimetype = extractMediaMimetype(evolutionBody) || "audio/ogg";
-    if (base64) {
-      const transcription = await transcribeAudio(base64, mimetype);
-      if (transcription) {
-        console.log("[chatbot-ai] Audio transcribed:", transcription.slice(0, 80));
-        return { type, text: transcription, transcribed: true, waMessageId, messageTimestamp };
-      }
-    }
-    return { type, text: "[áudio]", transcribed: false, waMessageId, messageTimestamp };
-  }
+  // Se for grupo ou outbound (fromMe), descarta antes de puxar: evita custos e banda desnecessários
+  const rawRemoteJid = evolutionBody?.data?.key?.remoteJid ?? evolutionBody?.remoteJid ?? evolutionBody?.senderJid ?? evolutionBody?.data?.key?.participant ?? null;
+  const isGroup = forcedIsGroup !== null ? Boolean(forcedIsGroup) : isGroupJid(rawRemoteJid);
+  const fromMe = forcedFromMe !== null ? Boolean(forcedFromMe) : isFromMe(evolutionBody);
 
-  if (type === "image") {
-    const base64 = extractMediaBase64(evolutionBody);
-    const mimetype = extractMediaMimetype(evolutionBody) || "image/jpeg";
-    if (base64) {
-      const description = await describeImage(base64, mimetype, caption);
-      if (description) {
-        console.log("[chatbot-ai] Image described:", description.slice(0, 80));
-        return { type, text: `[imagem: ${description}]${caption ? ` — legenda: "${caption}"` : ""}`, described: true, waMessageId, messageTimestamp };
-      }
-    }
-    return { type, text: caption ? `[imagem] ${caption}` : "[imagem]", described: false, waMessageId, messageTimestamp };
-  }
-
-  if (type === "sticker") return { type, text: "[sticker]", waMessageId, messageTimestamp };
+  // Decisão de produto (Conrado): figurinha fica fora do storage por decisão explícita de produto, e não por esquecimento (mediaPath: null intencional).
+  if (type === "sticker") return { type, text: "[sticker]", waMessageId, messageTimestamp, mediaPath: null };
   if (type === "reaction") return { type, text: "[reação]", waMessageId, messageTimestamp };
   if (type === "video") return { type, text: caption ? `[vídeo] ${caption}` : "[vídeo]", waMessageId, messageTimestamp };
   if (type === "document") {
     const name = evolutionBody?.data?.message?.documentMessage?.fileName || "documento";
     return { type, text: `[documento: ${name}]`, waMessageId, messageTimestamp };
   }
+
+  // Mídia elegível para transcrição/descrição: áudio e imagem
+  const isEligibleForPull = (type === "audio" || type === "image") && !isGroup && !fromMe;
+
+  let mediaBase64 = extractMediaBase64(evolutionBody);
+  let mimetype = extractMediaMimetype(evolutionBody);
+
+  // Pull sob demanda na Evolution API SOMENTE após todos os filtros passarem
+  if (!mediaBase64 && instanceName && isEligibleForPull) {
+    const rawData = evolutionBody?.data || evolutionBody?.message || evolutionBody;
+    try {
+      const pulled = await fetchMediaBase64FromEvolution(instanceName, rawData);
+      if (pulled?.base64) {
+        mediaBase64 = pulled.base64;
+        if (!mimetype) mimetype = pulled.mimetype;
+      }
+    } catch (pullErr) {
+      console.warn(`[chatbot-ai] Falha ao puxar mídia sob demanda da Evolution (${instanceName}):`, pullErr?.message || pullErr);
+    }
+  }
+
+  let mediaPath = null;
+  // Upload ao Cloudflare R2 de forma assíncrona (não-bloqueante) apenas para inbound válido
+  if (mediaBase64 && clientId && waMessageId && isEligibleForPull) {
+    const buffer = Buffer.from(mediaBase64, "base64");
+    saveMediaBuffer({ clientId, waMessageId, buffer, mimetype, mediaType: type, messageTimestamp })
+      .then((saveRes) => {
+        if (saveRes?.mediaPath) {
+          mediaPath = saveRes.mediaPath;
+          if (pgDatabasePool) {
+            pgDatabasePool.query(
+              "UPDATE public.lead_messages SET media_path = $1 WHERE client_id = $2 AND wa_message_id = $3",
+              [saveRes.mediaPath, clientId, waMessageId]
+            ).catch(() => {});
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("[chatbot-ai] Falha assíncrona ao salvar mídia no R2:", err?.message || err);
+      });
+  }
+
+  if (type === "audio") {
+    const effectiveMime = mimetype || "audio/ogg";
+    if (mediaBase64 && !isGroup && !fromMe) {
+      const transcription = await transcribeAudio(mediaBase64, effectiveMime);
+      if (transcription) {
+        return { type, text: transcription, transcribed: true, waMessageId, messageTimestamp, mediaPath };
+      }
+    }
+    return { type, text: "[áudio]", transcribed: false, waMessageId, messageTimestamp, mediaPath };
+  }
+
+  if (type === "image") {
+    const effectiveMime = mimetype || "image/jpeg";
+    if (mediaBase64 && !isGroup && !fromMe) {
+      const description = await describeImage(mediaBase64, effectiveMime, caption);
+      if (description) {
+        return {
+          type,
+          text: `[imagem: ${description}]${caption ? ` — legenda: "${caption}"` : ""}`,
+          described: true,
+          waMessageId,
+          messageTimestamp,
+          mediaPath,
+        };
+      }
+    }
+    return { type, text: caption ? `[imagem] ${caption}` : "[imagem]", described: false, waMessageId, messageTimestamp, mediaPath };
+  }
+
+  return { type, text: `[${type}]`, waMessageId, messageTimestamp, mediaPath };
 
   return { type: "unknown", text: "", waMessageId, messageTimestamp };
 }

@@ -43,6 +43,7 @@ import {
   Undo2,
   UserPlus,
   CheckCheck,
+  Paperclip,
 } from "lucide-react";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
@@ -82,6 +83,7 @@ import { useLeadClients } from "@/hooks/useLeadClients";
 import { useLeads, type LeadRow } from "@/hooks/useLeads";
 import {
   useSendWhatsAppMessage,
+  useSendWhatsAppMediaMessage,
   useWhatsAppChats,
   useWhatsAppMessages,
   useClearWhatsAppChats,
@@ -97,6 +99,8 @@ import {
 import { SingleFollowupReminderModal } from "@/components/followup/SingleFollowupReminderModal";
 import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
 import { MediaMessage } from "@/components/MediaMessage";
+import { MediaAttachmentModal } from "@/components/inbox/MediaAttachmentModal";
+import { VoiceRecorderButton } from "@/components/inbox/VoiceRecorderButton";
 import { API_BASE_URL } from "@/lib/api";
 import { sanitizePhone } from "@/lib/phone";
 import { formatHeaderCount } from "@/lib/messageFormatting";
@@ -354,6 +358,8 @@ export default function WhatsAppInbox({
   const bulkCreateLeadsMutation = useBulkCreateLeadsFromChats(clientId);
   const messagesQuery = useWhatsAppMessages(clientId, instanceFilter, selectedChatId, canLoadInbox);
   const sendMessage = useSendWhatsAppMessage(clientId, selectedChatId);
+  const sendMediaMessage = useSendWhatsAppMediaMessage(clientId, selectedChatId);
+  const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const clearChats = useClearWhatsAppChats(clientId);
 
   // ── Seleção Múltipla e Ações em Massa ─────────────────────────────────────────
@@ -1945,10 +1951,11 @@ export default function WhatsAppInbox({
                               }}
                             >
                               <MediaMessage
-                                messageId={item.id}
+                                messageId={"waMessageId" in item && item.waMessageId ? item.waMessageId : item.id}
                                 hasMedia={item.hasMedia}
                                 fallbackBody={item.body}
                                 fromMe={item.fromMe}
+                                clientId={clientId}
                                 className="font-normal select-text"
                               />
                               <div
@@ -2052,9 +2059,34 @@ export default function WhatsAppInbox({
                   </button>
                 </div>
 
-                <span className="text-[10px] text-muted-foreground hidden sm:inline">
-                  Pressione <kbd className="rounded bg-muted px-1 py-0.5 font-mono">Enter</kbd> para enviar
-                </span>
+                <div className="flex items-center gap-1">
+                  {compositionMode === "whatsapp" && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setAttachmentModalOpen(true)}
+                        disabled={!selectedChat || sendMessage.isPending || sendMediaMessage.isPending}
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-colors"
+                        title="Anexar mídia ou documento"
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </Button>
+
+                      <VoiceRecorderButton
+                        onSendAudio={async (params) => {
+                          await sendMediaMessage.mutateAsync(params);
+                        }}
+                        disabled={!selectedChat || sendMessage.isPending || sendMediaMessage.isPending}
+                      />
+                    </>
+                  )}
+
+                  <span className="text-[10px] text-muted-foreground hidden sm:inline ml-1">
+                    Pressione <kbd className="rounded bg-muted px-1 py-0.5 font-mono">Enter</kbd> para enviar
+                  </span>
+                </div>
               </div>
 
               <div className="relative">
@@ -2068,7 +2100,7 @@ export default function WhatsAppInbox({
                       : "Escreva uma nota interna visível apenas para a sua equipe..."
                   }
                   rows={3}
-                  disabled={!selectedChat || sendMessage.isPending}
+                  disabled={!selectedChat || sendMessage.isPending || sendMediaMessage.isPending}
                   className={cn(
                     "text-xs rounded-xl pr-20 resize-none font-sans",
                     compositionMode === "internal_note" &&
@@ -2078,7 +2110,7 @@ export default function WhatsAppInbox({
                 <Button
                   size="sm"
                   onClick={handleSendMessage}
-                  disabled={!selectedChat || !draft.trim() || sendMessage.isPending}
+                  disabled={!selectedChat || !draft.trim() || sendMessage.isPending || sendMediaMessage.isPending}
                   className={cn(
                     "absolute right-2 bottom-2 h-7 px-3 text-xs font-semibold rounded-lg gap-1.5 shadow-xs",
                     compositionMode === "whatsapp"
@@ -2086,7 +2118,7 @@ export default function WhatsAppInbox({
                       : "bg-amber-600 hover:bg-amber-700 text-white"
                   )}
                 >
-                  {sendMessage.isPending ? (
+                  {sendMessage.isPending || sendMediaMessage.isPending ? (
                     <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Send className="h-3.5 w-3.5" />
@@ -2095,6 +2127,15 @@ export default function WhatsAppInbox({
                 </Button>
               </div>
             </div>
+
+            <MediaAttachmentModal
+              open={attachmentModalOpen}
+              onOpenChange={setAttachmentModalOpen}
+              onSendMedia={async (params) => {
+                await sendMediaMessage.mutateAsync(params);
+              }}
+              disabled={!selectedChat || sendMediaMessage.isPending}
+            />
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════════════

@@ -15,7 +15,17 @@ import { applyCorsHeaders } from "../../services/corsPolicy.js";
 import { upsertLeadByPhone, isRealName } from "../../services/leadUpsert.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
 import { OutlierQualificationBot } from "../../hardcoded-chatbot-outlier.js";
-import { resolveEvolutionInstanceOwner, resolveInstanceIdentifier } from "../../services/evolution.js";
+import {
+  resolveEvolutionInstanceOwner,
+  resolveInstanceIdentifier,
+  fetchMediaBase64FromEvolution,
+  sendMediaMessageViaEvolution,
+} from "../../services/evolution.js";
+import {
+  getMediaBuffer,
+  saveMediaBuffer,
+  deriveExtensionFromMimetype,
+} from "../../services/storage.js";
 
 const SQL_CANONICAL_PHONE = (col) => `
   CASE
@@ -1305,7 +1315,8 @@ export function registerChatbotRoutes(app, deps) {
           message_timestamp,
           COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp,
           wa_message_id,
-          sender_type
+          sender_type,
+          media_path
         FROM public.lead_messages
         WHERE client_id = $1 AND phone = ANY($2) ${instanceFilter} ${beforeFilter} ${afterFilter}
         ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC NULLS LAST, id DESC
@@ -1351,6 +1362,22 @@ export function registerChatbotRoutes(app, deps) {
         const timestampVal = row.effective_timestamp
           ? Math.floor(new Date(row.effective_timestamp).getTime() / 1000)
           : (row.created_at ? Math.floor(new Date(row.created_at).getTime() / 1000) : null);
+        const text = row.message_text || "";
+        const isMediaPrefix =
+          text.startsWith("[áudio]") ||
+          text.startsWith("[imagem") ||
+          text.startsWith("[vídeo]") ||
+          text.startsWith("[documento]") ||
+          text.startsWith("[sticker]") ||
+          text.startsWith("[arquivo]");
+        const hasMedia = Boolean(row.media_path) || isMediaPrefix;
+        let deducedType = "chat";
+        if (text.startsWith("[áudio]")) deducedType = "audio";
+        else if (text.startsWith("[imagem")) deducedType = "image";
+        else if (text.startsWith("[vídeo]")) deducedType = "video";
+        else if (text.startsWith("[documento]") || text.startsWith("[arquivo]")) deducedType = "document";
+        else if (text.startsWith("[sticker]")) deducedType = "sticker";
+
         return {
           id: String(row.id),
           body: row.message_text || "",
@@ -1362,11 +1389,12 @@ export function registerChatbotRoutes(app, deps) {
           createdAt: row.created_at,
           messageTimestamp: row.message_timestamp,
           waMessageId: row.wa_message_id,
+          mediaPath: row.media_path || null,
           phone: row.phone,
           direction: row.direction,
           senderType: row.sender_type || (row.direction === "outbound" ? "agent" : "lead"),
-          type: "chat",
-          hasMedia: false,
+          type: deducedType,
+          hasMedia,
         };
       });
 
@@ -1509,6 +1537,330 @@ export function registerChatbotRoutes(app, deps) {
       sendError(res, 500, "WHATSAPP_SEND_FAILED", error instanceof Error ? error.message : "Failed to send message via Evolution API");
     }
   });
+
+  // ─── ENDPOINTS DE MÍDIA WHATSAPP (Preservação R2 + Cascata Evolution 20d) ───
+
+  // GET /api/whatsapp/media/:waMessageId (e alias /api/media/:messageId)
+  // Cascata: Memória LRU -> Cloudflare R2 -> Evolution API (janela de 20 dias)
+  const handleGetMedia = async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    try {
+      const waMessageId = normalizeString(req.params.waMessageId || req.params.messageId);
+      if (!waMessageId) {
+        sendError(res, 400, "INVALID_QUERY", "Missing waMessageId");
+        return;
+      }
+
+      const requestedClientId = normalizeString(req.query.clientId);
+      const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+      if (!clientId) return;
+
+      // Busca estritamente vinculada ao client_id e wa_message_id (ou id numérico)
+      let row = null;
+      const isNumericId = /^\d+$/.test(waMessageId);
+      if (isNumericId) {
+        const queryRes = await pgDatabasePool.query(
+          `SELECT
+             id, client_id, phone, instance_name, message_text, media_path, direction,
+             sender_type, meta, created_at, message_timestamp, delivered_at,
+             wa_message_id,
+             COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp
+           FROM public.lead_messages
+           WHERE client_id = $1 AND (wa_message_id = $2 OR id = $3)
+           LIMIT 1`,
+          [clientId, waMessageId, BigInt(waMessageId)]
+        );
+        row = queryRes.rows[0] || null;
+      } else {
+        const queryRes = await pgDatabasePool.query(
+          `SELECT
+             id, client_id, phone, instance_name, message_text, media_path, direction,
+             sender_type, meta, created_at, message_timestamp, delivered_at,
+             wa_message_id,
+             COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp
+           FROM public.lead_messages
+           WHERE client_id = $1 AND wa_message_id = $2
+           LIMIT 1`,
+          [clientId, waMessageId]
+        );
+        row = queryRes.rows[0] || null;
+      }
+
+      if (!row) {
+        sendError(res, 404, "MEDIA_NOT_FOUND", "Mídia não encontrada para esta empresa");
+        return;
+      }
+
+      const rawText = row.message_text || "";
+      let mediaType = row.meta?.messageType || null;
+      if (!mediaType) {
+        if (rawText.startsWith("[áudio]")) mediaType = "audio";
+        else if (rawText.startsWith("[imagem")) mediaType = "image";
+        else if (rawText.startsWith("[vídeo]")) mediaType = "video";
+        else if (rawText.startsWith("[documento]") || rawText.startsWith("[arquivo]")) mediaType = "document";
+        else if (rawText.startsWith("[sticker]")) mediaType = "sticker";
+        else mediaType = "document";
+      }
+
+      let buffer = null;
+      let contentType = null;
+      let source = "unknown";
+
+      // 1. Tenta recuperar do R2 / Cache em memória se tiver media_path
+      if (row.media_path) {
+        const storageResult = await getMediaBuffer(row.media_path);
+        if (storageResult?.buffer) {
+          buffer = storageResult.buffer;
+          contentType = storageResult.contentType;
+          source = storageResult.source;
+        }
+      }
+
+      // 2. Se não encontrou no R2, verifica idade do registro. Se <= 20 dias, puxa da Evolution sob demanda
+      const effectiveDate = new Date(row.effective_timestamp || row.created_at || Date.now());
+      const ageMs = Date.now() - effectiveDate.getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+      if (!buffer && ageDays <= 20) {
+        let instance = row.instance_name;
+        if (!instance) {
+          const instances = await getLeadClientEvolutionInstances(clientId);
+          instance = instances.find((i) => i.active && i.is_default)?.name || instances.find((i) => i.active)?.name;
+        }
+
+        if (instance) {
+          const evoTargetId = row.wa_message_id || waMessageId;
+          const evoRes = await fetchMediaBase64FromEvolution(instance, evoTargetId);
+          if (evoRes?.base64) {
+            buffer = Buffer.from(evoRes.base64, "base64");
+            contentType = evoRes.mimetype || (
+              mediaType === "audio" ? "audio/ogg" :
+              mediaType === "image" ? "image/jpeg" :
+              mediaType === "video" ? "video/mp4" :
+              "application/octet-stream"
+            );
+            source = "evolution";
+
+            // Se for áudio ou imagem, persiste no R2 assincronamente para as próximas requisições.
+            // Decisão de produto (Conrado): figurinha fica fora do storage por decisão explícita de produto.
+            if (mediaType === "audio" || mediaType === "image") {
+              saveMediaBuffer({
+                clientId,
+                waMessageId: evoTargetId,
+                buffer,
+                mimetype: contentType,
+                mediaType,
+                messageTimestamp: row.effective_timestamp || row.message_timestamp || row.created_at || null,
+              }).then((saveRes) => {
+                if (saveRes?.mediaPath && pgDatabasePool) {
+                  pgDatabasePool.query(
+                    "UPDATE public.lead_messages SET media_path = $1 WHERE client_id = $2 AND id = $3",
+                    [saveRes.mediaPath, clientId, row.id]
+                  ).catch(() => {});
+                }
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+
+      // 3. Verifica se expirou (> 20 dias e sem cópia persistida)
+      const isExpired = !buffer && ageDays > 20;
+
+      // Resposta em JSON (quando solicitado via query param ou Accept header)
+      const wantsJson = req.query.format === "json" || (req.headers.accept && req.headers.accept.includes("application/json"));
+
+      if (wantsJson) {
+        if (isExpired) {
+          return res.json({
+            item: {
+              waMessageId: row.wa_message_id || waMessageId,
+              mediaType,
+              mimeType: null,
+              dataUrl: null,
+              url: null,
+              transcription: row.meta?.transcribed ? row.message_text : null,
+              description: row.meta?.described ? row.message_text : null,
+              fileName: null,
+              expired: true,
+            },
+          });
+        }
+
+        if (!buffer) {
+          return sendError(res, 404, "MEDIA_NOT_AVAILABLE", "Mídia temporariamente indisponível");
+        }
+
+        return res.json({
+          item: {
+            waMessageId: row.wa_message_id || waMessageId,
+            mediaType,
+            mimeType: contentType,
+            dataUrl: `data:${contentType};base64,${buffer.toString("base64")}`,
+            url: null,
+            transcription: row.meta?.transcribed ? row.message_text : null,
+            description: row.meta?.described ? row.message_text : null,
+            fileName: `${row.wa_message_id || waMessageId}.${deriveExtensionFromMimetype(contentType)}`,
+            expired: false,
+            source,
+          },
+        });
+      }
+
+      // Resposta em binário direto (para tag <audio>, <img>, download)
+      if (isExpired) {
+        return sendError(res, 410, "MEDIA_EXPIRED", "Mídia expirada no WhatsApp (> 20 dias)");
+      }
+
+      if (!buffer) {
+        return sendError(res, 404, "MEDIA_NOT_AVAILABLE", "Mídia temporariamente indisponível");
+      }
+
+      res.setHeader("Content-Type", contentType || "application/octet-stream");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (err) {
+      console.error("[whatsapp-media] Erro ao buscar mídia:", err);
+      sendError(res, 500, "MEDIA_FETCH_FAILED", err instanceof Error ? err.message : "Erro ao carregar mídia");
+    }
+  };
+
+  app.get("/api/whatsapp/media/:waMessageId", requireFirebaseAuth, requireAppViewAccess("whatsapp"), handleGetMedia);
+  app.get("/api/media/:messageId", requireFirebaseAuth, requireAppViewAccess("whatsapp"), handleGetMedia);
+
+  // POST /api/whatsapp/messages/media — envio de mensagem com mídia pelo atendente
+  app.post("/api/whatsapp/messages/media", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    try {
+      const chatId = normalizeString(req.body?.chatId);
+      const mediaType = normalizeString(req.body?.mediaType); // audio | image | video | document
+      const base64 = req.body?.base64;
+      const mimetype = normalizeString(req.body?.mimetype);
+      const fileName = normalizeString(req.body?.fileName) || null;
+      const caption = normalizeString(req.body?.caption) || "";
+      const requestedClientId = normalizeString(req.body?.clientId);
+
+      const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+      if (!clientId) return;
+
+      if (!chatId || !mediaType || !base64) {
+        sendError(res, 400, "INVALID_BODY", "Parâmetros obrigatórios ausentes (chatId, mediaType, base64)");
+        return;
+      }
+
+      const validTypes = ["audio", "image", "video", "document"];
+      if (!validTypes.includes(mediaType)) {
+        sendError(res, 400, "INVALID_MEDIA_TYPE", `Tipo de mídia inválido. Suportados: ${validTypes.join(", ")}`);
+        return;
+      }
+
+      const cleanPhone = sanitizePhone(chatId);
+      const buffer = Buffer.from(base64, "base64");
+
+      // Tetos de envio: 16 MB para áudio/imagem/vídeo, 50 MB para documentos
+      const maxOutboundBytes = mediaType === "document" ? 50 * 1024 * 1024 : 16 * 1024 * 1024;
+      if (buffer.length > maxOutboundBytes) {
+        sendError(res, 400, "PAYLOAD_TOO_LARGE", `Arquivo excede o limite de ${Math.round(maxOutboundBytes / 1024 / 1024)} MB para envio`);
+        return;
+      }
+
+      // Localizar instância Evolution ativa para este cliente
+      const instances = await getLeadClientEvolutionInstances(clientId);
+      const activeInstance = instances.find((inst) => inst.active && inst.is_default) || instances.find((inst) => inst.active);
+
+      if (!activeInstance) {
+        sendError(res, 400, "NO_ACTIVE_WHATSAPP_CHIP", "Não há nenhum chip WhatsApp ativo configurado para esta empresa.");
+        return;
+      }
+
+      const webhookUrl = activeInstance.dispatch_webhook_url;
+      const evoInstanceName = webhookUrl
+        ? new URL(webhookUrl).pathname.split("/").filter(Boolean).pop() || activeInstance.name
+        : activeInstance.name;
+      const webhookToken = activeInstance.dispatch_webhook_token;
+
+      // Envia via Evolution API
+      const evoResult = await sendMediaMessageViaEvolution({
+        instanceName: evoInstanceName,
+        number: cleanPhone,
+        mediaType,
+        base64,
+        mimetype: mimetype || (mediaType === "audio" ? "audio/ogg" : mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
+        fileName,
+        caption,
+        webhookToken,
+        baseUrl: webhookUrl ? new URL(webhookUrl).origin : null,
+      });
+
+      const waMessageId = evoResult?.waMessageId || `msg-${Date.now()}`;
+
+      // Salva no R2 se for áudio ou imagem (preservação permanente)
+      let savedMediaPath = null;
+      if (mediaType === "audio" || mediaType === "image") {
+        try {
+          const nowIso = new Date().toISOString();
+          const saveRes = await saveMediaBuffer({
+            clientId,
+            waMessageId,
+            buffer,
+            mimetype: mimetype || (mediaType === "audio" ? "audio/ogg" : "image/jpeg"),
+            mediaType,
+            messageTimestamp: nowIso,
+          });
+          savedMediaPath = saveRes?.mediaPath || null;
+        } catch (storageErr) {
+          console.warn("[whatsapp-media] Falha ao salvar mídia enviada no R2:", storageErr?.message || storageErr);
+        }
+      }
+
+      const messageText = caption ? `[${mediaType}] ${caption}` : `[${mediaType}]`;
+
+      await appendLeadMessage({
+        clientId,
+        phone: cleanPhone,
+        senderType: "agent",
+        direction: "outbound",
+        messageText,
+        deliveredAt: new Date().toISOString(),
+        messageTimestamp: new Date().toISOString(),
+        instanceName: evoInstanceName,
+        waMessageId,
+        mediaPath: savedMediaPath,
+        meta: {
+          source: "manual-inbox-media",
+          mediaType,
+          fileName,
+          mimetype,
+          caption: caption || null,
+        },
+      });
+
+      const timestampVal = Math.floor(Date.now() / 1000);
+      res.status(201).json({
+        success: true,
+        item: {
+          id: waMessageId,
+          waMessageId,
+          body: messageText,
+          from: "me",
+          to: cleanPhone,
+          author: null,
+          fromMe: true,
+          timestamp: timestampVal,
+          type: mediaType,
+          hasMedia: true,
+          mediaPath: savedMediaPath,
+        },
+      });
+    } catch (err) {
+      console.error("[whatsapp-media] Erro ao enviar mídia:", err);
+      sendError(res, 500, "WHATSAPP_SEND_MEDIA_FAILED", err instanceof Error ? err.message : "Falha ao enviar mídia");
+    }
+  });
+
   // GET /api/prompts — lê prompt customizado de uma empresa por tipo
   app.get("/api/prompts", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
@@ -1919,10 +2271,18 @@ export function registerChatbotRoutes(app, deps) {
     });
     const instanceName = resolvedInstanceName || rawInstanceName;
 
-    // Detectar tipo e extrair conteúdo da mensagem
+    const fromMe = isFromMe(body);
+
+    // Detectar tipo e extrair conteúdo da mensagem (com pull sob demanda APENAS se passou nos filtros)
     let messageData = null;
     try {
-      messageData = await resolveMessageContent(body);
+      messageData = await resolveMessageContent(body, {
+        clientId,
+        instanceName,
+        pgDatabasePool,
+        fromMe,
+        isGroup: false,
+      });
     } catch (err) {
       console.error("[chatbot-webhook] resolveMessageContent error:", err?.message || err);
     }
@@ -1931,8 +2291,6 @@ export function registerChatbotRoutes(app, deps) {
       descartar("empty_message", { type: messageData?.type, phone: maskPhoneForLog(phone) });
       return;
     }
-
-    const fromMe = isFromMe(body);
 
     // ── ETAPA 3: GRAVAÇÃO DA MENSAGEM (SEMPRE, INBOUND OU OUTBOUND/FROM_ME) ──
     // Se fromMe = true: gravada como direction "outbound" e senderType "device".
@@ -1955,6 +2313,7 @@ export function registerChatbotRoutes(app, deps) {
         instanceName,
         waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
         messageTimestamp: messageData.messageTimestamp || new Date().toISOString(),
+        mediaPath: messageData.mediaPath || null,
       });
     } catch (msgErr) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);

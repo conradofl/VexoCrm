@@ -226,6 +226,15 @@ async function isAlreadyApplied(pool, filename) {
         )
       )
     ) AS ok`,
+    "20260912140000_add_esconder_valores_to_gd_proposals.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='gd_proposals')
+      OR EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'gd_proposals'
+          AND column_name = 'esconder_valores'
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

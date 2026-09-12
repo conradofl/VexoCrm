@@ -1,6 +1,13 @@
+import zlib from "zlib";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
-import { createContract, buildContractPdfBuffer } from "../domains/geracaoDigitalContracts/contractHandlers.js";
+import {
+  createContract,
+  buildContractPdfBuffer,
+  applyMerge,
+  renderContractPdf,
+  CONTRACT_FILL_LINE,
+} from "../domains/geracaoDigitalContracts/contractHandlers.js";
 import { isManagerOrAdmin } from "../access/claims.js";
 import { registerGeracaoDigitalRoutes } from "../domains/geracaoDigitalRoutes.js";
 
@@ -496,6 +503,74 @@ describe("Peça 2 — Testes de Contrato Standalone e Reabertura de Proposta", (
       expect(queries[0].sql).toContain("UPDATE gd_contracts");
       // Nenhuma query em gd_proposals foi executada
       expect(queries.some((q) => q.sql.includes("gd_proposals"))).toBe(false);
+    });
+  });
+
+  describe("2.5 — Varredura de placeholders e geração de PDF sem marcadores vazios", () => {
+    function extractPdfText(pdfBuffer) {
+      let fullDecompressed = "";
+      let idx = 0;
+      while (true) {
+        const sStart = pdfBuffer.indexOf(Buffer.from("stream\n"), idx);
+        const sStartCr = pdfBuffer.indexOf(Buffer.from("stream\r\n"), idx);
+        const start = sStart !== -1 && (sStartCr === -1 || sStart < sStartCr) ? sStart + 7 : sStartCr !== -1 ? sStartCr + 8 : -1;
+        if (start === -1) break;
+        const end = pdfBuffer.indexOf(Buffer.from("endstream"), start);
+        if (end === -1) break;
+        const raw = pdfBuffer.subarray(start, end);
+        try {
+          fullDecompressed += zlib.inflateSync(raw).toString("latin1");
+        } catch (e) {
+          fullDecompressed += raw.toString("latin1");
+        }
+        idx = end + 9;
+      }
+      const decoded = fullDecompressed.replace(/<([0-9a-fA-F]+)>/g, (_, hex) => {
+        return Buffer.from(hex, "hex").toString("latin1");
+      });
+      return decoded.replace(/\[([^\]]+)\]\s*TJ/g, (_, inner) => {
+        return inner.replace(/\s+-?\d+(\.\d+)?\s+/g, "");
+      });
+    }
+
+    it("applyMerge: substitui marcadores vazios pela linha de preenchimento e varre qualquer {{...}}", () => {
+      const template = "Contrato: {{razao_social}}, CNPJ: {{cnpj}}, Endereço: {{endereco}}, Foro: {{foro_cidade}}.";
+      const merged = applyMerge(template, {
+        razao_social: "Padaria Modelo LTDA",
+        cnpj: "", // vazio
+        // endereco omitido
+        // foro_cidade omitido
+      });
+
+      expect(merged).toContain("Padaria Modelo LTDA");
+      expect(merged).not.toContain("{{cnpj}}");
+      expect(merged).not.toContain("{{endereco}}");
+      expect(merged).not.toContain("{{foro_cidade}}");
+      expect(merged).not.toContain("{{");
+      expect(merged).toContain(CONTRACT_FILL_LINE);
+    });
+
+    it("renderContractPdf: contrato sem campo nenhum preenchido gera PDF sem nenhuma ocorrência de {{", async () => {
+      const template = `CONTRATO DE PRESTAÇÃO DE SERVIÇOS
+Cláusula Primeira — Das Partes
+A CONTRATANTE {{razao_social}}, inscrita no CNPJ sob o nº {{cnpj}}, situada em {{endereco}}.
+Cláusula Segunda — Do Objeto
+Prestação dos serviços {{servicos_descricao}} no valor de R$ {{mensalidade}}.
+Contratada: {{assinatura_contratada}}
+Contratante: {{assinatura_contratante}}`;
+
+      const pdfBuffer = await renderContractPdf(template, {});
+      expect(Buffer.isBuffer(pdfBuffer)).toBe(true);
+      expect(pdfBuffer.length).toBeGreaterThan(500);
+
+      const pdfText = extractPdfText(pdfBuffer);
+      // Prova cabal: nenhuma ocorrência de {{ no texto do PDF
+      expect(pdfText).not.toContain("{{");
+      expect(pdfText).not.toContain("}}");
+      expect(pdfText).not.toContain("razao_social");
+      expect(pdfText).not.toContain("cnpj");
+      expect(pdfText).toContain("CONTRATO DE PRESTA");
+      expect(pdfText).toContain(CONTRACT_FILL_LINE);
     });
   });
 });

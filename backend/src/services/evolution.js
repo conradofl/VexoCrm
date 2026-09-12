@@ -1907,3 +1907,147 @@ export async function resolveEvolutionInstanceOwner({ clientId, instanceName = n
   return chip?.owner_uid || null;
 }
 
+/**
+ * Puxa o base64 de uma mensagem de mídia sob demanda da Evolution API.
+ * Formatos suportados:
+ * 1. Objeto completo recebido no webhook: { message: data, convertToMp4: false } (~43ms)
+ * 2. Somente a chave wa_message_id na cascata: { message: { key: { id: waMessageId } }, convertToMp4: false } (~200-300ms)
+ */
+export async function fetchMediaBase64FromEvolution(instanceName, messagePayload) {
+  if (!instanceName || !messagePayload) return null;
+  const baseUrl = normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey = process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+  if (!apiKey) {
+    console.warn("[evolution] EVOLUTION_API_KEY não configurada para fetchMediaBase64FromEvolution");
+    return null;
+  }
+
+  const url = `${baseUrl.replace(/\/+$/, "")}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`;
+
+  let bodyPayload;
+  if (messagePayload && typeof messagePayload === "object" && "message" in messagePayload) {
+    bodyPayload = messagePayload;
+  } else if (typeof messagePayload === "string") {
+    bodyPayload = {
+      message: { key: { id: messagePayload } },
+      convertToMp4: false,
+    };
+  } else {
+    bodyPayload = {
+      message: messagePayload,
+      convertToMp4: false,
+    };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildEvolutionAuthHeaders(apiKey),
+      },
+      body: JSON.stringify(bodyPayload),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!res.ok) {
+      console.warn(`[evolution] getBase64FromMediaMessage HTTP ${res.status} para instância "${instanceName}"`);
+      return null;
+    }
+
+    const data = await res.json();
+    if (data?.base64) {
+      return {
+        base64: data.base64,
+        mimetype: data.mimetype || null,
+      };
+    }
+    return null;
+  } catch (err) {
+    console.warn(`[evolution] Erro ao buscar base64 da mídia para "${instanceName}":`, err.message || err);
+    return null;
+  }
+}
+
+/**
+ * Envia mensagem com mídia através da Evolution API.
+ * Suporta áudio nativo (sendWhatsAppAudio com encoding: true para PTT/waveform)
+ * e outros formatos (sendMedia para imagem, vídeo, documento, figurinha).
+ */
+export async function sendMediaMessageViaEvolution({
+  instanceName,
+  number,
+  mediaType,
+  base64,
+  mimetype,
+  fileName = null,
+  caption = "",
+  webhookToken = null,
+  baseUrl = null,
+}) {
+  if (!instanceName || !number || !base64) {
+    throw new Error("Parâmetros obrigatórios ausentes (instanceName, number, base64)");
+  }
+
+  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+
+  if (!apiKey) {
+    throw new Error("Chave de autenticação da Evolution não configurada");
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const isAudio = mediaType === "audio";
+  const endpoint = isAudio
+    ? `${effectiveBaseUrl.replace(/\/+$/, "")}/message/sendWhatsAppAudio/${encodeURIComponent(instanceName)}`
+    : `${effectiveBaseUrl.replace(/\/+$/, "")}/message/sendMedia/${encodeURIComponent(instanceName)}`;
+
+  let payload;
+  if (isAudio) {
+    payload = {
+      number,
+      audio: base64,
+      encoding: true,
+    };
+  } else {
+    payload = {
+      number,
+      mediatype: mediaType,
+      mimetype: mimetype || "application/octet-stream",
+      media: base64,
+      fileName: fileName || `${mediaType}`,
+      caption: caption || "",
+    };
+  }
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const resText = await res.text();
+  if (!res.ok) {
+    throw new Error(`Evolution HTTP ${res.status}: ${resText}`);
+  }
+
+  try {
+    const data = JSON.parse(resText);
+    const waMessageId = data?.key?.id || data?.id || null;
+    return {
+      success: true,
+      waMessageId,
+      raw: data,
+    };
+  } catch {
+    return {
+      success: true,
+      waMessageId: null,
+      raw: resText,
+    };
+  }
+}

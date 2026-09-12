@@ -173,4 +173,30 @@ describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
       expect(resolveTermNomeExibicao(term)).toBe("Pix à vista");
     });
   });
+
+  describe("A4: applyContractMerge limpa placeholders vazios com linha de preenchimento", () => {
+    it("substitui campos não preenchidos por linha de preenchimento e varre {{qualquer_coisa}}", () => {
+      const template = "Contratante: {{razao_social}}, CNPJ: {{cnpj}}, Endereço: {{endereco}}, Foro: {{foro_cidade}}.";
+      const merged = applyContractMerge(template, {
+        razao_social: "Padaria Modelo LTDA",
+        cnpj: "", // campo vazio
+        // endereco omitido
+        // foro_cidade omitido
+      });
+
+      expect(merged).toContain("Padaria Modelo LTDA");
+      expect(merged).not.toContain("{{cnpj}}");
+      expect(merged).not.toContain("{{endereco}}");
+      expect(merged).not.toContain("{{foro_cidade}}");
+      expect(merged).not.toContain("{{");
+      expect(merged).toContain("______________________________");
+    });
+
+    it("contrato sem nenhum campo preenchido não deixa nenhuma ocorrência de {{", () => {
+      const template = "Cláusula Primeira: {{razao_social}}, portador do CNPJ {{cnpj}}, situado em {{endereco}}.\nValor: {{mensalidade}}.";
+      const merged = applyContractMerge(template, {});
+      expect(merged).not.toContain("{{");
+      expect(merged).toContain("______________________________");
+    });
+  });
 });

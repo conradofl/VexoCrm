@@ -16,6 +16,7 @@ import {
   getCommercialIntelligenceDefaultSettings,
 } from "../../commercial-intelligence.js";
 import { getMigrationStatus } from "../../migrate.js";
+import { getStorageStatus } from "../../services/storage.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -115,6 +116,7 @@ export function registerInsightsRoutes(app, deps) {
       databaseTarget,
       postgresPing,
       firebaseAuth: firebaseReady,
+      storage: getStorageStatus(),
     };
     if (postgresPingDetail) {
       services.postgresPingDetail = postgresPingDetail;
