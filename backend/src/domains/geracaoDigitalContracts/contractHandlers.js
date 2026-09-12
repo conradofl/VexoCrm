@@ -334,7 +334,8 @@ async function renderContractPdf(templateConteudo, dados) {
       const p = linha.trimEnd();
 
       if (p.trim() === "") {
-        doc.moveDown(0.5);
+        // Cada linha vazia (Enter) agora gera um espaçamento completo real (~14pt)
+        doc.moveDown(1.0);
         continue;
       }
 
@@ -361,7 +362,8 @@ async function renderContractPdf(templateConteudo, dados) {
         doc.font("Helvetica").fontSize(10.5);
         doc.text(p.trim(), { align: "center", lineGap: LINE_GAP });
         if (isSignatureLabel) {
-          doc.moveDown(1.5);
+          // Espaço base generoso após o nome para acomodar carimbo/rubrica digital
+          doc.moveDown(2.5);
         }
         continue;
       }
@@ -385,7 +387,7 @@ async function renderContractPdf(templateConteudo, dados) {
       doc.font("Helvetica").fontSize(10.5);
       doc.text("____________________________________________________", { align: "center" });
       doc.text(`Contratada: ${dados.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"}`, { align: "center" });
-      doc.moveDown(2);
+      doc.moveDown(4.5);
       doc.text("____________________________________________________", { align: "center" });
       doc.text(`Contratante: ${dados.assinatura_contratante || dados.razao_social || "Razão Social"}`, { align: "center" });
     }

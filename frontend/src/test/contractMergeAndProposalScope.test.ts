@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
-import { buildContractDados, toggleBoldMarkdown } from "@/lib/geracaoDigital/contractMerge";
+import { buildContractDados, toggleBoldMarkdown, buildSignatureBlock, expandSignatureSpacingInText } from "@/lib/geracaoDigital/contractMerge";
 import { resolveTermNomeExibicao } from "@/lib/geracaoDigital/formasPagamento";
 
 describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
@@ -34,14 +34,42 @@ describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
       });
       expect(dados.assinatura_contratada).toBe("CAIO VINÍCIUS ALMEIDA DE OLIVEIRA");
       expect(dados.assinatura_contratante).toBe("Cafeeiro Lanches LTDA");
+      expect(dados.espaco_assinatura).toBe("4");
 
       const dadosCustom = buildContractDados({
         razao_social: "Cafeeiro Lanches LTDA",
         assinatura_contratada: "Geração Digital LTDA",
         assinatura_contratante: "Cafeeiro Lanches LTDA - Rep: João da Silva",
+        espaco_assinatura: "6",
       });
       expect(dadosCustom.assinatura_contratada).toBe("Geração Digital LTDA");
       expect(dadosCustom.assinatura_contratante).toBe("Cafeeiro Lanches LTDA - Rep: João da Silva");
+      expect(dadosCustom.espaco_assinatura).toBe("6");
+    });
+  });
+
+  describe("Espaçamento de Assinaturas (Assinatura Digital)", () => {
+    it("buildSignatureBlock usa 4 quebras de linha por padrão entre as partes", () => {
+      const block = buildSignatureBlock({
+        assinatura_contratada: "Contratada LTDA",
+        assinatura_contratante: "Cliente XPTO",
+      });
+      expect(block).toContain("Contratada: Contratada LTDA\n\n\n\n\n____________________________________________________");
+    });
+
+    it("buildSignatureBlock respeita espaco_assinatura customizado", () => {
+      const block = buildSignatureBlock({
+        assinatura_contratada: "Contratada LTDA",
+        assinatura_contratante: "Cliente XPTO",
+        espaco_assinatura: "6",
+      });
+      expect(block).toContain("Contratada: Contratada LTDA\n\n\n\n\n\n\n____________________________________________________");
+    });
+
+    it("expandSignatureSpacingInText adiciona quebras adicionais entre as assinaturas", () => {
+      const initialText = "Texto qualquer\nContratada: Empresa LTDA\n\n____________________________________________________\nContratante: Cliente";
+      const expanded = expandSignatureSpacingInText(initialText, 2);
+      expect(expanded).toContain("Contratada: Empresa LTDA\n\n\n\n____________________________________________________");
     });
   });
 

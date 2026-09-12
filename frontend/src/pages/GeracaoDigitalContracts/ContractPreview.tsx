@@ -1,8 +1,8 @@
 import React, { useMemo, useRef } from "react";
-import { applyContractMerge, formatExtenseDateClient, toggleBoldMarkdown } from "@/lib/geracaoDigital/contractMerge";
+import { applyContractMerge, formatExtenseDateClient, toggleBoldMarkdown, expandSignatureSpacingInText } from "@/lib/geracaoDigital/contractMerge";
 import { GdContractFormData, GdContractTemplate } from "@/hooks/useGdContracts";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Pencil, FileText, Bold } from "lucide-react";
+import { RotateCcw, Pencil, FileText, Bold, MoveVertical } from "lucide-react";
 
 interface ContractPreviewProps {
   template: GdContractTemplate | null;
@@ -62,6 +62,13 @@ export function ContractPreview({ template, formData, onChangeTextoFinal }: Cont
     });
   };
 
+  const handleExpandSignatureSpacing = () => {
+    const newText = expandSignatureSpacingInText(displayText, 2);
+    if (onChangeTextoFinal) {
+      onChangeTextoFinal(newText);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Atalho de tecla para negrito: Ctrl+B (Windows/Linux) ou ⌘B (Mac)
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
@@ -111,6 +118,18 @@ export function ContractPreview({ template, formData, onChangeTextoFinal }: Cont
             </kbd>
           </Button>
 
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleExpandSignatureSpacing}
+            title="Aumentar espaço entre as assinaturas para caber assinatura digital"
+            className="h-8 text-xs flex items-center gap-1.5 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-white/15 hover:bg-slate-100 dark:hover:bg-white/10"
+          >
+            <MoveVertical className="h-3.5 w-3.5 text-slate-500" />
+            <span>+ Espaço Assinatura</span>
+          </Button>
+
           {isEdited && (
             <Button
               type="button"
@@ -137,7 +156,7 @@ export function ContractPreview({ template, formData, onChangeTextoFinal }: Cont
 
       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
         <span>
-          💡 Selecione qualquer palavra ou frase e aperte <strong>Ctrl+B</strong> (ou <strong>⌘B</strong>) para colocar em negrito (<code className="text-purple-600 dark:text-purple-400 font-mono">**palavra**</code>). As palavras marcadas sairão em negrito no PDF gerado.
+          💡 Selecione qualquer palavra ou frase e aperte <strong>Ctrl+B</strong> (ou <strong>⌘B</strong>) para colocar em negrito (<code className="text-purple-600 dark:text-purple-400 font-mono">**palavra**</code>). Use o botão <strong>+ Espaço Assinatura</strong> ou dê <strong>Enter</strong> entre as linhas de assinatura para criar o espaço necessário para carimbos digitais.
         </span>
       </div>
     </div>

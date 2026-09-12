@@ -37,6 +37,7 @@ const CONTRACT_DEFAULTS: Record<string, string> = {
   cidade_assinatura: "Uberlândia-MG",
   assinatura_contratada: "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA",
   assinatura_contratante: "",
+  espaco_assinatura: "4",
   vigencia: "90",
 };
 
@@ -384,6 +385,20 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
                   onChange={handleChange}
                   placeholder={formData.razao_social || "Razão Social da Contratante"}
                 />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Espaço entre assinaturas (para assinatura digital)</Label>
+                <select
+                  name="espaco_assinatura"
+                  value={formData.espaco_assinatura || "4"}
+                  onChange={handleChange}
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 h-10 text-sm text-slate-800 dark:text-slate-100"
+                >
+                  <option value="2">Compacto (2 linhas de respiro)</option>
+                  <option value="4">Padrão (4 linhas - ideal para assinatura digital)</option>
+                  <option value="6">Amplo (6 linhas - ZapSign / ClickSign / DocuSign)</option>
+                  <option value="8">Extra Amplo (8 linhas - carimbos grandes com QR Code)</option>
+                </select>
               </div>
             </div>
           </TabsContent>

@@ -1,7 +1,9 @@
 export function buildSignatureBlock(data: Record<string, any>): string {
   const contratada = data.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA";
   const contratante = data.assinatura_contratante || data.razao_social || "Razão Social";
-  return `\n\n____________________________________________________\nContratada: ${contratada}\n\n____________________________________________________\nContratante: ${contratante}`;
+  const nLinhas = Math.max(1, Number(data.espaco_assinatura || 4));
+  const espaco = "\n".repeat(nLinhas);
+  return `\n\n____________________________________________________\nContratada: ${contratada}${espaco}\n____________________________________________________\nContratante: ${contratante}`;
 }
 
 export function applyContractMerge(template: string, data: Record<string, string>): string {
@@ -57,6 +59,7 @@ export function buildContractDados(formData: Record<string, any>): Record<string
   const cronograma = buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
   const contratada = String(formData.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA").trim() || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA";
   const contratante = String(formData.assinatura_contratante || formData.razao_social || "Razão Social").trim() || "Razão Social";
+  const espacoAssinatura = String(formData.espaco_assinatura || "4");
 
   const result: Record<string, any> = {
     ...formData,
@@ -64,6 +67,7 @@ export function buildContractDados(formData: Record<string, any>): Record<string
     cronograma_pagamento: cronograma || String(formData.condicoes_pagamento || "Conforme condições da proposta comercial aceita."),
     assinatura_contratada: contratada,
     assinatura_contratante: contratante,
+    espaco_assinatura: espacoAssinatura,
   };
   if (formData.texto_final && typeof formData.texto_final === "string" && formData.texto_final.trim()) {
     result.texto_final = formData.texto_final;
@@ -71,6 +75,23 @@ export function buildContractDados(formData: Record<string, any>): Record<string
     delete result.texto_final;
   }
   return result;
+}
+
+/**
+ * Localiza o espaçamento entre a assinatura da Contratada e da Contratante
+ * e insere quebras de linha adicionais.
+ */
+export function expandSignatureSpacingInText(text: string, additionalLines = 2): string {
+  const extra = "\n".repeat(additionalLines);
+  const regex = /(Contratada:[^\n]*\n)([\s\n]*)(_{10,})/i;
+  if (regex.test(text)) {
+    return text.replace(regex, (match, p1, p2, p3) => `${p1}${p2}${extra}${p3}`);
+  }
+  const regexUnderline = /(_{10,}[\s\S]*?Contratante:)/i;
+  if (regexUnderline.test(text)) {
+    return text.replace(regexUnderline, `${extra}$1`);
+  }
+  return text + extra;
 }
 
 export function formatExtenseDateClient(): string {

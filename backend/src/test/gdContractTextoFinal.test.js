@@ -131,4 +131,49 @@ Contratante: Cafeeiro Lanches LTDA - Rep: Carlos`,
       _setPgDatabasePoolForTesting(null);
     }
   });
+
+  it("renderiza PDF com múltiplos Enters entre as assinaturas para assinatura digital", async () => {
+    const mockPool = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM gd_contracts")) {
+          return {
+            rows: [
+              {
+                id: "contract-spacing",
+                tenant_id: "tenant-1",
+                dados: {
+                  razao_social: "Espaçamento Teste",
+                  texto_final: `CONTRATO DE PRESTAÇÃO DE SERVIÇOS
+Cláusula 1 - Objeto
+Texto do contrato.
+
+____________________________________________________
+Contratada: CAIO VINÍCIUS ALMEIDA DE OLIVEIRA
+
+
+
+
+
+____________________________________________________
+Contratante: Espaçamento Teste`,
+                },
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+
+    _setPgDatabasePoolForTesting(mockPool);
+
+    try {
+      const result = await buildContractPdfBuffer("tenant-1", "contract-spacing");
+      expect(result).toBeDefined();
+      expect(Buffer.isBuffer(result.pdfData)).toBe(true);
+      expect(result.pdfData.length).toBeGreaterThan(200);
+    } finally {
+      _setPgDatabasePoolForTesting(null);
+    }
+  });
 });
