@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
-import { buildContractDados, toggleBoldMarkdown, buildSignatureBlock, expandSignatureSpacingInText } from "@/lib/geracaoDigital/contractMerge";
+import { buildContractDados, toggleBoldMarkdown, buildSignatureBlock, expandSignatureSpacingInText, applyContractMerge } from "@/lib/geracaoDigital/contractMerge";
 import { resolveTermNomeExibicao } from "@/lib/geracaoDigital/formasPagamento";
 
 describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
@@ -28,11 +28,11 @@ describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
       expect(dados.texto_final).toBeUndefined();
     });
 
-    it("inclui assinatura_contratada e assinatura_contratante com defaults adequados", () => {
+    it("inclui assinatura_contratada vazia por padrão (sem hardcode) e assinatura_contratante com razão social", () => {
       const dados = buildContractDados({
         razao_social: "Cafeeiro Lanches LTDA",
       });
-      expect(dados.assinatura_contratada).toBe("CAIO VINÍCIUS ALMEIDA DE OLIVEIRA");
+      expect(dados.assinatura_contratada).toBe("");
       expect(dados.assinatura_contratante).toBe("Cafeeiro Lanches LTDA");
       expect(dados.espaco_assinatura).toBe("4");
 
@@ -41,10 +41,27 @@ describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
         assinatura_contratada: "Geração Digital LTDA",
         assinatura_contratante: "Cafeeiro Lanches LTDA - Rep: João da Silva",
         espaco_assinatura: "6",
+        contratada_razao_social: "AGÊNCIA GERAÇÃO DIGITAL LTDA",
+        contratada_cnpj: "66.722.723/0001-02",
+        contratada_comarca: "Uberlândia-MG",
       });
       expect(dadosCustom.assinatura_contratada).toBe("Geração Digital LTDA");
       expect(dadosCustom.assinatura_contratante).toBe("Cafeeiro Lanches LTDA - Rep: João da Silva");
       expect(dadosCustom.espaco_assinatura).toBe("6");
+      expect(dadosCustom.contratada_razao_social).toBe("AGÊNCIA GERAÇÃO DIGITAL LTDA");
+      expect(dadosCustom.contratada_cnpj).toBe("66.722.723/0001-02");
+      expect(dadosCustom.contratada_comarca).toBe("Uberlândia-MG");
+      expect(dadosCustom.foro_cidade).toBe("Uberlândia-MG");
+    });
+
+    it("applyContractMerge substitui marcadores de contratada e foro", () => {
+      const tpl = "Contratada: {{contratada_razao_social}}, CNPJ: {{contratada_cnpj}}, Foro: {{contratada_comarca}}";
+      const merged = applyContractMerge(tpl, {
+        contratada_razao_social: "AGÊNCIA GERAÇÃO DIGITAL LTDA",
+        contratada_cnpj: "66.722.723/0001-02",
+        contratada_comarca: "Uberlândia-MG",
+      });
+      expect(merged).toContain("Contratada: AGÊNCIA GERAÇÃO DIGITAL LTDA, CNPJ: 66.722.723/0001-02, Foro: Uberlândia-MG");
     });
   });
 

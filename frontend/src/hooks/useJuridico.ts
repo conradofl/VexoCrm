@@ -2,10 +2,22 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
+export interface ContratadaSettings {
+  razao_social: string;
+  cnpj: string;
+  representante: string;
+  endereco: string;
+  telefone: string;
+  email: string;
+  comarca: string;
+  assinatura: string;
+}
+
 export interface JuridicoSettings {
   slack_channel_id: string;
   whatsapp_number: string;
   evolution_instance: string;
+  contratada?: ContratadaSettings;
 }
 
 export interface EvolutionInstance {

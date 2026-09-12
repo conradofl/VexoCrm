@@ -9,27 +9,50 @@
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
+// ATENÇÃO (import circular): funciona porque buildContractPdfBuffer é function declaration (tem hoisting).
+// NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { buildContractPdfBuffer } from "./contractHandlers.js";
 
 const SLACK_API = "https://slack.com/api";
 
+export async function getTenantContratadaConfig(tenantId) {
+  const { contratada } = await readGdConfig(tenantId);
+  return contratada;
+}
+
 async function readGdConfig(tenantId) {
   const { rows } = await db.query("SELECT config FROM public.tenant_modules WHERE tenant_id = $1", [tenantId]);
   const config = rows[0]?.config || {};
-  return { config, juridico: config?.gd?.juridico || {} };
+  const rawContratada = config.contratada || config?.gd?.contratada || {};
+  const contratada = {
+    razao_social: String(rawContratada.razao_social || "").trim(),
+    cnpj: String(rawContratada.cnpj || "").trim(),
+    representante: String(rawContratada.representante || "").trim(),
+    endereco: String(rawContratada.endereco || "").trim(),
+    telefone: String(rawContratada.telefone || "").trim(),
+    email: String(rawContratada.email || "").trim(),
+    comarca: String(rawContratada.comarca || "").trim(),
+    assinatura: String(rawContratada.assinatura || "").trim(),
+  };
+  return {
+    config,
+    juridico: config?.gd?.juridico || {},
+    contratada,
+  };
 }
 
 export async function getJuridicoSettings(req, res) {
   try {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
-    const { juridico } = await readGdConfig(tenantId);
+    const { juridico, contratada } = await readGdConfig(tenantId);
     res.json({
       success: true,
       data: {
         slack_channel_id: juridico.slack_channel_id || "",
         whatsapp_number: juridico.whatsapp_number || "",
         evolution_instance: juridico.evolution_instance || "",
+        contratada,
       },
     });
   } catch (error) {
@@ -42,17 +65,36 @@ export async function saveJuridicoSettings(req, res) {
   try {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
-    const { slack_channel_id = "", whatsapp_number = "", evolution_instance = "" } = req.body || {};
+    const {
+      slack_channel_id,
+      whatsapp_number,
+      evolution_instance,
+      contratada: reqContratada,
+    } = req.body || {};
 
-    const { config } = await readGdConfig(tenantId);
+    const { config, contratada: currentContratada } = await readGdConfig(tenantId);
+
+    const mergedContratada = reqContratada ? {
+      razao_social: String(reqContratada.razao_social ?? currentContratada.razao_social ?? "").trim(),
+      cnpj: String(reqContratada.cnpj ?? currentContratada.cnpj ?? "").trim(),
+      representante: String(reqContratada.representante ?? currentContratada.representante ?? "").trim(),
+      endereco: String(reqContratada.endereco ?? currentContratada.endereco ?? "").trim(),
+      telefone: String(reqContratada.telefone ?? currentContratada.telefone ?? "").trim(),
+      email: String(reqContratada.email ?? currentContratada.email ?? "").trim(),
+      comarca: String(reqContratada.comarca ?? currentContratada.comarca ?? "").trim(),
+      assinatura: String(reqContratada.assinatura ?? currentContratada.assinatura ?? "").trim(),
+    } : currentContratada;
+
+    const currentJuridico = config?.gd?.juridico || {};
     const novo = {
       ...config,
+      contratada: mergedContratada,
       gd: {
         ...(config.gd || {}),
         juridico: {
-          slack_channel_id: String(slack_channel_id).trim(),
-          whatsapp_number: String(whatsapp_number).trim(),
-          evolution_instance: String(evolution_instance).trim(),
+          slack_channel_id: String(slack_channel_id ?? currentJuridico.slack_channel_id ?? "").trim(),
+          whatsapp_number: String(whatsapp_number ?? currentJuridico.whatsapp_number ?? "").trim(),
+          evolution_instance: String(evolution_instance ?? currentJuridico.evolution_instance ?? "").trim(),
         },
       },
     };
@@ -64,7 +106,13 @@ export async function saveJuridicoSettings(req, res) {
       [tenantId, JSON.stringify(novo)]
     );
 
-    res.json({ success: true, data: novo.gd.juridico });
+    res.json({
+      success: true,
+      data: {
+        ...novo.gd.juridico,
+        contratada: novo.contratada,
+      },
+    });
   } catch (error) {
     console.error("[saveJuridicoSettings] Error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Erro ao salvar as configurações do jurídico.");

@@ -61,6 +61,10 @@ async function isAlreadyApplied(pool, filename) {
     "20260508000001_drop_conta_energia_from_leads_outlier.sql": `SELECT TRUE AS ok`,
     "20260508120000_add_campaigns_phones_column.sql": `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='campaigns' AND column_name='phones') AS ok`,
     // Novas migrations — verificam se coluna já existe
+    "20260912130000_update_gd_contract_template_contratada_placeholders.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='gd_contract_templates')
+      OR NOT EXISTS (SELECT 1 FROM public.gd_contract_templates WHERE conteudo LIKE '%40.508.817/0001-90%')
+    ) AS ok`,
     "20260831180000_add_whatsapp_number_validation_and_invalid_status.sql": `SELECT (
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='whatsapp_number_validations')
       AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'campaign_dispatch_runs_status_check' AND pg_get_constraintdef(oid) LIKE '%invalid_number%')
@@ -206,6 +210,22 @@ async function isAlreadyApplied(pool, filename) {
           AND column_name = 'agent_muted_at'
       )
     ) AS ok`,
+    "20260911200000_add_lead_messages_media_path.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_messages')
+      OR (
+        EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'lead_messages'
+            AND column_name = 'media_path'
+        )
+        AND EXISTS (
+          SELECT 1 FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND indexname = 'idx_lead_messages_client_media_path'
+        )
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];
@@ -230,13 +250,16 @@ async function runMigration(pool, filename) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(sql);
+    const res = await client.query(sql);
     await client.query(
       `INSERT INTO ${MIGRATIONS_TABLE} (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
       [filename]
     );
     await client.query("COMMIT");
-    console.info(`[migrate] ✅ Applied: ${filename}`);
+    const count = Array.isArray(res)
+      ? res.map((r) => r.rowCount).filter((c) => c !== undefined && c !== null).join(", ")
+      : res?.rowCount;
+    console.info(`[migrate] ✅ Applied: ${filename}${count !== undefined ? ` (${count} linhas alteradas)` : ""}`);
   } catch (err) {
     await client.query("ROLLBACK");
     throw new Error(`[migrate] ❌ Failed: ${filename} — ${err.message}`);

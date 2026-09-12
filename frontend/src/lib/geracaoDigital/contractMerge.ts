@@ -1,6 +1,6 @@
 export function buildSignatureBlock(data: Record<string, any>): string {
-  const contratada = data.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA";
-  const contratante = data.assinatura_contratante || data.razao_social || "Razão Social";
+  const contratada = data.assinatura_contratada || "";
+  const contratante = data.assinatura_contratante || data.razao_social || "";
   const nLinhas = Math.max(1, Number(data.espaco_assinatura || 4));
   const espaco = "\n".repeat(nLinhas);
   return `\n\n____________________________________________________\nContratada: ${contratada}${espaco}\n____________________________________________________\nContratante: ${contratante}`;
@@ -57,14 +57,23 @@ export function buildCronograma(numParcelas: number, valorParcela: number, dataP
 export function buildContractDados(formData: Record<string, any>): Record<string, string> {
   const forma = FORMA_PAGAMENTO_TEXTO[String(formData.forma_pagamento || "")] || String(formData.forma_pagamento || "conforme condições da proposta");
   const cronograma = buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
-  const contratada = String(formData.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA").trim() || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA";
-  const contratante = String(formData.assinatura_contratante || formData.razao_social || "Razão Social").trim() || "Razão Social";
+  const contratada = String(formData.assinatura_contratada || "").trim();
+  const contratante = String(formData.assinatura_contratante || formData.razao_social || "").trim();
   const espacoAssinatura = String(formData.espaco_assinatura || "4");
+  const comarca = String(formData.contratada_comarca || formData.foro_cidade || "").trim();
 
   const result: Record<string, any> = {
     ...formData,
     forma_pagamento: forma,
     cronograma_pagamento: cronograma || String(formData.condicoes_pagamento || "Conforme condições da proposta comercial aceita."),
+    contratada_razao_social: String(formData.contratada_razao_social || "").trim(),
+    contratada_cnpj: String(formData.contratada_cnpj || "").trim(),
+    contratada_representante: String(formData.contratada_representante || "").trim(),
+    contratada_endereco: String(formData.contratada_endereco || "").trim(),
+    contratada_telefone: String(formData.contratada_telefone || "").trim(),
+    contratada_email: String(formData.contratada_email || "").trim(),
+    contratada_comarca: comarca,
+    foro_cidade: comarca,
     assinatura_contratada: contratada,
     assinatura_contratante: contratante,
     espaco_assinatura: espacoAssinatura,

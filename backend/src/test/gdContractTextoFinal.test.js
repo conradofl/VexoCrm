@@ -36,7 +36,8 @@ describe("buildContractPdfBuffer com texto_final editável (Leva A)", () => {
       expect(result.dados.texto_final).toContain("CONTRATO ESPECIAL CUSTOMIZADO");
       expect(Buffer.isBuffer(result.pdfData)).toBe(true);
       expect(result.pdfData.length).toBeGreaterThan(100);
-      expect(mockPool.query).toHaveBeenCalledTimes(1);
+      // 2 queries: tenant_modules (config contratada) e gd_contracts (contrato). Template NÃO consultado.
+      expect(mockPool.query).toHaveBeenCalledTimes(2);
     } finally {
       _setPgDatabasePoolForTesting(null);
     }
@@ -82,7 +83,8 @@ describe("buildContractPdfBuffer com texto_final editável (Leva A)", () => {
       expect(result).toBeDefined();
       expect(Buffer.isBuffer(result.pdfData)).toBe(true);
       expect(result.pdfData.length).toBeGreaterThan(100);
-      expect(mockPool.query).toHaveBeenCalledTimes(2);
+      // 3 queries: tenant_modules, gd_contracts e gd_contract_templates
+      expect(mockPool.query).toHaveBeenCalledTimes(3);
     } finally {
       _setPgDatabasePoolForTesting(null);
     }

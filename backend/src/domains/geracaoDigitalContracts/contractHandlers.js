@@ -2,6 +2,9 @@ import PDFDocument from "pdfkit";
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
+// ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
+// NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
+import { getTenantContratadaConfig } from "./juridicoHandlers.js";
 
 // Helper for formatting date
 function formatExtenseDate() {
@@ -217,6 +220,20 @@ export async function buildContractPdfBuffer(tenantId, id) {
   const dados = contract.dados || {};
   dados.data_extenso = formatExtenseDate();
 
+  // Injeta configuração da Contratada do tenant ANTES de qualquer atalho de texto_final
+  const contratadaConfig = await getTenantContratadaConfig(tenantId);
+  dados.contratada_razao_social = dados.contratada_razao_social || contratadaConfig.razao_social || "";
+  dados.contratada_cnpj = dados.contratada_cnpj || contratadaConfig.cnpj || "";
+  dados.contratada_representante = dados.contratada_representante || contratadaConfig.representante || "";
+  dados.contratada_endereco = dados.contratada_endereco || contratadaConfig.endereco || "";
+  dados.contratada_telefone = dados.contratada_telefone || contratadaConfig.telefone || "";
+  dados.contratada_email = dados.contratada_email || contratadaConfig.email || "";
+  dados.contratada_comarca = dados.contratada_comarca || contratadaConfig.comarca || "";
+  dados.assinatura_contratada = dados.assinatura_contratada || contratadaConfig.assinatura || "";
+  if (!dados.foro_cidade && dados.contratada_comarca) {
+    dados.foro_cidade = dados.contratada_comarca;
+  }
+
   // Se o usuário editou o texto final na tela, renderiza diretamente ignorando o template
   if (dados?.texto_final && typeof dados.texto_final === "string" && dados.texto_final.trim()) {
     const pdfData = await renderContractPdf(dados.texto_final, dados);
@@ -386,10 +403,10 @@ async function renderContractPdf(templateConteudo, dados) {
       doc.moveDown(3);
       doc.font("Helvetica").fontSize(10.5);
       doc.text("____________________________________________________", { align: "center" });
-      doc.text(`Contratada: ${dados.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"}`, { align: "center" });
+      doc.text(`Contratada: ${dados.assinatura_contratada || ""}`.trimEnd(), { align: "center" });
       doc.moveDown(4.5);
       doc.text("____________________________________________________", { align: "center" });
-      doc.text(`Contratante: ${dados.assinatura_contratante || dados.razao_social || "Razão Social"}`, { align: "center" });
+      doc.text(`Contratante: ${dados.assinatura_contratante || dados.razao_social || ""}`.trimEnd(), { align: "center" });
     }
 
     doc.end();

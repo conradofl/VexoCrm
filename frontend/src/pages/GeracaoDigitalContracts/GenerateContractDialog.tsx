@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateGdContract, useUpdateGdContract, useExtractContractData, useGdContractTemplates, GdContractFormData } from "@/hooks/useGdContracts";
-import { Sparkles } from "lucide-react";
+import { useJuridicoSettings } from "@/hooks/useJuridico";
+import { Sparkles, AlertTriangle, Building2, ChevronDown } from "lucide-react";
 import { buildContractDados } from "@/lib/geracaoDigital/contractMerge";
 import { ContractPreview } from "./ContractPreview";
 import { useToast } from "@/components/ui/use-toast";
@@ -21,6 +22,14 @@ const CONTRACT_DEFAULTS: Record<string, string> = {
   email: "",
   representante: "",
   endereco: "",
+  // Contratada (sobrescrita opcional por contrato)
+  contratada_razao_social: "",
+  contratada_cnpj: "",
+  contratada_representante: "",
+  contratada_endereco: "",
+  contratada_telefone: "",
+  contratada_email: "",
+  contratada_comarca: "",
   // Objeto / entregas
   produtos: "",
   condicoes_pagamento: "",
@@ -33,9 +42,9 @@ const CONTRACT_DEFAULTS: Record<string, string> = {
   // Prazo / foro / assinatura
   prazo_dias: "180",
   aviso_previo_dias: "60",
-  foro_cidade: "Uberlândia-MG",
-  cidade_assinatura: "Uberlândia-MG",
-  assinatura_contratada: "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA",
+  foro_cidade: "",
+  cidade_assinatura: "",
+  assinatura_contratada: "",
   assinatura_contratante: "",
   espaco_assinatura: "4",
   vigencia: "90",
@@ -61,12 +70,14 @@ interface GenerateContractDialogProps {
 
 export function GenerateContractDialog({ open, onOpenChange, proposalId, initialData, contractId, initialDados }: GenerateContractDialogProps) {
   const { data: templates } = useGdContractTemplates();
+  const { data: juridicoSettings } = useJuridicoSettings();
   const createContract = useCreateGdContract();
   const updateContract = useUpdateGdContract();
   const extractData = useExtractContractData();
   const { toast } = useToast();
   const isEdit = !!contractId;
   const [textoColado, setTextoColado] = useState("");
+  const [showContratadaOverride, setShowContratadaOverride] = useState(false);
 
   const [formData, setFormData] = useLocalStorage<GdContractFormData>(
     `gd_contract_form_${proposalId}`,
@@ -75,6 +86,26 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
     // eram aproveitados e o resto ficava no default.
     { ...CONTRACT_DEFAULTS, ...somentePreenchidos(initialData) } as GdContractFormData
   );
+
+  // Preenche dados padrão da Contratada do tenant caso ainda não estejam no formulário
+  useEffect(() => {
+    if (open && !contractId && juridicoSettings?.contratada) {
+      const c = juridicoSettings.contratada;
+      setFormData((prev) => ({
+        ...prev,
+        contratada_razao_social: prev.contratada_razao_social || c.razao_social || "",
+        contratada_cnpj: prev.contratada_cnpj || c.cnpj || "",
+        contratada_representante: prev.contratada_representante || c.representante || "",
+        contratada_endereco: prev.contratada_endereco || c.endereco || "",
+        contratada_telefone: prev.contratada_telefone || c.telefone || "",
+        contratada_email: prev.contratada_email || c.email || "",
+        contratada_comarca: prev.contratada_comarca || c.comarca || "",
+        foro_cidade: prev.foro_cidade || c.comarca || "",
+        cidade_assinatura: prev.cidade_assinatura || c.comarca || "",
+        assinatura_contratada: prev.assinatura_contratada || c.assinatura || "",
+      }));
+    }
+  }, [open, contractId, juridicoSettings]);
 
   // Modo edição: ao abrir, carrega os dados salvos do contrato (fonte da verdade,
   // não o rascunho do localStorage).
@@ -216,6 +247,15 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
           </DialogDescription>
         </DialogHeader>
 
+        {!Boolean(juridicoSettings?.contratada?.razao_social || juridicoSettings?.contratada?.cnpj) && (
+          <div className="p-3 my-2 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>
+              <strong>Atenção:</strong> Os dados da Contratada ainda não foram configurados neste tenant. Acesse a aba <em>Contratos &gt; Configurações da Contratada e Jurídico</em> para cadastrá-los e ter preenchimento automático.
+            </span>
+          </div>
+        )}
+
         <Tabs defaultValue="form" className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-4">
             <TabsTrigger value="form">Formulário de Preenchimento</TabsTrigger>
@@ -343,6 +383,93 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
                 <Input name="data_primeiro_venc" value={formData.data_primeiro_venc || ""} onChange={handleChange} type="date" />
               </div>
 
+              {/* Dados da Contratada (neste contrato) */}
+              <div className="md:col-span-2 border-t border-slate-200 dark:border-white/10 pt-3">
+                <div
+                  className="flex items-center justify-between cursor-pointer py-1 select-none"
+                  onClick={() => setShowContratadaOverride((v) => !v)}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5 text-purple-650 dark:text-purple-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-purple-650 dark:text-purple-400">
+                      Dados da Contratada ({formData.contratada_razao_social || juridicoSettings?.contratada?.razao_social || "Padrão do Sistema"})
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-purple-650 dark:text-purple-400 hover:underline flex items-center gap-1 font-medium">
+                    {showContratadaOverride ? "Ocultar" : "Personalizar para este contrato"}
+                    <ChevronDown className={`h-3 w-3 transition-transform ${showContratadaOverride ? "rotate-180" : ""}`} />
+                  </span>
+                </div>
+              </div>
+
+              {showContratadaOverride && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Razão Social da Contratada</Label>
+                    <Input
+                      name="contratada_razao_social"
+                      value={formData.contratada_razao_social || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.razao_social || "Razão Social da Contratada"}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>CNPJ da Contratada</Label>
+                    <Input
+                      name="contratada_cnpj"
+                      value={formData.contratada_cnpj || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.cnpj || "CNPJ"}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Representante da Contratada</Label>
+                    <Input
+                      name="contratada_representante"
+                      value={formData.contratada_representante || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.representante || "Representante"}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Comarca do Foro da Contratada</Label>
+                    <Input
+                      name="contratada_comarca"
+                      value={formData.contratada_comarca || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.comarca || "Ex: Uberlândia-MG"}
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>Endereço da Contratada</Label>
+                    <Input
+                      name="contratada_endereco"
+                      value={formData.contratada_endereco || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.endereco || "Endereço completo"}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Telefone da Contratada</Label>
+                    <Input
+                      name="contratada_telefone"
+                      value={formData.contratada_telefone || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.telefone || "Telefone"}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>E-mail da Contratada</Label>
+                    <Input
+                      name="contratada_email"
+                      value={formData.contratada_email || ""}
+                      onChange={handleChange}
+                      placeholder={juridicoSettings?.contratada?.email || "E-mail comercial"}
+                    />
+                  </div>
+                </>
+              )}
+
               {/* Cláusula 5ª/6ª — Prazo e Foro */}
               <div className="md:col-span-2 border-t border-slate-200 dark:border-white/10 pt-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-purple-650 dark:text-purple-400">Prazo e Foro (Cláusulas 6ª e 7ª)</span>
@@ -357,11 +484,21 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
               </div>
               <div className="space-y-2">
                 <Label>Foro (Comarca)</Label>
-                <Input name="foro_cidade" value={formData.foro_cidade || ""} onChange={handleChange} placeholder="Ex: Uberlândia-MG" />
+                <Input
+                  name="foro_cidade"
+                  value={formData.foro_cidade || ""}
+                  onChange={handleChange}
+                  placeholder={formData.contratada_comarca || juridicoSettings?.contratada?.comarca || "Ex: Uberlândia-MG"}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Cidade da assinatura</Label>
-                <Input name="cidade_assinatura" value={formData.cidade_assinatura || ""} onChange={handleChange} placeholder="Ex: Uberlândia-MG" />
+                <Input
+                  name="cidade_assinatura"
+                  value={formData.cidade_assinatura || ""}
+                  onChange={handleChange}
+                  placeholder={formData.contratada_comarca || juridicoSettings?.contratada?.comarca || "Ex: Uberlândia-MG"}
+                />
               </div>
 
               {/* Assinaturas */}
@@ -372,9 +509,9 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
                 <Label>Nome da Contratada (na assinatura)</Label>
                 <Input
                   name="assinatura_contratada"
-                  value={formData.assinatura_contratada ?? "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"}
+                  value={formData.assinatura_contratada ?? ""}
                   onChange={handleChange}
-                  placeholder="CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"
+                  placeholder={formData.contratada_razao_social || juridicoSettings?.contratada?.assinatura || "Nome da Contratada"}
                 />
               </div>
               <div className="space-y-2">
