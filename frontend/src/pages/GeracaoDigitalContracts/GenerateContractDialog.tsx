@@ -35,6 +35,8 @@ const CONTRACT_DEFAULTS: Record<string, string> = {
   aviso_previo_dias: "60",
   foro_cidade: "Uberlândia-MG",
   cidade_assinatura: "Uberlândia-MG",
+  assinatura_contratada: "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA",
+  assinatura_contratante: "",
   vigencia: "90",
 };
 
@@ -359,6 +361,29 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
               <div className="space-y-2">
                 <Label>Cidade da assinatura</Label>
                 <Input name="cidade_assinatura" value={formData.cidade_assinatura || ""} onChange={handleChange} placeholder="Ex: Uberlândia-MG" />
+              </div>
+
+              {/* Assinaturas */}
+              <div className="md:col-span-2 border-t border-slate-200 dark:border-white/10 pt-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-purple-650 dark:text-purple-400">Assinaturas do Contrato</span>
+              </div>
+              <div className="space-y-2">
+                <Label>Nome da Contratada (na assinatura)</Label>
+                <Input
+                  name="assinatura_contratada"
+                  value={formData.assinatura_contratada ?? "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"}
+                  onChange={handleChange}
+                  placeholder="CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Nome da Contratante (na assinatura)</Label>
+                <Input
+                  name="assinatura_contratante"
+                  value={formData.assinatura_contratante ?? ""}
+                  onChange={handleChange}
+                  placeholder={formData.razao_social || "Razão Social da Contratante"}
+                />
               </div>
             </div>
           </TabsContent>

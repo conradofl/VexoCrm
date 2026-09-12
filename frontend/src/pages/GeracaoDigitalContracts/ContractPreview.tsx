@@ -1,8 +1,8 @@
-import React, { useMemo } from "react";
-import { applyContractMerge, formatExtenseDateClient } from "@/lib/geracaoDigital/contractMerge";
+import React, { useMemo, useRef } from "react";
+import { applyContractMerge, formatExtenseDateClient, toggleBoldMarkdown } from "@/lib/geracaoDigital/contractMerge";
 import { GdContractFormData, GdContractTemplate } from "@/hooks/useGdContracts";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Pencil, FileText } from "lucide-react";
+import { RotateCcw, Pencil, FileText, Bold } from "lucide-react";
 
 interface ContractPreviewProps {
   template: GdContractTemplate | null;
@@ -11,6 +11,8 @@ interface ContractPreviewProps {
 }
 
 export function ContractPreview({ template, formData, onChangeTextoFinal }: ContractPreviewProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   // Texto padrão gerado mesclando os dados atuais do formulário com o template ativo
   const defaultMergedText = useMemo(() => {
     if (!template) return "";
@@ -39,6 +41,35 @@ export function ContractPreview({ template, formData, onChangeTextoFinal }: Cont
     }
   };
 
+  const handleToggleBold = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const currentText = displayText;
+    const { text: newText, newStart, newEnd } = toggleBoldMarkdown(currentText, start, end);
+
+    if (onChangeTextoFinal) {
+      onChangeTextoFinal(newText);
+    }
+
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newStart, newEnd);
+      }
+    });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Atalho de tecla para negrito: Ctrl+B (Windows/Linux) ou ⌘B (Mac)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      e.preventDefault();
+      handleToggleBold();
+    }
+  };
+
   const handleRestore = () => {
     if (window.confirm("Deseja descartar as edições manuais e restaurar o texto a partir do modelo?")) {
       if (onChangeTextoFinal) {
@@ -64,26 +95,52 @@ export function ContractPreview({ template, formData, onChangeTextoFinal }: Cont
           )}
         </div>
 
-        {isEdited && (
+        <div className="flex items-center gap-2">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={handleRestore}
-            className="h-8 text-xs flex items-center gap-1.5 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-white/15 hover:bg-slate-100 dark:hover:bg-white/10"
+            onClick={handleToggleBold}
+            title="Inserir/Alternar Negrito (Ctrl+B ou ⌘B)"
+            className="h-8 text-xs flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-200 border-slate-300 dark:border-white/15 hover:bg-slate-100 dark:hover:bg-white/10"
           >
-            <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
-            Restaurar do modelo
+            <Bold className="h-3.5 w-3.5" />
+            <span>Negrito</span>
+            <kbd className="text-[10px] font-normal px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 text-slate-500">
+              Ctrl+B
+            </kbd>
           </Button>
-        )}
+
+          {isEdited && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleRestore}
+              className="h-8 text-xs flex items-center gap-1.5 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-white/15 hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+              Restaurar do modelo
+            </Button>
+          )}
+        </div>
       </div>
 
       <textarea
+        ref={textareaRef}
         value={displayText}
         onChange={handleTextChange}
+        onKeyDown={handleKeyDown}
         className="w-full h-[500px] rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 p-4 font-serif text-sm leading-relaxed text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 shadow-inner resize-none overflow-y-auto"
         placeholder="Texto do contrato..."
       />
+
+      <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
+        <span>
+          💡 Selecione qualquer palavra ou frase e aperte <strong>Ctrl+B</strong> (ou <strong>⌘B</strong>) para colocar em negrito (<code className="text-purple-600 dark:text-purple-400 font-mono">**palavra**</code>). As palavras marcadas sairão em negrito no PDF gerado.
+        </span>
+      </div>
     </div>
   );
 }
+

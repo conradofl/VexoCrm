@@ -87,4 +87,48 @@ describe("buildContractPdfBuffer com texto_final editável (Leva A)", () => {
       _setPgDatabasePoolForTesting(null);
     }
   });
+
+  it("renderiza texto_final contendo negrito (**palavra**) e assinaturas personalizadas", async () => {
+    const mockPool = {
+      query: vi.fn(async (sql, params) => {
+        if (sql.includes("FROM gd_contracts")) {
+          return {
+            rows: [
+              {
+                id: "contract-3",
+                tenant_id: "tenant-1",
+                dados: {
+                  razao_social: "Cafeeiro Lanches",
+                  assinatura_contratada: "Geração Digital Publicidade LTDA",
+                  assinatura_contratante: "Cafeeiro Lanches LTDA - Rep: Carlos",
+                  texto_final: `CONTRATO DE PRESTAÇÃO DE SERVIÇOS
+Cláusula 1 - Condições Especiais
+1º Pagamento: **R$ 2.400,00** à vista com **desconto de 10%**.
+E, por estarem de acordo, assinam:
+
+____________________________________________________
+Contratada: Geração Digital Publicidade LTDA
+
+____________________________________________________
+Contratante: Cafeeiro Lanches LTDA - Rep: Carlos`,
+                },
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+
+    _setPgDatabasePoolForTesting(mockPool);
+
+    try {
+      const result = await buildContractPdfBuffer("tenant-1", "contract-3");
+      expect(result).toBeDefined();
+      expect(Buffer.isBuffer(result.pdfData)).toBe(true);
+      expect(result.pdfData.length).toBeGreaterThan(200);
+    } finally {
+      _setPgDatabasePoolForTesting(null);
+    }
+  });
 });

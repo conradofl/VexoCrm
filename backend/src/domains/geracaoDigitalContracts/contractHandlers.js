@@ -277,6 +277,34 @@ async function finalizeContractPdfResponse(res, tenantId, id, dados, pdfData) {
   return res.send(pdfData);
 }
 
+// Renderiza parágrafo com suporte a marcação de negrito (**texto** ou <b>texto</b>)
+function renderFormattedParagraph(doc, text, options = {}) {
+  const regex = /(\*\*.*?\*\*|<b>.*?<\/b>)/g;
+  const parts = text.split(regex);
+  const tokens = parts.filter(Boolean).map((part) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+      return { text: part.slice(2, -2), bold: true };
+    }
+    if (/^<b>(.*?)<\/b>$/i.test(part)) {
+      return { text: part.replace(/^<b>|<\/b>$/gi, ""), bold: true };
+    }
+    return { text: part, bold: false };
+  });
+
+  if (tokens.length === 0) {
+    return;
+  }
+
+  tokens.forEach((token, idx) => {
+    const isLast = idx === tokens.length - 1;
+    doc.font(token.bold ? "Helvetica-Bold" : "Helvetica");
+    doc.text(token.text, {
+      ...options,
+      continued: !isLast,
+    });
+  });
+}
+
 // Renderização do documento (mesmo layout do preview da tela).
 async function renderContractPdf(templateConteudo, dados) {
   {
@@ -326,28 +354,45 @@ async function renderContractPdf(templateConteudo, dados) {
         continue;
       }
 
+      // Linhas de assinatura centralizadas (traços e rótulos de Contratada/Contratante)
+      const isSignatureUnderline = /^[_\s]{10,}$/.test(p.trim());
+      const isSignatureLabel = /^(Contratada|Contratante):/i.test(p.trim());
+      if (isSignatureUnderline || isSignatureLabel) {
+        doc.font("Helvetica").fontSize(10.5);
+        doc.text(p.trim(), { align: "center", lineGap: LINE_GAP });
+        if (isSignatureLabel) {
+          doc.moveDown(1.5);
+        }
+        continue;
+      }
+
       // Itens de lista (A./B./ "- item" / "1º Pagamento") — sem recuo extra,
       // mantendo o alinhamento à esquerda igual ao preview.
       const isItem = /^([A-Z]\.|[-•]|\d+º)\s/.test(p.trim());
-      doc.font("Helvetica").fontSize(BODY_SIZE).text(p.trim(), {
+      doc.fontSize(BODY_SIZE);
+      renderFormattedParagraph(doc, p.trim(), {
         align: "left",
         lineGap: LINE_GAP,
         paragraphGap: isItem ? 0 : 2,
       });
     }
 
-    doc.moveDown(3);
-
-    // Assinaturas
-    doc.font("Helvetica").fontSize(10.5);
-    doc.text("____________________________________________________", { align: "center" });
-    doc.text("Contratada: CAIO VINÍCIUS ALMEIDA DE OLIVEIRA", { align: "center" });
-    doc.moveDown(2);
-    doc.text("____________________________________________________", { align: "center" });
-    doc.text(`Contratante: ${dados.razao_social || "Razão Social"}`, { align: "center" });
+    // Assinaturas: se o documento já não renderizou assinaturas no corpo do texto,
+    // inclui o bloco de rodapé com suporte aos campos dinâmicos dados.assinatura_contratada / contratante
+    const jaTemAssinaturas = linhas.some((l) => /^(Contratada|Contratante):/i.test(l.trim()));
+    if (!jaTemAssinaturas) {
+      doc.moveDown(3);
+      doc.font("Helvetica").fontSize(10.5);
+      doc.text("____________________________________________________", { align: "center" });
+      doc.text(`Contratada: ${dados.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA"}`, { align: "center" });
+      doc.moveDown(2);
+      doc.text("____________________________________________________", { align: "center" });
+      doc.text(`Contratante: ${dados.assinatura_contratante || dados.razao_social || "Razão Social"}`, { align: "center" });
+    }
 
     doc.end();
 
     return await pdfBufferPromise;
   }
 }
+

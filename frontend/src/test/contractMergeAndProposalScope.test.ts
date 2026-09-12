@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
-import { buildContractDados } from "@/lib/geracaoDigital/contractMerge";
+import { buildContractDados, toggleBoldMarkdown } from "@/lib/geracaoDigital/contractMerge";
 import { resolveTermNomeExibicao } from "@/lib/geracaoDigital/formasPagamento";
 
 describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
@@ -26,6 +26,45 @@ describe("Leva A - Contratos GD: deduplicação e texto editável", () => {
         texto_final: "   ",
       });
       expect(dados.texto_final).toBeUndefined();
+    });
+
+    it("inclui assinatura_contratada e assinatura_contratante com defaults adequados", () => {
+      const dados = buildContractDados({
+        razao_social: "Cafeeiro Lanches LTDA",
+      });
+      expect(dados.assinatura_contratada).toBe("CAIO VINÍCIUS ALMEIDA DE OLIVEIRA");
+      expect(dados.assinatura_contratante).toBe("Cafeeiro Lanches LTDA");
+
+      const dadosCustom = buildContractDados({
+        razao_social: "Cafeeiro Lanches LTDA",
+        assinatura_contratada: "Geração Digital LTDA",
+        assinatura_contratante: "Cafeeiro Lanches LTDA - Rep: João da Silva",
+      });
+      expect(dadosCustom.assinatura_contratada).toBe("Geração Digital LTDA");
+      expect(dadosCustom.assinatura_contratante).toBe("Cafeeiro Lanches LTDA - Rep: João da Silva");
+    });
+  });
+
+  describe("Edição de Negrito e Atalho Markdown", () => {
+    it("envolve texto selecionado com **", () => {
+      const res = toggleBoldMarkdown("Valor: R$ 2.400,00 reais", 7, 18);
+      expect(res.text).toBe("Valor: **R$ 2.400,00** reais");
+      expect(res.newStart).toBe(7);
+      expect(res.newEnd).toBe(22);
+    });
+
+    it("remove ** de texto que já está em negrito (toggle off)", () => {
+      const res = toggleBoldMarkdown("Valor: **R$ 2.400,00** reais", 7, 22);
+      expect(res.text).toBe("Valor: R$ 2.400,00 reais");
+      expect(res.newStart).toBe(7);
+      expect(res.newEnd).toBe(18);
+    });
+
+    it("insere **** na posição do cursor quando não há seleção", () => {
+      const res = toggleBoldMarkdown("Texto antes .", 12, 12);
+      expect(res.text).toBe("Texto antes ****.");
+      expect(res.newStart).toBe(14);
+      expect(res.newEnd).toBe(14);
     });
   });
 

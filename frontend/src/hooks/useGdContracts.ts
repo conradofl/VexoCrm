@@ -22,6 +22,8 @@ export interface GdContractFormData {
   condicoes_pagamento: string;
   vigencia: string;
   texto_final?: string;
+  assinatura_contratada?: string;
+  assinatura_contratante?: string;
   [key: string]: any;
 }
 

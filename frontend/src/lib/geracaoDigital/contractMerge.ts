@@ -1,3 +1,9 @@
+export function buildSignatureBlock(data: Record<string, any>): string {
+  const contratada = data.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA";
+  const contratante = data.assinatura_contratante || data.razao_social || "Razão Social";
+  return `\n\n____________________________________________________\nContratada: ${contratada}\n\n____________________________________________________\nContratante: ${contratante}`;
+}
+
 export function applyContractMerge(template: string, data: Record<string, string>): string {
   if (!template) return "";
   
@@ -6,6 +12,13 @@ export function applyContractMerge(template: string, data: Record<string, string
     const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
     result = result.replace(regex, value || "");
   }
+
+  // Se o template não possui o bloco de assinaturas, anexa as assinaturas dinâmicas
+  const jaPossuiAssinaturas = /Contratada:\s*.*?\n.*?Contratante:/is.test(result) || result.includes("________________");
+  if (!jaPossuiAssinaturas) {
+    result += buildSignatureBlock(data);
+  }
+
   return result;
 }
 
@@ -38,14 +51,19 @@ export function buildCronograma(numParcelas: number, valorParcela: number, dataP
 }
 
 // Enriquisce o formData com os campos derivados usados no template
-// (forma_pagamento por extenso e cronograma). Usado no preview e ao gerar.
+// (forma_pagamento por extenso, cronograma e assinaturas). Usado no preview e ao gerar.
 export function buildContractDados(formData: Record<string, any>): Record<string, string> {
   const forma = FORMA_PAGAMENTO_TEXTO[String(formData.forma_pagamento || "")] || String(formData.forma_pagamento || "conforme condições da proposta");
   const cronograma = buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
+  const contratada = String(formData.assinatura_contratada || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA").trim() || "CAIO VINÍCIUS ALMEIDA DE OLIVEIRA";
+  const contratante = String(formData.assinatura_contratante || formData.razao_social || "Razão Social").trim() || "Razão Social";
+
   const result: Record<string, any> = {
     ...formData,
     forma_pagamento: forma,
     cronograma_pagamento: cronograma || String(formData.condicoes_pagamento || "Conforme condições da proposta comercial aceita."),
+    assinatura_contratada: contratada,
+    assinatura_contratante: contratante,
   };
   if (formData.texto_final && typeof formData.texto_final === "string" && formData.texto_final.trim()) {
     result.texto_final = formData.texto_final;
@@ -63,3 +81,50 @@ export function formatExtenseDateClient(): string {
   const date = new Date();
   return `${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
 }
+
+/**
+ * Envolve ou desenvolve seleção com sintaxe Markdown de negrito (****).
+ */
+export function toggleBoldMarkdown(text: string, start: number, end: number): { text: string; newStart: number; newEnd: number } {
+  if (start === end) {
+    const before = text.slice(0, start);
+    const after = text.slice(start);
+    return {
+      text: `${before}****${after}`,
+      newStart: start + 2,
+      newEnd: start + 2,
+    };
+  }
+
+  const selected = text.slice(start, end);
+
+  // Se o próprio texto selecionado já contém ** no início e fim
+  if (selected.startsWith("**") && selected.endsWith("**") && selected.length >= 4) {
+    const unwrapped = selected.slice(2, -2);
+    const newText = text.slice(0, start) + unwrapped + text.slice(end);
+    return {
+      text: newText,
+      newStart: start,
+      newEnd: start + unwrapped.length,
+    };
+  }
+
+  // Se os caracteres vizinhos externos já são **
+  if (start >= 2 && text.slice(start - 2, start) === "**" && text.slice(end, end + 2) === "**") {
+    const newText = text.slice(0, start - 2) + selected + text.slice(end + 2);
+    return {
+      text: newText,
+      newStart: start - 2,
+      newEnd: start - 2 + selected.length,
+    };
+  }
+
+  const wrapped = `**${selected}**`;
+  const newText = text.slice(0, start) + wrapped + text.slice(end);
+  return {
+    text: newText,
+    newStart: start,
+    newEnd: start + wrapped.length,
+  };
+}
+
