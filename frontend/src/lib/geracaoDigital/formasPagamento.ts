@@ -33,7 +33,7 @@ export interface FormaDef {
 export const FORMAS_SETUP: FormaDef[] = [
   { id: "pix_avista", label: "Pix à vista", aplica_a: "setup", parcelavel: false },
   { id: "entrada_pix_30d", label: "Entrada no Pix + 30 dias no Pix", aplica_a: "setup", parcelavel: false },
-  { id: "cartao_parcelado", label: "Parcelado no Cartão em até 3x", aplica_a: "setup", parcelavel: true },
+  { id: "cartao_parcelado", label: "Parcelado no Cartão", aplica_a: "setup", parcelavel: true },
 ];
 
 export const FORMAS_MENSALIDADE: FormaDef[] = [
@@ -114,7 +114,7 @@ export function nomeDaForma(
   if (!def.parcelavel) return def.label;
   const n = parcelasDe(formas, def.id, periodoOuMeses);
   if (def.id === "cartao_parcelado_periodo") {
-    return n === 1 ? "Parcelado no Cartão em 1x" : `Parcelado no Cartão em até ${n}x`;
+    return `Parcelado no Cartão em ${n}x`;
   }
   return `${def.label} em ${n}x`;
 }
@@ -170,3 +170,24 @@ export function termsParaFormas(terms: any[]): FormasSelecionadas {
 export function termsLegados(terms: any[]): any[] {
   return (terms || []).filter((t) => !TODAS_FORMAS.some((d) => d.id === t?.id));
 }
+
+/**
+ * Normaliza e resolve o nome de exibição de uma condição de pagamento,
+ * garantindo que condições parceladas usem "em Nx" em vez do legado "em até Nx".
+ */
+export function resolveTermNomeExibicao(term: any): string {
+  if (!term) return "";
+  const num = Number(term?.config?.num_parcelas);
+  if (
+    term.id === "cartao_parcelado" ||
+    term.id === "cartao_parcelado_periodo" ||
+    term.tipo === "parcelado_cartao"
+  ) {
+    if (num >= 1) return `Parcelado no Cartão em ${num}x`;
+  }
+  let n = String(term.nome || "");
+  n = n.replace(/Parcelado no Cartão(?: em até \d+x)? em (\d+)x/gi, "Parcelado no Cartão em $1x");
+  n = n.replace(/Parcelado no Cartão em até (\d+)x/gi, "Parcelado no Cartão em $1x");
+  return n;
+}
+

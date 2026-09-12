@@ -18,7 +18,16 @@ export function buildContractInitialData(proposal: any, availablePackages: any[]
 
   const itens = Array.isArray(proposal?.itens) ? proposal.itens : [];
   // Escopo (Cláusula Segunda): itens inclusos entram sem valor, para não poluir.
+  // No contrato, duas linhas idênticas de valor zero são sempre erro — remove duplicatas por descrição.
+  const seenDesc = new Set<string>();
   const produtos = itens
+    .filter((i: any) => {
+      const desc = String(i?.descricao || "").trim();
+      if (!desc) return false;
+      if (seenDesc.has(desc)) return false;
+      seenDesc.add(desc);
+      return true;
+    })
     .map((i: any) => {
       const valor = Number(i.valor || 0);
       return valor > 0

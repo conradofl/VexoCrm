@@ -21,6 +21,7 @@ export interface GdContractFormData {
   produtos: string;
   condicoes_pagamento: string;
   vigencia: string;
+  texto_final?: string;
   [key: string]: any;
 }
 

@@ -217,6 +217,12 @@ export async function buildContractPdfBuffer(tenantId, id) {
   const dados = contract.dados || {};
   dados.data_extenso = formatExtenseDate();
 
+  // Se o usuário editou o texto final na tela, renderiza diretamente ignorando o template
+  if (dados?.texto_final && typeof dados.texto_final === "string" && dados.texto_final.trim()) {
+    const pdfData = await renderContractPdf(dados.texto_final, dados);
+    return { contract, dados, pdfData };
+  }
+
   const { rows: templateRows } = await db.query(
     "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1",
     [tenantId]

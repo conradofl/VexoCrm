@@ -364,7 +364,11 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
           </TabsContent>
 
           <TabsContent value="preview">
-            <ContractPreview template={template} formData={buildContractDados(formData) as GdContractFormData} />
+            <ContractPreview
+              template={template}
+              formData={buildContractDados(formData) as GdContractFormData}
+              onChangeTextoFinal={(text) => setFormData((prev) => ({ ...prev, texto_final: text }))}
+            />
           </TabsContent>
         </Tabs>
 

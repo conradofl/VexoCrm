@@ -3372,15 +3372,30 @@ Condições: ${condicoes}`;
       // Keep any other items from the old proposal that were not part of the old package (e.g. Vexo avulso modules)
       if (Array.isArray(proposal.itens)) {
         proposal.itens.forEach((item) => {
-          if (item.categoria === "vexo" && !item.descricao.startsWith("Pacote Vexo:")) {
-            finalItems.push(item);
+          if (item.categoria === "vexo" && !item.descricao?.startsWith("Pacote Vexo:")) {
+            const alreadyExists = finalItems.some((f) => f.descricao === item.descricao);
+            if (!alreadyExists) {
+              finalItems.push(item);
+            }
           }
         });
       }
 
+      // Deduplica itens por descrição (evita repetições de valor zero)
+      const seenDescs = new Set();
+      const dedupedFinalItems = finalItems.filter((it) => {
+        const desc = String(it.descricao || "").trim();
+        if (!desc) return false;
+        if (Number(it.valor || 0) === 0) {
+          if (seenDescs.has(desc)) return false;
+          seenDescs.add(desc);
+        }
+        return true;
+      });
+
       // Recalculate totals
-      const valorSetup = somaSetup(finalItems);
-      const valorRecorrente = somaRecorrente(finalItems);
+      const valorSetup = somaSetup(dedupedFinalItems);
+      const valorRecorrente = somaRecorrente(dedupedFinalItems);
       const valorTotal = valorSetup + valorRecorrente;
 
       // Update proposal in DB — período do plano acompanha o pacote escolhido
@@ -3430,7 +3445,7 @@ Condições: ${condicoes}`;
         `UPDATE public.gd_proposals
          SET package_id = $1, itens = $2, valor_total = $3, periodo_plano = COALESCE($5, periodo_plano), valor_vp = $6, desconto_mensal_pct = $7
          WHERE id = $4`,
-        [package_id, JSON.stringify(finalItems), valorTotal, id, periodoDoPacote, vpMensalParaSalvar, descPeriodo]
+        [package_id, JSON.stringify(dedupedFinalItems), valorTotal, id, periodoDoPacote, vpMensalParaSalvar, descPeriodo]
       );
 
       res.json({ success: true });

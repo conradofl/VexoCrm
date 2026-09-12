@@ -427,10 +427,12 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
 
       if (Array.isArray(selectedGdPkg.produtos_incluidos)) {
         selectedGdPkg.produtos_incluidos.forEach((p: any) => {
+          const isVexo = p.origem === "vexo";
+          const desc = isVexo ? (String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`) : p.nome;
           finalItems.push({
             product_id: p.product_id || null,
-            descricao: p.nome,
-            categoria: "gd",
+            descricao: desc,
+            categoria: isVexo ? "vexo" : "gd",
             valor: 0,
             recorrencia: "mensal"
           });
@@ -461,13 +463,16 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
 
       if (Array.isArray(selectedVexoPkg.produtos_incluidos)) {
         selectedVexoPkg.produtos_incluidos.forEach((p: any) => {
-          finalItems.push({
-            product_id: p.product_id || null,
-            descricao: `Módulo: ${p.nome}`,
-            categoria: "vexo",
-            valor: 0,
-            recorrencia: "mensal"
-          });
+          const desc = String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`;
+          if (!finalItems.some(it => it.descricao === desc)) {
+            finalItems.push({
+              product_id: p.product_id || null,
+              descricao: desc,
+              categoria: "vexo",
+              valor: 0,
+              recorrencia: "mensal"
+            });
+          }
         });
       }
     }
@@ -479,9 +484,20 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     // impresso com preço na proposta do cliente. Os itens legados já gravados
     // são absorvidos no escopo por planoDeProposta() ao abrir a proposta.
 
+    const seenItemDescs = new Set<string>();
+    const dedupedItems = finalItems.filter((i) => {
+      const desc = String(i.descricao || "").trim();
+      if (!desc) return false;
+      if (Number(i.valor || 0) === 0) {
+        if (seenItemDescs.has(desc)) return false;
+        seenItemDescs.add(desc);
+      }
+      return true;
+    });
+
     const serialize = (arr: any[]) => JSON.stringify(arr.map(i => ({ d: i.descricao, v: i.valor })));
-    if (serialize(finalItems) !== serialize(items)) {
-      setItems(finalItems);
+    if (serialize(dedupedItems) !== serialize(items)) {
+      setItems(dedupedItems);
     }
   }, [editPackageId, editPackageVexoId, availablePackages, vexoProducts, gdProducts, selectedProposal]);
 
@@ -835,9 +851,10 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         if (Array.isArray(selectedGdPkg.produtos_incluidos)) {
           selectedGdPkg.produtos_incluidos.forEach((p: any) => {
             const isVexo = p.origem === "vexo";
+            const desc = isVexo ? (String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`) : p.nome;
             finalItems.push({
               product_id: p.product_id || null,
-              descricao: isVexo ? `Módulo: ${p.nome}` : p.nome,
+              descricao: desc,
               categoria: isVexo ? "vexo" : "gd",
               valor: 0,
               recorrencia: "mensal"
@@ -869,16 +886,31 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
 
         if (Array.isArray(selectedVexoPkg.produtos_incluidos)) {
           selectedVexoPkg.produtos_incluidos.forEach((p: any) => {
-            finalItems.push({
-              product_id: p.product_id || null,
-              descricao: `Módulo: ${p.nome}`,
-              categoria: "vexo",
-              valor: 0,
-              recorrencia: "mensal"
-            });
+            const desc = String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`;
+            if (!finalItems.some(it => it.descricao === desc)) {
+              finalItems.push({
+                product_id: p.product_id || null,
+                descricao: desc,
+                categoria: "vexo",
+                valor: 0,
+                recorrencia: "mensal"
+              });
+            }
           });
         }
       }
+
+      // Deduplica itens por descrição (evita repetições de valor zero)
+      const seenItens = new Set<string>();
+      const dedupedFinalItems = finalItems.filter((i) => {
+        const desc = String(i.descricao || "").trim();
+        if (!desc) return false;
+        if (Number(i.valor || 0) === 0) {
+          if (seenItens.has(desc)) return false;
+          seenItens.add(desc);
+        }
+        return true;
+      });
 
       // Nada de avulso com valor: um serviço está no plano ou não está na
       // proposta. Ver o efeito de montagem de itens acima.
@@ -889,7 +921,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
 
       if (updatedSlides) {
         const gdItems: string[] = [];
-        const pkgItem = finalItems.find((it: any) => {
+        const pkgItem = dedupedFinalItems.find((it: any) => {
           const desc = String(it.descricao || it.nome || "").trim();
           return desc.toLowerCase().startsWith("pacote:") && !desc.toLowerCase().includes("vexo");
         });
@@ -897,7 +929,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
           gdItems.push(pkgItem.descricao || pkgItem.nome);
         }
 
-        finalItems.forEach((it: any) => {
+        dedupedFinalItems.forEach((it: any) => {
           const desc = String(it.descricao || it.nome || "").trim();
           const cat = String(it.categoria || "").toLowerCase();
           if (!desc) return;
@@ -909,7 +941,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         });
 
         const vexoItems: string[] = [];
-        finalItems.forEach((it: any) => {
+        dedupedFinalItems.forEach((it: any) => {
           const desc = String(it.descricao || it.nome || "").trim();
           const cat = String(it.categoria || "").toLowerCase();
           if (!desc) return;
@@ -962,7 +994,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         // que faz os prazos novos (Mensal/Trimestral/Semestral) entrarem.
         pacotes_ofertados: pacotesOfertados,
         package_vexo_id: editPackageVexoId || null,
-        itens: finalItems,
+        itens: dedupedFinalItems,
         presentation_slides: updatedSlides || undefined,
         condicoes,
         payment_link: paymentLink,

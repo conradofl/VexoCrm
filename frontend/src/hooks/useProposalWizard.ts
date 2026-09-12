@@ -112,10 +112,12 @@ export function useProposalWizard({
 
         if (Array.isArray(selectedGdPkg.produtos_incluidos)) {
           selectedGdPkg.produtos_incluidos.forEach((p: any) => {
+            const isVexo = p.origem === "vexo";
+            const desc = isVexo ? (String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`) : p.nome;
             finalItems.push({
               product_id: p.product_id || null,
-              descricao: p.nome,
-              categoria: "gd",
+              descricao: desc,
+              categoria: isVexo ? "vexo" : "gd",
               valor: 0,
               recorrencia: "mensal"
             });
@@ -148,16 +150,31 @@ export function useProposalWizard({
 
         if (Array.isArray(selectedVexoPkg.produtos_incluidos)) {
           selectedVexoPkg.produtos_incluidos.forEach((p: any) => {
-            finalItems.push({
-              product_id: p.product_id || null,
-              descricao: `Módulo: ${p.nome}`,
-              categoria: "vexo",
-              valor: 0,
-              recorrencia: "mensal"
-            });
+            const desc = String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`;
+            if (!finalItems.some(it => it.descricao === desc)) {
+              finalItems.push({
+                product_id: p.product_id || null,
+                descricao: desc,
+                categoria: "vexo",
+                valor: 0,
+                recorrencia: "mensal"
+              });
+            }
           });
         }
       }
+
+      // Deduplica itens por descrição (evita repetições de valor zero)
+      const seenItens = new Set<string>();
+      const dedupedFinalItems = finalItems.filter((i) => {
+        const desc = String(i.descricao || "").trim();
+        if (!desc) return false;
+        if (Number(i.valor || 0) === 0) {
+          if (seenItens.has(desc)) return false;
+          seenItens.add(desc);
+        }
+        return true;
+      });
 
       // Não existe avulso com valor: o escopo do plano é a única fonte
       // de serviços da proposta. Ver lib/geracaoDigital/plano.ts.
@@ -174,7 +191,7 @@ export function useProposalWizard({
         package_id: newPackageId || null,
         package_vexo_id: newPackageVexoId || null,
         pacotes_ofertados: newPacotesOfertados,
-        itens: finalItems,
+        itens: dedupedFinalItems,
         cobrar_setup: newCobrarSetup || Number(newValorSetup || 0) > 0,
         // Guarda o valor mesmo com a cobrança desligada: é o que permite
         // exibir "R$ 3.000 (riscado) Isento" na proposta. O cálculo ignora

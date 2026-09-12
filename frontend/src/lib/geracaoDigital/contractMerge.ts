@@ -42,11 +42,17 @@ export function buildCronograma(numParcelas: number, valorParcela: number, dataP
 export function buildContractDados(formData: Record<string, any>): Record<string, string> {
   const forma = FORMA_PAGAMENTO_TEXTO[String(formData.forma_pagamento || "")] || String(formData.forma_pagamento || "conforme condições da proposta");
   const cronograma = buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
-  return {
+  const result: Record<string, any> = {
     ...formData,
     forma_pagamento: forma,
     cronograma_pagamento: cronograma || String(formData.condicoes_pagamento || "Conforme condições da proposta comercial aceita."),
   };
+  if (formData.texto_final && typeof formData.texto_final === "string" && formData.texto_final.trim()) {
+    result.texto_final = formData.texto_final;
+  } else {
+    delete result.texto_final;
+  }
+  return result;
 }
 
 export function formatExtenseDateClient(): string {

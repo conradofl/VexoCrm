@@ -83,13 +83,13 @@ describe("stepper de parcelas", () => {
   it("o nome exibido carrega as parcelas", () => {
     let f = formasVazias();
     f = ajustarParcelas(f, "cartao_parcelado", 3); // 3 -> 6
-    expect(nomeDaForma(f, FORMAS_SETUP[2])).toBe("Parcelado no Cartão em até 3x em 6x");
+    expect(nomeDaForma(f, FORMAS_SETUP[2])).toBe("Parcelado no Cartão em 6x");
     expect(nomeDaForma(f, FORMAS_SETUP[0])).toBe("Pix à vista");
 
     const formaMensal = FORMAS_MENSALIDADE.find((m) => m.id === "cartao_parcelado_periodo")!;
-    expect(nomeDaForma(f, formaMensal, "trimestral")).toBe("Parcelado no Cartão em até 3x");
-    expect(nomeDaForma(f, formaMensal, "semestral")).toBe("Parcelado no Cartão em até 6x");
-    expect(nomeDaForma(f, formaMensal, "anual")).toBe("Parcelado no Cartão em até 12x");
+    expect(nomeDaForma(f, formaMensal, "trimestral")).toBe("Parcelado no Cartão em 3x");
+    expect(nomeDaForma(f, formaMensal, "semestral")).toBe("Parcelado no Cartão em 6x");
+    expect(nomeDaForma(f, formaMensal, "anual")).toBe("Parcelado no Cartão em 12x");
     expect(nomeDaForma(f, formaMensal, "mensal")).toBe("Parcelado no Cartão em 1x");
   });
 });
@@ -145,7 +145,7 @@ describe("conversão para PaymentTerm (formato já gravado em condicoes_pagament
     expect(term.tipo).toBe("parcelado_cartao");
     expect(termAplicaA(term)).toBe("mensalidade");
     expect(term.config?.num_parcelas).toBe(3);
-    expect(term.nome).toBe("Parcelado no Cartão em até 3x");
+    expect(term.nome).toBe("Parcelado no Cartão em 3x");
 
     // trimestral de R$ 5.000/mês vira 3x de R$ 5.000 (total R$ 15.000)
     const b = computePaymentBreakdown(term, 5000 * 3);

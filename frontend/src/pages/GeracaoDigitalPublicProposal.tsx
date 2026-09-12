@@ -101,6 +101,9 @@ const PERIODO_LABELS: Record<string, string> = {
   anual: "Anual",
 };
 
+import { resolveTermNomeExibicao } from "@/lib/geracaoDigital/formasPagamento";
+export { resolveTermNomeExibicao };
+
 export default function GeracaoDigitalPublicProposal() {
   const { id } = useParams<{ id: string }>();
   // ?embed=1: a proposta está dentro do preview da tela interna. Esconde as
@@ -767,7 +770,7 @@ export default function GeracaoDigitalPublicProposal() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold text-white leading-tight">
-                          {term.nome}
+                          {resolveTermNomeExibicao(term)}
                           <span className={aplicaA === "mensalidade" ? "text-[8px] font-black uppercase text-blue-400 ml-1.5" : "text-[8px] font-black uppercase text-purple-400 ml-1.5"}>
                             · {APLICA_A_LABELS[aplicaA]}
                           </span>
@@ -783,7 +786,7 @@ export default function GeracaoDigitalPublicProposal() {
               </div>
               {proposal.status === "aceita" && chosenTerm && (
                 <p className="text-[10px] text-emerald-400 font-bold">
-                  Condição escolhida: {chosenTerm.nome}
+                  Condição escolhida: {resolveTermNomeExibicao(chosenTerm)}
                 </p>
               )}
             </div>
