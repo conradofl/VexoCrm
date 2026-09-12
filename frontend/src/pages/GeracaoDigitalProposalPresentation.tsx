@@ -127,9 +127,10 @@ export default function GeracaoDigitalProposalPresentation() {
 
         if (Array.isArray(slidesToUse) && slidesToUse.length > 0) {
           slidesToUse = slidesToUse.map((s: any) => {
+            let updated = { ...s };
             if (s.kind === "partnership" || s.id === 5) {
-              return {
-                ...s,
+              updated = {
+                ...updated,
                 fronts: [
                   {
                     label: "Geração Digital",
@@ -144,7 +145,20 @@ export default function GeracaoDigitalProposalPresentation() {
                 ],
               };
             }
-            return s;
+            if (prop?.esconder_valores === true) {
+              if (
+                updated.metric &&
+                typeof updated.metric.value === "string" &&
+                (updated.metric.value.includes("R$") || updated.kind === "close" || updated.kind === "pricing")
+              ) {
+                updated.metric = {
+                  ...updated.metric,
+                  value: "Sob Consulta",
+                  caption: updated.metric.caption || "Condições especiais personalizadas",
+                };
+              }
+            }
+            return updated;
           });
         }
 

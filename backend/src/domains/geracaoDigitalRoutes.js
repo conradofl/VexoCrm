@@ -11,6 +11,8 @@ import {
   requireVexoCommercialAccess,
   makeVexoCommercialRowGuard,
 } from "../access/vexoCommercialGate.js";
+import { isManagerOrAdmin } from "../access/claims.js";
+import { resolveAuthorizedClientId } from "../services/tenant.js";
 
 // Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
 // grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
@@ -289,6 +291,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS meeting_notes TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS meeting_notes TEXT`));
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`));
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`));
+      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
       await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
 
@@ -2038,7 +2041,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             "tenant_id", "presentation_id", "package_id", "package_vexo_id", "prospect_name", "itens", "valor_total", "condicoes", "status",
             "cobrar_setup", "valor_setup_vexo", "condicoes_pagamento", "periodo_plano", "validade_ate", "valor_apos_validade", "observacao_validade", "valor_vp",
             "pacotes_ofertados", "owner_company", "condicoes_especiais", "desconto_setup_pct", "desconto_mensal_pct", "vexi_plan", "vexi_price", "vexo_plan", "vexo_price",
-            "descontos_por_periodo", "vp_percent"
+            "descontos_por_periodo", "vp_percent", "esconder_valores"
           ];
           const cols = hasSegmentLogo ? [...baseCols, "segment_id", "prospect_logo"] : baseCols;
           const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
@@ -2077,7 +2080,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
             descontos_por_periodo && typeof descontos_por_periodo === "object"
               ? JSON.stringify(descontos_por_periodo)
               : (typeof descontos_por_periodo === "string" ? descontos_por_periodo : null),
-            vp_percent !== null && vp_percent !== undefined && vp_percent !== "" ? Number(vp_percent) : null
+            vp_percent !== null && vp_percent !== undefined && vp_percent !== "" ? Number(vp_percent) : null,
+            req.body.esconder_valores === true
           ];
           if (!hasSegmentLogo) return base;
           const rawSegment = custom_segment_name || customSegmentName || segment_id || null;
@@ -2222,7 +2226,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const { id } = req.params;
       const {
         client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento, package_id, package_vexo_id, valor_vp, pacotes_ofertados, segment_id, custom_segment_name, customSegmentName, prospect_logo,
-        condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price
+        condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price,
+        esconder_valores
       } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
@@ -2358,6 +2363,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         ? ",\n             segment_id = COALESCE($23, segment_id),\n             prospect_logo = COALESCE($24, prospect_logo)"
         : "";
 
+      const finalEsconderValores = esconder_valores !== undefined ? (esconder_valores === true) : (current.esconder_valores === true);
+
       const result = await pool.query(
         `UPDATE public.gd_proposals
          SET prospect_name = COALESCE($1, prospect_name),
@@ -2390,7 +2397,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              owner_company = COALESCE($30, owner_company),
              presentation_slides = COALESCE($31, presentation_slides),
              descontos_por_periodo = $32,
-             vp_percent = $33${segLogoSet}
+             vp_percent = $33,
+             esconder_valores = $34${segLogoSet}
          WHERE id = $19 AND tenant_id = $20 RETURNING *`,
         [
           prospect_name,
@@ -2425,7 +2433,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalOwnerCompany || null,
           finalPresentationSlides ? JSON.stringify(finalPresentationSlides) : null,
           finalDescontosPorPeriodo,
-          finalVpPercent
+          finalVpPercent,
+          finalEsconderValores
         ]
       );
 
@@ -2605,6 +2614,100 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     }
   });
 
+  // POST /api/gd/proposals/:id/reopen — reabre proposta aceita com preservação de assinaturas e auditoria
+  app.post("/api/gd/proposals/:id/reopen", requireFirebaseAuth, requireVexoCommercialAccess, guardPropostaVexo, async (req, res) => {
+    try {
+      if (!isManagerOrAdmin(req.authAccess)) {
+        return res.status(403).json({ error: "Apenas gestores ou administradores podem reabrir propostas aceitas." });
+      }
+
+      const { id } = req.params;
+      const { motivo } = req.body || {};
+
+      const clientKey = resolveAuthorizedClientId(req, res, req.body?.client_id || req.query?.client_id);
+      if (!clientKey) return; // resolveAuthorizedClientId já respondeu
+
+      const tenantId = await resolveTenantUuid(clientKey);
+
+      const propRes = await pool.query(
+        `SELECT * FROM public.gd_proposals WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+
+      if (propRes.rows.length === 0) {
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+
+      const prop = propRes.rows[0];
+      if (prop.status !== "aceita") {
+        return res.status(400).json({ error: "Apenas propostas com status 'aceita' podem ser reabertas." });
+      }
+
+      // PRESERVAÇÃO ESTRITA: nunca apaga assinatura, signer_name, signed_at, signer_ip, assinatura_metodo.
+      // Registra a reabertura no histórico estruturado de condicoes_pagamento.
+      let condicoesPagamento = prop.condicoes_pagamento;
+      if (typeof condicoesPagamento === "string") {
+        try { condicoesPagamento = JSON.parse(condicoesPagamento); } catch { condicoesPagamento = {}; }
+      }
+      if (!condicoesPagamento || typeof condicoesPagamento !== "object" || Array.isArray(condicoesPagamento)) {
+        condicoesPagamento = {};
+      }
+
+      const reaberturaRegistro = {
+        reaberto_por: req.authAccess?.name || req.authAccess?.email || "Gestor",
+        reaberto_por_uid: req.authAccess?.uid || null,
+        reaberto_em: new Date().toISOString(),
+        motivo: motivo ? String(motivo).trim() : null,
+        aceite_anterior: {
+          signer_name: prop.signer_name || null,
+          signed_at: prop.signed_at || null,
+          signer_ip: prop.signer_ip || null,
+          assinatura_metodo: prop.assinatura_metodo || null,
+        },
+      };
+
+      const reaberturasAnteriores = Array.isArray(condicoesPagamento.reaberturas)
+        ? condicoesPagamento.reaberturas
+        : [];
+
+      const updatedCondicoesPagamento = {
+        ...condicoesPagamento,
+        reabertura: reaberturaRegistro,
+        reaberturas: [...reaberturasAnteriores, reaberturaRegistro],
+      };
+
+      const result = await pool.query(
+        `UPDATE public.gd_proposals
+         SET status = 'rascunho',
+             condicoes_pagamento = $1
+         WHERE id = $2 AND tenant_id = $3
+         RETURNING *`,
+        [JSON.stringify(updatedCondicoesPagamento), id, tenantId]
+      );
+
+      const row = result.rows[0];
+      const items = Array.isArray(row.itens) ? row.itens : [];
+      const valorSetup = somaSetup(items);
+      const valorRecorrente = somaRecorrente(items);
+
+      const payload = {
+        ...row,
+        valor_setup: valorSetup,
+        valor_recorrente: valorRecorrente,
+      };
+
+      res.json({
+        success: true,
+        message: "Proposta reaberta com sucesso. As assinaturas e evidências anteriores foram preservadas.",
+        data: payload,
+        proposal: payload,
+      });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao reabrir proposta:", error);
+      res.status(500).json({ error: "Erro ao reabrir proposta comercial." });
+    }
+  });
+
   // ─── PITCH GENERATOR COM IA GROQ + PERSISTÊNCIA DE SLIDES ──────────────────────
 
   async function generatePitchSlidesWithGroq(proposal, segmentName, meetingNotes) {
@@ -2618,6 +2721,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       style: "currency",
       currency: "BRL",
     });
+    const esconderValores = proposal.esconder_valores === true;
+    const metricValue = esconderValores ? "Sob Consulta" : total;
+    const metricCaption = esconderValores
+      ? "condições especiais acordadas individualmente"
+      : "investimento para transformação completa do processo comercial";
     const condicoes = proposal.condicoes || "Sem observações adicionais";
     const notes = (meetingNotes || proposal.meeting_notes || "").trim();
 
@@ -2755,8 +2863,8 @@ Retorne EXCLUSIVAMENTE um objeto JSON no formato:
       "title": "O Próximo Nível de Escala",
       "subtitle": "Investimento estruturado com retorno rápido",
       "metric": {
-        "value": "${total}",
-        "caption": "investimento para transformação completa do processo comercial"
+        "value": "${metricValue}",
+        "caption": "${metricCaption}"
       },
       "punch": "Vamos iniciar a implementação hoje e colher os primeiros resultados nos próximos 7 dias?"
     }
@@ -2768,7 +2876,7 @@ Segmento: ${segmentName || "Geral / B2B"}
 ${notes ? `Anotações da Reunião / Dores do Cliente:\n${notes}\n` : ""}
 Itens/Entregáveis da Proposta:
 ${itemsText || "Implementação de Solução Comercial Integrada"}
-Valor Total: ${total}
+Valor Total: ${esconderValores ? "Condições Especiais / Sob Consulta (NÃO cite valores monetários ou preços em reais de planos na apresentação)" : total}
 Condições: ${condicoes}`;
 
     if (apiKey) {
@@ -2913,8 +3021,8 @@ Condições: ${condicoes}`;
           title: "Salão Cheio e Rentável o Dia Inteiro",
           subtitle: "Investimento planejado com retorno rápido na operação",
           metric: {
-            value: total,
-            caption: "investimento planejado para a transformação completa da operação",
+            value: metricValue,
+            caption: metricCaption,
           },
           punch: `Vamos iniciar a estruturação da ${prospectName} e colocar a máquina comercial para rodar?`,
         },
@@ -2995,8 +3103,8 @@ Condições: ${condicoes}`;
         title: "Próximos Passos & Início da Operação",
         subtitle: "Investimento claro e cronograma de implementação imediata",
         metric: {
-          value: total,
-          caption: "investimento planejado para a transformação completa da operação",
+          value: metricValue,
+          caption: metricCaption,
         },
         punch: `Vamos iniciar a configuração da ${prospectName} e colocar a máquina para rodar?`,
       },
@@ -3110,7 +3218,7 @@ Condições: ${condicoes}`;
       const { id } = req.params;
 
       const result = await pool.query(
-        `SELECT id, tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo, valor_vp, meio_pagamento, carencia_dias, pacotes_ofertados, presentation_slides, owner_company, condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price, prospect_logo, segment_id, descontos_por_periodo, vp_percent
+        `SELECT id, tenant_id, presentation_id, package_id, package_vexo_id, prospect_name, itens, valor_total, condicoes, status, payment_link, assinatura, signer_name, signed_at, created_at, sent_at, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, assinatura_metodo, valor_vp, meio_pagamento, carencia_dias, pacotes_ofertados, presentation_slides, owner_company, condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price, prospect_logo, segment_id, descontos_por_periodo, vp_percent, esconder_valores
          FROM public.gd_proposals WHERE id = $1`,
         [id]
       );
@@ -3253,6 +3361,7 @@ Condições: ${condicoes}`;
         segment_id: row.segment_id,
         descontos_por_periodo: row.descontos_por_periodo,
         vp_percent: row.vp_percent !== null && row.vp_percent !== undefined ? Number(row.vp_percent) : null,
+        esconder_valores: row.esconder_valores === true,
         valor_setup: valorSetup,
         valor_recorrente: valorRecorrente,
         packages: packagesRows

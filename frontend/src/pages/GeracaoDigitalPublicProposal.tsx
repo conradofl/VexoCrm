@@ -21,7 +21,8 @@ import {
   X,
   Share2,
   Lock,
-  ChevronDown
+  ChevronDown,
+  Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -84,6 +85,8 @@ interface Proposal {
   desconto_mensal_pct?: number | null;
   descontos_por_periodo?: Record<string, any> | string | null;
   vp_percent?: number | null;
+  esconder_valores?: boolean | null;
+  condicoes_especiais?: string | null;
 }
 
 export function isVexoProposal(prop: Proposal | null | undefined): boolean {
@@ -400,19 +403,23 @@ export default function GeracaoDigitalPublicProposal() {
   // Resumo "Como você vai pagar" por trilha (meio + parcelamento + condição)
   const condSetupEscolhida = chosenTerm && termAplicaA(chosenTerm) === "setup" ? chosenTerm : null;
   const condMensalEscolhida = chosenTerm && termAplicaA(chosenTerm) === "mensalidade" ? chosenTerm : null;
-  const pagamentoEntrada = [
-    condSetupEscolhida ? computePaymentBreakdown(condSetupEscolhida, setupFinalVal).linhas[0] : null,
-    !condSetupEscolhida ? "à vista" : null,
-    meioSetupPub ? `no ${meioSetupPub}` : null,
-  ].filter(Boolean).join(" · ");
+  const pagamentoEntrada = proposal.esconder_valores
+    ? (setupIsento ? "Isenta nesta proposta" : (meioSetupPub ? `no ${meioSetupPub}` : "conforme acordado"))
+    : [
+        condSetupEscolhida ? computePaymentBreakdown(condSetupEscolhida, setupFinalVal).linhas[0] : null,
+        !condSetupEscolhida ? "à vista" : null,
+        meioSetupPub ? `no ${meioSetupPub}` : null,
+      ].filter(Boolean).join(" · ");
   const baseMensalEscolhida =
     condMensalEscolhida && (condMensalEscolhida.id === "cartao_parcelado_periodo" || condMensalEscolhida.id === "cartao_total_parcelado")
       ? calc.compromissoFinal
       : mensalFinalVal;
-  const pagamentoMensalidade = [
-    condMensalEscolhida ? computePaymentBreakdown(condMensalEscolhida, baseMensalEscolhida).linhas[0] : "faturamento mensal recorrente",
-    meioMensalPub ? `no ${meioMensalPub}` : null,
-  ].filter(Boolean).join(" · ");
+  const pagamentoMensalidade = proposal.esconder_valores
+    ? [condMensalEscolhida ? condMensalEscolhida.nome : "faturamento mensal recorrente", meioMensalPub ? `no ${meioMensalPub}` : null].filter(Boolean).join(" · ")
+    : [
+        condMensalEscolhida ? computePaymentBreakdown(condMensalEscolhida, baseMensalEscolhida).linhas[0] : "faturamento mensal recorrente",
+        meioMensalPub ? `no ${meioMensalPub}` : null,
+      ].filter(Boolean).join(" · ");
   const temResumoPagamento = !!(meioSetupPub || meioMensalPub || chosenTerm);
 
   // Carência do 1º vencimento: informativo, não altera valores.
@@ -527,12 +534,12 @@ export default function GeracaoDigitalPublicProposal() {
                     : `Proposta válida até ${validadeDate.toLocaleDateString("pt-BR")}`}
                 </span>
               </div>
-              {(proposal.observacao_validade || proposal.valor_apos_validade) && (
+              {(proposal.observacao_validade || (!proposal.esconder_valores && proposal.valor_apos_validade)) && (
                 <p className="text-[11px] text-slate-300 leading-relaxed pl-6">
                   {proposal.observacao_validade
                     ? proposal.observacao_validade
-                    : `Após esta data o valor retorna a R$ ${Number(proposal.valor_apos_validade || 0).toLocaleString("pt-BR")}.`}
-                  {proposal.observacao_validade && proposal.valor_apos_validade
+                    : `Após esta data as condições desta proposta expiram.`}
+                  {proposal.observacao_validade && !proposal.esconder_valores && proposal.valor_apos_validade
                     ? ` Após o prazo: R$ ${Number(proposal.valor_apos_validade || 0).toLocaleString("pt-BR")}.`
                     : ""}
                 </p>
@@ -617,28 +624,36 @@ export default function GeracaoDigitalPublicProposal() {
                           <span className="text-[9px] text-slate-400 font-mono">{periodoLabel}</span>
                         )}
                       </div>
-                      <div>
-                        {temValorRiscado && (
-                          <span className="text-[11px] text-slate-400 line-through block font-mono">
-                            De R$ {valorRiscado.toLocaleString("pt-BR")}/mês
+                      {proposal.esconder_valores ? (
+                        <div className="pt-1">
+                          <span className="text-[11px] font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
+                            Sob consulta
                           </span>
-                        )}
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-base font-black text-pink-500 font-mono">
-                            R$ {valorMensalFinal.toLocaleString("pt-BR")}<span className="text-[10px] font-bold text-slate-400">/mês</span>
-                          </span>
-                          {descPct > 0 && (
-                            <span className="text-[9px] font-extrabold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                              -{descPct}%
+                        </div>
+                      ) : (
+                        <div>
+                          {temValorRiscado && (
+                            <span className="text-[11px] text-slate-400 line-through block font-mono">
+                              De R$ {valorRiscado.toLocaleString("pt-BR")}/mês
+                            </span>
+                          )}
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-base font-black text-pink-500 font-mono">
+                              R$ {valorMensalFinal.toLocaleString("pt-BR")}<span className="text-[10px] font-bold text-slate-400">/mês</span>
+                            </span>
+                            {descPct > 0 && (
+                              <span className="text-[9px] font-extrabold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                                -{descPct}%
+                              </span>
+                            )}
+                          </div>
+                          {meses > 1 && (
+                            <span className="text-[9px] text-slate-500 block font-mono">
+                              Total: R$ {totalPeriodo.toLocaleString("pt-BR")} ({meses} meses)
                             </span>
                           )}
                         </div>
-                        {meses > 1 && (
-                          <span className="text-[9px] text-slate-500 block font-mono">
-                            Total: R$ {totalPeriodo.toLocaleString("pt-BR")} ({meses} meses)
-                          </span>
-                        )}
-                      </div>
+                      )}
                       {isSelected && (
                         <div className="absolute top-2.5 right-2.5 h-5 w-5 bg-violet-600 rounded-full flex items-center justify-center text-white">
                           <Check className="h-3 w-3" />
@@ -876,123 +891,162 @@ export default function GeracaoDigitalPublicProposal() {
 
           {/* Valores Propostos */}
           <div className="rounded-2xl bg-white/[0.06] backdrop-blur-xl border border-white/10 p-6 space-y-5 shadow-2xl">
-            <h3 className="font-black text-white text-lg">Valores Propostos</h3>
+            {proposal.esconder_valores ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-white text-lg">Valores Propostos</h3>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-300 bg-purple-500/20 px-2.5 py-1 rounded-full border border-purple-500/30 flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-purple-300" />
+                    Condições Especiais
+                  </span>
+                </div>
 
-            <div className="space-y-4">
-              <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
-                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Investimento único (Setup)</span>
-                <span className="text-purple-300 font-black text-3xl block transition-all duration-500 ease-in-out">
-                  {setupIsento ? (
-                    <>
-                      {setupIsentadoVal > 0 && (
-                        <span className="text-slate-500 line-through mr-2 font-bold text-lg">
-                          R$ {setupIsentadoVal.toLocaleString("pt-BR")}
-                        </span>
-                      )}
-                      <span className="text-emerald-400 transition-colors duration-500">Isento</span>
-                    </>
-                  ) : (
-                    // A camada de concessões saiu na fase 5c: final e base são
-                    // sempre iguais, então o riscado aqui só podia enganar.
-                    <>R$ {setupFinalVal.toLocaleString("pt-BR")}</>
+                <div className="rounded-xl bg-purple-950/40 border border-purple-500/20 p-5 text-center space-y-3">
+                  <div className="h-10 w-10 mx-auto rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center">
+                    <Sparkles className="h-5 w-5 text-purple-300" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white text-base">Valores sob Consulta</h4>
+                    <p className="text-xs text-slate-300 leading-relaxed mt-1">
+                      Esta proposta possui formatos e condições de investimento acordados de forma individualizada com seu consultor.
+                    </p>
+                  </div>
+                  {proposal.condicoes_especiais && (
+                    <div className="pt-3 mt-3 border-t border-purple-500/20 text-left">
+                      <span className="text-[10px] text-purple-300 font-mono uppercase tracking-wider block font-bold">Acordo Comercial:</span>
+                      <p className="text-xs text-purple-100 italic mt-1 whitespace-pre-wrap">{proposal.condicoes_especiais}</p>
+                    </div>
                   )}
-                </span>
+                </div>
+
+                {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
+                  <div className="flex justify-between items-center text-sm font-mono pt-2 border-t border-white/10">
+                    <span className="text-slate-400">Período Selecionado:</span>
+                    <span className="text-white font-bold">{PERIODO_LABELS[proposal.periodo_plano]}</span>
+                  </div>
+                )}
               </div>
-              <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
-                <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Mensalidade</span>
-                {(() => {
-                  const pkgItem = (proposal.itens || (proposal as any).items || []).find((i: any) => i.categoria === "gd" && (Number(i.valor || 0) > 0 || Number(i.valor_tabela || 0) > 0));
-                  const valorTabelaPeriodo = pkgItem ? Number(pkgItem.valor_tabela || 0) : 0;
-                  const mesesItem = pkgItem ? (pkgItem.meses || calc.mesesPeriodo || 1) : 1;
-                  const rawTabelaMensal = valorTabelaPeriodo > 0 ? Math.round((valorTabelaPeriodo / mesesItem) * 100) / 100 : Number((proposal as any).valor_tabela_mensal || 0);
-                  const temTabelaExplicita = rawTabelaMensal > mensalFinalVal;
-                  const temDescontoPercentual = !temTabelaExplicita && calc.descontoMensalPorcentagem > 0 && calc.mensalidadeOriginal > mensalFinalVal;
-                  const temPrecoCheio = temTabelaExplicita || temDescontoPercentual;
-                  const valorRiscado = temTabelaExplicita ? rawTabelaMensal : calc.mensalidadeOriginal;
-                  const badgeTexto = temTabelaExplicita ? "Condição Especial" : `-${calc.descontoMensalPorcentagem}%`;
+            ) : (
+              <>
+                <h3 className="font-black text-white text-lg">Valores Propostos</h3>
 
-                  return (
-                    <>
-                      {temPrecoCheio && (
-                        <div className="flex items-center gap-2 pt-0.5 pb-1">
-                          <span className="text-slate-400 line-through font-bold text-lg">
-                            R$ {valorRiscado.toLocaleString("pt-BR")}/mês
-                          </span>
-                          <span className="text-emerald-400 text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                            {badgeTexto}
-                          </span>
-                        </div>
+                <div className="space-y-4">
+                  <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
+                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Investimento único (Setup)</span>
+                    <span className="text-purple-300 font-black text-3xl block transition-all duration-500 ease-in-out">
+                      {setupIsento ? (
+                        <>
+                          {setupIsentadoVal > 0 && (
+                            <span className="text-slate-500 line-through mr-2 font-bold text-lg">
+                              R$ {setupIsentadoVal.toLocaleString("pt-BR")}
+                            </span>
+                          )}
+                          <span className="text-emerald-400 transition-colors duration-500">Isento</span>
+                        </>
+                      ) : (
+                        // A camada de concessões saiu na fase 5c: final e base são
+                        // sempre iguais, então o riscado aqui só podia enganar.
+                        <>R$ {setupFinalVal.toLocaleString("pt-BR")}</>
                       )}
+                    </span>
+                  </div>
+                  <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
+                    <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Mensalidade</span>
+                    {(() => {
+                      const pkgItem = (proposal.itens || (proposal as any).items || []).find((i: any) => i.categoria === "gd" && (Number(i.valor || 0) > 0 || Number(i.valor_tabela || 0) > 0));
+                      const valorTabelaPeriodo = pkgItem ? Number(pkgItem.valor_tabela || 0) : 0;
+                      const mesesItem = pkgItem ? (pkgItem.meses || calc.mesesPeriodo || 1) : 1;
+                      const rawTabelaMensal = valorTabelaPeriodo > 0 ? Math.round((valorTabelaPeriodo / mesesItem) * 100) / 100 : Number((proposal as any).valor_tabela_mensal || 0);
+                      const temTabelaExplicita = rawTabelaMensal > mensalFinalVal;
+                      const temDescontoPercentual = !temTabelaExplicita && calc.descontoMensalPorcentagem > 0 && calc.mensalidadeOriginal > mensalFinalVal;
+                      const temPrecoCheio = temTabelaExplicita || temDescontoPercentual;
+                      const valorRiscado = temTabelaExplicita ? rawTabelaMensal : calc.mensalidadeOriginal;
+                      const badgeTexto = temTabelaExplicita ? "Condição Especial" : `-${calc.descontoMensalPorcentagem}%`;
 
-                      <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                        R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
+                      return (
+                        <>
+                          {temPrecoCheio && (
+                            <div className="flex items-center gap-2 pt-0.5 pb-1">
+                              <span className="text-slate-400 line-through font-bold text-lg">
+                                R$ {valorRiscado.toLocaleString("pt-BR")}/mês
+                              </span>
+                              <span className="text-emerald-400 text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                                {badgeTexto}
+                              </span>
+                            </div>
+                          )}
+
+                          <span className="text-pink-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                            R$ {mensalFinalVal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400 transition-colors duration-500">/mês</span>
+                          </span>
+                          {calc.temVp && (
+                            <div className="mt-2 space-y-1">
+                              <span className="text-[10px] text-slate-400 block">Composição da mensalidade</span>
+                              <div className="flex items-center justify-between py-1.5 px-3 bg-pink-500/10 border border-pink-500/20 rounded-md">
+                                <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
+                                <span className="text-pink-300 text-sm font-black">R$ {calc.dinheiroMensal.toLocaleString("pt-BR")}/mês</span>
+                              </div>
+                              <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
+                                <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em permuta</span>
+                                <span className="text-emerald-400 text-sm font-black">R$ {calc.vpMensal.toLocaleString("pt-BR")}/mês</span>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                    {primeiraMensalidadeDate && (
+                      <span className="text-xs font-bold text-amber-300 block pt-1 transition-colors duration-500">
+                        Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
+                      </span>
+                    )}
+                  </div>
+                  {calc.mesesPeriodo > 1 && (
+                    <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
+                      <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
+                      <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                        R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
                       </span>
                       {calc.temVp && (
                         <div className="mt-2 space-y-1">
-                          <span className="text-[10px] text-slate-400 block">Composição da mensalidade</span>
-                          <div className="flex items-center justify-between py-1.5 px-3 bg-pink-500/10 border border-pink-500/20 rounded-md">
+                          <span className="text-[10px] text-slate-400 block">Composição do período</span>
+                          <div className="flex items-center justify-between py-1.5 px-3 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
                             <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
-                            <span className="text-pink-300 text-sm font-black">R$ {calc.dinheiroMensal.toLocaleString("pt-BR")}/mês</span>
+                            <span className="text-indigo-300 text-sm font-black">R$ {calc.dinheiroPeriodo.toLocaleString("pt-BR")}</span>
                           </div>
                           <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
                             <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em permuta</span>
-                            <span className="text-emerald-400 text-sm font-black">R$ {calc.vpMensal.toLocaleString("pt-BR")}/mês</span>
+                            <span className="text-emerald-400 text-sm font-black">R$ {calc.vpPeriodo.toLocaleString("pt-BR")}</span>
                           </div>
                         </div>
                       )}
-                    </>
-                  );
-                })()}
-                {primeiraMensalidadeDate && (
-                  <span className="text-xs font-bold text-amber-300 block pt-1 transition-colors duration-500">
-                    Primeira mensalidade em {primeiraMensalidadeDate.toLocaleDateString("pt-BR")} (carência de {carenciaDias} dias)
-                  </span>
-                )}
-              </div>
-              {calc.mesesPeriodo > 1 && (
-                <div className="pb-4 border-b border-white/10 space-y-1 transition-all duration-500 ease-in-out">
-                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500 font-semibold">Compromisso do Período</span>
-                  <span className="text-indigo-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                    R$ {calc.compromissoFinal.toLocaleString("pt-BR")}
-                  </span>
-                  {calc.temVp && (
-                    <div className="mt-2 space-y-1">
-                      <span className="text-[10px] text-slate-400 block">Composição do período</span>
-                      <div className="flex items-center justify-between py-1.5 px-3 bg-indigo-500/10 border border-indigo-500/20 rounded-md">
-                        <span className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Em reais</span>
-                        <span className="text-indigo-300 text-sm font-black">R$ {calc.dinheiroPeriodo.toLocaleString("pt-BR")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
-                        <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider">Em permuta</span>
-                        <span className="text-emerald-400 text-sm font-black">R$ {calc.vpPeriodo.toLocaleString("pt-BR")}</span>
-                      </div>
+                      <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
+                        Soma total das mensalidades por {calc.mesesPeriodo} meses.
+                        {calc.temVp && ` Desse total, R$ ${calc.vpPeriodo.toLocaleString("pt-BR")} são pagos em permuta.`}
+                      </span>
                     </div>
                   )}
-                  <span className="text-[10px] text-slate-400 block pt-1 transition-colors duration-500">
-                    Soma total das mensalidades por {calc.mesesPeriodo} meses.
-                    {calc.temVp && ` Desse total, R$ ${calc.vpPeriodo.toLocaleString("pt-BR")} são pagos em permuta.`}
-                  </span>
-                </div>
-              )}
-              {calc.temVp && (
-                <div className="pb-4 border-b border-white/10 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
-                  <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Permuta Comercial (VP)</span>
-                  <span className="text-purple-400 font-black text-3xl block transition-all duration-500 ease-in-out">
-                    R$ {calc.vpMensal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400">/mês</span>
-                  </span>
-                  <span className="text-[10px] text-purple-300 block font-light leading-snug">
-                    Acordo realizado via permuta comercial física ou de serviços ({calc.vpPercent}% da mensalidade).
-                  </span>
-                </div>
-              )}
+                  {calc.temVp && (
+                    <div className="pb-4 border-b border-white/10 space-y-1 animate-fade-in transition-all duration-500 ease-in-out">
+                      <span className="text-[11px] text-slate-400 font-mono font-bold uppercase tracking-widest block transition-colors duration-500">Permuta Comercial (VP)</span>
+                      <span className="text-purple-400 font-black text-3xl block transition-all duration-500 ease-in-out">
+                        R$ {calc.vpMensal.toLocaleString("pt-BR")}<span className="text-base font-bold text-slate-400">/mês</span>
+                      </span>
+                      <span className="text-[10px] text-purple-300 block font-light leading-snug">
+                        Acordo realizado via permuta comercial física ou de serviços ({calc.vpPercent}% da mensalidade).
+                      </span>
+                    </div>
+                  )}
 
-              {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
-                <div className="flex justify-between items-center text-sm font-mono">
-                  <span className="text-slate-400">Período do Plano:</span>
-                  <span className="text-white font-bold">{PERIODO_LABELS[proposal.periodo_plano]}</span>
+                  {proposal.periodo_plano && PERIODO_LABELS[proposal.periodo_plano] && (
+                    <div className="flex justify-between items-center text-sm font-mono">
+                      <span className="text-slate-400">Período do Plano:</span>
+                      <span className="text-white font-bold">{PERIODO_LABELS[proposal.periodo_plano]}</span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
 
             {/* Pay Now Button (if link exists) */}
             {proposal.payment_link && (

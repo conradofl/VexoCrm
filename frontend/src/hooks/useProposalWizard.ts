@@ -43,6 +43,7 @@ export function useProposalWizard({
   const [newPeriodo, setNewPeriodo] = useState<string>("mensal");
   const [newValidade, setNewValidade] = useState<string>("");
   const [newCondicoes, setNewCondicoes] = useState<string>("");
+  const [newEsconderValores, setNewEsconderValores] = useState<boolean>(false);
   const [newPaymentLink, setNewPaymentLink] = useState<string>("");
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
 
@@ -64,6 +65,7 @@ export function useProposalWizard({
     setNewPeriodo("mensal");
     setNewValidade("");
     setNewCondicoes("");
+    setNewEsconderValores(false);
     setNewPaymentLink("");
     setEditingProposalId(null);
   };
@@ -226,6 +228,7 @@ export function useProposalWizard({
         },
         owner_company: isVexoCommercial ? "vexo" : "geracao-digital",
         condicoes_especiais: newCondicoes || null,
+        esconder_valores: newEsconderValores,
       };
 
       const url = editingProposalId ? `/api/gd/proposals/${editingProposalId}` : `/api/gd/proposals`;
@@ -292,6 +295,8 @@ export function useProposalWizard({
     setNewValidade,
     newCondicoes,
     setNewCondicoes,
+    newEsconderValores,
+    setNewEsconderValores,
     newPaymentLink,
     setNewPaymentLink,
     editingProposalId,

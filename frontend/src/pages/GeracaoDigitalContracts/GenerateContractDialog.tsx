@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateGdContract, useUpdateGdContract, useExtractContractData, useGdContractTemplates, GdContractFormData } from "@/hooks/useGdContracts";
 import { useJuridicoSettings } from "@/hooks/useJuridico";
-import { Sparkles, AlertTriangle, Building2, ChevronDown } from "lucide-react";
+import { Sparkles, AlertTriangle, Building2, ChevronDown, Info, FileText } from "lucide-react";
 import { buildContractDados } from "@/lib/geracaoDigital/contractMerge";
 import { ContractPreview } from "./ContractPreview";
 import { useToast } from "@/components/ui/use-toast";
@@ -60,15 +60,28 @@ function somentePreenchidos(obj: Record<string, any> = {}): Record<string, strin
 interface GenerateContractDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  proposalId: string;
-  initialData: Partial<GdContractFormData>;
+  proposalId?: string | null;
+  initialData?: Partial<GdContractFormData>;
   /** Quando presente, o diálogo entra em modo EDIÇÃO de um contrato já gerado. */
   contractId?: string | null;
   /** Dados salvos do contrato que está sendo editado. */
   initialDados?: Partial<GdContractFormData> | null;
+  /** Status da proposta de origem (ex: rascunho, enviada, aceita) para aviso contextual */
+  proposalStatus?: string | null;
+  /** Chave isolada para contrato avulso para evitar colisão entre rascunhos */
+  standaloneKey?: string | null;
 }
 
-export function GenerateContractDialog({ open, onOpenChange, proposalId, initialData, contractId, initialDados }: GenerateContractDialogProps) {
+export function GenerateContractDialog({
+  open,
+  onOpenChange,
+  proposalId,
+  initialData = {},
+  contractId,
+  initialDados,
+  proposalStatus,
+  standaloneKey,
+}: GenerateContractDialogProps) {
   const { data: templates } = useGdContractTemplates();
   const { data: juridicoSettings } = useJuridicoSettings();
   const createContract = useCreateGdContract();
@@ -79,8 +92,18 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
   const [textoColado, setTextoColado] = useState("");
   const [showContratadaOverride, setShowContratadaOverride] = useState(false);
 
+  // Isolamento estrito de chave para nunca haver colisão de rascunhos:
+  // - Edição: isolado por contractId
+  // - Proposta: isolado por proposalId
+  // - Avulso: isolado por chave de sessão do contrato avulso
+  const storageKey = contractId
+    ? `gd_contract_edit_${contractId}`
+    : proposalId
+    ? `gd_contract_form_${proposalId}`
+    : `gd_contract_form_standalone_${standaloneKey || "draft"}`;
+
   const [formData, setFormData] = useLocalStorage<GdContractFormData>(
-    `gd_contract_form_${proposalId}`,
+    storageKey,
     // Defaults + tudo que veio da proposta aceita (escopo, parcelas, valores,
     // período, carência). O spread precisa vir por último: antes só 3 campos
     // eram aproveitados e o resto ficava no default.
@@ -162,7 +185,7 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
     }
 
     createContract.mutate({
-      proposal_id: proposalId,
+      proposal_id: proposalId || null,
       template_id: templateId,
       // Salva já com os campos derivados (forma por extenso + cronograma).
       dados: buildContractDados(formData) as GdContractFormData
@@ -172,7 +195,7 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
           title: "Contrato gerado",
           description: "O contrato foi gerado com sucesso.",
         });
-        localStorage.removeItem(`gd_contract_form_${proposalId}`);
+        localStorage.removeItem(storageKey);
         onOpenChange(false);
       },
       onError: (err: any) => {
@@ -256,6 +279,24 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
           </div>
         )}
 
+        {proposalId && proposalStatus && proposalStatus !== "aceita" && (
+          <div className="p-3 my-2 rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 text-blue-800 dark:text-blue-300 text-xs flex items-center gap-2">
+            <Info className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+            <span>
+              Esta proposta está com status <strong>"{proposalStatus}"</strong>. O contrato será gerado com os dados atuais dela.
+            </span>
+          </div>
+        )}
+
+        {!proposalId && !isEdit && (
+          <div className="p-3 my-2 rounded-md bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/50 text-purple-800 dark:text-purple-300 text-xs flex items-center gap-2">
+            <FileText className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-400" />
+            <span>
+              <strong>Contrato Avulso:</strong> Este contrato está sendo gerado do zero, sem vínculo com proposta prévia.
+            </span>
+          </div>
+        )}
+
         <Tabs defaultValue="form" className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-4">
             <TabsTrigger value="form">Formulário de Preenchimento</TabsTrigger>
@@ -264,7 +305,7 @@ export function GenerateContractDialog({ open, onOpenChange, proposalId, initial
 
           <TabsContent value="form" className="space-y-4">
             {/* Dados já negociados na proposta */}
-            {!isEdit && (
+            {!isEdit && proposalId && (
               <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
                 <div className="min-w-0">
                   <span className="text-xs font-bold text-indigo-900 block">Dados da proposta</span>

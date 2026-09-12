@@ -72,8 +72,8 @@ export async function createContract(req, res) {
 
     const { proposal_id, template_id, dados } = req.body;
 
-    if (!proposal_id || !dados) {
-      return sendError(res, 400, "BAD_REQUEST", "proposal_id e dados são obrigatórios");
+    if (!dados) {
+      return sendError(res, 400, "BAD_REQUEST", "dados é obrigatório");
     }
 
     let resolvedTemplateId = template_id;
@@ -104,7 +104,7 @@ export async function createContract(req, res) {
       `INSERT INTO gd_contracts (tenant_id, proposal_id, dados, status, owner_company)
        VALUES ($1, $2, $3, 'rascunho', $4)
        RETURNING *`,
-      [tenantId, proposal_id, dados, finalOwnerCompany]
+      [tenantId, proposal_id || null, dados, finalOwnerCompany]
     );
 
     res.status(201).json(contractRows[0]);

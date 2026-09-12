@@ -53,6 +53,7 @@ export const CLASSIFIED_PUBLIC_COLUMNS = [
   "segment_id",
   "descontos_por_periodo",
   "vp_percent",
+  "esconder_valores",
 ];
 
 export const CLASSIFIED_INTERNAL_OR_SENSITIVE_COLUMNS = [

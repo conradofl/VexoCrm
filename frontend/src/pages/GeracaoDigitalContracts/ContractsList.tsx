@@ -22,6 +22,7 @@ import {
   List as ListIcon,
   ChevronLeft,
   ChevronRight,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -61,7 +62,8 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
   const enviarJuridico = useSendContractToJuridico();
   const { getIdToken, clientId } = useAuth();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ id: string; proposalId: string; dados: any } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; proposalId?: string | null; dados: any } | null>(null);
+  const [creatingStandaloneKey, setCreatingStandaloneKey] = useState<string | null>(null);
 
   // Busca e troca de aba voltam para a primeira página.
   useEffect(() => { setPage(1); }, [busca, showArquivados]);
@@ -159,6 +161,14 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
           <ListIcon className="h-4 w-4" />
         </button>
       </div>
+
+      <Button
+        onClick={() => setCreatingStandaloneKey(crypto.randomUUID())}
+        className="bg-purple-650 hover:bg-purple-700 text-white font-bold text-xs h-9 gap-1.5 shrink-0 ml-auto"
+      >
+        <Plus className="h-4 w-4" />
+        Novo contrato
+      </Button>
     </div>
   );
 
@@ -276,7 +286,18 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
                   <div className="space-y-2 text-sm text-slate-600 dark:text-slate-400 mb-4 flex-grow">
                     <p><span className="font-medium text-slate-900 dark:text-slate-100">CNPJ:</span> {contract.dados?.cnpj || "-"}</p>
                     <p><span className="font-medium text-slate-900 dark:text-slate-100">Representante:</span> {contract.dados?.representante || "-"}</p>
-                    <p><span className="font-medium text-slate-900 dark:text-slate-100">Proposta ID:</span> <span className="truncate inline-block max-w-[120px] align-bottom">{contract.proposal_id || "-"}</span></p>
+                    <p>
+                      <span className="font-medium text-slate-900 dark:text-slate-100">Origem:</span>{" "}
+                      {contract.proposal_id ? (
+                        <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400 font-bold">
+                          Proposta #{contract.proposal_id.slice(0, 8)}
+                        </span>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] font-normal border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 bg-purple-50/50 dark:bg-purple-950/30">
+                          Avulso (sem proposta)
+                        </Badge>
+                      )}
+                    </p>
                   </div>
                   <div className="flex gap-2 flex-col">{acoes(contract)}</div>
                 </CardContent>
@@ -303,6 +324,7 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
                   </div>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     {contract.dados?.cnpj || "sem CNPJ"} · {contract.dados?.representante || "sem representante"} ·{" "}
+                    {contract.proposal_id ? `Proposta #${contract.proposal_id.slice(0, 8)}` : "Avulso (sem proposta)"} ·{" "}
                     {format(new Date(contract.created_at), "dd/MM/yyyy", { locale: ptBR })}
                   </span>
                 </div>
@@ -342,6 +364,17 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
           initialData={{}}
           contractId={editing.id}
           initialDados={editing.dados}
+        />
+      )}
+
+      {/* Criação de um contrato avulso (do zero, sem proposta) */}
+      {creatingStandaloneKey && (
+        <GenerateContractDialog
+          open={!!creatingStandaloneKey}
+          onOpenChange={(o) => { if (!o) setCreatingStandaloneKey(null); }}
+          proposalId={null}
+          initialData={{}}
+          standaloneKey={creatingStandaloneKey}
         />
       )}
     </div>

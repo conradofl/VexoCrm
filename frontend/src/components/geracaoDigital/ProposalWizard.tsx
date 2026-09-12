@@ -79,6 +79,8 @@ interface ProposalWizardProps {
     setNewValidade: (val: string) => void;
     newCondicoes: string;
     setNewCondicoes: (val: string) => void;
+    newEsconderValores?: boolean;
+    setNewEsconderValores?: (val: boolean) => void;
     newPaymentLink: string;
     setNewPaymentLink: (val: string) => void;
     handleCreateDirectProposal: (formasFixas?: any[]) => Promise<void>;
@@ -432,6 +434,8 @@ export const ProposalWizard: React.FC<ProposalWizardProps> = ({
                 meses={mesesPlano}
                 condicaoEspecialTexto={newCondicoes}
                 onCondicaoEspecialChange={setNewCondicoes}
+                esconderValores={wizardState.newEsconderValores}
+                onEsconderValoresChange={wizardState.setNewEsconderValores}
               />
             </div>
 

@@ -26,6 +26,8 @@ interface Props {
   meses: number;
   condicaoEspecialTexto?: string;
   onCondicaoEspecialChange?: (text: string) => void;
+  esconderValores?: boolean;
+  onEsconderValoresChange?: (v: boolean) => void;
 }
 
 /**
@@ -40,6 +42,8 @@ export default function FormasPagamentoEditor({
   meses,
   condicaoEspecialTexto,
   onCondicaoEspecialChange,
+  esconderValores,
+  onEsconderValoresChange,
 }: Props) {
   const baseDe = (def: FormaDef) =>
     def.aplica_a === "mensalidade" ? mensalidade * (meses || 1) : totalSetup;
@@ -159,6 +163,25 @@ export default function FormasPagamentoEditor({
           rows={2}
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
         />
+      </div>
+
+      <div className="pt-3 border-t border-slate-100 dark:border-white/5">
+        <label className="flex items-start gap-2.5 cursor-pointer select-none rounded-lg border border-purple-200 dark:border-purple-900/40 bg-purple-50/40 dark:bg-purple-950/20 p-3">
+          <input
+            type="checkbox"
+            checked={!!esconderValores}
+            onChange={(e) => onEsconderValoresChange?.(e.target.checked)}
+            className="accent-purple-600 mt-0.5 shrink-0"
+          />
+          <div className="space-y-0.5">
+            <span className="text-xs font-bold text-purple-950 dark:text-purple-200 block">
+              Condições especiais (ocultar valores na proposta)
+            </span>
+            <span className="text-[11px] text-purple-800/80 dark:text-purple-300/70 block leading-snug">
+              Oculta os preços e mensalidades na proposta pública e na apresentação. Mantém o escopo e entregáveis intactos.
+            </span>
+          </div>
+        </label>
       </div>
     </div>
   );

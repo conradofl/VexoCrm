@@ -3,7 +3,7 @@ import { resolveAuthorizedClientId } from "../../services/tenant.js";
 import { sendError } from "../../services/httpInfra.js";
 
 export async function resolveTenantUuid(req, res, providedClientId = null) {
-  const clientKey = providedClientId || req.query.client_id || req.body.client_id;
+  const clientKey = providedClientId || req.query?.client_id || req.body?.client_id;
   
   const allowedClientId = resolveAuthorizedClientId(req, res, clientKey);
   

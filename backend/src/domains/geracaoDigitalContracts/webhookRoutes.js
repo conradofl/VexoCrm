@@ -34,14 +34,16 @@ router.post("/webhook/zapsign", async (req, res) => {
       if (rows.length > 0) {
         const { proposal_id, tenant_id } = rows[0];
         
-        // 2. Atualizar a Proposta original para fechada (won)
-        await db.query(
-          `UPDATE gd_proposals 
-           SET status = 'fechada', updated_at = NOW() 
-           WHERE id = $1 AND tenant_id = $2`,
-          [proposal_id, tenant_id]
-        );
-        console.log(`[Webhook ZapSign] Proposta ${proposal_id} marcada como fechada/won.`);
+        // 2. Atualizar a Proposta original para fechada (won) caso exista proposta vinculada
+        if (proposal_id) {
+          await db.query(
+            `UPDATE gd_proposals 
+             SET status = 'fechada', updated_at = NOW() 
+             WHERE id = $1 AND tenant_id = $2`,
+            [proposal_id, tenant_id]
+          );
+          console.log(`[Webhook ZapSign] Proposta ${proposal_id} marcada como fechada/won.`);
+        }
       }
     }
 

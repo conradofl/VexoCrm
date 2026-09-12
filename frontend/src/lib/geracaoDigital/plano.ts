@@ -58,6 +58,9 @@ export interface Plano {
   desconto_mensal_pct?: number;
   descontos_por_periodo?: Record<PeriodoKey, number> | null;
   vp_percent?: number | null;
+  /** Modo condições especiais: oculta valores de planos nas visualizações públicas/pitch */
+  esconderValores?: boolean;
+  esconder_valores?: boolean;
 }
 
 export const planoVazio = (): Plano => ({
@@ -73,6 +76,8 @@ export const planoVazio = (): Plano => ({
   cobrar_setup: false,
   descontoSetupPorcentagem: 0,
   descontoMensalPorcentagem: 0,
+  esconderValores: false,
+  esconder_valores: false,
 });
 
 /** VP mensal de um prazo, derivado do percentual. */
@@ -220,6 +225,10 @@ export function planoDeProposta(pacotes: any[], itens: any[], proposal?: any): P
   });
 
   if (proposal) {
+    if (proposal.esconder_valores !== undefined && proposal.esconder_valores !== null) {
+      plano.esconderValores = proposal.esconder_valores === true;
+      plano.esconder_valores = plano.esconderValores;
+    }
     if (proposal.valor_setup_vexo !== undefined && proposal.valor_setup_vexo !== null) {
       const v = Number(proposal.valor_setup_vexo || 0);
       plano.valorSetupVexo = v;

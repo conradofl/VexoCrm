@@ -17,6 +17,9 @@ import { type FormasSelecionadas, formasVazias, formasParaTerms, termsParaFormas
 import { syncPlanoPackages } from "@/lib/geracaoDigital/planoSync";
 import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
 import { API_BASE_URL, fetchApi } from "@/lib/api";
+import { isManagerOrAdmin } from "@/lib/access";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -37,6 +40,7 @@ import {
   LayoutGrid,
   List as ListIcon,
   Layers,
+  RotateCcw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PERIOD_LABELS as PKG_PERIOD_LABELS } from "@/lib/geracaoDigital/packagePricing";
@@ -108,6 +112,8 @@ interface Proposal {
   segment_id?: string | null;
   presentation_slides?: any[] | null;
   meeting_notes?: string | null;
+  esconder_valores?: boolean | null;
+  condicoes_especiais?: string | null;
 }
 
 const PERIODO_OPTIONS = [
@@ -123,7 +129,7 @@ interface GeracaoDigitalProposalsProps {
 }
 
 export default function GeracaoDigitalProposals({ isVexoCommercial = false }: GeracaoDigitalProposalsProps) {
-  const { isAuthenticated, getIdToken, clientId } = useAuth();
+  const { isAuthenticated, getIdToken, clientId, accessProfile } = useAuth();
   const navigate = useNavigate();
 
   // Proposals State
@@ -139,6 +145,14 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
   const propostaIdUrl = new URLSearchParams(useLocation().search).get("proposta");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Reabertura de proposta aceita (ação de gestor)
+  const [showReopenModal, setShowReopenModal] = useState<boolean>(false);
+  const [reopenMotivo, setReopenMotivo] = useState<string>("");
+  const [isReopening, setIsReopening] = useState<boolean>(false);
+
+  // Modo condições especiais (esconder valores de planos na proposta pública/pitch)
+  const [editEsconderValores, setEditEsconderValores] = useState<boolean>(false);
 
   // Proposal form editor state
   const [prospectName, setProspectName] = useState<string>("");
@@ -572,6 +586,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     setProspectName(prop.prospect_name);
     setCondicoes(prop.condicoes);
     setNewCondicoes((prop as any).condicoes_especiais || (prop as any).condicao_especial || "");
+    setEditEsconderValores((prop as any).esconder_valores === true);
     setItems(Array.isArray(prop.itens) ? prop.itens : []);
     setSignerName(prop.signer_name || "");
     setPaymentLink(prop.payment_link || "");
@@ -1021,6 +1036,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         valor_vp: vpMensalPlano > 0 ? vpMensalPlano : null,
         vp_percent: Number(editPlano.vpPercent || 0) > 0 ? Number(editPlano.vpPercent) : null,
         condicoes_especiais: newCondicoes || (editPlano as any).condicoesEspeciais || null,
+        esconder_valores: editEsconderValores,
         desconto_setup_pct: (editPlano as any).descontoSetupPorcentagem ?? (editPlano as any).desconto_setup_pct ?? 0,
         descontos_por_periodo: editPlano.descontosPorPeriodo || null,
         desconto_mensal_pct: (() => {
@@ -1094,6 +1110,52 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     } catch (err: any) {
       console.error(err);
       toast({ title: "Erro", description: err.message, variant: "destructive" });
+    }
+  };
+
+  // Reabrir proposta aceita (ação restrita a gestores/admins)
+  const handleReopenProposal = async () => {
+    if (!selectedProposal) return;
+    setIsReopening(true);
+    try {
+      const token = await getIdToken();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}/reopen`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          client_id: clientId,
+          motivo: reopenMotivo.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Erro ao reabrir proposta.");
+      }
+
+      toast({
+        title: "Proposta Reaberta",
+        description: "Status retornado para rascunho. As evidências da assinatura anterior foram preservadas.",
+      });
+
+      setShowReopenModal(false);
+      setReopenMotivo("");
+      if (data.proposal) {
+        setSelectedProposal(data.proposal);
+      }
+      loadProposals();
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro ao Reabrir",
+        description: err.message || "Falha ao reabrir proposta no servidor.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsReopening(false);
     }
   };
 
@@ -1546,17 +1608,29 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                     <p className="text-xs text-slate-500 font-mono dark:text-slate-400">ID: {selectedProposal.id}</p>
                   </div>
 
-                  <div className="flex gap-2">
-                    {selectedProposal.status === "aceita" && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => setShowGenerateContract(true)}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold shrink-0"
+                      title={selectedProposal.status !== "aceita" ? "Gerar contrato preliminar mesmo com proposta não aceita" : "Gerar contrato jurídico a partir desta proposta"}
+                    >
+                      <FileText className="h-4 w-4 mr-1.5" />
+                      Gerar Contrato Jurídico
+                    </Button>
+
+                    {selectedProposal.status === "aceita" && isManagerOrAdmin(accessProfile) && (
                       <Button
+                        variant="outline"
                         size="sm"
-                        onClick={() => setShowGenerateContract(true)}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold shrink-0"
+                        onClick={() => setShowReopenModal(true)}
+                        className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700/50 dark:text-amber-400 dark:hover:bg-amber-950/20 shrink-0 font-medium"
                       >
-                        <FileText className="h-4 w-4 mr-1.5" />
-                        Gerar Contrato Jurídico
+                        <RotateCcw className="h-4 w-4 mr-1.5" />
+                        Reabrir Proposta
                       </Button>
                     )}
+
                     {/* Um único editor. O antigo "Gerar/Editar Proposta" abria o
                         wizard — que, desde que o painel de configuração ganhou o
                         PlanoEditor, fazia exatamente a mesma coisa em 4 passos.
@@ -1593,6 +1667,35 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                     )}
                   </div>
                 </div>
+
+                {/* Alerta de Reabertura quando aplicável */}
+                {((selectedProposal as any).condicoes_pagamento?.reabertura ||
+                  (selectedProposal.status === "rascunho" && selectedProposal.signed_at)) && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3 shadow-sm">
+                    <RotateCcw className="h-5 w-5 mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <div className="space-y-1">
+                      <p className="font-bold text-sm text-amber-800 dark:text-amber-300">
+                        Proposta reaberta após aceite original
+                        {selectedProposal.signed_at && (
+                          <span className="font-normal text-xs ml-1 opacity-90">
+                            · Assinatura original em {new Date(selectedProposal.signed_at).toLocaleString("pt-BR")}
+                            {selectedProposal.signer_name && ` por ${selectedProposal.signer_name}`}
+                          </span>
+                        )}
+                      </p>
+                      {(selectedProposal as any).condicoes_pagamento?.reabertura && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          Reaberto em {new Date((selectedProposal as any).condicoes_pagamento.reabertura.reaberto_em).toLocaleString("pt-BR")}
+                          {(selectedProposal as any).condicoes_pagamento.reabertura.reaberto_por && ` por ${(selectedProposal as any).condicoes_pagamento.reabertura.reaberto_por}`}
+                          {(selectedProposal as any).condicoes_pagamento.reabertura.motivo && ` — Motivo: "${(selectedProposal as any).condicoes_pagamento.reabertura.motivo}"`}
+                        </p>
+                      )}
+                      <p className="text-[11px] text-amber-600/90 dark:text-amber-500">
+                        As evidências jurídicas da assinatura original (nome, data, IP e método de aceite) estão integralmente preservadas no histórico.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Visualização Consolidada da Proposta (Somente Leitura) */}
                 <Card className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm">
@@ -1824,6 +1927,8 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                                 meses={c.mesesPeriodo}
                                 condicaoEspecialTexto={newCondicoes}
                                 onCondicaoEspecialChange={setNewCondicoes}
+                                esconderValores={editEsconderValores}
+                                onEsconderValoresChange={setEditEsconderValores}
                               />
                             );
                           })()}
@@ -1904,8 +2009,72 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
           open={showGenerateContract}
           onOpenChange={setShowGenerateContract}
           proposalId={selectedProposal.id}
+          proposalStatus={selectedProposal.status}
           initialData={buildContractInitialData(selectedProposal, availablePackages)}
         />
+      )}
+
+      {/* Modal de confirmação para Reabrir Proposta Aceita */}
+      {selectedProposal && showReopenModal && (
+        <Dialog open={showReopenModal} onOpenChange={setShowReopenModal}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                <RotateCcw className="h-5 w-5" />
+                Reabrir Proposta Aceita
+              </DialogTitle>
+              <DialogDescription className="text-slate-600 dark:text-slate-300 pt-2">
+                Você está prestes a reabrir a proposta de <strong>{selectedProposal.prospect_name}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-3">
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                <p className="font-semibold">O que acontece ao reabrir:</p>
+                <ul className="list-disc list-inside space-y-0.5 opacity-90">
+                  <li>O status volta para <strong>Rascunho</strong>, permitindo editar valores, escopo e prazos.</li>
+                  <li>Todas as evidências da assinatura original (nome, IP, data) são <strong>preservadas</strong> no histórico.</li>
+                  <li>Um registro de auditoria com data e usuário será gravado na proposta.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="reopen-motivo" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Motivo da reabertura (opcional):
+                </Label>
+                <Textarea
+                  id="reopen-motivo"
+                  placeholder="Ex: Cliente solicitou upgrade de escopo / ajuste na forma de pagamento..."
+                  value={reopenMotivo}
+                  onChange={(e) => setReopenMotivo(e.target.value)}
+                  className="text-xs resize-none h-20"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowReopenModal(false);
+                  setReopenMotivo("");
+                }}
+                disabled={isReopening}
+              >
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleReopenProposal}
+                disabled={isReopening}
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold"
+              >
+                {isReopening ? "Reabrindo..." : "Confirmar Reabertura"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Modal de Briefing Rápido da Reunião para Gerar Pitch com IA */}

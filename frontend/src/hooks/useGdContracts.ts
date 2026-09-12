@@ -30,7 +30,7 @@ export interface GdContractFormData {
 export interface GdContract {
   id: string;
   tenant_id: string;
-  proposal_id: string;
+  proposal_id?: string | null;
   dados: GdContractFormData;
   pdf_url: string | null;
   sign_url?: string | null;
@@ -90,7 +90,7 @@ export function useCreateGdContract() {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { proposal_id: string; template_id?: string; dados: GdContractFormData }): Promise<GdContract> => {
+    mutationFn: async (data: { proposal_id?: string | null; template_id?: string; dados: GdContractFormData }): Promise<GdContract> => {
       const token = await getIdToken();
       const res = await fetchApi("/api/gd/contracts", {
         method: "POST",
@@ -107,7 +107,9 @@ export function useCreateGdContract() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["gdContracts"] });
-      queryClient.invalidateQueries({ queryKey: ["gdContracts", variables.proposal_id] });
+      if (variables.proposal_id) {
+        queryClient.invalidateQueries({ queryKey: ["gdContracts", variables.proposal_id] });
+      }
     },
   });
 }

@@ -818,3 +818,16 @@ export function isPathAllowedForClient(
   if (!tabKey) return true;
   return allowedTabs.includes(tabKey);
 }
+
+/**
+ * Espelho de UI para exibição condicional de controles restritos a gestor/admin.
+ * A decisão de autorização real e definitiva é SEMPRE validada pelo servidor backend (403).
+ */
+export function isManagerOrAdmin(access: any): boolean {
+  if (!access) return false;
+  if (access.isFixedAdmin || access.isAdmin || access.isAdminUser || access.role === "superadmin") return true;
+  if (access.approvalLevel === "manager" || access.approvalLevel === "director") return true;
+  if (Array.isArray(access.internalPages) && access.internalPages.includes("usuarios")) return true;
+  if (Array.isArray(access.permissions) && (access.permissions.includes("users.manage") || access.permissions.includes("users.view"))) return true;
+  return false;
+}
