@@ -275,6 +275,10 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='signed_file_history')
       )
     ) AS ok`,
+    "20260913160000_create_lead_reminders.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_reminders')
+      AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_lead_reminders_client_phone')
+    ) AS ok`,
   };
 
   const query = checks[filename];

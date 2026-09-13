@@ -224,10 +224,41 @@ export function registerFollowupQueueRoutes(app, deps) {
     }
   });
 
+  async function ensureScheduleTenantAccess(req, res, scheduleId) {
+    const { rows } = await fupQuery(
+      `SELECT fs.id, fs.campaign_id, fco.tenant_id
+         FROM followup_schedules fs
+         JOIN followup_companies fco ON fco.id = fs.company_id
+        WHERE fs.id = $1`,
+      [scheduleId]
+    );
+    if (!rows.length) {
+      sendError(res, 404, "NOT_FOUND", "Schedule not found");
+      return null;
+    }
+    const tenantId = rows[0].tenant_id;
+    const access = req.authAccess;
+
+    const isUnrestricted =
+      access?.role === "superadmin" ||
+      access?.isAdmin ||
+      access?.scopeMode === "all_clients";
+    if (isUnrestricted) return rows[0];
+
+    const clientIds = Array.isArray(access?.clientIds) ? access.clientIds : [];
+    if (tenantId && clientIds.includes(tenantId)) return rows[0];
+
+    sendError(res, 404, "NOT_FOUND", "Schedule not found");
+    return null;
+  }
+
   // PATCH /api/followup-queue/:scheduleId/reschedule — cria novo job BullMQ com delay e cancela anterior
   app.patch("/api/followup-queue/:scheduleId/reschedule", requireFirebaseAuth, async (req, res) => {
     const scheduleId = normalizeString(req.params?.scheduleId);
     if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
+
+    const scheduleRecord = await ensureScheduleTenantAccess(req, res, scheduleId);
+    if (!scheduleRecord) return;
 
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const rawScheduledFor = body.scheduledFor ? new Date(body.scheduledFor) : null;
@@ -249,16 +280,7 @@ export function registerFollowupQueueRoutes(app, deps) {
     const templateId = normalizeString(body.templateId) || null;
 
     try {
-      const { rows: schedRows } = await fupQuery(
-        `SELECT fs.id, fs.campaign_id, fco.tenant_id
-           FROM followup_schedules fs
-           JOIN followup_companies fco ON fco.id = fs.company_id
-          WHERE fs.id = $1`,
-        [scheduleId]
-      );
-      if (!schedRows.length) return sendError(res, 404, "NOT_FOUND", "Schedule not found");
-
-      const { campaign_id, tenant_id } = schedRows[0];
+      const { campaign_id, tenant_id } = scheduleRecord;
       const tenantSettings = await getLeadClientN8nSettings(tenant_id || "geracao-digital");
       const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
       const effectiveDate = adjustDateToSendWindow(targetDate, sendWindowConfig);
@@ -321,6 +343,9 @@ export function registerFollowupQueueRoutes(app, deps) {
     const scheduleId = normalizeString(req.params?.scheduleId);
     if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
 
+    const scheduleRecord = await ensureScheduleTenantAccess(req, res, scheduleId);
+    if (!scheduleRecord) return;
+
     try {
       const { rows } = await fupQuery(
         `UPDATE followup_schedules SET status = 'cancelled' WHERE id = $1 RETURNING id`,
@@ -343,6 +368,9 @@ export function registerFollowupQueueRoutes(app, deps) {
   app.delete("/api/followup-queue/:scheduleId", requireFirebaseAuth, async (req, res) => {
     const scheduleId = normalizeString(req.params?.scheduleId);
     if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
+
+    const scheduleRecord = await ensureScheduleTenantAccess(req, res, scheduleId);
+    if (!scheduleRecord) return;
 
     try {
       const { rows: schedRows } = await fupQuery(
@@ -379,6 +407,9 @@ export function registerFollowupQueueRoutes(app, deps) {
   app.post("/api/followup-queue/:scheduleId/convert", requireFirebaseAuth, async (req, res) => {
     const scheduleId = normalizeString(req.params?.scheduleId);
     if (!scheduleId) return sendError(res, 400, "INVALID_PARAM", "Missing scheduleId");
+
+    const scheduleRecord = await ensureScheduleTenantAccess(req, res, scheduleId);
+    if (!scheduleRecord) return;
 
     try {
       const { rows } = await fupQuery(

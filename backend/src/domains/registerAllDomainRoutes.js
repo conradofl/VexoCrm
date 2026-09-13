@@ -14,6 +14,7 @@ import { registerAiExtractRoutes } from "./leads/aiExtractRoutes.js";
 import { registerInsightsRoutes } from "./insights/routes.js";
 import { registerIntegrationsRoutes } from "./integrations/routes.js";
 import { registerChatbotRoutes } from "./chatbot/routes.js";
+import { registerRemindersRoutes } from "./reminders/routes.js";
 import { registerCampaignsRoutes } from "./campaigns/routes.js";
 import { registerSuperAdminRoutes } from "./superadmin/routes.js";
 
@@ -44,6 +45,7 @@ export function registerAllDomainRoutes(app) {
   registerAuthRoutes(app, routeDeps);
   registerVexoSalesRoutes(app, routeDeps);
   registerChatbotRoutes(app, routeDeps);
+  registerRemindersRoutes(app, routeDeps);
   registerCampaignsRoutes(app, routeDeps);
 
   // ─── Fila de Follow-up (painel de moderação /api/followup-queue) ───

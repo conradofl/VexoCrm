@@ -22,6 +22,8 @@ import {
   Target,
   DollarSign,
   Calendar,
+  CalendarClock,
+  Bell,
   Copy,
   Check,
   ChevronRight,
@@ -101,6 +103,12 @@ import {
   type WhatsAppMessage,
 } from "@/hooks/useWhatsAppInbox";
 import { SingleFollowupReminderModal } from "@/components/followup/SingleFollowupReminderModal";
+import { EditFollowupScheduleModal } from "@/components/followup/EditFollowupScheduleModal";
+import { CreateLeadReminderModal } from "@/components/inbox/CreateLeadReminderModal";
+import {
+  useInboxRemindersSummary,
+  useCompleteLeadReminder,
+} from "@/hooks/useLeadReminders";
 import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
 import { MediaMessage } from "@/components/MediaMessage";
 import { MediaAttachmentModal } from "@/components/inbox/MediaAttachmentModal";
@@ -108,6 +116,17 @@ import { VoiceRecorderButton } from "@/components/inbox/VoiceRecorderButton";
 import { API_BASE_URL } from "@/lib/api";
 import { sanitizePhone } from "@/lib/phone";
 import { formatHeaderCount, parseDossierSummary } from "@/lib/messageFormatting";
+
+function formatScheduleDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${day}/${month} às ${hours}:${minutes}`;
+}
 
 interface InternalNote {
   id: string;
@@ -311,7 +330,7 @@ export default function WhatsAppInbox({
   const [selectedInstanceNames, setSelectedInstanceNames] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [compositionMode, setCompositionMode] = useState<"whatsapp" | "internal_note">("whatsapp");
-  const [inboxTab, setInboxTab] = useState<"fila" | "aguardando" | "minhas" | "automacao" | "arquivadas" | "grupos" | "todas">("fila");
+  const [inboxTab, setInboxTab] = useState<"fila" | "aguardando" | "minhas" | "hoje" | "automacao" | "arquivadas" | "grupos" | "todas">("fila");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -320,6 +339,8 @@ export default function WhatsAppInbox({
   const [showDossier, setShowDossier] = useState(true);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [isApplyFollowupModalOpen, setIsApplyFollowupModalOpen] = useState(false);
+  const [isCreateReminderModalOpen, setIsCreateReminderModalOpen] = useState(false);
+  const [isEditScheduleModalOpen, setIsEditScheduleModalOpen] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -373,6 +394,11 @@ export default function WhatsAppInbox({
   const sendMediaMessage = useSendWhatsAppMediaMessage(clientId, selectedChatId);
   const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const clearChats = useClearWhatsAppChats(clientId);
+
+  const remindersSummaryQuery = useInboxRemindersSummary(clientId);
+  const completeLeadReminder = useCompleteLeadReminder(clientId);
+  const itemsByPhone = remindersSummaryQuery.data?.itemsByPhone || {};
+  const hojeBadgeCount = remindersSummaryQuery.data?.todayCount || 0;
 
   // ── Seleção Múltipla e Ações em Massa ─────────────────────────────────────────
   const [selectedChatIds, setSelectedChatIds] = useState<Set<string>>(new Set());
@@ -592,11 +618,30 @@ export default function WhatsAppInbox({
     return leadsByPhone.get(chatCanonical) || null;
   }, [selectedChat, leadsByPhone]);
 
+  const selectedCanonicalPhone = useMemo(() => {
+    if (!selectedChat?.id) return null;
+    return sanitizePhone(selectedChat.id);
+  }, [selectedChat?.id]);
+
+  const selectedSummary = selectedCanonicalPhone ? itemsByPhone[selectedCanonicalPhone] : null;
+  const activeSchedule = selectedSummary?.activeSchedule || null;
+  const activeReminders = selectedSummary?.activeReminders || [];
+  const pendingReminder = activeReminders.find((r) => r.status === "pending") || null;
+
   // Contagem de conversas em espera vinda do servidor ou fallback local
   const awaitingReplyCount = chatsQuery.counts?.awaiting ?? 0;
 
   // Lista de conversas já filtradas pelo servidor conforme aba e busca
-  const filteredChats = useMemo(() => chats, [chats]);
+  const filteredChats = useMemo(() => {
+    if (inboxTab === "hoje") {
+      return chats.filter((c) => {
+        const cPhone = sanitizePhone(c.id);
+        const item = cPhone ? itemsByPhone[cPhone] : null;
+        return Boolean(item?.todayDue?.hasScheduledToday || item?.todayDue?.hasReminderToday);
+      });
+    }
+    return chats;
+  }, [chats, inboxTab, itemsByPhone]);
   const totalChatsCount = chatsQuery.total ?? chats.length;
 
   const handleReabrirAtendimento = async () => {
@@ -1150,8 +1195,8 @@ export default function WhatsAppInbox({
 
               {/* Abas de Navegação do Inbox */}
               <div className="flex flex-col gap-1 rounded-xl bg-background p-1 border border-border/70 text-[11px]">
-                {/* Linha 1: Fila | Espera | Minhas | Todas */}
-                <div className="grid grid-cols-4 gap-1">
+                {/* Linha 1: Fila | Espera | Minhas | Hoje | Todas */}
+                <div className="grid grid-cols-5 gap-1">
                   <button
                     type="button"
                     onClick={() => setInboxTab("fila")}
@@ -1213,6 +1258,32 @@ export default function WhatsAppInbox({
                         title={`${chatsQuery.counts?.myUnopened} novos leads atribuídos não abertos`}
                       >
                         {chatsQuery.counts?.myUnopened}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("hoje")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
+                      inboxTab === "hoje"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Pendências para hoje ou atrasadas (mensagens agendadas e lembretes pessoais)"
+                  >
+                    <span>Hoje</span>
+                    {hojeBadgeCount > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "hoje"
+                            ? "bg-white text-primary"
+                            : "bg-primary/20 text-primary dark:text-primary-foreground"
+                        )}
+                        title={`${hojeBadgeCount} pendências para hoje ou atrasadas`}
+                      >
+                        {hojeBadgeCount}
                       </span>
                     )}
                   </button>
@@ -1443,6 +1514,10 @@ export default function WhatsAppInbox({
                     : `+${rawId}`;
                   const cPhone = sanitizePhone(chat.id);
                   const lead = cPhone ? leadsByPhone.get(cPhone) : null;
+                  const cardSummary = cPhone ? itemsByPhone[cPhone] : null;
+                  const cardHasActiveSchedule = Boolean(cardSummary?.activeSchedule);
+                  const cardPendingReminders = cardSummary?.activeReminders || [];
+                  const cardHasPendingReminder = cardPendingReminders.length > 0;
                   const precisaAtencao = Boolean(
                     lead?.dados?.precisa_atencao_humana || (lead as any)?.precisa_atencao_humana
                   );
@@ -1600,12 +1675,44 @@ export default function WhatsAppInbox({
                               <span>Sem Lead</span>
                             </span>
                           )}
+                          {cardHasActiveSchedule && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
+                              title={`Vai ser enviado ao cliente: mensagem agendada para ${formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)}`}
+                            >
+                              <Clock3 className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                              <span>📤 Envio {formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)}</span>
+                            </span>
+                          )}
+                          {cardHasPendingReminder && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300"
+                              title={`Só para você: lembrete pessoal "${cardPendingReminders[0].title}" para ${formatScheduleDate(cardPendingReminders[0].remindAt)}`}
+                            >
+                              <Bell className="h-2.5 w-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>📌 {cardPendingReminders[0].title}</span>
+                            </span>
+                          )}
                           <OriginBadge
                             origin={chat.leadOrigin ?? null}
                             campaignId={chat.sourceCampaignId ?? null}
                             campaignNames={campaignNames}
                           />
                         </div>
+                        {inboxTab === "hoje" && cardSummary?.todayDue?.hasScheduledToday && (
+                          <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] text-indigo-800 dark:text-indigo-300">
+                            <Clock3 className="h-3 w-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                            <span className="font-bold">Vai ser enviado ao cliente:</span>
+                            <span className="truncate">mensagem agendada para {formatScheduleDate(cardSummary.todayDue.scheduledAt)}</span>
+                          </div>
+                        )}
+                        {inboxTab === "hoje" && cardSummary?.todayDue?.hasReminderToday && (
+                          <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-800 dark:text-amber-300">
+                            <Bell className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <span className="font-bold">Só para você:</span>
+                            <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
+                          </div>
+                        )}
                       </div>
                     </button>
                   );
@@ -2651,27 +2758,119 @@ export default function WhatsAppInbox({
                     Gerar Proposta Comercial
                   </Button>
 
-                  {/* Ações Secundárias Lado a Lado: Lembrar & Cadência */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsReminderModalOpen(true)}
-                      className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15 cursor-pointer"
-                    >
-                      <Clock3 className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
-                      Lembrar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsApplyFollowupModalOpen(true)}
-                      className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 cursor-pointer"
-                    >
-                      <RefreshCw className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
-                      Cadência
-                    </Button>
-                  </div>
+                  {/* Card de Lembrete Pessoal Pendente no Dossiê */}
+                  {pendingReminder && (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200 flex items-start justify-between gap-2 shadow-2xs">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
+                          <Bell className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span className="truncate">{pendingReminder.title}</span>
+                        </div>
+                        {pendingReminder.notes && (
+                          <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 line-clamp-2">
+                            {pendingReminder.notes}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 text-[10px] text-amber-600 dark:text-amber-400 pt-0.5 font-mono">
+                          <span>📅 {formatScheduleDate(pendingReminder.remindAt)}</span>
+                          {pendingReminder.assignedToName && (
+                            <span>· 👤 {pendingReminder.assignedToName}</span>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            await completeLeadReminder.mutateAsync(pendingReminder.id);
+                            toast.success("Lembrete concluído!");
+                          } catch (err: any) {
+                            toast.error(err?.message || "Erro ao concluir lembrete.");
+                          }
+                        }}
+                        disabled={completeLeadReminder.isPending}
+                        className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white border-none shrink-0 cursor-pointer gap-1 shadow-2xs"
+                        title="Concluir lembrete em 1 clique"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Concluir
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Ações de Agendamento com Estado e Lembrete Pessoal */}
+                  {activeSchedule ? (
+                    <div className="space-y-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsEditScheduleModalOpen(true)}
+                        className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-indigo-500/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/20 cursor-pointer truncate"
+                        title="Mensagem agendada ativa para este lead. Clique para editar ou cancelar."
+                      >
+                        <Clock3 className="mr-1.5 h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                        <span className="truncate">
+                          ⏰ Mensagem agendada{activeSchedule.totalActiveCount && activeSchedule.totalActiveCount > 1 ? ` (+${activeSchedule.totalActiveCount - 1})` : ""} · {formatScheduleDate(activeSchedule.nextScheduledFor)}
+                        </span>
+                      </Button>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsCreateReminderModalOpen(true)}
+                          className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 cursor-pointer"
+                          title="Criar lembrete pessoal interno (não envia WhatsApp para o cliente)"
+                        >
+                          <Bell className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                          Criar lembrete
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsApplyFollowupModalOpen(true)}
+                          className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-purple-500/30 bg-purple-500/5 text-purple-700 dark:text-purple-300 hover:bg-purple-500/15 cursor-pointer"
+                        >
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5 text-purple-500" />
+                          Cadência
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsReminderModalOpen(true)}
+                        className="w-full justify-center h-8 text-[11px] font-semibold rounded-xl border-indigo-500/30 bg-indigo-500/5 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/15 cursor-pointer px-1"
+                        title="Agendar mensagem que dispara para o cliente na data e hora marcadas"
+                      >
+                        <CalendarClock className="mr-1 h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                        <span className="truncate">Agendar msg</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsCreateReminderModalOpen(true)}
+                        className="w-full justify-center h-8 text-[11px] font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 cursor-pointer px-1"
+                        title="Criar lembrete pessoal interno (não envia nada ao cliente)"
+                      >
+                        <Bell className="mr-1 h-3.5 w-3.5 text-amber-500 shrink-0" />
+                        <span className="truncate">Lembrete</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsApplyFollowupModalOpen(true)}
+                        className="w-full justify-center h-8 text-[11px] font-semibold rounded-xl border-purple-500/30 bg-purple-500/5 text-purple-700 dark:text-purple-300 hover:bg-purple-500/15 cursor-pointer px-1"
+                      >
+                        <RefreshCw className="mr-1 h-3.5 w-3.5 text-purple-500 shrink-0" />
+                        <span className="truncate">Cadência</span>
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2688,6 +2887,24 @@ export default function WhatsAppInbox({
           phone: rawPhone,
         }}
         tenantId={clientId}
+      />
+
+      <EditFollowupScheduleModal
+        open={isEditScheduleModalOpen}
+        onOpenChange={setIsEditScheduleModalOpen}
+        item={activeSchedule}
+      />
+
+      <CreateLeadReminderModal
+        open={isCreateReminderModalOpen}
+        onOpenChange={setIsCreateReminderModalOpen}
+        lead={{
+          id: matchedLead?.id,
+          nome: matchedLead?.nome || selectedChat?.name || "Lead",
+          phone: rawPhone,
+        }}
+        clientId={clientId}
+        operatorOptions={operatorOptions}
       />
 
       <ApplyFollowupModal

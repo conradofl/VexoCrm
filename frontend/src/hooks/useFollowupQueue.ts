@@ -112,7 +112,11 @@ export function useRescheduleFollowup() {
 
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao reagendar"));
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["followup-queue"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["followup-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
   });
 }
 
@@ -132,7 +136,11 @@ export function useDiscardFollowup() {
 
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao descartar"));
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["followup-queue"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["followup-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
   });
 }
 
@@ -231,6 +239,8 @@ export function useCreateStandaloneReminder() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["followup-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
     },
   });
 }

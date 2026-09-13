@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Info,
   Edit3,
+  Trash2,
 } from "lucide-react";
 import {
   Dialog,
@@ -21,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "@/components/ui/use-toast";
-import { useRescheduleFollowup, type FollowupItem } from "@/hooks/useFollowupQueue";
+import { useRescheduleFollowup, useDiscardFollowup, type FollowupItem } from "@/hooks/useFollowupQueue";
 
 interface EditFollowupScheduleModalProps {
   open: boolean;
@@ -84,6 +85,7 @@ export function EditFollowupScheduleModal({
   item,
 }: EditFollowupScheduleModalProps) {
   const reschedule = useRescheduleFollowup();
+  const discardFollowup = useDiscardFollowup();
 
   const isAvulso = !item?.campaignId || item?.campaignName === "Avulso";
   const leadName = item?.leadName || "Lead";
@@ -190,6 +192,27 @@ export function EditFollowupScheduleModal({
     }
   };
 
+  const handleDiscard = async () => {
+    if (!item?.id) return;
+    if (!window.confirm("Deseja realmente cancelar este agendamento? A mensagem programada não será enviada.")) {
+      return;
+    }
+    try {
+      await discardFollowup.mutateAsync(item.id);
+      toast({
+        title: "Agendamento cancelado",
+        description: "A mensagem agendada foi cancelada com sucesso.",
+      });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao cancelar agendamento",
+        description: err?.message || "Falha ao descartar envio.",
+      });
+    }
+  };
+
   if (!item) return null;
 
   return (
@@ -217,10 +240,22 @@ export function EditFollowupScheduleModal({
               <div className="font-semibold text-foreground">{leadName}</div>
               <div className="text-xs font-mono text-muted-foreground">{rawPhone}</div>
             </div>
-            <div className="text-right">
+            <div className="text-right flex flex-col items-end gap-1.5">
               <Badge variant={isAvulso ? "secondary" : "outline"} className="text-xs">
                 {item.campaignName || "Avulso"}
               </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={discardFollowup.isPending || reschedule.isPending}
+                onClick={handleDiscard}
+                className="h-6 px-2 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                title="Cancelar agendamento de mensagem"
+              >
+                <Trash2 className="w-3 h-3 mr-1" />
+                {discardFollowup.isPending ? "Cancelando..." : "Cancelar agendamento"}
+              </Button>
             </div>
           </div>
 
@@ -373,7 +408,7 @@ export function EditFollowupScheduleModal({
           <Button
             type="button"
             size="sm"
-            disabled={reschedule.isPending || isPast || (isAvulso && !message.trim())}
+            disabled={reschedule.isPending || discardFollowup.isPending || isPast || (isAvulso && !message.trim())}
             onClick={handleSave}
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs gap-1.5 shadow-sm"
           >

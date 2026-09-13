@@ -29,6 +29,7 @@ import {
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover } from "../../services/followupExitGuard.js";
 
 const SQL_NUMBER_CHANGE_MATCH = (col) => `(
@@ -485,6 +486,12 @@ export function registerChatbotRoutes(app, deps) {
           } else {
             tabCondition = "AND 1=0";
           }
+        } else if (rawTab === "hoje" || rawTab === "today") {
+          // Aba "Hoje": conversas com pendências vencendo hoje ou já vencidas (lembretes pessoais e mensagens agendadas)
+          const opList = operatorIdentifiers.length > 0 ? operatorIdentifiers : ["__NONE__"];
+          queryParams.push(opList);
+          const opIdx = queryParams.length;
+          tabCondition = `AND COALESCE(cs.state, 'ativa') != 'lixeira' AND ${SQL_HOJE_CHAT_FILTER({ clientParam: "$1", operatorParam: `$${opIdx}` })}`;
         } else if (rawTab === "todas" || rawTab === "all") {
           // Aba "Todas": exibe absolutamente tudo (grupos, ativas, automações, arquivadas), exceto lixeira
           tabCondition = "AND COALESCE(cs.state, 'ativa') != 'lixeira'";
