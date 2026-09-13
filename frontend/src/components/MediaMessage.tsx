@@ -377,7 +377,25 @@ export function MediaMessage({
     );
   }
 
+  // Estado 2: Erro ou mídia não encontrada (ex: 404 da Evolution ou apagada)
+  if (error || !media) {
+    return (
+      <div className={cn("space-y-1.5 py-1", className)}>
+        <div className="flex items-center gap-1.5 text-xs opacity-80">
+          <FileText className="h-3.5 w-3.5" />
+          <span>[mídia indisponível]</span>
+        </div>
+        {fallbackBody && (
+          <p className="text-xs italic opacity-90 select-text">
+            {fallbackBody}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   const src = media.dataUrl ?? media.url ?? "";
+
 
   // Áudio
   if (media.mediaType === "audio" && src) {

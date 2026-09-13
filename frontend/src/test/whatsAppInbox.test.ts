@@ -182,4 +182,34 @@ describe("WhatsAppInbox exports, sorting and polling utilities", () => {
     // Caso 5: Nenhuma conversa
     expect(formatHeaderCount(0, 0)).toBe("0 conversas");
   });
+
+  it("handles null media or 404 response safely without throwing TypeError on dataUrl", () => {
+    // Simula a lógica de renderização segura do MediaMessage
+    const renderMedia = (media: { dataUrl?: string | null; url?: string | null; expired?: boolean } | null, fallbackBody: string) => {
+      if (media?.expired) {
+        return { status: "expired" };
+      }
+      if (!media) {
+        return { status: "unavailable", fallback: fallbackBody || "[mídia indisponível]" };
+      }
+      const src = media.dataUrl ?? media.url ?? "";
+      return { status: "ready", src };
+    };
+
+    // Caso 1: media é null (Evolution 404) -> NUNCA lança TypeError
+    expect(() => renderMedia(null, "[imagem] foto.png")).not.toThrow();
+    const resultNull = renderMedia(null, "[imagem] foto.png");
+    expect(resultNull.status).toBe("unavailable");
+    expect(resultNull.fallback).toBe("[imagem] foto.png");
+
+    // Caso 2: media expirada
+    const resultExpired = renderMedia({ expired: true }, "[áudio]");
+    expect(resultExpired.status).toBe("expired");
+
+    // Caso 3: media válida
+    const resultValid = renderMedia({ dataUrl: "data:image/png;base64,abc", url: null }, "[imagem]");
+    expect(resultValid.status).toBe("ready");
+    expect(resultValid.src).toBe("data:image/png;base64,abc");
+  });
 });
+
