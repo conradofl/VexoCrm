@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   FileText,
   ImageOff,
@@ -41,6 +41,25 @@ function AudioPlayer({
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [showTranscription, setShowTranscription] = useState(true);
 
+  const handleLoadedMetadata = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+      setDuration(audio.duration);
+    } else if (audio.duration === Infinity || (audio.duration && !isFinite(audio.duration))) {
+      // Remédio para WebM do MediaRecorder com duration: Infinity
+      const onDurationChange = () => {
+        if (audio.duration && isFinite(audio.duration)) {
+          setDuration(audio.duration);
+          audio.removeEventListener("durationchange", onDurationChange);
+          audio.currentTime = 0;
+        }
+      };
+      audio.addEventListener("durationchange", onDurationChange);
+      audio.currentTime = 1e101;
+    }
+  }, []);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -52,7 +71,7 @@ function AudioPlayer({
       setCurrentTime(0);
     };
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onLoadedMetadata = () => {
+    const onDurationChangeGeneral = () => {
       if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
         setDuration(audio.duration);
       }
@@ -62,16 +81,23 @@ function AudioPlayer({
     audio.addEventListener("pause", onPause);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("durationchange", onDurationChangeGeneral);
+
+    // Se os metadados já estiverem prontos no mount (áudio em cache)
+    if (audio.readyState >= 1) {
+      handleLoadedMetadata();
+    }
 
     return () => {
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("durationchange", onDurationChangeGeneral);
     };
-  }, []);
+  }, [handleLoadedMetadata]);
 
   const togglePlay = () => {
     if (!audioRef.current) return;
@@ -100,7 +126,12 @@ function AudioPlayer({
 
   return (
     <div className="w-full min-w-[240px] max-w-[340px] space-y-2">
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={handleLoadedMetadata}
+      />
 
       {/* Player Controls */}
       <div className="flex items-center gap-2.5">
@@ -215,13 +246,16 @@ function ImageWithDescription({
   alt,
   description,
   fromMe,
+  fileName,
 }: {
   src: string;
   alt: string;
   description: string | null;
   fromMe: boolean;
+  fileName?: string | null;
 }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const downloadName = fileName || "imagem.jpg";
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -253,6 +287,22 @@ function ImageWithDescription({
         </div>
       </div>
 
+      {/* Botão de download na miniatura */}
+      <div className="flex items-center justify-between pt-0.5">
+        <a
+          href={src}
+          download={downloadName}
+          className={cn(
+            "inline-flex items-center gap-1 text-[11px] font-medium transition-opacity opacity-80 hover:opacity-100",
+            fromMe ? "text-emerald-100" : "text-muted-foreground"
+          )}
+          title="Baixar imagem"
+        >
+          <Download className="h-3 w-3" />
+          <span>Baixar imagem</span>
+        </a>
+      </div>
+
       {description && (
         <p
           className={cn(
@@ -264,20 +314,32 @@ function ImageWithDescription({
         </p>
       )}
 
-      {/* Lightbox Modal */}
+      {/* Lightbox Modal com botão de download */}
       {lightboxOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-4 animate-in fade-in duration-150"
           onClick={() => setLightboxOpen(false)}
         >
-          <button
-            type="button"
-            onClick={() => setLightboxOpen(false)}
-            className="absolute top-4 right-4 rounded-full bg-white/10 hover:bg-white/20 text-white p-2 transition-colors"
-            aria-label="Fechar"
-          >
-            <X className="h-6 w-6" />
-          </button>
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <a
+              href={src}
+              download={downloadName}
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-full bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 transition-colors flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+              title="Baixar imagem original"
+            >
+              <Download className="h-4 w-4" />
+              <span>Baixar</span>
+            </a>
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(false)}
+              className="rounded-full bg-white/15 hover:bg-white/25 text-white p-1.5 transition-colors cursor-pointer"
+              aria-label="Fechar"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
           <img
             src={src}
             alt={alt}
@@ -420,6 +482,7 @@ export function MediaMessage({
           alt={media.fileName || "Imagem WhatsApp"}
           description={media.description || (fallbackBody.startsWith("[imagem:") ? fallbackBody : null)}
           fromMe={fromMe}
+          fileName={media.fileName}
         />
         {fallbackBody &&
           !fallbackBody.startsWith("[imagem") &&

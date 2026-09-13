@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatHeaderCount } from "../lib/messageFormatting";
+import { formatHeaderCount, parseDossierSummary } from "../lib/messageFormatting";
 
 describe("WhatsAppInbox exports, sorting and polling utilities", () => {
   it("formats timestamps and previews without errors", () => {
@@ -210,6 +210,128 @@ describe("WhatsAppInbox exports, sorting and polling utilities", () => {
     const resultValid = renderMedia({ dataUrl: "data:image/png;base64,abc", url: null }, "[imagem]");
     expect(resultValid.status).toBe("ready");
     expect(resultValid.src).toBe("data:image/png;base64,abc");
+  });
+});
+
+describe("parseDossierSummary com resumos reais de produção", () => {
+  it("lê perfeitamente resumo real de produção completo com os 4 emojis (🎯 📋 🤝 ⏭️)", () => {
+    // Resumo real emitido por chatInsight.js / formatSummaryOutput
+    const realSummary = [
+      "🎯 Quer pacote para Maceió em janeiro",
+      "📋 2 adultos e 1 criança de 4 anos, orçamento até 8 mil",
+      "🤝 Prometido enviar cotação até sexta",
+      "⏭️ Cotar Maceió em janeiro para 2 adultos e 1 criança",
+    ].join("\n");
+
+    const parsed = parseDossierSummary(realSummary, null);
+
+    expect(parsed.isPersonal).toBe(false);
+    expect(parsed.objetivo).toBe("Quer pacote para Maceió em janeiro");
+    expect(parsed.situacao).toBe("2 adultos e 1 criança de 4 anos, orçamento até 8 mil");
+    expect(parsed.combinado).toBe("Prometido enviar cotação até sexta");
+    expect(parsed.proximoPasso).toBe("Cotar Maceió em janeiro para 2 adultos e 1 criança");
+    expect(parsed.missing).toEqual([]);
+  });
+
+  it("trata 'nada ainda' como campo vazio e adiciona à lista 'missing' (caso João do pé de feijão)", () => {
+    // String real extraída diretamente de produção (conforme gravada no banco e presente em outboundGuardAndLadder.test.js)
+    const productionSummaryWithNadaAinda =
+      "🎯 Confirmar se o que foi conversado anteriormente ainda está válido\n" +
+      "📋 nada ainda\n" +
+      "🤝 nada ainda\n" +
+      "⏭️ Pedir ao João que informe seu segmento de atuação...";
+
+    const parsed = parseDossierSummary(productionSummaryWithNadaAinda, null);
+
+    expect(parsed.isPersonal).toBe(false);
+    expect(parsed.objetivo).toBe("Confirmar se o que foi conversado anteriormente ainda está válido");
+    // 'nada ainda' NÃO pode entrar como conteúdo:
+    expect(parsed.situacao).toBeNull();
+    expect(parsed.combinado).toBeNull();
+    expect(parsed.proximoPasso).toBe("Pedir ao João que informe seu segmento de atuação...");
+    // Os campos que vieram como 'nada ainda' entram em missing:
+    expect(parsed.missing).toEqual(["Situação", "Combinado"]);
+  });
+
+  it("suporta marcador sem seletor de variação unicode (⏭ vs ⏭️)", () => {
+    const rawWithBareNext = [
+      "🎯 Quer consultoria de energia solar",
+      "📋 Residência com conta média de R$ 900",
+      "🤝 Agendada ligação técnica para amanhã às 14h",
+      "⏭ Enviar proposta preliminar antes da ligação",
+    ].join("\n");
+
+    const parsed = parseDossierSummary(rawWithBareNext, null);
+
+    expect(parsed.proximoPasso).toBe("Enviar proposta preliminar antes da ligação");
+    expect(parsed.missing).toEqual([]);
+  });
+
+  it("utiliza fallback dos campos do Lead quando o resumo da IA tem 'nada ainda' ou está ausente", () => {
+    const partialSummary =
+      "🎯 Economia na conta de luz comercial\n" +
+      "📋 nada ainda\n" +
+      "🤝 nada ainda\n" +
+      "⏭️ nada ainda";
+
+    const leadMock = {
+      cidade: "Uberlândia",
+      estado: "MG",
+      tipo_cliente: "Comercial",
+      dados: {
+        combinado: "Falar com o sócio Roberto na segunda",
+        proximo_passo: "Montar estudo de viabilidade",
+      },
+    };
+
+    const parsed = parseDossierSummary(partialSummary, leadMock);
+
+    expect(parsed.objetivo).toBe("Economia na conta de luz comercial");
+    expect(parsed.situacao).toBe("Uberlândia - MG");
+    expect(parsed.combinado).toBe("Falar com o sócio Roberto na segunda");
+    expect(parsed.proximoPasso).toBe("Montar estudo de viabilidade");
+    expect(parsed.missing).toEqual([]);
+  });
+
+  it("reconhece o escape de conversa pessoal 🚫 apenas no início do texto, alinhado ao backend", () => {
+    const personalSummary = "🚫 Conversa pessoal sobre almoço de domingo em família";
+
+    const parsed = parseDossierSummary(personalSummary, null);
+
+    expect(parsed.isPersonal).toBe(true);
+    expect(parsed.personalText).toBe("Conversa pessoal sobre almoço de domingo em família");
+  });
+
+  it("não trata como conversa pessoal resumo comercial que contenha o emoji 🚫 no meio do texto", () => {
+    // Exemplo: o cliente mencionou restrição ou rejeição com 🚫 no meio de uma frase
+    const commercialWithProhibitedEmoji = [
+      "🎯 Reduzir conta de luz com energia solar",
+      "📋 Consumo alto mas 🚫 sem interesse em consórcio ou financiamento longo",
+      "🤝 Combinado enviar proposta à vista com desconto",
+      "⏭️ Apresentar simulação de payback em 2 anos",
+    ].join("\n");
+
+    const parsed = parseDossierSummary(commercialWithProhibitedEmoji, null);
+
+    // Deve ser tratado como comercial legítimo (isPersonal = false), espelhando conversationInsightHelper.js
+    expect(parsed.isPersonal).toBe(false);
+    expect(parsed.personalText).toBe("");
+    expect(parsed.objetivo).toBe("Reduzir conta de luz com energia solar");
+    expect(parsed.situacao).toBe("Consumo alto mas 🚫 sem interesse em consórcio ou financiamento longo");
+    expect(parsed.combinado).toBe("Combinado enviar proposta à vista com desconto");
+    expect(parsed.proximoPasso).toBe("Apresentar simulação de payback em 2 anos");
+    expect(parsed.missing).toEqual([]);
+  });
+
+  it("trata resumo nulo ou vazio e exibe todos os campos em missing", () => {
+    const parsedNull = parseDossierSummary(null, null);
+
+    expect(parsedNull.isPersonal).toBe(false);
+    expect(parsedNull.objetivo).toBeNull();
+    expect(parsedNull.situacao).toBeNull();
+    expect(parsedNull.combinado).toBeNull();
+    expect(parsedNull.proximoPasso).toBeNull();
+    expect(parsedNull.missing).toEqual(["Objetivo", "Situação", "Combinado", "Próximo passo"]);
   });
 });
 

@@ -107,7 +107,7 @@ import { MediaAttachmentModal } from "@/components/inbox/MediaAttachmentModal";
 import { VoiceRecorderButton } from "@/components/inbox/VoiceRecorderButton";
 import { API_BASE_URL } from "@/lib/api";
 import { sanitizePhone } from "@/lib/phone";
-import { formatHeaderCount } from "@/lib/messageFormatting";
+import { formatHeaderCount, parseDossierSummary } from "@/lib/messageFormatting";
 
 interface InternalNote {
   id: string;
@@ -212,45 +212,6 @@ const FUNNEL_STAGES = [
   { label: "Fechado", value: "fechado" },
 ] as const;
 
-function parseDossierSummary(summary: string | null, lead: LeadRow | null) {
-  let objetivo = lead?.objetivo || lead?.interesse || null;
-  let contexto = [lead?.cidade, lead?.estado].filter(Boolean).join(" - ") || lead?.tipo_cliente || null;
-  let objecao = (lead?.dados as any)?.objecao || (lead?.dados as any)?.duvida || null;
-  let orcamento = [lead?.credito, lead?.parcela, lead?.lance_entrada_fgts].filter(Boolean).join(" · ") || null;
-
-  let isPersonal = false;
-  let personalText = "";
-
-  if (summary) {
-    if (summary.startsWith("🚫")) {
-      isPersonal = true;
-      personalText = summary.replace(/^🚫\uFE0F?\s*/u, "").trim();
-    } else {
-      const lines = summary.split("\n");
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        const lower = line.toLowerCase();
-        if (!objetivo && (lower.includes("objetivo:") || lower.includes("interesse:"))) {
-          objetivo = line.replace(/.*?(objetivo|interesse):\s*/i, "").trim();
-        } else if (!contexto && (lower.includes("contexto:") || lower.includes("cidade:") || lower.includes("local:"))) {
-          contexto = line.replace(/.*?(contexto|cidade|local):\s*/i, "").trim();
-        } else if (!objecao && (lower.includes("objeção:") || lower.includes("objecao:"))) {
-          objecao = line.replace(/.*?obje[çc][ãa]o:\s*/i, "").trim();
-        } else if (!orcamento && (lower.includes("orçamento:") || lower.includes("orcamento:") || lower.includes("crédito:") || lower.includes("credito:") || lower.includes("valor:"))) {
-          orcamento = line.replace(/.*?(or[çc]amento|cr[ée]dito|valor):\s*/i, "").trim();
-        }
-      }
-    }
-  }
-
-  const missing: string[] = [];
-  if (!objetivo) missing.push("Objetivo");
-  if (!contexto) missing.push("Contexto");
-  if (!objecao) missing.push("Objeção");
-  if (!orcamento) missing.push("Orçamento");
-
-  return { objetivo, contexto, objecao, orcamento, missing, isPersonal, personalText };
-}
 
 function ChatAvatar({
   label,
@@ -2362,10 +2323,10 @@ export default function WhatsAppInbox({
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════════════
-              COLUNA 3: Dossiê Lateral do Lead & Copiloto (Largura Fixa 320px, Colapsável)
+              COLUNA 3: Dossiê Lateral do Lead & Copiloto (Largura Fixa 360-380px, Colapsável)
           ══════════════════════════════════════════════════════════════════════════ */}
           {showDossier && (
-            <div className="w-[320px] shrink-0 flex min-h-0 flex-col overflow-y-auto rounded-2xl border border-border/80 bg-card/60 p-4 shadow-xs space-y-4 animate-in fade-in slide-in-from-right-2 duration-150">
+            <div className="w-[360px] xl:w-[380px] shrink-0 flex min-h-0 flex-col overflow-y-auto rounded-2xl border border-border/80 bg-card/60 p-4 sm:p-5 shadow-xs space-y-5 animate-in fade-in slide-in-from-right-2 duration-150">
               {/* Header do Dossiê com botão de fechar */}
               <div className="flex items-center justify-between pb-1 border-b border-border/40">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -2559,7 +2520,7 @@ export default function WhatsAppInbox({
                   </button>
                 </div>
 
-                <div className="rounded-2xl border border-purple-500/25 bg-purple-50/50 dark:bg-purple-950/25 p-3 space-y-2 text-xs shadow-xs">
+                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 dark:bg-purple-950/40 p-4 space-y-3 text-xs shadow-xs">
                   {dossierSummary.isPersonal ? (
                     <div className="space-y-1 text-[11px] text-muted-foreground">
                       <div className="font-semibold flex items-center gap-1.5 text-foreground/80">
@@ -2571,27 +2532,35 @@ export default function WhatsAppInbox({
                       </p>
                     </div>
                   ) : currentChatSummary || matchedLead ? (
-                    <div className="space-y-1.5 text-[11px]">
+                    <div className="space-y-2 text-[11px]">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0">Objetivo:</span>
-                        <span className="text-foreground text-right">{dossierSummary.objetivo || "—"}</span>
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>🎯</span> Objetivo:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.objetivo || "—"}</span>
                       </div>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0">Contexto:</span>
-                        <span className="text-foreground text-right">{dossierSummary.contexto || "—"}</span>
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>📋</span> Situação:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.situacao || "—"}</span>
                       </div>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0">Objeção:</span>
-                        <span className="text-foreground text-right">{dossierSummary.objecao || "—"}</span>
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>🤝</span> Combinado:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.combinado || "—"}</span>
                       </div>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0">Orçamento:</span>
-                        <span className="text-foreground text-right">{dossierSummary.orcamento || "—"}</span>
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>⏭</span> Próximo passo:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.proximoPasso || "—"}</span>
                       </div>
 
                       {/* Rodapé com pendências de descoberta */}
                       {dossierSummary.missing.length > 0 && (
-                        <div className="pt-1.5 mt-1.5 border-t border-purple-500/15 text-[10px] text-muted-foreground/80 italic">
+                        <div className="pt-2 mt-2 border-t border-purple-500/20 text-[10px] text-muted-foreground/80 italic">
                           Falta descobrir: {dossierSummary.missing.join(", ")}
                         </div>
                       )}
@@ -2617,12 +2586,12 @@ export default function WhatsAppInbox({
               </div>
 
               {/* 2. Trilha Horizontal do Funil Comercial (Estágios reais: Novo, Atendimento, Qualificado, Fechado) */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                   <Target className="h-3.5 w-3.5 text-indigo-500" />
                   Estágio no Funil
                 </span>
-                <div className="grid grid-cols-4 gap-1">
+                <div className="grid grid-cols-4 gap-1.5 w-full">
                   {FUNNEL_STAGES.map((s, idx) => {
                     const isPast = idx < currentStageIndex;
                     const isCurrent = idx === currentStageIndex;
@@ -2640,16 +2609,16 @@ export default function WhatsAppInbox({
                             : `Mudar estágio para ${s.label}`
                         }
                         className={cn(
-                          "relative flex flex-col items-center justify-center py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer border text-[11px]",
+                          "relative flex items-center justify-center py-2 px-1 rounded-lg text-center transition-all cursor-pointer border text-xs w-full min-w-0",
                           isPast && "bg-emerald-600 border-emerald-600 text-white font-semibold shadow-xs",
-                          isCurrent && "border-2 border-emerald-500 bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 font-bold shadow-xs",
-                          isFuture && "border-border/60 bg-muted/30 text-muted-foreground/70 hover:border-border hover:text-foreground font-medium",
+                          isCurrent && "border-2 border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 font-bold shadow-xs",
+                          isFuture && "border-border/60 bg-muted/40 text-muted-foreground/80 hover:border-border hover:text-foreground font-medium",
                           !matchedLead && "opacity-50 cursor-not-allowed"
                         )}
                       >
-                        <div className="flex items-center gap-0.5 justify-center">
-                          {isPast && <Check className="h-3 w-3 shrink-0 stroke-[3]" />}
-                          <span className="truncate">{s.label}</span>
+                        <div className="flex items-center gap-1 justify-center truncate px-0.5">
+                          {isPast && <Check className="h-3 w-3 shrink-0 stroke-[2.5]" />}
+                          <span className="truncate text-[11px] leading-tight font-medium">{s.label}</span>
                         </div>
                       </button>
                     );
