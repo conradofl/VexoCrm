@@ -1672,6 +1672,7 @@ export function registerLeadsRoutes(app, deps) {
         temperature: normalizeString(req.body?.temperature) || 'warm',
         tags: Array.isArray(req.body?.tags) ? req.body.tags : [],
         assigned_to: assignedToVal,
+        assigned_at: assignedToVal ? new Date().toISOString() : null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -1683,6 +1684,7 @@ export function registerLeadsRoutes(app, deps) {
         temperature: payload.temperature,
         tags: payload.tags,
         assigned_to: assignedToVal,
+        assigned_at: payload.assigned_at,
       });
 
       const variants = buildPhoneLookupVariants(phone);
@@ -1745,6 +1747,7 @@ export function registerLeadsRoutes(app, deps) {
         }
         const val = req.body.assigned_to !== undefined ? req.body.assigned_to : req.body.assignedTo;
         updates.assigned_to = val ? String(val).trim() : null;
+        updates.assigned_at = val ? new Date().toISOString() : null;
       }
       updates.updated_at = new Date().toISOString();
 

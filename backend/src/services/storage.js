@@ -189,6 +189,8 @@ export function deriveExtensionFromMimetype(mimetype) {
   const map = {
     "audio/ogg": "ogg",
     "audio/opus": "opus",
+    "audio/webm": "webm",
+    "video/webm": "webm",
     "audio/mp4": "m4a",
     "audio/mpeg": "mp3",
     "audio/wav": "wav",
@@ -339,9 +341,13 @@ export async function getMediaBuffer(mediaPath) {
         jpeg: "image/jpeg",
         png: "image/png",
         webp: "image/webp",
+        gif: "image/gif",
         ogg: "audio/ogg",
         opus: "audio/opus",
+        webm: "audio/webm",
         mp3: "audio/mpeg",
+        m4a: "audio/mp4",
+        wav: "audio/wav",
         mp4: "video/mp4",
         pdf: "application/pdf",
       };

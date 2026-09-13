@@ -2051,3 +2051,95 @@ export async function sendMediaMessageViaEvolution({
     };
   }
 }
+
+/**
+ * Apaga mensagem para todos no WhatsApp via Evolution API.
+ * Se a janela de exclusão do WhatsApp expirou (~48 horas), a Evolution recusa com HTTP 400.
+ */
+export async function deleteMessageViaEvolution({
+  instanceName,
+  waMessageId,
+  remoteJid,
+  fromMe = true,
+  webhookToken = null,
+  baseUrl = null,
+}) {
+  if (!instanceName || !waMessageId || !remoteJid) {
+    throw new Error("Parâmetros obrigatórios ausentes (instanceName, waMessageId, remoteJid)");
+  }
+
+  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+
+  if (!apiKey) {
+    throw new Error("Chave de autenticação da Evolution não configurada");
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const endpoint = `${effectiveBaseUrl.replace(/\/+$/, "")}/chat/deleteMessageForEveryone/${encodeURIComponent(instanceName)}`;
+  const payload = {
+    id: waMessageId,
+    remoteJid,
+    fromMe: Boolean(fromMe),
+  };
+
+  const res = await fetch(endpoint, {
+    method: "DELETE",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const resText = await res.text();
+  if (!res.ok) {
+    const error = new Error(`Evolution HTTP ${res.status}: ${resText}`);
+    error.status = res.status;
+    error.responseBody = resText;
+    throw error;
+  }
+
+  try {
+    return { success: true, data: JSON.parse(resText) };
+  } catch {
+    return { success: true, raw: resText };
+  }
+}
+
+/**
+ * Busca URL da foto de perfil do contato via Evolution API.
+ */
+export async function fetchProfilePictureUrlViaEvolution({
+  instanceName,
+  number,
+  webhookToken = null,
+  baseUrl = null,
+}) {
+  if (!instanceName || !number) return null;
+
+  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+  if (!apiKey) return null;
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const endpoint = `${effectiveBaseUrl.replace(/\/+$/, "")}/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`;
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ number }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.profilePictureUrl || data?.picture || null;
+  } catch {
+    return null;
+  }
+}
+

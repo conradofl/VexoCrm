@@ -221,6 +221,16 @@ export function MediaAttachmentModal({
                     />
                   </div>
                 )}
+
+                {/* Aviso A4: Imagem > 8 MB */}
+                {mediaType === "image" && selectedFile && selectedFile.size > 8 * 1024 * 1024 && (
+                  <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/30 p-2.5 text-xs text-amber-800 dark:text-amber-300 animate-in fade-in">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <div className="leading-snug">
+                      <span className="font-semibold">Aviso:</span> Acima de 8 MB a imagem é enviada normalmente ao cliente, mas não fica guardada no sistema.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

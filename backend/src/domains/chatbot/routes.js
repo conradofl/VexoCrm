@@ -20,6 +20,8 @@ import {
   resolveInstanceIdentifier,
   fetchMediaBase64FromEvolution,
   sendMediaMessageViaEvolution,
+  deleteMessageViaEvolution,
+  fetchProfilePictureUrlViaEvolution,
 } from "../../services/evolution.js";
 import {
   getMediaBuffer,
@@ -47,7 +49,7 @@ const SQL_NUMBER_CHANGE_MATCH = (col) => `(
 )`;
 
 const SQL_AUTOMATION_MATCH = (col) => `(
-  ${col} ~* 'digite\\s+(apenas\\s+)?(o\\s+)?(n[úu]mero|\\d)|selecione\\s+(uma\\s+)?(das\\s+)?opç[õo]|escolha\\s+(um\\s+)?(dos\\s+)?n[úu]meros?|escreva\\s+uma\\s+das\\s+opç[õo]es|opç[ãa]o\\s+(desejada|inv[áa]lida)|\\bmenu\\b|atendimento\\s+autom[áa]tico|protocolo\\s+de\\s+atendimento|resposta\\s+autom[áa]tica|\\[mensagem\\s+autom[áa]tica\\]|vou\\s+te\\s+transferir\\s+para\\s+nossa\\s+equipe|agradece\\s+(o\\s+)?seu\\s+contato|agradecemos\\s+(o\\s+)?seu\\s+contato|agradecemos\\s+a\\s+prefer[êe]ncia|seja\\s+(muito\\s+)?bem[- ]vindo\\(a\\)|hor[áa]rios?\\s+de\\s+atendimento|nosso\\s+(showroom|card[áa]pio|cat[áa]logo|site)|finalizarei\\s+nossa\\s+intera[çc][ãa]o|n[ãa]o\\s+consegui\\s+identificar\\s+nenhuma\\s+resposta|vou\\s+encerrar\\s+esse\\s+atendimento|atendimento\\s+foi\\s+finalizado|responder\\s+a\\s+nossa\\s+pesquisa'
+  ${col} ~* 'digite\\s+(apenas\\s+)?(o\\s+)?(n[úu]mero|\\d)|(escolha|selecione|escreva)\\s+(uma\\s+)?(das\\s+)?opç[õo]|escolha\\s+(um\\s+)?(dos\\s+)?n[úu]meros?|opç[ãa]o\\s+(desejada|inv[áa]lida)|\\bmenu\\b|atendimento\\s+autom[áa]tico|protocolo\\s+de\\s+atendimento|resposta\\s+autom[áa]tica|\\[mensagem\\s+autom[áa]tica\\]|((esse\\s+|o\\s+)?(atendimento|chamado|contato)\\s+(est[áa]\\s+)?(sendo\\s+)?transferid[oa]\\s+para|(vou\\s+te\\s+transferir|transferindo|transferid[oa])\\s+para\\s+(um\\s+|o\\s+|a\\s+|noss[oa]\\s+)?(atendente|consultor[a]?|especialista|setor|departamento|escrit[óo]rio|equipe|humano|suporte|operador[a]?))|n[ãa]o\\s+(consegui\\s+identificar|entendi)\\s+(a\\s+)?(sua\\s+)?resposta|agradece(mos)?\\s+(o\\s+)?seu\\s+contato|agradecemos\\s+a\\s+prefer[êe]ncia|bem[- ]vindo\\(a\\)|hor[áa]rios?\\s+de\\s+atendimento|nosso\\s+(showroom|card[áa]pio|cat[áa]logo|site)|finalizarei\\s+nossa\\s+intera[çc][ãa]o|vou\\s+encerrar\\s+esse\\s+atendimento|atendimento\\s+foi\\s+finalizado|responder\\s+a\\s+nossa\\s+pesquisa'
 )`;
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
@@ -430,6 +432,10 @@ export function registerChatbotRoutes(app, deps) {
       const limit = Number.isNaN(rawLimit) ? 20 : Math.min(Math.max(rawLimit, 1), 200);
       const offset = Number.isNaN(rawOffset) ? 0 : Math.max(rawOffset, 0);
 
+      const userUid = _req.authAccess?.uid || _req.authUser?.uid || null;
+      const userEmail = _req.authAccess?.email || _req.authUser?.email || null;
+      const operatorIdentifiers = [userUid, userEmail].filter(Boolean);
+
       const requestedClientId = normalizeString(_req.query.clientId);
       const clientId = resolveAuthorizedClientId(_req, res, requestedClientId);
       if (!clientId) return;
@@ -480,12 +486,18 @@ export function registerChatbotRoutes(app, deps) {
             cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
           )`;
         } else if (rawTab === "minhas") {
-          // Filtro de mensagens ativas (podendo filtrar por atendente específico se fornecido)
-          tabCondition = `AND (m.is_group IS NOT TRUE) AND (
-            COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
-          ) AND (
-            cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
-          )`;
+          // Filtro estrito da aba Minhas: apenas leads atribuídos ao operador logado (sem a ponte de nulos)
+          if (operatorIdentifiers.length > 0) {
+            queryParams.push(operatorIdentifiers);
+            const opIdx = queryParams.length;
+            tabCondition = `AND (m.is_group IS NOT TRUE) AND l.assigned_to = ANY($${opIdx}) AND (
+              COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
+            ) AND (
+              cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
+            )`;
+          } else {
+            tabCondition = "AND 1=0";
+          }
         } else if (rawTab === "todas" || rawTab === "all") {
           // Aba "Todas": exibe absolutamente tudo (grupos, ativas, automações, arquivadas), exceto lixeira
           tabCondition = "AND COALESCE(cs.state, 'ativa') != 'lixeira'";
@@ -501,11 +513,17 @@ export function registerChatbotRoutes(app, deps) {
 
       let total = 0;
       let items = [];
-      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0 };
+      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, myUnopened: 0 };
       let lastQueryInfo = { step: "init", sql: null, params: null };
 
       try {
         // 1. Apura contadores gerais para as abas
+        const opIdentifiersForCount = operatorIdentifiers.length > 0 ? operatorIdentifiers : ["__NONE__"];
+        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND instance_name = ANY($2)" : "";
+        const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
+        countsParams.push(opIdentifiersForCount);
+        const opParamIdx = countsParams.length;
+
         const countsQueryText = `
           WITH pre_canonical AS (
             SELECT
@@ -515,7 +533,7 @@ export function registerChatbotRoutes(app, deps) {
               message_text,
               is_group
             FROM public.lead_messages
-            WHERE client_id = $1 ${instanceFilter}
+            WHERE client_id = $1 ${countInstanceFilter}
           ),
           latest_messages AS (
             SELECT DISTINCT ON (canonical_phone)
@@ -546,11 +564,19 @@ export function registerChatbotRoutes(app, deps) {
                 AND m.direction = 'inbound'
                 AND (cs.attended_at IS NULL OR cs.attended_at < m.effective_timestamp)
                 AND (cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")})
-            )::integer as awaiting_count
+            )::integer as awaiting_count,
+            COUNT(*) FILTER (
+              WHERE m.is_group IS NOT TRUE
+                AND l.assigned_to = ANY($${opParamIdx})
+                AND (COALESCE(cs.state, 'ativa') = 'ativa')
+                AND l.assigned_at IS NOT NULL
+                AND (ucs.last_opened_at IS NULL OR ucs.last_opened_at < l.assigned_at)
+            )::integer as my_unopened_count
           FROM latest_messages m
+          LEFT JOIN public."${leadsTable}" l ON ${SQL_CANONICAL_PHONE("l.telefone")} = m.phone AND l.client_id = $1
           LEFT JOIN public.whatsapp_chat_states cs ON cs.client_id = $1 AND cs.phone = m.phone
+          LEFT JOIN public.whatsapp_user_chat_states ucs ON ucs.client_id = $1 AND ucs.phone = m.phone AND ucs.user_id = ANY($${opParamIdx})
         `;
-        const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
         lastQueryInfo = { step: "countsQuery (contadores das abas)", sql: countsQueryText, params: countsParams };
         const countsRes = await pgDatabasePool.query(countsQueryText, countsParams);
         const countsRow = countsRes.rows[0];
@@ -561,6 +587,7 @@ export function registerChatbotRoutes(app, deps) {
             automations: countsRow.automations_count || 0,
             groups: countsRow.groups_count || 0,
             archived: countsRow.archived_count || 0,
+            myUnopened: countsRow.my_unopened_count || 0,
           };
         }
 
@@ -1253,6 +1280,22 @@ export function registerChatbotRoutes(app, deps) {
       const phoneVariants = isJidChat
         ? [chatId]
         : Array.from(new Set([chatId, cleanPhone, ...buildPhoneLookupVariants(chatId)].filter(Boolean)));
+
+      const userUid = req.authAccess?.uid || req.authUser?.uid || null;
+
+      // Se houver operador autenticado, registra a abertura da conversa para zerar o contador da aba Minhas
+      if (userUid && cleanPhone) {
+        pgDatabasePool.query(`
+          INSERT INTO public.whatsapp_user_chat_states (client_id, user_id, phone, last_opened_at, created_at, updated_at)
+          VALUES ($1, $2, $3, now(), now(), now())
+          ON CONFLICT (client_id, user_id, phone) DO UPDATE SET
+            last_opened_at = now(),
+            updated_at = now()
+        `, [clientId, userUid, cleanPhone]).catch((err) => {
+          console.warn("[whatsapp/messages] Falha ao registrar last_opened_at:", err?.message || err);
+        });
+      }
+
       const queryParams = [clientId, phoneVariants, limit];
 
       let instanceFilter = "";
@@ -1304,6 +1347,28 @@ export function registerChatbotRoutes(app, deps) {
         }
       }
 
+      let userHiddenFilter = "";
+      let userClearedFilter = "";
+      if (userUid) {
+        queryParams.push(userUid);
+        const userUidIdx = queryParams.length;
+        userHiddenFilter = `AND NOT EXISTS (
+          SELECT 1 FROM public.whatsapp_user_hidden_messages uhm
+          WHERE uhm.client_id = $1 AND uhm.user_id = $${userUidIdx} AND uhm.message_id = lead_messages.id
+        )`;
+
+        if (cleanPhone) {
+          queryParams.push(cleanPhone);
+          const cleanPhoneIdx = queryParams.length;
+          userClearedFilter = `AND NOT EXISTS (
+            SELECT 1 FROM public.whatsapp_user_chat_states ucs
+            WHERE ucs.client_id = $1 AND ucs.user_id = $${userUidIdx} AND ucs.phone = $${cleanPhoneIdx}
+              AND ucs.cleared_at IS NOT NULL
+              AND COALESCE(lead_messages.message_timestamp, lead_messages.delivered_at, lead_messages.created_at) <= ucs.cleared_at
+          )`;
+        }
+      }
+
       const queryText = `
         SELECT
           id,
@@ -1316,9 +1381,14 @@ export function registerChatbotRoutes(app, deps) {
           COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp,
           wa_message_id,
           sender_type,
-          media_path
+          media_path,
+          meta
         FROM public.lead_messages
-        WHERE client_id = $1 AND phone = ANY($2) ${instanceFilter} ${beforeFilter} ${afterFilter}
+        WHERE client_id = $1 AND phone = ANY($2)
+          AND COALESCE(deleted_for_all, false) IS FALSE
+          ${userHiddenFilter}
+          ${userClearedFilter}
+          ${instanceFilter} ${beforeFilter} ${afterFilter}
         ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC NULLS LAST, id DESC
         LIMIT $3
       `;
@@ -1363,20 +1433,18 @@ export function registerChatbotRoutes(app, deps) {
           ? Math.floor(new Date(row.effective_timestamp).getTime() / 1000)
           : (row.created_at ? Math.floor(new Date(row.created_at).getTime() / 1000) : null);
         const text = row.message_text || "";
-        const isMediaPrefix =
-          text.startsWith("[áudio]") ||
-          text.startsWith("[imagem") ||
-          text.startsWith("[vídeo]") ||
-          text.startsWith("[documento]") ||
-          text.startsWith("[sticker]") ||
-          text.startsWith("[arquivo]");
-        const hasMedia = Boolean(row.media_path) || isMediaPrefix;
+        const meta = row.meta || {};
+        const metaMediaType = meta.mediaType || meta.messageType || null;
+
         let deducedType = "chat";
-        if (text.startsWith("[áudio]")) deducedType = "audio";
-        else if (text.startsWith("[imagem")) deducedType = "image";
-        else if (text.startsWith("[vídeo]")) deducedType = "video";
-        else if (text.startsWith("[documento]") || text.startsWith("[arquivo]")) deducedType = "document";
-        else if (text.startsWith("[sticker]")) deducedType = "sticker";
+        if (metaMediaType === "audio" || text.startsWith("[áudio]") || text.startsWith("[audio]")) deducedType = "audio";
+        else if (metaMediaType === "image" || text.startsWith("[imagem") || text.startsWith("[image")) deducedType = "image";
+        else if (metaMediaType === "video" || text.startsWith("[vídeo]") || text.startsWith("[video]")) deducedType = "video";
+        else if (metaMediaType === "document" || text.startsWith("[documento]") || text.startsWith("[document]") || text.startsWith("[arquivo]")) deducedType = "document";
+        else if (metaMediaType === "sticker" || text.startsWith("[sticker]")) deducedType = "sticker";
+
+        const isMediaPrefix = deducedType !== "chat";
+        const hasMedia = Boolean(row.media_path) || isMediaPrefix;
 
         return {
           id: String(row.id),
@@ -1390,6 +1458,7 @@ export function registerChatbotRoutes(app, deps) {
           messageTimestamp: row.message_timestamp,
           waMessageId: row.wa_message_id,
           mediaPath: row.media_path || null,
+          meta,
           phone: row.phone,
           direction: row.direction,
           senderType: row.sender_type || (row.direction === "outbound" ? "agent" : "lead"),
@@ -1593,12 +1662,12 @@ export function registerChatbotRoutes(app, deps) {
       }
 
       const rawText = row.message_text || "";
-      let mediaType = row.meta?.messageType || null;
+      let mediaType = row.meta?.mediaType || row.meta?.messageType || null;
       if (!mediaType) {
-        if (rawText.startsWith("[áudio]")) mediaType = "audio";
-        else if (rawText.startsWith("[imagem")) mediaType = "image";
-        else if (rawText.startsWith("[vídeo]")) mediaType = "video";
-        else if (rawText.startsWith("[documento]") || rawText.startsWith("[arquivo]")) mediaType = "document";
+        if (rawText.startsWith("[áudio]") || rawText.startsWith("[audio]")) mediaType = "audio";
+        else if (rawText.startsWith("[imagem") || rawText.startsWith("[image")) mediaType = "image";
+        else if (rawText.startsWith("[vídeo]") || rawText.startsWith("[video]")) mediaType = "video";
+        else if (rawText.startsWith("[documento]") || rawText.startsWith("[document]") || rawText.startsWith("[arquivo]")) mediaType = "document";
         else if (rawText.startsWith("[sticker]")) mediaType = "sticker";
         else mediaType = "document";
       }
@@ -1816,7 +1885,8 @@ export function registerChatbotRoutes(app, deps) {
         }
       }
 
-      const messageText = caption ? `[${mediaType}] ${caption}` : `[${mediaType}]`;
+      const prefix = mediaType === "audio" ? "[áudio]" : mediaType === "image" ? "[imagem]" : mediaType === "video" ? "[vídeo]" : "[documento]";
+      const messageText = caption ? `${prefix} ${caption}` : prefix;
 
       await appendLeadMessage({
         clientId,
@@ -1832,6 +1902,7 @@ export function registerChatbotRoutes(app, deps) {
         meta: {
           source: "manual-inbox-media",
           mediaType,
+          messageType: mediaType,
           fileName,
           mimetype,
           caption: caption || null,
@@ -1858,6 +1929,199 @@ export function registerChatbotRoutes(app, deps) {
     } catch (err) {
       console.error("[whatsapp-media] Erro ao enviar mídia:", err);
       sendError(res, 500, "WHATSAPP_SEND_MEDIA_FAILED", err instanceof Error ? err.message : "Falha ao enviar mídia");
+    }
+  });
+
+  // DELETE /api/whatsapp/messages/:id — Apagar mensagem (para mim vs para todos)
+  app.delete("/api/whatsapp/messages/:id", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const { id } = req.params;
+    const mode = normalizeString(req.query.mode || req.body?.mode) || "me"; // "me" | "everyone"
+    const requestedClientId = normalizeString(req.query.clientId || req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const userUid = req.authAccess?.uid || req.authUser?.uid;
+    if (!userUid) {
+      return sendError(res, 401, "UNAUTHORIZED", "Usuário não autenticado");
+    }
+
+    if (!id) {
+      return sendError(res, 400, "MISSING_ID", "ID da mensagem ausente");
+    }
+
+    try {
+      // 1. Busca a mensagem no banco para validar existência e dados
+      const msgRes = await pgDatabasePool.query(
+        `SELECT id, client_id, phone, instance_name, direction, wa_message_id, created_at, message_timestamp
+         FROM public.lead_messages
+         WHERE client_id = $1 AND (id::text = $2 OR wa_message_id = $2)
+         LIMIT 1`,
+        [clientId, id]
+      );
+
+      const msg = msgRes.rows[0];
+      if (!msg) {
+        return sendError(res, 404, "MESSAGE_NOT_FOUND", "Mensagem não encontrada");
+      }
+
+      if (mode === "me") {
+        // "Apagar para mim": insere em whatsapp_user_hidden_messages com UUID
+        await pgDatabasePool.query(
+          `INSERT INTO public.whatsapp_user_hidden_messages (client_id, user_id, message_id, hidden_at)
+           VALUES ($1, $2, $3, now())
+           ON CONFLICT (client_id, user_id, message_id) DO NOTHING`,
+          [clientId, userUid, msg.id]
+        );
+        return res.json({ success: true, mode: "me", messageId: msg.id });
+      }
+
+      if (mode === "everyone") {
+        // "Apagar para todos": só pode se a mensagem for outbound (enviada pelo sistema/atendente)
+        if (msg.direction !== "outbound") {
+          return sendError(res, 400, "CANNOT_DELETE_INBOUND", "Apenas mensagens enviadas por você podem ser apagadas para todos");
+        }
+
+        if (!msg.wa_message_id) {
+          // Sem wa_message_id, marca apenas no banco como deleted_for_all
+          await pgDatabasePool.query(
+            `UPDATE public.lead_messages
+             SET deleted_for_all = true, deleted_at = now(), deleted_by = $1
+             WHERE id = $2 AND client_id = $3`,
+            [userUid, msg.id, clientId]
+          );
+          return res.json({ success: true, mode: "everyone", messageId: msg.id });
+        }
+
+        // Obtém a instância da Evolution para envio
+        const evoInstanceName = msg.instance_name || await resolveEvolutionInstanceOwner({ clientId, dbPool: pgDatabasePool });
+        const cleanPhone = sanitizePhone(msg.phone);
+        const remoteJid = cleanPhone.includes("@") ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+
+        try {
+          await deleteMessageViaEvolution({
+            instanceName: evoInstanceName,
+            waMessageId: msg.wa_message_id,
+            remoteJid,
+            fromMe: true,
+          });
+        } catch (evoErr) {
+          console.warn("[whatsapp-messages] Erro ao deletar mensagem na Evolution:", evoErr.message || evoErr);
+          return sendError(
+            res,
+            400,
+            "EVOLUTION_DELETE_REJECTED",
+            "O WhatsApp recusou a exclusão para todos (fora da janela de 48 horas permitida ou mensagem indisponível)."
+          );
+        }
+
+        // Se a Evolution aceitou a exclusão no WhatsApp, marca deleted_for_all no banco
+        await pgDatabasePool.query(
+          `UPDATE public.lead_messages
+           SET deleted_for_all = true, deleted_at = now(), deleted_by = $1
+           WHERE id = $2 AND client_id = $3`,
+          [userUid, msg.id, clientId]
+        );
+
+        return res.json({ success: true, mode: "everyone", messageId: msg.id });
+      }
+
+      return sendError(res, 400, "INVALID_MODE", "Modo de exclusão deve ser 'me' ou 'everyone'");
+    } catch (err) {
+      console.error("[whatsapp-messages] Erro ao apagar mensagem:", err);
+      sendError(res, 500, "DELETE_FAILED", err.message || "Erro ao apagar mensagem");
+    }
+  });
+
+  // POST /api/whatsapp/chats/:phone/clear — Limpar conversa da tela do operador logado
+  app.post("/api/whatsapp/chats/:phone/clear", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const { phone } = req.params;
+    const requestedClientId = normalizeString(req.query.clientId || req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const userUid = req.authAccess?.uid || req.authUser?.uid;
+    if (!userUid) {
+      return sendError(res, 401, "UNAUTHORIZED", "Usuário não autenticado");
+    }
+
+    if (!phone) {
+      return sendError(res, 400, "MISSING_PHONE", "Telefone ausente");
+    }
+
+    const cleanPhone = phone.includes("@") ? phone : sanitizePhone(phone);
+
+    try {
+      // Grava cleared_at no registro do usuário (não afeta os outros usuários e não deleta linhas de lead_messages)
+      await pgDatabasePool.query(
+        `INSERT INTO public.whatsapp_user_chat_states (client_id, user_id, phone, cleared_at, created_at, updated_at)
+         VALUES ($1, $2, $3, now(), now(), now())
+         ON CONFLICT (client_id, user_id, phone) DO UPDATE SET
+           cleared_at = now(),
+           updated_at = now()`,
+        [clientId, userUid, cleanPhone]
+      );
+
+      res.json({ success: true, phone: cleanPhone, clearedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error("[whatsapp-chats] Erro ao limpar conversa:", err);
+      sendError(res, 500, "CLEAR_FAILED", err.message || "Erro ao limpar conversa");
+    }
+  });
+
+  // GET /api/whatsapp/contact-profile-pic — Busca foto de perfil do contato via Evolution
+  app.get("/api/whatsapp/contact-profile-pic", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const phone = normalizeString(req.query.phone);
+    const requestedClientId = normalizeString(req.query.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    if (!phone) {
+      return sendError(res, 400, "MISSING_PHONE", "Telefone ausente");
+    }
+
+    const cleanPhone = sanitizePhone(phone);
+
+    try {
+      // 1. Tenta obter do cache em whatsapp_lid_map se já existir
+      const mapRes = await pgDatabasePool.query(
+        `SELECT profile_picture_url FROM public.whatsapp_lid_map WHERE lid = $1 OR phone = $1 LIMIT 1`,
+        [cleanPhone]
+      ).catch(() => ({ rows: [] }));
+
+      if (mapRes.rows[0]?.profile_picture_url) {
+        return res.json({ success: true, profilePictureUrl: mapRes.rows[0].profile_picture_url });
+      }
+
+      // 2. Busca na Evolution API
+      const evoInstanceName = await resolveEvolutionInstanceOwner({ clientId, dbPool: pgDatabasePool });
+      if (!evoInstanceName) {
+        return res.json({ success: true, profilePictureUrl: null });
+      }
+
+      const picUrl = await fetchProfilePictureUrlViaEvolution({
+        instanceName: evoInstanceName,
+        number: cleanPhone,
+      });
+
+      // 3. Persiste se encontrou e tabela existir
+      if (picUrl) {
+        pgDatabasePool.query(
+          `INSERT INTO public.whatsapp_lid_map (lid, phone, profile_picture_url, updated_at)
+           VALUES ($1, $1, $2, now())
+           ON CONFLICT (lid) DO UPDATE SET
+             profile_picture_url = EXCLUDED.profile_picture_url,
+             updated_at = now()`,
+          [cleanPhone, picUrl]
+        ).catch(() => {});
+      }
+
+      res.json({ success: true, profilePictureUrl: picUrl || null });
+    } catch (err) {
+      console.warn("[whatsapp] Falha ao buscar foto de perfil:", err?.message || err);
+      res.json({ success: true, profilePictureUrl: null });
     }
   });
 

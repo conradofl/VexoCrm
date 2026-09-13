@@ -27,10 +27,12 @@ function AudioPlayer({
   src,
   transcription,
   fromMe,
+  fileName,
 }: {
   src: string;
   transcription: string | null;
   fromMe: boolean;
+  fileName?: string | null;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -145,20 +147,35 @@ function AudioPlayer({
           </div>
         </div>
 
-        {/* Speed Toggle */}
-        <button
-          type="button"
-          onClick={cyclePlaybackRate}
-          className={cn(
-            "rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors",
-            fromMe
-              ? "bg-emerald-700/60 text-emerald-100 hover:bg-emerald-700"
-              : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
-          )}
-          title="Velocidade de reprodução"
-        >
-          {playbackRate}x
-        </button>
+        {/* Speed Toggle & Download */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={cyclePlaybackRate}
+            className={cn(
+              "rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wider transition-colors",
+              fromMe
+                ? "bg-emerald-700/60 text-emerald-100 hover:bg-emerald-700"
+                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+            )}
+            title="Velocidade de reprodução"
+          >
+            {playbackRate}x
+          </button>
+          <a
+            href={src}
+            download={fileName || "audio.ogg"}
+            className={cn(
+              "rounded-md p-1 transition-colors",
+              fromMe
+                ? "text-emerald-100/80 hover:text-white hover:bg-emerald-700/60"
+                : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+            )}
+            title="Baixar áudio"
+          >
+            <Download className="h-3 w-3" />
+          </a>
+        </div>
       </div>
 
       {/* Transcription */}
@@ -360,22 +377,6 @@ export function MediaMessage({
     );
   }
 
-  if (error || !media) {
-    return (
-      <div className={cn("space-y-1.5 py-1", className)}>
-        <div className="flex items-center gap-1.5 text-xs opacity-80">
-          <FileText className="h-3.5 w-3.5" />
-          <span>[mídia indisponível]</span>
-        </div>
-        {fallbackBody && (
-          <p className="text-xs italic opacity-90 select-text">
-            {fallbackBody}
-          </p>
-        )}
-      </div>
-    );
-  }
-
   const src = media.dataUrl ?? media.url ?? "";
 
   // Áudio
@@ -384,8 +385,9 @@ export function MediaMessage({
       <div className={className}>
         <AudioPlayer
           src={src}
-          transcription={media.transcription || (fallbackBody !== "[áudio]" ? fallbackBody : null)}
+          transcription={media.transcription || (fallbackBody !== "[áudio]" && fallbackBody !== "[audio]" ? fallbackBody : null)}
           fromMe={fromMe}
+          fileName={media.fileName}
         />
       </div>
     );
@@ -401,7 +403,11 @@ export function MediaMessage({
           description={media.description || (fallbackBody.startsWith("[imagem:") ? fallbackBody : null)}
           fromMe={fromMe}
         />
-        {fallbackBody && !fallbackBody.startsWith("[imagem") && (
+        {fallbackBody &&
+          !fallbackBody.startsWith("[imagem") &&
+          !fallbackBody.startsWith("[image") &&
+          fallbackBody !== "[áudio]" &&
+          fallbackBody !== "[audio]" && (
           <p className="mt-1.5 text-xs opacity-90 select-text">{fallbackBody}</p>
         )}
       </div>
@@ -418,7 +424,21 @@ export function MediaMessage({
           className="max-h-64 max-w-full rounded-lg bg-black/90 shadow-xs"
           preload="metadata"
         />
-        {fallbackBody && fallbackBody !== "[vídeo]" && (
+        <div className="flex items-center justify-between pt-0.5">
+          <a
+            href={src}
+            download={media.fileName || "video.mp4"}
+            className={cn(
+              "inline-flex items-center gap-1 text-[11px] font-medium transition-opacity opacity-80 hover:opacity-100",
+              fromMe ? "text-emerald-100" : "text-muted-foreground"
+            )}
+            title="Baixar vídeo original"
+          >
+            <Download className="h-3 w-3" />
+            <span>Baixar vídeo</span>
+          </a>
+        </div>
+        {fallbackBody && fallbackBody !== "[vídeo]" && fallbackBody !== "[video]" && (
           <p className="text-xs opacity-90 select-text">{fallbackBody}</p>
         )}
       </div>

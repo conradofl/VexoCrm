@@ -44,6 +44,7 @@ import {
   UserPlus,
   CheckCheck,
   Paperclip,
+  Trash2,
 } from "lucide-react";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
@@ -93,6 +94,9 @@ import {
   useUnmuteChat,
   useCreateLeadFromChat,
   useBulkCreateLeadsFromChats,
+  useDeleteWhatsAppMessage,
+  useClearSingleChat,
+  useWhatsAppProfilePic,
   type WhatsAppChat,
   type WhatsAppMessage,
 } from "@/hooks/useWhatsAppInbox";
@@ -199,6 +203,53 @@ function getPreview(chat: WhatsAppChat) {
   const body = chat.lastMessage?.body?.trim();
   if (!body) return "Sem mensagens recentes.";
   return body.length > 60 ? `${body.slice(0, 60)}...` : body;
+}
+
+const FUNNEL_STAGES = [
+  { label: "Novo", value: "novo" },
+  { label: "Atendimento", value: "em_atendimento" },
+  { label: "Qualificado", value: "qualificado" },
+  { label: "Fechado", value: "fechado" },
+] as const;
+
+function parseDossierSummary(summary: string | null, lead: LeadRow | null) {
+  let objetivo = lead?.objetivo || lead?.interesse || null;
+  let contexto = [lead?.cidade, lead?.estado].filter(Boolean).join(" - ") || lead?.tipo_cliente || null;
+  let objecao = (lead?.dados as any)?.objecao || (lead?.dados as any)?.duvida || null;
+  let orcamento = [lead?.credito, lead?.parcela, lead?.lance_entrada_fgts].filter(Boolean).join(" · ") || null;
+
+  let isPersonal = false;
+  let personalText = "";
+
+  if (summary) {
+    if (summary.startsWith("🚫")) {
+      isPersonal = true;
+      personalText = summary.replace(/^🚫\uFE0F?\s*/u, "").trim();
+    } else {
+      const lines = summary.split("\n");
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        const lower = line.toLowerCase();
+        if (!objetivo && (lower.includes("objetivo:") || lower.includes("interesse:"))) {
+          objetivo = line.replace(/.*?(objetivo|interesse):\s*/i, "").trim();
+        } else if (!contexto && (lower.includes("contexto:") || lower.includes("cidade:") || lower.includes("local:"))) {
+          contexto = line.replace(/.*?(contexto|cidade|local):\s*/i, "").trim();
+        } else if (!objecao && (lower.includes("objeção:") || lower.includes("objecao:"))) {
+          objecao = line.replace(/.*?obje[çc][ãa]o:\s*/i, "").trim();
+        } else if (!orcamento && (lower.includes("orçamento:") || lower.includes("orcamento:") || lower.includes("crédito:") || lower.includes("credito:") || lower.includes("valor:"))) {
+          orcamento = line.replace(/.*?(or[çc]amento|cr[ée]dito|valor):\s*/i, "").trim();
+        }
+      }
+    }
+  }
+
+  const missing: string[] = [];
+  if (!objetivo) missing.push("Objetivo");
+  if (!contexto) missing.push("Contexto");
+  if (!objecao) missing.push("Objeção");
+  if (!orcamento) missing.push("Orçamento");
+
+  return { objetivo, contexto, objecao, orcamento, missing, isPersonal, personalText };
 }
 
 function ChatAvatar({
@@ -531,6 +582,10 @@ export default function WhatsAppInbox({
     );
   }, [adminUsersQuery.data, clientId]);
   const [reabrirPending, setReabrirPending] = useState(false);
+  const deleteMessageMutation = useDeleteWhatsAppMessage(clientId);
+  const clearChatMutation = useClearSingleChat(clientId);
+  const [messageToDeleteForEveryone, setMessageToDeleteForEveryone] = useState<string | null>(null);
+  const [chatToClear, setChatToClear] = useState<string | null>(null);
 
   const selectedChat = useMemo<WhatsAppChat | null>(() => {
     if (!selectedChatId) return null;
@@ -1009,6 +1064,94 @@ export default function WhatsAppInbox({
     ? `+${rawPhone.slice(0, 2)} (${rawPhone.slice(2, 4)}) ${rawPhone.slice(4, 9)}-${rawPhone.slice(9)}`
     : "Número indisponível";
 
+  const { data: contactProfilePic } = useWhatsAppProfilePic(rawPhone || selectedChatId, clientId);
+
+  const dossierSummary = useMemo(() => {
+    return parseDossierSummary(currentChatSummary, matchedLead);
+  }, [currentChatSummary, matchedLead]);
+
+  const currentStageIndex = useMemo(() => {
+    if (!matchedLead) return 0;
+    const s = (matchedLead.status || "").toLowerCase();
+    if (s === "fechado" || s === "ganho") return 3;
+    if (s === "qualificado" || matchedLead.qualificacao === "QUENTE") return 2;
+    if (s === "em_atendimento" || s === "atendimento" || !matchedLead.finalizado) return 1;
+    return 0; // "novo"
+  }, [matchedLead]);
+
+  const handleUpdateFunnelStage = async (newStageValue: string) => {
+    if (!matchedLead?.id) {
+      toast.error("Cadastre o lead no CRM antes de alterar o estágio do funil.");
+      return;
+    }
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/leads/${matchedLead.id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: newStageValue }),
+      });
+      if (!res.ok) {
+        const err = await readApiErrorMessage(res, "Falha ao atualizar estágio.");
+        throw new Error(err);
+      }
+      toast.success("Estágio do funil atualizado!");
+      refetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao atualizar estágio", { description: err.message });
+    }
+  };
+
+  const relationshipContextLine = useMemo(() => {
+    const conversaNum = (matchedLead?.dados as any)?.numero_conversa || (matchedLead as any)?.total_conversas || 1;
+    const conversaStr = `${conversaNum}ª conversa`;
+
+    let marcoStr = "";
+    const propostaEm = (matchedLead?.dados as any)?.proposta_enviada_em || (matchedLead as any)?.proposta_data;
+    if (propostaEm) {
+      const d = new Date(propostaEm);
+      if (!isNaN(d.getTime())) {
+        marcoStr = `proposta enviada em ${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
+      }
+    } else if (matchedLead?.created_at) {
+      const d = new Date(matchedLead.created_at);
+      if (!isNaN(d.getTime())) {
+        marcoStr = `lead desde ${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
+      }
+    }
+
+    return marcoStr ? `${conversaStr} · ${marcoStr}` : conversaStr;
+  }, [matchedLead]);
+
+  const handleDeleteMessage = async (messageId: string, mode: "me" | "everyone") => {
+    try {
+      await deleteMessageMutation.mutateAsync({ messageId, mode });
+      if (mode === "everyone") {
+        toast.success("Mensagem apagada para todos.");
+      } else {
+        toast.success("Mensagem apagada da sua tela.");
+      }
+    } catch (err: any) {
+      toast.error(mode === "everyone" ? "Não foi possível apagar para todos" : "Erro ao apagar mensagem", {
+        description: err.message,
+      });
+    }
+  };
+
+  const handleConfirmClearChat = async () => {
+    if (!chatToClear) return;
+    try {
+      await clearChatMutation.mutateAsync({ phone: chatToClear });
+      toast.success("Conversa limpa com sucesso da sua tela.");
+      setChatToClear(null);
+    } catch (err: any) {
+      toast.error("Erro ao limpar conversa", { description: err.message });
+    }
+  };
+
   return (
     <PageShell title={title} subtitle={subtitle} headerRight={headerRight} compactHero spacing="space-y-4">
       {tenantsLoading ? (
@@ -1090,14 +1233,27 @@ export default function WhatsAppInbox({
                     type="button"
                     onClick={() => setInboxTab("minhas")}
                     className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center",
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
                       inboxTab === "minhas"
                         ? "bg-primary text-primary-foreground shadow-xs"
                         : "text-muted-foreground hover:text-foreground"
                     )}
-                    title="Conversas com mensagens enviadas"
+                    title="Conversas atribuídas a você"
                   >
-                    Minhas
+                    <span>Minhas</span>
+                    {Boolean(chatsQuery.counts?.myUnopened && chatsQuery.counts.myUnopened > 0) && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "minhas"
+                            ? "bg-white text-primary"
+                            : "bg-primary/20 text-primary dark:text-primary-foreground"
+                        )}
+                        title={`${chatsQuery.counts?.myUnopened} novos leads atribuídos não abertos`}
+                      >
+                        {chatsQuery.counts?.myUnopened}
+                      </span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -1583,8 +1739,8 @@ export default function WhatsAppInbox({
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {selectedChat && (
                       <ChatAvatar
-                        label={selectedChat.name || String(selectedChat.id)}
-                        picture={selectedChat.profilePic}
+                        label={matchedLead?.nome || selectedChat.name || displayPhone}
+                        picture={contactProfilePic || selectedChat.profilePic}
                         size="sm"
                       />
                     )}
@@ -1768,7 +1924,7 @@ export default function WhatsAppInbox({
                         className={cn(
                           "h-8 gap-1.5 text-xs rounded-xl border-border/80 transition-colors",
                           showDossier
-                            ? "bg-muted/80 text-foreground font-semibold"
+                            ? "bg-muted/80 text-foreground font-semibold border-primary/40 shadow-xs"
                             : "text-muted-foreground hover:text-foreground"
                         )}
                         onClick={() => setShowDossier((v) => !v)}
@@ -1847,6 +2003,29 @@ export default function WhatsAppInbox({
                           >
                             <RotateCcw className={cn("h-3.5 w-3.5", reabrirPending && "animate-spin")} />
                             <span>Reabrir Atendimento IA</span>
+                          </DropdownMenuItem>
+
+                          {/* Ver no Banco de Dados (movido do painel lateral) */}
+                          <DropdownMenuItem
+                            onClick={() => {
+                              const p = new URLSearchParams();
+                              if (matchedLead?.id) p.set("leadId", matchedLead.id);
+                              if (rawPhone) p.set("phone", rawPhone);
+                              navigate(`/crm/banco-de-dados?${p.toString()}`);
+                            }}
+                            className="gap-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                          >
+                            <Inbox className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Ver no Banco de Dados</span>
+                          </DropdownMenuItem>
+
+                          {/* Limpar histórico da conversa da tela do consultor */}
+                          <DropdownMenuItem
+                            onClick={() => setChatToClear(rawPhone || String(selectedChat.id).replace(/\D/g, ""))}
+                            className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            <span>Limpar conversa</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1939,7 +2118,7 @@ export default function WhatsAppInbox({
                           ) : (
                             <div
                               className={cn(
-                                "relative rounded-lg shadow-xs transition-colors",
+                                "group relative rounded-lg shadow-xs transition-colors",
                                 "max-w-[min(80%,900px)]",
                                 item.fromMe
                                   ? "ml-auto rounded-tr-none bg-emerald-600 text-white"
@@ -1950,6 +2129,50 @@ export default function WhatsAppInbox({
                                 padding: "6px 9px 8px",
                               }}
                             >
+                              {/* Menu de Opções da Mensagem */}
+                              {item.id && (
+                                <div
+                                  className={cn(
+                                    "absolute top-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity",
+                                    item.fromMe ? "right-1" : "right-1"
+                                  )}
+                                >
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className={cn(
+                                          "h-5 w-5 rounded-md flex items-center justify-center transition-colors cursor-pointer",
+                                          item.fromMe
+                                            ? "bg-emerald-700/80 hover:bg-emerald-700 text-white shadow-xs"
+                                            : "bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground shadow-xs"
+                                        )}
+                                        title="Opções da mensagem"
+                                      >
+                                        <ChevronDown className="h-3 w-3" />
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-44 text-xs">
+                                      <DropdownMenuItem
+                                        onClick={() => handleDeleteMessage(item.id, "me")}
+                                        className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                        <span>Apagar para mim</span>
+                                      </DropdownMenuItem>
+                                      {item.fromMe && (
+                                        <DropdownMenuItem
+                                          onClick={() => setMessageToDeleteForEveryone(item.id)}
+                                          className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                          <span>Apagar para todos</span>
+                                        </DropdownMenuItem>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                              )}
                               <MediaMessage
                                 messageId={"waMessageId" in item && item.waMessageId ? item.waMessageId : item.id}
                                 hasMedia={item.hasMedia}
@@ -2152,7 +2375,7 @@ export default function WhatsAppInbox({
                 <button
                   type="button"
                   onClick={() => setShowDossier(false)}
-                  className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted/60"
+                  className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted/60 cursor-pointer"
                   title="Recolher painel do lead"
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -2163,7 +2386,7 @@ export default function WhatsAppInbox({
               <div className="flex flex-col items-center text-center p-3 rounded-2xl bg-muted/20 border border-border/60">
                 <ChatAvatar
                   label={matchedLead?.nome || selectedChat?.name || displayPhone}
-                  picture={selectedChat?.profilePic}
+                  picture={contactProfilePic || selectedChat?.profilePic}
                   size="lg"
                 />
                 <h3 className="mt-2 text-sm font-extrabold text-foreground truncate w-full">
@@ -2176,7 +2399,7 @@ export default function WhatsAppInbox({
                     <button
                       type="button"
                       onClick={() => handleCopyPhone(rawPhone)}
-                      className="p-1 hover:text-foreground text-muted-foreground transition-colors"
+                      className="p-1 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                       title="Copiar número"
                     >
                       {copiedPhone ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
@@ -2184,7 +2407,12 @@ export default function WhatsAppInbox({
                   )}
                 </div>
 
-                {/* Origem */}
+                {/* Linha de Relacionamento (Contexto Direto) */}
+                <p className="mt-1 text-[11px] text-muted-foreground/80 font-medium">
+                  {relationshipContextLine}
+                </p>
+
+                {/* Origem e Qualificação */}
                 <div className="mt-2.5 flex flex-wrap items-center justify-center gap-1.5">
                   <OriginBadge
                     origin={(selectedChat as any)?.leadOrigin ?? (matchedLead ? "inbound" : null)}
@@ -2304,41 +2532,12 @@ export default function WhatsAppInbox({
                 )}
               </div>
 
-              {/* Estágio do Funil Comercial */}
-              <div className="space-y-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <Target className="h-3.5 w-3.5 text-indigo-500" />
-                  Estágio no Funil
-                </span>
-                <div className="grid grid-cols-2 gap-1.5 text-xs">
-                  {[
-                    { step: "1. Novo", active: !matchedLead || matchedLead.status === "novo" },
-                    { step: "2. Atendimento", active: matchedLead?.status === "em_atendimento" || !matchedLead?.finalizado },
-                    { step: "3. Qualificado", active: matchedLead?.qualificacao === "QUENTE" || matchedLead?.status === "qualificado" },
-                    { step: "4. Fechado", active: matchedLead?.status === "fechado" || matchedLead?.status === "ganho" },
-                  ].map((s) => (
-                    <div
-                      key={s.step}
-                      className={cn(
-                        "flex items-center justify-between rounded-xl border p-2 text-[11px] font-semibold transition-colors",
-                        s.active
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 shadow-xs"
-                          : "border-border/60 bg-muted/20 text-muted-foreground opacity-60"
-                      )}
-                    >
-                      <span>{s.step}</span>
-                      {s.active && <Check className="h-3 w-3 text-emerald-500" />}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Resumo Coletado pela IA */}
-              <div className="space-y-2">
+              {/* 1. Resumo Coletado pela IA — NO TOPO LOGO APÓS A IDENTIFICAÇÃO */}
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                     <Sparkles className="h-3.5 w-3.5 text-purple-500" />
-                    Resumo Coletado pela IA
+                    Resumo da IA
                   </span>
                   <button
                     type="button"
@@ -2354,65 +2553,53 @@ export default function WhatsAppInbox({
                     ) : (
                       <>
                         <RefreshCw className="h-3 w-3" />
-                        Atualizar com IA
+                        Atualizar
                       </>
                     )}
                   </button>
                 </div>
-                <div className="rounded-2xl border border-border/70 bg-muted/20 p-3 space-y-2 text-xs">
-                  {currentChatSummary ? (
-                    currentChatSummary.startsWith("🚫") ? (
-                      <div className="space-y-1.5 text-[11px] text-muted-foreground bg-muted/40 p-2.5 rounded-xl border border-border/60">
-                        <div className="font-semibold flex items-center gap-1.5 text-foreground/80">
-                          <span>🚫</span>
-                          <span>Conversa pessoal — sem oportunidade comercial</span>
-                        </div>
-                        <p className="italic text-muted-foreground/90 whitespace-pre-line leading-relaxed">
-                          {currentChatSummary.replace(/^🚫\uFE0F?\s*/u, "") || "Nenhuma intenção comercial detectada."}
-                        </p>
+
+                <div className="rounded-2xl border border-purple-500/25 bg-purple-50/50 dark:bg-purple-950/25 p-3 space-y-2 text-xs shadow-xs">
+                  {dossierSummary.isPersonal ? (
+                    <div className="space-y-1 text-[11px] text-muted-foreground">
+                      <div className="font-semibold flex items-center gap-1.5 text-foreground/80">
+                        <span>🚫</span>
+                        <span>Conversa pessoal</span>
                       </div>
-                    ) : (
-                      <div className="space-y-1.5 whitespace-pre-line text-foreground leading-relaxed text-[11px]">
-                        {currentChatSummary}
+                      <p className="italic text-muted-foreground/90 whitespace-pre-line leading-relaxed">
+                        {dossierSummary.personalText || "Nenhuma intenção comercial detectada."}
+                      </p>
+                    </div>
+                  ) : currentChatSummary || matchedLead ? (
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0">Objetivo:</span>
+                        <span className="text-foreground text-right">{dossierSummary.objetivo || "—"}</span>
                       </div>
-                    )
-                  ) : matchedLead && (matchedLead.interesse || matchedLead.objetivo || matchedLead.cidade || matchedLead.credito) ? (
-                    <div className="space-y-1.5">
-                      {matchedLead.interesse && (
-                        <div className="flex items-start justify-between gap-2 text-[11px]">
-                          <span className="text-muted-foreground">Interesse:</span>
-                          <span className="font-semibold text-foreground text-right">{matchedLead.interesse}</span>
-                        </div>
-                      )}
-                      {matchedLead.objetivo && (
-                        <div className="flex items-start justify-between gap-2 text-[11px]">
-                          <span className="text-muted-foreground">Objetivo:</span>
-                          <span className="font-semibold text-foreground text-right">{matchedLead.objetivo}</span>
-                        </div>
-                      )}
-                      {(matchedLead.cidade || matchedLead.estado) && (
-                        <div className="flex items-start justify-between gap-2 text-[11px]">
-                          <span className="text-muted-foreground">Localização:</span>
-                          <span className="font-semibold text-foreground text-right">
-                            {[matchedLead.cidade, matchedLead.estado].filter(Boolean).join(" - ")}
-                          </span>
-                        </div>
-                      )}
-                      {(matchedLead.credito || matchedLead.parcela || matchedLead.lance_entrada_fgts) && (
-                        <div className="flex items-start justify-between gap-2 text-[11px]">
-                          <span className="text-muted-foreground">Orçamento / Entrada:</span>
-                          <span className="font-semibold text-foreground text-right">
-                            {[matchedLead.credito, matchedLead.parcela, matchedLead.lance_entrada_fgts]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </span>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0">Contexto:</span>
+                        <span className="text-foreground text-right">{dossierSummary.contexto || "—"}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0">Objeção:</span>
+                        <span className="text-foreground text-right">{dossierSummary.objecao || "—"}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0">Orçamento:</span>
+                        <span className="text-foreground text-right">{dossierSummary.orcamento || "—"}</span>
+                      </div>
+
+                      {/* Rodapé com pendências de descoberta */}
+                      {dossierSummary.missing.length > 0 && (
+                        <div className="pt-1.5 mt-1.5 border-t border-purple-500/15 text-[10px] text-muted-foreground/80 italic">
+                          Falta descobrir: {dossierSummary.missing.join(", ")}
                         </div>
                       )}
                     </div>
                   ) : (
                     <div className="text-center py-2 space-y-2">
                       <p className="text-muted-foreground text-[11px]">
-                        Nenhum resumo gerado para esta conversa ainda.
+                        Nenhum resumo gerado ainda.
                       </p>
                       <Button
                         size="sm"
@@ -2429,62 +2616,93 @@ export default function WhatsAppInbox({
                 </div>
               </div>
 
-              {/* Ações Rápidas do Consultor */}
+              {/* 2. Trilha Horizontal do Funil Comercial (Estágios reais: Novo, Atendimento, Qualificado, Fechado) */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <Target className="h-3.5 w-3.5 text-indigo-500" />
+                  Estágio no Funil
+                </span>
+                <div className="grid grid-cols-4 gap-1">
+                  {FUNNEL_STAGES.map((s, idx) => {
+                    const isPast = idx < currentStageIndex;
+                    const isCurrent = idx === currentStageIndex;
+                    const isFuture = idx > currentStageIndex;
+
+                    return (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => handleUpdateFunnelStage(s.value)}
+                        disabled={!matchedLead}
+                        title={
+                          !matchedLead
+                            ? "Cadastre o lead para alterar o estágio"
+                            : `Mudar estágio para ${s.label}`
+                        }
+                        className={cn(
+                          "relative flex flex-col items-center justify-center py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer border text-[11px]",
+                          isPast && "bg-emerald-600 border-emerald-600 text-white font-semibold shadow-xs",
+                          isCurrent && "border-2 border-emerald-500 bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 font-bold shadow-xs",
+                          isFuture && "border-border/60 bg-muted/30 text-muted-foreground/70 hover:border-border hover:text-foreground font-medium",
+                          !matchedLead && "opacity-50 cursor-not-allowed"
+                        )}
+                      >
+                        <div className="flex items-center gap-0.5 justify-center">
+                          {isPast && <Check className="h-3 w-3 shrink-0 stroke-[3]" />}
+                          <span className="truncate">{s.label}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Ações Rápidas do Consultor (Hierarquia Clara) */}
               <div className="space-y-2 pt-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                   <Zap className="h-3.5 w-3.5 text-amber-500" />
                   Ações Rápidas
                 </span>
                 <div className="flex flex-col gap-2">
+                  {/* Botão Primário Destacado: Gerar Proposta Comercial */}
                   <Button
-                    variant="outline"
+                    variant="default"
                     size="sm"
                     onClick={() => {
-                      const rawPhone = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
+                      const rawP = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
                       const prospectName = matchedLead?.nome || selectedChat?.name || "";
                       const params = new URLSearchParams();
-                      if (rawPhone) params.set("phone", rawPhone);
+                      if (rawP) params.set("phone", rawP);
                       if (prospectName) params.set("nome", prospectName);
                       navigate(`/crm/propostas-gd?${params.toString()}`);
                     }}
-                    className="w-full justify-start h-8 text-xs font-semibold rounded-xl border-indigo-500/30 bg-indigo-500/5 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/15"
+                    className="w-full justify-center h-9 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs cursor-pointer"
                   >
-                    <FileText className="mr-2 h-3.5 w-3.5 text-indigo-500" />
+                    <FileText className="mr-2 h-4 w-4" />
                     Gerar Proposta Comercial
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsReminderModalOpen(true)}
-                    className="w-full justify-start h-8 text-xs font-semibold rounded-xl border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15"
-                  >
-                    <Clock3 className="mr-2 h-3.5 w-3.5 text-emerald-500" />
-                    Lembrar deste lead
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsApplyFollowupModalOpen(true)}
-                    className="w-full justify-start h-8 text-xs font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15"
-                  >
-                    <RefreshCw className="mr-2 h-3.5 w-3.5 text-amber-500" />
-                    Adicionar a uma cadência
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const rawPhone = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
-                      const params = new URLSearchParams();
-                      if (matchedLead?.id) params.set("leadId", matchedLead.id);
-                      if (rawPhone) params.set("phone", rawPhone);
-                      navigate(`/crm/banco-de-dados?${params.toString()}`);
-                    }}
-                    className="w-full justify-start h-8 text-xs font-semibold rounded-xl border-border/80 bg-background hover:bg-muted"
-                  >
-                    <Inbox className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                    Ver no Banco de Dados
-                  </Button>
+
+                  {/* Ações Secundárias Lado a Lado: Lembrar & Cadência */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsReminderModalOpen(true)}
+                      className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15 cursor-pointer"
+                    >
+                      <Clock3 className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
+                      Lembrar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsApplyFollowupModalOpen(true)}
+                      className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 cursor-pointer"
+                    >
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                      Cadência
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2571,6 +2789,89 @@ export default function WhatsAppInbox({
               className="h-8 text-xs rounded-xl bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
             >
               {bulkCreateLeadsMutation.isPending ? "Cadastrando..." : `Sim, Cadastrar (${selectedChatIds.size})`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal de Confirmação para Apagar Mensagem para Todos */}
+      <AlertDialog
+        open={Boolean(messageToDeleteForEveryone)}
+        onOpenChange={(open) => !open && setMessageToDeleteForEveryone(null)}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-base">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Apagar mensagem para todos?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Esta mensagem será apagada para todos os participantes da conversa no WhatsApp e removida do histórico do Vexo OS.
+              <br />
+              <span className="text-foreground font-medium mt-1.5 block">
+                Esta ação não pode ser desfeita. A Evolution API só permite apagar mensagens enviadas recentemente (janela padrão de 48h).
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel
+              disabled={deleteMessageMutation.isPending}
+              className="h-8 text-xs rounded-xl"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMessageMutation.isPending}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!messageToDeleteForEveryone) return;
+                const id = messageToDeleteForEveryone;
+                setMessageToDeleteForEveryone(null);
+                await handleDeleteMessage(id, "everyone");
+              }}
+              className="h-8 text-xs rounded-xl bg-destructive hover:bg-destructive/90 text-destructive-foreground cursor-pointer"
+            >
+              {deleteMessageMutation.isPending ? "Apagando..." : "Apagar para todos"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal de Confirmação para Limpar Conversa */}
+      <AlertDialog
+        open={Boolean(chatToClear)}
+        onOpenChange={(open) => !open && setChatToClear(null)}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-base">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Limpar histórico da conversa?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              As mensagens anteriores serão ocultadas apenas da sua tela de atendimento no Vexo OS.
+              <br />
+              <span className="text-foreground font-medium mt-1.5 block">
+                O histórico continua intacto no banco de dados e no celular do cliente. Novas mensagens continuarão chegando normalmente.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel
+              disabled={clearChatMutation.isPending}
+              className="h-8 text-xs rounded-xl"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearChatMutation.isPending}
+              onClick={async (e) => {
+                e.preventDefault();
+                await handleConfirmClearChat();
+              }}
+              className="h-8 text-xs rounded-xl bg-destructive hover:bg-destructive/90 text-destructive-foreground cursor-pointer"
+            >
+              {clearChatMutation.isPending ? "Limpando..." : "Sim, Limpar Conversa"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

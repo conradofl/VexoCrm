@@ -164,6 +164,9 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
   if (insertPayload.stage && !insertPayload.stage_source) {
     insertPayload.stage_source = "auto";
   }
+  if (insertPayload.assigned_to && !insertPayload.assigned_at) {
+    insertPayload.assigned_at = new Date().toISOString();
+  }
 
   const cols = Object.keys(insertPayload).filter((k) => insertPayload[k] !== undefined);
   const insertCols = cols.map((c) => `"${c}"`).join(", ");

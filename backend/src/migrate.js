@@ -235,6 +235,27 @@ async function isAlreadyApplied(pool, filename) {
           AND column_name = 'esconder_valores'
       )
     ) AS ok`,
+    "20260913100000_create_whatsapp_user_states_and_assigned_at.sql": `SELECT (
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'leads' AND column_name = 'assigned_at'
+      )
+      AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'lead_messages' AND column_name = 'deleted_for_all'
+      )
+      AND EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_user_chat_states'
+      )
+      AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'whatsapp_user_hidden_messages'
+          AND column_name = 'message_id'
+          AND data_type = 'uuid'
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

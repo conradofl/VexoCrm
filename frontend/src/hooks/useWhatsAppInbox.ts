@@ -44,6 +44,7 @@ export interface WhatsAppCounts {
   automations: number;
   groups: number;
   archived: number;
+  myUnopened?: number;
 }
 
 export interface WhatsAppMessage {
@@ -723,5 +724,98 @@ export function useClearWhatsAppChats(clientId: string | null) {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-chats", clientId] });
       queryClient.invalidateQueries({ queryKey: ["whatsapp-messages", clientId] });
     },
+  });
+}
+
+/**
+ * Apaga mensagem (para mim ou para todos via Evolution)
+ */
+export function useDeleteWhatsAppMessage(clientId: string | null) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      messageId,
+      mode = "me",
+    }: {
+      messageId: string;
+      mode?: "me" | "everyone";
+    }) => {
+      if (!clientId) throw new Error("Client ID é obrigatório");
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado");
+
+      const params = new URLSearchParams({ clientId, mode });
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/messages/${encodeURIComponent(messageId)}?${params.toString()}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      return parseApiResponse<{ success: boolean; mode: string; messageId: string }>(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-messages"] });
+    },
+  });
+}
+
+/**
+ * Limpa o histórico de uma conversa da tela do operador logado
+ */
+export function useClearSingleChat(clientId: string | null) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ phone }: { phone: string }) => {
+      if (!clientId) throw new Error("Client ID é obrigatório");
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado");
+
+      const params = new URLSearchParams({ clientId });
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/chats/${encodeURIComponent(phone)}/clear?${params.toString()}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      return parseApiResponse<{ success: boolean; phone: string; clearedAt: string }>(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
+  });
+}
+
+/**
+ * Busca foto de perfil do contato via Evolution API
+ */
+export function useWhatsAppProfilePic(phone: string | null | undefined, clientId: string | null) {
+  const { getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["whatsapp-profile-pic", clientId, phone],
+    queryFn: async () => {
+      if (!phone || !clientId) return null;
+      const token = await getIdToken();
+      if (!token) return null;
+
+      const params = new URLSearchParams({ clientId, phone });
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/contact-profile-pic?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.profilePictureUrl || null;
+    },
+    enabled: Boolean(phone && clientId),
+    staleTime: 1000 * 60 * 60 * 24, // Cache de 24 horas
   });
 }
