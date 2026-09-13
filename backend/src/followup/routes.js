@@ -18,6 +18,10 @@ import { triggerAutomationRun } from "./automationEngine.js";
 import { defaultGroqModel } from "../services/llmModels.js";
 import { adjustDateToSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
+import { isFromMe, isGroupJid } from "../services/inboundGuard.js";
+import { sanitizePhone } from "../services/leadImport.js";
+import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
+import { cancelFollowupCadenceOnReply } from "../services/followupExitGuard.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -109,20 +113,49 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
         .maybeSingle();
 
       const body = req.body || {};
-      const phone =
-        str(body.data?.key?.remoteJid?.split("@")[0]) ||
+      const rawJid = body.data?.key?.remoteJid || body.key?.remoteJid || body.remoteJid || "";
+
+      // Guarda de fromMe: eventos de mensagens enviadas por nós mesmos NUNCA devem ser interpretados
+      // como resposta de lead nem cancelar jobs futuros.
+      if (isFromMe(body)) {
+        console.log(`[followup/webhook-reply][company:${companyId}] Mensagem de saída ignorada (fromMe: true)`);
+        return res.status(200).json({ ok: true, ignored: "fromMe" });
+      }
+
+      // Guarda de grupo / broadcast: resposta legítima de lead nunca vem de grupo
+      if (isGroupJid(rawJid)) {
+        console.log(`[followup/webhook-reply][company:${companyId}] Mensagem de grupo/broadcast ignorada`);
+        return res.status(200).json({ ok: true, ignored: "group_or_broadcast" });
+      }
+
+      const rawPhone =
+        str(rawJid.split("@")[0]) ||
         str(body.phone) ||
         null;
+      const phone = sanitizePhone(rawPhone) || rawPhone;
 
-      // Identificar campanha pelo telefone
+      // Identificar campanha pelo telefone usando casamento canônico
       let campaign_id = null;
       if (phone) {
         const { rows } = await query(
           `SELECT campaign_id FROM followup_schedules
-            WHERE company_id = $1 AND phone LIKE $2 LIMIT 1`,
-          [companyId, `%${phone.replace(/\D/g, "").slice(-8)}`]
+            WHERE company_id = $1
+              AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+            ORDER BY created_at DESC LIMIT 1`,
+          [companyId, phone]
         );
         campaign_id = rows[0]?.campaign_id || null;
+      }
+
+      // Cancelar cadência em andamento quando o lead responde (exit_on_reply)
+      if (phone) {
+        await cancelFollowupCadenceOnReply({
+          companyId,
+          phone,
+          queryFn: query,
+        }).catch((err) => {
+          console.error("[followup/webhook-reply] erro ao cancelar cadência on reply:", err?.message || err);
+        });
       }
 
       // Opt-out detection
@@ -462,16 +495,22 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
 
       // Inserir sem webhook_trigger_url primeiro para obter o id
+      const insertPayload = {
+        company_id: str(company_id),
+        name: str(name),
+        description: str(description),
+        default_origin: str(default_origin),
+        status: "draft",
+        webhook_secret: secret,
+      };
+      if ("exit_on_reply" in req.body) insertPayload.exit_on_reply = Boolean(req.body.exit_on_reply);
+      if ("exit_on_won" in req.body) insertPayload.exit_on_won = Boolean(req.body.exit_on_won);
+      if ("exit_on_lost" in req.body) insertPayload.exit_on_lost = Boolean(req.body.exit_on_lost);
+      if ("exit_on_human_takeover" in req.body) insertPayload.exit_on_human_takeover = Boolean(req.body.exit_on_human_takeover);
+
       const { data, error } = await supabase
         .from("followup_campaigns")
-        .insert({
-          company_id: str(company_id),
-          name: str(name),
-          description: str(description),
-          default_origin: str(default_origin),
-          status: "draft",
-          webhook_secret: secret,
-        })
+        .insert(insertPayload)
         .select()
         .maybeSingle();
       if (error) throw error;
@@ -510,6 +549,10 @@ function normalizeInstanceList(list, fallback) {
       if (status) patch.status = status;
       if ("default_origin" in req.body) patch.default_origin = str(default_origin);
       if (regenerate_secret) patch.webhook_secret = generateSecret();
+      if ("exit_on_reply" in req.body) patch.exit_on_reply = Boolean(req.body.exit_on_reply);
+      if ("exit_on_won" in req.body) patch.exit_on_won = Boolean(req.body.exit_on_won);
+      if ("exit_on_lost" in req.body) patch.exit_on_lost = Boolean(req.body.exit_on_lost);
+      if ("exit_on_human_takeover" in req.body) patch.exit_on_human_takeover = Boolean(req.body.exit_on_human_takeover);
 
       const supabase = getSupabase();
       const { data, error } = await supabase

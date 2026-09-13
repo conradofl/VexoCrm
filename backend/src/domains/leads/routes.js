@@ -26,6 +26,7 @@ import {
 
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
+import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
 
 function sanitizePhoneE164(phoneInput, defaultDdd = null) {
   const s = sanitizePhone(phoneInput, defaultDdd);
@@ -1766,6 +1767,18 @@ export function registerLeadsRoutes(app, deps) {
         .single();
 
       if (error) throw error;
+
+      if (updates.stage && data?.telefone && data?.client_id && pgDatabasePool) {
+        cancelFollowupCadenceOnStageChange({
+          clientId: data.client_id,
+          phone: data.telefone,
+          newStage: updates.stage,
+          queryFn: pgDatabasePool.query.bind(pgDatabasePool),
+        }).catch((err) => {
+          console.error("[leads/patch] erro ao cancelar cadência on stage change:", err?.message || err);
+        });
+      }
+
       res.json({ item: data });
     } catch (err) {
       sendError(res, 500, "LEAD_UPDATE_FAILED", err.message || "Erro ao atualizar lead");
@@ -1849,6 +1862,25 @@ export function registerLeadsRoutes(app, deps) {
            WHERE client_id = $2 AND id = ANY($3::uuid[])`,
           [addTag, clientId, leadIds]
         );
+      }
+
+      if (stage && leadIds.length > 0 && pgDatabasePool) {
+        try {
+          const { rows: leadPhones } = await pgDatabasePool.query(
+            `SELECT telefone FROM public.leads WHERE client_id = $1 AND id = ANY($2::uuid[]) AND telefone IS NOT NULL`,
+            [clientId, leadIds]
+          );
+          for (const row of leadPhones) {
+            cancelFollowupCadenceOnStageChange({
+              clientId,
+              phone: row.telefone,
+              newStage: stage,
+              queryFn: pgDatabasePool.query.bind(pgDatabasePool),
+            }).catch(() => {});
+          }
+        } catch (err) {
+          console.error("[leads/bulk-update] erro ao processar saída de cadência:", err?.message || err);
+        }
       }
 
       res.json({ success: true, updatedCount: leadIds.length });

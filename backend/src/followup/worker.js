@@ -25,6 +25,8 @@ import {
   resolveSendWindowConfig,
 } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
+import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
+import { isWonStage, isLostStage } from "../services/followupExitGuard.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -155,6 +157,7 @@ async function processJob(job) {
             fs.campaign_id, fs.company_id,
             ft.message, ft.trigger_type,
             fc.status as campaign_status,
+            fc.exit_on_reply, fc.exit_on_won, fc.exit_on_lost, fc.exit_on_human_takeover,
             fco.tenant_id,
             fco.evolution_instance,
             fco.evolution_instances
@@ -174,6 +177,12 @@ async function processJob(job) {
 
   const row = jobRows[0];
   const log = `[followup/worker][${row.campaign_id || 'no-campaign'}][${row.lead_name}]`;
+
+  // 1. Guarda: Se o job já não estiver pendente (ex: cancelled, skipped, sent), aborta imediatamente
+  if (row.job_status !== "pending") {
+    console.log(log, `job já processado ou cancelado (status: ${row.job_status}) — abortando`);
+    return;
+  }
 
   if (row.campaign_status === "paused") {
     // Re-adiciona o mesmo payload com delay de 5 min; job atual termina sem erro
@@ -216,21 +225,87 @@ async function processJob(job) {
     }
   }
 
-  if (row.campaign_status === "archived" || row.schedule_status === "cancelled") {
+  if (row.campaign_status === "archived" || row.schedule_status === "cancelled" || row.schedule_status === "canceled") {
     await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
-    console.log(log, "skipped (archived/cancelled)");
+    console.log(log, "skipped (archived/cancelled schedule)");
     return;
   }
 
+  // 2. Condição de saída: Resposta do lead (trigger no_reply ou exit_on_reply)
   if (row.trigger_type === "no_reply" && row.company_id && row.phone) {
     const { rows: replies } = await query(
-      `SELECT id FROM followup_replies WHERE company_id=$1 AND phone=$2 LIMIT 1`,
+      `SELECT id FROM followup_replies
+        WHERE company_id = $1
+          AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+        LIMIT 1`,
       [row.company_id, row.phone]
     );
     if (replies.length) {
       await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
-      console.log(log, "skipped — lead já respondeu");
+      console.log(log, "skipped — lead já respondeu (trigger no_reply)");
       return;
+    }
+  } else if (row.exit_on_reply !== false && row.company_id && row.phone) {
+    const { rows: replies } = await query(
+      `SELECT id FROM followup_replies
+        WHERE company_id = $1
+          AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+        LIMIT 1`,
+      [row.company_id, row.phone]
+    );
+    if (replies.length) {
+      await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
+      console.log(log, "skipped — lead já respondeu (exit_on_reply)");
+      return;
+    }
+  }
+
+  // 3. Condição de saída: Estágio do Lead (exit_on_won / exit_on_lost)
+  if ((row.exit_on_won !== false || row.exit_on_lost !== false) && row.tenant_id && row.phone) {
+    try {
+      const { rows: leads } = await query(
+        `SELECT stage, status FROM public.leads
+          WHERE client_id = $1
+            AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+          LIMIT 1`,
+        [row.tenant_id, row.phone]
+      );
+      if (leads.length) {
+        const leadStage = leads[0].stage || leads[0].status;
+        if (row.exit_on_won !== false && isWonStage(leadStage)) {
+          await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
+          console.log(log, `skipped — lead já converteu/ganho (${leadStage})`);
+          return;
+        }
+        if (row.exit_on_lost !== false && isLostStage(leadStage)) {
+          await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
+          console.log(log, `skipped — lead descartado/perdido (${leadStage})`);
+          return;
+        }
+      }
+    } catch (leadCheckErr) {
+      console.warn(log, "aviso ao checar estágio do lead:", leadCheckErr?.message || leadCheckErr);
+    }
+  }
+
+  // 4. Condição de saída: Atendimento humano assumiu (exit_on_human_takeover)
+  if (row.exit_on_human_takeover !== false && row.tenant_id && row.phone) {
+    try {
+      const { rows: chats } = await query(
+        `SELECT attended_at FROM public.whatsapp_chat_states
+          WHERE client_id = $1
+            AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+            AND attended_at IS NOT NULL
+          LIMIT 1`,
+        [row.tenant_id, row.phone]
+      );
+      if (chats.length) {
+        await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
+        console.log(log, "skipped — conversa já foi assumida humanamente (takeover)");
+        return;
+      }
+    } catch (takeoverCheckErr) {
+      console.warn(log, "aviso ao checar takeover humano:", takeoverCheckErr?.message || takeoverCheckErr);
     }
   }
 

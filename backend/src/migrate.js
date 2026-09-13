@@ -256,6 +256,15 @@ async function isAlreadyApplied(pool, filename) {
           AND data_type = 'uuid'
       )
     ) AS ok`,
+    "20260913120000_add_followup_exit_conditions.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_campaigns')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_campaigns' AND column_name='exit_on_reply')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_campaigns' AND column_name='exit_on_won')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_campaigns' AND column_name='exit_on_lost')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_campaigns' AND column_name='exit_on_human_takeover')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];
