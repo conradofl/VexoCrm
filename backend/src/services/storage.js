@@ -365,3 +365,155 @@ export async function getMediaBuffer(mediaPath) {
 
   return null;
 }
+
+// Teto específico para contratos assinados (20 MB)
+export const CONTRACT_MAX_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Constrói caminho padronizado para contratos assinados:
+ * contratos/:clientId/:contractId/:timestamp.pdf
+ */
+export function buildContractStorageKey(clientId, contractId, timestamp = Date.now()) {
+  const safeClientId = encodeURIComponent(String(clientId || "shared").trim());
+  const safeContractId = encodeURIComponent(String(contractId).trim());
+  const ts = Number(timestamp) || Date.now();
+  return `contratos/${safeClientId}/${safeContractId}/${ts}.pdf`;
+}
+
+/**
+ * Salva buffer exato do contrato assinado no storage configurado (R2 em prod, local em dev/test).
+ * Regra que não pode falhar: guarda os bytes exatos, sem recomprimir ou alterar o binário.
+ * Teto próprio: 20 MB. Em produção sem credenciais R2, recusa e grita no log (nunca salva em disco efêmero).
+ */
+export async function saveContractBuffer({ clientId, contractId, buffer, timestamp = Date.now() }) {
+  if (!buffer || buffer.length === 0) {
+    const err = new Error("Arquivo vazio ou buffer inválido.");
+    err.code = "EMPTY_BUFFER";
+    throw err;
+  }
+
+  if (buffer.length > CONTRACT_MAX_BYTES) {
+    const err = new Error(`Arquivo excede o teto máximo permitido de 20 MB (tamanho: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB).`);
+    err.code = "FILE_TOO_LARGE";
+    throw err;
+  }
+
+  if (!clientId || !contractId) {
+    const err = new Error("clientId e contractId são obrigatórios para salvar contrato assinado.");
+    err.code = "MISSING_PARAMS";
+    throw err;
+  }
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    console.error(
+      "================================================================================\n" +
+      "🛑 [STORAGE] CRITICAL CONFIG ERROR: Recusando salvar contrato assinado no disco efêmero!\n" +
+      "   Em ambiente de PRODUÇÃO, o Cloudflare R2 é OBRIGATÓRIO para contratos jurídicos.\n" +
+      "================================================================================"
+    );
+    const err = new Error(config.error || "Armazenamento Cloudflare R2 não configurado em produção.");
+    err.code = "STORAGE_UNCONFIGURED";
+    throw err;
+  }
+
+  const contractKey = buildContractStorageKey(clientId, contractId, timestamp);
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: contractKey,
+          Body: buffer,
+          ContentType: "application/pdf",
+        })
+      );
+      return {
+        storageKey: contractKey,
+        sizeBytes: buffer.length,
+      };
+    } catch (err) {
+      console.error("[storage] Erro ao gravar contrato assinado no Cloudflare R2:", err.message || err);
+      throw err;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, contractKey);
+      await fsPromises.mkdir(path.dirname(fullPath), { recursive: true });
+      await fsPromises.writeFile(fullPath, buffer);
+      return {
+        storageKey: contractKey,
+        sizeBytes: buffer.length,
+      };
+    } catch (err) {
+      console.error("[storage] Erro ao gravar contrato assinado no disco local:", err.message || err);
+      throw err;
+    }
+  }
+
+  const err = new Error(`Provedor de armazenamento desconhecido: ${config.provider}`);
+  err.code = "UNKNOWN_PROVIDER";
+  throw err;
+}
+
+/**
+ * Recupera buffer do contrato assinado a partir da chave de storage.
+ * Devolve os bytes exatos preservando assinaturas digitais (gov.br).
+ */
+export async function getContractBuffer(storageKey) {
+  if (!storageKey) return null;
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    console.error("[storage] Tentativa de ler contrato com armazenamento não configurado.");
+    return null;
+  }
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      const res = await s3.send(
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: storageKey,
+        })
+      );
+      const chunks = [];
+      for await (const chunk of res.Body) {
+        chunks.push(chunk);
+      }
+      return {
+        buffer: Buffer.concat(chunks),
+        contentType: res.ContentType || "application/pdf",
+        source: "r2",
+      };
+    } catch (err) {
+      if (err.name !== "NoSuchKey") {
+        console.error("[storage] Erro ao ler contrato do R2:", err.message || err);
+      }
+      return null;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, storageKey);
+      const buffer = await fsPromises.readFile(fullPath);
+      return {
+        buffer,
+        contentType: "application/pdf",
+        source: "local",
+      };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  return null;
+}

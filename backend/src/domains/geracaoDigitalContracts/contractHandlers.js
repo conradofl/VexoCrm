@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
+import { saveContractBuffer, getContractBuffer, CONTRACT_MAX_BYTES } from "../../services/storage.js";
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
 // NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
@@ -418,6 +419,167 @@ export async function renderContractPdf(templateConteudo, dados) {
     doc.end();
 
     return await pdfBufferPromise;
+  }
+}
+
+/**
+ * Upload de contrato assinado (ex: assinado via gov.br).
+ * Guarda os bytes exatos no Cloudflare R2 (com trava de ambiente em prod).
+ * Ao subir o arquivo, atualiza o status do contrato para "assinado".
+ * Substituição preserva o histórico de versões em signed_file_history (nunca apaga do storage).
+ */
+export async function uploadSignedContract(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+
+    const { id } = req.params;
+
+    let buffer = null;
+    if (Buffer.isBuffer(req.body)) {
+      buffer = req.body;
+    } else if (req.body && typeof req.body === "object" && typeof req.body.base64 === "string") {
+      buffer = Buffer.from(req.body.base64, "base64");
+    } else if (typeof req.body === "string") {
+      buffer = Buffer.from(req.body, "binary");
+    }
+
+    if (!buffer || buffer.length === 0) {
+      return sendError(res, 400, "BAD_REQUEST", "Arquivo não fornecido ou buffer vazio");
+    }
+
+    if (buffer.length > CONTRACT_MAX_BYTES) {
+      return sendError(res, 400, "FILE_TOO_LARGE", "O arquivo excede o limite máximo permitido de 20 MB.");
+    }
+
+    // Validação estrita de cabeçalho PDF (%PDF)
+    const isPdf = buffer.length >= 4 && buffer.slice(0, 4).toString("ascii") === "%PDF";
+    if (!isPdf) {
+      return sendError(res, 400, "INVALID_FILE_TYPE", "Apenas arquivos PDF são aceitos.");
+    }
+
+    const { rows: contractRows } = await db.query(
+      "SELECT id, tenant_id, status, signed_file_path, signed_file_name, signed_uploaded_at, signed_uploaded_by, signed_file_history FROM public.gd_contracts WHERE id = $1 AND tenant_id = $2",
+      [id, tenantId]
+    );
+
+    if (contractRows.length === 0) {
+      return sendError(res, 404, "NOT_FOUND", "Contrato não encontrado");
+    }
+
+    const contract = contractRows[0];
+
+    const rawFileName = req.headers["x-file-name"] || req.query.filename || "contrato-assinado.pdf";
+    let originalFileName = "contrato-assinado.pdf";
+    try {
+      originalFileName = decodeURIComponent(String(rawFileName)).trim() || "contrato-assinado.pdf";
+    } catch {
+      originalFileName = String(rawFileName).trim() || "contrato-assinado.pdf";
+    }
+    if (!originalFileName.toLowerCase().endsWith(".pdf")) {
+      originalFileName += ".pdf";
+    }
+
+    const timestamp = Date.now();
+    const saveResult = await saveContractBuffer({
+      clientId: tenantId,
+      contractId: id,
+      buffer,
+      timestamp,
+    });
+
+    // Versionamento histórico (substitui atual sem apagar o anterior do storage)
+    const history = Array.isArray(contract.signed_file_history) ? [...contract.signed_file_history] : [];
+    if (contract.signed_file_path) {
+      history.push({
+        signed_file_path: contract.signed_file_path,
+        signed_file_name: contract.signed_file_name,
+        signed_uploaded_at: contract.signed_uploaded_at,
+        signed_uploaded_by: contract.signed_uploaded_by,
+        archived_at: new Date().toISOString(),
+      });
+    }
+
+    const uploadedBy =
+      req.authAccess?.email ||
+      req.authUser?.email ||
+      req.authAccess?.uid ||
+      req.authUser?.name ||
+      "usuario";
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE public.gd_contracts
+       SET signed_file_path = $1,
+           signed_file_name = $2,
+           signed_uploaded_at = NOW(),
+           signed_uploaded_by = $3,
+           signed_file_history = $4,
+           status = 'assinado',
+           updated_at = NOW()
+       WHERE id = $5 AND tenant_id = $6
+       RETURNING *`,
+      [
+        saveResult.storageKey,
+        originalFileName,
+        uploadedBy,
+        JSON.stringify(history),
+        id,
+        tenantId,
+      ]
+    );
+
+    res.status(200).json(updatedRows[0]);
+  } catch (error) {
+    console.error("[uploadSignedContract] Error:", error);
+    if (!res.headersSent) {
+      sendError(res, 500, "INTERNAL_ERROR", error.message || "Erro ao fazer upload do contrato assinado");
+    }
+  }
+}
+
+/**
+ * Download de contrato assinado.
+ * Escopo de tenant estrito (WHERE id = $1 AND tenant_id = $2). Se não encontrar, responde 404 (nunca 403).
+ * Serve os bytes exatos salvos no storage, preservando integralmente a assinatura digital.
+ */
+export async function downloadSignedContract(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+
+    const { id } = req.params;
+
+    const { rows } = await db.query(
+      "SELECT id, tenant_id, signed_file_path, signed_file_name FROM public.gd_contracts WHERE id = $1 AND tenant_id = $2",
+      [id, tenantId]
+    );
+
+    if (rows.length === 0 || !rows[0].signed_file_path) {
+      return sendError(res, 404, "NOT_FOUND", "Contrato assinado não encontrado");
+    }
+
+    const contract = rows[0];
+    const fileResult = await getContractBuffer(contract.signed_file_path);
+    if (!fileResult || !fileResult.buffer) {
+      return sendError(res, 404, "NOT_FOUND", "Arquivo assinado não encontrado no armazenamento");
+    }
+
+    const fileName = contract.signed_file_name || `contrato-${id}-assinado.pdf`;
+    const cleanFileName = fileName.replace(/["\r\n]/g, "");
+    const safeEncodedName = encodeURIComponent(cleanFileName);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", fileResult.buffer.length);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${cleanFileName}"; filename*=UTF-8''${safeEncodedName}`
+    );
+    return res.send(fileResult.buffer);
+  } catch (error) {
+    console.error("[downloadSignedContract] Error:", error);
+    if (!res.headersSent) {
+      sendError(res, 500, "INTERNAL_ERROR", "Erro ao baixar contrato assinado");
+    }
   }
 }
 

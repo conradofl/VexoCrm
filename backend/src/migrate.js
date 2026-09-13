@@ -265,6 +265,16 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_campaigns' AND column_name='exit_on_human_takeover')
       )
     ) AS ok`,
+    "20260913150000_add_signed_file_to_gd_contracts.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='gd_contracts')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='signed_file_path')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='signed_file_name')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='signed_uploaded_at')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='signed_uploaded_by')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='signed_file_history')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

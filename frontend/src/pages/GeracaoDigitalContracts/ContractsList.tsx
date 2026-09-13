@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useGdContracts, useUpdateGdContract } from "@/hooks/useGdContracts";
+import { useGdContracts, useUpdateGdContract, useUploadSignedContract } from "@/hooks/useGdContracts";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
@@ -23,6 +23,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Upload,
+  FileCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -59,9 +61,14 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
 
   const { data: contracts, isLoading, error } = useGdContracts(undefined, showArquivados, isVexoCommercial);
   const updateContract = useUpdateGdContract();
+  const uploadSignedContract = useUploadSignedContract();
   const enviarJuridico = useSendContractToJuridico();
   const { getIdToken, clientId } = useAuth();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadingSignedId, setDownloadingSignedId] = useState<string | null>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [targetUploadContractId, setTargetUploadContractId] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<{ id: string; proposalId?: string | null; dados: any } | null>(null);
   const [creatingStandaloneKey, setCreatingStandaloneKey] = useState<string | null>(null);
 
@@ -87,6 +94,70 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
       toast({ title: "Erro ao abrir contrato", description: err.message, variant: "destructive" });
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  // Baixa o arquivo assinado preservando byte a byte o arquivo original do storage.
+  const handleDownloadSigned = async (contract: any) => {
+    try {
+      setDownloadingSignedId(contract.id);
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/gd/contracts/${contract.id}/signed?client_id=${clientId || ""}`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        throw new Error("Não foi possível baixar o contrato assinado.");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = contract.signed_file_name || `contrato-${contract.id}-assinado.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: "Erro ao baixar contrato assinado", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloadingSignedId(null);
+    }
+  };
+
+  const handleTriggerUpload = (contractId: string) => {
+    setTargetUploadContractId(contractId);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const contractId = targetUploadContractId;
+    if (!file || !contractId) return;
+
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      toast({ title: "Formato inválido", description: "O contrato assinado deve ser um arquivo PDF.", variant: "destructive" });
+      return;
+    }
+
+    if (file.size > 20 * 1024 * 1024) {
+      toast({ title: "Arquivo muito grande", description: "O arquivo excede o limite máximo permitido de 20 MB.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      setUploadingId(contractId);
+      await uploadSignedContract.mutateAsync({ contractId, file });
+      toast({ title: "Contrato assinado guardado com sucesso!" });
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: "Erro no upload do contrato", description: err.message, variant: "destructive" });
+    } finally {
+      setUploadingId(null);
+      setTargetUploadContractId(null);
     }
   };
 
@@ -206,6 +277,41 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
 
   const acoes = (contract: any, compact = false) => (
     <>
+      {/* Botões do contrato assinado (upload, download, substituir) */}
+      {contract.signed_file_path ? (
+        <>
+          <Button
+            size="sm"
+            className={cn("bg-emerald-600 hover:bg-emerald-500 text-white font-medium", compact ? "" : "w-full")}
+            onClick={() => handleDownloadSigned(contract)}
+            disabled={downloadingSignedId === contract.id}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {downloadingSignedId === contract.id ? "Baixando..." : "Baixar contrato assinado"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn("text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800", compact ? "" : "w-full")}
+            onClick={() => handleTriggerUpload(contract.id)}
+            disabled={uploadingId === contract.id}
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            {uploadingId === contract.id ? "Enviando..." : "Substituir assinado"}
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="sm"
+          className={cn("bg-emerald-600 hover:bg-emerald-500 text-white font-medium", compact ? "" : "w-full")}
+          onClick={() => handleTriggerUpload(contract.id)}
+          disabled={uploadingId === contract.id}
+        >
+          <Upload className="h-4 w-4 mr-2" />
+          {uploadingId === contract.id ? "Enviando..." : "Subir contrato assinado"}
+        </Button>
+      )}
+
       <Button
         size="sm"
         className={cn("bg-indigo-600 hover:bg-indigo-500 text-white", compact ? "" : "w-full")}
@@ -267,16 +373,25 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
             const statusConfig = getStatusConfig(contract.status);
             const StatusIcon = statusConfig.icon;
             return (
-              <Card key={contract.id} className="border-slate-200 dark:border-white/10 flex flex-col">
+              <Card key={contract.id} className={cn("border-slate-200 dark:border-white/10 flex flex-col transition-all", contract.signed_file_path ? "border-emerald-300 dark:border-emerald-800/60 ring-1 ring-emerald-500/10" : "")}>
                 <CardHeader className="pb-3">
-                  <div className="flex justify-between items-start">
+                  <div className="flex justify-between items-start gap-2">
                     <CardTitle className="text-lg truncate pr-2">
                       {contract.dados?.razao_social || "Sem Razão Social"}
                     </CardTitle>
-                    <Badge className={`${statusConfig.color} border-0 flex items-center gap-1`}>
-                      <StatusIcon className="h-3 w-3" />
-                      {statusConfig.label}
-                    </Badge>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {contract.signed_file_path ? (
+                        <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white border-0 flex items-center gap-1 font-semibold text-xs shadow-sm">
+                          <FileCheck className="h-3.5 w-3.5" />
+                          Assinado
+                        </Badge>
+                      ) : (
+                        <Badge className={`${statusConfig.color} border-0 flex items-center gap-1`}>
+                          <StatusIcon className="h-3 w-3" />
+                          {statusConfig.label}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <CardDescription>
                     Gerado em {format(new Date(contract.created_at), "dd 'de' MMMM, yyyy", { locale: ptBR })}
@@ -298,6 +413,28 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
                         </Badge>
                       )}
                     </p>
+
+                    {/* Bloco de contrato assinado (detalhes do arquivo e histórico) */}
+                    {contract.signed_file_path ? (
+                      <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-lg p-2.5 text-xs text-emerald-900 dark:text-emerald-300 space-y-1 mt-2">
+                        <div className="flex items-center gap-1.5 font-semibold">
+                          <FileCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span className="truncate" title={contract.signed_file_name || "Contrato assinado"}>
+                            {contract.signed_file_name || "Arquivo assinado"}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                          Upload: {contract.signed_uploaded_at ? format(new Date(contract.signed_uploaded_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : "-"}
+                        </div>
+                        <div className="text-[11px] text-emerald-700 dark:text-emerald-400 truncate">
+                          Por: {contract.signed_uploaded_by || "-"}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 dark:text-slate-500 italic mt-1">
+                        Nenhum arquivo assinado anexado ainda.
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-2 flex-col">{acoes(contract)}</div>
                 </CardContent>
@@ -311,21 +448,33 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
             const statusConfig = getStatusConfig(contract.status);
             const StatusIcon = statusConfig.icon;
             return (
-              <div key={contract.id} className="flex flex-wrap items-center gap-3 p-3 bg-white dark:bg-slate-900">
+              <div key={contract.id} className={cn("flex flex-wrap items-center gap-3 p-3 bg-white dark:bg-slate-900", contract.signed_file_path ? "bg-emerald-50/20 dark:bg-emerald-950/10" : "")}>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
                       {contract.dados?.razao_social || "Sem Razão Social"}
                     </span>
-                    <Badge className={`${statusConfig.color} border-0 flex items-center gap-1 shrink-0`}>
-                      <StatusIcon className="h-3 w-3" />
-                      {statusConfig.label}
-                    </Badge>
+                    {contract.signed_file_path ? (
+                      <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white border-0 flex items-center gap-1 font-semibold text-[10px] shrink-0">
+                        <FileCheck className="h-3 w-3" />
+                        Assinado
+                      </Badge>
+                    ) : (
+                      <Badge className={`${statusConfig.color} border-0 flex items-center gap-1 shrink-0`}>
+                        <StatusIcon className="h-3 w-3" />
+                        {statusConfig.label}
+                      </Badge>
+                    )}
                   </div>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     {contract.dados?.cnpj || "sem CNPJ"} · {contract.dados?.representante || "sem representante"} ·{" "}
                     {contract.proposal_id ? `Proposta #${contract.proposal_id.slice(0, 8)}` : "Avulso (sem proposta)"} ·{" "}
                     {format(new Date(contract.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                    {contract.signed_file_path && contract.signed_file_name && (
+                      <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                        {" "}· 📎 {contract.signed_file_name} ({format(new Date(contract.signed_uploaded_at), "dd/MM HH:mm")})
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="flex gap-2 shrink-0">{acoes(contract, true)}</div>
@@ -377,6 +526,15 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
           standaloneKey={creatingStandaloneKey}
         />
       )}
+
+      {/* Input de arquivo invisível para subir PDF assinado (ex: gov.br) */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".pdf"
+        className="hidden"
+      />
     </div>
   );
 }

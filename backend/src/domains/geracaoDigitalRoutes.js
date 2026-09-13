@@ -294,6 +294,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
       await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
+      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_path TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_path TEXT`));
+      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_name TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_name TEXT`));
+      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_at TIMESTAMPTZ`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_at TIMESTAMPTZ`));
+      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_by TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_by TEXT`));
+      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_history JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_history JSONB DEFAULT '[]'::jsonb`));
 
       // Seed de propostas históricas se a tabela estiver vazia
       const propCount = await dbPool.query("SELECT count(*)::int AS count FROM public.gd_proposals");
@@ -366,6 +371,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           status TEXT NOT NULL DEFAULT 'rascunho',
           file_url TEXT,
           signed_at TIMESTAMPTZ,
+          signed_file_path TEXT,
+          signed_file_name TEXT,
+          signed_uploaded_at TIMESTAMPTZ,
+          signed_uploaded_by TEXT,
+          signed_file_history JSONB DEFAULT '[]'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
       `);

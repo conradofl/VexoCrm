@@ -1,3 +1,4 @@
+import express from "express";
 import { requireFirebaseAuth } from "../../access/middlewares.js";
 import {
   requireVexoCommercialAccess,
@@ -12,6 +13,8 @@ import {
   getContract,
   updateContract,
   generateContractPdf,
+  uploadSignedContract,
+  downloadSignedContract,
 } from "./contractHandlers.js";
 import { extractContractData } from "./contractExtract.js";
 import {
@@ -46,4 +49,14 @@ export function registerContractRoutes(app) {
   app.put("/api/gd/contracts/:id", requireFirebaseAuth, requireVexoCommercialAccess, guardContratoVexo, updateContract);
   
   app.get("/api/gd/contracts/:id/pdf", requireFirebaseAuth, guardContratoVexo, generateContractPdf);
+
+  // Contrato assinado externamente (ex: gov.br): upload e download byte a byte com trava de tenant
+  app.post(
+    "/api/gd/contracts/:id/signed",
+    requireFirebaseAuth,
+    guardContratoVexo,
+    express.raw({ type: ["application/pdf", "application/octet-stream"], limit: "25mb" }),
+    uploadSignedContract
+  );
+  app.get("/api/gd/contracts/:id/signed", requireFirebaseAuth, guardContratoVexo, downloadSignedContract);
 }

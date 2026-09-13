@@ -36,6 +36,17 @@ export interface GdContract {
   sign_url?: string | null;
   status: "rascunho" | "gerado" | "enviado" | "assinado";
   arquivado?: boolean;
+  signed_file_path?: string | null;
+  signed_file_name?: string | null;
+  signed_uploaded_at?: string | null;
+  signed_uploaded_by?: string | null;
+  signed_file_history?: Array<{
+    signed_file_path: string;
+    signed_file_name: string;
+    signed_uploaded_at: string;
+    signed_uploaded_by: string;
+    archived_at: string;
+  }>;
   created_at: string;
 }
 
@@ -182,6 +193,40 @@ export function useDeleteGdContract() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gdContracts"] });
+    },
+  });
+}
+
+export function useUploadSignedContract() {
+  const { getIdToken, clientId } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ contractId, file }: { contractId: string; file: File }): Promise<GdContract> => {
+      const token = await getIdToken();
+      const params = new URLSearchParams();
+      if (clientId) params.set("client_id", clientId);
+      params.set("filename", file.name);
+
+      const res = await fetchApi(`/api/gd/contracts/${contractId}/signed?${params}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/pdf",
+          "x-file-name": encodeURIComponent(file.name),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: file,
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao enviar contrato assinado"));
+      }
+      return readApiJson<GdContract>(res, "upload-signed-contract");
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["gdContracts"] });
+      if (data.proposal_id) {
+        queryClient.invalidateQueries({ queryKey: ["gdContracts", data.proposal_id] });
+      }
     },
   });
 }
