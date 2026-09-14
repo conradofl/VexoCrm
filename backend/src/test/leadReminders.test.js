@@ -598,6 +598,184 @@ describe("Lembretes e Agendamento com Estado (6 Blocos de Verificação)", () =>
     });
   });
 
+  // ─── PARTE 1: Vencido é estado próprio e Desfazer ───
+  describe("Parte 1 — Vencido é estado próprio e Desfazer status", () => {
+    it("vencido é estado próprio: lembrete 2 min no passado volta is_overdue: true; outro para daqui a 2h volta false com is_due_today_or_overdue: true no mesmo teste", async () => {
+      const now = Date.now();
+      const past2MinDate = new Date(now - 2 * 60 * 1000).toISOString();
+      const future2HoursDate = new Date(now + 2 * 3600 * 1000).toISOString();
+
+      const overdueRow = {
+        id: "rem-overdue-1",
+        lead_id: null,
+        phone: "5534991093607",
+        lead_name: "Cliente Atrasado",
+        title: "Ligar para cliente",
+        notes: "Urgente",
+        remind_at: past2MinDate,
+        assigned_to_uid: "user-1",
+        assigned_to_name: "Conrado",
+        created_by_uid: "user-1",
+        created_by_name: "Conrado",
+        status: "pending",
+        created_at: new Date(now - 3600000).toISOString(),
+        is_due_today_or_overdue: true,
+        is_overdue: true,
+        is_for_current_user: true,
+      };
+
+      const futureRow = {
+        id: "rem-future-1",
+        lead_id: null,
+        phone: "5534999998888",
+        lead_name: "Cliente Em Dia",
+        title: "Enviar catálogo",
+        notes: null,
+        remind_at: future2HoursDate,
+        assigned_to_uid: "user-1",
+        assigned_to_name: "Conrado",
+        created_by_uid: "user-1",
+        created_by_name: "Conrado",
+        status: "pending",
+        created_at: new Date().toISOString(),
+        is_due_today_or_overdue: true,
+        is_overdue: false,
+        is_for_current_user: true,
+      };
+
+      mockPgPool.query.mockResolvedValueOnce({ rows: [] }); // schedules
+      mockPgPool.query.mockResolvedValueOnce({ rows: [overdueRow, futureRow] }); // reminders
+
+      const summaryRes = await invokeRoute(remindersApp, "GET", "/api/reminders/inbox-summary", {
+        authAccess: { uid: "user-1", name: "Conrado", isAdmin: true },
+        query: { clientId: "geracao-digital" },
+      });
+
+      expect(summaryRes.statusCode).toBe(200);
+
+      // Confere que a query SQL do remindersQuery solicitou a coluna lr.remind_at < NOW() AS is_overdue
+      const remindersQueryCall = mockPgPool.query.mock.calls.find((call) =>
+        call[0].includes("FROM public.lead_reminders lr")
+      );
+      expect(remindersQueryCall).toBeDefined();
+      expect(remindersQueryCall[0]).toContain("lr.remind_at < NOW()");
+      expect(remindersQueryCall[0]).toContain("AS is_overdue");
+
+      // Item 1: Vencido (2 minutos no passado)
+      const item1 = summaryRes.body.itemsByPhone["5534991093607"];
+      expect(item1).toBeDefined();
+      expect(item1.activeReminders[0].isOverdue).toBe(true);
+      expect(item1.activeReminders[0].isDueTodayOrOverdue).toBe(true);
+      expect(item1.todayDue.isReminderOverdue).toBe(true);
+
+      // Item 2: Daqui a duas horas (futuro próximo de hoje)
+      const item2 = summaryRes.body.itemsByPhone["5534999998888"];
+      expect(item2).toBeDefined();
+      expect(item2.activeReminders[0].isOverdue).toBe(false);
+      expect(item2.activeReminders[0].isDueTodayOrOverdue).toBe(true);
+      expect(item2.todayDue.isReminderOverdue).toBe(false);
+    });
+
+    it("desfazer: Concluir, depois PATCH { status: 'pending' }: completed_at e completed_by_uid nulos e o lembrete de volta ao sumário; status inválido devolve 400 sem escrever nada", async () => {
+      mockPgPool.query.mockClear();
+
+      // 1. Simula PATCH /api/reminders/:id com status inválido -> deve devolver 400 sem chamar o pool de banco
+      const invalidReq = {
+        authAccess: { uid: "user-1", isAdmin: true },
+        params: { id: "rem-10" },
+        body: { clientId: "geracao-digital", status: "invalid_status" },
+      };
+      const invalidRes = await invokeRoute(remindersApp, "PATCH", "/api/reminders/:id", invalidReq);
+      expect(invalidRes.statusCode).toBe(400);
+      expect(invalidRes.body.error.code).toBe("INVALID_STATUS");
+      expect(mockPgPool.query).not.toHaveBeenCalled();
+
+      // 2. Simula Concluir (PATCH /api/reminders/:id/complete)
+      mockPgPool.query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: "rem-10",
+            client_id: "geracao-digital",
+            status: "completed",
+            completed_at: new Date().toISOString(),
+            completed_by_uid: "user-1",
+          },
+        ],
+      });
+      const completeRes = await invokeRoute(remindersApp, "PATCH", "/api/reminders/:id/complete", {
+        authAccess: { uid: "user-1", isAdmin: true },
+        params: { id: "rem-10" },
+        body: { clientId: "geracao-digital" },
+      });
+      expect(completeRes.statusCode).toBe(200);
+      expect(completeRes.body.reminder.status).toBe("completed");
+      expect(completeRes.body.reminder.completed_at).toBeDefined();
+
+      // 3. Simula Desfazer (PATCH /api/reminders/:id com status: 'pending')
+      mockPgPool.query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: "rem-10",
+            client_id: "geracao-digital",
+            status: "pending",
+            completed_at: null,
+            completed_by_uid: null,
+            updated_at: new Date().toISOString(),
+          },
+        ],
+      });
+      const reopenRes = await invokeRoute(remindersApp, "PATCH", "/api/reminders/:id", {
+        authAccess: { uid: "user-1", isAdmin: true },
+        params: { id: "rem-10" },
+        body: { clientId: "geracao-digital", status: "pending" },
+      });
+      expect(reopenRes.statusCode).toBe(200);
+      expect(reopenRes.body.reminder.status).toBe("pending");
+      expect(reopenRes.body.reminder.completed_at).toBeNull();
+      expect(reopenRes.body.reminder.completed_by_uid).toBeNull();
+
+      // Confere que o SQL gerado incluiu explicitamente completed_at = NULL e completed_by_uid = NULL
+      const updateCall = mockPgPool.query.mock.calls.find((call) =>
+        call[0].includes("UPDATE public.lead_reminders") && call[0].includes("completed_at = NULL")
+      );
+      expect(updateCall).toBeDefined();
+      expect(updateCall[0]).toContain("completed_at = NULL");
+      expect(updateCall[0]).toContain("completed_by_uid = NULL");
+
+      // 4. Lembrete de volta ao sumário
+      mockPgPool.query.mockResolvedValueOnce({ rows: [] }); // schedules
+      mockPgPool.query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: "rem-10",
+            lead_id: null,
+            phone: "5534991093607",
+            lead_name: "Lead Reaberto",
+            title: "Lembrete Reaberto",
+            notes: null,
+            remind_at: new Date(Date.now() + 3600000).toISOString(),
+            assigned_to_uid: "user-1",
+            assigned_to_name: "Conrado",
+            created_by_uid: "user-1",
+            created_by_name: "Conrado",
+            status: "pending",
+            created_at: new Date().toISOString(),
+            is_due_today_or_overdue: true,
+            is_overdue: false,
+            is_for_current_user: true,
+          },
+        ],
+      }); // reminders
+      const summaryAfterReopen = await invokeRoute(remindersApp, "GET", "/api/reminders/inbox-summary", {
+        authAccess: { uid: "user-1", name: "Conrado", isAdmin: true },
+        query: { clientId: "geracao-digital" },
+      });
+      expect(summaryAfterReopen.statusCode).toBe(200);
+      expect(summaryAfterReopen.body.itemsByPhone["5534991093607"].activeReminders[0].id).toBe("rem-10");
+      expect(summaryAfterReopen.body.itemsByPhone["5534991093607"].activeReminders[0].status).toBe("pending");
+    });
+  });
+
   // ─── BÔNUS: Fuso Horário e Helpers Compartilhados ───
   describe("Helpers Compartilhados e Fuso Horário America/Sao_Paulo", () => {
     it("garante que as expressões SQL usam America/Sao_Paulo para truncamento do dia", () => {

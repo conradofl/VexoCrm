@@ -47,6 +47,7 @@ import {
   CheckCheck,
   Paperclip,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
@@ -108,6 +109,10 @@ import { CreateLeadReminderModal } from "@/components/inbox/CreateLeadReminderMo
 import {
   useInboxRemindersSummary,
   useCompleteLeadReminder,
+  useDeleteLeadReminder,
+  useUpdateLeadReminder,
+  useLeadReminders,
+  type LeadReminder,
 } from "@/hooks/useLeadReminders";
 import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
 import { MediaMessage } from "@/components/MediaMessage";
@@ -397,6 +402,55 @@ export default function WhatsAppInbox({
 
   const remindersSummaryQuery = useInboxRemindersSummary(clientId);
   const completeLeadReminder = useCompleteLeadReminder(clientId);
+  const deleteLeadReminder = useDeleteLeadReminder(clientId);
+  const updateLeadReminder = useUpdateLeadReminder(clientId);
+  const [editingReminder, setEditingReminder] = useState<LeadReminder | null>(null);
+  const [showCompletedReminders, setShowCompletedReminders] = useState(false);
+  const alertedOverdueReminderIds = useRef<Set<string>>(new Set());
+  const overdueSeeded = useRef(false);
+
+  // Reseta semente de alertas se o tenant for trocado
+  useEffect(() => {
+    alertedOverdueReminderIds.current = new Set();
+    overdueSeeded.current = false;
+  }, [clientId]);
+
+  // Toast único por lembrete ao virar vencido (quando cruza de pendente para vencido com a aba aberta)
+  useEffect(() => {
+    if (!remindersSummaryQuery.data?.itemsByPhone) return;
+    const items = remindersSummaryQuery.data.itemsByPhone;
+
+    // 1ª carga: semeia os IDs já vencidos sem disparar toast
+    if (!overdueSeeded.current) {
+      for (const contact of Object.values(items)) {
+        for (const rem of contact.activeReminders || []) {
+          if (rem.status === "pending" && rem.isOverdue) {
+            alertedOverdueReminderIds.current.add(rem.id);
+          }
+        }
+      }
+      overdueSeeded.current = true;
+      return;
+    }
+
+    // Da 2ª carga em diante: avisa apenas sobre lembretes do usuário atual que viraram vencidos agora
+    for (const contact of Object.values(items)) {
+      for (const rem of contact.activeReminders || []) {
+        if (
+          rem.isForCurrentUser &&
+          rem.status === "pending" &&
+          rem.isOverdue &&
+          !alertedOverdueReminderIds.current.has(rem.id)
+        ) {
+          alertedOverdueReminderIds.current.add(rem.id);
+          toast.error(`⏰ Lembrete vencido: ${rem.title}`, {
+            description: `Para ${rem.leadName || rem.phone} · Marcado para ${formatScheduleDate(rem.remindAt)}`,
+          });
+        }
+      }
+    }
+  }, [remindersSummaryQuery.data]);
+
   const itemsByPhone = remindersSummaryQuery.data?.itemsByPhone || {};
   const hojeBadgeCount = remindersSummaryQuery.data?.todayCount || 0;
 
@@ -627,6 +681,13 @@ export default function WhatsAppInbox({
   const activeSchedule = selectedSummary?.activeSchedule || null;
   const activeReminders = selectedSummary?.activeReminders || [];
   const pendingReminder = activeReminders.find((r) => r.status === "pending") || null;
+
+  const completedRemindersQuery = useLeadReminders(
+    clientId,
+    selectedCanonicalPhone,
+    "completed"
+  );
+  const completedReminders = showCompletedReminders ? completedRemindersQuery.data || [] : [];
 
   // Contagem de conversas em espera vinda do servidor ou fallback local
   const awaitingReplyCount = chatsQuery.counts?.awaiting ?? 0;
@@ -1686,11 +1747,20 @@ export default function WhatsAppInbox({
                           )}
                           {cardHasPendingReminder && (
                             <span
-                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300"
-                              title={`Só para você: lembrete pessoal "${cardPendingReminders[0].title}" para ${formatScheduleDate(cardPendingReminders[0].remindAt)}`}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
+                                cardPendingReminders[0].isOverdue
+                                  ? "bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300"
+                                  : "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300"
+                              )}
+                              title={
+                                cardPendingReminders[0].isOverdue
+                                  ? `VENCEU: lembrete pessoal "${cardPendingReminders[0].title}" venceu em ${formatScheduleDate(cardPendingReminders[0].remindAt)}`
+                                  : `Só para você: lembrete pessoal "${cardPendingReminders[0].title}" para ${formatScheduleDate(cardPendingReminders[0].remindAt)}`
+                              }
                             >
-                              <Bell className="h-2.5 w-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                              <span>📌 {cardPendingReminders[0].title}</span>
+                              <Bell className={cn("h-2.5 w-2.5 shrink-0", cardPendingReminders[0].isOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
+                              <span>{cardPendingReminders[0].isOverdue ? `⏰ Venceu · ${cardPendingReminders[0].title}` : `📌 ${cardPendingReminders[0].title}`}</span>
                             </span>
                           )}
                           <OriginBadge
@@ -1707,9 +1777,14 @@ export default function WhatsAppInbox({
                           </div>
                         )}
                         {inboxTab === "hoje" && cardSummary?.todayDue?.hasReminderToday && (
-                          <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-800 dark:text-amber-300">
-                            <Bell className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-                            <span className="font-bold">Só para você:</span>
+                          <div className={cn(
+                            "mt-1 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px]",
+                            cardSummary.todayDue.isReminderOverdue
+                              ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                          )}>
+                            <Bell className={cn("h-3 w-3 shrink-0", cardSummary.todayDue.isReminderOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
+                            <span className="font-bold">{cardSummary.todayDue.isReminderOverdue ? "Venceu:" : "Só para você:"}</span>
                             <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
                           </div>
                         )}
@@ -2760,45 +2835,195 @@ export default function WhatsAppInbox({
 
                   {/* Card de Lembrete Pessoal Pendente no Dossiê */}
                   {pendingReminder && (
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200 flex items-start justify-between gap-2 shadow-2xs">
+                    <div
+                      className={cn(
+                        "rounded-xl border p-2.5 text-xs flex items-start justify-between gap-2 shadow-2xs",
+                        pendingReminder.isOverdue
+                          ? "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-200"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200"
+                      )}
+                    >
                       <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
-                          <Bell className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <div
+                          className={cn(
+                            "flex items-center gap-1.5 font-bold",
+                            pendingReminder.isOverdue
+                              ? "text-rose-800 dark:text-rose-300"
+                              : "text-amber-800 dark:text-amber-300"
+                          )}
+                        >
+                          <Bell
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0",
+                              pendingReminder.isOverdue
+                                ? "text-rose-600 dark:text-rose-400"
+                                : "text-amber-600 dark:text-amber-400"
+                            )}
+                          />
+                          {pendingReminder.isOverdue && (
+                            <span className="rounded bg-rose-600 px-1 py-0.5 text-[9px] font-extrabold uppercase text-white tracking-wider shrink-0">
+                              Venceu
+                            </span>
+                          )}
                           <span className="truncate">{pendingReminder.title}</span>
                         </div>
                         {pendingReminder.notes && (
-                          <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 line-clamp-2">
+                          <p
+                            className={cn(
+                              "text-[11px] line-clamp-2",
+                              pendingReminder.isOverdue
+                                ? "text-rose-700/80 dark:text-rose-300/80"
+                                : "text-amber-700/80 dark:text-amber-300/80"
+                            )}
+                          >
                             {pendingReminder.notes}
                           </p>
                         )}
-                        <div className="flex items-center gap-2 text-[10px] text-amber-600 dark:text-amber-400 pt-0.5 font-mono">
+                        <div
+                          className={cn(
+                            "flex items-center gap-2 text-[10px] pt-0.5 font-mono",
+                            pendingReminder.isOverdue
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "text-amber-600 dark:text-amber-400"
+                          )}
+                        >
                           <span>📅 {formatScheduleDate(pendingReminder.remindAt)}</span>
                           {pendingReminder.assignedToName && (
                             <span>· 👤 {pendingReminder.assignedToName}</span>
                           )}
                         </div>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={async () => {
-                          try {
-                            await completeLeadReminder.mutateAsync(pendingReminder.id);
-                            toast.success("Lembrete concluído!");
-                          } catch (err: any) {
-                            toast.error(err?.message || "Erro ao concluir lembrete.");
-                          }
-                        }}
-                        disabled={completeLeadReminder.isPending}
-                        className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white border-none shrink-0 cursor-pointer gap-1 shadow-2xs"
-                        title="Concluir lembrete em 1 clique"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        Concluir
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              await completeLeadReminder.mutateAsync(pendingReminder.id);
+                              toast.success("Lembrete concluído!");
+                            } catch (err: any) {
+                              toast.error(err?.message || "Erro ao concluir lembrete.");
+                            }
+                          }}
+                          disabled={completeLeadReminder.isPending}
+                          className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white border-none shrink-0 cursor-pointer gap-1 shadow-2xs"
+                          title="Concluir lembrete em 1 clique"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Concluir
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+                              title="Opções do lembrete"
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-32">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setEditingReminder(pendingReminder);
+                                setIsCreateReminderModalOpen(true);
+                              }}
+                              className="cursor-pointer text-xs flex items-center gap-2"
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>Editar</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={async () => {
+                                if (window.confirm("Deseja realmente excluir este lembrete?")) {
+                                  try {
+                                    await deleteLeadReminder.mutateAsync(pendingReminder.id);
+                                    toast.success("Lembrete excluído!");
+                                  } catch (err: any) {
+                                    toast.error(err?.message || "Erro ao excluir lembrete.");
+                                  }
+                                }
+                              }}
+                              className="cursor-pointer text-xs flex items-center gap-2 text-rose-600 focus:text-rose-600"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Excluir</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
                   )}
+
+                  {/* Seção de Lembretes Concluídos com Desfazer */}
+                  <div className="pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowCompletedReminders((prev) => !prev)}
+                      className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1"
+                    >
+                      {showCompletedReminders ? (
+                        <ChevronDown className="h-3 w-3" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3" />
+                      )}
+                      <span>Lembretes concluídos</span>
+                    </button>
+
+                    {showCompletedReminders && (
+                      <div className="mt-1 space-y-1.5 pl-1">
+                        {completedRemindersQuery.isLoading ? (
+                          <div className="text-[10px] text-muted-foreground p-1">Carregando concluídos...</div>
+                        ) : completedReminders.length === 0 ? (
+                          <div className="text-[10px] text-muted-foreground italic p-1">
+                            Nenhum lembrete concluído para este contato.
+                          </div>
+                        ) : (
+                          completedReminders.map((r) => (
+                            <div
+                              key={r.id}
+                              className="rounded-lg border border-border/40 bg-muted/20 p-2 text-xs flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0 flex-1 space-y-0.5 opacity-80">
+                                <div className="flex items-center gap-1.5 font-medium line-through text-muted-foreground text-[11px]">
+                                  <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                                  <span className="truncate">{r.title}</span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground font-mono">
+                                  Concluído {r.completedAt ? formatScheduleDate(r.completedAt) : ""}
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={async () => {
+                                  try {
+                                    await updateLeadReminder.mutateAsync({
+                                      id: r.id,
+                                      status: "pending",
+                                    });
+                                    toast.success("Lembrete reaberto com sucesso!");
+                                  } catch (err: any) {
+                                    toast.error(err?.message || "Erro ao reabrir lembrete.");
+                                  }
+                                }}
+                                disabled={updateLeadReminder.isPending}
+                                className="h-6 px-2 text-[10px] font-semibold text-muted-foreground hover:text-foreground rounded cursor-pointer gap-1"
+                                title="Desfazer conclusão e mover de volta para pendente"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Desfazer
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Ações de Agendamento com Estado e Lembrete Pessoal */}
                   {activeSchedule ? (
@@ -2897,7 +3122,10 @@ export default function WhatsAppInbox({
 
       <CreateLeadReminderModal
         open={isCreateReminderModalOpen}
-        onOpenChange={setIsCreateReminderModalOpen}
+        onOpenChange={(open) => {
+          setIsCreateReminderModalOpen(open);
+          if (!open) setEditingReminder(null);
+        }}
         lead={{
           id: matchedLead?.id,
           nome: matchedLead?.nome || selectedChat?.name || "Lead",
@@ -2905,6 +3133,7 @@ export default function WhatsAppInbox({
         }}
         clientId={clientId}
         operatorOptions={operatorOptions}
+        initialReminder={editingReminder}
       />
 
       <ApplyFollowupModal

@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { useCreateLeadReminder } from "@/hooks/useLeadReminders";
+import { useCreateLeadReminder, useUpdateLeadReminder, type LeadReminder } from "@/hooks/useLeadReminders";
 import { Bell, Calendar, Clock, User, ShieldAlert } from "lucide-react";
 
 interface CreateLeadReminderModalProps {
@@ -40,6 +40,7 @@ interface CreateLeadReminderModalProps {
     displayName?: string | null;
     email?: string | null;
   }>;
+  initialReminder?: LeadReminder | null;
 }
 
 function formatLocalDateTime(date: Date): string {
@@ -97,9 +98,11 @@ export function CreateLeadReminderModal({
   lead,
   clientId,
   operatorOptions = [],
+  initialReminder,
 }: CreateLeadReminderModalProps) {
   const { user } = useAuth();
   const createReminder = useCreateLeadReminder(clientId);
+  const updateReminder = useUpdateLeadReminder(clientId);
 
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -114,14 +117,22 @@ export function CreateLeadReminderModal({
 
   useEffect(() => {
     if (open) {
-      setTitle("");
-      setNotes("");
-      const defaultDate = new Date(Date.now() + 60 * 60 * 1000);
-      setDateTime(formatLocalDateTime(defaultDate));
-      setSelectedShortcutIndex(null);
-      setAssignedToUid("me");
+      if (initialReminder) {
+        setTitle(initialReminder.title);
+        setNotes(initialReminder.notes || "");
+        setDateTime(formatLocalDateTime(new Date(initialReminder.remindAt)));
+        setSelectedShortcutIndex(null);
+        setAssignedToUid(initialReminder.assignedToUid || "me");
+      } else {
+        setTitle("");
+        setNotes("");
+        const defaultDate = new Date(Date.now() + 60 * 60 * 1000);
+        setDateTime(formatLocalDateTime(defaultDate));
+        setSelectedShortcutIndex(null);
+        setAssignedToUid("me");
+      }
     }
-  }, [open, lead?.phone]);
+  }, [open, initialReminder, lead?.phone]);
 
   const leadName = lead?.nome || "Lead";
   const rawPhone = lead?.phone || "";
@@ -173,27 +184,44 @@ export function CreateLeadReminderModal({
     }
 
     try {
-      await createReminder.mutateAsync({
-        clientId: clientId || undefined,
-        leadId: lead?.id,
-        phone: rawPhone,
-        leadName,
-        title: title.trim(),
-        notes: notes.trim() || null,
-        remindAt: d.toISOString(),
-        assignedToUid: targetUid,
-        assignedToName: targetName,
-      });
+      if (initialReminder) {
+        await updateReminder.mutateAsync({
+          id: initialReminder.id,
+          clientId: clientId || undefined,
+          title: title.trim(),
+          notes: notes.trim() || null,
+          remindAt: d.toISOString(),
+          assignedToUid: targetUid,
+          assignedToName: targetName,
+        });
 
-      toast({
-        title: "Lembrete criado",
-        description: "O lembrete pessoal foi registrado com sucesso.",
-      });
+        toast({
+          title: "Lembrete atualizado",
+          description: "O lembrete pessoal foi alterado com sucesso.",
+        });
+      } else {
+        await createReminder.mutateAsync({
+          clientId: clientId || undefined,
+          leadId: lead?.id,
+          phone: rawPhone,
+          leadName,
+          title: title.trim(),
+          notes: notes.trim() || null,
+          remindAt: d.toISOString(),
+          assignedToUid: targetUid,
+          assignedToName: targetName,
+        });
+
+        toast({
+          title: "Lembrete criado",
+          description: "O lembrete pessoal foi registrado com sucesso.",
+        });
+      }
 
       onOpenChange(false);
     } catch (err) {
       toast({
-        title: "Erro ao criar lembrete",
+        title: initialReminder ? "Erro ao atualizar lembrete" : "Erro ao criar lembrete",
         description: err instanceof Error ? err.message : "Falha ao gravar lembrete.",
         variant: "destructive",
       });
@@ -209,7 +237,9 @@ export function CreateLeadReminderModal({
               <Bell className="h-5 w-5" />
             </div>
             <div>
-              <DialogTitle className="text-base font-bold">Criar Lembrete Pessoal</DialogTitle>
+              <DialogTitle className="text-base font-bold">
+                {initialReminder ? "Editar Lembrete Pessoal" : "Criar Lembrete Pessoal"}
+              </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Para <strong>{leadName}</strong> ({rawPhone})
               </DialogDescription>
@@ -335,11 +365,15 @@ export function CreateLeadReminderModal({
           <Button
             type="button"
             size="sm"
-            disabled={createReminder.isPending || !title.trim() || !dateTime}
+            disabled={createReminder.isPending || updateReminder.isPending || !title.trim() || !dateTime}
             onClick={handleSave}
             className="bg-amber-600 hover:bg-amber-700 text-white text-xs gap-1.5 shadow-sm"
           >
-            {createReminder.isPending ? "Salvando..." : "Salvar Lembrete"}
+            {createReminder.isPending || updateReminder.isPending
+              ? "Salvando..."
+              : initialReminder
+              ? "Salvar Alterações"
+              : "Salvar Lembrete"}
           </Button>
         </DialogFooter>
       </DialogContent>

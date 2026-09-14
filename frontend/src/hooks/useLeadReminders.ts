@@ -26,6 +26,7 @@ export interface LeadReminder {
   createdAt: string;
   updatedAt?: string;
   isDueTodayOrOverdue?: boolean;
+  isOverdue?: boolean;
   isForCurrentUser?: boolean;
 }
 
@@ -39,6 +40,7 @@ export interface InboxSummaryItem {
     hasReminderToday: boolean;
     reminderTitle: string | null;
     reminderAt: string | null;
+    isReminderOverdue?: boolean;
   } | null;
 }
 
@@ -191,3 +193,109 @@ export function useDeleteLeadReminder(clientId: string | null | undefined) {
     },
   });
 }
+
+/**
+ * Hook para listar lembretes pessoais com filtros (ex: status = 'completed' ou 'pending').
+ */
+export function useLeadReminders(
+  clientId: string | null | undefined,
+  phone?: string | null,
+  status: "pending" | "completed" = "pending"
+) {
+  const { isAuthenticated, getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["lead-reminders", clientId, phone, status],
+    enabled: isAuthenticated && Boolean(clientId),
+    queryFn: async (): Promise<LeadReminder[]> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const params = new URLSearchParams({
+        clientId: clientId || "",
+        status,
+      });
+      if (phone) params.set("phone", phone);
+
+      const res = await fetchApi(`/api/reminders?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao listar lembretes"));
+      }
+
+      const json = await readApiJson<{ success: boolean; items: any[] }>(res, "list_reminders");
+      return (json.items || []).map((item) => ({
+        id: item.id,
+        clientId: item.clientId || item.client_id,
+        leadId: item.leadId || item.lead_id || null,
+        phone: item.phone,
+        leadName: item.leadName || item.lead_name || null,
+        title: item.title,
+        notes: item.notes || null,
+        remindAt: item.remindAt || item.remind_at,
+        assignedToUid: item.assignedToUid || item.assigned_to_uid,
+        assignedToName: item.assignedToName || item.assigned_to_name || null,
+        createdByUid: item.createdByUid || item.created_by_uid,
+        createdByName: item.createdByName || item.created_by_name || null,
+        status: item.status,
+        completedAt: item.completedAt || item.completed_at || null,
+        completedByUid: item.completedByUid || item.completed_by_uid || null,
+        createdAt: item.createdAt || item.created_at,
+        updatedAt: item.updatedAt || item.updated_at,
+        isDueTodayOrOverdue: Boolean(item.isDueTodayOrOverdue ?? item.is_due_today_or_overdue),
+        isOverdue: Boolean(item.isOverdue ?? item.is_overdue),
+      }));
+    },
+    staleTime: 5000,
+  });
+}
+
+export interface UpdateLeadReminderPayload {
+  id: string;
+  clientId?: string;
+  title?: string;
+  notes?: string | null;
+  remindAt?: string;
+  assignedToUid?: string | null;
+  assignedToName?: string | null;
+  status?: "pending" | "completed";
+}
+
+/**
+ * Hook para atualizar título, anotações, data ou status (desfazer/reabrir) de um lembrete.
+ */
+export function useUpdateLeadReminder(clientId: string | null | undefined) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: UpdateLeadReminderPayload) => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const { id, ...data } = payload;
+      const res = await fetchApi(`/api/reminders/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ...data, clientId: data.clientId || clientId }),
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao atualizar lembrete"));
+      }
+
+      return readApiJson<{ success: boolean; reminder: any }>(res, "update_reminder");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["lead-reminders"] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
+  });
+}
+

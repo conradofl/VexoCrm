@@ -127,6 +127,9 @@ export function registerRemindersRoutes(app, deps) {
             (lr.remind_at AT TIME ZONE 'America/Sao_Paulo') < date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo') + interval '1 day'
           ) AS is_due_today_or_overdue,
           (
+            lr.remind_at < NOW()
+          ) AS is_overdue,
+          (
             lr.assigned_to_uid = ANY($2)
             OR (lr.assigned_to_uid IS NULL AND lr.created_by_uid = ANY($2))
           ) AS is_for_current_user
@@ -249,6 +252,7 @@ export function registerRemindersRoutes(app, deps) {
           status: row.status,
           createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
           isDueTodayOrOverdue: Boolean(row.is_due_today_or_overdue),
+          isOverdue: Boolean(row.is_overdue),
           isForCurrentUser: Boolean(row.is_for_current_user),
         };
 
@@ -262,12 +266,14 @@ export function registerRemindersRoutes(app, deps) {
               hasReminderToday: true,
               reminderTitle: row.title,
               reminderAt: row.remind_at ? new Date(row.remind_at).toISOString() : null,
+              isReminderOverdue: Boolean(row.is_overdue),
             };
           } else {
             itemsByPhone[phone].todayDue.hasReminderToday = true;
             if (!itemsByPhone[phone].todayDue.reminderTitle) {
               itemsByPhone[phone].todayDue.reminderTitle = row.title;
               itemsByPhone[phone].todayDue.reminderAt = row.remind_at ? new Date(row.remind_at).toISOString() : null;
+              itemsByPhone[phone].todayDue.isReminderOverdue = Boolean(row.is_overdue);
             }
           }
         }
@@ -313,7 +319,8 @@ export function registerRemindersRoutes(app, deps) {
            id, client_id, lead_id, phone, lead_name, title, notes,
            remind_at, assigned_to_uid, assigned_to_name,
            created_by_uid, created_by_name, status,
-           completed_at, completed_by_uid, created_at, updated_at
+           completed_at, completed_by_uid, created_at, updated_at,
+           (remind_at < NOW()) AS is_overdue
          FROM public.lead_reminders
          WHERE client_id = $1 AND status = $2 ${phoneFilter}
          ORDER BY remind_at ASC`,
@@ -475,6 +482,25 @@ export function registerRemindersRoutes(app, deps) {
       updates.push(`assigned_to_uid = $${params.length}`);
       params.push(assignedToName);
       updates.push(`assigned_to_name = $${params.length}`);
+    }
+
+    if (body.status !== undefined) {
+      const status = normalizeString(body.status);
+      if (status !== "pending" && status !== "completed") {
+        return sendError(res, 400, "INVALID_STATUS", "Status deve ser 'pending' ou 'completed'.");
+      }
+      params.push(status);
+      updates.push(`status = $${params.length}`);
+
+      if (status === "pending") {
+        updates.push("completed_at = NULL");
+        updates.push("completed_by_uid = NULL");
+      } else if (status === "completed") {
+        const userUid = req.authAccess?.uid || req.authUser?.uid || null;
+        params.push(userUid);
+        updates.push("completed_at = NOW()");
+        updates.push(`completed_by_uid = $${params.length}`);
+      }
     }
 
     if (!updates.length) {
