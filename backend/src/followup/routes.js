@@ -12,6 +12,7 @@ import {
   enrollLead,
   cancelPendingJobsForCampaign,
   validateTemplatePayload,
+  getAnchorFieldsMetadata,
 } from "./service.js";
 import { getAnalytics } from "./analyticsService.js";
 import { getFollowupQueue } from "./queue.js";
@@ -823,6 +824,16 @@ function normalizeInstanceList(list, fallback) {
       console.error("[followup/reminders] Erro ao criar lembrete avulso:", err);
       return sendErr(res, 500, "REMINDER_CREATE_FAILED", err.message);
     }
+  });
+
+  // ── Âncoras ──────────────────────────────────────────────────────────────
+
+  // GET /api/followup/anchor-fields
+  router.get("/anchor-fields", requireFirebaseAuth, requireInternalPageAccess("planilhas"), (req, res) => {
+    return res.json({
+      success: true,
+      fields: getAnchorFieldsMetadata(),
+    });
   });
 
   // ── Templates ─────────────────────────────────────────────────────────────

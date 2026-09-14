@@ -20,6 +20,27 @@ export const ANCHOR_FIELDS = {
   data_nascimento: { source: "lead", recurring: true },
 };
 
+export const ANCHOR_FIELD_METADATA = {
+  meeting_datetime: {
+    label: "Data da reunião",
+    description: "Data e horário agendados para a reunião",
+  },
+  data_nascimento: {
+    label: "Aniversário",
+    description: "Data de nascimento buscada automaticamente no cadastro do lead",
+  },
+};
+
+export function getAnchorFieldsMetadata() {
+  return Object.entries(ANCHOR_FIELDS).map(([key, config]) => ({
+    key,
+    label: ANCHOR_FIELD_METADATA[key]?.label || key,
+    source: config.source,
+    recurring: config.recurring,
+    description: ANCHOR_FIELD_METADATA[key]?.description || "",
+  }));
+}
+
 export function isValidAnchorField(field) {
   return typeof field === "string" && Object.prototype.hasOwnProperty.call(ANCHOR_FIELDS, field);
 }

@@ -34,6 +34,16 @@ describe("Cadence Trigger Types & Modal Validation", () => {
     expect(modalSource).toContain("toast.error");
   });
 
+  it("exposes anchor trigger options, whitelist selector and scheduled_time in CadenceEditor", () => {
+    expect(cadenceEditorSource).toContain('"before_anchor"');
+    expect(cadenceEditorSource).toContain('"X antes de uma data do lead"');
+    expect(cadenceEditorSource).toContain('"after_anchor"');
+    expect(cadenceEditorSource).toContain('"X depois de uma data do lead"');
+    expect(cadenceEditorSource).toContain("buscada automaticamente no cadastro do lead");
+    expect(cadenceEditorSource).toContain("Enviar às (opcional)");
+    expect(cadenceEditorSource).toContain("Linha do tempo da cadência");
+  });
+
   it("FollowupQueue keeps event journeys hidden while preserving the component", () => {
     expect(followupQueueSource).toContain("FollowUpJourneys");
     expect(followupQueueSource).toContain("false as boolean && isSectionAllowed");

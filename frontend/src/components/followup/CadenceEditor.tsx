@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2, ArrowUp, ArrowDown, Play, Pause, Loader2, MessageSquarePlus, ListPlus } from "lucide-react";
+import { Plus, Trash2, ArrowUp, ArrowDown, Play, Pause, Loader2, MessageSquarePlus, ListPlus, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,10 +23,13 @@ import {
   useCreateFupTemplate,
   useDeleteFupTemplate,
   useReorderFupTemplates,
+  useAnchorFields,
   type FupTemplate,
+  type AnchorFieldOption,
 } from "@/hooks/useFollowupAdmin";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
+import { describeStep as formatStepDescription, isTimeOutsideSendWindow } from "@/lib/followup/describeStep";
 
 // Editor de cadências de follow-up (objetivo: dar onde criar as cadências reutilizáveis
 // que o Banco de Dados aplica). Uma cadência = passos (templates), cada passo = mensagem +
@@ -76,6 +79,20 @@ const TRIGGER_OPTIONS: {
     needsValue: true,
     requiresMeetingDate: true,
   },
+  {
+    value: "before_anchor",
+    label: "X antes de uma data do lead",
+    shortLabel: "antes de data do lead",
+    needsValue: true,
+    requiresMeetingDate: false,
+  },
+  {
+    value: "after_anchor",
+    label: "X depois de uma data do lead",
+    shortLabel: "depois de data do lead",
+    needsValue: true,
+    requiresMeetingDate: false,
+  },
 ];
 
 function unitLabel(unit: string) {
@@ -84,11 +101,8 @@ function unitLabel(unit: string) {
   return "dias";
 }
 
-function describeStep(step: FupTemplate) {
-  const opt = TRIGGER_OPTIONS.find((o) => o.value === step.trigger_type);
-  if (!opt) return "";
-  if (!opt.needsValue) return opt.label;
-  return `${step.trigger_value} ${unitLabel(step.trigger_unit)} — ${opt.label}`;
+function describeStep(step: FupTemplate, anchorFields?: AnchorFieldOption[]) {
+  return formatStepDescription(step, anchorFields);
 }
 
 export default function CadenceEditor({ companyId }: { companyId: string }) {
@@ -121,12 +135,21 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const deleteStep = useDeleteFupTemplate();
   const reorderSteps = useReorderFupTemplates();
 
+  const { data: anchorFields = [] } = useAnchorFields();
+
   // Form de novo passo
   const [stepName, setStepName] = useState("");
   const [stepMessage, setStepMessage] = useState("");
   const [stepTrigger, setStepTrigger] = useState<TriggerType>("after_enrollment");
   const [stepValue, setStepValue] = useState<number>(1);
   const [stepUnit, setStepUnit] = useState<"minutes" | "hours" | "days">("days");
+  const [stepScheduledTime, setStepScheduledTime] = useState<string>("");
+  const [stepAnchorField, setStepAnchorField] = useState<string>("data_nascimento");
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const windowStart = selectedCrmClient?.n8n_settings?.send_window_start || "08:00";
+  const windowEnd = selectedCrmClient?.n8n_settings?.send_window_end || "18:00";
+  const isOutsideWindow = isTimeOutsideSendWindow(stepScheduledTime, windowStart, windowEnd);
 
   const triggerOpt = TRIGGER_OPTIONS.find((o) => o.value === stepTrigger)!;
 
@@ -193,6 +216,7 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
       toast.error("Escreva a mensagem do passo.");
       return;
     }
+    const isAnchor = stepTrigger === "before_anchor" || stepTrigger === "after_anchor";
     try {
       await createStep.mutateAsync({
         campaign_id: selected.id,
@@ -201,12 +225,20 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
         trigger_type: stepTrigger,
         trigger_value: triggerOpt.needsValue ? Number(stepValue) || 0 : 0,
         trigger_unit: stepUnit,
-        trigger_direction: stepTrigger === "before_meeting" ? "before" : stepTrigger === "after_meeting" ? "after" : null,
+        trigger_direction:
+          stepTrigger === "before_meeting" || stepTrigger === "before_anchor"
+            ? "before"
+            : stepTrigger === "after_meeting" || stepTrigger === "after_anchor"
+            ? "after"
+            : null,
+        scheduled_time: stepScheduledTime || null,
+        anchor_field: isAnchor ? (stepAnchorField || "data_nascimento") : null,
         is_active: true,
         order_index: orderedSteps.length,
       });
       setStepName("");
       setStepMessage("");
+      setStepScheduledTime("");
       toast.success("Passo adicionado.");
     } catch {
       toast.error("Falha ao adicionar o passo.");
@@ -218,6 +250,22 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
     if (target < 0 || target >= orderedSteps.length || !selected) return;
     const reordered = [...orderedSteps];
     [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    try {
+      await reorderSteps.mutateAsync({
+        campaign_id: selected.id,
+        items: reordered.map((s, i) => ({ id: s.id, order_index: i })),
+      });
+    } catch {
+      toast.error("Falha ao reordenar.");
+    }
+  }
+
+  async function handleDrop(targetIndex: number) {
+    if (draggedIndex === null || draggedIndex === targetIndex || !selected) return;
+    const reordered = [...orderedSteps];
+    const [removed] = reordered.splice(draggedIndex, 1);
+    reordered.splice(targetIndex, 0, removed);
+    setDraggedIndex(null);
     try {
       await reorderSteps.mutateAsync({
         campaign_id: selected.id,
@@ -312,39 +360,149 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
             </CardContent>
           </Card>
 
-          {/* Passos existentes */}
+          {/* Passos existentes em linha do tempo vertical */}
           <Card>
-            <CardContent className="p-4 space-y-2">
-              <p className="text-sm font-semibold">Passos da cadência</p>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold">Linha do tempo da cadência</p>
+                <span className="text-xs text-muted-foreground">
+                  {orderedSteps.length} passo(s) configurado(s)
+                </span>
+              </div>
+
               {orderedSteps.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Nenhum passo. Adicione o primeiro abaixo.</p>
+                <p className="text-xs text-muted-foreground">
+                  Nenhum passo adicionado. Monte o primeiro no formulário abaixo.
+                </p>
               ) : (
-                orderedSteps.map((step, index) => (
-                  <div key={step.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
-                    <Badge variant="outline" className="mt-0.5 shrink-0">{index + 1}</Badge>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{step.name || "Mensagem"}</p>
-                      <p className="text-xs text-indigo-600 dark:text-indigo-400">{describeStep(step)}</p>
-                      <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words">{step.message}</p>
-                    </div>
-                    <div className="flex flex-col gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => move(index, -1)} disabled={index === 0}>
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => move(index, 1)} disabled={index === orderedSteps.length - 1}>
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => deleteStep.mutateAsync({ id: step.id, campaign_id: selected.id }).catch(() => toast.error("Falha ao excluir passo."))}
+                <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-border">
+                  {orderedSteps.map((step, index) => {
+                    const isAnchor =
+                      step.trigger_type === "before_anchor" || step.trigger_type === "after_anchor";
+                    const isInactive = step.is_active === false;
+
+                    return (
+                      <div
+                        key={step.id}
+                        draggable
+                        onDragStart={() => setDraggedIndex(index)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => handleDrop(index)}
+                        className={`relative rounded-lg border transition-all ${
+                          isInactive
+                            ? "opacity-60 bg-muted/20 border-dashed border-border"
+                            : isAnchor
+                            ? "bg-card border-purple-500/30 hover:border-purple-500/50 shadow-sm"
+                            : "bg-card border-border hover:border-border/80 shadow-sm"
+                        }`}
                       >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    </div>
-                  </div>
-                ))
+                        {/* Timeline marker / nó */}
+                        <div
+                          className={`absolute -left-6 top-3.5 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full text-[10px] font-bold ring-4 ring-background ${
+                            isInactive
+                              ? "bg-muted-foreground text-background"
+                              : isAnchor
+                              ? "bg-purple-600 text-white"
+                              : "bg-indigo-600 text-white"
+                          }`}
+                        >
+                          {index + 1}
+                        </div>
+
+                        <div className="p-3.5 space-y-2">
+                          {/* Header do passo com o quando em destaque à esquerda */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-foreground">
+                                {step.name || `Passo ${index + 1}`}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] font-semibold ${
+                                  isAnchor
+                                    ? "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                                    : "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30"
+                                }`}
+                              >
+                                {describeStep(step, anchorFields)}
+                              </Badge>
+                              {isAnchor && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                                >
+                                  ⚡ Automático
+                                </Badge>
+                              )}
+                              {step.scheduled_time && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] text-muted-foreground"
+                                >
+                                  🕒 {step.scheduled_time}
+                                </Badge>
+                              )}
+                              {isInactive && (
+                                <Badge variant="outline" className="text-[9px] text-muted-foreground">
+                                  Inativo
+                                </Badge>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
+                                title="Arraste para reordenar"
+                              >
+                                <GripVertical className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => move(index, -1)}
+                                disabled={index === 0}
+                                title="Mover para cima"
+                              >
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => move(index, 1)}
+                                disabled={index === orderedSteps.length - 1}
+                                title="Mover para baixo"
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() =>
+                                  deleteStep
+                                    .mutateAsync({ id: step.id, campaign_id: selected.id })
+                                    .catch(() => toast.error("Falha ao excluir passo."))
+                                }
+                                title="Excluir passo"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Mensagem no corpo do cartão */}
+                          <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words bg-muted/20 p-2.5 rounded-md">
+                            {step.message}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -400,6 +558,55 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                   </>
                 )}
               </div>
+
+              {/* Seletor de âncora se for gatilho de âncora */}
+              {(stepTrigger === "before_anchor" || stepTrigger === "after_anchor") && (
+                <div className="space-y-1.5 p-3 rounded-md bg-purple-500/5 border border-purple-500/20">
+                  <Label className="text-xs font-semibold text-purple-900 dark:text-purple-200">Qual data do lead</Label>
+                  <Select value={stepAnchorField} onValueChange={setStepAnchorField}>
+                    <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {anchorFields.length > 0 ? (
+                        anchorFields.map((f) => (
+                          <SelectItem key={f.key} value={f.key}>
+                            {f.label}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <>
+                          <SelectItem value="data_nascimento">Aniversário do lead</SelectItem>
+                          <SelectItem value="meeting_datetime">Data da reunião</SelectItem>
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    buscada automaticamente no cadastro do lead
+                  </p>
+                </div>
+              )}
+
+              {/* Hora fixa (opcional para qualquer passo) */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Enviar às (opcional)</Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="time"
+                    value={stepScheduledTime}
+                    onChange={(e) => setStepScheduledTime(e.target.value)}
+                    className="w-32"
+                  />
+                  <span className="text-[11px] text-muted-foreground">
+                    Vazio = horário flexível pelo cálculo. Preenchido = fixa o horário do disparo.
+                  </span>
+                </div>
+                {isOutsideWindow && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                    Fora da janela ({windowStart}–{windowEnd}). Será enviado na próxima abertura.
+                  </p>
+                )}
+              </div>
+
               <p className="text-[11px] text-muted-foreground">
                 Dica: passos que exigem data-alvo dependem de informar a data da reunião/evento ao aplicar a cadência. Para lembretes pós-cadastro (ex: 2h ou 2 dias após a entrada), use "X depois da inscrição".
               </p>

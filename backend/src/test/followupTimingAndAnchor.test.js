@@ -20,6 +20,7 @@ vi.mock("../followup/queue.js", () => ({
 
 import {
   ANCHOR_FIELDS,
+  getAnchorFieldsMetadata,
   calcScheduledFor,
   isValidAnchorField,
   projectNextRecurringDate,
@@ -163,6 +164,65 @@ describe("PARTE 2B — Follow-up: Timing Fixo (scheduled_time) e Campos Âncora"
         expect.objectContaining({
           success: false,
           error: expect.objectContaining({ code: "INVALID_ANCHOR_FIELD" }),
+        })
+      );
+    });
+
+    it("getAnchorFieldsMetadata exporta lista de âncoras com rótulo e descrição para o frontend", () => {
+      const meta = getAnchorFieldsMetadata();
+      expect(meta).toHaveLength(2);
+      expect(meta).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "meeting_datetime",
+            label: "Data da reunião",
+            source: "schedule",
+            recurring: false,
+          }),
+          expect.objectContaining({
+            key: "data_nascimento",
+            label: "Aniversário",
+            source: "lead",
+            recurring: true,
+          }),
+        ])
+      );
+    });
+
+    it("GET rota /api/followup/anchor-fields devolve lista de âncoras para preencher seletor", async () => {
+      let followupRouter = null;
+      const fakeApp = {
+        use: (path, router) => {
+          if (path === "/api/followup") followupRouter = router;
+        },
+        get: vi.fn(),
+        post: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+      };
+      const noop = (req, res, next) => next?.();
+      registerFollowupRoutes(fakeApp, noop, () => noop, () => noop);
+
+      const routeLayer = followupRouter.stack.find(
+        (layer) => layer.route && layer.route.path === "/anchor-fields" && layer.route.methods.get
+      );
+      expect(routeLayer).toBeDefined();
+
+      const getHandler = routeLayer.route.stack[routeLayer.route.stack.length - 1].handle;
+      const req = {};
+      const res = {
+        json: vi.fn(),
+      };
+
+      await getHandler(req, res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          fields: expect.arrayContaining([
+            expect.objectContaining({ key: "data_nascimento", label: "Aniversário" }),
+            expect.objectContaining({ key: "meeting_datetime", label: "Data da reunião" }),
+          ]),
         })
       );
     });

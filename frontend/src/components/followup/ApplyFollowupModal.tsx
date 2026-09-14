@@ -45,6 +45,12 @@ interface FollowupCadence {
   status: string;
 }
 
+import {
+  describeStep,
+  getStepPreview as sharedGetStepPreview,
+  requiresTargetDate,
+} from "@/lib/followup/describeStep";
+
 interface FollowupStep {
   id: string;
   name: string | null;
@@ -52,6 +58,8 @@ interface FollowupStep {
   trigger_type: string;
   trigger_value: number;
   trigger_unit: string;
+  scheduled_time?: string | null;
+  anchor_field?: string | null;
   order_index: number;
 }
 
@@ -64,113 +72,9 @@ interface Props {
   getToken: () => Promise<string | null>;
 }
 
-function unitLabel(unit: string) {
-  if (unit === "minutes") return "min";
-  if (unit === "hours") return "h";
-  return "dias";
-}
-
-function toMs(value: number, unit: string) {
-  const v = Number(value) || 0;
-  if (unit === "minutes") return v * 60 * 1000;
-  if (unit === "hours") return v * 60 * 60 * 1000;
-  return v * 24 * 60 * 60 * 1000;
-}
-
-function formatDateTime(d: Date) {
-  const date = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return `${date} às ${time}`;
-}
-
-function describeStep(step: FollowupStep) {
-  switch (step.trigger_type) {
-    case "on_schedule":
-      return "na hora da inscrição (imediato)";
-    case "after_enrollment":
-      return `${step.trigger_value} ${unitLabel(step.trigger_unit)} após a inscrição (incondicional)`;
-    case "no_reply":
-      return `${step.trigger_value} ${unitLabel(step.trigger_unit)} após a inscrição (se sem resposta)`;
-    case "before_meeting":
-      return `${step.trigger_value} ${unitLabel(step.trigger_unit)} ANTES da data-alvo`;
-    case "after_meeting":
-      return `${step.trigger_value} ${unitLabel(step.trigger_unit)} DEPOIS da data-alvo`;
-    default:
-      return "";
-  }
-}
-
+// getStepPreview unificado via lib/followup/describeStep ("warning_past" / "Horário já passou" / "warning_no_date")
 function getStepPreview(step: FollowupStep, meetingDatetime: string) {
-  const deltaMs = toMs(step.trigger_value, step.trigger_unit);
-  const now = new Date();
-
-  if (step.trigger_type === "on_schedule") {
-    return {
-      type: "valid" as const,
-      badge: "Imediato",
-      message: "Disparo imediato ao aplicar.",
-    };
-  }
-
-  if (step.trigger_type === "after_enrollment") {
-    const target = new Date(now.getTime() + deltaMs);
-    return {
-      type: "valid" as const,
-      badge: "Agendado",
-      message: `Previsto para ${formatDateTime(target)} (${step.trigger_value} ${unitLabel(step.trigger_unit)} após inscrição).`,
-    };
-  }
-
-  if (step.trigger_type === "no_reply") {
-    const target = new Date(now.getTime() + deltaMs);
-    return {
-      type: "valid" as const,
-      badge: "Condicional",
-      message: `Previsto para ${formatDateTime(target)} (cancela se lead responder).`,
-    };
-  }
-
-  if (step.trigger_type === "before_meeting" || step.trigger_type === "after_meeting") {
-    if (!meetingDatetime) {
-      return {
-        type: "warning_no_date" as const,
-        badge: "Sem data-alvo",
-        message: "Exige data-alvo informada. Este passo será ignorado.",
-      };
-    }
-
-    const meetingTime = new Date(meetingDatetime).getTime();
-    if (isNaN(meetingTime)) {
-      return {
-        type: "warning_no_date" as const,
-        badge: "Data inválida",
-        message: "Data-alvo inválida.",
-      };
-    }
-
-    const targetTime = step.trigger_type === "before_meeting" ? meetingTime - deltaMs : meetingTime + deltaMs;
-    const targetDate = new Date(targetTime);
-
-    if (targetDate.getTime() <= now.getTime()) {
-      return {
-        type: "warning_past" as const,
-        badge: "Horário já passou",
-        message: `Cairia em ${formatDateTime(targetDate)}, que já passou. Nenhuma mensagem será agendada.`,
-      };
-    }
-
-    return {
-      type: "valid" as const,
-      badge: "Agendado",
-      message: `Previsto para ${formatDateTime(targetDate)}.`,
-    };
-  }
-
-  return {
-    type: "valid" as const,
-    badge: "Agendado",
-    message: "",
-  };
+  return sharedGetStepPreview(step, meetingDatetime);
 }
 
 export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads, apiBase, getToken }: Props) {
@@ -260,6 +164,7 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
   const stepPreviews = steps.map((s) => ({ step: s, preview: getStepPreview(s, meetingDatetime) }));
   const validStepsCount = stepPreviews.filter((p) => p.preview.type === "valid").length;
   const hasOnlySkippedSteps = steps.length > 0 && validStepsCount === 0;
+  const hasMeetingSteps = steps.some(requiresTargetDate);
 
   async function handleSubmit() {
     if (!cadenceId) {
@@ -407,14 +312,23 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
           )}
 
           <div className="space-y-1.5">
-            <Label>Data-alvo (reunião, evento, pagamento)</Label>
+            <div className="flex items-center justify-between">
+              <Label>Data-alvo (reunião, evento, pagamento)</Label>
+              {hasMeetingSteps && (
+                <Badge variant="outline" className="text-[10px] text-amber-600 dark:text-amber-400 border-amber-500/30">
+                  Obrigatória para esta cadência
+                </Badge>
+              )}
+            </div>
             <Input
               type="datetime-local"
               value={meetingDatetime}
               onChange={(e) => setMeetingDatetime(e.target.value)}
             />
             <p className="text-[11px] text-muted-foreground">
-              Opcional. Necessária apenas para passos "antes/depois da data-alvo". Passos calculados a partir da inscrição saem sem depender deste campo.
+              {hasMeetingSteps
+                ? "Necessária para os passos antes/depois da data-alvo desta cadência."
+                : "Opcional. Esta cadência não depende de data-alvo (passos calculados por inscrição ou aniversário buscam a data automaticamente)."}
             </p>
           </div>
 

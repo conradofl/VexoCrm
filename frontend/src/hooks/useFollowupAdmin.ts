@@ -70,10 +70,19 @@ export interface FupTemplate {
   campaign_id: string;
   name: string;
   message: string;
-  trigger_type: "on_schedule" | "after_enrollment" | "before_meeting" | "after_meeting" | "no_reply";
+  trigger_type:
+    | "on_schedule"
+    | "after_enrollment"
+    | "before_meeting"
+    | "after_meeting"
+    | "no_reply"
+    | "before_anchor"
+    | "after_anchor";
   trigger_value: number;
   trigger_unit: "minutes" | "hours" | "days";
   trigger_direction: "before" | "after" | null;
+  scheduled_time: string | null;
+  anchor_field: string | null;
   is_active: boolean;
   order_index: number;
   created_at: string;
@@ -325,6 +334,29 @@ export function useReorderFupTemplates() {
       }),
     onSuccess: (_, vars) =>
       qc.invalidateQueries({ queryKey: ["fup-templates", vars.campaign_id] }),
+  });
+}
+
+// ─── Âncoras ──────────────────────────────────────────────────────────────────
+
+export interface AnchorFieldOption {
+  key: string;
+  label: string;
+  source: string;
+  recurring: boolean;
+  description?: string;
+}
+
+export function useAnchorFields() {
+  const { isAuthenticated, getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["fup-anchor-fields"],
+    enabled: isAuthenticated,
+    queryFn: () =>
+      apiCall<{ fields: AnchorFieldOption[] }>("/api/followup/anchor-fields", getIdToken).then(
+        (r) => r.fields || []
+      ),
+    staleTime: 5 * 60 * 1000,
   });
 }
 
