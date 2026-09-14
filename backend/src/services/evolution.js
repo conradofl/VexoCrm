@@ -84,12 +84,13 @@ export function mergeEvolutionInstanceIntoSettings(settings, instance) {
 
 let _evolutionInstancesSchemaEnsured = false;
 
-export async function ensureLeadClientEvolutionInstancesTable() {
-  if (!pgDatabasePool) return false;
-  if (_evolutionInstancesSchemaEnsured) return true;
+export async function ensureLeadClientEvolutionInstancesTable(pool = null) {
+  const db = pool || pgDatabasePool;
+  if (!db) return false;
+  if (_evolutionInstancesSchemaEnsured && db === pgDatabasePool) return true;
 
   try {
-    await pgDatabasePool.query(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS public.leads_clients (
         id TEXT PRIMARY KEY,
         name TEXT,
@@ -97,7 +98,7 @@ export async function ensureLeadClientEvolutionInstancesTable() {
       )
     `).catch(() => {});
 
-    await pgDatabasePool.query(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS public.lead_client_evolution_instances (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         client_id TEXT NOT NULL,
@@ -119,33 +120,33 @@ export async function ensureLeadClientEvolutionInstancesTable() {
       )
     `);
 
-    await pgDatabasePool.query(`
+    await db.query(`
       ALTER TABLE public.lead_client_evolution_instances
         ADD COLUMN IF NOT EXISTS connection_state TEXT NOT NULL DEFAULT 'unknown'
     `).catch(() => {});
 
-    await pgDatabasePool.query(`
+    await db.query(`
       ALTER TABLE public.lead_client_evolution_instances
         ADD COLUMN IF NOT EXISTS owner_uid TEXT NULL
     `).catch(() => {});
 
-    await pgDatabasePool.query(`
+    await db.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_client_evolution_default
         ON public.lead_client_evolution_instances (client_id)
         WHERE is_default = true
     `).catch(() => {});
 
-    await pgDatabasePool.query(`
+    await db.query(`
       CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_client
         ON public.lead_client_evolution_instances (client_id, active)
     `).catch(() => {});
 
-    await pgDatabasePool.query(`
+    await db.query(`
       CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_owner_uid
         ON public.lead_client_evolution_instances (client_id, owner_uid)
     `).catch(() => {});
 
-    await pgDatabasePool.query(`
+    await db.query(`
       CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_usage (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         instance_id UUID NOT NULL,
@@ -155,13 +156,60 @@ export async function ensureLeadClientEvolutionInstancesTable() {
       )
     `).catch(() => {});
 
-    _evolutionInstancesSchemaEnsured = true;
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_limit_audit (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        instance_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        previous_limit INTEGER,
+        new_limit INTEGER,
+        changed_by_uid TEXT,
+        changed_by_email TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `).catch(() => {});
+
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_evolution_instance_daily_limit_audit_instance
+        ON public.evolution_instance_daily_limit_audit (instance_id, created_at DESC)
+    `).catch(() => {});
+
+    if (db === pgDatabasePool) {
+      _evolutionInstancesSchemaEnsured = true;
+    }
     return true;
   } catch (err) {
     console.warn("[evolution-instances] Table initialization warning:", err.message);
-    _evolutionInstancesSchemaEnsured = true;
+    if (db === pgDatabasePool) {
+      _evolutionInstancesSchemaEnsured = true;
+    }
     return true;
   }
+}
+
+export async function recordDailyLimitOverrideAudit(clientOrPool, {
+  instanceId,
+  clientId,
+  previousLimit,
+  newLimit,
+  changedByUid,
+  changedByEmail,
+}) {
+  if (!clientOrPool || !instanceId || !clientId) return false;
+  await clientOrPool.query(
+    `INSERT INTO public.evolution_instance_daily_limit_audit
+       (instance_id, client_id, previous_limit, new_limit, changed_by_uid, changed_by_email, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, now())`,
+    [
+      String(instanceId),
+      String(clientId),
+      previousLimit ?? null,
+      newLimit ?? null,
+      changedByUid || null,
+      changedByEmail || null,
+    ]
+  );
+  return true;
 }
 
 export function selectDefaultEvolutionInstance(instances = []) {
@@ -1041,8 +1089,12 @@ export async function configureEvolutionInstanceWebhook(clientId, dispatchWebhoo
   return true;
 }
 
-export async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, existing = null) {
-  if (!(await ensureLeadClientEvolutionInstancesTable())) {
+export async function upsertLeadClientEvolutionInstance(clientId, input, authAccess, existing = null, pool = null) {
+  const dbPool = pool || pgDatabasePool;
+  if (!dbPool) {
+    throw new Error("EVOLUTION_INSTANCES_UNAVAILABLE");
+  }
+  if (!(await ensureLeadClientEvolutionInstancesTable(dbPool))) {
     throw new Error("EVOLUTION_INSTANCES_UNAVAILABLE");
   }
 
@@ -1116,7 +1168,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
     updated_by_email: authAccess?.email || null,
   };
 
-  const client = await pgDatabasePool.connect();
+  const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
 
@@ -1216,6 +1268,23 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
 
     await client.query("COMMIT");
 
+    const previousLimit = existing?.daily_limit_override != null ? Number(existing.daily_limit_override) : null;
+    const newLimit = payload.daily_limit_override != null ? Number(payload.daily_limit_override) : null;
+    const savedInstanceId = result.rows[0]?.id || existing?.id;
+
+    if (savedInstanceId && newLimit !== previousLimit) {
+      await recordDailyLimitOverrideAudit(client, {
+        instanceId: String(savedInstanceId),
+        clientId,
+        previousLimit,
+        newLimit,
+        changedByUid: authAccess?.uid || null,
+        changedByEmail: authAccess?.email || null,
+      }).catch((auditErr) => {
+        console.warn("[evolution] Falha ao registrar auditoria de limite:", auditErr?.message || auditErr);
+      });
+    }
+
     // Configure the webhook remotely on Evolution API.
     // A assinatura é (clientId, dispatchWebhookUrl, dispatchWebhookToken, enabled) e a
     // função deriva o instanceName da própria URL. A chamada anterior passava
@@ -1250,7 +1319,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
 
     return result.rows[0] || null;
   } catch (error) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();

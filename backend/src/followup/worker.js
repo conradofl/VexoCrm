@@ -7,7 +7,7 @@
 //  - 3 tentativas com backoff de 30s; após todas: status "failed"
 import { Worker } from "bullmq";
 import { defaultGroqModel } from "../services/llmModels.js";
-import { query, getSupabase } from "./db.js";
+import { query, getSupabase, getPool } from "./db.js";
 import { QUEUE_NAME, getRedisConnection, getFollowupQueue } from "./queue.js";
 import Groq from "groq-sdk";
 import { ResendProvider } from "../providers/ResendProvider.js";
@@ -23,13 +23,32 @@ import {
   isWithinSendWindow,
   getNextSendWindowOpening,
   resolveSendWindowConfig,
+  createDateInTimezone,
+  getPartsInTimezone,
 } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
 import { isWonStage, isLostStage } from "../services/followupExitGuard.js";
+import {
+  resolveChipDailyLimit,
+  reserveChipDailyQuota,
+  releaseChipDailyQuota,
+  setChipQuotaDbPool,
+} from "../services/chipQuota.js";
+import { getDateKey } from "../services/analytics.js";
+import { pgDatabasePool } from "../services/database.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+
+export function getFollowupWorkerDbPool() {
+  try {
+    const p = getPool();
+    if (p) return p;
+  } catch {}
+  if (pgDatabasePool) return pgDatabasePool;
+  return null;
+}
 
 export async function resolveEvolutionInstanceForFollowup(tenantId, instanceNameOrId) {
   if (!tenantId) {
@@ -84,6 +103,8 @@ export async function resolveEvolutionInstanceForFollowup(tenantId, instanceName
     webhookUrl: matched.dispatch_webhook_url,
     apiKey,
     baseUrl,
+    rawInstance: matched,
+    instanceId: matched.id || instanceSlug,
   };
 }
 
@@ -96,7 +117,7 @@ function renderMessage(template, { lead_name, meeting_datetime, phone = "" }) {
   );
 }
 
-async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, text }) {
+export async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, text }) {
   const resolvedBaseUrl = (baseUrl || process.env.EVOLUTION_API_URL || "").replace(/\/$/, "");
   const resolvedApiKey = apiKey || process.env.EVOLUTION_API_KEY;
 
@@ -143,7 +164,7 @@ async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, text }) 
   }
 }
 
-async function processJob(job) {
+export async function processJob(job) {
   if (job.data.isMock) {
     console.log(`[followup/worker] Job processado (mock): ${job.id}`);
     return;
@@ -196,10 +217,11 @@ async function processJob(job) {
   }
 
   // Validação da janela de envio permitida do tenant
+  let sendWindowConfig = null;
   if (row.tenant_id) {
     try {
       const tenantSettings = await getLeadClientN8nSettings(row.tenant_id);
-      const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
+      sendWindowConfig = resolveSendWindowConfig(tenantSettings);
       if (!isWithinSendWindow(new Date(), sendWindowConfig)) {
         const nextOpening = getNextSendWindowOpening(new Date(), sendWindowConfig);
         const delay = Math.max(1000, nextOpening.getTime() - Date.now());
@@ -322,22 +344,81 @@ async function processJob(job) {
     row.evolution_instance
   );
 
-  await sendViaEvolution({
-    baseUrl: evoConfig.baseUrl,
-    apiKey: evoConfig.apiKey,
-    instanceSlug: evoConfig.instanceSlug,
-    phone: row.phone,
-    text,
-  });
+  // Anti-ban: reserva de cota diária por chip antes de enviar
+  const workerPool = getFollowupWorkerDbPool();
+  if (!workerPool) {
+    throw new Error("[followup/worker] Pool de banco de dados indisponível para validação de cota.");
+  }
+  setChipQuotaDbPool(workerPool);
+
+  const chipInstanceId = String(evoConfig.instanceId || evoConfig.rawInstance?.id || evoConfig.instanceSlug);
+  const chipLimit = resolveChipDailyLimit(evoConfig.rawInstance);
+  if (!sendWindowConfig) {
+    sendWindowConfig = resolveSendWindowConfig({});
+  }
+  const tenantTz = sendWindowConfig.timezone || "America/Sao_Paulo";
+  const todayKey = getDateKey(new Date(), tenantTz);
+
+  const reserved = await reserveChipDailyQuota(chipInstanceId, todayKey, workerPool);
+  if (reserved === null) {
+    throw new Error(`[followup/worker] Falha ao reservar cota para a instância ${chipInstanceId}`);
+  }
+
+  if (reserved > chipLimit) {
+    // 1. Libera a cota reservada em excesso
+    await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
+
+    // 2. Calcula próxima abertura de janela do dia seguinte
+    let nextOpening = getNextSendWindowOpening(new Date(), sendWindowConfig);
+    const nowParts = getPartsInTimezone(new Date(), tenantTz);
+    const nextParts = getPartsInTimezone(nextOpening, tenantTz);
+    if (nowParts.year === nextParts.year && nowParts.month === nextParts.month && nowParts.day === nextParts.day) {
+      const tomorrowMidnight = createDateInTimezone(nowParts.year, nowParts.month, nowParts.day + 1, 0, 1, 0, tenantTz);
+      nextOpening = getNextSendWindowOpening(tomorrowMidnight, sendWindowConfig);
+    }
+
+    const delay = Math.max(1000, nextOpening.getTime() - Date.now());
+    const quotaMsg = `Cota diária do chip atingida (${chipLimit}/${chipLimit}) para a instância ${evoConfig.displayName || chipInstanceId}. Reagendado para a próxima abertura de janela.`;
+
+    console.warn(log, quotaMsg, { nextOpening: nextOpening.toISOString(), limit: chipLimit, reserved });
+
+    // 3. Adia o job: mantém status pending, atualiza scheduled_for e error_log
+    await query(
+      "UPDATE followup_jobs SET scheduled_for=$1, error_log=$2 WHERE id=$3",
+      [nextOpening.toISOString(), quotaMsg, jobId]
+    );
+
+    await getFollowupQueue().add(
+      "send-followup",
+      { jobId, customMessage: customMessage || row.custom_message },
+      { delay, jobId: `fup-quota-${jobId}-${nextOpening.getTime()}` }
+    );
+
+    return;
+  }
+
+  try {
+    await sendViaEvolution({
+      baseUrl: evoConfig.baseUrl,
+      apiKey: evoConfig.apiKey,
+      instanceSlug: evoConfig.instanceSlug,
+      phone: row.phone,
+      text,
+    });
+  } catch (sendErr) {
+    // Falha na Evolution API: libera a cota reservada imediatamente
+    await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
+    throw sendErr;
+  }
 
   await query(
-    "UPDATE followup_jobs SET status='sent', sent_at=NOW() WHERE id=$1",
+    "UPDATE followup_jobs SET status='sent', sent_at=NOW(), error_log=NULL WHERE id=$1",
     [jobId]
   );
   console.log(log, `mensagem enviada via Evolution API (${evoConfig.displayName} -> ${evoConfig.instanceSlug})`);
 }
 
-async function processEventJourneyJob(job) {
+export async function processEventJourneyJob(job) {
   const { companyId, leadId, eventName, journeyId, channel, aiPrompt, context } = job.data;
   const log = `[event-journey][${eventName}][${leadId}]`;
 
@@ -414,13 +495,88 @@ async function processEventJourneyJob(job) {
           companyData.tenant_id,
           companyData.evolution_instance
         );
-        await sendViaEvolution({
-          baseUrl: evoConfig.baseUrl,
-          apiKey: evoConfig.apiKey,
-          instanceSlug: evoConfig.instanceSlug,
-          phone: leadData.phone,
-          text: finalMessage,
-        });
+        const workerPool = getFollowupWorkerDbPool();
+        if (!workerPool) {
+          throw new Error("[followup/worker] Pool de banco de dados indisponível para validação de cota.");
+        }
+        setChipQuotaDbPool(workerPool);
+
+        let sendWindowConfig = null;
+        if (companyData.tenant_id) {
+          try {
+            const tenantSettings = await getLeadClientN8nSettings(companyData.tenant_id);
+            sendWindowConfig = resolveSendWindowConfig(tenantSettings);
+          } catch {}
+        }
+        if (!sendWindowConfig) {
+          sendWindowConfig = resolveSendWindowConfig({});
+        }
+
+        const chipInstanceId = String(evoConfig.instanceId || evoConfig.rawInstance?.id || evoConfig.instanceSlug);
+        const chipLimit = resolveChipDailyLimit(evoConfig.rawInstance);
+        const tenantTz = sendWindowConfig.timezone || "America/Sao_Paulo";
+        const todayKey = getDateKey(new Date(), tenantTz);
+
+        const reserved = await reserveChipDailyQuota(chipInstanceId, todayKey, workerPool);
+        if (reserved === null) {
+          throw new Error(`[followup/worker] Falha ao reservar cota para a instância ${chipInstanceId}`);
+        }
+
+        if (reserved > chipLimit) {
+          // 1. Libera a cota reservada em excesso
+          await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
+
+          // 2. Calcula próxima abertura de janela do dia seguinte
+          let nextOpening = getNextSendWindowOpening(new Date(), sendWindowConfig);
+          const nowParts = getPartsInTimezone(new Date(), tenantTz);
+          const nextParts = getPartsInTimezone(nextOpening, tenantTz);
+          if (nowParts.year === nextParts.year && nowParts.month === nextParts.month && nowParts.day === nextParts.day) {
+            const tomorrowMidnight = createDateInTimezone(nowParts.year, nowParts.month, nowParts.day + 1, 0, 1, 0, tenantTz);
+            nextOpening = getNextSendWindowOpening(tomorrowMidnight, sendWindowConfig);
+          }
+
+          const delay = Math.max(1000, nextOpening.getTime() - Date.now());
+          const quotaMsg = `Cota diária do chip atingida (${chipLimit}/${chipLimit}) para a instância ${evoConfig.displayName || chipInstanceId}. Reagendado para a próxima abertura de janela.`;
+
+          console.warn(log, quotaMsg, { nextOpening: nextOpening.toISOString(), limit: chipLimit, reserved });
+
+          const targetJobId = job.data?.jobId;
+          if (targetJobId) {
+            await query(
+              "UPDATE followup_jobs SET scheduled_for=$1, error_log=$2 WHERE id=$3",
+              [nextOpening.toISOString(), quotaMsg, targetJobId]
+            ).catch(() => {});
+          }
+
+          await getFollowupQueue().add(
+            "process-event-journey",
+            {
+              ...job.data,
+              scheduled_for: nextOpening.toISOString(),
+              error_log: quotaMsg,
+              status: "pending",
+            },
+            {
+              delay,
+              jobId: `fup-journey-quota-${journeyId || eventName}-${leadId}-${nextOpening.getTime()}`,
+            }
+          );
+
+          return;
+        }
+
+        try {
+          await sendViaEvolution({
+            baseUrl: evoConfig.baseUrl,
+            apiKey: evoConfig.apiKey,
+            instanceSlug: evoConfig.instanceSlug,
+            phone: leadData.phone,
+            text: finalMessage,
+          });
+        } catch (sendErr) {
+          await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
+          throw sendErr;
+        }
         console.log(log, `WhatsApp disparado com sucesso via Evolution (${evoConfig.displayName})!`);
       } else {
         console.log(log, "Faltam dados de instância ou telefone para WhatsApp.");

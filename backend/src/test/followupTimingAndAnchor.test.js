@@ -445,5 +445,61 @@ describe("PARTE 2B — Follow-up: Timing Fixo (scheduled_time) e Campos Âncora"
       // Deve ter agendado para o próximo 15 de março (2027 se hoje for pós-março 2026) às 09:00 SP (12:00 UTC)
       expect(scheduledForStr).toContain("-03-15T12:00:00");
     });
+
+    it("lead gravado no banco com data_nascimento e payload trazendo data_nascimento: null: a ordem do spread preserva a data do banco e agenda com sucesso", async () => {
+      mockQuery.mockImplementation(async (sql, params) => {
+        if (sql.includes("INSERT INTO followup_schedules")) {
+          return { rows: [{ id: "sched-101" }] };
+        }
+        if (sql.includes("FROM followup_companies")) {
+          return { rows: [{ tenant_id: "geracao-digital" }] };
+        }
+        if (sql.includes("SELECT data_nascimento FROM public.")) {
+          return { rows: [{ data_nascimento: "1995-04-10" }] };
+        }
+        if (sql.includes("INSERT INTO followup_jobs")) {
+          return { rows: [{ id: "job-201" }] };
+        }
+        return { rows: [] };
+      });
+
+      const supabase = mockGetSupabase();
+      supabase.from.mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "step-bday-2",
+              name: "Mensagem Aniversário 2",
+              order_index: 0,
+              trigger_type: "before_anchor",
+              anchor_field: "data_nascimento",
+              trigger_value: 0,
+              trigger_unit: "days",
+              scheduled_time: "09:00",
+              is_active: true,
+            },
+          ],
+          error: null,
+        }),
+      });
+
+      // Payload cru com data_nascimento: null explícito (ex.: de outro chamador que manda o objeto lead inteiro)
+      const campaign = { id: "camp-1", company_id: "comp-1" };
+      const enrollResult = await enrollLead(campaign, {
+        lead_name: "Larissa",
+        phone: "5534991093607",
+        data_nascimento: null, // não deve sobrescrever o "1995-04-10" do banco!
+      });
+
+      expect(enrollResult.enqueued).toBe(1);
+      expect(enrollResult.skippedSteps).toHaveLength(0);
+
+      const jobInsertCall = mockQuery.mock.calls.find((c) => c[0].includes("INSERT INTO followup_jobs") && c[1][0] === "sched-101");
+      expect(jobInsertCall).toBeDefined();
+      // 10 de abril de 2027 é sábado, janela de dias úteis joga para segunda 12 de abril
+      expect(jobInsertCall[1][2]).toContain("2027-04-12");
+    });
   });
 });

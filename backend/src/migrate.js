@@ -287,6 +287,10 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'followup_templates_trigger_type_check' AND pg_get_constraintdef(oid) LIKE '%before_anchor%')
       )
     ) AS ok`,
+    "20260914110000_create_evolution_instance_limit_audit.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='evolution_instance_daily_limit_audit')
+      AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_evolution_instance_daily_limit_audit_instance')
+    ) AS ok`,
   };
 
   const query = checks[filename];

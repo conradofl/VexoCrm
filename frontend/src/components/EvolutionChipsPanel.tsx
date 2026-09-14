@@ -125,6 +125,16 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
     const draft = getChipDraft(instance);
     const limitNum = draft.dailyLimitOverride.trim() ? parseInt(draft.dailyLimitOverride, 10) : null;
     const dailyLimitOverride = limitNum != null && Number.isInteger(limitNum) && limitNum > 0 ? limitNum : null;
+
+    // Aviso de segurança: acima de 50 (frio) ou 500 (aquecido) exige confirmação do operador
+    const safeThreshold = draft.chipState === "warm" ? 500 : 50;
+    if (dailyLimitOverride != null && dailyLimitOverride > safeThreshold) {
+      const confirmed = window.confirm(
+        `Atenção: O limite diário de ${dailyLimitOverride} mensagens está acima do patamar seguro recomendado (${safeThreshold} msgs/dia para chip ${draft.chipState === "warm" ? "aquecido" : "frio"}).\n\nUltrapassar a faixa segura aumenta consideravelmente o risco de banimento da linha pelo WhatsApp.\n\nDeseja realmente confirmar esta alteração?`
+      );
+      if (!confirmed) return;
+    }
+
     try {
       await saveEvolutionInstance.mutateAsync({
         tenantId: tenant.id,

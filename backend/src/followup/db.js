@@ -5,7 +5,7 @@ import { createDatabasePool, createPgSupabaseClient } from "../pgSupabaseCompat.
 let _pool = null;
 let _supabase = null;
 
-function getPool() {
+export function getPool() {
   if (!_pool) {
     const connStr = process.env.DATABASE_URL;
     if (!connStr) throw new Error("[followup/db] DATABASE_URL não configurado.");

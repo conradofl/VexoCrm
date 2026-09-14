@@ -395,7 +395,7 @@ export async function enrollLead(
 
   for (const tpl of templates || []) {
     // 1. calcScheduledFor (calcula a data com base em delay/dias úteis)
-    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, { data_nascimento: leadBirthDate, ...lead });
+    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, { ...lead, data_nascimento: leadBirthDate });
     if (!scheduledFor) {
       // Passo depende de data-alvo (ex.: antes/depois da reunião ou âncora) e ela não foi informada.
       skippedNoDate++;
