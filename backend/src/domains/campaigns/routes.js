@@ -58,8 +58,20 @@ import {
   resolveSendWindowConfig,
 } from "../../services/sendWindow.js";
 import { getDateKey } from "../../services/analytics.js";
+import {
+  EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
+  resolveChipDailyLimit,
+  reserveChipDailyQuota,
+  getChipDailyUsage,
+  releaseChipDailyQuota,
+  resolveEvolutionInstanceDailyLimit,
+  reserveEvolutionInstanceDailyQuota,
+  getEvolutionInstanceDailyUsage,
+  releaseEvolutionInstanceDailyQuota,
+  ensureEvolutionInstanceDailyUsageTable,
+  setChipQuotaDbPool,
+} from "../../services/chipQuota.js";
 
-let _evolutionDailyUsageSchemaEnsured = false;
 let _dispatchRunsClaimSchemaEnsured = false;
 let _dueDispatchTimerStarted = false;
 let _dueDispatchInterval = null;
@@ -164,6 +176,8 @@ export function registerCampaignsRoutes(app, deps) {
     supabase,
     validateN8nInboundBearer,
   } = deps;
+
+  setChipQuotaDbPool(pgDatabasePool);
 
   const { appendLeadMessage } = createLeadMessaging({
     supabase,
@@ -1581,75 +1595,7 @@ export function registerCampaignsRoutes(app, deps) {
     return true;
   }
 
-  // ── Anti-ban (Fatia 3a): cota diária por chip ───────────────────────────────
-  const EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS = { cold: 50, warm: 500 };
 
-  async function ensureEvolutionInstanceDailyUsageTable() {
-    if (!pgDatabasePool) return false;
-    if (_evolutionDailyUsageSchemaEnsured) return true;
-    await pgDatabasePool.query(`
-      CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_usage (
-        instance_id TEXT NOT NULL,
-        date DATE NOT NULL,
-        sent_count INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (instance_id, date)
-      )
-    `);
-    await pgDatabasePool.query(`
-      ALTER TABLE public.evolution_instance_daily_usage ALTER COLUMN instance_id TYPE TEXT
-    `).catch(() => {});
-    _evolutionDailyUsageSchemaEnsured = true;
-    return true;
-  }
-
-  function resolveEvolutionInstanceDailyLimit(instance) {
-    const override = Number.parseInt(String(instance?.daily_limit_override ?? ""), 10);
-    if (Number.isInteger(override) && override > 0) return override;
-    const state = normalizeString(instance?.chip_state) === "warm" ? "warm" : "cold";
-    return EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS[state];
-  }
-
-  async function reserveEvolutionInstanceDailyQuota(instanceId, dateStr = null) {
-    if (!instanceId || !(await ensureEvolutionInstanceDailyUsageTable())) return null;
-    const targetDate = dateStr || new Date().toISOString().slice(0, 10);
-    const { rows } = await pgDatabasePool.query(
-      `
-        INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count)
-        VALUES ($1::text, $2::date, 1)
-        ON CONFLICT (instance_id, date)
-        DO UPDATE SET sent_count = public.evolution_instance_daily_usage.sent_count + 1
-        RETURNING sent_count
-      `,
-      [String(instanceId), targetDate]
-    );
-    return rows[0]?.sent_count ?? null;
-  }
-
-  async function getEvolutionInstanceDailyUsage(instanceId, dateStr = null) {
-    if (!instanceId || !(await ensureEvolutionInstanceDailyUsageTable())) return 0;
-    const targetDate = dateStr || new Date().toISOString().slice(0, 10);
-    const { rows } = await pgDatabasePool.query(
-      `SELECT sent_count FROM public.evolution_instance_daily_usage WHERE instance_id = $1::text AND date = $2::date`,
-      [String(instanceId), targetDate]
-    );
-    return Number(rows[0]?.sent_count ?? 0);
-  }
-
-  async function releaseEvolutionInstanceDailyQuota(instanceId, dateStr = null) {
-    if (!instanceId || !pgDatabasePool) return;
-    const targetDate = dateStr || new Date().toISOString().slice(0, 10);
-    await pgDatabasePool
-      .query(
-        `
-          UPDATE public.evolution_instance_daily_usage
-          SET sent_count = GREATEST(sent_count - 1, 0)
-          WHERE instance_id = $1::text AND date = $2::date
-        `,
-        [String(instanceId), targetDate]
-      )
-      .catch(() => {});
-  }
-  // ────────────────────────────────────────────────────────────────────────────
 
   // ── Defeito A: elegibilidade idempotente por disparo ────────────────────────
   // Estende campaign_dispatch_runs (tabela equivalente já existente) com claim por
