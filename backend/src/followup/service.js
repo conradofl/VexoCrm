@@ -4,8 +4,130 @@ import crypto from "crypto";
 import { query, getSupabase } from "./db.js";
 import { getFollowupQueue } from "./queue.js";
 import { sanitizePhone } from "../services/leadImport.js";
-import { adjustDateToSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
+import {
+  adjustDateToSendWindow,
+  createDateInTimezone,
+  getPartsInTimezone,
+  resolveSendWindowConfig,
+} from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
+import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
+import { leadsTableName } from "../services/tenant.js";
+
+// Whitelist de âncoras suportadas no follow-up
+export const ANCHOR_FIELDS = {
+  meeting_datetime: { source: "schedule", recurring: false },
+  data_nascimento: { source: "lead", recurring: true },
+};
+
+export function isValidAnchorField(field) {
+  return typeof field === "string" && Object.prototype.hasOwnProperty.call(ANCHOR_FIELDS, field);
+}
+
+export function validateTemplatePayload(payload = {}) {
+  const triggerType = payload.trigger_type;
+  const anchorField = payload.anchor_field;
+
+  if (triggerType === "before_anchor" || triggerType === "after_anchor") {
+    if (!anchorField || !isValidAnchorField(anchorField)) {
+      return {
+        valid: false,
+        code: "INVALID_ANCHOR_FIELD",
+        message: `Gatilho '${triggerType}' exige um campo âncora válido (${Object.keys(ANCHOR_FIELDS).join(", ")}).`,
+      };
+    }
+  }
+
+  if (anchorField && !isValidAnchorField(anchorField)) {
+    return {
+      valid: false,
+      code: "INVALID_ANCHOR_FIELD",
+      message: `Campo âncora '${anchorField}' é inválido. Válidos: ${Object.keys(ANCHOR_FIELDS).join(", ")}.`,
+    };
+  }
+
+  return { valid: true };
+}
+
+export function parseTimeString(timeStr) {
+  if (!timeStr || typeof timeStr !== "string") return null;
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const second = match[3] ? parseInt(match[3], 10) : 0;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return null;
+  return { hour, minute, second };
+}
+
+export function projectNextRecurringDate(dateInput, refDate = new Date(), timeZone = "America/Sao_Paulo") {
+  if (!dateInput) return null;
+  let birthYear, birthMonth, birthDay;
+  if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+    const p = getPartsInTimezone(dateInput, timeZone);
+    birthYear = p.year;
+    birthMonth = p.month;
+    birthDay = p.day;
+  } else if (typeof dateInput === "string") {
+    const trimmed = dateInput.trim();
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      birthYear = parseInt(isoMatch[1], 10);
+      birthMonth = parseInt(isoMatch[2], 10);
+      birthDay = parseInt(isoMatch[3], 10);
+    } else {
+      const brMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (brMatch) {
+        birthDay = parseInt(brMatch[1], 10);
+        birthMonth = parseInt(brMatch[2], 10);
+        birthYear = parseInt(brMatch[3], 10);
+      } else {
+        const d = new Date(trimmed);
+        if (isNaN(d.getTime())) return null;
+        const p = getPartsInTimezone(d, timeZone);
+        birthYear = p.year;
+        birthMonth = p.month;
+        birthDay = p.day;
+      }
+    }
+  } else {
+    return null;
+  }
+
+  const nowParts = getPartsInTimezone(refDate, timeZone);
+  let targetYear = nowParts.year;
+
+  if (
+    birthMonth < nowParts.month ||
+    (birthMonth === nowParts.month && birthDay < nowParts.day)
+  ) {
+    targetYear += 1;
+  }
+
+  let targetDay = birthDay;
+  if (birthMonth === 2 && birthDay === 29) {
+    const isLeap = (targetYear % 4 === 0 && targetYear % 100 !== 0) || targetYear % 400 === 0;
+    if (!isLeap) targetDay = 28;
+  }
+
+  return createDateInTimezone(targetYear, birthMonth, targetDay, 0, 0, 0, timeZone);
+}
+
+export function resolveAnchorDate(anchorField, context = {}, refDate = new Date(), timeZone = "America/Sao_Paulo") {
+  if (!anchorField || !isValidAnchorField(anchorField)) return null;
+  const config = ANCHOR_FIELDS[anchorField];
+  if (!config) return null;
+
+  const rawValue = context[anchorField] || (anchorField === "data_nascimento" ? context.nascimento || context.birth_date : null);
+  if (!rawValue) return null;
+
+  if (config.recurring) {
+    return projectNextRecurringDate(rawValue, refDate, timeZone);
+  }
+
+  const date = new Date(rawValue);
+  return isNaN(date.getTime()) ? null : date;
+}
 
 // ─── Utilitários ─────────────────────────────────────────────────────────────
 
@@ -50,7 +172,7 @@ function toMs(value, unit) {
   return v * 24 * 60 * 60 * 1000;
 }
 
-function calcScheduledFor(template, triggerAt, meetingDatetime) {
+export function calcScheduledFor(template, triggerAt, meetingDatetime, leadData = {}) {
   const now = triggerAt.getTime();
   const meeting = meetingDatetime ? new Date(meetingDatetime).getTime() : null;
   const delta = toMs(template.trigger_value, template.trigger_unit);
@@ -68,6 +190,16 @@ function calcScheduledFor(template, triggerAt, meetingDatetime) {
       return new Date(meeting + delta);
     case "no_reply":
       return new Date(now + delta);
+    case "before_anchor": {
+      const anchorDate = resolveAnchorDate(template.anchor_field, { meeting_datetime: meetingDatetime, ...leadData }, triggerAt);
+      if (!anchorDate) return null;
+      return new Date(anchorDate.getTime() - delta);
+    }
+    case "after_anchor": {
+      const anchorDate = resolveAnchorDate(template.anchor_field, { meeting_datetime: meetingDatetime, ...leadData }, triggerAt);
+      if (!anchorDate) return null;
+      return new Date(anchorDate.getTime() + delta);
+    }
     default:
       return null;
   }
@@ -147,7 +279,16 @@ const EMPTY_UTMS = {
 // de followup_campaigns; `originOverride` marca a origem (ex.: "banco_dados") no manual.
 export async function enrollLead(
   campaign,
-  { lead_name, phone: rawPhone, meeting_datetime = null, calendly_event_uri = null, utms = EMPTY_UTMS, originOverride = null }
+  {
+    lead_name,
+    phone: rawPhone,
+    meeting_datetime = null,
+    calendly_event_uri = null,
+    utms = EMPTY_UTMS,
+    originOverride = null,
+    data_nascimento = null,
+    lead = null,
+  }
 ) {
   const phone = normalizePhone(rawPhone);
 
@@ -202,7 +343,7 @@ export async function enrollLead(
   const supabase = getSupabase();
   const { data: templates } = await supabase
     .from("followup_templates")
-    .select("id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, order_index")
+    .select("id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, order_index, scheduled_time, anchor_field")
     .eq("campaign_id", campaign.id)
     .eq("is_active", true)
     .order("order_index", { ascending: true });
@@ -220,6 +361,31 @@ export async function enrollLead(
   const tenantSettings = await getLeadClientN8nSettings(tenantId);
   const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
 
+  let leadBirthDate = data_nascimento || lead?.data_nascimento || null;
+  if (!leadBirthDate && phone && tenantId) {
+    const hasBirthdayStep = (templates || []).some(
+      (t) => (t.trigger_type === "before_anchor" || t.trigger_type === "after_anchor") && t.anchor_field === "data_nascimento"
+    );
+    if (hasBirthdayStep) {
+      try {
+        const table = leadsTableName(tenantId);
+        const { rows: leadRows } = await query(
+          `SELECT data_nascimento FROM public."${table}"
+            WHERE client_id = $1
+              AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+              AND data_nascimento IS NOT NULL
+            LIMIT 1`,
+          [tenantId, phone]
+        );
+        if (leadRows.length && leadRows[0].data_nascimento) {
+          leadBirthDate = leadRows[0].data_nascimento;
+        }
+      } catch (err) {
+        console.warn("[followup/service] Falha ao buscar data_nascimento na tabela de leads:", err.message);
+      }
+    }
+  }
+
   const now = new Date();
   const queue = getFollowupQueue();
   let enqueued = 0;
@@ -228,9 +394,10 @@ export async function enrollLead(
   const skippedSteps = [];
 
   for (const tpl of templates || []) {
-    const scheduledFor = calcScheduledFor(tpl, now, meeting_datetime);
+    // 1. calcScheduledFor (calcula a data com base em delay/dias úteis)
+    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, { data_nascimento: leadBirthDate, ...lead });
     if (!scheduledFor) {
-      // Passo depende de data-alvo (ex.: antes/depois da reunião) e ela não foi informada.
+      // Passo depende de data-alvo (ex.: antes/depois da reunião ou âncora) e ela não foi informada.
       skippedNoDate++;
       skippedSteps.push({
         stepId: tpl.id,
@@ -242,7 +409,32 @@ export async function enrollLead(
       continue;
     }
 
-    // Passo com horário que já caiu no passado (apenas para gatilhos baseados em evento passado, ex: before_meeting)
+    // 2. Se scheduled_time estiver preenchido: fixa o horário nesta hora/minuto em America/Sao_Paulo
+    if (tpl.scheduled_time) {
+      const parsedTime = parseTimeString(tpl.scheduled_time);
+      if (parsedTime) {
+        const parts = getPartsInTimezone(scheduledFor, "America/Sao_Paulo");
+        scheduledFor = createDateInTimezone(
+          parts.year,
+          parts.month,
+          parts.day,
+          parsedTime.hour,
+          parsedTime.minute,
+          parsedTime.second,
+          "America/Sao_Paulo"
+        );
+        // Quando scheduled_time empurra a data para trás do agora (ex.: inscrito às 15h para 09:00),
+        // soma um dia antes da janela para não disparar imediatamente com delay 0.
+        if (
+          scheduledFor.getTime() <= now.getTime() &&
+          (tpl.trigger_type === "after_enrollment" || tpl.trigger_type === "on_schedule")
+        ) {
+          scheduledFor = new Date(scheduledFor.getTime() + 24 * 60 * 60 * 1000);
+        }
+      }
+    }
+
+    // Passo com horário que já caiu no passado (apenas para gatilhos baseados em evento passado, ex: before_meeting, before_anchor)
     if (scheduledFor.getTime() <= now.getTime() && tpl.trigger_type !== "on_schedule" && tpl.trigger_type !== "after_enrollment") {
       skippedPastDate++;
       const timeStr = scheduledFor.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -258,7 +450,7 @@ export async function enrollLead(
       continue;
     }
 
-    // Aplica a janela de envio permitida do tenant (ex: se cair às 21h ou fim de semana, move para a próxima abertura)
+    // 3. adjustDateToSendWindow: roda POR ÚLTIMO.
     const effectiveScheduledFor = adjustDateToSendWindow(scheduledFor, sendWindowConfig);
 
     const delay = Math.max(0, effectiveScheduledFor.getTime() - Date.now());

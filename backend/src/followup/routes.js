@@ -11,6 +11,7 @@ import {
   processInboundWebhook,
   enrollLead,
   cancelPendingJobsForCampaign,
+  validateTemplatePayload,
 } from "./service.js";
 import { getAnalytics } from "./analyticsService.js";
 import { getFollowupQueue } from "./queue.js";
@@ -645,11 +646,14 @@ function normalizeInstanceList(list, fallback) {
         const lead_name = str(raw?.name) || str(raw?.lead_name) || "Lead";
         const phone = str(raw?.phone) || str(raw?.telefone) || null;
         const meeting_datetime = str(raw?.meeting_datetime) || globalMeeting || null;
+        const data_nascimento = str(raw?.data_nascimento) || null;
         try {
           const result = await enrollLead(campaign, {
             lead_name,
             phone,
             meeting_datetime,
+            data_nascimento,
+            lead: raw,
             originOverride: origin,
           });
           if (result.reason === "missing_phone") {
@@ -831,7 +835,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_templates")
-        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, created_at")
+        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, anchor_field, created_at")
         .eq("campaign_id", campaignId)
         .order("order_index", { ascending: true });
       if (error) throw error;
@@ -847,9 +851,14 @@ function normalizeInstanceList(list, fallback) {
       campaign_id, name, message,
       trigger_type, trigger_value, trigger_unit, trigger_direction,
       is_active, order_index,
+      scheduled_time, anchor_field,
     } = req.body || {};
     if (!str(campaign_id) || !str(name) || !str(message) || !str(trigger_type)) {
       return sendErr(res, 400, "MISSING_FIELDS", "Campos obrigatórios faltando");
+    }
+    const validation = validateTemplatePayload({ trigger_type, anchor_field, scheduled_time });
+    if (!validation.valid) {
+      return sendErr(res, 400, validation.code, validation.message);
     }
     try {
       const supabase = getSupabase();
@@ -865,6 +874,8 @@ function normalizeInstanceList(list, fallback) {
           trigger_direction: str(trigger_direction),
           is_active: is_active !== false,
           order_index: Number(order_index) || 0,
+          scheduled_time: scheduled_time ? str(scheduled_time) : null,
+          anchor_field: anchor_field ? str(anchor_field) : null,
         })
         .select()
         .maybeSingle();
@@ -902,14 +913,35 @@ function normalizeInstanceList(list, fallback) {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
-      const allowed = ["name", "message", "trigger_type", "trigger_value", "trigger_unit", "trigger_direction", "is_active", "order_index"];
+      const supabase = getSupabase();
+      const { data: existing, error: fetchErr } = await supabase
+        .from("followup_templates")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!existing) return sendErr(res, 404, "NOT_FOUND", "Template não encontrado");
+
+      const merged = {
+        ...existing,
+        ...(req.body || {}),
+      };
+      const validation = validateTemplatePayload(merged);
+      if (!validation.valid) {
+        return sendErr(res, 400, validation.code, validation.message);
+      }
+
+      const allowed = [
+        "name", "message", "trigger_type", "trigger_value",
+        "trigger_unit", "trigger_direction", "is_active", "order_index",
+        "scheduled_time", "anchor_field",
+      ];
       const patch = { updated_at: new Date().toISOString() };
       for (const k of allowed) {
         if (k in (req.body || {})) {
           patch[k] = req.body[k] === null ? null : req.body[k];
         }
       }
-      const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_templates")
         .update(patch)
@@ -917,7 +949,6 @@ function normalizeInstanceList(list, fallback) {
         .select()
         .maybeSingle();
       if (error) throw error;
-      if (!data) return sendErr(res, 404, "NOT_FOUND", "Template não encontrado");
       return res.json({ success: true, template: data });
     } catch (err) {
       return sendErr(res, 500, "TEMPLATE_UPDATE_FAILED", err.message);

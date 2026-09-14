@@ -279,6 +279,14 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_reminders')
       AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_lead_reminders_client_phone')
     ) AS ok`,
+    "20260914100000_add_followup_timing_and_quota.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_templates')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='scheduled_time')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='anchor_field')
+        AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'followup_templates_trigger_type_check' AND pg_get_constraintdef(oid) LIKE '%before_anchor%')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

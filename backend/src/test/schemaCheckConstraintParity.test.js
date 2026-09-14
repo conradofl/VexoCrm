@@ -144,7 +144,7 @@ function scanJsWriters(srcDir) {
         const triggerMatches = code.matchAll(/case\s+['"]([a-zA-Z0-9_]+)['"]|trigger_type\s*===\s*['"]([a-zA-Z0-9_]+)['"]/g);
         for (const m of triggerMatches) {
           const val = m[1] || m[2];
-          if (["on_schedule", "after_enrollment", "no_reply", "before_meeting", "after_meeting"].includes(val)) {
+          if (["on_schedule", "after_enrollment", "no_reply", "before_meeting", "after_meeting", "before_anchor", "after_anchor"].includes(val)) {
             violations.push({ file: filePath, column: "followup_templates.trigger_type", value: val });
           }
         }
