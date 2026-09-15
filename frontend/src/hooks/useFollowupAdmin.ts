@@ -60,6 +60,7 @@ export interface FupCampaign {
   default_origin: string | null;
   webhook_trigger_url: string | null;
   webhook_secret: string | null;
+  dispatch_jitter_minutes?: number;
   totalLeads: number;
   messagesSent: number;
   created_at: string;
@@ -77,11 +78,13 @@ export interface FupTemplate {
     | "after_meeting"
     | "no_reply"
     | "before_anchor"
-    | "after_anchor";
+    | "after_anchor"
+    | "fixed_date";
   trigger_value: number;
   trigger_unit: "minutes" | "hours" | "days";
   trigger_direction: "before" | "after" | null;
   scheduled_time: string | null;
+  scheduled_date?: string | null;
   anchor_field: string | null;
   media_path?: string | null;
   media_type?: "image" | "audio" | "document" | "video" | null;

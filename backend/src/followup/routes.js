@@ -732,6 +732,7 @@ function normalizeInstanceList(list, fallback) {
           trigger_unit: tpl.trigger_unit,
           trigger_direction: tpl.trigger_direction,
           scheduled_time: tpl.scheduled_time,
+          scheduled_date: tpl.scheduled_date,
           anchor_field: tpl.anchor_field,
           media_path: tpl.media_path,
           media_type: tpl.media_type,
@@ -1005,7 +1006,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_templates")
-        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, anchor_field, media_path, media_type, media_mime, media_filename, created_at")
+        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, scheduled_date, anchor_field, media_path, media_type, media_mime, media_filename, created_at")
         .eq("campaign_id", campaignId)
         .order("order_index", { ascending: true });
       if (error) throw error;
@@ -1021,13 +1022,13 @@ function normalizeInstanceList(list, fallback) {
       campaign_id, name, message,
       trigger_type, trigger_value, trigger_unit, trigger_direction,
       is_active, order_index,
-      scheduled_time, anchor_field,
+      scheduled_time, scheduled_date, anchor_field,
       media_path, media_type, media_mime, media_filename,
     } = req.body || {};
     if (!str(campaign_id) || !str(name) || !str(message) || !str(trigger_type)) {
       return sendErr(res, 400, "MISSING_FIELDS", "Campos obrigatórios faltando");
     }
-    const validation = validateTemplatePayload({ trigger_type, anchor_field, scheduled_time });
+    const validation = validateTemplatePayload({ trigger_type, anchor_field, scheduled_time, scheduled_date });
     if (!validation.valid) {
       return sendErr(res, 400, validation.code, validation.message);
     }
@@ -1046,6 +1047,7 @@ function normalizeInstanceList(list, fallback) {
           is_active: is_active !== false,
           order_index: Number(order_index) || 0,
           scheduled_time: scheduled_time ? str(scheduled_time) : null,
+          scheduled_date: scheduled_date ? str(scheduled_date) : null,
           anchor_field: anchor_field ? str(anchor_field) : null,
           media_path: media_path ? str(media_path) : null,
           media_type: media_type ? str(media_type) : null,
@@ -1109,7 +1111,7 @@ function normalizeInstanceList(list, fallback) {
       const allowed = [
         "name", "message", "trigger_type", "trigger_value",
         "trigger_unit", "trigger_direction", "is_active", "order_index",
-        "scheduled_time", "anchor_field",
+        "scheduled_time", "scheduled_date", "anchor_field",
         "media_path", "media_type", "media_mime", "media_filename",
       ];
       const patch = { updated_at: new Date().toISOString() };
@@ -1131,6 +1133,7 @@ function normalizeInstanceList(list, fallback) {
         "trigger_unit",
         "trigger_direction",
         "scheduled_time",
+        "scheduled_date",
         "anchor_field",
         "trigger_type",
       ];

@@ -67,6 +67,17 @@ export function validateTemplatePayload(payload = {}) {
     };
   }
 
+  if (triggerType === "fixed_date") {
+    const scheduledDate = payload.scheduled_date;
+    if (!scheduledDate || typeof scheduledDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate.trim())) {
+      return {
+        valid: false,
+        code: "INVALID_SCHEDULED_DATE",
+        message: "Gatilho 'fixed_date' exige uma data agendada no formato YYYY-MM-DD.",
+      };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -193,7 +204,7 @@ function toMs(value, unit) {
   return v * 24 * 60 * 60 * 1000;
 }
 
-export function calcScheduledFor(template, triggerAt, meetingDatetime, leadData = {}) {
+export function calcScheduledFor(template, triggerAt, meetingDatetime, leadData = {}, options = {}) {
   const now = triggerAt.getTime();
   const meeting = meetingDatetime ? new Date(meetingDatetime).getTime() : null;
   const delta = toMs(template.trigger_value, template.trigger_unit);
@@ -220,6 +231,52 @@ export function calcScheduledFor(template, triggerAt, meetingDatetime, leadData 
       const anchorDate = resolveAnchorDate(template.anchor_field, { meeting_datetime: meetingDatetime, ...leadData }, triggerAt);
       if (!anchorDate) return null;
       return new Date(anchorDate.getTime() + delta);
+    }
+    case "fixed_date": {
+      if (!template.scheduled_date) return null;
+      let year, month, day;
+      if (typeof template.scheduled_date === "string") {
+        const match = template.scheduled_date.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (!match) return null;
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+        day = parseInt(match[3], 10);
+      } else if (template.scheduled_date instanceof Date && !isNaN(template.scheduled_date.getTime())) {
+        // node-postgres devolve coluna DATE como Date à meia-noite UTC (sem setTypeParser
+        // no projeto) — ler em getPartsInTimezone("America/Sao_Paulo") joga pro dia anterior
+        // (meia-noite UTC = 21h do dia anterior em SP). Usar os getters UTC preserva o dia
+        // de calendário gravado no banco, independente do timezone do processo.
+        year = template.scheduled_date.getUTCFullYear();
+        month = template.scheduled_date.getUTCMonth() + 1;
+        day = template.scheduled_date.getUTCDate();
+      } else {
+        return null;
+      }
+
+      let hour = 8;
+      let minute = 0;
+      let second = 0;
+
+      if (template.scheduled_time) {
+        const parsedTime = parseTimeString(template.scheduled_time);
+        if (parsedTime) {
+          hour = parsedTime.hour;
+          minute = parsedTime.minute;
+          second = parsedTime.second;
+        }
+      } else {
+        const windowConfig = options.sendWindowConfig || resolveSendWindowConfig(options.tenantSettings);
+        if (windowConfig?.start) {
+          const parsedStart = parseTimeString(windowConfig.start);
+          if (parsedStart) {
+            hour = parsedStart.hour;
+            minute = parsedStart.minute;
+            second = parsedStart.second || 0;
+          }
+        }
+      }
+
+      return createDateInTimezone(year, month, day, hour, minute, second, "America/Sao_Paulo");
     }
     default:
       return null;
@@ -364,7 +421,7 @@ export async function enrollLead(
   const supabase = getSupabase();
   const { data: templates } = await supabase
     .from("followup_templates")
-    .select("id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, order_index, scheduled_time, anchor_field")
+    .select("id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, order_index, scheduled_time, scheduled_date, anchor_field")
     .eq("campaign_id", campaign.id)
     .eq("is_active", true)
     .order("order_index", { ascending: true });
@@ -401,7 +458,7 @@ export async function enrollLead(
 
   for (const tpl of templates || []) {
     // 1. calcScheduledFor (calcula a data com base em delay/dias úteis)
-    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, { ...lead, data_nascimento: leadBirthDate });
+    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, { ...lead, data_nascimento: leadBirthDate }, { sendWindowConfig, tenantSettings });
     if (!scheduledFor) {
       // Passo depende de data-alvo (ex.: antes/depois da reunião ou âncora) e ela não foi informada.
       skippedNoDate++;
@@ -415,8 +472,8 @@ export async function enrollLead(
       continue;
     }
 
-    // 2. Se scheduled_time estiver preenchido: fixa o horário nesta hora/minuto em America/Sao_Paulo
-    if (tpl.scheduled_time) {
+    // 2. Se scheduled_time estiver preenchido: fixa o horário nesta hora/minuto em America/Sao_Paulo (fixed_date já define hora em calcScheduledFor)
+    if (tpl.scheduled_time && tpl.trigger_type !== "fixed_date") {
       const parsedTime = parseTimeString(tpl.scheduled_time);
       if (parsedTime) {
         const parts = getPartsInTimezone(scheduledFor, "America/Sao_Paulo");
@@ -611,14 +668,14 @@ export async function reschedulePendingJobsForTemplate(templateId) {
       lead_name: job.lead_name,
       phone: job.phone,
       data_nascimento: leadBirthDate,
-    });
+    }, { sendWindowConfig, tenantSettings });
 
     if (!scheduledFor) {
       // Sem data-alvo disponível para recalcular
       continue;
     }
 
-    if (template.scheduled_time) {
+    if (template.scheduled_time && template.trigger_type !== "fixed_date") {
       const parsedTime = parseTimeString(template.scheduled_time);
       if (parsedTime) {
         const parts = getPartsInTimezone(scheduledFor, "America/Sao_Paulo");

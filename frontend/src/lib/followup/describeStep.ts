@@ -9,7 +9,8 @@ export type TriggerType =
   | "after_meeting"
   | "no_reply"
   | "before_anchor"
-  | "after_anchor";
+  | "after_anchor"
+  | "fixed_date";
 
 export interface AnchorFieldInfo {
   key: string;
@@ -28,6 +29,7 @@ export interface StepLike {
   trigger_unit?: "minutes" | "hours" | "days" | string;
   trigger_direction?: "before" | "after" | null;
   scheduled_time?: string | null;
+  scheduled_date?: string | null;
   anchor_field?: string | null;
   media_path?: string | null;
   media_type?: "image" | "audio" | "document" | "video" | null;
@@ -121,6 +123,18 @@ export function describeStep(
     case "after_anchor":
       base = `${formatDuration(val, unit)} depois ${getAnchorPhrase(step.anchor_field, anchorFields)}`;
       break;
+
+    case "fixed_date": {
+      if (step.scheduled_date) {
+        const parts = String(step.scheduled_date).split("-");
+        const formattedDate =
+          parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : step.scheduled_date;
+        base = `Em ${formattedDate}`;
+      } else {
+        base = "Em data fixa";
+      }
+      break;
+    }
 
     default:
       base = "Passo";
@@ -285,6 +299,36 @@ export function getStepPreview(
       type: "valid",
       badge: "Agendado",
       message: `Previsto para ${whenStr}.`,
+    };
+  }
+
+  // 6. Data fixa
+  if (step.trigger_type === "fixed_date") {
+    if (!step.scheduled_date) {
+      return {
+        type: "warning_no_date",
+        badge: "Sem data",
+        message: "Data fixa não informada. Este passo será ignorado.",
+      };
+    }
+    const [y, m, d] = String(step.scheduled_date).split("-").map(Number);
+    const targetDate = new Date(y, m - 1, d, 23, 59, 59);
+    const isPast = targetDate.getTime() < now.getTime();
+    const formattedDate = `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+    const timeMsg = step.scheduled_time ? ` às ${step.scheduled_time}` : "";
+
+    if (isPast) {
+      return {
+        type: "warning_past",
+        badge: "Data no passado",
+        message: `A data ${formattedDate} já passou. Este passo será ignorado (past_date).`,
+      };
+    }
+
+    return {
+      type: "valid",
+      badge: "Data fixa",
+      message: `Disparo agendado para ${formattedDate}${timeMsg}.`,
     };
   }
 

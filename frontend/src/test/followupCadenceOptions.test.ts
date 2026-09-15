@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 describe("Cadence Trigger Types & Modal Validation", () => {
-  const cadenceEditorSource = readFileSync(resolve("src/components/followup/CadenceEditor.tsx"), "utf8");
+  const cadenceEditorSource =
+    readFileSync(resolve("src/components/followup/CadenceEditor.tsx"), "utf8") +
+    readFileSync(resolve("src/components/followup/StepDrawer.tsx"), "utf8");
   const modalSource = readFileSync(resolve("src/components/followup/ApplyFollowupModal.tsx"), "utf8");
   const followupQueueSource = readFileSync(resolve("src/pages/FollowupQueue.tsx"), "utf8");
 

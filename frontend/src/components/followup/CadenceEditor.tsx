@@ -6,28 +6,20 @@ import {
   ArrowDown,
   Play,
   Pause,
-  Loader2,
-  MessageSquarePlus,
-  ListPlus,
   GripVertical,
   Copy,
   Paperclip,
-  FileText,
-  Image as ImageIcon,
-  Music,
-  Video,
   RotateCcw,
-  AlertTriangle,
   Clock,
   Pencil,
+  MessageSquare,
+  ListPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -37,105 +29,46 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   useFupCampaigns,
   useCreateFupCampaign,
   useUpdateFupCampaign,
   useDeleteFupCampaign,
   useCloneFupCampaign,
   useFupTemplates,
-  useCreateFupTemplate,
-  useUpdateFupTemplate,
   useDeleteFupTemplate,
   useReorderFupTemplates,
   useReschedulePendingJobs,
-  useUploadFollowupMedia,
   useAnchorFields,
   type FupTemplate,
   type AnchorFieldOption,
 } from "@/hooks/useFollowupAdmin";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
-import { describeStep as formatStepDescription, isTimeOutsideSendWindow } from "@/lib/followup/describeStep";
+import { describeStep as formatStepDescription } from "@/lib/followup/describeStep";
+import StepDrawer from "./StepDrawer";
 
-// Editor de cadências de follow-up (objetivo: dar onde criar as cadências reutilizáveis
-// que o Banco de Dados aplica). Uma cadência = passos (templates), cada passo = mensagem +
-// quando enviar (na entrada, X antes/depois da data-alvo, ou X após a entrada sem resposta).
-
-type TriggerType = FupTemplate["trigger_type"];
-
-const TRIGGER_OPTIONS: {
-  value: TriggerType;
-  label: string;
-  shortLabel: string;
-  needsValue: boolean;
-  requiresMeetingDate?: boolean;
-}[] = [
-  {
-    value: "on_schedule",
-    label: "Na hora da inscrição (imediato)",
-    shortLabel: "na inscrição",
-    needsValue: false,
-    requiresMeetingDate: false,
-  },
-  {
-    value: "after_enrollment",
-    label: "X depois da inscrição (incondicional)",
-    shortLabel: "após inscrição",
-    needsValue: true,
-    requiresMeetingDate: false,
-  },
-  {
-    value: "no_reply",
-    label: "X depois da inscrição, se não responder",
-    shortLabel: "após inscrição (se sem resposta)",
-    needsValue: true,
-    requiresMeetingDate: false,
-  },
-  {
-    value: "before_meeting",
-    label: "X antes da data-alvo (exige data)",
-    shortLabel: "antes da data-alvo",
-    needsValue: true,
-    requiresMeetingDate: true,
-  },
-  {
-    value: "after_meeting",
-    label: "X depois da data-alvo (exige data)",
-    shortLabel: "depois da data-alvo",
-    needsValue: true,
-    requiresMeetingDate: true,
-  },
-  {
-    value: "before_anchor",
-    label: "X antes de uma data do lead",
-    shortLabel: "antes de data do lead",
-    needsValue: true,
-    requiresMeetingDate: false,
-  },
-  {
-    value: "after_anchor",
-    label: "X depois de uma data do lead",
-    shortLabel: "depois de data do lead",
-    needsValue: true,
-    requiresMeetingDate: false,
-  },
-];
-
-function unitLabel(unit: string) {
-  if (unit === "minutes") return "min";
-  if (unit === "hours") return "h";
-  return "dias";
-}
+// Editor de cadências de follow-up: Trilha vertical com cards e drawer lateral de criação/edição.
 
 function describeStep(step: FupTemplate, anchorFields?: AnchorFieldOption[]) {
   return formatStepDescription(step, anchorFields);
+}
+
+function renderMessageWithHighlight(text: string) {
+  if (!text) return null;
+  const parts = text.split(/(\{\{[^}]+\}\})/g);
+  return parts.map((part, i) => {
+    if (/^\{\{.*\}\}$/.test(part)) {
+      return (
+        <span
+          key={i}
+          className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded text-[11px]"
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
 }
 
 export default function CadenceEditor({ companyId }: { companyId: string }) {
@@ -165,87 +98,27 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const { data: steps = [] } = useFupTemplates(selectedId || undefined);
   const orderedSteps = [...steps].sort((a, b) => a.order_index - b.order_index);
 
-  const createStep = useCreateFupTemplate();
-  const updateStep = useUpdateFupTemplate();
   const deleteStep = useDeleteFupTemplate();
   const reorderSteps = useReorderFupTemplates();
   const reschedulePendingJobs = useReschedulePendingJobs();
-  const uploadMedia = useUploadFollowupMedia();
 
   const { data: anchorFields = [] } = useAnchorFields();
 
-  // Edição de passo existente
+  // Drawer de passo (criar ou editar)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingStep, setEditingStep] = useState<FupTemplate | null>(null);
-
-  // Form de passo (criar ou editar)
-  const [stepName, setStepName] = useState("");
-  const [stepMessage, setStepMessage] = useState("");
-  const [stepTrigger, setStepTrigger] = useState<TriggerType>("after_enrollment");
-  const [stepValue, setStepValue] = useState<number>(1);
-  const [stepUnit, setStepUnit] = useState<"minutes" | "hours" | "days">("days");
-  const [stepScheduledTime, setStepScheduledTime] = useState<string>("");
-  const [stepAnchorField, setStepAnchorField] = useState<string>("data_nascimento");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-
-  // Mídia do passo
-  const [stepMedia, setStepMedia] = useState<{
-    media_path: string;
-    media_type: "image" | "audio" | "document" | "video";
-    media_mime: string;
-    media_filename: string;
-    size_bytes?: number;
-  } | null>(null);
-  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [reschedulePrompt, setReschedulePrompt] = useState<{
     templateId: string;
     stepName: string;
     pendingCount: number;
   } | null>(null);
 
-  function handleStartEdit(step: FupTemplate) {
-    setEditingStep(step);
-    setStepName(step.name || "");
-    setStepMessage(step.message || "");
-    setStepTrigger(step.trigger_type);
-    setStepValue(step.trigger_value ?? 0);
-    setStepUnit(step.trigger_unit || "hours");
-    setStepScheduledTime(step.scheduled_time || "");
-    setStepAnchorField(step.anchor_field || "data_nascimento");
-    if (step.media_path) {
-      setStepMedia({
-        media_path: step.media_path,
-        media_type: step.media_type || "document",
-        media_mime: step.media_mime || "application/octet-stream",
-        media_filename: step.media_filename || "arquivo",
-        size_bytes: 0,
-      });
-    } else {
-      setStepMedia(null);
-    }
-  }
-
-  function handleCancelEdit() {
-    setEditingStep(null);
-    setStepName("");
-    setStepMessage("");
-    setStepTrigger("after_enrollment");
-    setStepValue(1);
-    setStepUnit("hours");
-    setStepScheduledTime("");
-    setStepAnchorField("data_nascimento");
-    setStepMedia(null);
-  }
-
-  // Reseta a edição ao trocar de cadência
+  // Fecha o drawer e limpa a edição ao trocar de cadência
   useEffect(() => {
-    handleCancelEdit();
+    setIsDrawerOpen(false);
+    setEditingStep(null);
   }, [selectedId]);
-
-  const windowStart = selectedCrmClient?.n8n_settings?.send_window_start || "08:00";
-  const windowEnd = selectedCrmClient?.n8n_settings?.send_window_end || "18:00";
-  const isOutsideWindow = isTimeOutsideSendWindow(stepScheduledTime, windowStart, windowEnd);
-
-  const triggerOpt = TRIGGER_OPTIONS.find((o) => o.value === stepTrigger)!;
 
   if (!validCompany) {
     return (
@@ -291,32 +164,6 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
     }
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !selectedCrmClient?.id) return;
-
-    setIsUploadingMedia(true);
-    try {
-      const result = await uploadMedia.mutateAsync({
-        file,
-        clientId: selectedCrmClient.id,
-      });
-      setStepMedia({
-        media_path: result.media_path,
-        media_type: result.media_type,
-        media_mime: result.media_mime,
-        media_filename: result.media_filename,
-        size_bytes: result.size_bytes,
-      });
-      toast.success(`Arquivo "${result.media_filename}" anexado com sucesso.`);
-    } catch (err: any) {
-      toast.error(err?.message || "Falha ao enviar arquivo.");
-    } finally {
-      setIsUploadingMedia(false);
-      e.target.value = "";
-    }
-  }
-
   async function handleReschedulePending(templateId: string) {
     try {
       const res = await reschedulePendingJobs.mutateAsync({ templateId });
@@ -350,83 +197,6 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
       toast.success("Cadência excluída.");
     } catch {
       toast.error("Falha ao excluir.");
-    }
-  }
-
-  async function addStep() {
-    if (!selected) return;
-    if (!stepMessage.trim()) {
-      toast.error("Escreva a mensagem do passo.");
-      return;
-    }
-    const isAnchor = stepTrigger === "before_anchor" || stepTrigger === "after_anchor";
-    const payload = {
-      name:
-        stepName.trim() ||
-        (editingStep
-          ? editingStep.name
-          : `Passo ${orderedSteps.length + 1}`),
-      message: stepMessage.trim(),
-      trigger_type: stepTrigger,
-      trigger_value: triggerOpt.needsValue ? Number(stepValue) || 0 : 0,
-      trigger_unit: stepUnit,
-      trigger_direction:
-        stepTrigger === "before_meeting" || stepTrigger === "before_anchor"
-          ? ("before" as const)
-          : stepTrigger === "after_meeting" || stepTrigger === "after_anchor"
-          ? ("after" as const)
-          : null,
-      scheduled_time: stepScheduledTime || null,
-      anchor_field: isAnchor ? (stepAnchorField || "data_nascimento") : null,
-      media_path: stepMedia?.media_path || null,
-      media_type: stepMedia?.media_type || null,
-      media_mime: stepMedia?.media_mime || null,
-      media_filename: stepMedia?.media_filename || null,
-    };
-
-    try {
-      if (editingStep) {
-        const res = await updateStep.mutateAsync({
-          id: editingStep.id,
-          ...payload,
-        });
-        handleCancelEdit();
-
-        if ((res?.pendingJobsCount || 0) > 0) {
-          toast.info(
-            `Alteração salva. Vale para os ${res.pendingJobsCount} envio(s) ainda não realizado(s).`
-          );
-        } else {
-          toast.success("Passo atualizado.");
-        }
-
-        if (res?.timingChanged && (res?.pendingJobsCount || 0) > 0) {
-          setReschedulePrompt({
-            templateId: res.template.id,
-            stepName: res.template.name,
-            pendingCount: res.pendingJobsCount || 0,
-          });
-        }
-      } else {
-        const res = await createStep.mutateAsync({
-          campaign_id: selected.id,
-          ...payload,
-          is_active: true,
-          order_index: orderedSteps.length,
-        });
-        handleCancelEdit();
-        toast.success("Passo adicionado.");
-
-        if (res?.timingChanged && (res?.pendingJobsCount || 0) > 0) {
-          setReschedulePrompt({
-            templateId: res.template.id,
-            stepName: res.template.name,
-            pendingCount: res.pendingJobsCount || 0,
-          });
-        }
-      }
-    } catch {
-      toast.error(editingStep ? "Falha ao atualizar o passo." : "Falha ao adicionar o passo.");
     }
   }
 
@@ -555,25 +325,56 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
             </CardContent>
           </Card>
 
-          {/* Passos existentes em linha do tempo vertical */}
+          {/* Trilha vertical de passos */}
           <Card>
             <CardContent className="p-4 space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Linha do tempo da cadência</p>
-                <span className="text-xs text-muted-foreground">
-                  {orderedSteps.length} passo(s) configurado(s)
-                </span>
+                <div>
+                  <p className="text-sm font-semibold">Linha do tempo da cadência</p>
+                  <p className="text-xs text-muted-foreground">
+                    Sequência de disparos automáticos via WhatsApp
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {orderedSteps.length} passo(s)
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditingStep(null);
+                      setIsDrawerOpen(true);
+                    }}
+                    className="h-7 text-xs gap-1"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Adicionar passo
+                  </Button>
+                </div>
               </div>
 
               {orderedSteps.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Nenhum passo adicionado. Monte o primeiro no formulário abaixo.
-                </p>
+                <div className="text-center py-6 border border-dashed rounded-lg space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum passo configurado nesta cadência.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditingStep(null);
+                      setIsDrawerOpen(true);
+                    }}
+                    className="text-xs gap-1"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Criar o primeiro passo
+                  </Button>
+                </div>
               ) : (
-                <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-border">
+                <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-border/70">
                   {orderedSteps.map((step, index) => {
                     const isAnchor =
                       step.trigger_type === "before_anchor" || step.trigger_type === "after_anchor";
+                    const isFixedDate = step.trigger_type === "fixed_date";
                     const isInactive = step.is_active === false;
 
                     return (
@@ -590,6 +391,8 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                             ? "opacity-60 bg-muted/20 border-dashed border-border"
                             : isAnchor
                             ? "bg-card border-purple-500/30 hover:border-purple-500/50 shadow-sm"
+                            : isFixedDate
+                            ? "bg-card border-emerald-500/30 hover:border-emerald-500/50 shadow-sm"
                             : "bg-card border-border hover:border-border/80 shadow-sm"
                         }`}
                       >
@@ -600,6 +403,8 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                               ? "bg-muted-foreground text-background"
                               : isAnchor
                               ? "bg-purple-600 text-white"
+                              : isFixedDate
+                              ? "bg-emerald-600 text-white"
                               : "bg-indigo-600 text-white"
                           }`}
                         >
@@ -607,38 +412,46 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                         </div>
 
                         <div className="p-3.5 space-y-2">
-                          {/* Header do passo com o quando em destaque à esquerda */}
+                          {/* Header do card: QUANDO e COMO */}
                           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-bold text-foreground">
                                 {step.name || `Passo ${index + 1}`}
                               </span>
+
+                              {/* QUANDO */}
                               <Badge
                                 variant="outline"
                                 className={`text-[10px] font-semibold ${
                                   isAnchor
                                     ? "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                                    : isFixedDate
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
                                     : "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30"
                                 }`}
                               >
                                 {describeStep(step, anchorFields)}
                               </Badge>
-                              {isAnchor && (
+
+                              {/* COMO (WhatsApp + Horário ou Dentro da Janela) */}
+                              <div className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-border/60">
+                                <MessageSquare className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>
+                                  {step.scheduled_time ? `às ${step.scheduled_time}` : "dentro da janela"}
+                                </span>
+                              </div>
+
+                              {/* ANEXO */}
+                              {step.media_path && (
                                 <Badge
                                   variant="outline"
-                                  className="text-[9px] bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                                  className="text-[10px] bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 gap-1"
                                 >
-                                  ⚡ Automático
+                                  <Paperclip className="h-3 w-3" />
+                                  <span>com anexo</span>
                                 </Badge>
                               )}
-                              {step.scheduled_time && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] text-muted-foreground"
-                                >
-                                  🕒 {step.scheduled_time}
-                                </Badge>
-                              )}
+
                               {isInactive && (
                                 <Badge variant="outline" className="text-[9px] text-muted-foreground">
                                   Inativo
@@ -646,16 +459,16 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                               )}
                             </div>
 
+                            {/* Ações do passo */}
                             <div className="flex items-center gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className={`h-6 w-6 ${
-                                  editingStep?.id === step.id
-                                    ? "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 font-bold"
-                                    : "text-muted-foreground hover:text-indigo-600"
-                                }`}
-                                onClick={() => handleStartEdit(step)}
+                                className="h-6 w-6 text-muted-foreground hover:text-indigo-600"
+                                onClick={() => {
+                                  setEditingStep(step);
+                                  setIsDrawerOpen(true);
+                                }}
                                 title="Editar passo"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
@@ -714,254 +527,56 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                             </div>
                           </div>
 
-                          {/* Anexo de mídia se houver */}
-                          {step.media_path && (
-                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-800/40 text-[11px] text-indigo-700 dark:text-indigo-300 w-fit">
-                              <Paperclip className="h-3 w-3 text-indigo-500 shrink-0" />
-                              <span className="font-medium">{step.media_filename || "Anexo"}</span>
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 uppercase bg-background">
-                                {step.media_type || "arquivo"}
-                              </Badge>
-                            </div>
-                          )}
-
                           {/* Mensagem no corpo do cartão */}
-                          <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words bg-muted/20 p-2.5 rounded-md">
-                            {step.message}
+                          <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words bg-muted/20 p-2.5 rounded-md leading-relaxed">
+                            {renderMessageWithHighlight(step.message)}
                           </div>
                         </div>
                       </div>
                     );
                   })}
+
+                  {/* Card "+" para adicionar novo passo na trilha */}
+                  <div
+                    onClick={() => {
+                      setEditingStep(null);
+                      setIsDrawerOpen(true);
+                    }}
+                    className="relative group flex items-center justify-center gap-2 p-3.5 rounded-lg border-2 border-dashed border-border hover:border-indigo-500 hover:bg-indigo-50/10 dark:hover:bg-indigo-950/10 cursor-pointer transition-all text-muted-foreground hover:text-indigo-600"
+                  >
+                    <div className="absolute -left-6 top-1/2 flex h-5 w-5 -translate-y-1/2 -translate-x-1/2 items-center justify-center rounded-full text-[10px] font-bold ring-4 ring-background bg-muted text-muted-foreground group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      +
+                    </div>
+                    <Plus className="h-4 w-4" />
+                    <span className="text-xs font-semibold">Adicionar novo passo</span>
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Novo passo ou Edição de passo */}
-          <Card>
-            <CardContent className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold flex items-center gap-2">
-                  {editingStep ? (
-                    <>
-                      <Pencil className="h-4 w-4 text-indigo-600" />
-                      Editando: {editingStep.name || "Passo"}
-                    </>
-                  ) : (
-                    <>
-                      <MessageSquarePlus className="h-4 w-4" />
-                      Adicionar passo (lembrete)
-                    </>
-                  )}
-                </p>
-                {editingStep && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCancelEdit}
-                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Cancelar edição
-                  </Button>
-                )}
-              </div>
-              {editingStep && (
-                <div className="p-2.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-800 dark:text-indigo-300">
-                  Você está alterando o passo existente. As alterações valerão para todos os envios futuros e pendentes deste passo.
-                </div>
-              )}
-              <div className="space-y-1.5">
-                <Label className="text-xs">Nome (opcional)</Label>
-                <Input value={stepName} onChange={(e) => setStepName(e.target.value)} placeholder="Ex: Lembrete 3 dias antes" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Mensagem</Label>
-                <Textarea
-                  value={stepMessage}
-                  onChange={(e) => setStepMessage(e.target.value)}
-                  placeholder="Use {{nome}} para personalizar. Ex: Oi {{nome}}, passando para lembrar da nossa reunião!"
-                  rows={3}
-                />
-              </div>
-
-              {/* Anexo de Mídia */}
-              <div className="space-y-2 p-3 rounded-lg border border-border/70 bg-muted/20">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold flex items-center gap-1.5">
-                    <Paperclip className="h-3.5 w-3.5 text-indigo-500" />
-                    Anexo de Mídia (Opcional)
-                  </Label>
-                  <span className="text-[10px] text-muted-foreground">PDF, Imagem, Áudio ou Vídeo</span>
-                </div>
-
-                {stepMedia ? (
-                  <div className="flex items-center justify-between p-2 rounded-md bg-background border border-border">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600">
-                        {stepMedia.media_type === "image" && <ImageIcon className="h-4 w-4" />}
-                        {stepMedia.media_type === "document" && <FileText className="h-4 w-4" />}
-                        {stepMedia.media_type === "audio" && <Music className="h-4 w-4" />}
-                        {stepMedia.media_type === "video" && <Video className="h-4 w-4" />}
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium text-foreground">{stepMedia.media_filename}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase">{stepMedia.media_type} {stepMedia.size_bytes ? `· ${(stepMedia.size_bytes / (1024 * 1024)).toFixed(1)} MB` : ""}</p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setStepMedia(null)}
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                      title="Remover anexo"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-dashed border-border/80 hover:border-indigo-500 bg-background hover:bg-muted/30 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
-                      <Paperclip className="h-3.5 w-3.5" />
-                      <span>{isUploadingMedia ? "Enviando arquivo..." : "Selecionar arquivo do computador"}</span>
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.webp,.mp3,.ogg,.wav,.mp4"
-                        onChange={handleFileUpload}
-                        disabled={isUploadingMedia}
-                      />
-                    </label>
-                  </div>
-                )}
-
-                {stepMedia && (
-                  <>
-                    <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
-                      ℹ️ A mensagem acima será enviada como legenda deste arquivo no WhatsApp.
-                    </p>
-                    <div className="flex items-start gap-1.5 p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 text-[11px]">
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
-                      <span>Envio de arquivos em massa tem maior consumo de dados e pode impactar o tempo de entrega do WhatsApp.</span>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Quando enviar</Label>
-                  <Select value={stepTrigger} onValueChange={(v) => setStepTrigger(v as TriggerType)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {TRIGGER_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {triggerOpt.needsValue && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Quanto</Label>
-                      <Input type="number" min={0} value={stepValue} onChange={(e) => setStepValue(Number(e.target.value))} className="w-24" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Unidade</Label>
-                      <Select value={stepUnit} onValueChange={(v) => setStepUnit(v as "minutes" | "hours" | "days")}>
-                        <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="minutes">minutos</SelectItem>
-                          <SelectItem value="hours">horas</SelectItem>
-                          <SelectItem value="days">dias</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Seletor de âncora se for gatilho de âncora */}
-              {(stepTrigger === "before_anchor" || stepTrigger === "after_anchor") && (
-                <div className="space-y-1.5 p-3 rounded-md bg-purple-500/5 border border-purple-500/20">
-                  <Label className="text-xs font-semibold text-purple-900 dark:text-purple-200">Qual data do lead</Label>
-                  <Select value={stepAnchorField} onValueChange={setStepAnchorField}>
-                    <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {anchorFields.length > 0 ? (
-                        anchorFields.map((f) => (
-                          <SelectItem key={f.key} value={f.key}>
-                            {f.label}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <>
-                          <SelectItem value="data_nascimento">Aniversário do lead</SelectItem>
-                          <SelectItem value="meeting_datetime">Data da reunião</SelectItem>
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    buscada automaticamente no cadastro do lead
-                  </p>
-                </div>
-              )}
-
-              {/* Hora fixa (opcional para qualquer passo) */}
-              <div className="space-y-1.5">
-                <Label className="text-xs">Enviar às (opcional)</Label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    type="time"
-                    value={stepScheduledTime}
-                    onChange={(e) => setStepScheduledTime(e.target.value)}
-                    className="w-32"
-                  />
-                  <span className="text-[11px] text-muted-foreground">
-                    Vazio = horário flexível pelo cálculo. Preenchido = fixa o horário do disparo.
-                  </span>
-                </div>
-                {isOutsideWindow && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                    Fora da janela ({windowStart}–{windowEnd}). Será enviado na próxima abertura.
-                  </p>
-                )}
-              </div>
-
-              <p className="text-[11px] text-muted-foreground">
-                Dica: passos que exigem data-alvo dependem de informar a data da reunião/evento ao aplicar a cadência. Para lembretes pós-cadastro (ex: 2h ou 2 dias após a entrada), use "X depois da inscrição".
-              </p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button
-                  onClick={addStep}
-                  disabled={createStep.isPending || updateStep.isPending || !stepMessage.trim()}
-                  className="w-full sm:w-auto"
-                >
-                  {createStep.isPending || updateStep.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : editingStep ? (
-                    <Pencil className="h-4 w-4 mr-2" />
-                  ) : (
-                    <Plus className="h-4 w-4 mr-2" />
-                  )}
-                  {editingStep ? "Salvar alterações" : "Adicionar passo"}
-                </Button>
-                {editingStep && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCancelEdit}
-                    disabled={updateStep.isPending}
-                    className="w-full sm:w-auto"
-                  >
-                    Cancelar edição
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          {/* Drawer lateral para criar / editar passos */}
+          <StepDrawer
+            isOpen={isDrawerOpen}
+            onClose={() => {
+              setIsDrawerOpen(false);
+              setEditingStep(null);
+            }}
+            editingStep={editingStep}
+            campaignId={selected.id}
+            stepCount={orderedSteps.length}
+            anchorFields={anchorFields}
+            selectedCrmClient={selectedCrmClient}
+            onSuccess={(res) => {
+              if (res.timingChanged && (res.pendingJobsCount || 0) > 0) {
+                setReschedulePrompt({
+                  templateId: res.template.id,
+                  stepName: res.template.name,
+                  pendingCount: res.pendingJobsCount,
+                });
+              }
+            }}
+          />
         </div>
       )}
 

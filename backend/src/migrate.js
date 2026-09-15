@@ -304,6 +304,14 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_jobs' AND column_name='media_filename')
       )
     ) AS ok`,
+    "20260915100000_add_followup_fixed_dates_and_jitter.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_templates')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='scheduled_date')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_campaigns' AND column_name='dispatch_jitter_minutes')
+        AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'followup_templates_trigger_type_check' AND pg_get_constraintdef(oid) LIKE '%fixed_date%')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];
