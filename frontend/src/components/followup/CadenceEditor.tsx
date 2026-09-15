@@ -19,6 +19,7 @@ import {
   RotateCcw,
   AlertTriangle,
   Clock,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,6 +51,7 @@ import {
   useCloneFupCampaign,
   useFupTemplates,
   useCreateFupTemplate,
+  useUpdateFupTemplate,
   useDeleteFupTemplate,
   useReorderFupTemplates,
   useReschedulePendingJobs,
@@ -164,6 +166,7 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const orderedSteps = [...steps].sort((a, b) => a.order_index - b.order_index);
 
   const createStep = useCreateFupTemplate();
+  const updateStep = useUpdateFupTemplate();
   const deleteStep = useDeleteFupTemplate();
   const reorderSteps = useReorderFupTemplates();
   const reschedulePendingJobs = useReschedulePendingJobs();
@@ -171,7 +174,10 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
 
   const { data: anchorFields = [] } = useAnchorFields();
 
-  // Form de novo passo
+  // Edição de passo existente
+  const [editingStep, setEditingStep] = useState<FupTemplate | null>(null);
+
+  // Form de passo (criar ou editar)
   const [stepName, setStepName] = useState("");
   const [stepMessage, setStepMessage] = useState("");
   const [stepTrigger, setStepTrigger] = useState<TriggerType>("after_enrollment");
@@ -181,7 +187,7 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const [stepAnchorField, setStepAnchorField] = useState<string>("data_nascimento");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Mídia do novo passo
+  // Mídia do passo
   const [stepMedia, setStepMedia] = useState<{
     media_path: string;
     media_type: "image" | "audio" | "document" | "video";
@@ -195,6 +201,45 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
     stepName: string;
     pendingCount: number;
   } | null>(null);
+
+  function handleStartEdit(step: FupTemplate) {
+    setEditingStep(step);
+    setStepName(step.name || "");
+    setStepMessage(step.message || "");
+    setStepTrigger(step.trigger_type);
+    setStepValue(step.trigger_value ?? 0);
+    setStepUnit(step.trigger_unit || "hours");
+    setStepScheduledTime(step.scheduled_time || "");
+    setStepAnchorField(step.anchor_field || "data_nascimento");
+    if (step.media_path) {
+      setStepMedia({
+        media_path: step.media_path,
+        media_type: step.media_type || "document",
+        media_mime: step.media_mime || "application/octet-stream",
+        media_filename: step.media_filename || "arquivo",
+        size_bytes: 0,
+      });
+    } else {
+      setStepMedia(null);
+    }
+  }
+
+  function handleCancelEdit() {
+    setEditingStep(null);
+    setStepName("");
+    setStepMessage("");
+    setStepTrigger("after_enrollment");
+    setStepValue(1);
+    setStepUnit("hours");
+    setStepScheduledTime("");
+    setStepAnchorField("data_nascimento");
+    setStepMedia(null);
+  }
+
+  // Reseta a edição ao trocar de cadência
+  useEffect(() => {
+    handleCancelEdit();
+  }, [selectedId]);
 
   const windowStart = selectedCrmClient?.n8n_settings?.send_window_start || "08:00";
   const windowEnd = selectedCrmClient?.n8n_settings?.send_window_end || "18:00";
@@ -315,44 +360,73 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
       return;
     }
     const isAnchor = stepTrigger === "before_anchor" || stepTrigger === "after_anchor";
-    try {
-      const res = await createStep.mutateAsync({
-        campaign_id: selected.id,
-        name: stepName.trim() || `Passo ${orderedSteps.length + 1}`,
-        message: stepMessage.trim(),
-        trigger_type: stepTrigger,
-        trigger_value: triggerOpt.needsValue ? Number(stepValue) || 0 : 0,
-        trigger_unit: stepUnit,
-        trigger_direction:
-          stepTrigger === "before_meeting" || stepTrigger === "before_anchor"
-            ? "before"
-            : stepTrigger === "after_meeting" || stepTrigger === "after_anchor"
-            ? "after"
-            : null,
-        scheduled_time: stepScheduledTime || null,
-        anchor_field: isAnchor ? (stepAnchorField || "data_nascimento") : null,
-        media_path: stepMedia?.media_path || null,
-        media_type: stepMedia?.media_type || null,
-        media_mime: stepMedia?.media_mime || null,
-        media_filename: stepMedia?.media_filename || null,
-        is_active: true,
-        order_index: orderedSteps.length,
-      });
-      setStepName("");
-      setStepMessage("");
-      setStepScheduledTime("");
-      setStepMedia(null);
-      toast.success("Passo adicionado.");
+    const payload = {
+      name:
+        stepName.trim() ||
+        (editingStep
+          ? editingStep.name
+          : `Passo ${orderedSteps.length + 1}`),
+      message: stepMessage.trim(),
+      trigger_type: stepTrigger,
+      trigger_value: triggerOpt.needsValue ? Number(stepValue) || 0 : 0,
+      trigger_unit: stepUnit,
+      trigger_direction:
+        stepTrigger === "before_meeting" || stepTrigger === "before_anchor"
+          ? ("before" as const)
+          : stepTrigger === "after_meeting" || stepTrigger === "after_anchor"
+          ? ("after" as const)
+          : null,
+      scheduled_time: stepScheduledTime || null,
+      anchor_field: isAnchor ? (stepAnchorField || "data_nascimento") : null,
+      media_path: stepMedia?.media_path || null,
+      media_type: stepMedia?.media_type || null,
+      media_mime: stepMedia?.media_mime || null,
+      media_filename: stepMedia?.media_filename || null,
+    };
 
-      if (res?.timingChanged && (res?.pendingJobsCount || 0) > 0) {
-        setReschedulePrompt({
-          templateId: res.template.id,
-          stepName: res.template.name,
-          pendingCount: res.pendingJobsCount || 0,
+    try {
+      if (editingStep) {
+        const res = await updateStep.mutateAsync({
+          id: editingStep.id,
+          ...payload,
         });
+        handleCancelEdit();
+
+        if ((res?.pendingJobsCount || 0) > 0) {
+          toast.info(
+            `Alteração salva. Vale para os ${res.pendingJobsCount} envio(s) ainda não realizado(s).`
+          );
+        } else {
+          toast.success("Passo atualizado.");
+        }
+
+        if (res?.timingChanged && (res?.pendingJobsCount || 0) > 0) {
+          setReschedulePrompt({
+            templateId: res.template.id,
+            stepName: res.template.name,
+            pendingCount: res.pendingJobsCount || 0,
+          });
+        }
+      } else {
+        const res = await createStep.mutateAsync({
+          campaign_id: selected.id,
+          ...payload,
+          is_active: true,
+          order_index: orderedSteps.length,
+        });
+        handleCancelEdit();
+        toast.success("Passo adicionado.");
+
+        if (res?.timingChanged && (res?.pendingJobsCount || 0) > 0) {
+          setReschedulePrompt({
+            templateId: res.template.id,
+            stepName: res.template.name,
+            pendingCount: res.pendingJobsCount || 0,
+          });
+        }
       }
     } catch {
-      toast.error("Falha ao adicionar o passo.");
+      toast.error(editingStep ? "Falha ao atualizar o passo." : "Falha ao adicionar o passo.");
     }
   }
 
@@ -510,7 +584,9 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => handleDrop(index)}
                         className={`relative rounded-lg border transition-all ${
-                          isInactive
+                          editingStep?.id === step.id
+                            ? "ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-md"
+                            : isInactive
                             ? "opacity-60 bg-muted/20 border-dashed border-border"
                             : isAnchor
                             ? "bg-card border-purple-500/30 hover:border-purple-500/50 shadow-sm"
@@ -571,6 +647,19 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                             </div>
 
                             <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`h-6 w-6 ${
+                                  editingStep?.id === step.id
+                                    ? "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 font-bold"
+                                    : "text-muted-foreground hover:text-indigo-600"
+                                }`}
+                                onClick={() => handleStartEdit(step)}
+                                title="Editar passo"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -649,12 +738,39 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
             </CardContent>
           </Card>
 
-          {/* Novo passo */}
+          {/* Novo passo ou Edição de passo */}
           <Card>
             <CardContent className="p-4 space-y-3">
-              <p className="text-sm font-semibold flex items-center gap-2">
-                <MessageSquarePlus className="h-4 w-4" /> Adicionar passo (lembrete)
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  {editingStep ? (
+                    <>
+                      <Pencil className="h-4 w-4 text-indigo-600" />
+                      Editando: {editingStep.name || "Passo"}
+                    </>
+                  ) : (
+                    <>
+                      <MessageSquarePlus className="h-4 w-4" />
+                      Adicionar passo (lembrete)
+                    </>
+                  )}
+                </p>
+                {editingStep && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCancelEdit}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancelar edição
+                  </Button>
+                )}
+              </div>
+              {editingStep && (
+                <div className="p-2.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-800 dark:text-indigo-300">
+                  Você está alterando o passo existente. As alterações valerão para todos os envios futuros e pendentes deste passo.
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label className="text-xs">Nome (opcional)</Label>
                 <Input value={stepName} onChange={(e) => setStepName(e.target.value)} placeholder="Ex: Lembrete 3 dias antes" />
@@ -817,10 +933,33 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
               <p className="text-[11px] text-muted-foreground">
                 Dica: passos que exigem data-alvo dependem de informar a data da reunião/evento ao aplicar a cadência. Para lembretes pós-cadastro (ex: 2h ou 2 dias após a entrada), use "X depois da inscrição".
               </p>
-              <Button onClick={addStep} disabled={createStep.isPending || !stepMessage.trim()} className="w-full sm:w-auto">
-                {createStep.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                Adicionar passo
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  onClick={addStep}
+                  disabled={createStep.isPending || updateStep.isPending || !stepMessage.trim()}
+                  className="w-full sm:w-auto"
+                >
+                  {createStep.isPending || updateStep.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : editingStep ? (
+                    <Pencil className="h-4 w-4 mr-2" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-2" />
+                  )}
+                  {editingStep ? "Salvar alterações" : "Adicionar passo"}
+                </Button>
+                {editingStep && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCancelEdit}
+                    disabled={updateStep.isPending}
+                    className="w-full sm:w-auto"
+                  >
+                    Cancelar edição
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
