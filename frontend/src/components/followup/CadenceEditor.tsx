@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -39,6 +40,7 @@ import {
   useReorderFupTemplates,
   useReschedulePendingJobs,
   useAnchorFields,
+  useUpcomingWindow,
   type FupTemplate,
   type AnchorFieldOption,
 } from "@/hooks/useFollowupAdmin";
@@ -46,6 +48,7 @@ import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
 import { describeStep as formatStepDescription } from "@/lib/followup/describeStep";
 import StepDrawer from "./StepDrawer";
+import UpcomingStrip from "./UpcomingStrip";
 
 // Editor de cadências de follow-up: Trilha vertical com cards e drawer lateral de criação/edição.
 
@@ -103,6 +106,15 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const reschedulePendingJobs = useReschedulePendingJobs();
 
   const { data: anchorFields = [] } = useAnchorFields();
+
+  // Faixa "Próximos 7 dias" — teto real é do chip, compartilhado entre cadências.
+  const { data: upcoming, isLoading: upcomingLoading } = useUpcomingWindow(selectedId || undefined, { days: 7 });
+
+  // Jitter anti-ban da cadência selecionada
+  const [jitterDraft, setJitterDraft] = useState<string>("0");
+  useEffect(() => {
+    setJitterDraft(String(selected?.dispatch_jitter_minutes ?? 0));
+  }, [selectedId, selected?.dispatch_jitter_minutes]);
 
   // Drawer de passo (criar ou editar)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -182,6 +194,25 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
       toast.success(next === "active" ? "Cadência ativada." : "Cadência pausada.");
     } catch {
       toast.error("Falha ao atualizar a cadência.");
+    }
+  }
+
+  async function handleSaveJitter() {
+    if (!selected) return;
+    const minutes = Number(jitterDraft);
+    if (!Number.isFinite(minutes) || minutes < 0 || minutes > 120) {
+      toast.error("Jitter deve ser um número entre 0 e 120 minutos.");
+      return;
+    }
+    try {
+      await updateCadence.mutateAsync({
+        id: selected.id,
+        company_id: validCompany,
+        dispatch_jitter_minutes: Math.round(minutes),
+      });
+      toast.success(minutes === 0 ? "Jitter desativado." : `Jitter de até ${Math.round(minutes)}min aplicado nos próximos disparos.`);
+    } catch {
+      toast.error("Falha ao salvar o jitter.");
     }
   }
 
@@ -296,7 +327,7 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
       ) : (
         <div className="space-y-4">
           <Card>
-            <CardContent className="p-4 flex items-center justify-between gap-3">
+            <CardContent className="p-4 flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h3 className="text-base font-bold">{selected.name}</h3>
                 <p className="text-xs text-muted-foreground">
@@ -322,6 +353,42 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
               </div>
+
+              {/* Jitter anti-ban: deslocamento aleatório de 0 a N minutos ANTES da
+                  janela de envio, pra não concentrar tudo na abertura do dia. */}
+              <div className="flex items-center gap-2 w-full pt-2 border-t border-border/50">
+                <Label htmlFor="jitter-input" className="text-[11px] text-muted-foreground whitespace-nowrap">
+                  Jitter anti-ban (min)
+                </Label>
+                <Input
+                  id="jitter-input"
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={jitterDraft}
+                  onChange={(e) => setJitterDraft(e.target.value)}
+                  className="h-7 w-20 text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={handleSaveJitter}
+                  disabled={updateCadence.isPending || jitterDraft === String(selected.dispatch_jitter_minutes ?? 0)}
+                >
+                  Salvar
+                </Button>
+                <span className="text-[10px] text-muted-foreground">
+                  Espalha os disparos em lote pra não sair tudo no mesmo segundo
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Faixa "Próximos 7 dias" — teto é do chip, não só desta cadência */}
+          <Card>
+            <CardContent className="p-4">
+              <UpcomingStrip days={upcoming?.days} chipLimit={upcoming?.chipLimit} loading={upcomingLoading} />
             </CardContent>
           </Card>
 

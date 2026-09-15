@@ -356,6 +356,93 @@ export function useReschedulePendingJobs() {
   });
 }
 
+// ─── Etapa 5 Commit 3: faixa "Próximos N dias" e calendário ──────────────────
+
+export interface UpcomingDay {
+  date: string;
+  cadencePending: number;
+  /** Total de TODAS as cadências que compartilham o mesmo chip — é o que estoura a cota, não cadencePending sozinho. */
+  chipPending: number;
+  chipLimit: number | null;
+  overLimit: boolean;
+  /** Quanto de projectLeads caiu neste dia (já somado em cadencePending/chipPending). */
+  projected: number;
+}
+
+export interface UpcomingWindow {
+  campaignId: string;
+  days: UpcomingDay[];
+  chipInstanceId: string | null;
+  chipLimit: number | null;
+}
+
+export function useUpcomingWindow(
+  campaignId?: string,
+  options?: { days?: number; projectLeads?: number }
+) {
+  const { isAuthenticated, getIdToken } = useAuth();
+  const days = options?.days ?? 7;
+  const projectLeads = options?.projectLeads ?? 0;
+  return useQuery({
+    queryKey: ["fup-upcoming", campaignId, days, projectLeads],
+    enabled: isAuthenticated && !!campaignId,
+    queryFn: () =>
+      apiCall<UpcomingWindow>(
+        `/api/followup/campaigns/${campaignId}/upcoming?days=${days}${
+          projectLeads > 0 ? `&projectLeads=${projectLeads}` : ""
+        }`,
+        getIdToken
+      ),
+    staleTime: 15_000,
+  });
+}
+
+export interface CalendarMonth {
+  tenantId: string;
+  month: string;
+  dayCounts: Record<string, number>;
+}
+
+export function useFollowupCalendarMonth(clientId?: string, month?: string) {
+  const { isAuthenticated, getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["fup-calendar-month", clientId, month],
+    enabled: isAuthenticated && !!clientId && !!month,
+    queryFn: () =>
+      apiCall<CalendarMonth>(`/api/followup/calendar?clientId=${clientId}&month=${month}`, getIdToken),
+    staleTime: 15_000,
+  });
+}
+
+export interface CalendarDayItem {
+  jobId: string;
+  scheduleId: string;
+  campaignId: string | null;
+  campaignName: string;
+  templateName: string | null;
+  leadName: string | null;
+  phone: string | null;
+  scheduledFor: string;
+  status: string;
+}
+
+export interface CalendarDay {
+  tenantId: string;
+  date: string;
+  items: CalendarDayItem[];
+}
+
+export function useFollowupCalendarDay(clientId?: string, date?: string) {
+  const { isAuthenticated, getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["fup-calendar-day", clientId, date],
+    enabled: isAuthenticated && !!clientId && !!date,
+    queryFn: () =>
+      apiCall<CalendarDay>(`/api/followup/calendar/day?clientId=${clientId}&date=${date}`, getIdToken),
+    staleTime: 10_000,
+  });
+}
+
 export interface UploadFollowupMediaResult {
   success: boolean;
   media_path: string;

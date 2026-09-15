@@ -50,6 +50,7 @@ import {
   getStepPreview as sharedGetStepPreview,
   requiresTargetDate,
 } from "@/lib/followup/describeStep";
+import UpcomingStrip, { type UpcomingStripDay } from "./UpcomingStrip";
 
 interface FollowupStep {
   id: string;
@@ -87,6 +88,9 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [upcomingDays, setUpcomingDays] = useState<UpcomingStripDay[] | undefined>(undefined);
+  const [upcomingChipLimit, setUpcomingChipLimit] = useState<number | null>(null);
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
 
   async function authFetch(path: string, init: RequestInit = {}) {
     const token = await getToken();
@@ -160,6 +164,39 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
       }
     })();
   }, [cadenceId]);
+
+  // Faixa "Próximos 7 dias" projetando o que ESTA aplicação (leads.length) vai gerar
+  // somado ao que já existe — teto real é do chip, compartilhado entre cadências.
+  useEffect(() => {
+    if (!cadenceId || leads.length === 0) {
+      setUpcomingDays(undefined);
+      setUpcomingChipLimit(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setUpcomingLoading(true);
+      try {
+        const res = await authFetch(
+          `/api/followup/campaigns/${encodeURIComponent(cadenceId)}/upcoming?days=7&projectLeads=${leads.length}`
+        );
+        const body = await res.json();
+        if (cancelled) return;
+        setUpcomingDays(body?.days || undefined);
+        setUpcomingChipLimit(body?.chipLimit ?? null);
+      } catch {
+        if (!cancelled) {
+          setUpcomingDays(undefined);
+          setUpcomingChipLimit(null);
+        }
+      } finally {
+        if (!cancelled) setUpcomingLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cadenceId, leads.length]);
 
   const stepPreviews = steps.map((s) => ({ step: s, preview: getStepPreview(s, meetingDatetime) }));
   const validStepsCount = stepPreviews.filter((p) => p.preview.type === "valid").length;
@@ -406,6 +443,17 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {cadenceId && (upcomingDays || upcomingLoading) && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <UpcomingStrip
+                days={upcomingDays}
+                chipLimit={upcomingChipLimit}
+                loading={upcomingLoading}
+                cadenceLabel="nesta cadência"
+              />
             </div>
           )}
         </div>

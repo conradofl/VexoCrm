@@ -351,6 +351,82 @@ const EMPTY_UTMS = {
   utm_term: null,
 };
 
+// Jitter anti-ban (Etapa 5 Commit 3): desloca a data calculada por um valor aleatório
+// entre 0 e `jitterMinutes` minutos, SEMPRE para frente — nunca atrasa nem confirma um
+// horário já prometido. Roda ANTES de adjustDateToSendWindow: se rodasse depois, o
+// deslocamento poderia empurrar o horário pra fora da janela e todo mundo concentraria
+// na abertura do dia seguinte — o oposto do objetivo de espalhar os disparos.
+// Vale para inscrição em lote (enrollLead) e reagendamento em massa de um template
+// (reschedulePendingJobsForTemplate), inclusive o passo imediato (on_schedule), que é
+// onde o padrão simultâneo é pior. NÃO se aplica ao lembrete avulso de
+// queueRoutes.js (PATCH /api/followup-queue/:scheduleId/reschedule) — lá a hora foi
+// marcada à mão por um humano para aquele lead específico: é uma promessa, não um lote.
+export function applyDispatchJitter(date, jitterMinutes, rng = Math.random) {
+  const minutes = Number(jitterMinutes) || 0;
+  if (!date || !(date instanceof Date) || isNaN(date.getTime()) || minutes <= 0) return date;
+  const offsetMs = Math.round(rng() * minutes * 60 * 1000);
+  return new Date(date.getTime() + offsetMs);
+}
+
+// ─── Etapa 5 Commit 3: faixa "Próximos N dias" ────────────────────────────────
+// Funções puras — sem I/O — reaproveitadas tanto pela rota GET
+// /api/followup/campaigns/:id/upcoming quanto pelo calendário. A rota que fizer
+// a consulta ao banco decide QUAIS jobs entram (tenant/chip/cadência); estas
+// funções só agrupam por dia e projetam, sem tocar em rede/banco.
+
+export function dayKeyInTimezone(date, timezone = "America/Sao_Paulo") {
+  const parts = getPartsInTimezone(date, timezone);
+  const mm = String(parts.month).padStart(2, "0");
+  const dd = String(parts.day).padStart(2, "0");
+  return `${parts.year}-${mm}-${dd}`;
+}
+
+// Lista as `days` chaves de dia (YYYY-MM-DD, timezone do tenant) a partir de `now`,
+// pra garantir que a faixa mostre um dia com ZERO explicitamente, não um buraco.
+export function buildUpcomingDayKeys(now, days, timezone = "America/Sao_Paulo") {
+  const out = [];
+  for (let i = 0; i < days; i++) {
+    out.push(dayKeyInTimezone(new Date(now.getTime() + i * 24 * 60 * 60 * 1000), timezone));
+  }
+  return out;
+}
+
+// Agrupa jobs por dia, contando SÓ status === 'pending' — sent e cancelled nunca
+// entram na conta, mesmo que o SQL upstream já filtre (defesa em profundidade: esta
+// função é a mesma usada tanto pra "cadência" quanto pra "chip inteiro", então um
+// SELECT futuro que esqueça o WHERE não vaza contagem errada pra UI).
+export function groupPendingJobsByDay(jobs, { timezone = "America/Sao_Paulo" } = {}) {
+  const counts = new Map();
+  for (const job of jobs || []) {
+    if (job.status !== "pending") continue;
+    if (!job.scheduled_for) continue;
+    const key = dayKeyInTimezone(new Date(job.scheduled_for), timezone);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+// Projeta quanto `leadsCount` leads NOVOS somariam a cada dia se fossem inscritos
+// agora — soma aos totais já existentes, nunca substitui. Só projeta passos cuja
+// data dá pra calcular sem dado por-lead (on_schedule/after_enrollment/no_reply/
+// fixed_date); passos que exigem meeting/âncora (before_meeting/after_meeting/
+// before_anchor/after_anchor) ficam de fora — mesma regra do enrollLead real: sem
+// data-alvo, o passo nem seria agendado (skippedSteps/no_date).
+export function projectLeadsOntoDays(templates, leadsCount, now, sendWindowConfig) {
+  const additions = new Map();
+  if (!leadsCount || leadsCount <= 0) return additions;
+  const timezone = sendWindowConfig?.timezone || "America/Sao_Paulo";
+  for (const tpl of templates || []) {
+    if (tpl.is_active === false) continue;
+    const scheduledFor = calcScheduledFor(tpl, now, null, {}, { sendWindowConfig });
+    if (!scheduledFor) continue;
+    const effective = adjustDateToSendWindow(scheduledFor, sendWindowConfig);
+    const key = dayKeyInTimezone(effective, timezone);
+    additions.set(key, (additions.get(key) || 0) + leadsCount);
+  }
+  return additions;
+}
+
 // Enrola UM lead numa cadência: cria o followup_schedule e enfileira os followup_jobs
 // conforme os templates (passos) ativos da campanha. Reutilizado pelo webhook de entrada
 // e pelo enrolamento manual a partir do Banco de Dados. `campaign` é a linha já carregada
@@ -513,8 +589,9 @@ export async function enrollLead(
       continue;
     }
 
-    // 3. adjustDateToSendWindow: roda POR ÚLTIMO.
-    const effectiveScheduledFor = adjustDateToSendWindow(scheduledFor, sendWindowConfig);
+    // 3. Jitter anti-ban ANTES da janela, depois adjustDateToSendWindow roda POR ÚLTIMO.
+    const jitteredScheduledFor = applyDispatchJitter(scheduledFor, campaign?.dispatch_jitter_minutes);
+    const effectiveScheduledFor = adjustDateToSendWindow(jitteredScheduledFor, sendWindowConfig);
 
     const delay = Math.max(0, effectiveScheduledFor.getTime() - Date.now());
 
@@ -548,10 +625,17 @@ export async function enrollLead(
 export async function processInboundWebhook(campaignId, parsedPayload) {
   const supabase = getSupabase();
 
+  // dispatch_jitter_minutes está no select por uniformidade (mesma lista de colunas
+  // que /campaigns/:id/enroll passa pro enrollLead) — o jitter ACABA se aplicando
+  // também a quem entra pelo webhook (Calendly etc). Isso é inofensivo, não errado:
+  // o webhook processa um lead por vez, não tem o padrão "N leads inscritos no mesmo
+  // segundo" que o jitter existe pra espalhar, então um deslocamento aleatório de
+  // 0-N min nesse único lead não muda nada pro anti-ban. Deixado assim de propósito,
+  // pra não ter duas listas de colunas divergentes alimentando o mesmo enrollLead.
   const { data: campaign, error: campErr } = await supabase
     .from("followup_campaigns")
     .select(
-      "id, company_id, status, default_origin, webhook_secret"
+      "id, company_id, status, default_origin, webhook_secret, dispatch_jitter_minutes"
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -626,6 +710,18 @@ export async function reschedulePendingJobsForTemplate(templateId) {
     throw err;
   }
 
+  // Jitter é por campanha (dispatch_jitter_minutes), não por template — busca uma vez,
+  // fora do loop de jobs, e reaproveita pra todos os passos recalculados abaixo.
+  let campaignJitterMinutes = 0;
+  if (template.campaign_id) {
+    const { data: campaignRow } = await supabase
+      .from("followup_campaigns")
+      .select("dispatch_jitter_minutes")
+      .eq("id", template.campaign_id)
+      .maybeSingle();
+    campaignJitterMinutes = campaignRow?.dispatch_jitter_minutes || 0;
+  }
+
   // Buscar todos os jobs pendentes com dados do schedule e company
   const { rows: jobs } = await query(
     `SELECT fj.id, fj.schedule_id, fj.bull_job_id, fj.scheduled_for, fj.custom_message,
@@ -697,7 +793,8 @@ export async function reschedulePendingJobsForTemplate(templateId) {
       }
     }
 
-    const effectiveScheduledFor = adjustDateToSendWindow(scheduledFor, sendWindowConfig);
+    const jitteredScheduledFor = applyDispatchJitter(scheduledFor, campaignJitterMinutes);
+    const effectiveScheduledFor = adjustDateToSendWindow(jitteredScheduledFor, sendWindowConfig);
     const delay = Math.max(0, effectiveScheduledFor.getTime() - Date.now());
 
     // Remove job antigo da fila do BullMQ

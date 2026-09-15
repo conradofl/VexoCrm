@@ -52,12 +52,16 @@ export function getFollowupWorkerDbPool() {
   return null;
 }
 
-export async function resolveEvolutionInstanceForFollowup(tenantId, instanceNameOrId) {
+// `preloadedInstances` (Etapa 5 Commit 3): quando o chamador já buscou a lista de
+// instâncias do tenant (ex.: resolvendo o chip de N empresas na mesma requisição da
+// faixa "Próximos 7 dias"), passa aqui pra pular a query repetida — mesma lógica de
+// casamento, sem duplicar a implementação e sem N buscas redundantes ao banco.
+export async function resolveEvolutionInstanceForFollowup(tenantId, instanceNameOrId, preloadedInstances = null) {
   if (!tenantId) {
     throw new Error("tenant_id não informado para resolução da instância de follow-up.");
   }
 
-  const instances = await getLeadClientEvolutionInstances(tenantId);
+  const instances = preloadedInstances || (await getLeadClientEvolutionInstances(tenantId));
   const activeInstances = Array.isArray(instances) ? instances.filter((i) => i.active !== false) : [];
 
   if (activeInstances.length === 0) {

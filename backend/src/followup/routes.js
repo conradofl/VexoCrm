@@ -14,6 +14,10 @@ import {
   validateTemplatePayload,
   getAnchorFieldsMetadata,
   reschedulePendingJobsForTemplate,
+  buildUpcomingDayKeys,
+  groupPendingJobsByDay,
+  projectLeadsOntoDays,
+  dayKeyInTimezone,
 } from "./service.js";
 import { saveFollowupMediaBuffer, FOLLOWUP_MEDIA_MAX_SIZES } from "../services/storage.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
@@ -21,12 +25,16 @@ import { getAnalytics } from "./analyticsService.js";
 import { getFollowupQueue } from "./queue.js";
 import { triggerAutomationRun } from "./automationEngine.js";
 import { defaultGroqModel } from "../services/llmModels.js";
-import { adjustDateToSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
+import { adjustDateToSendWindow, resolveSendWindowConfig, createDateInTimezone } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { isFromMe, isGroupJid } from "../services/inboundGuard.js";
 import { sanitizePhone } from "../services/leadImport.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
 import { cancelFollowupCadenceOnReply } from "../services/followupExitGuard.js";
+import { hasTenantAccess } from "./queueRoutes.js";
+import { resolveEvolutionInstanceForFollowup } from "./worker.js";
+import { getLeadClientEvolutionInstances } from "../services/evolution.js";
+import { resolveChipDailyLimit } from "../services/chipQuota.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -509,7 +517,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_campaigns")
-        .select("id, company_id, name, description, status, default_origin, webhook_trigger_url, webhook_secret, created_at")
+        .select("id, company_id, name, description, status, default_origin, webhook_trigger_url, webhook_secret, dispatch_jitter_minutes, created_at")
         .eq("company_id", companyId)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -601,11 +609,17 @@ function normalizeInstanceList(list, fallback) {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
 
-    const { name, description, status, default_origin, regenerate_secret } = req.body || {};
+    const { name, description, status, default_origin, regenerate_secret, dispatch_jitter_minutes } = req.body || {};
 
     const validStatuses = ["draft", "active", "paused", "archived"];
     if (status && !validStatuses.includes(status)) {
       return sendErr(res, 400, "INVALID_STATUS", `status deve ser: ${validStatuses.join(", ")}`);
+    }
+    if ("dispatch_jitter_minutes" in (req.body || {})) {
+      const jitter = Number(dispatch_jitter_minutes);
+      if (!Number.isFinite(jitter) || jitter < 0 || jitter > 120) {
+        return sendErr(res, 400, "INVALID_JITTER", "dispatch_jitter_minutes deve ser um número entre 0 e 120.");
+      }
     }
 
     try {
@@ -615,6 +629,7 @@ function normalizeInstanceList(list, fallback) {
       if (status) patch.status = status;
       if ("default_origin" in req.body) patch.default_origin = str(default_origin);
       if (regenerate_secret) patch.webhook_secret = generateSecret();
+      if ("dispatch_jitter_minutes" in req.body) patch.dispatch_jitter_minutes = Math.round(Number(dispatch_jitter_minutes));
       if ("exit_on_reply" in req.body) patch.exit_on_reply = Boolean(req.body.exit_on_reply);
       if ("exit_on_won" in req.body) patch.exit_on_won = Boolean(req.body.exit_on_won);
       if ("exit_on_lost" in req.body) patch.exit_on_lost = Boolean(req.body.exit_on_lost);
@@ -781,7 +796,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data: campaign, error: campErr } = await supabase
         .from("followup_campaigns")
-        .select("id, name, company_id, status, default_origin")
+        .select("id, name, company_id, status, default_origin, dispatch_jitter_minutes")
         .eq("id", id)
         .maybeSingle();
       if (campErr || !campaign) return sendErr(res, 404, "NOT_FOUND", "Cadência não encontrada.");
@@ -877,6 +892,274 @@ function normalizeInstanceList(list, fallback) {
       });
     } catch (err) {
       return sendErr(res, 500, "ENROLL_FAILED", err.message);
+    }
+  });
+
+  // GET /api/followup/campaigns/:id/upcoming?days=7&projectLeads=N — faixa "Próximos N dias".
+  //
+  // O teto de envio é do CHIP (número de WhatsApp), compartilhado entre TODAS as
+  // cadências/empresas do tenant que despacham por ele — não só a cadência aberta.
+  // Por isso este endpoint calcula dois números por dia:
+  //   cadencePending — só os jobs pendentes DESTA cadência (a fração)
+  //   chipPending    — jobs pendentes de TODAS as cadências que compartilham o
+  //                    mesmo chip resolvido (o total real que vai sair daquele número)
+  // O vermelho na UI deve vir de chipPending > chipLimit, nunca de cadencePending.
+  //
+  // Tenant SEMPRE resolvido a partir da linha (campaign -> company -> tenant_id),
+  // nunca de um clientId no payload — e fora do escopo responde 404, não 403 (não
+  // confirma nem nega a existência da cadência pra quem não tem acesso a ela).
+  router.get("/campaigns/:id/upcoming", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+
+    const rawDays = Number.parseInt(String(req.query.days || "7"), 10);
+    const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(rawDays, 30) : 7;
+    const rawProject = Number.parseInt(String(req.query.projectLeads || "0"), 10);
+    const projectLeads = Number.isFinite(rawProject) && rawProject > 0 ? rawProject : 0;
+
+    try {
+      const { rows: campRows } = await query(
+        `SELECT fc.id, fc.company_id, fco.tenant_id, fco.evolution_instance
+           FROM followup_campaigns fc
+           JOIN followup_companies fco ON fco.id = fc.company_id
+          WHERE fc.id = $1`,
+        [id]
+      );
+      if (!campRows.length) return sendErr(res, 404, "NOT_FOUND", "Cadência não encontrada.");
+      const campaignRow = campRows[0];
+
+      // Fora do escopo do usuário: 404, não 403 — nunca confirma que a cadência existe.
+      if (!hasTenantAccess(req, campaignRow.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Cadência não encontrada.");
+      }
+
+      const tenantSettings = await getLeadClientN8nSettings(campaignRow.tenant_id);
+      const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
+      const now = new Date();
+      const dayKeys = buildUpcomingDayKeys(now, days, sendWindowConfig.timezone);
+      const horizonEnd = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+      // Resolve o chip desta campanha e, a partir dele, TODAS as outras empresas do
+      // tenant que despacham pelo mesmo chip — é o conjunto cujos jobs pendentes
+      // formam o total real (chipPending). Falha graciosamente: chip desconectado
+      // não derruba a faixa, só limita a leitura à própria cadência.
+      let chipInstanceId = null;
+      let chipLimit = null;
+      let chipCompanyIds = [campaignRow.company_id];
+      try {
+        const instances = await getLeadClientEvolutionInstances(campaignRow.tenant_id);
+        const evoConfig = await resolveEvolutionInstanceForFollowup(
+          campaignRow.tenant_id,
+          campaignRow.evolution_instance,
+          instances
+        );
+        chipInstanceId = evoConfig.instanceId;
+        chipLimit = resolveChipDailyLimit(evoConfig.rawInstance);
+
+        const { rows: companies } = await query(
+          `SELECT id, evolution_instance FROM followup_companies WHERE tenant_id = $1`,
+          [campaignRow.tenant_id]
+        );
+        chipCompanyIds = [];
+        for (const comp of companies) {
+          try {
+            const compEvo = await resolveEvolutionInstanceForFollowup(
+              campaignRow.tenant_id,
+              comp.evolution_instance,
+              instances
+            );
+            if (compEvo.instanceId === chipInstanceId) chipCompanyIds.push(comp.id);
+          } catch {
+            // Empresa sem chip ativo/conectado: não participa da soma do chip.
+          }
+        }
+      } catch (chipErr) {
+        console.warn("[followup/upcoming] chip não resolvido:", chipErr?.message || chipErr);
+      }
+
+      const { rows: cadenceJobs } = await query(
+        `SELECT fj.status, fj.scheduled_for
+           FROM followup_jobs fj
+           JOIN followup_schedules fs ON fs.id = fj.schedule_id
+          WHERE fs.campaign_id = $1 AND fj.status = 'pending'
+            AND fj.scheduled_for >= $2 AND fj.scheduled_for < $3`,
+        [id, now.toISOString(), horizonEnd.toISOString()]
+      );
+
+      let chipJobs = cadenceJobs;
+      if (chipCompanyIds.length > 0) {
+        const { rows } = await query(
+          `SELECT fj.status, fj.scheduled_for
+             FROM followup_jobs fj
+             JOIN followup_schedules fs ON fs.id = fj.schedule_id
+            WHERE fs.company_id = ANY($1::uuid[]) AND fj.status = 'pending'
+              AND fj.scheduled_for >= $2 AND fj.scheduled_for < $3`,
+          [chipCompanyIds, now.toISOString(), horizonEnd.toISOString()]
+        );
+        chipJobs = rows;
+      }
+
+      const cadenceCounts = groupPendingJobsByDay(cadenceJobs, { timezone: sendWindowConfig.timezone });
+      const chipCounts = groupPendingJobsByDay(chipJobs, { timezone: sendWindowConfig.timezone });
+
+      let projectedAdditions = new Map();
+      if (projectLeads > 0) {
+        const supabase = getSupabase();
+        const { data: templates } = await supabase
+          .from("followup_templates")
+          .select("*")
+          .eq("campaign_id", id)
+          .eq("is_active", true);
+        projectedAdditions = projectLeadsOntoDays(templates || [], projectLeads, now, sendWindowConfig);
+      }
+
+      const dayResults = dayKeys.map((date) => {
+        const projected = projectedAdditions.get(date) || 0;
+        const cadencePending = (cadenceCounts.get(date) || 0) + projected;
+        const chipPending = (chipCounts.get(date) || 0) + projected;
+        return {
+          date,
+          cadencePending,
+          chipPending,
+          chipLimit,
+          overLimit: chipLimit != null && chipPending > chipLimit,
+          projected,
+        };
+      });
+
+      return res.json({
+        success: true,
+        campaignId: id,
+        days: dayResults,
+        chipInstanceId,
+        chipLimit,
+      });
+    } catch (err) {
+      return sendErr(res, 500, "UPCOMING_FETCH_FAILED", err.message);
+    }
+  });
+
+  // ── Calendário (Etapa 5 Commit 3) ───────────────────────────────────────────
+  // Lente, não superfície de criação: nada se cria nem se arrasta aqui. Ações
+  // permitidas no dia: abrir a conversa e cancelar um passo (rota já existente,
+  // PATCH /api/followup-queue/jobs/:jobId/cancel).
+  //
+  // Agrega o TENANT INTEIRO (todas as empresas/cadências), não uma cadência só —
+  // é por isso que precisa do clientId como escopo explícito na query, diferente de
+  // /campaigns/:id/upcoming (que deriva o tenant da própria cadência). O clientId da
+  // query NUNCA é usado direto: sempre passa por hasTenantAccess antes de virar
+  // filtro — fora do escopo responde 404, não 403, e sem essa guarda a tela vira
+  // listagem de leads e horários de outra empresa.
+
+  function resolveCalendarTenant(req, res) {
+    const clientId = str(req.query.clientId);
+    if (!clientId) {
+      sendErr(res, 400, "MISSING_CLIENT_ID", "clientId é obrigatório.");
+      return null;
+    }
+    if (!hasTenantAccess(req, clientId)) {
+      sendErr(res, 404, "NOT_FOUND", "Tenant não encontrado.");
+      return null;
+    }
+    return clientId;
+  }
+
+  // GET /api/followup/calendar?clientId=X&month=YYYY-MM
+  router.get("/calendar", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const clientId = resolveCalendarTenant(req, res);
+    if (!clientId) return;
+
+    const monthStr = str(req.query.month);
+    if (!monthStr || !/^\d{4}-\d{2}$/.test(monthStr)) {
+      return sendErr(res, 400, "INVALID_MONTH", "month deve ser YYYY-MM.");
+    }
+    const [year, month] = monthStr.split("-").map(Number);
+    if (month < 1 || month > 12) return sendErr(res, 400, "INVALID_MONTH", "month deve ser YYYY-MM.");
+
+    try {
+      const tenantSettings = await getLeadClientN8nSettings(clientId);
+      const timezone = resolveSendWindowConfig(tenantSettings).timezone;
+
+      const monthStart = createDateInTimezone(year, month, 1, 0, 0, 0, timezone);
+      const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+      const monthEnd = createDateInTimezone(nextMonth.y, nextMonth.m, 1, 0, 0, 0, timezone);
+      const daysInMonth = new Date(year, month, 0).getDate();
+
+      const { rows: jobs } = await query(
+        `SELECT fj.status, fj.scheduled_for
+           FROM followup_jobs fj
+           JOIN followup_schedules fs ON fs.id = fj.schedule_id
+           JOIN followup_companies fco ON fco.id = fs.company_id
+          WHERE fco.tenant_id = $1 AND fj.status = 'pending'
+            AND fj.scheduled_for >= $2 AND fj.scheduled_for < $3`,
+        [clientId, monthStart.toISOString(), monthEnd.toISOString()]
+      );
+      const counts = groupPendingJobsByDay(jobs, { timezone });
+
+      const dayCounts = {};
+      for (let d = 1; d <= daysInMonth; d++) {
+        const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        dayCounts[key] = counts.get(key) || 0;
+      }
+
+      return res.json({ success: true, tenantId: clientId, month: monthStr, dayCounts });
+    } catch (err) {
+      return sendErr(res, 500, "CALENDAR_FETCH_FAILED", err.message);
+    }
+  });
+
+  // GET /api/followup/calendar/day?clientId=X&date=YYYY-MM-DD
+  router.get("/calendar/day", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const clientId = resolveCalendarTenant(req, res);
+    if (!clientId) return;
+
+    const dateStr = str(req.query.date);
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return sendErr(res, 400, "INVALID_DATE", "date deve ser YYYY-MM-DD.");
+    }
+    const [year, month, day] = dateStr.split("-").map(Number);
+
+    try {
+      const tenantSettings = await getLeadClientN8nSettings(clientId);
+      const timezone = resolveSendWindowConfig(tenantSettings).timezone;
+
+      const dayStart = createDateInTimezone(year, month, day, 0, 0, 0, timezone);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+      const { rows: items } = await query(
+        `SELECT fj.id AS job_id, fj.scheduled_for, fj.status,
+                fs.id AS schedule_id, fs.lead_name, fs.phone, fs.campaign_id,
+                COALESCE(fc.name, 'Avulso') AS campaign_name,
+                ft.name AS template_name
+           FROM followup_jobs fj
+           JOIN followup_schedules fs  ON fs.id = fj.schedule_id
+           JOIN followup_companies fco ON fco.id = fs.company_id
+           LEFT JOIN followup_campaigns fc ON fc.id = fs.campaign_id
+           LEFT JOIN followup_templates ft ON ft.id = fj.template_id
+          WHERE fco.tenant_id = $1 AND fj.status = 'pending'
+            AND fj.scheduled_for >= $2 AND fj.scheduled_for < $3
+          ORDER BY fj.scheduled_for ASC`,
+        [clientId, dayStart.toISOString(), dayEnd.toISOString()]
+      );
+
+      return res.json({
+        success: true,
+        tenantId: clientId,
+        date: dateStr,
+        items: items.map((it) => ({
+          jobId: it.job_id,
+          scheduleId: it.schedule_id,
+          campaignId: it.campaign_id,
+          campaignName: it.campaign_name,
+          templateName: it.template_name,
+          leadName: it.lead_name,
+          phone: it.phone,
+          scheduledFor: it.scheduled_for,
+          status: it.status,
+        })),
+      });
+    } catch (err) {
+      return sendErr(res, 500, "CALENDAR_DAY_FETCH_FAILED", err.message);
     }
   });
 

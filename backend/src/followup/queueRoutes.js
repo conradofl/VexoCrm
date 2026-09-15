@@ -7,6 +7,29 @@ import { getFollowupQueue } from "./queue.js";
 import { adjustDateToSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 
+// Guarda de escopo por tenant, reusada por toda rota que expõe dados
+// agregados por tenant (fila de moderação e, na Etapa 5 Commit 3, a faixa
+// dos próximos 7 dias e o calendário em routes.js). Não depende de `deps` —
+// só lê req.authAccess — por isso vive no escopo do módulo e é exportada,
+// em vez de presa dentro de registerFollowupQueueRoutes. Uma chave só: nunca
+// aceite tenantId vindo do payload da requisição, sempre resolvido a partir
+// da linha (campaign/schedule/job → company → tenant_id).
+export function hasTenantAccess(req, tenantId) {
+  const access = req.authAccess;
+  const isUnrestricted =
+    access?.role === "superadmin" ||
+    access?.isAdmin ||
+    access?.scopeMode === "all_clients";
+  if (isUnrestricted) return true;
+
+  const clientIds = Array.isArray(access?.clientIds)
+    ? access.clientIds
+    : access?.clientId
+    ? [access.clientId]
+    : [];
+  return Boolean(tenantId && clientIds.includes(tenantId));
+}
+
 export function registerFollowupQueueRoutes(app, deps) {
   const { normalizeString, requireFirebaseAuth, sendError, supabase } = deps;
 
@@ -231,22 +254,6 @@ export function registerFollowupQueueRoutes(app, deps) {
       sendError(res, 500, "FOLLOWUP_QUEUE_FETCH_FAILED", err instanceof Error ? err.message : "Failed to fetch followup queue");
     }
   });
-
-  function hasTenantAccess(req, tenantId) {
-    const access = req.authAccess;
-    const isUnrestricted =
-      access?.role === "superadmin" ||
-      access?.isAdmin ||
-      access?.scopeMode === "all_clients";
-    if (isUnrestricted) return true;
-
-    const clientIds = Array.isArray(access?.clientIds)
-      ? access.clientIds
-      : access?.clientId
-      ? [access.clientId]
-      : [];
-    return Boolean(tenantId && clientIds.includes(tenantId));
-  }
 
   async function ensureScheduleTenantAccess(req, res, scheduleId) {
     const { rows } = await fupQuery(

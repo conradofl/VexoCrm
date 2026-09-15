@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Smartphone, Send, Zap, ChevronDown, CheckCircle2 } from "lucide-react";
+import { Smartphone, Send, Zap, ChevronDown, CheckCircle2, CalendarDays } from "lucide-react";
 
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useFupCompanies, useCreateFupCompany, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
 import { FollowUpJourneys } from "@/components/followup/FollowUpJourneys";
 import CadenceEditor from "@/components/followup/CadenceEditor";
+import FollowupCalendar from "@/components/followup/FollowupCalendar";
 import { FollowupQueueTable } from "@/components/followup/FollowupQueueTable";
 import { UpsellCard } from "@/components/UpsellCard";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
@@ -169,7 +170,7 @@ export default function FollowupDashboard() {
     }
   }, [companies, companyId]);
 
-  const [activeTab, setActiveTab] = useState<"cadencias" | "fila">("cadencias");
+  const [activeTab, setActiveTab] = useState<"cadencias" | "fila" | "calendario">("cadencias");
 
   const activeCompany = companies.find((c) => c.id === companyId) || companies[0] || null;
   const hasCompany = companies.length > 0 || connectedInstances.length > 0;
@@ -257,6 +258,18 @@ export default function FollowupDashboard() {
         >
           <Zap className="h-3.5 w-3.5" />
           Fila de Acompanhamento
+        </button>
+        <button
+          onClick={() => setActiveTab("calendario")}
+          className={cn(
+            "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
+            activeTab === "calendario"
+              ? "bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white"
+              : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          )}
+        >
+          <CalendarDays className="h-3.5 w-3.5" />
+          Calendário
         </button>
       </div>
 
@@ -385,6 +398,9 @@ export default function FollowupDashboard() {
       {activeTab === "fila" && (
         <FollowupQueueTable companyId={companyId} tenantId={tenantId} />
       )}
+
+      {/* Aba do Calendário — lente, não superfície de criação */}
+      {activeTab === "calendario" && <FollowupCalendar tenantId={tenantId} />}
     </PageShell>
   );
 }
