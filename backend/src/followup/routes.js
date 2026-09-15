@@ -1,6 +1,6 @@
 // Rotas do módulo de follow-up — adicionadas ao Express existente.
 // Importar e chamar registerFollowupRoutes(app) no final de registerAllDomainRoutes.js
-import { Router } from "express";
+import express, { Router } from "express";
 import crypto from "crypto";
 import { getSupabase, query } from "./db.js";
 import {
@@ -13,7 +13,10 @@ import {
   cancelPendingJobsForCampaign,
   validateTemplatePayload,
   getAnchorFieldsMetadata,
+  reschedulePendingJobsForTemplate,
 } from "./service.js";
+import { saveFollowupMediaBuffer, FOLLOWUP_MEDIA_MAX_SIZES } from "../services/storage.js";
+import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { getAnalytics } from "./analyticsService.js";
 import { getFollowupQueue } from "./queue.js";
 import { triggerAutomationRun } from "./automationEngine.js";
@@ -204,6 +207,67 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
   // ══════════════════════════════════════════════════════════════════════════
   // APIs AUTENTICADAS
   // ══════════════════════════════════════════════════════════════════════════
+
+  // ── Mídia de Follow-up (Upload binário cru, limite 25 MB) ───────────────────
+
+  // POST /api/followup/media/upload
+  router.post(
+    "/media/upload",
+    express.raw({ type: () => true, limit: "25mb" }),
+    async (req, res) => {
+      try {
+        const requestedClientId = req.query.clientId || req.headers["x-client-id"];
+        const tenantId = resolveAuthorizedClientId(req, res, requestedClientId);
+        if (!tenantId) return;
+
+        let buffer = null;
+        if (Buffer.isBuffer(req.body)) {
+          buffer = req.body;
+        } else if (req.body && typeof req.body === "object" && typeof req.body.base64 === "string") {
+          buffer = Buffer.from(req.body.base64, "base64");
+        }
+
+        if (!buffer || buffer.length === 0) {
+          return sendErr(res, 400, "EMPTY_BUFFER", "Arquivo vazio ou buffer inválido.");
+        }
+
+        const rawFileName = req.headers["x-file-name"] || req.headers["x-filename"] || req.query.filename || "anexo";
+        let declaredFilename = "anexo";
+        try {
+          declaredFilename = decodeURIComponent(String(rawFileName)).trim() || "anexo";
+        } catch {
+          declaredFilename = String(rawFileName).trim() || "anexo";
+        }
+
+        const declaredMime = String(
+          req.headers["x-mime-type"] || req.headers["content-type"] || req.query.mimeType || ""
+        ).trim();
+
+        const saveResult = await saveFollowupMediaBuffer({
+          clientId: tenantId,
+          buffer,
+          declaredFilename,
+          declaredMimeType: declaredMime,
+        });
+
+        return res.status(201).json({
+          success: true,
+          media_path: saveResult.storageKey,
+          media_type: saveResult.mediaType,
+          media_mime: saveResult.mimeType,
+          media_filename: saveResult.filename,
+          size_bytes: saveResult.sizeBytes,
+        });
+      } catch (err) {
+        const code = err.code || "UPLOAD_FAILED";
+        const status =
+          code === "INVALID_FILE_TYPE" || code === "FILE_TOO_LARGE" || code === "EMPTY_BUFFER"
+            ? 400
+            : 500;
+        return sendErr(res, status, code, err.message);
+      }
+    }
+  );
 
   // ── Empresas ──────────────────────────────────────────────────────────────
 
@@ -600,6 +664,101 @@ function normalizeInstanceList(list, fallback) {
     }
   });
 
+  // POST /api/followup/campaigns/:id/clone — duplica a cadência e todos os seus passos
+  router.post("/campaigns/:id/clone", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id da campanha é obrigatório");
+
+    try {
+      const supabase = getSupabase();
+      const { data: original, error: origErr } = await supabase
+        .from("followup_campaigns")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (origErr || !original) {
+        return sendErr(res, 404, "NOT_FOUND", "Campanha original não encontrada");
+      }
+
+      const cloneName = (req.body?.name && str(req.body.name)) || `${original.name} (Cópia)`;
+      const secret = generateSecret();
+
+      const insertCampaign = {
+        company_id: original.company_id,
+        name: cloneName,
+        description: original.description,
+        default_origin: original.default_origin,
+        status: "draft", // Status draft estrito e válido na constraint
+        webhook_secret: secret,
+        exit_on_reply: original.exit_on_reply ?? true,
+        exit_on_won: original.exit_on_won ?? true,
+        exit_on_lost: original.exit_on_lost ?? true,
+        exit_on_human_takeover: original.exit_on_human_takeover ?? true,
+      };
+
+      const { data: newCampaign, error: createErr } = await supabase
+        .from("followup_campaigns")
+        .insert(insertCampaign)
+        .select()
+        .maybeSingle();
+
+      if (createErr) throw createErr;
+
+      // Atualiza com URL de webhook gerada
+      const webhookUrl = generateWebhookUrl(newCampaign.id);
+      await supabase
+        .from("followup_campaigns")
+        .update({ webhook_trigger_url: webhookUrl })
+        .eq("id", newCampaign.id);
+
+      // Buscar todos os templates da campanha original
+      const { data: templates, error: tplErr } = await supabase
+        .from("followup_templates")
+        .select("*")
+        .eq("campaign_id", original.id)
+        .order("order_index", { ascending: true });
+
+      if (tplErr) throw tplErr;
+
+      let clonedTemplatesCount = 0;
+      if (templates && templates.length > 0) {
+        const templatesToInsert = templates.map((tpl) => ({
+          campaign_id: newCampaign.id,
+          name: tpl.name,
+          message: tpl.message,
+          trigger_type: tpl.trigger_type,
+          trigger_value: tpl.trigger_value,
+          trigger_unit: tpl.trigger_unit,
+          trigger_direction: tpl.trigger_direction,
+          scheduled_time: tpl.scheduled_time,
+          anchor_field: tpl.anchor_field,
+          media_path: tpl.media_path,
+          media_type: tpl.media_type,
+          media_mime: tpl.media_mime,
+          media_filename: tpl.media_filename,
+          is_active: tpl.is_active,
+          order_index: tpl.order_index,
+        }));
+
+        const { error: insTplErr } = await supabase
+          .from("followup_templates")
+          .insert(templatesToInsert);
+
+        if (insTplErr) throw insTplErr;
+        clonedTemplatesCount = templatesToInsert.length;
+      }
+
+      return res.status(201).json({
+        success: true,
+        campaign: { ...newCampaign, webhook_trigger_url: webhookUrl },
+        templatesCount: clonedTemplatesCount,
+      });
+    } catch (err) {
+      return sendErr(res, 500, "CLONE_CAMPAIGN_FAILED", err.message);
+    }
+  });
+
   // POST /api/followup/campaigns/:id/enroll — enrola leads selecionados (ex.: vindos do
   // Banco de Dados) na cadência, reusando a mesma engine do webhook. Body:
   //   { leads: [{ name, phone, meeting_datetime? }], meeting_datetime?, origin? }
@@ -846,7 +1005,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_templates")
-        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, anchor_field, created_at")
+        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, anchor_field, media_path, media_type, media_mime, media_filename, created_at")
         .eq("campaign_id", campaignId)
         .order("order_index", { ascending: true });
       if (error) throw error;
@@ -863,6 +1022,7 @@ function normalizeInstanceList(list, fallback) {
       trigger_type, trigger_value, trigger_unit, trigger_direction,
       is_active, order_index,
       scheduled_time, anchor_field,
+      media_path, media_type, media_mime, media_filename,
     } = req.body || {};
     if (!str(campaign_id) || !str(name) || !str(message) || !str(trigger_type)) {
       return sendErr(res, 400, "MISSING_FIELDS", "Campos obrigatórios faltando");
@@ -887,6 +1047,10 @@ function normalizeInstanceList(list, fallback) {
           order_index: Number(order_index) || 0,
           scheduled_time: scheduled_time ? str(scheduled_time) : null,
           anchor_field: anchor_field ? str(anchor_field) : null,
+          media_path: media_path ? str(media_path) : null,
+          media_type: media_type ? str(media_type) : null,
+          media_mime: media_mime ? str(media_mime) : null,
+          media_filename: media_filename ? str(media_filename) : null,
         })
         .select()
         .maybeSingle();
@@ -946,6 +1110,7 @@ function normalizeInstanceList(list, fallback) {
         "name", "message", "trigger_type", "trigger_value",
         "trigger_unit", "trigger_direction", "is_active", "order_index",
         "scheduled_time", "anchor_field",
+        "media_path", "media_type", "media_mime", "media_filename",
       ];
       const patch = { updated_at: new Date().toISOString() };
       for (const k of allowed) {
@@ -960,9 +1125,47 @@ function normalizeInstanceList(list, fallback) {
         .select()
         .maybeSingle();
       if (error) throw error;
-      return res.json({ success: true, template: data });
+
+      const timingFields = [
+        "trigger_value",
+        "trigger_unit",
+        "trigger_direction",
+        "scheduled_time",
+        "anchor_field",
+        "trigger_type",
+      ];
+      const timingChanged = timingFields.some(
+        (f) => f in (req.body || {}) && String(existing[f] ?? "") !== String(patch[f] ?? "")
+      );
+
+      const { rows: countRows } = await query(
+        "SELECT COUNT(*)::int as count FROM followup_jobs WHERE template_id = $1 AND status = 'pending'",
+        [id]
+      );
+      const pendingJobsCount = countRows[0]?.count || 0;
+
+      return res.json({
+        success: true,
+        template: data,
+        pendingJobsCount,
+        timingChanged,
+      });
     } catch (err) {
       return sendErr(res, 500, "TEMPLATE_UPDATE_FAILED", err.message);
+    }
+  });
+
+  // POST /api/followup/templates/:id/reschedule-pending — recalcula e reenfileira jobs pendentes do template
+  router.post("/templates/:id/reschedule-pending", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+
+    try {
+      const result = await reschedulePendingJobsForTemplate(id);
+      return res.json(result);
+    } catch (err) {
+      const status = err.code === "NOT_FOUND" ? 404 : 500;
+      return sendErr(res, status, err.code || "RESCHEDULE_PENDING_FAILED", err.message);
     }
   });
 

@@ -108,6 +108,10 @@ vi.mock("@/hooks/useFollowupQueue", () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useCancelFollowupJob: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
   useConvertToInbound: () => ({
     mutateAsync: vi.fn(),
   }),

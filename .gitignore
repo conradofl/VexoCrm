@@ -84,3 +84,6 @@ _memoria/
 frontend/.env.vercel
 backups/
 code-hash.txt
+
+# Storage local de desenvolvimento (midia e contratos) — nunca versionar
+backend/storage/

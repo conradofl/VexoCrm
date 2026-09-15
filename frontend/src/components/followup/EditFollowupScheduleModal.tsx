@@ -7,6 +7,7 @@ import {
   Info,
   Edit3,
   Trash2,
+  Ban,
 } from "lucide-react";
 import {
   Dialog,
@@ -20,9 +21,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "@/components/ui/use-toast";
-import { useRescheduleFollowup, useDiscardFollowup, type FollowupItem } from "@/hooks/useFollowupQueue";
+import {
+  useRescheduleFollowup,
+  useDiscardFollowup,
+  useCancelFollowupJob,
+  type FollowupItem,
+} from "@/hooks/useFollowupQueue";
 
 interface EditFollowupScheduleModalProps {
   open: boolean;
@@ -86,6 +91,7 @@ export function EditFollowupScheduleModal({
 }: EditFollowupScheduleModalProps) {
   const reschedule = useRescheduleFollowup();
   const discardFollowup = useDiscardFollowup();
+  const cancelJob = useCancelFollowupJob();
 
   const isAvulso = !item?.campaignId || item?.campaignName === "Avulso";
   const leadName = item?.leadName || "Lead";
@@ -118,16 +124,16 @@ export function EditFollowupScheduleModal({
 
   const isPast = Boolean(targetDate && targetDate.getTime() <= Date.now());
 
-  // Prévia da mensagem em tempo real para lembretes avulsos
+  // Prévia da mensagem em tempo real para qualquer lembrete ou cadência
   const previewText = useMemo(() => {
-    if (!isAvulso || !message) return "";
+    if (!message) return "";
     let rendered = message;
     const firstName = leadName.split(" ")[0] || leadName;
     rendered = rendered.replace(/\{\{\s*(nome|lead_name|name)\s*\}\}/gi, firstName);
     rendered = rendered.replace(/\{\{\s*(telefone|phone|celular)\s*\}\}/gi, rawPhone || "(telefone)");
     rendered = rendered.replace(/\{\{\s*(scheduling_link|link|agendamento)\s*\}\}/gi, "https://vexo.com.br/agenda");
     return rendered;
-  }, [message, leadName, rawPhone, isAvulso]);
+  }, [message, leadName, rawPhone]);
 
   const relativeTimeLabel = useMemo(() => {
     if (!targetDate || isPast) return null;
@@ -171,7 +177,7 @@ export function EditFollowupScheduleModal({
       await reschedule.mutateAsync({
         id: item.id,
         scheduledFor: targetDate.toISOString(),
-        customMessage: isAvulso ? message.trim() : undefined,
+        customMessage: message.trim() ? message.trim() : undefined,
       });
 
       const formattedHour = targetDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -192,16 +198,37 @@ export function EditFollowupScheduleModal({
     }
   };
 
+  const handleCancelSingleStep = async () => {
+    if (!item?.nextJobId) return;
+    if (!window.confirm("Deseja cancelar apenas este envio pendente? Os próximos passos da cadência continuarão agendados normalmente.")) {
+      return;
+    }
+    try {
+      await cancelJob.mutateAsync(item.nextJobId);
+      toast({
+        title: "Passo cancelado",
+        description: "O envio deste passo foi cancelado. Os próximos passos da cadência seguem ativos.",
+      });
+      onOpenChange(false);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao cancelar passo",
+        description: err?.message || "Falha ao cancelar o passo.",
+      });
+    }
+  };
+
   const handleDiscard = async () => {
     if (!item?.id) return;
-    if (!window.confirm("Deseja realmente cancelar este agendamento? A mensagem programada não será enviada.")) {
+    if (!window.confirm("Deseja realmente cancelar todos os disparos programados para este lead?")) {
       return;
     }
     try {
       await discardFollowup.mutateAsync(item.id);
       toast({
         title: "Agendamento cancelado",
-        description: "A mensagem agendada foi cancelada com sucesso.",
+        description: "A cadência programada foi cancelada com sucesso.",
       });
       onOpenChange(false);
     } catch (err: any) {
@@ -244,18 +271,34 @@ export function EditFollowupScheduleModal({
               <Badge variant={isAvulso ? "secondary" : "outline"} className="text-xs">
                 {item.campaignName || "Avulso"}
               </Badge>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={discardFollowup.isPending || reschedule.isPending}
-                onClick={handleDiscard}
-                className="h-6 px-2 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
-                title="Cancelar agendamento de mensagem"
-              >
-                <Trash2 className="w-3 h-3 mr-1" />
-                {discardFollowup.isPending ? "Cancelando..." : "Cancelar agendamento"}
-              </Button>
+              <div className="flex items-center gap-1">
+                {item.nextJobId && item.totalSteps > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={cancelJob.isPending || discardFollowup.isPending || reschedule.isPending}
+                    onClick={handleCancelSingleStep}
+                    className="h-6 px-2 text-[11px] font-medium text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer"
+                    title="Cancelar apenas este passo (os próximos passos da cadência continuam ativos)"
+                  >
+                    <Ban className="w-3 h-3 mr-1" />
+                    {cancelJob.isPending ? "Cancelando..." : "Cancelar este passo"}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={discardFollowup.isPending || cancelJob.isPending || reschedule.isPending}
+                  onClick={handleDiscard}
+                  className="h-6 px-2 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                  title="Cancelar agendamento de mensagem"
+                >
+                  <Trash2 className="w-3 h-3 mr-1" />
+                  {discardFollowup.isPending ? "Cancelando..." : item.totalSteps > 1 ? "Cancelar cadência" : "Cancelar agendamento"}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -319,80 +362,77 @@ export function EditFollowupScheduleModal({
           </div>
 
           {/* 2. Mensagem */}
-          {isAvulso ? (
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                  2. Mensagem do Lembrete Avulso
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                {isAvulso ? "2. Mensagem do Lembrete Avulso" : "2. Mensagem do Envio (Personalização deste Lead)"}
+              </span>
+              <span className="text-[10px] text-muted-foreground">Variáveis dinâmicas suportadas</span>
+            </Label>
+
+            {!isAvulso && (
+              <p className="text-[11px] text-muted-foreground">
+                Cadência: <strong className="text-foreground">{item.campaignName}</strong>. A mensagem abaixo terá prioridade no disparo deste lead.
+              </p>
+            )}
+
+            <Textarea
+              rows={3}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              className="text-xs resize-none rounded-xl"
+              placeholder="Digite a mensagem..."
+            />
+
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="text-[11px] font-medium">Inserir:</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleInsertVariable("{{nome}}")}
+                className="h-6 px-2 text-[11px] font-mono border-dashed hover:border-indigo-500 hover:text-indigo-600"
+              >
+                +&#123;&#123;nome&#125;&#125;
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleInsertVariable("{{telefone}}")}
+                className="h-6 px-2 text-[11px] font-mono border-dashed hover:border-indigo-500 hover:text-indigo-600"
+              >
+                +&#123;&#123;telefone&#125;&#125;
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleInsertVariable("{{scheduling_link}}")}
+                className="h-6 px-2 text-[11px] font-mono border-dashed hover:border-indigo-500 hover:text-indigo-600"
+              >
+                +&#123;&#123;scheduling_link&#125;&#125;
+              </Button>
+            </div>
+
+            {/* 3. Prévia Real */}
+            <div className="p-3 rounded-xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/20 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-indigo-700 dark:text-indigo-300">
+                  Prévia Real do Envio
                 </span>
-                <span className="text-[10px] text-muted-foreground">Variáveis dinâmicas suportadas</span>
-              </Label>
-
-              <Textarea
-                rows={3}
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="text-xs resize-none rounded-xl"
-                placeholder="Digite a mensagem..."
-              />
-
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="text-[11px] font-medium">Inserir:</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleInsertVariable("{{nome}}")}
-                  className="h-6 px-2 text-[11px] font-mono border-dashed hover:border-indigo-500 hover:text-indigo-600"
-                >
-                  +&#123;&#123;nome&#125;&#125;
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleInsertVariable("{{telefone}}")}
-                  className="h-6 px-2 text-[11px] font-mono border-dashed hover:border-indigo-500 hover:text-indigo-600"
-                >
-                  +&#123;&#123;telefone&#125;&#125;
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleInsertVariable("{{scheduling_link}}")}
-                  className="h-6 px-2 text-[11px] font-mono border-dashed hover:border-indigo-500 hover:text-indigo-600"
-                >
-                  +&#123;&#123;scheduling_link&#125;&#125;
-                </Button>
-              </div>
-
-              {/* 3. Prévia Real */}
-              <div className="p-3 rounded-xl border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/20 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-indigo-700 dark:text-indigo-300">
-                    Prévia Real do Envio
+                {relativeTimeLabel && (
+                  <span className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
+                    {relativeTimeLabel}
                   </span>
-                  {relativeTimeLabel && (
-                    <span className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
-                      {relativeTimeLabel}
-                    </span>
-                  )}
-                </div>
-                <div className="p-2.5 rounded-lg bg-background border border-border/80 text-xs text-foreground font-sans whitespace-pre-wrap leading-relaxed shadow-2xs">
-                  {previewText || <span className="text-muted-foreground italic">Nenhuma mensagem digitada</span>}
-                </div>
+                )}
+              </div>
+              <div className="p-2.5 rounded-lg bg-background border border-border/80 text-xs text-foreground font-sans whitespace-pre-wrap leading-relaxed shadow-2xs">
+                {previewText || <span className="text-muted-foreground italic">Nenhuma mensagem digitada</span>}
               </div>
             </div>
-          ) : (
-            <Alert className="bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-xs py-2.5">
-              <Info className="h-4 w-4 text-indigo-500" />
-              <AlertDescription className="text-xs text-muted-foreground leading-relaxed">
-                Mensagem definida pela cadência <strong className="text-foreground">{item.campaignName}</strong>. O texto é padronizado pelo template da cadência e não pode ser editado individualmente por envio.
-              </AlertDescription>
-            </Alert>
-          )}
+          </div>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-border">
@@ -408,7 +448,7 @@ export function EditFollowupScheduleModal({
           <Button
             type="button"
             size="sm"
-            disabled={reschedule.isPending || discardFollowup.isPending || isPast || (isAvulso && !message.trim())}
+            disabled={reschedule.isPending || discardFollowup.isPending || cancelJob.isPending || isPast || (isAvulso && !message.trim())}
             onClick={handleSave}
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs gap-1.5 shadow-sm"
           >

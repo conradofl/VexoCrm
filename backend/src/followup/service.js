@@ -388,22 +388,7 @@ export async function enrollLead(
       (t) => (t.trigger_type === "before_anchor" || t.trigger_type === "after_anchor") && t.anchor_field === "data_nascimento"
     );
     if (hasBirthdayStep) {
-      try {
-        const table = leadsTableName(tenantId);
-        const { rows: leadRows } = await query(
-          `SELECT data_nascimento FROM public."${table}"
-            WHERE client_id = $1
-              AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-              AND data_nascimento IS NOT NULL
-            LIMIT 1`,
-          [tenantId, phone]
-        );
-        if (leadRows.length && leadRows[0].data_nascimento) {
-          leadBirthDate = leadRows[0].data_nascimento;
-        }
-      } catch (err) {
-        console.warn("[followup/service] Falha ao buscar data_nascimento na tabela de leads:", err.message);
-      }
+      leadBirthDate = await resolveLeadBirthDate({ phone, tenantId });
     }
   }
 
@@ -543,3 +528,152 @@ export async function cancelPendingJobsForCampaign(campaignId) {
     [campaignId]
   );
 }
+
+// ─── Resolução Compartilhada de Aniversário (Âncora) ──────────────────────────
+
+export async function resolveLeadBirthDate({ phone, tenantId, initialBirthDate = null }) {
+  if (initialBirthDate) return initialBirthDate;
+  if (!phone || !tenantId) return null;
+  try {
+    const table = leadsTableName(tenantId);
+    const { rows: leadRows } = await query(
+      `SELECT data_nascimento FROM public."${table}"
+        WHERE client_id = $1
+          AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+          AND data_nascimento IS NOT NULL
+        LIMIT 1`,
+      [tenantId, phone]
+    );
+    if (leadRows.length && leadRows[0].data_nascimento) {
+      return leadRows[0].data_nascimento;
+    }
+  } catch (err) {
+    console.warn("[followup/service] Falha ao buscar data_nascimento na tabela de leads:", err?.message || err);
+  }
+  return null;
+}
+
+// ─── Reagendamento de Jobs Pendentes para um Template ─────────────────────────
+
+export async function reschedulePendingJobsForTemplate(templateId) {
+  const supabase = getSupabase();
+  const { data: template, error: tplErr } = await supabase
+    .from("followup_templates")
+    .select("*")
+    .eq("id", templateId)
+    .maybeSingle();
+
+  if (tplErr || !template) {
+    const err = new Error("Template não encontrado.");
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+
+  // Buscar todos os jobs pendentes com dados do schedule e company
+  const { rows: jobs } = await query(
+    `SELECT fj.id, fj.schedule_id, fj.bull_job_id, fj.scheduled_for, fj.custom_message,
+            fs.lead_name, fs.phone, fs.meeting_datetime, fs.created_at as schedule_created_at,
+            fs.company_id, fco.tenant_id
+       FROM followup_jobs fj
+       JOIN followup_schedules fs ON fs.id = fj.schedule_id
+       JOIN followup_companies fco ON fco.id = fs.company_id
+      WHERE fj.template_id = $1 AND fj.status = 'pending'`,
+    [templateId]
+  );
+
+  if (jobs.length === 0) {
+    return { success: true, rescheduledCount: 0, sampleScheduledFor: null };
+  }
+
+  const queue = getFollowupQueue();
+  let rescheduledCount = 0;
+  let sampleScheduledFor = null;
+
+  for (const job of jobs) {
+    const triggerAt = job.schedule_created_at ? new Date(job.schedule_created_at) : new Date();
+    const tenantId = job.tenant_id || "geracao-digital";
+    const tenantSettings = await getLeadClientN8nSettings(tenantId);
+    const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
+
+    // Resolução de aniversário caso seja passo de âncora
+    let leadBirthDate = null;
+    const isBirthdayStep =
+      (template.trigger_type === "before_anchor" || template.trigger_type === "after_anchor") &&
+      template.anchor_field === "data_nascimento";
+    if (isBirthdayStep) {
+      leadBirthDate = await resolveLeadBirthDate({
+        phone: job.phone,
+        tenantId,
+      });
+    }
+
+    let scheduledFor = calcScheduledFor(template, triggerAt, job.meeting_datetime, {
+      lead_name: job.lead_name,
+      phone: job.phone,
+      data_nascimento: leadBirthDate,
+    });
+
+    if (!scheduledFor) {
+      // Sem data-alvo disponível para recalcular
+      continue;
+    }
+
+    if (template.scheduled_time) {
+      const parsedTime = parseTimeString(template.scheduled_time);
+      if (parsedTime) {
+        const parts = getPartsInTimezone(scheduledFor, "America/Sao_Paulo");
+        scheduledFor = createDateInTimezone(
+          parts.year,
+          parts.month,
+          parts.day,
+          parsedTime.hour,
+          parsedTime.minute,
+          parsedTime.second,
+          "America/Sao_Paulo"
+        );
+        if (
+          scheduledFor.getTime() <= triggerAt.getTime() &&
+          (template.trigger_type === "after_enrollment" || template.trigger_type === "on_schedule")
+        ) {
+          scheduledFor = new Date(scheduledFor.getTime() + 24 * 60 * 60 * 1000);
+        }
+      }
+    }
+
+    const effectiveScheduledFor = adjustDateToSendWindow(scheduledFor, sendWindowConfig);
+    const delay = Math.max(0, effectiveScheduledFor.getTime() - Date.now());
+
+    // Remove job antigo da fila do BullMQ
+    if (job.bull_job_id) {
+      try {
+        const existingBull = await queue.getJob(job.bull_job_id);
+        if (existingBull) {
+          await existingBull.remove();
+        }
+      } catch (remErr) {
+        console.warn("[followup/service] Aviso ao remover bull job antigo:", remErr.message);
+      }
+    }
+
+    // Re-enfileira no BullMQ
+    const newBullJob = await queue.add(
+      "send-followup",
+      { jobId: job.id, customMessage: job.custom_message },
+      { delay, jobId: `fup-resched-${job.id}-${Date.now()}` }
+    );
+
+    // Atualiza scheduled_for e bull_job_id no banco!
+    await query(
+      "UPDATE followup_jobs SET scheduled_for=$1, bull_job_id=$2 WHERE id=$3",
+      [effectiveScheduledFor.toISOString(), newBullJob.id, job.id]
+    );
+
+    rescheduledCount++;
+    if (!sampleScheduledFor) {
+      sampleScheduledFor = effectiveScheduledFor.toISOString();
+    }
+  }
+
+  return { success: true, rescheduledCount, sampleScheduledFor };
+}
+

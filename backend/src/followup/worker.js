@@ -17,7 +17,9 @@ import { validateOutboundMessage } from "../services/jsonExtractor.js";
 import {
   getLeadClientEvolutionInstances,
   parseEvolutionWebhookEndpoint,
+  sendMediaMessageViaEvolution,
 } from "../services/evolution.js";
+import { getFollowupMediaBuffer } from "../services/storage.js";
 import { normalizeString } from "../textNormalize.js";
 import {
   isWithinSendWindow,
@@ -174,9 +176,11 @@ export async function processJob(job) {
 
   const { rows: jobRows } = await query(
     `SELECT fj.id, fj.schedule_id, fj.template_id, fj.custom_message, fj.status as job_status,
+            fj.media_path as job_media_path, fj.media_type as job_media_type, fj.media_mime as job_media_mime, fj.media_filename as job_media_filename,
             fs.lead_name, fs.phone, fs.meeting_datetime, fs.status as schedule_status,
             fs.campaign_id, fs.company_id,
             ft.message, ft.trigger_type,
+            ft.media_path as template_media_path, ft.media_type as template_media_type, ft.media_mime as template_media_mime, ft.media_filename as template_media_filename,
             fc.status as campaign_status,
             fc.exit_on_reply, fc.exit_on_won, fc.exit_on_lost, fc.exit_on_human_takeover,
             fco.tenant_id,
@@ -207,11 +211,12 @@ export async function processJob(job) {
 
   if (row.campaign_status === "paused") {
     // Re-adiciona o mesmo payload com delay de 5 min; job atual termina sem erro
-    await getFollowupQueue().add(
+    const pauseBullJob = await getFollowupQueue().add(
       "send-followup",
       { jobId, customMessage: customMessage || row.custom_message },
       { delay: 5 * 60 * 1000, jobId: `fup-pause-${jobId}-${Date.now()}` }
     );
+    await query("UPDATE followup_jobs SET bull_job_id=$1 WHERE id=$2", [pauseBullJob.id, jobId]).catch(() => {});
     console.log(log, "campanha pausada — reagendado em 5 min");
     return;
   }
@@ -231,11 +236,12 @@ export async function processJob(job) {
           jobId,
         ]);
 
-        await getFollowupQueue().add(
+        const windowBullJob = await getFollowupQueue().add(
           "send-followup",
           { jobId, customMessage: customMessage || row.custom_message },
           { delay, jobId: `fup-window-${jobId}-${nextOpening.getTime()}` }
         );
+        await query("UPDATE followup_jobs SET bull_job_id=$1 WHERE id=$2", [windowBullJob.id, jobId]).catch(() => {});
         console.log(
           log,
           `fora da janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}) — reagendado para ${nextOpening.toISOString()}`
@@ -338,6 +344,49 @@ export async function processJob(job) {
     phone: row.phone,
   });
 
+  // Guarda de saída obrigatória (válida tanto para mensagem textual pura quanto para legenda de mídia)
+  const guard = validateOutboundMessage(text);
+  if (!guard.valid) {
+    console.error("[followup/worker] BLOQUEIO DE SEGURANÇA: Mensagem ou legenda contém variável não substituída ou formato inválido.", {
+      phone: row.phone,
+      instance: row.evolution_instance,
+      motivo: guard.reason,
+      textoCompleto: text,
+      origem: "followup_worker",
+    });
+    const error = new Error(`[BLOQUEIO_GUARDA_SAIDA] Mensagem bloqueada: ${guard.reason}`);
+    error.code = "OUTBOUND_GUARD_BLOCKED";
+    error.reason = guard.reason;
+    throw error;
+  }
+
+  // Resolução de anexo de mídia (job sobrepõe template; ausente falha estrito)
+  const effectiveMediaPath = row.job_media_path || row.template_media_path;
+  const effectiveMediaType = row.job_media_type || row.template_media_type;
+  const effectiveMediaMime = row.job_media_mime || row.template_media_mime;
+  const effectiveMediaFilename = row.job_media_filename || row.template_media_filename;
+
+  let mediaData = null;
+  if (effectiveMediaPath) {
+    try {
+      mediaData = await getFollowupMediaBuffer(effectiveMediaPath);
+    } catch (readErr) {
+      console.error(log, "falha ao ler mídia do storage:", readErr?.message || readErr);
+    }
+
+    if (!mediaData || !mediaData.buffer || mediaData.buffer.length === 0) {
+      const missingMediaErr = `Arquivo de mídia não encontrado no storage: ${effectiveMediaPath}`;
+      console.error(log, missingMediaErr);
+      await query(
+        "UPDATE followup_jobs SET status='failed', error_log=$1 WHERE id=$2",
+        [missingMediaErr, jobId]
+      );
+      const err = new Error(missingMediaErr);
+      err.code = "MEDIA_NOT_FOUND";
+      throw err;
+    }
+  }
+
   // Resolve a instância oficial na tabela central de chips do tenant (lead_client_evolution_instances)
   const evoConfig = await resolveEvolutionInstanceForFollowup(
     row.tenant_id,
@@ -388,23 +437,41 @@ export async function processJob(job) {
       [nextOpening.toISOString(), quotaMsg, jobId]
     );
 
-    await getFollowupQueue().add(
+    const quotaBullJob = await getFollowupQueue().add(
       "send-followup",
       { jobId, customMessage: customMessage || row.custom_message },
       { delay, jobId: `fup-quota-${jobId}-${nextOpening.getTime()}` }
     );
+    await query("UPDATE followup_jobs SET bull_job_id=$1 WHERE id=$2", [
+      quotaBullJob.id,
+      jobId,
+    ]).catch(() => {});
 
     return;
   }
 
   try {
-    await sendViaEvolution({
-      baseUrl: evoConfig.baseUrl,
-      apiKey: evoConfig.apiKey,
-      instanceSlug: evoConfig.instanceSlug,
-      phone: row.phone,
-      text,
-    });
+    if (effectiveMediaPath && mediaData) {
+      await sendMediaMessageViaEvolution({
+        instanceName: evoConfig.instanceSlug,
+        number: row.phone,
+        mediaType: effectiveMediaType || "document",
+        base64: mediaData.buffer.toString("base64"),
+        mimetype: effectiveMediaMime || mediaData.contentType || "application/octet-stream",
+        fileName: effectiveMediaFilename || `${effectiveMediaType || "anexo"}`,
+        caption: text,
+        webhookToken: evoConfig.apiKey,
+        baseUrl: evoConfig.baseUrl,
+      });
+    } else {
+      await sendViaEvolution({
+        baseUrl: evoConfig.baseUrl,
+        apiKey: evoConfig.apiKey,
+        instanceSlug: evoConfig.instanceSlug,
+        phone: row.phone,
+        text,
+      });
+    }
   } catch (sendErr) {
     // Falha na Evolution API: libera a cota reservada imediatamente
     await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
@@ -415,7 +482,7 @@ export async function processJob(job) {
     "UPDATE followup_jobs SET status='sent', sent_at=NOW(), error_log=NULL WHERE id=$1",
     [jobId]
   );
-  console.log(log, `mensagem enviada via Evolution API (${evoConfig.displayName} -> ${evoConfig.instanceSlug})`);
+  console.log(log, `mensagem ${effectiveMediaPath ? 'com mídia ' : ''}enviada via Evolution API (${evoConfig.displayName} -> ${evoConfig.instanceSlug})`);
 }
 
 export async function processEventJourneyJob(job) {
@@ -548,7 +615,7 @@ export async function processEventJourneyJob(job) {
             ).catch(() => {});
           }
 
-          await getFollowupQueue().add(
+          const journeyBullJob = await getFollowupQueue().add(
             "process-event-journey",
             {
               ...job.data,
@@ -561,6 +628,12 @@ export async function processEventJourneyJob(job) {
               jobId: `fup-journey-quota-${journeyId || eventName}-${leadId}-${nextOpening.getTime()}`,
             }
           );
+          if (targetJobId && journeyBullJob?.id) {
+            await query(
+              "UPDATE followup_jobs SET bull_job_id=$1 WHERE id=$2",
+              [journeyBullJob.id, targetJobId]
+            ).catch(() => {});
+          }
 
           return;
         }

@@ -29,6 +29,10 @@ export interface StepLike {
   trigger_direction?: "before" | "after" | null;
   scheduled_time?: string | null;
   anchor_field?: string | null;
+  media_path?: string | null;
+  media_type?: "image" | "audio" | "document" | "video" | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
   order_index?: number;
   is_active?: boolean;
 }

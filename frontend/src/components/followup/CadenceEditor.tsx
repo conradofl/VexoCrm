@@ -1,5 +1,25 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2, ArrowUp, ArrowDown, Play, Pause, Loader2, MessageSquarePlus, ListPlus, GripVertical } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Play,
+  Pause,
+  Loader2,
+  MessageSquarePlus,
+  ListPlus,
+  GripVertical,
+  Copy,
+  Paperclip,
+  FileText,
+  Image as ImageIcon,
+  Music,
+  Video,
+  RotateCcw,
+  AlertTriangle,
+  Clock,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,6 +27,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -19,10 +47,13 @@ import {
   useCreateFupCampaign,
   useUpdateFupCampaign,
   useDeleteFupCampaign,
+  useCloneFupCampaign,
   useFupTemplates,
   useCreateFupTemplate,
   useDeleteFupTemplate,
   useReorderFupTemplates,
+  useReschedulePendingJobs,
+  useUploadFollowupMedia,
   useAnchorFields,
   type FupTemplate,
   type AnchorFieldOption,
@@ -126,6 +157,7 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const createCadence = useCreateFupCampaign();
   const updateCadence = useUpdateFupCampaign();
   const deleteCadence = useDeleteFupCampaign();
+  const cloneCadence = useCloneFupCampaign();
 
   const selected = cadences.find((c) => c.id === selectedId) || null;
   const { data: steps = [] } = useFupTemplates(selectedId || undefined);
@@ -134,6 +166,8 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const createStep = useCreateFupTemplate();
   const deleteStep = useDeleteFupTemplate();
   const reorderSteps = useReorderFupTemplates();
+  const reschedulePendingJobs = useReschedulePendingJobs();
+  const uploadMedia = useUploadFollowupMedia();
 
   const { data: anchorFields = [] } = useAnchorFields();
 
@@ -146,6 +180,21 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
   const [stepScheduledTime, setStepScheduledTime] = useState<string>("");
   const [stepAnchorField, setStepAnchorField] = useState<string>("data_nascimento");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // Mídia do novo passo
+  const [stepMedia, setStepMedia] = useState<{
+    media_path: string;
+    media_type: "image" | "audio" | "document" | "video";
+    media_mime: string;
+    media_filename: string;
+    size_bytes?: number;
+  } | null>(null);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [reschedulePrompt, setReschedulePrompt] = useState<{
+    templateId: string;
+    stepName: string;
+    pendingCount: number;
+  } | null>(null);
 
   const windowStart = selectedCrmClient?.n8n_settings?.send_window_start || "08:00";
   const windowEnd = selectedCrmClient?.n8n_settings?.send_window_end || "18:00";
@@ -184,6 +233,55 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
     }
   }
 
+  async function handleCloneCadence() {
+    if (!selected) return;
+    try {
+      const res = await cloneCadence.mutateAsync({ campaignId: selected.id });
+      toast.success("Cadência duplicada com sucesso como rascunho!");
+      if (res?.campaign?.id) {
+        setSelectedId(res.campaign.id);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Falha ao duplicar cadência.");
+    }
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !selectedCrmClient?.id) return;
+
+    setIsUploadingMedia(true);
+    try {
+      const result = await uploadMedia.mutateAsync({
+        file,
+        clientId: selectedCrmClient.id,
+      });
+      setStepMedia({
+        media_path: result.media_path,
+        media_type: result.media_type,
+        media_mime: result.media_mime,
+        media_filename: result.media_filename,
+        size_bytes: result.size_bytes,
+      });
+      toast.success(`Arquivo "${result.media_filename}" anexado com sucesso.`);
+    } catch (err: any) {
+      toast.error(err?.message || "Falha ao enviar arquivo.");
+    } finally {
+      setIsUploadingMedia(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleReschedulePending(templateId: string) {
+    try {
+      const res = await reschedulePendingJobs.mutateAsync({ templateId });
+      toast.success(`${res.rescheduledCount} envio(s) pendente(s) reagendado(s) com sucesso.`);
+      setReschedulePrompt(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Falha ao reagendar envios pendentes.");
+    }
+  }
+
   async function toggleActive() {
     if (!selected) return;
     const next = selected.status === "active" ? "paused" : "active";
@@ -218,7 +316,7 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
     }
     const isAnchor = stepTrigger === "before_anchor" || stepTrigger === "after_anchor";
     try {
-      await createStep.mutateAsync({
+      const res = await createStep.mutateAsync({
         campaign_id: selected.id,
         name: stepName.trim() || `Passo ${orderedSteps.length + 1}`,
         message: stepMessage.trim(),
@@ -233,13 +331,26 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
             : null,
         scheduled_time: stepScheduledTime || null,
         anchor_field: isAnchor ? (stepAnchorField || "data_nascimento") : null,
+        media_path: stepMedia?.media_path || null,
+        media_type: stepMedia?.media_type || null,
+        media_mime: stepMedia?.media_mime || null,
+        media_filename: stepMedia?.media_filename || null,
         is_active: true,
         order_index: orderedSteps.length,
       });
       setStepName("");
       setStepMessage("");
       setStepScheduledTime("");
+      setStepMedia(null);
       toast.success("Passo adicionado.");
+
+      if (res?.timingChanged && (res?.pendingJobsCount || 0) > 0) {
+        setReschedulePrompt({
+          templateId: res.template.id,
+          stepName: res.template.name,
+          pendingCount: res.pendingJobsCount || 0,
+        });
+      }
     } catch {
       toast.error("Falha ao adicionar o passo.");
     }
@@ -349,6 +460,16 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCloneCadence}
+                  disabled={cloneCadence.isPending}
+                  title="Duplicar cadência com todos os passos"
+                >
+                  <Copy className="h-4 w-4 mr-1" />
+                  {cloneCadence.isPending ? "Duplicando..." : "Duplicar"}
+                </Button>
                 <Button variant="outline" size="sm" onClick={toggleActive} disabled={updateCadence.isPending}>
                   {selected.status === "active" ? <Pause className="h-4 w-4 mr-1" /> : <Play className="h-4 w-4 mr-1" />}
                   {selected.status === "active" ? "Pausar" : "Ativar"}
@@ -453,6 +574,16 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:text-indigo-600"
+                                onClick={() => handleReschedulePending(step.id)}
+                                disabled={reschedulePendingJobs.isPending}
+                                title="Reagendar mensagens pendentes deste passo com o prazo atual"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
                                 title="Arraste para reordenar"
                               >
@@ -494,6 +625,17 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                             </div>
                           </div>
 
+                          {/* Anexo de mídia se houver */}
+                          {step.media_path && (
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-800/40 text-[11px] text-indigo-700 dark:text-indigo-300 w-fit">
+                              <Paperclip className="h-3 w-3 text-indigo-500 shrink-0" />
+                              <span className="font-medium">{step.media_filename || "Anexo"}</span>
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 uppercase bg-background">
+                                {step.media_type || "arquivo"}
+                              </Badge>
+                            </div>
+                          )}
+
                           {/* Mensagem no corpo do cartão */}
                           <div className="text-xs text-foreground/90 whitespace-pre-wrap break-words bg-muted/20 p-2.5 rounded-md">
                             {step.message}
@@ -526,6 +668,71 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                   rows={3}
                 />
               </div>
+
+              {/* Anexo de Mídia */}
+              <div className="space-y-2 p-3 rounded-lg border border-border/70 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold flex items-center gap-1.5">
+                    <Paperclip className="h-3.5 w-3.5 text-indigo-500" />
+                    Anexo de Mídia (Opcional)
+                  </Label>
+                  <span className="text-[10px] text-muted-foreground">PDF, Imagem, Áudio ou Vídeo</span>
+                </div>
+
+                {stepMedia ? (
+                  <div className="flex items-center justify-between p-2 rounded-md bg-background border border-border">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600">
+                        {stepMedia.media_type === "image" && <ImageIcon className="h-4 w-4" />}
+                        {stepMedia.media_type === "document" && <FileText className="h-4 w-4" />}
+                        {stepMedia.media_type === "audio" && <Music className="h-4 w-4" />}
+                        {stepMedia.media_type === "video" && <Video className="h-4 w-4" />}
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-foreground">{stepMedia.media_filename}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase">{stepMedia.media_type} {stepMedia.size_bytes ? `· ${(stepMedia.size_bytes / (1024 * 1024)).toFixed(1)} MB` : ""}</p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setStepMedia(null)}
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      title="Remover anexo"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-dashed border-border/80 hover:border-indigo-500 bg-background hover:bg-muted/30 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+                      <Paperclip className="h-3.5 w-3.5" />
+                      <span>{isUploadingMedia ? "Enviando arquivo..." : "Selecionar arquivo do computador"}</span>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.webp,.mp3,.ogg,.wav,.mp4"
+                        onChange={handleFileUpload}
+                        disabled={isUploadingMedia}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {stepMedia && (
+                  <>
+                    <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                      ℹ️ A mensagem acima será enviada como legenda deste arquivo no WhatsApp.
+                    </p>
+                    <div className="flex items-start gap-1.5 p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 text-[11px]">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <span>Envio de arquivos em massa tem maior consumo de dados e pode impactar o tempo de entrega do WhatsApp.</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Quando enviar</Label>
@@ -617,6 +824,44 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {/* Modal para confirmação de reagendamento de envios pendentes */}
+      {reschedulePrompt && (
+        <Dialog open={true} onOpenChange={() => setReschedulePrompt(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-base font-semibold flex items-center gap-2">
+                <Clock className="h-4 w-4 text-indigo-600" /> Reagendar envios pendentes?
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                O prazo do passo <strong>"{reschedulePrompt.stepName}"</strong> foi alterado.
+                Existem <strong>{reschedulePrompt.pendingCount}</strong> mensagem(ns) já agendada(s) para este passo na fila.
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-xs text-muted-foreground">
+              Deseja recalcular e mover os envios pendentes para o novo horário agora?
+            </p>
+            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReschedulePrompt(null)}
+                className="text-xs"
+              >
+                Manter horários atuais
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handleReschedulePending(reschedulePrompt.templateId)}
+                disabled={reschedulePendingJobs.isPending}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs gap-1.5"
+              >
+                {reschedulePendingJobs.isPending ? "Reagendando..." : "Reagendar agora"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

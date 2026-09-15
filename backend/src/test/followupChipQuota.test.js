@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mocks para followup/db.js, followup/queue.js e evolution.js
 const mockDb = {
@@ -260,6 +260,7 @@ import {
 describe("PARTE 2C — Teto Diário no Follow-up e Auditoria de Limites", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.setSystemTime(new Date("2026-09-15T14:00:00.000Z")); // Terça-feira às 11:00 em São Paulo (dentro da janela)
     mockDb.usage.clear();
     mockDb.audit.length = 0;
     mockDb.jobs.clear();
@@ -271,6 +272,10 @@ describe("PARTE 2C — Teto Diário no Follow-up e Auditoria de Limites", () => 
     queueAddedJobs.length = 0;
     mockEvolutionInstances.length = 0;
     setChipQuotaDbPool(mockPool);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("1. Cota vale para o follow-up: Chip com teto 2 e 3 jobs prontos -> 2 enviam, o 3º é adiado com error_log de cota e sem chamar Evolution", async () => {

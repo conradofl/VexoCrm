@@ -83,6 +83,10 @@ export interface FupTemplate {
   trigger_direction: "before" | "after" | null;
   scheduled_time: string | null;
   anchor_field: string | null;
+  media_path?: string | null;
+  media_type?: "image" | "audio" | "document" | "video" | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
   is_active: boolean;
   order_index: number;
   created_at: string;
@@ -284,16 +288,22 @@ export function useFupTemplates(campaignId?: string) {
   });
 }
 
+export interface TemplateMutationResponse {
+  template: FupTemplate;
+  pendingJobsCount?: number;
+  timingChanged?: boolean;
+}
+
 export function useCreateFupTemplate() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Omit<FupTemplate, "id" | "created_at">) =>
-      apiCall<{ template: FupTemplate }>("/api/followup/templates", getIdToken, {
+      apiCall<TemplateMutationResponse>("/api/followup/templates", getIdToken, {
         method: "POST",
         body: JSON.stringify(body),
-      }).then((r) => r.template),
-    onSuccess: (t) => qc.invalidateQueries({ queryKey: ["fup-templates", t.campaign_id] }),
+      }),
+    onSuccess: (res) => qc.invalidateQueries({ queryKey: ["fup-templates", res.template.campaign_id] }),
   });
 }
 
@@ -302,11 +312,81 @@ export function useUpdateFupTemplate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: Partial<FupTemplate> & { id: string }) =>
-      apiCall<{ template: FupTemplate }>(`/api/followup/templates/${id}`, getIdToken, {
+      apiCall<TemplateMutationResponse>(`/api/followup/templates/${id}`, getIdToken, {
         method: "PATCH",
         body: JSON.stringify(body),
-      }).then((r) => r.template),
-    onSuccess: (t) => qc.invalidateQueries({ queryKey: ["fup-templates", t.campaign_id] }),
+      }),
+    onSuccess: (res) => qc.invalidateQueries({ queryKey: ["fup-templates", res.template.campaign_id] }),
+  });
+}
+
+export function useCloneFupCampaign() {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ campaignId }: { campaignId: string }) =>
+      apiCall<{ success: boolean; campaign: FupCampaign; clonedTemplatesCount: number }>(
+        `/api/followup/campaigns/${campaignId}/clone`,
+        getIdToken,
+        { method: "POST" }
+      ),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["fup-campaigns", data.campaign.company_id] });
+      qc.invalidateQueries({ queryKey: ["fup-templates", data.campaign.id] });
+    },
+  });
+}
+
+export function useReschedulePendingJobs() {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ templateId }: { templateId: string }) =>
+      apiCall<{ success: boolean; rescheduledCount: number; sampleScheduledFor: string | null }>(
+        `/api/followup/templates/${templateId}/reschedule-pending`,
+        getIdToken,
+        { method: "POST" }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["followup-queue"] });
+    },
+  });
+}
+
+export interface UploadFollowupMediaResult {
+  success: boolean;
+  media_path: string;
+  media_type: "image" | "audio" | "document" | "video";
+  media_mime: string;
+  media_filename: string;
+  size_bytes: number;
+}
+
+export function useUploadFollowupMedia() {
+  const { getIdToken } = useAuth();
+  return useMutation({
+    mutationFn: async ({ file, clientId }: { file: File; clientId: string }): Promise<UploadFollowupMediaResult> => {
+      const token = await getIdToken();
+      const url = `/api/followup/media/upload?clientId=${encodeURIComponent(clientId)}`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/octet-stream",
+        "x-file-name": encodeURIComponent(file.name),
+        "x-mime-type": file.type || "application/octet-stream",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: file,
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || errData.error || `Falha no upload: HTTP ${res.status}`);
+      }
+      return res.json();
+    },
   });
 }
 

@@ -291,6 +291,19 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='evolution_instance_daily_limit_audit')
       AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_evolution_instance_daily_limit_audit_instance')
     ) AS ok`,
+    "20260914120000_add_followup_media_and_overrides.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_templates')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='media_path')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='media_type')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='media_mime')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='media_filename')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_jobs' AND column_name='media_path')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_jobs' AND column_name='media_type')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_jobs' AND column_name='media_mime')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_jobs' AND column_name='media_filename')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

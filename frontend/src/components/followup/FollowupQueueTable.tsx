@@ -12,6 +12,7 @@ import {
   Pencil,
   Ban,
   Info,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +27,7 @@ import {
   useFollowupQueue,
   useRetryFollowupStep,
   useDiscardFollowup,
+  useCancelFollowupJob,
   useDeleteFollowup,
   useConvertToInbound,
   type FollowupItem,
@@ -67,6 +69,7 @@ export function FollowupQueueTable({ companyId, tenantId }: FollowupQueueTablePr
 
   const retryStep = useRetryFollowupStep();
   const discardFollowup = useDiscardFollowup();
+  const cancelJob = useCancelFollowupJob();
   const deleteFollowup = useDeleteFollowup();
   const convertToInbound = useConvertToInbound();
 
@@ -151,6 +154,28 @@ export function FollowupQueueTable({ companyId, tenantId }: FollowupQueueTablePr
         variant: "destructive",
         title: "Falha ao cancelar agendamento",
         description: err?.message || "Ocorreu um erro ao cancelar.",
+      });
+    } finally {
+      setLoadingActionId(null);
+    }
+  };
+
+  // Cancelar apenas o passo pendente atual (mantém a cadência ativa para os passos futuros)
+  const handleCancelStep = async (item: FollowupItem) => {
+    if (!item.nextJobId) return;
+    if (!confirm(`Deseja cancelar apenas este envio pendente de ${item.leadName || item.phone}? Os próximos passos da cadência continuarão agendados.`)) return;
+    try {
+      setLoadingActionId(`cancel-step-${item.id}`);
+      await cancelJob.mutateAsync(item.nextJobId);
+      toast({
+        title: "Passo cancelado",
+        description: "O envio deste passo foi cancelado. Os próximos passos da cadência seguem ativos.",
+      });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Falha ao cancelar passo",
+        description: err?.message || "Ocorreu um erro ao cancelar o passo.",
       });
     } finally {
       setLoadingActionId(null);
@@ -486,7 +511,21 @@ export function FollowupQueueTable({ companyId, tenantId }: FollowupQueueTablePr
                             </Button>
                           )}
 
-                          {/* 4. Cancelar Agendamento (Interromper disparos futuros) */}
+                          {/* 4. Cancelar apenas este passo (a cadência segue ativa) */}
+                          {item.nextJobId && item.totalSteps > 1 && item.jobsPending > 0 && canCancel && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                              disabled={loadingActionId === `cancel-step-${item.id}`}
+                              onClick={() => handleCancelStep(item)}
+                              title="Cancelar apenas este envio (a cadência do lead continuará ativa para os próximos passos)"
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+
+                          {/* 5. Cancelar Toda a Cadência (Interromper disparos futuros) */}
                           {canCancel && (
                             <Button
                               size="sm"

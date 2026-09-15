@@ -71,6 +71,13 @@ export function registerFollowupQueueRoutes(app, deps) {
             MAX(fj.sent_at)                                    AS last_sent_at,
             MIN(fj.scheduled_for) FILTER (WHERE fj.status = 'pending') AS next_scheduled_for,
             (
+              SELECT fj_next.id
+                FROM followup_jobs fj_next
+               WHERE fj_next.schedule_id = fs.id AND fj_next.status = 'pending'
+               ORDER BY fj_next.scheduled_for ASC
+               LIMIT 1
+            ) AS next_job_id,
+            (
               SELECT fj_msg.custom_message
                 FROM followup_jobs fj_msg
                WHERE fj_msg.schedule_id = fs.id
@@ -124,6 +131,7 @@ export function registerFollowupQueueRoutes(app, deps) {
 
         return {
           id:              r.id,
+          nextJobId:       r.next_job_id || null,
           leadName:        r.lead_name,
           phone:           r.phone,
           origin:          r.origin,
@@ -224,6 +232,22 @@ export function registerFollowupQueueRoutes(app, deps) {
     }
   });
 
+  function hasTenantAccess(req, tenantId) {
+    const access = req.authAccess;
+    const isUnrestricted =
+      access?.role === "superadmin" ||
+      access?.isAdmin ||
+      access?.scopeMode === "all_clients";
+    if (isUnrestricted) return true;
+
+    const clientIds = Array.isArray(access?.clientIds)
+      ? access.clientIds
+      : access?.clientId
+      ? [access.clientId]
+      : [];
+    return Boolean(tenantId && clientIds.includes(tenantId));
+  }
+
   async function ensureScheduleTenantAccess(req, res, scheduleId) {
     const { rows } = await fupQuery(
       `SELECT fs.id, fs.campaign_id, fco.tenant_id
@@ -237,17 +261,9 @@ export function registerFollowupQueueRoutes(app, deps) {
       return null;
     }
     const tenantId = rows[0].tenant_id;
-    const access = req.authAccess;
-
-    const isUnrestricted =
-      access?.role === "superadmin" ||
-      access?.isAdmin ||
-      access?.scopeMode === "all_clients";
-    if (isUnrestricted) return rows[0];
-
-    const clientIds = Array.isArray(access?.clientIds) ? access.clientIds : [];
-    if (tenantId && clientIds.includes(tenantId)) return rows[0];
-
+    if (hasTenantAccess(req, tenantId)) {
+      return rows[0];
+    }
     sendError(res, 404, "NOT_FOUND", "Schedule not found");
     return null;
   }
@@ -289,17 +305,15 @@ export function registerFollowupQueueRoutes(app, deps) {
       let resolvedTemplateId = templateId;
       let customMessageToUse = null;
 
-      if (!campaign_id) {
-        // Lembrete avulso: usa a nova mensagem se fornecida ou resgata a do último job
-        if (typeof body.customMessage === "string" && body.customMessage.trim().length > 0) {
-          customMessageToUse = body.customMessage.trim();
-        } else {
-          const { rows: lastJobRows } = await fupQuery(
-            `SELECT custom_message FROM followup_jobs WHERE schedule_id = $1 ORDER BY created_at DESC LIMIT 1`,
-            [scheduleId]
-          );
-          customMessageToUse = lastJobRows[0]?.custom_message || null;
-        }
+      if (typeof body.customMessage === "string" && body.customMessage.trim().length > 0) {
+        customMessageToUse = body.customMessage.trim();
+      } else if (!campaign_id) {
+        // Lembrete avulso sem mensagem nova no body: resgata a do último job
+        const { rows: lastJobRows } = await fupQuery(
+          `SELECT custom_message FROM followup_jobs WHERE schedule_id = $1 ORDER BY created_at DESC LIMIT 1`,
+          [scheduleId]
+        );
+        customMessageToUse = lastJobRows[0]?.custom_message || null;
       } else if (!resolvedTemplateId) {
         const { rows: tplRows } = await fupQuery(
           `SELECT id FROM followup_templates WHERE campaign_id = $1 AND is_active = true ORDER BY order_index ASC LIMIT 1`,
@@ -326,11 +340,15 @@ export function registerFollowupQueueRoutes(app, deps) {
       );
       const newJobId = jobRows[0].id;
 
-      await getFollowupQueue().add(
+      const newBullJob = await getFollowupQueue().add(
         "send-followup",
         { jobId: newJobId, customMessage: customMessageToUse },
         { delay: delayMs, jobId: `fup-reschedule-${newJobId}-${Date.now()}` }
       );
+      await fupQuery("UPDATE followup_jobs SET bull_job_id = $1 WHERE id = $2", [
+        newBullJob.id,
+        newJobId,
+      ]);
 
       return res.json({ success: true, jobId: newJobId, delayMs, scheduledFor: effectiveDate.toISOString() });
     } catch (err) {
@@ -449,4 +467,59 @@ export function registerFollowupQueueRoutes(app, deps) {
       sendError(res, 500, "CONVERT_FAILED", err instanceof Error ? err.message : "Failed to convert schedule");
     }
   });
+
+  // PATCH /api/followup-queue/jobs/:jobId/cancel — cancela apenas um passo específico mantendo o restante da cadência ativo
+  app.patch("/api/followup-queue/jobs/:jobId/cancel", requireFirebaseAuth, async (req, res) => {
+    const jobId = normalizeString(req.params?.jobId);
+    if (!jobId) return sendError(res, 400, "INVALID_PARAM", "Missing jobId");
+
+    try {
+      const { rows: jobRows } = await fupQuery(
+        `SELECT fj.id, fj.schedule_id, fj.bull_job_id, fj.status,
+                fs.campaign_id, fs.company_id, fco.tenant_id
+           FROM followup_jobs fj
+           JOIN followup_schedules fs ON fs.id = fj.schedule_id
+           JOIN followup_companies fco ON fco.id = fs.company_id
+          WHERE fj.id = $1`,
+        [jobId]
+      );
+
+      if (!jobRows.length || !hasTenantAccess(req, jobRows[0].tenant_id)) {
+        return sendError(res, 404, "NOT_FOUND", "Job não encontrado");
+      }
+      const job = jobRows[0];
+
+      if (job.status !== "pending") {
+        return sendError(
+          res,
+          400,
+          "INVALID_STATE",
+          `Apenas jobs pendentes podem ser cancelados (status atual: ${job.status})`
+        );
+      }
+
+      // 1. Atualizar status do job no banco para cancelled (mantém followup_schedules active!)
+      await fupQuery(
+        `UPDATE followup_jobs SET status = 'cancelled' WHERE id = $1`,
+        [jobId]
+      );
+
+      // 2. Remover da fila do BullMQ caso ainda esteja na fila
+      if (job.bull_job_id) {
+        try {
+          const bullJob = await getFollowupQueue().getJob(job.bull_job_id);
+          if (bullJob) {
+            await bullJob.remove();
+          }
+        } catch (qErr) {
+          console.warn("[followup/queueRoutes] Aviso ao remover bull job:", qErr?.message || qErr);
+        }
+      }
+
+      return res.json({ success: true, jobId, status: "cancelled" });
+    } catch (err) {
+      sendError(res, 500, "CANCEL_JOB_FAILED", err instanceof Error ? err.message : "Falha ao cancelar passo");
+    }
+  });
 }
+

@@ -517,3 +517,319 @@ export async function getContractBuffer(storageKey) {
 
   return null;
 }
+
+// ─── Armazenamento de Mídia de Follow-up (Etapa 4) ───────────────────────────
+
+export const FOLLOWUP_MEDIA_MAX_SIZES = {
+  image: 5 * 1024 * 1024,      // 5 MB
+  audio: 16 * 1024 * 1024,     // 16 MB
+  video: 16 * 1024 * 1024,     // 16 MB
+  document: 20 * 1024 * 1024,  // 20 MB
+};
+
+const ALLOWED_TYPES_ERROR_MSG =
+  "Tipo de arquivo não permitido ou assinatura inválida. Os tipos permitidos são: " +
+  "Imagem (JPG, PNG, WebP), Áudio (OGG, MP3, WAV, M4A, AAC), Vídeo (MP4) e Documento (PDF, DOCX, XLSX).";
+
+/**
+ * Detecta o tipo de mídia e MIME type real com base na assinatura de bytes (magic bytes).
+ * O conteúdo dos bytes prevalece sobre qualquer extensão ou MIME informado pelo cliente.
+ */
+export function detectFollowupMediaType(buffer, declaredFilename = "", declaredMime = "") {
+  if (!buffer || buffer.length === 0) {
+    const err = new Error("Buffer de arquivo vazio.");
+    err.code = "EMPTY_BUFFER";
+    throw err;
+  }
+
+  // 1. Bloqueio imediato de executáveis e binários perigosos
+  // MZ header (DOS/Windows PE .exe, .dll, .scr)
+  if (buffer.length >= 2 && buffer[0] === 0x4d && buffer[1] === 0x5a) {
+    const err = new Error(ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+  // ELF header (Linux binário)
+  if (buffer.length >= 4 && buffer.slice(0, 4).toString("hex") === "7f454c46") {
+    const err = new Error(ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+  // Shebang script
+  if (buffer.length >= 2 && buffer[0] === 0x23 && buffer[1] === 0x21) {
+    const err = new Error(ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+
+  const fn = String(declaredFilename || "").toLowerCase().trim();
+  const dm = String(declaredMime || "").toLowerCase().trim();
+
+  // 2. PDF: %PDF-
+  if (buffer.length >= 5 && buffer.slice(0, 5).toString("ascii") === "%PDF-") {
+    return { mediaType: "document", mimeType: "application/pdf" };
+  }
+
+  // 3. JPEG: \xFF\xD8\xFF
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { mediaType: "image", mimeType: "image/jpeg" };
+  }
+
+  // 4. PNG: \x89PNG (\x89\x50\x4E\x47)
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return { mediaType: "image", mimeType: "image/png" };
+  }
+
+  // 5. WEBP: RIFF....WEBP
+  if (
+    buffer.length >= 12 &&
+    buffer.slice(0, 4).toString("ascii") === "RIFF" &&
+    buffer.slice(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return { mediaType: "image", mimeType: "image/webp" };
+  }
+
+  // 6. MP4 / M4A: box 'ftyp' nos bytes 4 a 8
+  if (buffer.length >= 8 && buffer.slice(4, 8).toString("ascii") === "ftyp") {
+    const brand = buffer.length >= 12 ? buffer.slice(8, 12).toString("ascii").trim().toUpperCase() : "";
+    if (fn.endsWith(".m4a") || dm.includes("audio") || brand === "M4A") {
+      return { mediaType: "audio", mimeType: "audio/mp4" };
+    }
+    return { mediaType: "video", mimeType: "video/mp4" };
+  }
+
+  // 7. OGG / Opus / Vorbis: OggS
+  if (buffer.length >= 4 && buffer.slice(0, 4).toString("ascii") === "OggS") {
+    return { mediaType: "audio", mimeType: "audio/ogg" };
+  }
+
+  // 8. MP3: ID3 tag ou frame sync \xFF\xFB, \xFF\xF3, \xFF\xF2, \xFF\xFA
+  if (
+    (buffer.length >= 3 && buffer.slice(0, 3).toString("ascii") === "ID3") ||
+    (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)
+  ) {
+    return { mediaType: "audio", mimeType: "audio/mpeg" };
+  }
+
+  // 9. WAV: RIFF....WAVE
+  if (
+    buffer.length >= 12 &&
+    buffer.slice(0, 4).toString("ascii") === "RIFF" &&
+    buffer.slice(8, 12).toString("ascii") === "WAVE"
+  ) {
+    return { mediaType: "audio", mimeType: "audio/wav" };
+  }
+
+  // 10. Zip-based Office documents (DOCX, XLSX): PK\x03\x04
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    buffer[2] === 0x03 &&
+    buffer[3] === 0x04
+  ) {
+    if (fn.endsWith(".docx") || dm.includes("wordprocessingml")) {
+      return {
+        mediaType: "document",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      };
+    }
+    if (fn.endsWith(".xlsx") || dm.includes("spreadsheetml")) {
+      return {
+        mediaType: "document",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      };
+    }
+    // Arquivos .zip puros ou outros zips não são aceitos
+    const err = new Error(ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+
+  // 11. Legacy Office (DOC / XLS): CFBF \xD0\xCF\x11\xE0
+  if (buffer.length >= 4 && buffer.slice(0, 4).toString("hex") === "d0cf11e0") {
+    if (fn.endsWith(".doc") || dm.includes("msword")) {
+      return { mediaType: "document", mimeType: "application/msword" };
+    }
+    if (fn.endsWith(".xls") || dm.includes("ms-excel")) {
+      return { mediaType: "document", mimeType: "application/vnd.ms-excel" };
+    }
+  }
+
+  // Se nenhum formato bateu com a assinatura de bytes
+  const err = new Error(ALLOWED_TYPES_ERROR_MSG);
+  err.code = "INVALID_FILE_TYPE";
+  throw err;
+}
+
+/**
+ * Constrói caminho padronizado para mídias de follow-up:
+ * followup-media/:clientId/:mediaType/:timestamp_:filename
+ */
+export function buildFollowupMediaStorageKey(clientId, mediaType, filename = "media", timestamp = Date.now()) {
+  const safeClientId = encodeURIComponent(String(clientId || "shared").trim());
+  const safeMediaType = encodeURIComponent(String(mediaType || "media").trim());
+  const baseName = path.basename(String(filename || "media")).replace(/[^a-zA-Z0-9._-]/g, "_");
+  const ts = Number(timestamp) || Date.now();
+  return `followup-media/${safeClientId}/${safeMediaType}/${ts}_${baseName}`;
+}
+
+/**
+ * Salva buffer exato da mídia de follow-up no storage configurado (R2 em prod, local em dev/test).
+ * Valida assinatura de bytes (magic bytes) e respeita rigorosamente FOLLOWUP_MEDIA_MAX_SIZES.
+ */
+export async function saveFollowupMediaBuffer({
+  clientId,
+  buffer,
+  declaredFilename = "anexo",
+  declaredMimeType = "",
+  timestamp = Date.now(),
+}) {
+  if (!buffer || buffer.length === 0) {
+    const err = new Error("Arquivo vazio ou buffer inválido.");
+    err.code = "EMPTY_BUFFER";
+    throw err;
+  }
+
+  if (!clientId) {
+    const err = new Error("clientId é obrigatório para salvar anexo de follow-up.");
+    err.code = "MISSING_PARAMS";
+    throw err;
+  }
+
+  // 1. Detectar tipo e validar assinatura de bytes
+  const { mediaType, mimeType } = detectFollowupMediaType(buffer, declaredFilename, declaredMimeType);
+
+  // 2. Validação estrita de teto por tipo de mídia
+  const maxSize = FOLLOWUP_MEDIA_MAX_SIZES[mediaType];
+  if (buffer.length > maxSize) {
+    const maxMB = (maxSize / (1024 * 1024)).toFixed(0);
+    const fileMB = (buffer.length / (1024 * 1024)).toFixed(2);
+    const err = new Error(
+      `O arquivo excede o limite máximo permitido de ${maxMB} MB para ${mediaType} (enviado: ${fileMB} MB).`
+    );
+    err.code = "FILE_TOO_LARGE";
+    err.maxSize = maxSize;
+    err.actualSize = buffer.length;
+    throw err;
+  }
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    const err = new Error(config.error || "Armazenamento Cloudflare R2 não configurado em produção.");
+    err.code = "STORAGE_UNCONFIGURED";
+    throw err;
+  }
+
+  const storageKey = buildFollowupMediaStorageKey(clientId, mediaType, declaredFilename, timestamp);
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: storageKey,
+          Body: buffer,
+          ContentType: mimeType,
+        })
+      );
+      return {
+        storageKey,
+        sizeBytes: buffer.length,
+        mediaType,
+        mimeType,
+        filename: path.basename(declaredFilename || "anexo"),
+      };
+    } catch (err) {
+      console.error("[storage] Erro ao gravar mídia de follow-up no Cloudflare R2:", err.message || err);
+      throw err;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, storageKey);
+      await fsPromises.mkdir(path.dirname(fullPath), { recursive: true });
+      await fsPromises.writeFile(fullPath, buffer);
+      return {
+        storageKey,
+        sizeBytes: buffer.length,
+        mediaType,
+        mimeType,
+        filename: path.basename(declaredFilename || "anexo"),
+      };
+    } catch (err) {
+      console.error("[storage] Erro ao gravar mídia de follow-up no disco local:", err.message || err);
+      throw err;
+    }
+  }
+
+  const err = new Error(`Provedor de armazenamento desconhecido: ${config.provider}`);
+  err.code = "UNKNOWN_PROVIDER";
+  throw err;
+}
+
+/**
+ * Recupera buffer da mídia de follow-up a partir da chave de storage.
+ */
+export async function getFollowupMediaBuffer(storageKey) {
+  if (!storageKey) return null;
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    console.error("[storage] Tentativa de ler mídia de follow-up com armazenamento não configurado.");
+    return null;
+  }
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      const res = await s3.send(
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: storageKey,
+        })
+      );
+      const chunks = [];
+      for await (const chunk of res.Body) {
+        chunks.push(chunk);
+      }
+      return {
+        buffer: Buffer.concat(chunks),
+        contentType: res.ContentType || "application/octet-stream",
+        source: "r2",
+      };
+    } catch (err) {
+      if (err.name !== "NoSuchKey") {
+        console.error("[storage] Erro ao ler mídia de follow-up do R2:", err.message || err);
+      }
+      return null;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, storageKey);
+      const buffer = await fsPromises.readFile(fullPath);
+      return {
+        buffer,
+        contentType: "application/octet-stream",
+        source: "local",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+

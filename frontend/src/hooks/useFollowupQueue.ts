@@ -13,6 +13,7 @@ export type FollowupStatus =
 
 export interface FollowupItem {
   id: string;
+  nextJobId?: string | null;
   leadName: string | null;
   phone: string;
   origin: string | null;
@@ -138,6 +139,31 @@ export function useDiscardFollowup() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["followup-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
+  });
+}
+
+export function useCancelFollowupJob() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (jobId: string): Promise<void> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const res = await fetchApi(`/api/followup-queue/jobs/${jobId}/cancel`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao cancelar passo"));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["followup-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["followup-schedule-jobs"] });
       queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
       queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
     },
