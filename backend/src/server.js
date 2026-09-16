@@ -89,9 +89,11 @@ import { configureCorsPolicy } from "./services/corsPolicy.js";
 import { registerEventosRoutes } from "./domains/eventos/routes.js";
 import { registerWebhooksRoutes } from "./webhooks/routes.js";
 import { startFollowupWorker, pauseFollowupWorker, stopFollowupWorker } from "./followup/worker.js";
+import { startRagWorker, pauseRagWorker, stopRagWorker } from "./rag/worker.js";
 import { startSlackWorker, pauseSlackWorker, stopSlackWorker } from "./geracaoDigital/slackWorker.js";
 import { startAutomationEngine, stopAutomationEngine } from "./followup/automationEngine.js";
 import { closeFollowupQueue } from "./followup/queue.js";
+import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
 import { stopDueDispatchScheduler } from "./domains/campaigns/routes.js";
 // getSegmentationCatalog, normalizeSegmentationCatalog, isFilterShape, normalizeFilters,
@@ -808,6 +810,7 @@ function startBackgroundServices() {
   // BullMQ worker do módulo de follow-up e gd-slack
   if (process.env.REDIS_URL || process.env.REDIS_HOST) {
     startFollowupWorker();
+    startRagWorker();
     startSlackWorker();
   } else {
     console.warn("[workers] REDIS_URL/REDIS_HOST não configurado — workers não iniciados.");
@@ -883,6 +886,7 @@ async function gracefulShutdown(signal) {
       stopAutomationEngine();
       await Promise.allSettled([
         pauseFollowupWorker(),
+        pauseRagWorker(),
         pauseSlackWorker(),
       ]);
       console.log(`[server] [etapa 1/4] novos trabalhos pausados e schedulers encerrados (${Date.now() - t1}ms).`);
@@ -934,6 +938,7 @@ async function gracefulShutdown(signal) {
       const tw = Date.now();
       await Promise.allSettled([
         stopFollowupWorker(),
+        stopRagWorker(),
         stopSlackWorker(),
       ]);
       console.log(`[server] [etapa 4a/4] workers BullMQ fechados (${Date.now() - tw}ms).`);
@@ -942,6 +947,7 @@ async function gracefulShutdown(signal) {
       const tq = Date.now();
       await Promise.allSettled([
         closeFollowupQueue(),
+        closeRagQueue(),
         closeSlackQueue(),
       ]);
       console.log(`[server] [etapa 4b/4] filas BullMQ fechadas (${Date.now() - tq}ms).`);

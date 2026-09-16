@@ -5,6 +5,7 @@ import { registerFollowupQueueRoutes } from "../followup/queueRoutes.js";
 import { registerGeracaoDigitalRoutes } from "./geracaoDigitalRoutes.js";
 import { registerContractRoutes } from "./geracaoDigitalContracts/contractRoutes.js";
 import { registerContractWebhookRoutes } from "./geracaoDigitalContracts/webhookRoutes.js";
+import { registerRagRoutes } from "../rag/routes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { registerEventosRoutes } from "./eventos/routes.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -57,6 +58,9 @@ export function registerAllDomainRoutes(app) {
   registerGeracaoDigitalRoutes(app, pgDatabasePool, requireFirebaseAuth, requireInternalPageAccess);
   registerContractRoutes(app);
   registerContractWebhookRoutes(app);
+
+  // ─── Base de Conhecimento RAG (upload/indexação, fila própria) ────────────
+  registerRagRoutes(app);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);
