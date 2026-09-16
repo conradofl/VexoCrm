@@ -1,5 +1,5 @@
 // backend/src/services/storage.js
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import fs from "fs";
 import { promises as fsPromises } from "fs";
 import path from "path";
@@ -833,3 +833,267 @@ export async function getFollowupMediaBuffer(storageKey) {
   return null;
 }
 
+
+// ─── Armazenamento de Documentos RAG (Etapa 5, Leva 2) ────────────────────────
+// Mesmo padrão de saveContractBuffer: bytes exatos, sem recompressão, prefixo
+// próprio no bucket (rag/), teto próprio.
+
+export const RAG_MAX_BYTES = 20 * 1024 * 1024;
+
+const RAG_ALLOWED_TYPES_ERROR_MSG =
+  "Tipo de arquivo não permitido ou assinatura inválida. Os tipos permitidos são: " +
+  "PDF, DOCX, TXT e MD.";
+
+/**
+ * Detecta o tipo de documento RAG pela assinatura de bytes — mesmo modelo de
+ * detectFollowupMediaType (Etapa 4): o conteúdo dos bytes prevalece sobre
+ * qualquer extensão ou MIME informado pelo cliente.
+ *
+ * TXT e MD não têm assinatura de bytes própria (são texto puro) — o critério
+ * pra aceitar como texto é: não bater nenhuma assinatura binária conhecida E
+ * decodificar como UTF-8 válido sem caractere de substituição. MD é
+ * distinguido de TXT só pela extensão declarada (o conteúdo é indistinguível).
+ */
+export function detectRagDocumentType(buffer, declaredFilename = "", declaredMime = "") {
+  if (!buffer || buffer.length === 0) {
+    const err = new Error("Buffer de arquivo vazio.");
+    err.code = "EMPTY_BUFFER";
+    throw err;
+  }
+
+  // Bloqueio imediato de executáveis e binários perigosos (mesmo bloco de
+  // detectFollowupMediaType — um documento "de conhecimento" não deveria
+  // nunca ser um binário executável, e aceitar um char por engano aqui vira
+  // vetor de ataque se algum dia o arquivo for servido de volta).
+  if (buffer.length >= 2 && buffer[0] === 0x4d && buffer[1] === 0x5a) {
+    const err = new Error(RAG_ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+  if (buffer.length >= 4 && buffer.slice(0, 4).toString("hex") === "7f454c46") {
+    const err = new Error(RAG_ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+  if (buffer.length >= 2 && buffer[0] === 0x23 && buffer[1] === 0x21) {
+    const err = new Error(RAG_ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+
+  const fn = String(declaredFilename || "").toLowerCase().trim();
+
+  // PDF: %PDF-
+  if (buffer.length >= 5 && buffer.slice(0, 5).toString("ascii") === "%PDF-") {
+    return { docType: "pdf", mimeType: "application/pdf" };
+  }
+
+  // DOCX: zip (PK\x03\x04) com conteúdo wordprocessingml
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    buffer[2] === 0x03 &&
+    buffer[3] === 0x04
+  ) {
+    if (fn.endsWith(".docx")) {
+      return {
+        docType: "docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      };
+    }
+    const err = new Error(RAG_ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+
+  // TXT / MD: sem assinatura própria — aceita se decodificar como UTF-8 válido.
+  // TextDecoder com fatal:true lança se encontrar sequência de bytes inválida.
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    const err = new Error(RAG_ALLOWED_TYPES_ERROR_MSG);
+    err.code = "INVALID_FILE_TYPE";
+    throw err;
+  }
+
+  if (fn.endsWith(".md") || fn.endsWith(".markdown")) {
+    return { docType: "md", mimeType: "text/markdown" };
+  }
+  return { docType: "txt", mimeType: "text/plain" };
+}
+
+/**
+ * Constrói caminho padronizado para documentos RAG:
+ * rag/:clientId/:documentId/:timestamp_:filename
+ */
+export function buildRagDocumentStorageKey(clientId, documentId, filename = "documento", timestamp = Date.now()) {
+  const safeClientId = encodeURIComponent(String(clientId || "shared").trim());
+  const safeDocumentId = encodeURIComponent(String(documentId).trim());
+  const baseName = path.basename(String(filename || "documento")).replace(/[^a-zA-Z0-9._-]/g, "_");
+  const ts = Number(timestamp) || Date.now();
+  return `rag/${safeClientId}/${safeDocumentId}/${ts}_${baseName}`;
+}
+
+/**
+ * Salva buffer exato do documento RAG no storage configurado (R2 em prod, local
+ * em dev/test). Mesma regra de saveContractBuffer: bytes exatos, sem recomprimir.
+ */
+export async function saveRagDocumentBuffer({ clientId, documentId, buffer, filename, mimeType, timestamp = Date.now() }) {
+  if (!buffer || buffer.length === 0) {
+    const err = new Error("Arquivo vazio ou buffer inválido.");
+    err.code = "EMPTY_BUFFER";
+    throw err;
+  }
+
+  if (buffer.length > RAG_MAX_BYTES) {
+    const err = new Error(`Arquivo excede o teto máximo permitido de 20 MB (tamanho: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB).`);
+    err.code = "FILE_TOO_LARGE";
+    throw err;
+  }
+
+  if (!clientId || !documentId) {
+    const err = new Error("clientId e documentId são obrigatórios para salvar documento RAG.");
+    err.code = "MISSING_PARAMS";
+    throw err;
+  }
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    console.error(
+      "================================================================================\n" +
+      "🛑 [STORAGE] CRITICAL CONFIG ERROR: Recusando salvar documento RAG no disco efêmero!\n" +
+      "   Em ambiente de PRODUÇÃO, o Cloudflare R2 é OBRIGATÓRIO.\n" +
+      "================================================================================"
+    );
+    const err = new Error(config.error || "Armazenamento Cloudflare R2 não configurado em produção.");
+    err.code = "STORAGE_UNCONFIGURED";
+    throw err;
+  }
+
+  const ragKey = buildRagDocumentStorageKey(clientId, documentId, filename, timestamp);
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: ragKey,
+          Body: buffer,
+          ContentType: mimeType || "application/octet-stream",
+        })
+      );
+      return { storageKey: ragKey, sizeBytes: buffer.length };
+    } catch (err) {
+      console.error("[storage] Erro ao gravar documento RAG no Cloudflare R2:", err.message || err);
+      throw err;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, ragKey);
+      await fsPromises.mkdir(path.dirname(fullPath), { recursive: true });
+      await fsPromises.writeFile(fullPath, buffer);
+      return { storageKey: ragKey, sizeBytes: buffer.length };
+    } catch (err) {
+      console.error("[storage] Erro ao gravar documento RAG no disco local:", err.message || err);
+      throw err;
+    }
+  }
+
+  const err = new Error(`Provedor de armazenamento desconhecido: ${config.provider}`);
+  err.code = "UNKNOWN_PROVIDER";
+  throw err;
+}
+
+/**
+ * Recupera buffer do documento RAG a partir da chave de storage.
+ */
+export async function getRagDocumentBuffer(storageKey) {
+  if (!storageKey) return null;
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    console.error("[storage] Tentativa de ler documento RAG com armazenamento não configurado.");
+    return null;
+  }
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      const res = await s3.send(new GetObjectCommand({ Bucket: config.bucket, Key: storageKey }));
+      const chunks = [];
+      for await (const chunk of res.Body) {
+        chunks.push(chunk);
+      }
+      return {
+        buffer: Buffer.concat(chunks),
+        contentType: res.ContentType || "application/octet-stream",
+        source: "r2",
+      };
+    } catch (err) {
+      if (err.name !== "NoSuchKey") {
+        console.error("[storage] Erro ao ler documento RAG do R2:", err.message || err);
+      }
+      return null;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, storageKey);
+      const buffer = await fsPromises.readFile(fullPath);
+      return { buffer, contentType: "application/octet-stream", source: "local" };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Apaga o arquivo do documento RAG do storage. "Apagar apaga tudo": esta
+ * função existe pra garantir que o binário some do R2/disco, não só a linha
+ * do banco — sem isso "apagar" seria só um DELETE de metadado, com o
+ * conteúdo real do documento continuando acessível pela storage_key antiga.
+ */
+export async function deleteRagDocumentBuffer(storageKey) {
+  if (!storageKey) return false;
+
+  const config = resolveStorageProvider();
+  if (!config.configured) {
+    console.error("[storage] Tentativa de apagar documento RAG com armazenamento não configurado.");
+    return false;
+  }
+
+  if (config.provider === "r2") {
+    try {
+      const s3 = getS3Client(config);
+      await s3.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: storageKey }));
+      return true;
+    } catch (err) {
+      console.error("[storage] Erro ao apagar documento RAG do R2:", err.message || err);
+      return false;
+    }
+  }
+
+  if (config.provider === "local") {
+    try {
+      const localBaseDir = path.resolve(__dirname, "../../storage");
+      const fullPath = path.join(localBaseDir, storageKey);
+      await fsPromises.unlink(fullPath);
+      return true;
+    } catch (err) {
+      if (err.code === "ENOENT") return true;
+      console.error("[storage] Erro ao apagar documento RAG do disco local:", err.message || err);
+      return false;
+    }
+  }
+
+  return false;
+}

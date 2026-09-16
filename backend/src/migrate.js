@@ -312,6 +312,15 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'followup_templates_trigger_type_check' AND pg_get_constraintdef(oid) LIKE '%fixed_date%')
       )
     ) AS ok`,
+    "20260916100000_create_rag_documents_and_chunks.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='rag_documents')
+      AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='rag_chunks')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_documents' AND column_name='status')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_documents' AND column_name='embedding_provider')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_documents' AND column_name='embedding_model')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_documents' AND column_name='embedding_dim')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_chunks' AND column_name='embedding')
+    ) AS ok`,
   };
 
   const query = checks[filename];
