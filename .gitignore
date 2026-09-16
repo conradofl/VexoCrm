@@ -87,3 +87,9 @@ code-hash.txt
 
 # Storage local de desenvolvimento (midia e contratos) — nunca versionar
 backend/storage/
+
+# Scripts de diagnostico de uso unico e exportacoes locais — nunca versionar
+scratch/
+backend/scripts/
+*.xlsx
+*.csv

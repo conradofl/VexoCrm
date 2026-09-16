@@ -43,6 +43,12 @@ function getDb() {
  * agente (companyId), quando o documento estiver amarrado a um. Documento sem
  * company_id (NULL) vale pro tenant inteiro; documento com company_id só
  * entra na busca de conversas daquele agente específico.
+ *
+ * Cada chunk devolvido carrega `filename` (do documento-pai) e, quando
+ * chamado com minSimilarity baixo, `similarity` de candidatos que não
+ * passariam no limiar de produção — usado pela rota de busca de teste
+ * (rag/routes.js), a tela de administração. `buildRagContextBlock` nunca usa
+ * esses dois campos: o lead não pode ver de qual documento veio a resposta.
  */
 export async function findRagContextForQuestion({
   clientId,
@@ -73,7 +79,7 @@ export async function findRagContextForQuestion({
   const [questionEmbedding] = await embedTexts([question], { provider: identity.provider });
 
   const { rows } = await pool.query(
-    `SELECT rc.document_id, rc.content, rc.embedding, rd.embedding_provider, rd.embedding_model
+    `SELECT rc.document_id, rc.content, rc.embedding, rd.embedding_provider, rd.embedding_model, rd.filename
        FROM public.rag_chunks rc
        JOIN public.rag_documents rd ON rd.id = rc.document_id
       WHERE rd.client_id = $1 AND rd.status = 'ready' AND (rd.company_id IS NULL OR rd.company_id = $2)`,

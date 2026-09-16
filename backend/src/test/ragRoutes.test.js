@@ -2,6 +2,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// search-test roda embedTexts de verdade (só o banco é mockado) — lexical é
+// determinístico e sem rede, mesma escolha de ragChatSearch.test.js.
+process.env.RAG_EMBEDDING_PROVIDER = "lexical";
+
 const poolQueryMock = vi.fn(async () => ({ rows: [] }));
 vi.mock("../services/database.js", () => ({
   get pgDatabasePool() {
@@ -10,6 +14,7 @@ vi.mock("../services/database.js", () => ({
 }));
 
 const saveRagDocumentBufferMock = vi.fn();
+const deleteRagDocumentBufferMock = vi.fn();
 vi.mock("../services/storage.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -17,6 +22,7 @@ vi.mock("../services/storage.js", async (importOriginal) => {
     // detectRagDocumentType e RAG_MAX_BYTES ficam REAIS — quero testar a
     // rejeição de verdade por assinatura de bytes através da rota.
     saveRagDocumentBuffer: (...args) => saveRagDocumentBufferMock(...args),
+    deleteRagDocumentBuffer: (...args) => deleteRagDocumentBufferMock(...args),
   };
 });
 
@@ -103,6 +109,7 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
     vi.clearAllMocks();
     poolQueryMock.mockResolvedValue({ rows: [] });
     saveRagDocumentBufferMock.mockResolvedValue({ storageKey: "rag/tenant/doc/123_arquivo.pdf", sizeBytes: 100 });
+    deleteRagDocumentBufferMock.mockResolvedValue(true);
   });
 
   describe("POST /documents — upload", () => {
@@ -253,6 +260,300 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
       const update = poolQueryMock.mock.calls.find(([sql]) => sql.includes("SET status = 'pending'"));
       expect(update).toBeUndefined();
       expect(queueAddMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /documents — lista pra tela (Commit 4)", () => {
+    it("lista documentos do tenant, mapeando as colunas certas e sem needsReindex quando a procedência bate", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "lexical";
+      poolQueryMock.mockResolvedValue({
+        rows: [
+          {
+            id: "doc-1",
+            filename: "politica.pdf",
+            mime_type: "application/pdf",
+            size_bytes: 1024,
+            status: "ready",
+            error_log: null,
+            chunk_count: 12,
+            embedding_provider: "lexical",
+            embedding_model: "lexical-trigram-hash-v1",
+            company_id: null,
+            created_at: "2026-09-01T10:00:00Z",
+            updated_at: "2026-09-01T10:05:00Z",
+          },
+        ],
+      });
+
+      const handler = getRouteHandler("/documents", "get");
+      const req = { query: { clientId: "geracao-digital" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.documents).toHaveLength(1);
+      const doc = res.body.documents[0];
+      expect(doc).toMatchObject({
+        id: "doc-1",
+        filename: "politica.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1024,
+        status: "ready",
+        chunkCount: 12,
+        needsReindex: false,
+      });
+    });
+
+    it("documento indexado com OUTRO provedor/modelo: needsReindex true", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "lexical"; // identidade ATUAL é lexical
+      poolQueryMock.mockResolvedValue({
+        rows: [
+          {
+            id: "doc-velho",
+            filename: "catalogo_antigo.pdf",
+            mime_type: "application/pdf",
+            size_bytes: 2048,
+            status: "ready",
+            error_log: null,
+            chunk_count: 30,
+            embedding_provider: "gemini", // indexado antes, com outro provedor
+            embedding_model: "text-embedding-004",
+            company_id: null,
+            created_at: "2026-08-01T10:00:00Z",
+            updated_at: "2026-08-01T10:05:00Z",
+          },
+        ],
+      });
+
+      const handler = getRouteHandler("/documents", "get");
+      const req = { query: { clientId: "geracao-digital" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.body.documents[0].needsReindex).toBe(true);
+    });
+
+    it("documento ainda 'pending' (sem procedência gravada): needsReindex nunca true", async () => {
+      poolQueryMock.mockResolvedValue({
+        rows: [
+          {
+            id: "doc-novo",
+            filename: "recem_subido.pdf",
+            mime_type: "application/pdf",
+            size_bytes: 500,
+            status: "pending",
+            error_log: null,
+            chunk_count: 0,
+            embedding_provider: null,
+            embedding_model: null,
+            company_id: null,
+            created_at: "2026-09-16T10:00:00Z",
+            updated_at: "2026-09-16T10:00:00Z",
+          },
+        ],
+      });
+
+      const handler = getRouteHandler("/documents", "get");
+      const req = { query: { clientId: "geracao-digital" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.body.documents[0].needsReindex).toBe(false);
+    });
+
+    it("tenant fora do escopo -> 403", async () => {
+      const handler = getRouteHandler("/documents", "get");
+      const req = { query: { clientId: "sonhare" }, authAccess: assignedAccess(["geracao-digital"]) };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(403);
+      expect(poolQueryMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("DELETE /documents/:id — apaga arquivo, trechos (cascade) e registro", () => {
+    it("apagar apaga tudo: storage primeiro, DELETE do banco depois (cascade cuida dos chunks)", async () => {
+      poolQueryMock.mockImplementation(async (sql) => {
+        if (sql.includes("SELECT id, client_id, storage_key FROM public.rag_documents")) {
+          return { rows: [{ id: "doc-1", client_id: "geracao-digital", storage_key: "rag/geracao-digital/doc-1/arquivo.pdf" }] };
+        }
+        return { rows: [] };
+      });
+
+      const handler = getRouteHandler("/documents/:id", "delete");
+      const req = { params: { id: "doc-1" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(deleteRagDocumentBufferMock).toHaveBeenCalledWith("rag/geracao-digital/doc-1/arquivo.pdf");
+
+      const del = poolQueryMock.mock.calls.find(([sql]) => sql.includes("DELETE FROM public.rag_documents"));
+      expect(del).toBeTruthy();
+      expect(del[1]).toEqual(["doc-1"]);
+    });
+
+    it("storage falha ao apagar: 500, e o registro NÃO é apagado do banco (fica pra tentar de novo, não vira órfão no R2)", async () => {
+      deleteRagDocumentBufferMock.mockResolvedValue(false);
+
+      poolQueryMock.mockImplementation(async (sql) => {
+        if (sql.includes("SELECT id, client_id, storage_key FROM public.rag_documents")) {
+          return { rows: [{ id: "doc-1", client_id: "geracao-digital", storage_key: "rag/geracao-digital/doc-1/arquivo.pdf" }] };
+        }
+        return { rows: [] };
+      });
+
+      const handler = getRouteHandler("/documents/:id", "delete");
+      const req = { params: { id: "doc-1" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(500);
+      const del = poolQueryMock.mock.calls.find(([sql]) => sql.includes("DELETE FROM public.rag_documents"));
+      expect(del).toBeUndefined();
+    });
+
+    it("documento inexistente -> 404, nunca chama storage", async () => {
+      poolQueryMock.mockResolvedValue({ rows: [] });
+
+      const handler = getRouteHandler("/documents/:id", "delete");
+      const req = { params: { id: "doc-fantasma" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(404);
+      expect(deleteRagDocumentBufferMock).not.toHaveBeenCalled();
+    });
+
+    it("documento de outro tenant -> 403, nunca apaga do storage nem do banco (tenant vem da linha)", async () => {
+      poolQueryMock.mockImplementation(async (sql) => {
+        if (sql.includes("SELECT id, client_id, storage_key FROM public.rag_documents")) {
+          return { rows: [{ id: "doc-1", client_id: "sonhare", storage_key: "rag/sonhare/doc-1/arquivo.pdf" }] };
+        }
+        return { rows: [] };
+      });
+
+      const handler = getRouteHandler("/documents/:id", "delete");
+      const req = { params: { id: "doc-1" }, authAccess: assignedAccess(["geracao-digital"]) };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(403);
+      expect(deleteRagDocumentBufferMock).not.toHaveBeenCalled();
+      const del = poolQueryMock.mock.calls.find(([sql]) => sql.includes("DELETE FROM public.rag_documents"));
+      expect(del).toBeUndefined();
+    });
+  });
+
+  describe("POST /search-test — busca de teste com similaridade de cada trecho (calibra RAG_MIN_SIMILARITY sem chutar)", () => {
+    it("pergunta ausente -> 400, nunca busca", async () => {
+      const handler = getRouteHandler("/search-test", "post");
+      const req = { body: { clientId: "geracao-digital" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(400);
+      expect(poolQueryMock).not.toHaveBeenCalled();
+    });
+
+    it("mostra similaridade de trechos que NÃO passariam no limiar de produção — é isso que calibra sem chutar", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "lexical";
+      process.env.RAG_MIN_SIMILARITY = "0.5";
+
+      const TEXTO_COMUM = "Parcelamos em até 12x sem juros no cartão de crédito.";
+      const TEXTO_IRRELEVANTE = "Nosso horário de atendimento é de segunda a sexta, das 9h às 18h.";
+
+      const { embedTexts } = await import("../services/embeddings.js");
+      const [embComum] = await embedTexts([TEXTO_COMUM], { provider: "lexical" });
+      const [embIrrelevante] = await embedTexts([TEXTO_IRRELEVANTE], { provider: "lexical" });
+
+      poolQueryMock.mockImplementation(async (sql) => {
+        if (sql.includes("COUNT(*)::int AS n")) return { rows: [{ n: 2 }] };
+        if (sql.includes("FROM public.rag_chunks rc")) {
+          return {
+            rows: [
+              {
+                document_id: "doc-relevante",
+                content: TEXTO_COMUM,
+                embedding: JSON.stringify(embComum),
+                embedding_provider: "lexical",
+                embedding_model: "lexical-trigram-hash-v1",
+                filename: "tabela_precos.pdf",
+              },
+              {
+                document_id: "doc-irrelevante",
+                content: TEXTO_IRRELEVANTE,
+                embedding: JSON.stringify(embIrrelevante),
+                embedding_provider: "lexical",
+                embedding_model: "lexical-trigram-hash-v1",
+                filename: "horario_atendimento.pdf",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      });
+
+      const handler = getRouteHandler("/search-test", "post");
+      const req = { body: { clientId: "geracao-digital", question: TEXTO_COMUM }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.applies).toBe(true);
+      expect(res.body.threshold).toBe(0.5);
+      // minSimilarity: 0 na busca -> os DOIS candidatos voltam, não só o que passaria.
+      expect(res.body.chunks).toHaveLength(2);
+
+      const relevante = res.body.chunks.find((c) => c.documentId === "doc-relevante");
+      const irrelevante = res.body.chunks.find((c) => c.documentId === "doc-irrelevante");
+      expect(relevante.filename).toBe("tabela_precos.pdf");
+      expect(relevante.similarity).toBeCloseTo(1, 5);
+      expect(relevante.passesThreshold).toBe(true);
+      expect(irrelevante.passesThreshold).toBe(false);
+
+      delete process.env.RAG_MIN_SIMILARITY;
+    });
+
+    it("tenant sem nenhum documento pronto: applies false, chunks vazio, nunca gera embedding (200, não erro)", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "lexical";
+      poolQueryMock.mockImplementation(async (sql) => {
+        if (sql.includes("COUNT(*)::int AS n")) return { rows: [{ n: 0 }] };
+        return { rows: [] };
+      });
+
+      const handler = getRouteHandler("/search-test", "post");
+      const req = { body: { clientId: "geracao-digital", question: "vocês parcelam?" }, authAccess: adminAccess() };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.applies).toBe(false);
+      expect(res.body.chunks).toEqual([]);
+    });
+
+    it("tenant fora do escopo -> 403, nunca busca", async () => {
+      const handler = getRouteHandler("/search-test", "post");
+      const req = { body: { clientId: "sonhare", question: "oi" }, authAccess: assignedAccess(["geracao-digital"]) };
+      const res = fakeRes();
+
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(403);
+      expect(poolQueryMock).not.toHaveBeenCalled();
     });
   });
 

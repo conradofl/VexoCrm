@@ -12,7 +12,9 @@ import crypto from "crypto";
 import { requireFirebaseAuth, requireInternalPageAccess } from "../access/middlewares.js";
 import { pgDatabasePool } from "../services/database.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
-import { detectRagDocumentType, saveRagDocumentBuffer, RAG_MAX_BYTES } from "../services/storage.js";
+import { detectRagDocumentType, saveRagDocumentBuffer, deleteRagDocumentBuffer, RAG_MAX_BYTES } from "../services/storage.js";
+import { resolveEmbeddingIdentity } from "../services/embeddings.js";
+import { findRagContextForQuestion, resolveDefaultMinSimilarity } from "./chatSearch.js";
 import { getRagQueue } from "./queue.js";
 
 function sendErr(res, status, code, message) {
@@ -129,6 +131,121 @@ export function registerRagRoutes(app) {
       });
     }
   );
+
+  // GET /api/rag/documents?clientId=&companyId= — lista pra tela.
+  // needsReindex é calculado aqui, não guardado: compara a procedência
+  // gravada no documento (embedding_provider/model, escrita no último índice
+  // bem-sucedido) contra resolveEmbeddingIdentity() de AGORA. Documento
+  // 'pending'/'processing' ainda não tem procedência (NULL) — nunca marca
+  // como precisando reindexar, porque ainda vai indexar com a identidade atual.
+  router.get("/documents", requireFirebaseAuth, async (req, res) => {
+    const clientId = resolveAuthorizedClientId(req, res, str(req.query.clientId));
+    if (!clientId) return;
+    const companyId = str(req.query.companyId);
+
+    const pool = getDb();
+    if (!pool) return sendErr(res, 500, "DB_UNAVAILABLE", "Banco de dados indisponível.");
+
+    const { rows } = await pool.query(
+      `SELECT id, filename, mime_type, size_bytes, status, error_log, chunk_count,
+              embedding_provider, embedding_model, company_id, created_at, updated_at
+         FROM public.rag_documents
+        WHERE client_id = $1 AND (company_id IS NULL OR company_id = $2)
+        ORDER BY created_at DESC`,
+      [clientId, companyId]
+    );
+
+    const identity = resolveEmbeddingIdentity();
+
+    return res.json({
+      success: true,
+      documents: rows.map((d) => ({
+        id: d.id,
+        filename: d.filename,
+        mimeType: d.mime_type,
+        sizeBytes: d.size_bytes,
+        status: d.status,
+        errorLog: d.error_log,
+        chunkCount: d.chunk_count,
+        companyId: d.company_id,
+        createdAt: d.created_at,
+        updatedAt: d.updated_at,
+        needsReindex: Boolean(
+          d.embedding_provider &&
+          (d.embedding_provider !== identity.provider || d.embedding_model !== identity.model)
+        ),
+      })),
+    });
+  });
+
+  // DELETE /api/rag/documents/:id — apaga arquivo, trechos e o registro.
+  // Ordem importa: apaga do storage PRIMEIRO. Se falhar, a linha do banco
+  // fica intacta e o documento continua aparecendo na tela (retry natural) —
+  // o contrário apagaria a referência à storage_key e deixaria o objeto
+  // órfão no R2 pra sempre, sem jeito de encontrar de novo.
+  router.delete("/documents/:id", requireFirebaseAuth, async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido.");
+
+    const pool = getDb();
+    if (!pool) return sendErr(res, 500, "DB_UNAVAILABLE", "Banco de dados indisponível.");
+
+    const { rows } = await pool.query(
+      `SELECT id, client_id, storage_key FROM public.rag_documents WHERE id = $1`,
+      [id]
+    );
+    if (!rows.length) return sendErr(res, 404, "NOT_FOUND", "Documento não encontrado.");
+
+    const clientId = resolveAuthorizedClientId(req, res, rows[0].client_id);
+    if (!clientId) return;
+
+    const storageOk = await deleteRagDocumentBuffer(rows[0].storage_key);
+    if (!storageOk) {
+      return sendErr(res, 500, "STORAGE_DELETE_FAILED", "Falha ao apagar o arquivo do armazenamento. Tente novamente.");
+    }
+
+    // ON DELETE CASCADE (migration) apaga os trechos junto.
+    await pool.query(`DELETE FROM public.rag_documents WHERE id = $1`, [id]);
+
+    return res.json({ success: true, documentId: id });
+  });
+
+  // POST /api/rag/search-test  { clientId, companyId?, question }
+  // Reaproveita findRagContextForQuestion (Commit 3) com minSimilarity: 0 —
+  // devolve TODOS os candidatos rankeados, não só os que passariam em
+  // produção. É o único jeito de calibrar RAG_MIN_SIMILARITY sem chutar: ver
+  // onde cada trecho caiu, não só quem passou. `threshold` vai junto pra tela
+  // marcar visualmente quem passaria hoje.
+  router.post("/search-test", requireFirebaseAuth, async (req, res) => {
+    const clientId = resolveAuthorizedClientId(req, res, str(req.body?.clientId));
+    if (!clientId) return;
+    const companyId = str(req.body?.companyId);
+    const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
+    if (!question) return sendErr(res, 400, "MISSING_QUESTION", "Pergunta de teste não fornecida.");
+
+    const threshold = resolveDefaultMinSimilarity();
+
+    let result;
+    try {
+      result = await findRagContextForQuestion({ clientId, companyId, question, topK: 10, minSimilarity: 0 });
+    } catch (err) {
+      return sendErr(res, 500, "SEARCH_FAILED", err.message || "Falha ao buscar na base de conhecimento.");
+    }
+
+    return res.json({
+      success: true,
+      applies: result.applies,
+      threshold,
+      chunks: result.chunks.map((c) => ({
+        documentId: c.document_id,
+        filename: c.filename || null,
+        content: c.content,
+        similarity: c.similarity,
+        passesThreshold: c.similarity >= threshold,
+      })),
+      needsReindexDocumentIds: result.needsReindexDocumentIds,
+    });
+  });
 
   // POST /api/rag/documents/:id/reprocess — reindexa (documento pronto, com falha, ou já em processo).
   router.post("/documents/:id/reprocess", requireFirebaseAuth, async (req, res) => {
