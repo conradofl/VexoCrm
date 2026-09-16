@@ -20,6 +20,7 @@ import { extractJsonFromLlmText, validateOutboundMessage, stripReasoningBlocks }
 import { maskPhoneForLog } from "./services/tenant.js";
 import { resolveEvolutionInstanceOwner, fetchMediaBase64FromEvolution } from "./services/evolution.js";
 import { saveMediaBuffer } from "./services/storage.js";
+import { findRagContextForQuestion, buildRagContextBlock, DEFAULT_RAG_TRANSFER_MESSAGE } from "./rag/chatSearch.js";
 
 /**
  * Chatbot AI Engine
@@ -946,8 +947,15 @@ Schema JSON obrigatório:
   "spin_fase": "situacao" | "problema" | "implicacao" | "necessidade" | null,
   "finalizado": true | false,
   "nao_comercial": true | false,
-  "motivo_nao_comercial": "string curta — motivo quando nao_comercial for true (ex: 'pedido de comida', 'conversa pessoal', 'engano'), ou null"
+  "motivo_nao_comercial": "string curta — motivo quando nao_comercial for true (ex: 'pedido de comida', 'conversa pessoal', 'engano'), ou null",
+  "precisa_humano": true | false
 }
+
+BASE DE CONHECIMENTO (QUANDO HOUVER UM BLOCO "BASE DE CONHECIMENTO" ANEXADO ABAIXO NESTE PROMPT):
+• Responda a pergunta do lead SOMENTE com o que estiver naquele bloco. Não complete com conhecimento geral, não invente, não "ache que sabe".
+• Se a resposta não estiver lá, marque "precisa_humano": true e escreva em "mensagem" uma frase curta e natural avisando que vai chamar um especialista (ex.: "${DEFAULT_RAG_TRANSFER_MESSAGE}") — no seu tom de voz, sem citar "documento" ou "trecho".
+• Saudação, agradecimento ou mensagem sem pergunta factual NÃO aciona esta regra, com ou sem bloco anexado — continue a conversa normalmente.
+• Fora desse cenário (sem bloco de Base de Conhecimento anexado — não achou trecho relevante para esta mensagem, ou o tenant não tem base configurada), "precisa_humano" fica false — isso não muda em nada como você atende hoje.
 
 RASTREAMENTO DE ORIGEM DO LEAD:
 • Se a origem do lead (lead_source ou origem_marketing nos dados) ainda não estiver definida, faça uma pergunta leve e natural durante a conversa para saber como ele conheceu a empresa (ex.: "Por sinal, como nos conheceu? Instagram, indicação, Google?").
@@ -1269,6 +1277,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
           raw.nao_comercial === true && typeof raw.motivo_nao_comercial === "string"
             ? raw.motivo_nao_comercial.trim().slice(0, 150)
             : null,
+        precisa_humano: raw.precisa_humano === true,
         contratoQuebrado: true,
       };
     }
@@ -1285,6 +1294,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
         raw.nao_comercial === true && typeof raw.motivo_nao_comercial === "string"
           ? raw.motivo_nao_comercial.trim().slice(0, 150)
           : null,
+      precisa_humano: raw.precisa_humano === true,
     };
   }
 
@@ -1314,6 +1324,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
             parsed.nao_comercial === true && typeof parsed.motivo_nao_comercial === "string"
               ? parsed.motivo_nao_comercial.trim().slice(0, 150)
               : null,
+          precisa_humano: parsed.precisa_humano === true,
           contratoQuebrado: true,
         };
       }
@@ -1327,6 +1338,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
         finalizado: parsed.finalizado === true,
         spin_fase: VALID_SPIN_FASES.has(parsed.spin_fase) ? parsed.spin_fase : null,
         nao_comercial: parsed.nao_comercial === true,
+        precisa_humano: parsed.precisa_humano === true,
         motivo_nao_comercial:
           parsed.nao_comercial === true && typeof parsed.motivo_nao_comercial === "string"
             ? parsed.motivo_nao_comercial.trim().slice(0, 150)
@@ -1600,6 +1612,7 @@ export async function processBatch({
   inboundPrompt = null,
   inboundSpinInstruction = "",
   instanceName = null,
+  companyId = null,
 }) {
   const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
   const effectivePersonaModel = model || tenantSettings?.chatbot_model || "generico";
@@ -1858,7 +1871,39 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     }
   }
 
-  // ── Execução da IA ──────────────────
+  // ── Base de Conhecimento RAG (Etapa 5, Leva 2, Commit 3) ──────────────────
+  // Roda ANTES de montar o prompt final. Tenant/agente sem nenhum documento
+  // pronto: applies=false — zero mudança de comportamento, nem embedding é
+  // gerado (checagem de contagem é a única query extra). Falha na busca
+  // (rede/banco) não pode travar o atendimento: cai pro fluxo de hoje, sem
+  // RAG neste turno.
+  //
+  // AUSÊNCIA DE TRECHO NÃO É "NÃO SEI" — é só "esta mensagem não bateu com
+  // nada da base". "Bom dia", "obrigado", "oi" nunca batem com nada, e não são
+  // perguntas sobre o negócio: transferir esses turnos sem chamar o modelo
+  // quebraria o agente assim que qualquer PDF fosse indexado. A regra dura
+  // ("responda só com o que está aqui, senão marque precisa_humano") só se
+  // aplica quando HÁ trecho — aí sim entra o bloco de contexto e o prompt
+  // (buildJsonInstruction) já instrui o modelo a marcar precisa_humano quando
+  // a pergunta é factual e o contexto não cobre. Sem trecho, segue pro modelo
+  // sem bloco nenhum — conversa, saudação e qualificação normais, como hoje.
+  const ragResult = await findRagContextForQuestion({
+    clientId,
+    companyId,
+    question: combinedText,
+  }).catch((err) => {
+    console.error("[chatbot-ai] RAG: falha ao buscar contexto — seguindo sem RAG neste turno", {
+      clientId,
+      phone: phone.slice(-4),
+      error: err?.message || String(err),
+    });
+    return { applies: false, chunks: [], needsReindexDocumentIds: [] };
+  });
+
+  if (ragResult.applies && ragResult.chunks.length > 0) {
+    systemPromptOverride = `${systemPromptOverride || effectiveSystemPrompt}${buildRagContextBlock(ragResult.chunks)}`;
+  }
+
   let aiResponse;
   try {
     aiResponse = await runChatbotAI({

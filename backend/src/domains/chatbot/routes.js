@@ -2975,6 +2975,7 @@ export function registerChatbotRoutes(app, deps) {
             inboundPrompt: inboundConfig?.prompt || null,
             inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
             instanceName,
+            companyId: inboundConfig?.companyId || null,
           });
 
           // Verificação de intenção não-comercial com as 5 travas de segurança
@@ -3196,6 +3197,41 @@ export function registerChatbotRoutes(app, deps) {
             }
           }
 
+          // Transferência por RAG (Etapa 5, Leva 2, Commit 3): o agente não
+          // achou a resposta na base de conhecimento e marcou precisa_humano.
+          // Reaproveita o MESMO sdr/temSdr já resolvido acima — não escreve
+          // transferência nova, nem chama resolveSdrTarget de novo.
+          if (aiResponse.precisa_humano === true) {
+            if (temSdr && evolutionUrl) {
+              try {
+                const alertaMsg = [
+                  `🔔 *Lead precisa de atendimento humano*`,
+                  `📱 Número: ${phone}`,
+                  `❓ O agente não encontrou a resposta na base de conhecimento e transferiu a conversa.`,
+                ].join("\n");
+
+                const entrega = await enviarParaSdrs({
+                  numeros: sdr.numbers,
+                  texto: alertaMsg,
+                  evolutionUrl,
+                  evolutionHeaders,
+                  contexto: { clientId, tipo: "rag_transferencia" },
+                });
+                console.log("[chatbot-webhook] alerta de transferencia (RAG) enviado ao SDR", {
+                  clientId, phone: maskPhoneForLog(phone),
+                  enviados: entrega.enviados, falhas: entrega.falhas.length,
+                });
+              } catch (err) {
+                console.error("[chatbot-webhook] SDR RAG transfer alert error:", err.message);
+              }
+            } else {
+              console.warn("[chatbot-webhook] precisa_humano=true mas sem SDR configurado para alertar", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+              });
+            }
+          }
+
           // Webhook de finalizacao da tela do Inbound: dispara com os dados
           // coletados quando o atendimento fecha. Era um campo salvo e nunca usado.
           if (aiResponse.finalizado && !aiResponse._recontato && inboundConfig?.webhookUrl) {
@@ -3388,6 +3424,7 @@ export function registerChatbotRoutes(app, deps) {
         inboundPrompt: inboundConfig?.prompt || null,
         inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
         instanceName,
+        companyId: inboundConfig?.companyId || null,
       });
 
       if (!aiResponse?.mensagem) {
