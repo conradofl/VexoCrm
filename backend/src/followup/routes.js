@@ -35,6 +35,8 @@ import { hasTenantAccess } from "./queueRoutes.js";
 import { resolveEvolutionInstanceForFollowup } from "./worker.js";
 import { getLeadClientEvolutionInstances } from "../services/evolution.js";
 import { resolveChipDailyLimit } from "../services/chipQuota.js";
+import { fetchDynamicPrompt, fetchTemplate } from "../chatbot-ai-engine.js";
+import { auditAgentInstructionSources } from "../services/agentInstructionAudit.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -472,6 +474,19 @@ function normalizeInstanceList(list, fallback) {
       if ("livpub_inactive_delay_months" in req.body) patch.livpub_inactive_delay_months = Number(livpub_inactive_delay_months);
 
       const supabase = getSupabase();
+      const { data: existing, error: fetchError } = await supabase
+        .from("followup_companies")
+        .select("id, tenant_id")
+        .eq("id", id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      if (!existing) return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
+
+      // Fora do escopo do usuário: 404, não 403 — nunca confirma que a empresa existe.
+      if (!hasTenantAccess(req, existing.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
+      }
+
       const { data, error } = await supabase
         .from("followup_companies")
         .update(patch)
@@ -492,6 +507,19 @@ function normalizeInstanceList(list, fallback) {
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
       const supabase = getSupabase();
+      const { data: existing, error: fetchError } = await supabase
+        .from("followup_companies")
+        .select("id, tenant_id, archived_at")
+        .eq("id", id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      if (!existing) return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada ou já arquivada");
+
+      // Fora do escopo do usuário: 404, não 403 — nunca confirma que a empresa existe.
+      if (!hasTenantAccess(req, existing.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada ou já arquivada");
+      }
+
       const { data, error } = await supabase
         .from("followup_companies")
         .update({ archived_at: new Date().toISOString() })
@@ -504,6 +532,58 @@ function normalizeInstanceList(list, fallback) {
       return res.json({ success: true });
     } catch (err) {
       return sendErr(res, 500, "COMPANY_ARCHIVE_FAILED", err.message);
+    }
+  });
+
+  // GET /api/followup/companies/:id/instruction-audit
+  //
+  // "Um agente, um dono para cada texto" — Commit 1. Não muda nada, só mostra
+  // o que já está acontecendo: de onde vem o prompt que este agente usa hoje
+  // e quais campos de coleta competem entre o template do tenant e a Coleta
+  // SPIN do próprio agente. Usa fetchDynamicPrompt/fetchTemplate — as MESMAS
+  // funções que o motor chama pra montar o prompt de verdade — pra nunca
+  // divergir do comportamento real.
+  router.get("/companies/:id/instruction-audit", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+
+    try {
+      const supabase = getSupabase();
+      const { data: agentRow, error } = await supabase
+        .from("followup_companies")
+        .select("id, tenant_id, name, inbound_prompt, inbound_spin_fields, inbound_model")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!agentRow) return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+
+      if (!hasTenantAccess(req, agentRow.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+      }
+
+      const tenantSettings = await getLeadClientN8nSettings(agentRow.tenant_id).catch(() => null);
+      const templateKey = tenantSettings?.chatbot_model || "generico";
+
+      const [tenantPromptContent, template] = await Promise.all([
+        fetchDynamicPrompt(supabase, agentRow.tenant_id, "padrao"),
+        fetchTemplate(supabase, agentRow.tenant_id, templateKey),
+      ]);
+
+      const audit = auditAgentInstructionSources({
+        agentRow,
+        tenantPromptContent,
+        template,
+        defaultLlmModel: defaultGroqModel(),
+      });
+
+      return res.json({
+        success: true,
+        agentId: id,
+        templateKeyEmUso: templateKey,
+        audit,
+      });
+    } catch (err) {
+      return sendErr(res, 500, "INSTRUCTION_AUDIT_FAILED", err.message);
     }
   });
 

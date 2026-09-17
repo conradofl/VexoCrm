@@ -976,7 +976,7 @@ REGRA CRÍTICA — quando setar "finalizado": true:
 Se "finalizado" não for true, o briefing NÃO é enviado ao SDR. Não esqueça desse campo no encerramento.`;
 }
 
-async function fetchDynamicPrompt(supabase, clientId, type) {
+export async function fetchDynamicPrompt(supabase, clientId, type) {
   if (!supabase || !clientId) return null;
   try {
     const { data } = await supabase

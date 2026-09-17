@@ -21,6 +21,7 @@ import { fetchApi } from "@/lib/api";
 import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
 import { useLlmModels } from "@/hooks/useChatbotTemplates";
 import { assertTenantMatch } from "@/lib/tenantIsolation";
+import { AgentInstructionAuditPanel } from "@/components/agente/AgentInstructionAuditPanel";
 
 // Empresa "de mentira" mostrada quando o tenant ainda nao tem linha em
 // followup_companies. Salvar com ela cria a linha de verdade.
@@ -372,6 +373,10 @@ export default function InboundAgentConfig() {
           <p className="text-sm text-slate-500">Selecione um Número de WhatsApp acima.</p>
         </div>
       ) : (
+        <>
+        {activeCompany.id !== PLACEHOLDER_COMPANY_ID && (
+          <AgentInstructionAuditPanel agentId={activeCompany.id} />
+        )}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
           <TabsList className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 h-auto p-1 grid w-full max-w-2xl grid-cols-4">
             <TabsTrigger value="config" className="rounded-md py-2 data-[state=active]:bg-slate-100 dark:data-[state=active]:bg-slate-900">
@@ -788,6 +793,7 @@ export default function InboundAgentConfig() {
             </Button>
           </div>
         </Tabs>
+        </>
       )}
     </PageShell>
   );

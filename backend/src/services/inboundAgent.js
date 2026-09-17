@@ -17,6 +17,20 @@ function normalize(value) {
 }
 
 /**
+ * Normaliza a coluna inbound_spin_fields (JSONB) pro formato {name, required}
+ * usado em toda parte que lê a coleta declarada do agente. Extraída daqui pra
+ * não duplicar a mesma regra em quem só precisa LER a coleta sem resolver o
+ * agente inteiro (ex.: o painel de diagnóstico de origem de instrução).
+ */
+export function normalizeSpinFields(rawSpinFields) {
+  return Array.isArray(rawSpinFields)
+    ? rawSpinFields
+        .map((f) => ({ name: normalize(f?.name), required: f?.required !== false }))
+        .filter((f) => f.name)
+    : [];
+}
+
+/**
  * Resolve a configuração inbound do número que recebeu a mensagem.
  *
  * @returns {Promise<null | {
@@ -98,11 +112,7 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
   if (!byInstance) return null;
   const row = byInstance;
 
-  const spinFields = Array.isArray(row.inbound_spin_fields)
-    ? row.inbound_spin_fields
-        .map((f) => ({ name: normalize(f?.name), required: f?.required !== false }))
-        .filter((f) => f.name)
-    : [];
+  const spinFields = normalizeSpinFields(row.inbound_spin_fields);
 
   return {
     companyId: row.id,
