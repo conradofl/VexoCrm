@@ -10,7 +10,7 @@
 // instância Evolution, então vários números de atendimento são várias linhas —
 // cada uma com seu próprio prompt, modelo e SPIN. Não precisou mudar schema.
 
-import { getLeadClientEvolutionInstances, parseEvolutionWebhookEndpoint } from "./evolution.js";
+import { getLeadClientEvolutionInstances, expandChipAliases } from "./evolution.js";
 
 function normalize(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -38,7 +38,7 @@ export function normalizeSpinFields(rawSpinFields) {
  *   model: string|null, prompt: string|null,
  *   spinFields: Array<{name: string, required: boolean}>,
  *   webhookUrl: string|null, sdrPhone: string|null, sdrTransferEnabled: boolean,
- *   instructionsConsolidated: boolean
+ *   instructionsConsolidated: boolean, agentKind: "atendimento"|"campanha"
  * }>} null quando o tenant não tem nenhuma linha configurada.
  */
 export async function resolveInboundAgentConfig({ supabase, clientId, instanceName }) {
@@ -47,7 +47,7 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
   const { data, error } = await supabase
     .from("followup_companies")
     .select(
-      "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at"
+      "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, agent_kind"
     )
     .eq("tenant_id", clientId);
 
@@ -63,27 +63,7 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
     tenantInstances = [];
   }
 
-  const resolveAliases = (instValue) => {
-    const raw = normalize(instValue);
-    if (!raw) return [];
-    const aliases = new Set([raw.toLowerCase()]);
-    const matched = (tenantInstances || []).find((inst) => {
-      const parsed = parseEvolutionWebhookEndpoint(inst.dispatch_webhook_url);
-      const urlInstance = parsed?.instance ? parsed.instance.toLowerCase() : null;
-      return (
-        inst.id === raw ||
-        (inst.name && inst.name.toLowerCase() === raw.toLowerCase()) ||
-        urlInstance === raw.toLowerCase()
-      );
-    });
-    if (matched) {
-      if (matched.id) aliases.add(matched.id.toLowerCase());
-      if (matched.name) aliases.add(matched.name.toLowerCase());
-      const parsed = parseEvolutionWebhookEndpoint(matched.dispatch_webhook_url);
-      if (parsed?.instance) aliases.add(parsed.instance.toLowerCase());
-    }
-    return Array.from(aliases);
-  };
+  const resolveAliases = (instValue) => expandChipAliases(instValue, tenantInstances);
 
   const wanted = normalize(instanceName);
   const wantedAliases = wanted ? resolveAliases(wanted) : [];
@@ -131,6 +111,12 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
     // agente ignora template e prompt padrão do tenant — processBatch lê isto
     // pra nem buscar os dois.
     instructionsConsolidated: Boolean(row.instructions_consolidated_at),
+    // "Um agente por chip, com função declarada", Commit 3: pra que serve o
+    // chip — atendimento (responde quem procurou a empresa) ou campanha
+    // (chip de disparo, não faz atendimento espontâneo). Não confundir com
+    // `role` (inbound_role) acima, que diz o que o agente FAZ dentro do
+    // atendimento (atender ou qualificar).
+    agentKind: row.agent_kind === "campanha" ? "campanha" : "atendimento",
   };
 }
 

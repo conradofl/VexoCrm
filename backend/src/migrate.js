@@ -325,6 +325,13 @@ async function isAlreadyApplied(pool, filename) {
       NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_companies')
       OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='instructions_consolidated_at')
     ) AS ok`,
+    "20260917140000_add_followup_companies_agent_kind.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_companies')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='agent_kind')
+        AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'followup_companies_agent_kind_check')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

@@ -53,3 +53,26 @@ export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSd
   if (hasCampaignMatch) return { engage: true, reason: null };
   return { engage: false, reason: "desconhecido_sem_lead" };
 }
+
+/**
+ * "Um agente por chip, com função declarada" (Commit 3) — Regra 1: chip de
+ * campanha não faz atendimento espontâneo. Mensagem de lead novo, SEM
+ * campanha ativa, chegando num chip cujo agente é `campanha`: decisão, não
+ * falha — não responde. Campanha ativa é outro eixo e sempre engaja, mesmo
+ * num chip `campanha` (é pra isso que ele existe).
+ *
+ * Separada de shouldEngageInbound de propósito: aquela decide por QUEM É O
+ * LEAD (conhecido, SDR, silenciado); esta decide pelo QUE O CHIP SERVE — a
+ * mesma distinção que agent_kind faz contra inbound_role. Não são a mesma
+ * pergunta, não devem ser a mesma trava.
+ *
+ * @param {object} params
+ * @param {"atendimento"|"campanha"|null|undefined} params.agentKind
+ * @param {boolean} params.hasCampaignMatch
+ */
+export function shouldCampaignKindChipEngage({ agentKind, hasCampaignMatch }) {
+  if (agentKind === "campanha" && !hasCampaignMatch) {
+    return { engage: false, reason: "chip_campanha_sem_atendimento" };
+  }
+  return { engage: true, reason: null };
+}

@@ -9,9 +9,12 @@
 //    mesma frase.
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   resolveInboundScope,
   shouldEngageInbound,
+  shouldCampaignKindChipEngage,
   INBOUND_SCOPE_ALL,
   INBOUND_SCOPE_LEADS_ONLY,
 } from "../services/inboundEngagementPolicy.js";
@@ -86,6 +89,43 @@ describe("escopo de inbound: quem o chatbot pode atender", () => {
     });
     expect(decisao.engage).toBe(false);
     expect(decisao.reason).toBe("conversa_nao_comercial");
+  });
+});
+
+describe("[Um agente por chip, Regra 1] chip de campanha não faz atendimento espontâneo", () => {
+  it("[TESTE OBRIGATÓRIO] agente 'campanha' no chip, mensagem de lead novo SEM campanha ativa -> não engaja, motivo registrado", () => {
+    const decisao = shouldCampaignKindChipEngage({ agentKind: "campanha", hasCampaignMatch: false });
+    expect(decisao.engage).toBe(false);
+    expect(decisao.reason).toBe("chip_campanha_sem_atendimento");
+  });
+
+  it("agente 'campanha' no chip, MAS com campanha ativa: engaja normalmente — é pra isso que o chip existe", () => {
+    const decisao = shouldCampaignKindChipEngage({ agentKind: "campanha", hasCampaignMatch: true });
+    expect(decisao.engage).toBe(true);
+    expect(decisao.reason).toBeNull();
+  });
+
+  it("agente 'atendimento' no chip: sempre engaja, com ou sem campanha ativa", () => {
+    expect(shouldCampaignKindChipEngage({ agentKind: "atendimento", hasCampaignMatch: false }).engage).toBe(true);
+    expect(shouldCampaignKindChipEngage({ agentKind: "atendimento", hasCampaignMatch: true }).engage).toBe(true);
+  });
+
+  it("agentKind ausente/nulo (chip sem agente, ou coluna default): trata como 'atendimento' — engaja", () => {
+    expect(shouldCampaignKindChipEngage({ agentKind: null, hasCampaignMatch: false }).engage).toBe(true);
+    expect(shouldCampaignKindChipEngage({ agentKind: undefined, hasCampaignMatch: false }).engage).toBe(true);
+  });
+
+  it("[TESTE OBRIGATÓRIO — Regra 3] PROVA ESTRUTURAL: chip sem agente continua igual — a checagem de agent_kind só roda dentro de 'if (inboundConfig)', nunca alcança o caminho do chatbot do tenant", () => {
+    const fonte = readFileSync(resolve("src/domains/chatbot/routes.js"), "utf8");
+    const idx = fonte.indexOf("shouldCampaignKindChipEngage({");
+    expect(idx, "chamada de shouldCampaignKindChipEngage não encontrada em routes.js").toBeGreaterThan(-1);
+
+    // As ~3 linhas imediatamente ANTES da chamada precisam conter o guard
+    // "if (inboundConfig)" — sem ele, chip sem agente (inboundConfig null)
+    // passaria pela regra 1 e mudaria o comportamento de quem não configurou
+    // nada, contra a Regra 3.
+    const trechoAntes = fonte.slice(Math.max(0, idx - 200), idx);
+    expect(trechoAntes).toMatch(/if\s*\(\s*inboundConfig\s*\)\s*\{/);
   });
 });
 

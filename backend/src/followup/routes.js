@@ -37,6 +37,7 @@ import { getLeadClientEvolutionInstances } from "../services/evolution.js";
 import { resolveChipDailyLimit } from "../services/chipQuota.js";
 import { fetchDynamicPrompt, fetchTemplate } from "../chatbot-ai-engine.js";
 import { auditAgentInstructionSources } from "../services/agentInstructionAudit.js";
+import { findChipExclusivityConflict } from "../services/chipExclusivity.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,32 @@ function authorizedTenantIds(req) {
       [a.clientId, a.tenantId, ...(a.clientIds || []), ...(a.tenantIds || [])].filter(Boolean)
     )
   );
+}
+
+// "Um chip pertence a um agente só" (Commit 3). Usado no POST e no PATCH de
+// /companies — mesma checagem, mesma mensagem, um lugar só. Devolve null
+// quando não há conflito, ou o texto de erro pronto pra resposta.
+async function checkChipExclusivity({ supabase, tenantId, instanceList, agentIdBeingSaved }) {
+  if (!tenantId || instanceList.length === 0) return null;
+
+  const { data: outrosAgentes, error } = await supabase
+    .from("followup_companies")
+    .select("id, name, evolution_instance, evolution_instances")
+    .eq("tenant_id", tenantId)
+    .is("archived_at", null);
+  if (error) throw error;
+
+  const tenantInstances = await getLeadClientEvolutionInstances(tenantId).catch(() => []);
+
+  const conflito = findChipExclusivityConflict({
+    requestedInstanceNames: instanceList,
+    agentIdBeingSaved,
+    otherAgentRows: outrosAgentes || [],
+    tenantInstances,
+  });
+
+  if (!conflito) return null;
+  return `O chip "${conflito.chipRequested}" já pertence ao agente "${conflito.ownedByAgentName}". Escolha outro chip ou remova-o daquele agente primeiro.`;
 }
 
 // ─── Auth helper — reutiliza requireFirebaseAuth injetado via closure ────────
@@ -289,7 +316,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
 
       let sbQuery = supabase
         .from("followup_companies")
-        .select("id, name, evolution_instance, evolution_instances, inbound_role, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, created_at, tenant_id, engine_scan_interval_hours, never_contacted_delay_hours, no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at")
+        .select("id, name, evolution_instance, evolution_instances, inbound_role, agent_kind, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, created_at, tenant_id, engine_scan_interval_hours, never_contacted_delay_hours, no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at")
         .is("archived_at", null)
         .order("name", { ascending: true });
 
@@ -362,6 +389,7 @@ function normalizeInstanceList(list, fallback) {
       sdr_whatsapp_number,
       sdr_transfer_enabled,
       tenant_id,
+      agent_kind,
       engine_scan_interval_hours,
       never_contacted_delay_hours,
       no_reply_delay_hours,
@@ -380,6 +408,10 @@ function normalizeInstanceList(list, fallback) {
         ? str(tenant_id) || authorizedTenantIds(req)[0] || null
         : authorizedTenantIds(req)[0] || null;
 
+      // "Um chip pertence a um agente só" — recusa ANTES de gravar.
+      const conflitoMsg = await checkChipExclusivity({ supabase, tenantId: boundTenantId, instanceList, agentIdBeingSaved: null });
+      if (conflitoMsg) return sendErr(res, 409, "CHIP_ALREADY_OWNED", conflitoMsg);
+
       const { data, error } = await supabase
         .from("followup_companies")
         .insert({
@@ -388,6 +420,7 @@ function normalizeInstanceList(list, fallback) {
           evolution_instance: instanceList[0],
           evolution_instances: instanceList,
           inbound_role: inbound_role === "qualificador" ? "qualificador" : "atendimento",
+          agent_kind: agent_kind === "campanha" ? "campanha" : "atendimento",
           webhook_url: str(webhook_url),
           calendly_webhook_secret: str(calendly_webhook_secret),
           panel_access: Boolean(panel_access),
@@ -431,6 +464,7 @@ function normalizeInstanceList(list, fallback) {
       inbound_webhook_url,
       sdr_whatsapp_number,
       sdr_transfer_enabled,
+      agent_kind,
       livpub_aniversario_prompt,
       livpub_inativo_prompt,
       engine_scan_interval_hours,
@@ -444,6 +478,9 @@ function normalizeInstanceList(list, fallback) {
       if (str(name)) patch.name = str(name);
       if ("inbound_role" in req.body) {
         patch.inbound_role = inbound_role === "qualificador" ? "qualificador" : "atendimento";
+      }
+      if ("agent_kind" in req.body) {
+        patch.agent_kind = agent_kind === "campanha" ? "campanha" : "atendimento";
       }
       if ("evolution_instances" in req.body) {
         const lista = normalizeInstanceList(evolution_instances, evolution_instance);
@@ -485,6 +522,18 @@ function normalizeInstanceList(list, fallback) {
       // Fora do escopo do usuário: 404, não 403 — nunca confirma que a empresa existe.
       if (!hasTenantAccess(req, existing.tenant_id)) {
         return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
+      }
+
+      // "Um chip pertence a um agente só" — só checa se a lista de chips está
+      // sendo alterada nesta chamada (não pune um PATCH que nem mexeu nisso).
+      if (Array.isArray(patch.evolution_instances)) {
+        const conflitoMsg = await checkChipExclusivity({
+          supabase,
+          tenantId: existing.tenant_id,
+          instanceList: patch.evolution_instances,
+          agentIdBeingSaved: id,
+        });
+        if (conflitoMsg) return sendErr(res, 409, "CHIP_ALREADY_OWNED", conflitoMsg);
       }
 
       const { data, error } = await supabase

@@ -1582,6 +1582,38 @@ export function parseEvolutionWebhookEndpoint(webhookUrl) {
   }
 }
 
+/**
+ * Todos os apelidos de UM chip: o valor cru (id, nome de display, ou slug da
+ * URL de disparo — qualquer um pode estar gravado dependendo de onde veio) e
+ * o id/nome/slug REAIS da instância correspondente, se achada em
+ * `tenantInstances`. Sem isso, comparar "o mesmo chip" por igualdade de
+ * string falha sempre que duas linhas guardaram o chip de formas diferentes.
+ * Extraída pra ser a ÚNICA fonte: quem resolve o agente de um número
+ * (inboundAgent.js) e quem checa exclusividade de chip ao salvar
+ * (chipExclusivity.js) usam exatamente a mesma noção de "é o mesmo chip".
+ */
+export function expandChipAliases(instanceValue, tenantInstances) {
+  const raw = normalizeString(instanceValue);
+  if (!raw) return [];
+  const aliases = new Set([raw.toLowerCase()]);
+  const matched = (tenantInstances || []).find((inst) => {
+    const parsed = parseEvolutionWebhookEndpoint(inst.dispatch_webhook_url);
+    const urlInstance = parsed?.instance ? parsed.instance.toLowerCase() : null;
+    return (
+      inst.id === raw ||
+      (inst.name && inst.name.toLowerCase() === raw.toLowerCase()) ||
+      urlInstance === raw.toLowerCase()
+    );
+  });
+  if (matched) {
+    if (matched.id) aliases.add(matched.id.toLowerCase());
+    if (matched.name) aliases.add(matched.name.toLowerCase());
+    const parsed = parseEvolutionWebhookEndpoint(matched.dispatch_webhook_url);
+    if (parsed?.instance) aliases.add(parsed.instance.toLowerCase());
+  }
+  return Array.from(aliases);
+}
+
 export function getSafeEvolutionEndpointLog(webhookUrl) {
   const endpoint = parseEvolutionWebhookEndpoint(webhookUrl);
   if (!endpoint) {

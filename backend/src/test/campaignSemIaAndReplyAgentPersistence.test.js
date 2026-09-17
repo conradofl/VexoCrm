@@ -94,6 +94,35 @@ describe("Persistência e Roteamento de replyAgent (Sem IA / Campanha / Atendime
     expect(legadaSemRoteiro.campaignPromptId).toBeNull();
   });
 
+  it("[TESTE OBRIGATÓRIO — achado da leva 'Um agente por chip'] replyAgent 'atendimento' COM roteiro: o roteiro NÃO é descartado — 'atendimento' decide quem fala, não se o roteiro entra", () => {
+    // Contra o código de antes desta correção: campaignPromptId vinha null
+    // aqui, e o roteiro da campanha nunca chegava no prompt enviado ao
+    // modelo — mesmo a campanha tendo roteiro salvo.
+    const escolha = resolveCampaignAgent({
+      id: "camp-atendimento-com-roteiro",
+      campaignPromptId: "prompt-oferta-xyz",
+      analytics_meta: {
+        dispatchOptions: { replyAgent: "atendimento" },
+      },
+    });
+
+    expect(escolha.agente).toBe(AGENTE_ATENDIMENTO); // quem fala continua sendo o agente do chip
+    expect(escolha.campaignPromptId).toBe("prompt-oferta-xyz"); // mas o roteiro NÃO é descartado
+  });
+
+  it("replyAgent 'atendimento' SEM roteiro: campaignPromptId continua nulo (não há o que compor)", () => {
+    const escolha = resolveCampaignAgent({
+      id: "camp-atendimento-sem-roteiro",
+      campaignPromptId: null,
+      analytics_meta: {
+        dispatchOptions: { replyAgent: "atendimento" },
+      },
+    });
+
+    expect(escolha.agente).toBe(AGENTE_ATENDIMENTO);
+    expect(escolha.campaignPromptId).toBeNull();
+  });
+
   it("5. createLeadMessaging: appendLeadMessage falha visivelmente se conexão com banco estiver ausente", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { appendLeadMessage } = createLeadMessaging({

@@ -7,6 +7,16 @@
 //
 // O gatilho e o ROTEIRO EXISTIR, nao o `mode`. Campanha antiga tem
 // campaign_prompt_id nulo e continua exatamente como antes.
+//
+// Segundo defeito, achado na leva "Um agente por chip" (Commit 3): quando a
+// campanha estava configurada como replyAgent "atendimento", o roteiro era
+// DESCARTADO por completo (campaignPromptId: null), mesmo tendo roteiro
+// salvo. "Atendimento" decide QUEM FALA (o agente do chip, no tom dele) —
+// nao decide se o roteiro da campanha entra ou nao. Regra final: "o roteiro
+// da campanha manda no conteudo, o agente do chip manda no tom" vale nos dois
+// modos (campanha e atendimento); so muda QUEM assina o tom da conversa.
+// chatbot-ai-engine.js ja sabia compor os dois (camada da campanha sobre o
+// prompt base) — o bug era este arquivo nunca entregar o roteiro pra ele.
 
 export const AGENTE_CAMPANHA = "campanha";
 export const AGENTE_ATENDIMENTO = "atendimento";
@@ -47,10 +57,16 @@ export function resolveCampaignAgent(activeCampaign) {
   }
 
   if (explicitReplyAgent === "atendimento") {
+    // O agente de ATENDIMENTO fala (tom, modelo, coleta, base de
+    // conhecimento) — mas o roteiro da campanha, se existir, ainda entra
+    // como camada de conteúdo sobre esse prompt. "Atendimento" decide quem
+    // assina o tom, nunca se o roteiro é descartado.
     return {
       agente: AGENTE_ATENDIMENTO,
-      campaignPromptId: null,
-      porque: "campanha configurada para qualificar com atendimento padrão",
+      campaignPromptId: roteiro,
+      porque: roteiro
+        ? "campanha configurada para atendimento padrão, com roteiro da campanha como camada de conteúdo"
+        : "campanha configurada para atendimento padrão, sem roteiro salvo",
     };
   }
 

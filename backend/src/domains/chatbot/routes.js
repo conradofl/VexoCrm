@@ -69,6 +69,7 @@ import {
 import {
   resolveInboundScope,
   shouldEngageInbound,
+  shouldCampaignKindChipEngage,
   INBOUND_SCOPE_ALL,
 } from "../../services/inboundEngagementPolicy.js";
 import { resolveSdrTarget, resolveTenantSdrNumbers, normalizeSdrNumber } from "../../services/sdrTarget.js";
@@ -2863,6 +2864,27 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // Agente inbound configurado na tela "Agente IA → Inbound", por NUMERO.
+    //
+    // "Um agente por chip, com função declarada" — três caminhos, três
+    // regras explícitas, decididas a partir daqui:
+    //
+    // 1. Mensagem de atendimento (lead novo, SEM campanha ativa) no chip X:
+    //    usa o agente do chip X, SE ele for `atendimento`. Sendo `campanha`,
+    //    não responde — chip de disparo não faz atendimento, e isso é
+    //    decisão, não falha. Ver shouldCampaignKindChipEngage logo abaixo.
+    // 2. Resposta de campanha no chip X: o roteiro da campanha manda no
+    //    conteúdo, o agente do chip manda em como falar (modelo, tom,
+    //    coleta, base de conhecimento) — composição, não substituição. Vale
+    //    nos dois `agentKind`. Ver services/campaignAgentRouting.js
+    //    (resolveCampaignAgent, já resolvido mais acima) e a camada
+    //    "CAMADA DA CAMPANHA" em chatbot-ai-engine.js.
+    // 3. Chip SEM agente (inboundConfig null): segue o chatbot do TENANT,
+    //    como hoje — nada muda pra quem não configurou nada. É o branch
+    //    `if (!inboundConfig)` logo abaixo desta função.
+    //
+    // Precedência escondida foi o que criou o problema atual — por isso as
+    // três regras vivem aqui, no ÚNICO lugar que resolve qual agente atende,
+    // e não espalhadas ou implícitas na ordem de checagens.
     const inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch((err) => {
       console.warn("[chatbot-webhook] falha ao resolver agente inbound:", err?.message || err);
       return null;
@@ -2871,6 +2893,18 @@ export function registerChatbotRoutes(app, deps) {
     if (inboundConfig && !inboundConfig.enabled) {
       descartar("inbound_disabled", { clientId, instanceName });
       return;
+    }
+
+    // Regra 1.
+    if (inboundConfig) {
+      const decisaoChipCampanha = shouldCampaignKindChipEngage({
+        agentKind: inboundConfig.agentKind,
+        hasCampaignMatch: Boolean(activeCampaignForLead),
+      });
+      if (!decisaoChipCampanha.engage) {
+        descartar(decisaoChipCampanha.reason, { clientId, instanceName });
+        return;
+      }
     }
 
     // Chips explicitamente vinculados ao chatbot do tenant (aba Configuracoes).
