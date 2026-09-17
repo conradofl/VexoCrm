@@ -148,7 +148,7 @@ export function registerRagRoutes(app) {
 
     const { rows } = await pool.query(
       `SELECT id, filename, mime_type, size_bytes, status, error_log, chunk_count,
-              embedding_provider, embedding_model, company_id, created_at, updated_at
+              embedding_provider, embedding_model, embedding_dim, company_id, created_at, updated_at
          FROM public.rag_documents
         WHERE client_id = $1 AND (company_id IS NULL OR company_id = $2)
         ORDER BY created_at DESC`,
@@ -167,6 +167,9 @@ export function registerRagRoutes(app) {
         status: d.status,
         errorLog: d.error_log,
         chunkCount: d.chunk_count,
+        embeddingProvider: d.embedding_provider,
+        embeddingModel: d.embedding_model,
+        embeddingDim: d.embedding_dim,
         companyId: d.company_id,
         createdAt: d.created_at,
         updatedAt: d.updated_at,

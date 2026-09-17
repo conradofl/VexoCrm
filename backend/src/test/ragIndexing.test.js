@@ -109,7 +109,7 @@ describe("processRagDocument — indexação/reindexação transacional (Etapa 5
       expect(fakeClient.release).toHaveBeenCalledTimes(1);
     });
 
-    it("PROVA OBRIGATÓRIA: a procedência gravada vem de resolveEmbeddingIdentity(), não de constante escrita à mão", async () => {
+    it("PROVA OBRIGATÓRIA: provider/model gravados vêm de resolveEmbeddingIdentity(), não de constante escrita à mão", async () => {
       embeddingsMock.embedTexts.mockImplementation(async (texts) => texts.map(() => [0.1]));
       embeddingsMock.resolveEmbeddingIdentity.mockReturnValue({
         provider: "valor-de-teste-improvavel-abc",
@@ -123,7 +123,35 @@ describe("processRagDocument — indexação/reindexação transacional (Etapa 5
       expect(updateDocumento).toBeTruthy();
       expect(updateDocumento.params).toContain("valor-de-teste-improvavel-abc");
       expect(updateDocumento.params).toContain("modelo-de-teste-improvavel-xyz");
-      expect(updateDocumento.params).toContain(777);
+    });
+
+    it("PROVA OBRIGATÓRIA: embedding_dim gravado é o TAMANHO REAL do vetor devolvido, não o dim declarado por resolveEmbeddingIdentity()", async () => {
+      // Vetor real de 3 posições, mas identity AFIRMA 777 — cenário exatamente
+      // do achado real: modelo Gemini novo (gemini-embedding-001) pode devolver
+      // dimensão diferente da assumida por provedor. Gravar o assumido em vez
+      // do real deixaria a coluna de procedência mentindo.
+      embeddingsMock.embedTexts.mockImplementation(async (texts) => texts.map(() => [0.1, 0.2, 0.3]));
+      embeddingsMock.resolveEmbeddingIdentity.mockReturnValue({
+        provider: "gemini",
+        model: "gemini-embedding-001",
+        dim: 777,
+      });
+
+      await processRagDocument("doc-1");
+
+      const updateDocumento = clientCalls.find((c) => c.sql.includes("SET status = 'ready'"));
+      expect(updateDocumento.params).toContain(3);
+      expect(updateDocumento.params).not.toContain(777);
+    });
+
+    it("vetor sem length utilizável (defensivo — não deveria acontecer, embedTexts sempre devolve arrays): cai no dim declarado por identity", async () => {
+      embeddingsMock.embedTexts.mockImplementation(async (texts) => texts.map(() => null));
+      embeddingsMock.resolveEmbeddingIdentity.mockReturnValue({ provider: "gemini", model: "modelo-x", dim: 768 });
+
+      await processRagDocument("doc-1");
+
+      const updateDocumento = clientCalls.find((c) => c.sql.includes("SET status = 'ready'"));
+      expect(updateDocumento.params).toContain(768);
     });
 
     it("mudar o que resolveEmbeddingIdentity() devolve muda o que é gravado — prova que é lido, não cacheado", async () => {

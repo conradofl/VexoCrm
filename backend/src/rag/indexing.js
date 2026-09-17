@@ -91,6 +91,13 @@ export async function processRagDocument(documentId) {
       throw err;
     }
 
+    // Dimensão REAL do vetor devolvido, não identity.dim (que é um valor
+    // assumido por provedor — 768 pra "gemini" independente de qual modelo
+    // RAG_EMBEDDING_MODEL apontar). Modelo Gemini novo pode devolver tamanho
+    // diferente do padrão antigo; gravar o assumido em vez do real deixaria a
+    // procedência mentindo exatamente na coluna que existe pra nunca mentir.
+    const actualDim = vectors[0]?.length ?? identity.dim;
+
     // A partir daqui a rede já terminou — só resta gravar. Isolado numa
     // transação: apaga os trechos antigos e grava os novos como uma coisa só.
     const client = await pool.connect();
@@ -123,7 +130,7 @@ export async function processRagDocument(documentId) {
                 error_log = NULL,
                 updated_at = NOW()
           WHERE id = $5`,
-        [chunks.length, identity.provider, identity.model, identity.dim, documentId]
+        [chunks.length, identity.provider, identity.model, actualDim, documentId]
       );
 
       await client.query("COMMIT");

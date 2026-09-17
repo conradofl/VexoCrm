@@ -264,6 +264,11 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
   });
 
   describe("GET /documents — lista pra tela (Commit 4)", () => {
+    it("PROVA ESTRUTURAL: embedding_dim está no SELECT (é o campo que responde 'qual dimensão foi gravada de verdade')", () => {
+      const fonte = readFileSync(resolve("src/rag/routes.js"), "utf8");
+      expect(fonte).toContain("embedding_dim");
+    });
+
     it("lista documentos do tenant, mapeando as colunas certas e sem needsReindex quando a procedência bate", async () => {
       process.env.RAG_EMBEDDING_PROVIDER = "lexical";
       poolQueryMock.mockResolvedValue({
@@ -278,6 +283,7 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
             chunk_count: 12,
             embedding_provider: "lexical",
             embedding_model: "lexical-trigram-hash-v1",
+            embedding_dim: 256,
             company_id: null,
             created_at: "2026-09-01T10:00:00Z",
             updated_at: "2026-09-01T10:05:00Z",
@@ -301,6 +307,9 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
         sizeBytes: 1024,
         status: "ready",
         chunkCount: 12,
+        embeddingProvider: "lexical",
+        embeddingModel: "lexical-trigram-hash-v1",
+        embeddingDim: 256,
         needsReindex: false,
       });
     });

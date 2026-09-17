@@ -12,6 +12,9 @@ export interface RagDocument {
   status: RagDocumentStatus;
   errorLog: string | null;
   chunkCount: number;
+  embeddingProvider: string | null;
+  embeddingModel: string | null;
+  embeddingDim: number | null;
   companyId: string | null;
   createdAt: string;
   updatedAt: string;
