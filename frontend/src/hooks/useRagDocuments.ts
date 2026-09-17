@@ -36,15 +36,20 @@ export interface RagSearchTestResult {
   needsReindexDocumentIds: string[];
 }
 
-export function useRagDocuments(clientId: string | undefined) {
+// companyId presente = escopa a busca/upload a UM agente (rag_documents.company_id).
+// Documento amarrado a um agente só entra na busca daquele agente; documento
+// sem agente (company_id null) vale pro tenant inteiro — a mesma regra que já
+// vale no motor desde a leva de busca (Commit 3 da RAG).
+export function useRagDocuments(clientId: string | undefined, companyId?: string) {
   const { isAuthenticated, getIdToken } = useAuth();
   return useQuery({
-    queryKey: ["ragDocuments", clientId],
+    queryKey: ["ragDocuments", clientId, companyId],
     enabled: isAuthenticated && Boolean(clientId),
     queryFn: async (): Promise<RagDocument[]> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
       const params = new URLSearchParams({ clientId: clientId as string });
+      if (companyId) params.set("companyId", companyId);
       const res = await fetchApi(`/api/rag/documents?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -57,7 +62,7 @@ export function useRagDocuments(clientId: string | undefined) {
   });
 }
 
-export function useUploadRagDocument(clientId: string | undefined) {
+export function useUploadRagDocument(clientId: string | undefined, companyId?: string) {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
@@ -65,6 +70,7 @@ export function useUploadRagDocument(clientId: string | undefined) {
       if (!clientId) throw new Error("Cliente não selecionado.");
       const token = await getIdToken();
       const params = new URLSearchParams({ clientId });
+      if (companyId) params.set("companyId", companyId);
       const res = await fetchApi(`/api/rag/documents?${params}`, {
         method: "POST",
         headers: {

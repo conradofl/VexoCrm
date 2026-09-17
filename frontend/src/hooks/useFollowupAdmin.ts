@@ -12,6 +12,10 @@ export interface FupCompany {
   evolution_instances?: string[];
   /** qualificador = responde quem foi disparado; atendimento = responde quem procurou. */
   inbound_role?: "atendimento" | "qualificador";
+  /** Pra que serve o chip: atendimento ou campanha (chip de disparo, não atende espontâneo). Não confundir com inbound_role. */
+  agent_kind?: "atendimento" | "campanha";
+  /** Quando não-nulo, este agente ignora template e prompt padrão do tenant — ver AgentInstructionAuditPanel. */
+  instructions_consolidated_at?: string | null;
   webhook_url: string | null;
   panel_access: boolean;
   auto_pause_on_reply?: boolean;

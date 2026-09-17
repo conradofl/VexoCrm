@@ -174,7 +174,9 @@ describe("Integridade de Renderização de Páginas e Verificação de Símbolos
     const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
 
     renderWithProviders(<InboundAgentConfig />);
-    expect(screen.getAllByText(/Agente de Atendimento|Agente Inbound|Configuração/i).length).toBeGreaterThan(0);
+    // "Um agente por chip" (Commit 4): a tela virou uma por agente — abas
+    // renomeadas (Identidade/Prompt/Modelo/...), "Configuração Geral" saiu.
+    expect(screen.getAllByText(/Agente de Atendimento|Agente Inbound|Identidade|Assistentes Inbound/i).length).toBeGreaterThan(0);
   });
 
   it("Relatorios renderiza envolvido em TenantScopeBoundary sem erros", async () => {

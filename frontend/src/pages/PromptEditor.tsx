@@ -14,6 +14,11 @@ import { usePrompt, useSavePrompt, type PromptType } from "@/hooks/usePrompts";
 import { useCampaignPrompts, useSaveCampaignPrompt, useDeleteCampaignPrompt } from "@/hooks/useCampaignPrompts";
 import { useAuth } from "@/contexts/AuthContext";
 
+// Só prompts de CONVERSA — o que instrui o chatbot enquanto ele fala com o
+// lead. "Extrato" saiu daqui de propósito ("Um agente por chip" — Commit 4):
+// não instrui conversa nenhuma, gera um RELATÓRIO pra equipe depois que a
+// conversa termina. Misturado nesta lista, parecia "mais um prompt igual aos
+// outros" — tem seção própria mais abaixo, chamada pelo que é.
 const PROMPT_TYPES: { value: PromptType; label: string; description: string }[] = [
   {
     value: "padrao",
@@ -29,11 +34,6 @@ const PROMPT_TYPES: { value: PromptType; label: string; description: string }[] 
     value: "qualificar",
     label: "Qualificação Aprofundada",
     description: "Prompt especializado para aprofundar a qualificação após o SPIN inicial.",
-  },
-  {
-    value: "extrato",
-    label: "Extrato / Briefing SDR",
-    description: "Prompt de geração do briefing enviado ao SDR quando o lead finaliza.",
   },
 ];
 
@@ -352,7 +352,7 @@ export default function PromptEditor() {
             <div className="space-y-1 text-sm text-indigo-800 dark:text-indigo-300">
               <p className="font-medium">Como funciona</p>
               <p className="text-indigo-700 dark:text-indigo-400">
-                Cada empresa pode ter até 4 prompts: <strong>padrão</strong> (inbound), <strong>campanha</strong> (outbound), <strong>qualificação aprofundada</strong> e <strong>extrato SDR</strong>. O chatbot escolhe automaticamente com base na origem e fase do lead. Se não houver prompt salvo, usa o prompt padrão do código.
+                Cada empresa pode ter até 3 prompts de <strong>conversa</strong>: <strong>padrão</strong> (inbound), <strong>campanha</strong> (outbound) e <strong>qualificação aprofundada</strong>. O chatbot escolhe automaticamente com base na origem e fase do lead. Se não houver prompt salvo, usa o prompt padrão do código. O <strong>relatório para a equipe</strong> (extrato) é outra coisa — não instrui conversa nenhuma — e tem seção própria logo abaixo.
               </p>
             </div>
           </div>
@@ -432,6 +432,31 @@ export default function PromptEditor() {
       )}
 
       {selectedClientId && <CampaignPromptsSection clientId={selectedClientId} />}
+
+      {/* Relatório para a equipe — separado dos prompts de conversa de
+          propósito ("Um agente por chip", Commit 4). Não instrui nenhuma
+          conversa: gera o resumo enviado ao SDR DEPOIS que o lead termina de
+          ser qualificado, não durante. */}
+      {selectedClientId && (
+        <Card className="border-slate-200 dark:border-white/10">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <FileEdit className="h-4 w-4 text-slate-500" />
+              <CardTitle className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Relatório para a equipe — {selectedClient?.name ?? selectedClientId}
+              </CardTitle>
+              <Badge variant="outline" className="text-[10px]">Extrato / Briefing SDR</Badge>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Não é um prompt de conversa — o chatbot nunca usa este texto pra falar com o lead. Ele só
+              entra depois que o atendimento termina, pra montar o resumo que o SDR recebe.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <PromptEditorCard clientId={selectedClientId} type="extrato" />
+          </CardContent>
+        </Card>
+      )}
     </PageShell>
   );
 }
