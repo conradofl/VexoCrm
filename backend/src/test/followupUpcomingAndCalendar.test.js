@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../followup/db.js", () => {
   const queryMock = vi.fn();
@@ -63,6 +63,17 @@ function accessAssignedClients(clientIds) {
 describe("Etapa 5 Commit 3 — faixa 'Próximos N dias' e calendário", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Relógio congelado em dia útil, dentro da janela de envio — mesma doença
+    // já consertada em followupChipQuota.test.js: "hoje"/"amanhã" calculados
+    // com Date.now() real ficam reféns do horário em que a suíte roda. Depois
+    // das 20h (janela fecha), a projeção do passo imediato cai pra próxima
+    // abertura — amanhã — e "hoje" vira zero. O teste passa de manhã e cai
+    // toda noite; congelar o relógio tira a suíte do relógio de parede.
+    vi.setSystemTime(new Date("2026-09-16T14:00:00.000Z")); // quarta-feira às 11:00 em São Paulo
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe("groupPendingJobsByDay — função pura", () => {
