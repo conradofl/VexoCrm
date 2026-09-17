@@ -7,7 +7,8 @@
 // `embedTexts(textos)`.
 //
 // Provedores:
-//   "gemini" (padrão, e o ÚNICO escolhido automaticamente) — text-embedding-004
+//   "gemini" (padrão, e o ÚNICO escolhido automaticamente) — modelo
+//     configurável por RAG_EMBEDDING_MODEL (padrão "text-embedding-004"),
 //     via GEMINI_API_KEY. Rede, cobrado (camada gratuita com limite de
 //     chamadas/minuto — daí o lote com espaçamento e retry em erro temporário).
 //   "lexical" — sem chave, sem rede, NUNCA escolhido por padrão. Não é um
@@ -27,6 +28,9 @@
 // pede, não algo pra instalar por conta própria. Troca a IMPLEMENTAÇÃO deste
 // arquivo, não o contrato de embedTexts — o resto do sistema não muda uma linha.
 
+// Padrão — RAG_EMBEDDING_MODEL (lido em resolveGeminiEmbeddingModel, a cada
+// chamada) sobrescreve. Nome de modelo de terceiro muda sem aviso; trocar
+// isso nunca pode exigir deploy.
 export const GEMINI_EMBEDDING_MODEL = "text-embedding-004";
 export const GEMINI_EMBEDDING_DIM = 768;
 const GEMINI_BATCH_SIZE = 10;
@@ -41,6 +45,16 @@ function resolveProvider(explicit) {
   const raw = explicit || process.env.RAG_EMBEDDING_PROVIDER || "gemini";
   const normalized = String(raw).toLowerCase().trim();
   return normalized === "lexical" ? "lexical" : "gemini";
+}
+
+// Lido do ambiente A CADA CHAMADA — mesmo padrão de resolveProvider e do
+// limiar em chatSearch.js. Nunca cacheado em módulo: resolveEmbeddingIdentity
+// tem que ver o modelo REAL que embedTextsGemini vai usar, não uma constante
+// congelada na hora que o processo subiu.
+export function resolveGeminiEmbeddingModel() {
+  const raw = process.env.RAG_EMBEDDING_MODEL;
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  return trimmed || GEMINI_EMBEDDING_MODEL;
 }
 
 function sleep(ms) {
@@ -87,55 +101,74 @@ function embedTextLexical(text, dim = LEXICAL_EMBEDDING_DIM) {
   return vector.map((v) => v / norm);
 }
 
-// ─── Provedor Gemini: text-embedding-004, em lotes com espaçamento e retry ───
+// ─── Provedor Gemini: modelo configurável, em lotes com espaçamento e retry ──
+//
+// Retry é SÓ pra 429/503 (rede/cota, temporário — melhora numa segunda
+// tentativa) e pra exceção de rede do próprio fetch (timeout, DNS, conexão
+// caiu). 404 é modelo inexistente: não existe segunda tentativa que resolva
+// um nome de modelo errado, então falha na hora, com o nome tentado na
+// mensagem — é o que vai pro error_log e pra tela. Qualquer outro status
+// (400, 401, 500...) também falha na hora, pelo mesmo motivo: repetir sem
+// mudar nada não é retry, é atraso.
 
-async function embedBatchGemini(texts, apiKey) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_EMBEDDING_MODEL}:batchEmbedContents?key=${apiKey}`;
+async function embedBatchGemini(texts, apiKey, model) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${apiKey}`;
   const body = {
     requests: texts.map((text) => ({
-      model: `models/${GEMINI_EMBEDDING_MODEL}`,
+      model: `models/${model}`,
       content: { parts: [{ text: String(text || "") }] },
     })),
   };
 
   let lastErr = null;
   for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
+    let res;
     try {
-      const res = await fetch(url, {
+      res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-
-      if (res.status === 429 || res.status === 503) {
-        lastErr = new Error(`Gemini embeddings: erro temporário ${res.status}`);
-        if (attempt < GEMINI_MAX_RETRIES) {
-          await sleep(GEMINI_RETRY_BASE_DELAY_MS * (attempt + 1));
-          continue;
-        }
-        throw lastErr;
-      }
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        throw new Error(`Gemini embeddings: HTTP ${res.status} — ${errBody.slice(0, 300)}`);
-      }
-
-      const json = await res.json();
-      const embeddings = Array.isArray(json?.embeddings) ? json.embeddings : [];
-      if (embeddings.length !== texts.length) {
-        throw new Error(
-          `Gemini embeddings: esperava ${texts.length} vetores, recebeu ${embeddings.length}`
-        );
-      }
-      return embeddings.map((e) => e.values || []);
-    } catch (err) {
-      lastErr = err;
+    } catch (networkErr) {
+      lastErr = networkErr;
       if (attempt < GEMINI_MAX_RETRIES) {
         await sleep(GEMINI_RETRY_BASE_DELAY_MS * (attempt + 1));
         continue;
       }
+      throw lastErr;
     }
+
+    if (res.status === 429 || res.status === 503) {
+      lastErr = new Error(`Gemini embeddings: erro temporário ${res.status}`);
+      if (attempt < GEMINI_MAX_RETRIES) {
+        await sleep(GEMINI_RETRY_BASE_DELAY_MS * (attempt + 1));
+        continue;
+      }
+      throw lastErr;
+    }
+
+    if (res.status === 404) {
+      const errBody = await res.text().catch(() => "");
+      const err = new Error(
+        `Gemini embeddings: modelo "${model}" não encontrado (404). Confira a variável RAG_EMBEDDING_MODEL. ${errBody.slice(0, 200)}`.trim()
+      );
+      err.code = "EMBEDDING_MODEL_NOT_FOUND";
+      throw err;
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      throw new Error(`Gemini embeddings: HTTP ${res.status} — ${errBody.slice(0, 300)}`);
+    }
+
+    const json = await res.json();
+    const embeddings = Array.isArray(json?.embeddings) ? json.embeddings : [];
+    if (embeddings.length !== texts.length) {
+      throw new Error(
+        `Gemini embeddings: esperava ${texts.length} vetores, recebeu ${embeddings.length}`
+      );
+    }
+    return embeddings.map((e) => e.values || []);
   }
   throw lastErr || new Error("Gemini embeddings: falha desconhecida");
 }
@@ -148,10 +181,12 @@ async function embedTextsGemini(texts) {
     throw err;
   }
 
+  const model = resolveGeminiEmbeddingModel();
+
   const results = [];
   for (let i = 0; i < texts.length; i += GEMINI_BATCH_SIZE) {
     const batch = texts.slice(i, i + GEMINI_BATCH_SIZE);
-    const vectors = await embedBatchGemini(batch, apiKey);
+    const vectors = await embedBatchGemini(batch, apiKey, model);
     results.push(...vectors);
     // Espaçamento entre lotes — camada gratuita do Gemini tem limite de
     // chamadas por minuto. Indexação é assíncrona, então esperar não incomoda.
@@ -191,7 +226,7 @@ export function resolveEmbeddingIdentity(explicitProvider) {
   if (provider === "lexical") {
     return { provider: "lexical", model: LEXICAL_EMBEDDING_MODEL, dim: LEXICAL_EMBEDDING_DIM };
   }
-  return { provider: "gemini", model: GEMINI_EMBEDDING_MODEL, dim: GEMINI_EMBEDDING_DIM };
+  return { provider: "gemini", model: resolveGeminiEmbeddingModel(), dim: GEMINI_EMBEDDING_DIM };
 }
 
 /**

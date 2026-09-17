@@ -142,6 +142,75 @@ describe("Serviço de Embedding (Etapa 5, Leva 2, Commit 1) — trocar de proved
       expect(result).toEqual([[0.5, 0.5]]);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     }, 15000);
+
+    it("erro 404 (modelo inexistente) FALHA NA HORA — nunca tenta de novo, e a mensagem traz o nome do modelo tentado", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "gemini";
+      process.env.GEMINI_API_KEY = "fake-key-for-test";
+      process.env.RAG_EMBEDDING_MODEL = "text-embedding-inexistente-999";
+
+      const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: async () => "models/text-embedding-inexistente-999 is not found",
+      });
+
+      await expect(embedTexts(["texto qualquer"])).rejects.toThrow(/text-embedding-inexistente-999/);
+      // UMA chamada só — 404 não é 429/503, não melhora numa segunda tentativa.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("outros erros permanentes (ex.: 500) também não tentam de novo — só 429/503 são temporários", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "gemini";
+      process.env.GEMINI_API_KEY = "fake-key-for-test";
+
+      const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "erro interno",
+      });
+
+      await expect(embedTexts(["texto qualquer"])).rejects.toThrow(/HTTP 500/);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("RAG_EMBEDDING_MODEL — nome do modelo Gemini configurável sem deploy", () => {
+    it("sem a variável definida, usa o padrão GEMINI_EMBEDDING_MODEL", () => {
+      delete process.env.RAG_EMBEDDING_MODEL;
+      expect(resolveEmbeddingIdentity("gemini").model).toBe(GEMINI_EMBEDDING_MODEL);
+    });
+
+    it("com a variável definida, a procedência (resolveEmbeddingIdentity) reflete o modelo REAL configurado, não a constante do código", () => {
+      process.env.RAG_EMBEDDING_MODEL = "text-embedding-005-experimental";
+      expect(resolveEmbeddingIdentity("gemini").model).toBe("text-embedding-005-experimental");
+      // Prova de que não é a constante: são valores diferentes.
+      expect(resolveEmbeddingIdentity("gemini").model).not.toBe(GEMINI_EMBEDDING_MODEL);
+    });
+
+    it("string vazia ou só espaço na variável cai no padrão (não manda modelo vazio pra API)", () => {
+      process.env.RAG_EMBEDDING_MODEL = "   ";
+      expect(resolveEmbeddingIdentity("gemini").model).toBe(GEMINI_EMBEDDING_MODEL);
+    });
+
+    it("embedTexts (gemini) manda o modelo CONFIGURADO na URL e no body — não o hardcoded", async () => {
+      process.env.RAG_EMBEDDING_PROVIDER = "gemini";
+      process.env.GEMINI_API_KEY = "fake-key-for-test";
+      process.env.RAG_EMBEDDING_MODEL = "text-embedding-canario";
+
+      const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ embeddings: [{ values: [0.1, 0.2] }] }),
+      });
+
+      await embedTexts(["texto qualquer"]);
+
+      const [url, options] = fetchSpy.mock.calls[0];
+      expect(url).toContain("/models/text-embedding-canario:batchEmbedContents");
+      expect(url).not.toContain(GEMINI_EMBEDDING_MODEL);
+      const body = JSON.parse(options.body);
+      expect(body.requests[0].model).toBe("models/text-embedding-canario");
+    });
   });
 
   describe("resolveEmbeddingIdentity — procedência gravada em rag_documents", () => {

@@ -169,6 +169,23 @@ describe("processRagDocument — indexação/reindexação transacional (Etapa 5
       const updateReady = poolCalls.find((c) => c.sql.includes("status = 'ready'"));
       expect(updateReady).toBeUndefined();
     });
+
+    it("RAG_EMBEDDING_MODEL apontando pra modelo inexistente: falha uma vez (sem retry aqui dentro — quem não repete é embedBatchGemini, testado em embeddings.test.js), error_log traz o nome do modelo tentado", async () => {
+      const err = new Error(
+        'Gemini embeddings: modelo "text-embedding-inexistente-999" não encontrado (404). Confira a variável RAG_EMBEDDING_MODEL.'
+      );
+      err.code = "EMBEDDING_MODEL_NOT_FOUND";
+      embeddingsMock.embedTexts.mockRejectedValue(err);
+
+      await expect(processRagDocument("doc-1")).rejects.toThrow(/text-embedding-inexistente-999/);
+
+      expect(embeddingsMock.embedTexts).toHaveBeenCalledTimes(1);
+      expect(fakePool.connect).not.toHaveBeenCalled();
+
+      const updateFalha = poolCalls.find((c) => c.sql.includes("status = 'failed'"));
+      expect(updateFalha).toBeTruthy();
+      expect(updateFalha.params.join(" ")).toContain("text-embedding-inexistente-999");
+    });
   });
 
   describe("TESTE OBRIGATÓRIO: PDF digitalizado / texto insuficiente — não chama embedding nem toca em chunks", () => {
