@@ -45,6 +45,13 @@ export default function ChatbotTemplates() {
       subtitle="Configure os campos de coleta e critérios de qualificação para cada agente."
     >
       <div className="space-y-6 max-w-5xl">
+        {/* "Um agente, um dono para cada texto": agente consolidado passa a ser
+            dono do próprio prompt e da própria coleta — editar o template dele
+            aqui não muda mais nada na conversa. */}
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Templates valem para agentes ainda não consolidados e para novos agentes.
+        </p>
+
         {/* Seletor de empresa */}
         <Card>
           <CardContent className="pt-5">

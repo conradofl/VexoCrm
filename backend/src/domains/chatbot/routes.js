@@ -2976,6 +2976,7 @@ export function registerChatbotRoutes(app, deps) {
             inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
             instanceName,
             companyId: inboundConfig?.companyId || null,
+            instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
           });
 
           // Verificação de intenção não-comercial com as 5 travas de segurança
@@ -3425,6 +3426,7 @@ export function registerChatbotRoutes(app, deps) {
         inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
         instanceName,
         companyId: inboundConfig?.companyId || null,
+        instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
       });
 
       if (!aiResponse?.mensagem) {

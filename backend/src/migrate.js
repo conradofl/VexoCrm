@@ -321,6 +321,10 @@ async function isAlreadyApplied(pool, filename) {
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_documents' AND column_name='embedding_dim')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rag_chunks' AND column_name='embedding')
     ) AS ok`,
+    "20260917040000_add_followup_companies_instructions_consolidated.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_companies')
+      OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='instructions_consolidated_at')
+    ) AS ok`,
   };
 
   const query = checks[filename];

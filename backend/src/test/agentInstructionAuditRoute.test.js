@@ -102,9 +102,23 @@ describe("GET /companies/:id/instruction-audit", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.templateKeyEmUso).toBe("generico");
+    expect(res.body.consolidated).toBe(false);
+    expect(res.body.consolidatedAt).toBeNull();
     expect(res.body.audit.prompt.source).toBe("tenant"); // agente sem inbound_prompt próprio
     const conflito = res.body.audit.collection.conflicts.find((c) => c.field === "telefone");
     expect(conflito).toMatchObject({ emAgente: false, emTemplate: true });
+  });
+
+  it("agente já consolidado: a resposta expõe consolidated=true e o timestamp", async () => {
+    mockSupabaseReturning(mockAgentRow({ instructions_consolidated_at: "2026-09-17T00:00:00Z" }));
+    const handler = getRouteHandler("/companies/:id/instruction-audit", "get");
+    const req = { params: { id: "agente-1" }, authAccess: adminAccess() };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.body.consolidated).toBe(true);
+    expect(res.body.consolidatedAt).toBe("2026-09-17T00:00:00Z");
   });
 
   it("usa fetchDynamicPrompt/fetchTemplate com o tenant_id do AGENTE, não um valor solto", async () => {

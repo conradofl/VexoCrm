@@ -1613,6 +1613,7 @@ export async function processBatch({
   inboundSpinInstruction = "",
   instanceName = null,
   companyId = null,
+  instructionsConsolidated = false,
 }) {
   const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
   const effectivePersonaModel = model || tenantSettings?.chatbot_model || "generico";
@@ -1763,10 +1764,15 @@ export async function processBatch({
   const promptType = promptTypeOverride || (effectivePersonaModel.startsWith("campanha_") ? "campanha" : "padrao");
   const baseModelKey = effectivePersonaModel.startsWith("campanha_") ? effectivePersonaModel.replace("campanha_", "") : effectivePersonaModel;
 
+  // Agente consolidado ("Um agente, um dono para cada texto", Commit 2): ignora
+  // template e prompt padrão do tenant — nem busca. O roteiro de campanha
+  // continua sendo buscado normalmente: é um eixo diferente (a oferta DESTE
+  // disparo), não "o que instrui a conversa por padrão", e continua entrando
+  // como camada sobre o agente mesmo depois de consolidado.
   const [dynamicPrompt, campaignPrompt, template] = await Promise.all([
-    fetchDynamicPrompt(supabase, clientId, promptType),
+    instructionsConsolidated ? Promise.resolve(null) : fetchDynamicPrompt(supabase, clientId, promptType),
     campaignPromptId ? fetchCampaignPromptById(supabase, campaignPromptId) : Promise.resolve(null),
-    fetchTemplate(supabase, clientId, baseModelKey),
+    instructionsConsolidated ? Promise.resolve(null) : fetchTemplate(supabase, clientId, baseModelKey),
   ]);
 
   // Se houver inboundPrompt (customizado por chip), ele é a base. Senão, dynamicPrompt.
@@ -1794,7 +1800,7 @@ export async function processBatch({
     console.error("[chatbot-ai] PROMPT NOT FOUND in DB — chatbot silenciado", { clientId, promptType, isRecontact: isPrimeiroRecontato });
     return null;
   }
-  if (!template) {
+  if (!template && !instructionsConsolidated) {
     console.warn("[chatbot-ai] TEMPLATE NOT FOUND in DB", { clientId, baseModelKey });
   }
 

@@ -37,7 +37,8 @@ export function normalizeSpinFields(rawSpinFields) {
  *   companyId: string, instanceName: string|null, enabled: boolean,
  *   model: string|null, prompt: string|null,
  *   spinFields: Array<{name: string, required: boolean}>,
- *   webhookUrl: string|null, sdrPhone: string|null, sdrTransferEnabled: boolean
+ *   webhookUrl: string|null, sdrPhone: string|null, sdrTransferEnabled: boolean,
+ *   instructionsConsolidated: boolean
  * }>} null quando o tenant não tem nenhuma linha configurada.
  */
 export async function resolveInboundAgentConfig({ supabase, clientId, instanceName }) {
@@ -46,7 +47,7 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
   const { data, error } = await supabase
     .from("followup_companies")
     .select(
-      "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled"
+      "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at"
     )
     .eq("tenant_id", clientId);
 
@@ -126,6 +127,10 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
     webhookUrl: normalize(row.inbound_webhook_url) || null,
     sdrPhone: normalize(row.sdr_whatsapp_number) || null,
     sdrTransferEnabled: row.sdr_transfer_enabled === true,
+    // "Um agente, um dono para cada texto", Commit 2: uma vez consolidado, o
+    // agente ignora template e prompt padrão do tenant — processBatch lê isto
+    // pra nem buscar os dois.
+    instructionsConsolidated: Boolean(row.instructions_consolidated_at),
   };
 }
 

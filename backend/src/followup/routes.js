@@ -551,7 +551,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data: agentRow, error } = await supabase
         .from("followup_companies")
-        .select("id, tenant_id, name, inbound_prompt, inbound_spin_fields, inbound_model")
+        .select("id, tenant_id, name, inbound_prompt, inbound_spin_fields, inbound_model, instructions_consolidated_at")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
@@ -580,10 +580,104 @@ function normalizeInstanceList(list, fallback) {
         success: true,
         agentId: id,
         templateKeyEmUso: templateKey,
+        consolidated: Boolean(agentRow.instructions_consolidated_at),
+        consolidatedAt: agentRow.instructions_consolidated_at || null,
         audit,
       });
     } catch (err) {
       return sendErr(res, 500, "INSTRUCTION_AUDIT_FAILED", err.message);
+    }
+  });
+
+  // POST /api/followup/companies/:id/consolidate
+  //
+  // "Um agente, um dono para cada texto" — Commit 2: o agente vira dono.
+  // Ação explícita e IRREVERSÍVEL por esta rota (não existe "desconsolidar"):
+  // grava no PRÓPRIO agente tudo que hoje o instrui efetivamente — o prompt
+  // que estava valendo (seu ou do tenant) e a UNIÃO dos campos que já
+  // estavam sendo pedidos (Coleta do agente + template) — e marca
+  // instructions_consolidated_at. A partir daí processBatch nem busca mais
+  // template nem prompt padrão do tenant pra este agente (chatbot-ai-engine.js).
+  // Não apaga nada nas tabelas antigas — o tenant e o template continuam
+  // intocados, valendo pra quem não consolidou.
+  router.post("/companies/:id/consolidate", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+
+    try {
+      const supabase = getSupabase();
+      const { data: agentRow, error } = await supabase
+        .from("followup_companies")
+        .select("id, tenant_id, inbound_prompt, inbound_spin_fields, instructions_consolidated_at")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!agentRow) return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+
+      if (!hasTenantAccess(req, agentRow.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+      }
+
+      if (agentRow.instructions_consolidated_at) {
+        return sendErr(res, 409, "ALREADY_CONSOLIDATED", "Este agente já foi consolidado.");
+      }
+
+      const tenantSettings = await getLeadClientN8nSettings(agentRow.tenant_id).catch(() => null);
+      const templateKey = tenantSettings?.chatbot_model || "generico";
+      const [tenantPromptContent, template] = await Promise.all([
+        fetchDynamicPrompt(supabase, agentRow.tenant_id, "padrao"),
+        fetchTemplate(supabase, agentRow.tenant_id, templateKey),
+      ]);
+
+      const audit = auditAgentInstructionSources({ agentRow, tenantPromptContent, template, defaultLlmModel: defaultGroqModel() });
+
+      // Prompt efetivo vazio (nem o agente, nem o tenant têm prompt hoje):
+      // consolidar gravaria inbound_prompt = "", e um agente consolidado NUNCA
+      // busca o prompt do tenant como fallback — o motor cai direto em
+      // "PROMPT NOT FOUND" e silencia o lead pra sempre. Consolidação é mão
+      // única (409 na segunda tentativa): sem essa trava, não haveria botão
+      // que desfizesse. Recusa antes de gravar qualquer coisa.
+      if (!audit.prompt.value) {
+        return sendErr(
+          res,
+          400,
+          "EMPTY_EFFECTIVE_PROMPT",
+          "Este agente não tem prompt próprio nem o tenant tem prompt padrão — não há o que consolidar. Escreva o prompt deste agente antes de consolidar."
+        );
+      }
+
+      // Consolidar nunca pode fazer o lead parar de ser perguntado algo que já
+      // era perguntado: a coleta gravada é a UNIÃO, não só a do agente.
+      const nomesJaNaColeta = new Set(audit.collection.agentFields.map((f) => f.name.toLowerCase()));
+      const coletaConsolidada = [
+        ...audit.collection.agentFields,
+        ...audit.collection.templateFields
+          .filter((f) => !nomesJaNaColeta.has(f.name.toLowerCase()))
+          .map((f) => ({ name: f.name, required: f.required })),
+      ];
+
+      const { data: updated, error: updateError } = await supabase
+        .from("followup_companies")
+        .update({
+          inbound_prompt: audit.prompt.value,
+          inbound_spin_fields: coletaConsolidada,
+          instructions_consolidated_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .select("id, instructions_consolidated_at, inbound_prompt, inbound_spin_fields")
+        .maybeSingle();
+      if (updateError) throw updateError;
+
+      return res.json({
+        success: true,
+        agentId: id,
+        consolidatedAt: updated.instructions_consolidated_at,
+        prompt: updated.inbound_prompt,
+        collectionFields: updated.inbound_spin_fields,
+      });
+    } catch (err) {
+      return sendErr(res, 500, "CONSOLIDATE_FAILED", err.message);
     }
   });
 

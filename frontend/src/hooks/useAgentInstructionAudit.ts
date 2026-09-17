@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -37,7 +37,16 @@ export interface AgentInstructionAudit {
 export interface AgentInstructionAuditResponse {
   agentId: string;
   templateKeyEmUso: string;
+  consolidated: boolean;
+  consolidatedAt: string | null;
   audit: AgentInstructionAudit;
+}
+
+export interface ConsolidateAgentResponse {
+  agentId: string;
+  consolidatedAt: string;
+  prompt: string;
+  collectionFields: AgentInstructionField[];
 }
 
 export function useAgentInstructionAudit(agentId: string | undefined) {
@@ -55,6 +64,32 @@ export function useAgentInstructionAudit(agentId: string | undefined) {
         throw new Error(await readApiErrorMessage(res, "Erro ao carregar diagnóstico do agente"));
       }
       return readApiJson<AgentInstructionAuditResponse>(res, "agent-instruction-audit");
+    },
+  });
+}
+
+// "Um agente, um dono para cada texto" — Commit 2. Ação de mão única: depois
+// de consolidado, o agente ignora template e prompt padrão do tenant. O
+// backend recusa (409) se já estiver consolidado — não existe "desconsolidar".
+export function useConsolidateAgent(agentId: string | undefined) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<ConsolidateAgentResponse> => {
+      if (!agentId) throw new Error("Agente não selecionado.");
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/followup/companies/${agentId}/consolidate`, {
+        method: "POST",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao consolidar o agente"));
+      }
+      return readApiJson<ConsolidateAgentResponse>(res, "consolidate-agent");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agentInstructionAudit", agentId] });
+      queryClient.invalidateQueries({ queryKey: ["fup-companies"] });
     },
   });
 }
