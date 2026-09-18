@@ -17,6 +17,7 @@ import {
   Wand2,
   ChevronRight,
   Database,
+  Archive,
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -29,11 +30,22 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { cn } from "@/lib/utils";
-import { useCreateFupCompany, useFupCompanies, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
+import { useArchiveFupCompany, useCreateFupCompany, useFupCompanies, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi } from "@/lib/api";
 import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
@@ -64,6 +76,19 @@ function instanceNameFromChip(chip: { name?: string; dispatch_webhook_url?: stri
   const url = chip?.dispatch_webhook_url || "";
   const last = url.split("/").filter(Boolean).pop();
   return (last && !last.includes("?") ? last : chip?.name) || "";
+}
+// Números (chips) gravados numa linha de agente — mesma regra de fallback
+// usada em todo lugar que lê evolution_instances: lista nova, com a coluna
+// antiga como reserva pra linhas de antes da migration.
+function instancesOfCompany(c: any): string[] {
+  if (Array.isArray(c?.evolution_instances) && c.evolution_instances.length > 0) return c.evolution_instances;
+  return c?.evolution_instance ? [c.evolution_instance] : [];
+}
+// O que fica gravado (nome/id/slug da URL) nem sempre é o nome que o dono
+// reconhece na lista de chips — resolve pro nome de exibição quando achar.
+function chipDisplayName(value: string, chips: any[]): string {
+  const found = chips.find((c) => instanceNameFromChip(c) === value || c.name === value || c.id === value);
+  return found?.name || value;
 }
 
 // "Uma tela, um agente, de cima para baixo" — modelo pronto não guarda texto
@@ -421,22 +446,36 @@ export default function InboundAgentConfig() {
                   : c.evolution_instance || c.evolution_instances?.[0])
               : "sem chip";
             return (
-              <button
+              <div
                 key={c.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => setCompanyId(c.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCompanyId(c.id); }
+                }}
                 className={cn(
-                  "flex flex-col items-start gap-1 rounded-xl border px-3.5 py-2.5 text-left transition-colors min-w-[180px]",
+                  "relative flex flex-col items-start gap-1 rounded-xl border px-3.5 py-2.5 text-left transition-colors min-w-[180px] cursor-pointer",
                   isSelected
                     ? "border-indigo-400 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/30"
                     : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
                 )}
               >
+                {!isPlaceholder && (
+                  <ArchiveAgentButton
+                    agent={c}
+                    chips={chips}
+                    variant="card"
+                    onArchived={() => {
+                      if (c.id === companyId) setCompanyId("all");
+                    }}
+                  />
+                )}
                 <div className="flex items-center gap-1.5">
                   {hasChip && (
                     <span className={cn("h-1.5 w-1.5 rounded-full", c.inbound_enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700")} />
                   )}
-                  <span className="text-sm font-semibold text-foreground truncate max-w-[160px]">{c.name}</span>
+                  <span className="text-sm font-semibold text-foreground truncate max-w-[160px] pr-4">{c.name}</span>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0", kind === "campanha" ? "text-purple-600 border-purple-500/30" : "text-cyan-600 border-cyan-500/30")}>
@@ -447,7 +486,7 @@ export default function InboundAgentConfig() {
                     {!hasChip && !isPlaceholder ? "desligado · sem chip" : chipLabel}
                   </span>
                 </div>
-              </button>
+              </div>
             );
           })}
           <button
@@ -471,6 +510,20 @@ export default function InboundAgentConfig() {
         </div>
       ) : (
         <div className="space-y-8 max-w-3xl">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              Agentes <span className="mx-1">›</span> <span className="text-foreground font-medium">{activeCompany.name}</span>
+            </p>
+            {!isPlaceholderCompany && (
+              <ArchiveAgentButton
+                agent={activeCompany}
+                chips={chips}
+                variant="header"
+                onArchived={() => setCompanyId("all")}
+              />
+            )}
+          </div>
+
           {isPlaceholderCompany && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -975,5 +1028,78 @@ function SectionHeading({ n, title, icon }: { n: number; title: string; icon: Re
         {title}
       </h2>
     </div>
+  );
+}
+
+// "Arquivar", não "Excluir" — nomeia a ação pelo que ela faz. A linha
+// continua no banco (archived_at, followup/routes.js DELETE /companies/:id);
+// só some da lista e, se tinha chip, o chip volta a cair no chatbot padrão
+// da empresa (resolveInboundAgentConfig já ignora linha arquivada).
+function ArchiveAgentButton({
+  agent,
+  chips,
+  variant = "header",
+  onArchived,
+}: {
+  agent: any;
+  chips: any[];
+  variant?: "header" | "card";
+  onArchived: () => void;
+}) {
+  const { toast } = useToast();
+  const archiveMutation = useArchiveFupCompany();
+  const chipNames = instancesOfCompany(agent).map((v) => chipDisplayName(v, chips));
+
+  const handleArchive = () => {
+    archiveMutation.mutate(agent.id, {
+      onSuccess: () => {
+        toast({ title: "Agente arquivado", description: `"${agent.name}" saiu da lista.` });
+        onArchived();
+      },
+      onError: (err: any) => toast({ title: "Erro ao arquivar", description: err?.message, variant: "destructive" }),
+    });
+  };
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        {variant === "card" ? (
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-1.5 right-1.5 rounded-md p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+            title="Arquivar agente"
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <Button variant="outline" size="sm" className="text-xs gap-1.5 text-slate-500 hover:text-rose-600 shrink-0">
+            <Archive className="h-3.5 w-3.5" />
+            Arquivar agente
+          </Button>
+        )}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Arquivar "{agent.name}"?</AlertDialogTitle>
+          <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+            {chipNames.length > 0 ? (
+              <span className="block">
+                O chip <strong className="text-foreground">{chipNames.join(", ")}</strong> volta a ser atendido pelo chatbot padrão da empresa.
+              </span>
+            ) : (
+              <span className="block">Este agente não tem nenhum chip vinculado — arquivar não afeta nenhuma conversa.</span>
+            )}
+            <span className="block">O agente some da lista. A linha continua no banco — não é apagada.</span>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={handleArchive} disabled={archiveMutation.isPending} className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white">
+            {archiveMutation.isPending ? "Arquivando..." : "Arquivar"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

@@ -99,15 +99,19 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
       .select(INBOUND_AGENT_COLUMNS)
       .eq("id", agentId)
       .eq("tenant_id", clientId)
+      .is("archived_at", null)
       .maybeSingle();
     if (error || !row) return null;
     return buildInboundAgentConfig(row);
   }
 
+  // Agente arquivado não responde mais — é exatamente o que "arquivar" com
+  // chip amarrado promete: o chip volta a cair no chatbot padrão do tenant.
   const { data, error } = await supabase
     .from("followup_companies")
     .select(INBOUND_AGENT_COLUMNS)
-    .eq("tenant_id", clientId);
+    .eq("tenant_id", clientId)
+    .is("archived_at", null);
 
   if (error || !Array.isArray(data) || data.length === 0) {
     if (error) console.warn("[inbound-agent] falha ao ler followup_companies:", error.message);

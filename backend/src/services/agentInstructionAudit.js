@@ -55,8 +55,12 @@ export function auditAgentInstructionSources({ agentRow, tenantPromptContent = n
   const agentFields = normalizeSpinFields(agentRow?.inbound_spin_fields);
   const templateFields = templateFieldsOf(template);
   const agentNames = new Set(agentFields.map((f) => f.name.toLowerCase()));
-  const templateNames = new Set(templateFields.map((f) => f.name.toLowerCase()));
 
+  // Conflito só existe numa direção: o template pedindo um campo que o
+  // agente não coleta é o robô sendo instruído por baixo, sem que a tela do
+  // agente mostre isso — é o que engana. O contrário (campo só no agente,
+  // ausente do template) é normal: o agente é a autoridade sobre a própria
+  // Coleta, e um template mais enxuto não muda nada no que ele pergunta.
   const conflicts = [];
   for (const f of templateFields) {
     if (!agentNames.has(f.name.toLowerCase())) {
@@ -66,17 +70,6 @@ export function auditAgentInstructionSources({ agentRow, tenantPromptContent = n
         emTemplate: true,
         origemTemplate: template?.template_key || null,
         motivo: `"${f.name}" é pedido pelo template "${template?.template_key || "?"}" mas não está na Coleta do agente`,
-      });
-    }
-  }
-  for (const f of agentFields) {
-    if (!templateNames.has(f.name.toLowerCase())) {
-      conflicts.push({
-        field: f.name,
-        emAgente: true,
-        emTemplate: false,
-        origemTemplate: template?.template_key || null,
-        motivo: `"${f.name}" está na Coleta do agente mas não é pedido pelo template "${template?.template_key || "?"}"`,
       });
     }
   }

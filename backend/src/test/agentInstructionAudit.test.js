@@ -48,22 +48,33 @@ describe("auditAgentInstructionSources — prompt: de onde vem o texto que o age
   });
 });
 
-describe("auditAgentInstructionSources — coleta: template vs Coleta SPIN do agente competindo em silêncio", () => {
-  it("[TESTE OBRIGATÓRIO] campo no template ausente na coleta do agente: painel aponta o conflito nomeando as duas origens", () => {
+describe("auditAgentInstructionSources — coleta: conflito só numa direção (template instruindo o robô por baixo)", () => {
+  it("[TESTE OBRIGATÓRIO] campo no template ausente na coleta do agente: conflito aponta as duas origens", () => {
     const audit = auditAgentInstructionSources({
       agentRow: { inbound_spin_fields: [{ name: "orcamento", required: true }] },
       template: template({ data_fields: [{ key: "telefone", label: "Telefone", description: "Telefone alternativo" }], required_fields: [] }),
     });
 
-    expect(audit.collection.conflicts).toHaveLength(2);
-
-    const doTemplate = audit.collection.conflicts.find((c) => c.field === "telefone");
-    expect(doTemplate).toMatchObject({ emAgente: false, emTemplate: true, origemTemplate: "generico" });
+    expect(audit.collection.conflicts).toHaveLength(1);
+    const doTemplate = audit.collection.conflicts[0];
+    expect(doTemplate).toMatchObject({ field: "telefone", emAgente: false, emTemplate: true, origemTemplate: "generico" });
     expect(doTemplate.motivo).toContain("telefone");
     expect(doTemplate.motivo).toContain("generico");
+  });
 
-    const doAgente = audit.collection.conflicts.find((c) => c.field === "orcamento");
-    expect(doAgente).toMatchObject({ emAgente: true, emTemplate: false });
+  it("[TESTE OBRIGATÓRIO] agente com 3 campos e template com 0: nenhum conflito — o agente é a autoridade sobre a própria Coleta", () => {
+    const audit = auditAgentInstructionSources({
+      agentRow: {
+        inbound_spin_fields: [
+          { name: "interesse", required: true },
+          { name: "orcamento", required: true },
+          { name: "melhor_horario", required: false },
+        ],
+      },
+      template: template({ data_fields: [], required_fields: [] }),
+    });
+
+    expect(audit.collection.conflicts).toEqual([]);
   });
 
   it("mesmos campos nos dois lados: zero conflito", () => {
@@ -74,7 +85,7 @@ describe("auditAgentInstructionSources — coleta: template vs Coleta SPIN do ag
     expect(audit.collection.conflicts).toEqual([]);
   });
 
-  it("[o teste que fecha a leva] agente com 2 campos, template com 5: os 3 que faltam na coleta aparecem nomeados", () => {
+  it("[o teste que fecha a leva] agente com 2 campos, template com 5: os 3 que faltam na coleta aparecem nomeados, nada mais", () => {
     const audit = auditAgentInstructionSources({
       agentRow: { inbound_spin_fields: [{ name: "interesse", required: true }, { name: "cidade", required: false }] },
       template: template({
@@ -89,21 +100,18 @@ describe("auditAgentInstructionSources — coleta: template vs Coleta SPIN do ag
       }),
     });
 
-    const camposFaltantes = audit.collection.conflicts.filter((c) => c.emTemplate && !c.emAgente).map((c) => c.field);
+    const camposFaltantes = audit.collection.conflicts.map((c) => c.field);
     expect(camposFaltantes.sort()).toEqual(["cep", "email", "telefone"]);
-    expect(audit.collection.conflicts.filter((c) => c.emAgente && !c.emTemplate)).toEqual([]);
   });
 
-  it("sem template resolvido: nenhum conflito inventado, campos do agente aparecem normalmente", () => {
+  it("sem template resolvido: nenhum conflito inventado, campos do agente aparecem normalmente na Coleta", () => {
     const audit = auditAgentInstructionSources({
       agentRow: { inbound_spin_fields: [{ name: "interesse", required: true }] },
       template: null,
     });
     expect(audit.collection.templateFields).toEqual([]);
-    expect(audit.collection.conflicts).toEqual([{
-      field: "interesse", emAgente: true, emTemplate: false, origemTemplate: null,
-      motivo: expect.stringContaining("interesse"),
-    }]);
+    expect(audit.collection.agentFields).toEqual([{ name: "interesse", required: true }]);
+    expect(audit.collection.conflicts).toEqual([]);
   });
 });
 

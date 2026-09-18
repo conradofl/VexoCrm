@@ -10,11 +10,12 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveInboundAgentConfig } from "../services/inboundAgent.js";
 
 function mockSupabaseReturning(row) {
-  const eq2 = vi.fn(() => ({ maybeSingle: () => Promise.resolve({ data: row, error: null }) }));
+  const is = vi.fn(() => ({ maybeSingle: () => Promise.resolve({ data: row, error: null }) }));
+  const eq2 = vi.fn(() => ({ is }));
   const eq1 = vi.fn(() => ({ eq: eq2 }));
   const select = vi.fn(() => ({ eq: eq1 }));
   const from = vi.fn(() => ({ select }));
-  return { from, _eq1: eq1, _eq2: eq2, _select: select };
+  return { from, _eq1: eq1, _eq2: eq2, _is: is, _select: select };
 }
 
 describe("resolveInboundAgentConfig com agentId", () => {
@@ -57,6 +58,18 @@ describe("resolveInboundAgentConfig com agentId", () => {
     expect(supabase._select).toHaveBeenCalled();
     expect(supabase._eq1).toHaveBeenCalledWith("id", "agente-1");
     expect(supabase._eq2).toHaveBeenCalledWith("tenant_id", "sonhare");
+    expect(supabase._is).toHaveBeenCalledWith("archived_at", null);
+  });
+
+  it("[TESTE OBRIGATÓRIO] agente arquivado: a query pede archived_at nulo — arquivado não é achado, mesmo id e tenant certos", async () => {
+    // O mock devolve null pra simular a query real não achando linha (o
+    // filtro .is("archived_at", null) descarta a linha arquivada no banco).
+    const supabase = mockSupabaseReturning(null);
+
+    const config = await resolveInboundAgentConfig({ supabase, clientId: "sonhare", agentId: "agente-arquivado" });
+
+    expect(supabase._is).toHaveBeenCalledWith("archived_at", null);
+    expect(config).toBeNull();
   });
 
   it("[TESTE OBRIGATÓRIO] agente de outro tenant (a query não acha nada com o filtro tenant_id): devolve null, não lança", async () => {
@@ -69,7 +82,7 @@ describe("resolveInboundAgentConfig com agentId", () => {
 
   it("erro do banco na busca por id: devolve null (o chamador decide 404, não 500)", async () => {
     const from = vi.fn(() => ({
-      select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { message: "timeout" } }) }) }) }),
+      select: () => ({ eq: () => ({ eq: () => ({ is: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { message: "timeout" } }) }) }) }) }),
     }));
 
     const config = await resolveInboundAgentConfig({ supabase: { from }, clientId: "sonhare", agentId: "agente-1" });

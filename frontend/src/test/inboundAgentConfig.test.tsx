@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 function renderWithProviders(ui: React.ReactElement) {
@@ -64,12 +64,16 @@ vi.mock("@/lib/tenantIsolation", () => ({
 }));
 
 const updateMutateAsync = vi.fn(async (body: any) => ({ ...body }));
+const archiveMutate = vi.fn((_id: string, opts?: { onSuccess?: () => void }) => {
+  opts?.onSuccess?.();
+});
 
 function mockCompanies(companies: any[]) {
   vi.doMock("@/hooks/useFollowupAdmin", () => ({
     useFupCompanies: () => ({ data: companies, isLoading: false }),
     useCreateFupCompany: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useUpdateFupCompany: () => ({ mutateAsync: updateMutateAsync, isPending: false }),
+    useArchiveFupCompany: () => ({ mutate: archiveMutate, isPending: false }),
   }));
 }
 
@@ -77,6 +81,7 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
   beforeEach(() => {
     vi.resetModules();
     updateMutateAsync.mockClear();
+    archiveMutate.mockClear();
   });
 
   it("[TESTE OBRIGATÓRIO] agente sem chip: interruptor desabilitado, com o motivo visível", async () => {
@@ -131,6 +136,7 @@ describe("InboundAgentConfig — Passo 6 (Testar antes de soltar)", () => {
   beforeEach(() => {
     vi.resetModules();
     updateMutateAsync.mockClear();
+    archiveMutate.mockClear();
   });
 
   it("[TESTE OBRIGATÓRIO] agente ainda não salvo (rascunho): o simulador não aparece — não há id pra testar", async () => {
@@ -191,5 +197,78 @@ describe("InboundAgentConfig — Passo 6 (Testar antes de soltar)", () => {
     const body = JSON.parse((options as RequestInit).body as string);
     expect(body.agentId).toBe("agente-1");
     expect(body.clientId).toBe("sonhare");
+  });
+});
+
+describe("InboundAgentConfig — Arquivar agente", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    updateMutateAsync.mockClear();
+    archiveMutate.mockClear();
+  });
+
+  it("[TESTE OBRIGATÓRIO] agente com chip: confirmação nomeia o chip, e confirmar chama a mutação com o id do agente", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    // Um só agente existe, então ele aparece na lista E aberto — os dois
+    // botões de arquivar (card + topo do agente) coexistem.
+    const triggers = screen.getAllByRole("button", { name: /Arquivar agente/i });
+    expect(triggers.length).toBe(2);
+    fireEvent.click(triggers[triggers.length - 1]);
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/Chip 1/)).toBeTruthy();
+    expect(within(dialog).getByText(/volta a ser atendido pelo chatbot padrão da empresa/)).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Arquivar" }));
+    expect(archiveMutate).toHaveBeenCalledWith("agente-1", expect.any(Object));
+  });
+
+  it("[TESTE OBRIGATÓRIO] agente sem chip: confirmação diz que não afeta nenhuma conversa, e confirmar arquiva sem mexer em mais nada", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: [] },
+    ]);
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    const trigger = screen.getAllByRole("button", { name: /Arquivar agente/i })[0];
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/não tem nenhum chip vinculado — arquivar não afeta nenhuma conversa/)).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Arquivar" }));
+    expect(archiveMutate).toHaveBeenCalledTimes(1);
+    expect(archiveMutate).toHaveBeenCalledWith("agente-1", expect.any(Object));
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("[TESTE OBRIGATÓRIO] cancelar na confirmação: nada acontece — mutação não é chamada", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    const trigger = screen.getAllByRole("button", { name: /Arquivar agente/i })[0];
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(archiveMutate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("agente ainda não salvo (rascunho): sem botão de arquivar — nada pra arquivar ainda", async () => {
+    mockCompanies([]);
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    expect(screen.queryByRole("button", { name: /Arquivar agente/i })).toBeNull();
   });
 });
