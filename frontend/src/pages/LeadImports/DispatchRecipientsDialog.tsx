@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Download, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Clock, Search, Play, PhoneOff } from "lucide-react";
+import { Loader2, Download, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Clock, Search, Play, PhoneOff, Trash2 } from "lucide-react";
 import { useDispatchRecipients, useRetryFailedDispatchLeads, useRunPendingDispatchLeads } from "@/hooks/useCampanhas";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,12 +14,15 @@ import { cn } from "@/lib/utils";
 interface DispatchRecipientsDialogProps {
   dispatchId: string | null;
   onClose: () => void;
+  /** Chamado depois de excluir o lote com sucesso — quem chama decide o que invalidar/atualizar. */
+  onDeleted?: () => void;
 }
 
-export function DispatchRecipientsDialog({ dispatchId, onClose }: DispatchRecipientsDialogProps) {
+export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: DispatchRecipientsDialogProps) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [downloadingCsv, setDownloadingCsv] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { toast } = useToast();
   const { getIdToken } = useAuth();
@@ -96,6 +99,37 @@ export function DispatchRecipientsDialog({ dispatchId, onClose }: DispatchRecipi
         description: err.message || "Não foi possível iniciar o envio dos leads pendentes.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleDeleteDispatch = async () => {
+    if (!dispatchId) return;
+    const nome = data?.dispatchName || "este lote";
+    if (
+      !window.confirm(
+        `Excluir o lote "${nome}"?\n\nOs leads já enviados continuam no histórico do Inbox — só a fila de agendamento deste lote é removida. Não pode ser desfeito.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error?.message || "Erro ao excluir lote");
+      }
+      toast({ title: "Lote excluído" });
+      onDeleted?.();
+      onClose();
+    } catch (err: any) {
+      toast({ title: "Erro ao excluir lote", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -373,9 +407,21 @@ export function DispatchRecipientsDialog({ dispatchId, onClose }: DispatchRecipi
             {isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />}
             <span>Exibindo {filteredItems.length} registros</span>
           </div>
-          <Button onClick={onClose} variant="outline" className="h-8 text-xs font-bold rounded-xl px-4">
-            Fechar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleDeleteDispatch}
+              disabled={deleting || !dispatchId}
+              variant="outline"
+              title="Excluir este lote — cirurgia pontual, não afeta os outros lotes da campanha"
+              className="h-8 text-xs font-bold rounded-xl px-3 text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900/40 dark:hover:bg-rose-950/20"
+            >
+              {deleting ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 mr-1.5" />}
+              Excluir lote
+            </Button>
+            <Button onClick={onClose} variant="outline" className="h-8 text-xs font-bold rounded-xl px-4">
+              Fechar
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -71,6 +71,12 @@ import {
   ensureEvolutionInstanceDailyUsageTable,
   setChipQuotaDbPool,
 } from "../../services/chipQuota.js";
+import {
+  aggregateDispatchStatus,
+  isCampaignActive,
+  estimateDispatchCompletion,
+  AGGREGATE_STATUS_LABELS,
+} from "../../services/campaignDispatchSummary.js";
 
 let _dispatchRunsClaimSchemaEnsured = false;
 let _dueDispatchTimerStarted = false;
@@ -2605,6 +2611,267 @@ export function registerCampaignsRoutes(app, deps) {
       res.json({ dispatches: rows });
     } catch (err) {
       sendError(res, 500, "DISPATCHES_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // Status de campaign_dispatches que ainda podem ser afetados por cada ação
+  // em massa. 'running' só entra no pausar (é o que já está saindo agora);
+  // cancelar nunca inclui 'running' — o que está em voo termina sozinho, "o
+  // que falta" é o que ainda não começou ou ficou parado.
+  const PAUSE_TARGET_STATUSES = ["running", "draft", "scheduled", "failed", "interrupted"];
+  const RESUME_TARGET_STATUSES = ["paused"];
+  const CANCEL_TARGET_STATUSES = ["draft", "scheduled", "paused", "failed", "interrupted"];
+
+  // GET /api/campaigns/dispatch-summary — "uma linha por campanha, lote vira
+  // quadrado". Duas consultas agrupadas (uma pros números por campanha, uma
+  // pros quadrados dos lotes da página atual) — nunca uma consulta por
+  // campanha no laço. 134 lotes acumulados hoje é exatamente por que isso
+  // precisava parar de ser uma lista de lote.
+  app.get("/api/campaigns/dispatch-summary", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.query.clientId);
+    if (!requestedClientId) return sendError(res, 400, "MISSING_CLIENT_ID", "Missing clientId query param");
+    const authorizedClientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!authorizedClientId) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+
+    const scope = req.query.scope === "ended" ? "ended" : "active";
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 20, 1), 100);
+
+    try {
+      await ensureCampaignDispatchEvolutionInstanceColumn();
+
+      // Consulta 1 de 3: uma linha por campanha, somando todos os seus lotes.
+      const { rows: grouped } = await pgDatabasePool.query(
+        `
+          SELECT
+            d.campaign_id,
+            c.name AS campaign_name,
+            COUNT(*)::int AS lote_count,
+            SUM(COALESCE(d.sent_count, 0))::int AS sent_total,
+            SUM(COALESCE(d.failed_count, 0))::int AS failed_total,
+            SUM(COALESCE(d.target_count, 0))::int AS leads_total,
+            SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status NOT IN ('done','cancelled'))::int AS leads_pending,
+            SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($2::text[]))::int AS leads_pause_target,
+            SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($3::text[]))::int AS leads_resume_target,
+            SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($4::text[]))::int AS leads_cancel_target,
+            array_agg(d.status ORDER BY d.created_at ASC) AS statuses,
+            (array_agg(d.evolution_instance_id ORDER BY d.created_at DESC))[1] AS evolution_instance_id,
+            MIN(d.scheduled_at) FILTER (WHERE d.status IN ('draft','scheduled')) AS next_scheduled_at,
+            MAX(d.updated_at) AS last_updated_at
+          FROM public.campaign_dispatches d
+          JOIN public.campaigns c ON c.id = d.campaign_id
+          WHERE d.client_id = $1
+          GROUP BY d.campaign_id, c.name
+        `,
+        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES]
+      );
+
+      const active = [];
+      const ended = [];
+      for (const row of grouped) {
+        (isCampaignActive(row.statuses) ? active : ended).push(row);
+      }
+      const byRecency = (a, b) => new Date(b.last_updated_at) - new Date(a.last_updated_at);
+      active.sort(byRecency);
+      ended.sort(byRecency);
+
+      const offset = (page - 1) * pageSize;
+      const pageRows = scope === "active" ? active : ended.slice(offset, offset + pageSize);
+
+      // Consulta 2 de 3: quantos leads já responderam, por campanha — uma
+      // consulta agrupada com todos os campaign_id de uma vez.
+      const campaignIds = grouped.map((r) => r.campaign_id);
+      let repliedMap = {};
+      if (campaignIds.length > 0) {
+        const { rows: repliedRows } = await pgDatabasePool.query(
+          `
+            SELECT r.campaign_id, COUNT(DISTINCT r.phone)::int AS replied_count
+            FROM public.campaign_dispatch_runs r
+            WHERE r.client_id = $1 AND r.campaign_id = ANY($2::uuid[])
+              AND EXISTS (
+                SELECT 1 FROM public.lead_messages lm
+                WHERE lm.client_id = $1 AND lm.phone = r.phone
+                  AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              )
+            GROUP BY r.campaign_id
+          `,
+          [authorizedClientId, campaignIds]
+        );
+        repliedMap = Object.fromEntries(repliedRows.map((r) => [r.campaign_id, r.replied_count]));
+      }
+
+      // Consulta 3 de 3: os quadrados (um por lote), só das campanhas desta
+      // página — não de todas as campanhas, e não uma consulta por campanha.
+      const pageCampaignIds = pageRows.map((r) => r.campaign_id);
+      const batchesByCampaign = {};
+      if (pageCampaignIds.length > 0) {
+        const { rows: batchRows } = await pgDatabasePool.query(
+          `
+            SELECT id, campaign_id, status, sent_count, failed_count, target_count, scheduled_at, created_at
+            FROM public.campaign_dispatches
+            WHERE client_id = $1 AND campaign_id = ANY($2::uuid[])
+            ORDER BY created_at ASC
+          `,
+          [authorizedClientId, pageCampaignIds]
+        );
+        for (const b of batchRows) {
+          (batchesByCampaign[b.campaign_id] ??= []).push(b);
+        }
+      }
+
+      const tenantSettings = await getLeadClientN8nSettings(authorizedClientId).catch(() => null);
+      const sendWindowConfig = resolveSendWindowConfig(tenantSettings || {});
+      const instances = await getLeadClientEvolutionInstances(authorizedClientId);
+      const instanceById = new Map(instances.map((i) => [i.id, i]));
+
+      const buildRow = (row) => {
+        const instance = row.evolution_instance_id ? instanceById.get(row.evolution_instance_id) : null;
+        const dailyLimit = instance ? resolveChipDailyLimit(instance) : 0;
+        const sentToday = instance ? Number(instance.sent_count_today || 0) : 0;
+        const status = aggregateDispatchStatus(row.statuses);
+        const eta = estimateDispatchCompletion({
+          pendingLeads: row.leads_pending,
+          dailyLimit,
+          sentToday,
+          windowDays: sendWindowConfig.days,
+          windowEnd: sendWindowConfig.end,
+        });
+        return {
+          campaignId: row.campaign_id,
+          campaignName: row.campaign_name,
+          chipName: instance?.name || null,
+          loteCount: row.lote_count,
+          leadsTotal: row.leads_total,
+          leadsPending: row.leads_pending,
+          sentTotal: row.sent_total,
+          failedTotal: row.failed_total,
+          repliedCount: repliedMap[row.campaign_id] || 0,
+          status,
+          statusLabel: AGGREGATE_STATUS_LABELS[status] || null,
+          nextScheduledAt: row.next_scheduled_at,
+          eta,
+          leadsActionable: {
+            pause: row.leads_pause_target || 0,
+            resume: row.leads_resume_target || 0,
+            cancel: row.leads_cancel_target || 0,
+          },
+          batches: (batchesByCampaign[row.campaign_id] || []).map((b) => ({
+            id: b.id,
+            status: b.status,
+            sentCount: b.sent_count,
+            failedCount: b.failed_count,
+            targetCount: b.target_count,
+            scheduledAt: b.scheduled_at,
+            createdAt: b.created_at,
+          })),
+        };
+      };
+
+      // Cartões do topo somam Ativas + Encerradas, período "últimos 30
+      // dias" — sem isso um número que muda de significado conforme a aba
+      // é pior que número nenhum. `grouped` já tem TODAS as campanhas do
+      // tenant (não só a página), então isto é um filtro em memória, não
+      // outra consulta.
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+      const cutoff = Date.now() - THIRTY_DAYS_MS;
+      const recentRows = grouped.filter((r) => r.last_updated_at && new Date(r.last_updated_at).getTime() >= cutoff);
+      const kpiSentTotal = recentRows.reduce((sum, r) => sum + (r.sent_total || 0), 0);
+      const kpiFailedTotal = recentRows.reduce((sum, r) => sum + (r.failed_total || 0), 0);
+      const kpiAttempts = kpiSentTotal + kpiFailedTotal;
+
+      res.json({
+        campaigns: pageRows.map(buildRow),
+        counts: { active: active.length, ended: ended.length },
+        scope,
+        page,
+        pageSize,
+        totalForScope: scope === "active" ? active.length : ended.length,
+        kpis: {
+          periodLabel: "últimos 30 dias",
+          campaigns: recentRows.length,
+          leads: recentRows.reduce((sum, r) => sum + (r.leads_total || 0), 0),
+          sent: kpiSentTotal,
+          deliveryRate: kpiAttempts > 0 ? Math.round((kpiSentTotal / kpiAttempts) * 1000) / 10 : null,
+        },
+      });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_SUMMARY_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // POST /api/campaigns/:campaignId/dispatches/bulk-action — Pausar, Retomar
+  // ou Cancelar o que falta, pra TODOS os lotes pendentes da campanha numa
+  // chamada só. A confirmação na tela usa leadsActionable (acima) pra dizer
+  // quantos leads serão afetados; esta rota devolve o número real depois de
+  // gravar, pro toast confirmar com o que de fato mudou.
+  app.post("/api/campaigns/:campaignId/dispatches/bulk-action", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const campaignId = normalizeString(req.params.campaignId);
+    if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
+    const action = normalizeString(req.body?.action);
+    if (!["pause", "resume", "cancel"].includes(action)) {
+      return sendError(res, 400, "INVALID_ACTION", 'action deve ser "pause", "resume" ou "cancel"');
+    }
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+
+    try {
+      const { data: campaign, error: campaignErr } = await supabase
+        .from("campaigns")
+        .select("id, client_id")
+        .eq("id", campaignId)
+        .single();
+      if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
+      await ensureCampaignDispatchEvolutionInstanceColumn();
+      if (action === "pause" || action === "cancel") {
+        await ensureCampaignDispatchPausedStatusAllowed();
+      }
+
+      let query;
+      let params;
+      if (action === "pause") {
+        query = `
+          UPDATE public.campaign_dispatches
+          SET status = 'paused', updated_at = now()
+          WHERE campaign_id = $1 AND client_id = $2 AND status = ANY($3::text[])
+          RETURNING id, target_count
+        `;
+        params = [campaignId, authorizedClientId, PAUSE_TARGET_STATUSES];
+      } else if (action === "resume") {
+        query = `
+          UPDATE public.campaign_dispatches
+          SET status = 'scheduled',
+              scheduled_at = CASE WHEN scheduled_at IS NULL OR scheduled_at < now() THEN now() ELSE scheduled_at END,
+              updated_at = now()
+          WHERE campaign_id = $1 AND client_id = $2 AND status = ANY($3::text[])
+          RETURNING id, target_count
+        `;
+        params = [campaignId, authorizedClientId, RESUME_TARGET_STATUSES];
+      } else {
+        query = `
+          UPDATE public.campaign_dispatches
+          SET status = 'cancelled', updated_at = now()
+          WHERE campaign_id = $1 AND client_id = $2 AND status = ANY($3::text[])
+          RETURNING id, target_count
+        `;
+        params = [campaignId, authorizedClientId, CANCEL_TARGET_STATUSES];
+      }
+
+      const { rows } = await pgDatabasePool.query(query, params);
+      const affectedLeads = rows.reduce((sum, r) => sum + (Number(r.target_count) || 0), 0);
+
+      res.json({
+        success: true,
+        action,
+        affectedDispatches: rows.length,
+        affectedLeads,
+      });
+    } catch (err) {
+      sendError(res, 500, "DISPATCH_BULK_ACTION_FAILED", err instanceof Error ? err.message : "Failed");
     }
   });
 

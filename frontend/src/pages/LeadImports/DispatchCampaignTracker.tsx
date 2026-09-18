@@ -1,0 +1,358 @@
+// frontend/src/pages/LeadImports/DispatchCampaignTracker.tsx
+//
+// "Uma linha por campanha, lote vira quadrado" — Acompanhar Disparos. Cada
+// campanha é UMA linha (não um lote): progresso somado, faixa de quadrados
+// (um por lote, clicável), e as ações (Pausar/Retomar/Cancelar o que falta)
+// operam em todos os lotes pendentes da campanha numa chamada só. A lixeira
+// por lote saiu daqui — mora dentro do lote aberto (DispatchRecipientsDialog).
+
+import { useState } from "react";
+import {
+  Loader2,
+  Pause,
+  Play,
+  X,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/EmptyState";
+import { cn } from "@/lib/utils";
+import { toast } from "@/components/ui/use-toast";
+import { formatDateTime } from "@/lib/leadImports/spreadsheet";
+import {
+  useDispatchSummary,
+  useCampaignDispatchBulkAction,
+  DISPATCH_AGGREGATE_STATUS_COLORS,
+  DISPATCH_SQUARE_COLORS,
+  type DispatchSummaryCampaign,
+} from "@/hooks/useCampanhas";
+
+const PAGE_SIZE_ENDED = 20;
+
+interface DispatchCampaignTrackerProps {
+  clientId: string | null;
+  onOpenDispatch: (dispatchId: string) => void;
+}
+
+export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCampaignTrackerProps) {
+  const [tab, setTab] = useState<"active" | "ended">("active");
+  const [endedPage, setEndedPage] = useState(1);
+
+  const activeQuery = useDispatchSummary(clientId, "active", 1, 100);
+  const endedQuery = useDispatchSummary(clientId, "ended", endedPage, PAGE_SIZE_ENDED);
+  const current = tab === "active" ? activeQuery : endedQuery;
+
+  const counts = current.data?.counts ?? activeQuery.data?.counts ?? endedQuery.data?.counts ?? { active: 0, ended: 0 };
+  const kpis = current.data?.kpis;
+
+  return (
+    <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
+      <CardHeader className="pb-3 space-y-4">
+        <div>
+          <h3 className="text-base font-bold">Acompanhar Disparos</h3>
+          <p className="text-xs text-muted-foreground">Uma linha por campanha — cada lote é um quadrado na faixa.</p>
+        </div>
+
+        {/* Cartões do topo — somam Ativas + Encerradas, período explícito */}
+        {kpis && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <KpiCard label="Campanhas" value={kpis.campaigns} periodLabel={kpis.periodLabel} />
+            <KpiCard label="Leads" value={kpis.leads} periodLabel={kpis.periodLabel} />
+            <KpiCard label="Enviados" value={kpis.sent} periodLabel={kpis.periodLabel} />
+            <KpiCard
+              label="Taxa de entrega"
+              value={kpis.deliveryRate != null ? `${kpis.deliveryRate}%` : "—"}
+              periodLabel={kpis.periodLabel}
+            />
+          </div>
+        )}
+
+        {/* Abas Ativas / Encerradas, com contagem em cada uma */}
+        <div className="flex items-center gap-2 border-b border-border">
+          <button
+            type="button"
+            onClick={() => setTab("active")}
+            className={cn(
+              "px-3 py-2 text-xs font-bold border-b-2 -mb-px transition-colors",
+              tab === "active" ? "border-indigo-600 text-indigo-600 dark:text-indigo-400" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Ativas ({counts.active})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("ended")}
+            className={cn(
+              "px-3 py-2 text-xs font-bold border-b-2 -mb-px transition-colors",
+              tab === "ended" ? "border-indigo-600 text-indigo-600 dark:text-indigo-400" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Encerradas ({counts.ended})
+          </button>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {current.isLoading ? (
+          <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Carregando campanhas...</div>
+        ) : (current.data?.campaigns.length ?? 0) === 0 ? (
+          <div className="p-8">
+            <EmptyState
+              title={tab === "active" ? "Nenhuma campanha ativa" : "Nenhuma campanha encerrada"}
+              description={
+                tab === "active"
+                  ? "Campanhas agendadas, enviando ou pausadas aparecem aqui."
+                  : "Campanhas concluídas ou canceladas aparecem aqui."
+              }
+            />
+          </div>
+        ) : (
+          <>
+            {current.data!.campaigns.map((c) => (
+              <CampaignRow key={c.campaignId} campaign={c} onOpenDispatch={onOpenDispatch} />
+            ))}
+
+            {tab === "ended" && (current.data?.totalForScope ?? 0) > PAGE_SIZE_ENDED && (
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-muted-foreground">
+                  Página {endedPage} de {Math.ceil((current.data?.totalForScope ?? 0) / PAGE_SIZE_ENDED)}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-7 p-0"
+                    disabled={endedPage <= 1}
+                    onClick={() => setEndedPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-7 p-0"
+                    disabled={endedPage >= Math.ceil((current.data?.totalForScope ?? 0) / PAGE_SIZE_ENDED)}
+                    onClick={() => setEndedPage((p) => p + 1)}
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function KpiCard({ label, value, periodLabel }: { label: string; value: number | string; periodLabel: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-lg font-bold text-foreground">{value}</p>
+      <p className="text-[10px] text-muted-foreground">{periodLabel}</p>
+    </div>
+  );
+}
+
+function CampaignRow({
+  campaign,
+  onOpenDispatch,
+}: {
+  campaign: DispatchSummaryCampaign;
+  onOpenDispatch: (dispatchId: string) => void;
+}) {
+  const bulkAction = useCampaignDispatchBulkAction();
+  const total = campaign.leadsTotal || 1;
+  const sentPct = Math.round((campaign.sentTotal / total) * 100);
+  const failedPct = Math.round((campaign.failedTotal / total) * 100);
+
+  const handleBulkAction = (action: "pause" | "resume" | "cancel") => {
+    bulkAction.mutate(
+      { campaignId: campaign.campaignId, action },
+      {
+        onSuccess: (res) => {
+          const verbo = action === "pause" ? "pausados" : action === "resume" ? "retomados" : "cancelados";
+          toast({
+            title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} ${verbo}`,
+            description: `${res.affectedDispatches} ${res.affectedDispatches === 1 ? "lote afetado" : "lotes afetados"}.`,
+          });
+        },
+        onError: (err: any) => toast({ title: "Erro ao executar ação", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-bold text-foreground">{campaign.campaignName}</p>
+            <Badge variant="outline" className={cn("text-[10px] font-bold", DISPATCH_AGGREGATE_STATUS_COLORS[campaign.status])}>
+              {campaign.statusLabel}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {campaign.chipName || "Sem chip"} · {campaign.leadsTotal} leads · {campaign.loteCount} {campaign.loteCount === 1 ? "lote" : "lotes"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {campaign.leadsActionable.pause > 0 && (
+            <BulkActionButton
+              action="pause"
+              icon={<Pause className="h-3.5 w-3.5 mr-1" />}
+              label="Pausar"
+              leadsCount={campaign.leadsActionable.pause}
+              campaignName={campaign.campaignName}
+              pending={bulkAction.isPending}
+              onConfirm={() => handleBulkAction("pause")}
+              className="border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400"
+            />
+          )}
+          {campaign.leadsActionable.resume > 0 && (
+            <BulkActionButton
+              action="resume"
+              icon={<Play className="h-3.5 w-3.5 mr-1" />}
+              label="Retomar"
+              leadsCount={campaign.leadsActionable.resume}
+              campaignName={campaign.campaignName}
+              pending={bulkAction.isPending}
+              onConfirm={() => handleBulkAction("resume")}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
+            />
+          )}
+          {campaign.leadsActionable.cancel > 0 && (
+            <BulkActionButton
+              action="cancel"
+              icon={<X className="h-3.5 w-3.5 mr-1" />}
+              label="Cancelar o que falta"
+              leadsCount={campaign.leadsActionable.cancel}
+              campaignName={campaign.campaignName}
+              pending={bulkAction.isPending}
+              onConfirm={() => handleBulkAction("cancel")}
+              className="border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-400"
+              destructive
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Barra de progresso: enviado, falhou, restante */}
+      <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden flex">
+        <div className="h-full bg-emerald-500" style={{ width: `${sentPct}%` }} />
+        <div className="h-full bg-rose-500" style={{ width: `${failedPct}%` }} />
+      </div>
+
+      {/* Os quatro números */}
+      <div className="grid grid-cols-4 gap-2 text-center">
+        <NumberStat label="Enviados" value={campaign.sentTotal} className="text-emerald-600" />
+        <NumberStat label="Responderam" value={campaign.repliedCount} className="text-indigo-600" />
+        <NumberStat label="Falharam" value={campaign.failedTotal} className="text-rose-500" />
+        <NumberStat label="Na fila" value={campaign.leadsPending} className="text-slate-500" />
+      </div>
+
+      {/* Próximo envio */}
+      {campaign.eta && (
+        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <Clock className="h-3 w-3" />
+          Termina {campaign.eta.label}
+        </p>
+      )}
+
+      {/* Faixa de quadrados — um por lote, rola dentro do próprio contêiner */}
+      {campaign.batches.length > 0 && (
+        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto overflow-x-hidden pr-1">
+          {campaign.batches.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => onOpenDispatch(b.id)}
+              title={`${b.status} — ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
+              className={cn("h-4 w-4 rounded-sm shrink-0 hover:ring-2 hover:ring-indigo-400 transition-all", DISPATCH_SQUARE_COLORS[b.status])}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NumberStat({ label, value, className }: { label: string; value: number; className?: string }) {
+  return (
+    <div>
+      <p className={cn("text-sm font-bold", className)}>{value}</p>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function BulkActionButton({
+  action,
+  icon,
+  label,
+  leadsCount,
+  campaignName,
+  pending,
+  onConfirm,
+  className,
+  destructive,
+}: {
+  action: "pause" | "resume" | "cancel";
+  icon: React.ReactNode;
+  label: string;
+  leadsCount: number;
+  campaignName: string;
+  pending: boolean;
+  onConfirm: () => void;
+  className?: string;
+  destructive?: boolean;
+}) {
+  const verbo = action === "pause" ? "pausar" : action === "resume" ? "retomar" : "cancelar o que falta de";
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button size="sm" variant={action === "resume" ? "default" : "outline"} disabled={pending} className={cn("h-8 text-xs font-bold rounded-xl px-2.5", className)}>
+          {pending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : icon}
+          {label}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {label} "{campaignName}"?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            Isto vai {verbo} <strong className="text-foreground">{leadsCount} {leadsCount === 1 ? "lead" : "leads"}</strong> em todos os lotes pendentes desta campanha, numa ação só.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className={cn("h-8 text-xs", destructive && "bg-rose-600 hover:bg-rose-700 text-white")}
+          >
+            {label}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}

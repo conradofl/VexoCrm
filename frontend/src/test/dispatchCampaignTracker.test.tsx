@@ -1,0 +1,181 @@
+// frontend/src/test/dispatchCampaignTracker.test.tsx
+//
+// "Uma linha por campanha, lote vira quadrado" — Acompanhar Disparos. Abre
+// em Ativas, com contagem nas duas abas; cada linha soma a campanha; clicar
+// num quadrado abre o lote; a confirmação das ações conta LEADS, não lotes.
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import React from "react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+vi.mock("@/components/ui/use-toast", () => ({
+  toast: vi.fn(),
+}));
+
+const bulkActionMutate = vi.fn();
+const summaryMockFn = vi.fn();
+
+vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
+  const actual: any = await importOriginal();
+  return {
+    ...actual,
+    useDispatchSummary: (_clientId: any, scope: string, page: number, pageSize: number) =>
+      summaryMockFn(scope, page, pageSize),
+    useCampaignDispatchBulkAction: () => ({ mutate: bulkActionMutate, isPending: false }),
+  };
+});
+
+function renderWithProviders(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+function makeBatch(overrides: Partial<any> = {}) {
+  return {
+    id: "batch-1",
+    status: "done",
+    sentCount: 10,
+    failedCount: 0,
+    targetCount: 10,
+    scheduledAt: null,
+    createdAt: "2026-09-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeCampaign(overrides: Partial<any> = {}) {
+  return {
+    campaignId: "camp-1",
+    campaignName: "Campanha Teste",
+    chipName: "GD Gabriel",
+    loteCount: 1,
+    leadsTotal: 100,
+    leadsPending: 20,
+    sentTotal: 70,
+    failedTotal: 10,
+    repliedCount: 15,
+    status: "agendada",
+    statusLabel: "Agendada",
+    nextScheduledAt: null,
+    eta: { isToday: false, weekday: "qui", label: "quinta-feira, por volta das 20h" },
+    leadsActionable: { pause: 0, resume: 0, cancel: 20 },
+    batches: [makeBatch()],
+    ...overrides,
+  };
+}
+
+function setupSummary({ active, ended }: { active: any[]; ended: any[] }) {
+  summaryMockFn.mockImplementation((scope: string) => {
+    const campaigns = scope === "active" ? active : ended;
+    return {
+      isLoading: false,
+      data: {
+        campaigns,
+        counts: { active: active.length, ended: ended.length },
+        scope,
+        page: 1,
+        pageSize: scope === "active" ? 100 : 20,
+        totalForScope: campaigns.length,
+        // Números diferentes dos da linha (70/15/10/20/100), de propósito —
+        // pra não colidir com os testes que leem os números da linha.
+        kpis: { periodLabel: "últimos 30 dias", campaigns: campaigns.length, leads: 12345, sent: 999, deliveryRate: 87.5 },
+      },
+    };
+  });
+}
+
+describe("DispatchCampaignTracker", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("[TESTE OBRIGATÓRIO] abre em Ativas, com a contagem das duas abas visível", async () => {
+    setupSummary({ active: [makeCampaign()], ended: [makeCampaign({ campaignId: "c2" }), makeCampaign({ campaignId: "c3" })] });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    expect(screen.getByText("Ativas (1)")).toBeTruthy();
+    expect(screen.getByText("Encerradas (2)")).toBeTruthy();
+    expect(screen.getByText("Campanha Teste")).toBeTruthy();
+  });
+
+  it("a linha soma a campanha: chip, total de leads, quantidade de lotes, e os quatro números", async () => {
+    setupSummary({ active: [makeCampaign()], ended: [] });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    expect(screen.getByText(/GD Gabriel/)).toBeTruthy();
+    expect(screen.getByText(/100 leads/)).toBeTruthy();
+    expect(screen.getByText("70")).toBeTruthy(); // enviados
+    expect(screen.getByText("15")).toBeTruthy(); // responderam
+    expect(screen.getByText("10")).toBeTruthy(); // falharam
+    expect(screen.getByText("20")).toBeTruthy(); // na fila
+    expect(screen.getByText(/quinta-feira, por volta das 20h/)).toBeTruthy();
+  });
+
+  it("[TESTE OBRIGATÓRIO] clicar num quadrado abre o lote daquele quadrado, reaproveitando a tela de destinatários", async () => {
+    const onOpenDispatch = vi.fn();
+    setupSummary({
+      active: [makeCampaign({ batches: [makeBatch({ id: "lote-especifico" })] })],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={onOpenDispatch} />);
+
+    const squares = screen.getAllByTitle(/done/);
+    fireEvent.click(squares[0]);
+    expect(onOpenDispatch).toHaveBeenCalledWith("lote-especifico");
+  });
+
+  it("[TESTE OBRIGATÓRIO] a confirmação de 'Cancelar o que falta' conta LEADS, não lotes", async () => {
+    setupSummary({
+      active: [makeCampaign({ loteCount: 33, leadsActionable: { pause: 0, resume: 0, cancel: 280 } })],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancelar o que falta/ }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/280 leads/)).toBeTruthy();
+    expect(within(dialog).queryByText(/33 lotes/)).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar o que falta" }));
+    expect(bulkActionMutate).toHaveBeenCalledWith(
+      { campaignId: "camp-1", action: "cancel" },
+      expect.any(Object)
+    );
+  });
+
+  it("botão de ação só aparece quando há leads acionáveis para aquela ação", async () => {
+    setupSummary({
+      active: [makeCampaign({ leadsActionable: { pause: 0, resume: 0, cancel: 0 }, status: "concluida", statusLabel: "Concluída" })],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /Pausar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retomar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Cancelar o que falta/ })).toBeNull();
+  });
+
+  it("[TESTE OBRIGATÓRIO] Encerradas com mais campanhas que o tamanho da página mostra paginação", async () => {
+    const endedCampaigns = Array.from({ length: 25 }, (_, i) => makeCampaign({ campaignId: `ended-${i}`, campaignName: `Encerrada ${i}` }));
+    summaryMockFn.mockImplementation((scope: string) => {
+      if (scope === "active") {
+        return { isLoading: false, data: { campaigns: [], counts: { active: 0, ended: 25 }, scope, page: 1, pageSize: 100, totalForScope: 0, kpis: { periodLabel: "últimos 30 dias", campaigns: 0, leads: 0, sent: 0, deliveryRate: null } } };
+      }
+      return {
+        isLoading: false,
+        data: { campaigns: endedCampaigns.slice(0, 20), counts: { active: 0, ended: 25 }, scope, page: 1, pageSize: 20, totalForScope: 25, kpis: { periodLabel: "últimos 30 dias", campaigns: 25, leads: 0, sent: 0, deliveryRate: null } },
+      };
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("Encerradas (25)"));
+    expect(await screen.findByText(/Página 1 de 2/)).toBeTruthy();
+  });
+});

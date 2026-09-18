@@ -1070,3 +1070,146 @@ export function useRunPendingDispatchLeads() {
     },
   });
 }
+
+// ─── "Uma linha por campanha, lote vira quadrado" ──────────────────────────
+// GET /api/campaigns/dispatch-summary: uma linha agregada por campanha, não
+// por lote. batches[] é a faixa de quadrados (só da página atual).
+
+export type DispatchAggregateStatus = "enviando" | "concluida" | "cancelada" | "agendada" | "pausada";
+
+export const DISPATCH_AGGREGATE_STATUS_LABELS: Record<DispatchAggregateStatus, string> = {
+  enviando: "Enviando",
+  concluida: "Concluída",
+  cancelada: "Cancelada",
+  agendada: "Agendada",
+  pausada: "Pausada",
+};
+
+export const DISPATCH_AGGREGATE_STATUS_COLORS: Record<DispatchAggregateStatus, string> = {
+  enviando: "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400",
+  concluida: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400",
+  cancelada: "border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400",
+  agendada: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400",
+  pausada: "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/30 dark:text-orange-400",
+};
+
+// Cor de cada quadrado da faixa de lotes, por status do LOTE (não da campanha).
+export const DISPATCH_SQUARE_COLORS: Record<CampaignDispatch["status"], string> = {
+  done: "bg-emerald-500",
+  failed: "bg-rose-500",
+  cancelled: "bg-slate-300 dark:bg-slate-700",
+  running: "bg-indigo-500 animate-pulse",
+  paused: "bg-orange-400",
+  draft: "bg-slate-200 dark:bg-slate-800",
+  scheduled: "bg-amber-300",
+  interrupted: "bg-rose-300",
+};
+
+export interface DispatchSummaryBatch {
+  id: string;
+  status: CampaignDispatch["status"];
+  sentCount: number;
+  failedCount: number;
+  targetCount: number;
+  scheduledAt: string | null;
+  createdAt: string;
+}
+
+export interface DispatchSummaryEta {
+  isToday: boolean;
+  weekday: string | null;
+  label: string;
+}
+
+export interface DispatchSummaryCampaign {
+  campaignId: string;
+  campaignName: string;
+  chipName: string | null;
+  loteCount: number;
+  leadsTotal: number;
+  leadsPending: number;
+  sentTotal: number;
+  failedTotal: number;
+  repliedCount: number;
+  status: DispatchAggregateStatus;
+  statusLabel: string;
+  nextScheduledAt: string | null;
+  eta: DispatchSummaryEta | null;
+  leadsActionable: { pause: number; resume: number; cancel: number };
+  batches: DispatchSummaryBatch[];
+}
+
+export interface DispatchSummaryKpis {
+  periodLabel: string;
+  campaigns: number;
+  leads: number;
+  sent: number;
+  deliveryRate: number | null;
+}
+
+export interface DispatchSummaryResponse {
+  campaigns: DispatchSummaryCampaign[];
+  counts: { active: number; ended: number };
+  scope: "active" | "ended";
+  page: number;
+  pageSize: number;
+  totalForScope: number;
+  kpis: DispatchSummaryKpis;
+}
+
+export function useDispatchSummary(
+  clientId: string | null,
+  scope: "active" | "ended",
+  page: number = 1,
+  pageSize: number = 20
+) {
+  const { getIdToken } = useAuth();
+  return useQuery<DispatchSummaryResponse>({
+    queryKey: ["dispatch-summary", clientId, scope, page, pageSize],
+    enabled: !!clientId,
+    staleTime: 15_000,
+    queryFn: async () => {
+      const token = await getIdToken();
+      const params = new URLSearchParams({
+        clientId: clientId!,
+        scope,
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatch-summary?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao buscar o resumo de disparos"));
+      return res.json();
+    },
+  });
+}
+
+export interface DispatchBulkActionResult {
+  success: boolean;
+  action: "pause" | "resume" | "cancel";
+  affectedDispatches: number;
+  affectedLeads: number;
+}
+
+export function useCampaignDispatchBulkAction() {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ campaignId, action }: { campaignId: string; action: "pause" | "resume" | "cancel" }) => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches/bulk-action`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao executar ação em massa"));
+      return res.json() as Promise<DispatchBulkActionResult>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
+      qc.invalidateQueries({ queryKey: ["all-dispatches"] });
+      qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+    },
+  });
+}

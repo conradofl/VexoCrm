@@ -85,7 +85,7 @@ import { MessageSequenceStep } from "./LeadImports/MessageSequenceStep";
 import { SchedulingStep } from "./LeadImports/SchedulingStep";
 import { WhatsAppPreviewPanel } from "./LeadImports/WhatsAppPreviewPanel";
 import { CampaignsTable } from "./LeadImports/CampaignsTable";
-import { DispatchQueueTable } from "./LeadImports/DispatchQueueTable";
+import { DispatchCampaignTracker } from "./LeadImports/DispatchCampaignTracker";
 import { LeadImportAuditReport } from "./LeadImports/LeadImportAuditReport";
 import { ImportViewerDialog } from "./LeadImports/ImportViewerDialog";
 import { DispatchPromptDialog } from "./LeadImports/DispatchPromptDialog";
@@ -1845,19 +1845,11 @@ export default function LeadImports({
         />
       )}
 
-      {/* ⚡ TAB 3: FILA DE ENVIOS (Cross-campaign dispatch executions) */}
+      {/* ⚡ TAB 3: ACOMPANHAR DISPAROS (uma linha por campanha, lote vira quadrado) */}
       {activeTab === "agendamentos" && (
-        <DispatchQueueTable
-          dispatches={dispatches}
-          loadingDispatches={loadingDispatches}
-          refetchDispatches={refetchDispatches}
-          onTriggerDispatchBatch={handleTriggerDispatchBatch}
-          onPauseDispatchBatch={handlePauseDispatchBatch}
-          onDownloadFailedCsv={handleDownloadFailedCsv}
-          onDeleteDispatchBatch={handleDeleteDispatchBatch}
-          onDeleteMultipleDispatches={handleDeleteMultipleDispatches}
-          onPreviewDispatch={(dispId) => setPreviewDispatchId(dispId)}
-          onEditDispatchPrompt={(dispId) => setPromptDispatchId(dispId)}
+        <DispatchCampaignTracker
+          clientId={activeClientId || null}
+          onOpenDispatch={(dispId) => setPreviewDispatchId(dispId)}
         />
       )}
 
@@ -1959,6 +1951,10 @@ export default function LeadImports({
       <DispatchRecipientsDialog
         dispatchId={previewDispatchId}
         onClose={() => setPreviewDispatchId(null)}
+        onDeleted={() => {
+          refetchDispatches();
+          queryClient.invalidateQueries({ queryKey: ["dispatch-summary"] });
+        }}
       />
 
       {/* Modal de Aviso de Disparos em Aberto / Duplicados */}
