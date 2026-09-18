@@ -123,9 +123,83 @@ describe("DispatchCampaignTracker", () => {
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={onOpenDispatch} />);
 
-    const squares = screen.getAllByTitle(/done/);
+    const squares = screen.getAllByTitle(/Lote 1 — enviado/);
     fireEvent.click(squares[0]);
     expect(onOpenDispatch).toHaveBeenCalledWith("lote-especifico");
+  });
+
+  it("[TESTE OBRIGATÓRIO] cada quadrado mostra o número do lote — dá pra dizer 'abre o lote 4', não 'o quarto da esquerda'", async () => {
+    setupSummary({
+      active: [
+        makeCampaign({
+          batches: [
+            makeBatch({ id: "b1", status: "done" }),
+            makeBatch({ id: "b2", status: "done" }),
+            makeBatch({ id: "b3", status: "done" }),
+            makeBatch({ id: "b4", status: "failed" }),
+            makeBatch({ id: "b5", status: "running" }),
+          ],
+        }),
+      ],
+      ended: [],
+    });
+    const onOpenDispatch = vi.fn();
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={onOpenDispatch} />);
+
+    for (const n of [1, 2, 3, 4, 5]) {
+      const square = screen.getByTitle(new RegExp(`^Lote ${n} —`));
+      expect(square.textContent).toBe(String(n));
+    }
+    // clicar no quadrado 4 (falhou) abre exatamente o lote b4, não outro
+    fireEvent.click(screen.getByTitle(/Lote 4 — com falha/));
+    expect(onOpenDispatch).toHaveBeenCalledWith("b4");
+  });
+
+  it("[TESTE OBRIGATÓRIO] lote cancelado dentro de campanha ativa não vira 'na fila' — é o seu próprio estado", async () => {
+    // Cenário real: "Cancelar o que falta" atingiu um lote, mas a campanha
+    // segue ativa (outro lote ainda pendente). O quadrado cancelado nunca
+    // vai sair — contar como "na fila" faria a pessoa contar errado o que
+    // falta de verdade.
+    setupSummary({
+      active: [
+        makeCampaign({
+          status: "agendada",
+          statusLabel: "Agendada",
+          batches: [
+            makeBatch({ id: "b1", status: "cancelled" }),
+            makeBatch({ id: "b2", status: "scheduled" }),
+          ],
+        }),
+      ],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    const cancelado = screen.getByTitle(/^Lote 1 — cancelado/);
+    const naFila = screen.getByTitle(/^Lote 2 — na fila/);
+    expect(cancelado).toBeTruthy();
+    expect(naFila).toBeTruthy();
+    // as duas cores precisam ser diferentes — senão viraria a mesma confusão de novo
+    expect(cancelado.className).not.toBe(naFila.className);
+  });
+
+  it("[TESTE OBRIGATÓRIO] 45 lotes: todos numerados de 1 a 45, sem truncar, sem estourar a página", async () => {
+    const batches = Array.from({ length: 45 }, (_, i) => makeBatch({ id: `lote-${i + 1}`, status: i === 44 ? "running" : "done" }));
+    setupSummary({
+      active: [makeCampaign({ campaignName: "Clínica Estética - Uberlândia", loteCount: 45, leadsTotal: 2031, batches })],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    expect(screen.getByText("45 lotes — clique em um para ver os leads dele")).toBeTruthy();
+    for (const n of [1, 23, 45]) {
+      const square = screen.getByTitle(new RegExp(`^Lote ${n} —`));
+      expect(square.textContent).toBe(String(n));
+    }
+    expect(screen.getAllByTitle(/^Lote \d+ —/).length).toBe(45);
   });
 
   it("[TESTE OBRIGATÓRIO] a confirmação de 'Cancelar o que falta' conta LEADS, não lotes", async () => {

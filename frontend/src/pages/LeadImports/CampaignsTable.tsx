@@ -6,8 +6,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import type { Campaign } from "@/hooks/useCampanhas";
+import { DispatchKpiCards } from "./DispatchKpiCards";
 
 interface CampaignsTableProps {
+  clientId: string | null;
   campaigns: Campaign[];
   loadingCampaigns: boolean;
   onEditCampaign: (campaign: Campaign) => void;
@@ -15,9 +17,12 @@ interface CampaignsTableProps {
   onDeleteCampaign: (campaign: Campaign) => void;
 }
 
-export function CampaignsTable({ campaigns, loadingCampaigns, onEditCampaign, onDuplicateCampaign, onDeleteCampaign }: CampaignsTableProps) {
+export function CampaignsTable({ clientId, campaigns, loadingCampaigns, onEditCampaign, onDuplicateCampaign, onDeleteCampaign }: CampaignsTableProps) {
   return (
-    <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
+    <div className="space-y-4">
+      <DispatchKpiCards clientId={clientId} />
+
+      <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
       <CardHeader className="pb-3 flex flex-row items-center justify-between">
         <div>
           <CardTitle className="text-base font-bold">Campanhas Configuradas</CardTitle>
@@ -84,6 +89,7 @@ export function CampaignsTable({ campaigns, loadingCampaigns, onEditCampaign, on
           </div>
         )}
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }

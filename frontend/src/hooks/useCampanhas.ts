@@ -1093,16 +1093,46 @@ export const DISPATCH_AGGREGATE_STATUS_COLORS: Record<DispatchAggregateStatus, s
   pausada: "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/30 dark:text-orange-400",
 };
 
-// Cor de cada quadrado da faixa de lotes, por status do LOTE (não da campanha).
-export const DISPATCH_SQUARE_COLORS: Record<CampaignDispatch["status"], string> = {
-  done: "bg-emerald-500",
-  failed: "bg-rose-500",
-  cancelled: "bg-slate-300 dark:bg-slate-700",
-  running: "bg-indigo-500 animate-pulse",
-  paused: "bg-orange-400",
-  draft: "bg-slate-200 dark:bg-slate-800",
-  scheduled: "bg-amber-300",
-  interrupted: "bg-rose-300",
+// Cada quadrado da faixa de lotes é um dos 5 estados visuais (a legenda da
+// tela): enviado, com falha, saindo agora, na fila, cancelado. Os 8 status
+// reais do lote colapsam nesses 5 — granularidade fina demais na cor viraria
+// "adivinha o que essa tonalidade quer dizer" em vez de "olha e sabe".
+//
+// Cancelado é o SEU PRÓPRIO estado, nunca "fila": um lote cancelado nunca
+// vai sair — contá-lo junto do que ainda vai ser enviado faz a pessoa contar
+// errado o que falta. Acontece de verdade quando "Cancelar o que falta"
+// atinge um lote dentro de uma campanha que segue ativa (outro lote ainda
+// pendente, ou a campanha é retomada depois).
+export type DispatchSquareState = "enviado" | "falha" | "saindo" | "fila" | "cancelado";
+
+export const DISPATCH_SQUARE_STATE_BY_STATUS: Record<CampaignDispatch["status"], DispatchSquareState> = {
+  done: "enviado",
+  failed: "falha",
+  interrupted: "falha",
+  running: "saindo",
+  draft: "fila",
+  scheduled: "fila",
+  paused: "fila",
+  cancelled: "cancelado",
+};
+
+export const DISPATCH_SQUARE_STATE_LABELS: Record<DispatchSquareState, string> = {
+  enviado: "enviado",
+  falha: "com falha",
+  saindo: "saindo agora",
+  fila: "na fila",
+  cancelado: "cancelado",
+};
+
+// Fundo + cor do número — precisa ler o número de dentro do quadrado, não só
+// reconhecer a cor. Cancelado usa risco no número: mais apagado que "na
+// fila", pra não competir visualmente com o que ainda vai sair.
+export const DISPATCH_SQUARE_STYLES: Record<DispatchSquareState, string> = {
+  enviado: "bg-emerald-500 text-white",
+  falha: "bg-rose-500 text-white",
+  saindo: "bg-indigo-500 text-white animate-pulse",
+  cancelado: "bg-slate-100 text-slate-400 line-through dark:bg-slate-800/60 dark:text-slate-600",
+  fila: "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
 };
 
 export interface DispatchSummaryBatch {

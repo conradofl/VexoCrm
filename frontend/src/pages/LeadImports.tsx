@@ -1837,6 +1837,7 @@ export default function LeadImports({
       {/* 📋 TAB 2: CAMPANHAS CRIADAS (Clean table list) */}
       {activeTab === "enviadas" && (
         <CampaignsTable
+          clientId={activeClientId || null}
           campaigns={campaigns}
           loadingCampaigns={loadingCampaigns}
           onEditCampaign={handleEditCampaign}

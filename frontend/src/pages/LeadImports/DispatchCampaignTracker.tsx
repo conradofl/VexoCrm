@@ -38,9 +38,12 @@ import {
   useDispatchSummary,
   useCampaignDispatchBulkAction,
   DISPATCH_AGGREGATE_STATUS_COLORS,
-  DISPATCH_SQUARE_COLORS,
+  DISPATCH_SQUARE_STATE_BY_STATUS,
+  DISPATCH_SQUARE_STATE_LABELS,
+  DISPATCH_SQUARE_STYLES,
   type DispatchSummaryCampaign,
 } from "@/hooks/useCampanhas";
+import { DispatchKpiCardsView } from "./DispatchKpiCards";
 
 const PAGE_SIZE_ENDED = 20;
 
@@ -69,18 +72,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
         </div>
 
         {/* Cartões do topo — somam Ativas + Encerradas, período explícito */}
-        {kpis && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <KpiCard label="Campanhas" value={kpis.campaigns} periodLabel={kpis.periodLabel} />
-            <KpiCard label="Leads" value={kpis.leads} periodLabel={kpis.periodLabel} />
-            <KpiCard label="Enviados" value={kpis.sent} periodLabel={kpis.periodLabel} />
-            <KpiCard
-              label="Taxa de entrega"
-              value={kpis.deliveryRate != null ? `${kpis.deliveryRate}%` : "—"}
-              periodLabel={kpis.periodLabel}
-            />
-          </div>
-        )}
+        {kpis && <DispatchKpiCardsView kpis={kpis} />}
 
         {/* Abas Ativas / Encerradas, com contagem em cada uma */}
         <div className="flex items-center gap-2 border-b border-border">
@@ -158,16 +150,6 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function KpiCard({ label, value, periodLabel }: { label: string; value: number | string; periodLabel: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-muted/20 p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="text-lg font-bold text-foreground">{value}</p>
-      <p className="text-[10px] text-muted-foreground">{periodLabel}</p>
-    </div>
   );
 }
 
@@ -277,18 +259,33 @@ function CampaignRow({
         </p>
       )}
 
-      {/* Faixa de quadrados — um por lote, rola dentro do próprio contêiner */}
+      {/* Faixa de quadrados — um por lote, numerado, rola dentro do próprio
+          contêiner. O número é o que deixa dizer "abre o lote 4" em vez de
+          "o quarto contando da esquerda". */}
       {campaign.batches.length > 0 && (
-        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto overflow-x-hidden pr-1">
-          {campaign.batches.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => onOpenDispatch(b.id)}
-              title={`${b.status} — ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
-              className={cn("h-4 w-4 rounded-sm shrink-0 hover:ring-2 hover:ring-indigo-400 transition-all", DISPATCH_SQUARE_COLORS[b.status])}
-            />
-          ))}
+        <div>
+          <p className="text-[11px] text-muted-foreground mb-1.5">
+            {campaign.batches.length} {campaign.batches.length === 1 ? "lote" : "lotes"} — clique em um para ver os leads dele
+          </p>
+          <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto overflow-x-hidden pr-1">
+            {campaign.batches.map((b, i) => {
+              const state = DISPATCH_SQUARE_STATE_BY_STATUS[b.status];
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => onOpenDispatch(b.id)}
+                  title={`Lote ${i + 1} — ${DISPATCH_SQUARE_STATE_LABELS[state]} · ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
+                  className={cn(
+                    "h-7 w-7 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all",
+                    DISPATCH_SQUARE_STYLES[state]
+                  )}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
