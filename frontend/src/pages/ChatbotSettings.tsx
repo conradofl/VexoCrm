@@ -30,7 +30,6 @@ export default function ChatbotSettings() {
   const handleSubTabChange = (val: string) => {
     setSubTab(val);
     setSearchParams((prev) => {
-      prev.set("tab", "settings");
       prev.set("subtab", val);
       return prev;
     });
@@ -57,7 +56,7 @@ export default function ChatbotSettings() {
 
   if (loadingClients || !activeClientId || !selectedClient) {
     return (
-      <PageShell title="Configurações do Chatbot SPIN" subtitle="Ajuste parâmetros gerais, templates, prompts e simulações por empresa">
+      <PageShell title="Padrões da empresa" subtitle="O que é da empresa, não de um agente: chatbot padrão, modelos de prompt e o relatório da equipe">
         <div className="flex h-32 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-slate-900 dark:border-slate-100" />
         </div>
@@ -74,7 +73,7 @@ export default function ChatbotSettings() {
   const currentClientId = activeClientId;
 
   return (
-    <PageShell title="Configurações do Chatbot SPIN" subtitle="Ajuste parâmetros gerais, templates, prompts e simulações por empresa" spacing="space-y-6">
+    <PageShell title="Padrões da empresa" subtitle="O que é da empresa, não de um agente: chatbot padrão, modelos de prompt e o relatório da equipe" spacing="space-y-6">
       {/* Empresa vem do seletor do cabecalho. O seletor proprio que existia aqui
           listava TODOS os tenants (Infinie, Outlier, Vexo...) mesmo com a
           Geracao Digital escolhida no topo — dois controles para a mesma coisa,

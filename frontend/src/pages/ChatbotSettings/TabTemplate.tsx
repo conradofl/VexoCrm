@@ -266,6 +266,9 @@ export function TabTemplate({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-6 max-w-4xl">
+      <p className="text-xs text-slate-500 rounded-md border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-800 dark:bg-slate-900/40">
+        Modelos servem para criar agentes novos. Agente já criado não é afetado por mudanças aqui.
+      </p>
       <div className="flex justify-end">
         <Button size="sm" onClick={() => setEditing(emptyTemplate(clientId))}>
           <Plus className="size-3.5 mr-1.5" />Novo template

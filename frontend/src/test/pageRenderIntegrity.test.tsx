@@ -137,20 +137,29 @@ describe("Integridade de Renderização de Páginas e Verificação de Símbolos
     expect(screen.getByText(/Gera o briefing enviado ao SDR/i)).toBeTruthy();
   });
 
-  it("ChatbotSettings renderiza na subaba prompts sem quebrar por ReferenceError", async () => {
+  it("ChatbotSettings (Padrões da empresa) renderiza na subaba prompts sem quebrar por ReferenceError", async () => {
     const { default: ChatbotSettings } = await import("@/pages/ChatbotSettings");
-    
-    renderWithProviders(<ChatbotSettings />, { route: "/crm/agente?tab=settings&subtab=prompts" });
+
+    renderWithProviders(<ChatbotSettings />, { route: "/crm/padroes-da-empresa?subtab=prompts" });
 
     // Confirma que a tela de ChatbotSettings monta a aba de prompts com sucesso
     expect(screen.getByText(/Prompt Padrão \(SPIN\)/i)).toBeTruthy();
   });
 
-  it("AgenteIA monta todas as abas e renderiza sem erros de escopo", async () => {
+  it("[TESTE OBRIGATÓRIO] AgenteIA mostra exatamente duas abas no topo (Agentes, Base de Conhecimento), não quatro", async () => {
     const { default: AgenteIA } = await import("@/pages/AgenteIA");
 
-    renderWithProviders(<AgenteIA />, { route: "/crm/agente?tab=settings" });
-    expect(screen.getAllByText(/Configurações/i).length).toBeGreaterThan(0);
+    renderWithProviders(<AgenteIA />, { route: "/crm/agente" });
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.length).toBe(2);
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      expect.stringMatching(/Agentes/),
+      expect.stringMatching(/Base de Conhecimento/),
+    ]);
+    expect(screen.queryByText(/^Operação$/)).toBeNull();
+    expect(screen.queryByText(/^Configurações$/)).toBeNull();
+    expect(screen.getByText(/Padrões da empresa/)).toBeTruthy();
   });
 
   it("TenantScopeBoundary desmonta e remonta sem erros ao trocar de tenantId", () => {
@@ -174,9 +183,22 @@ describe("Integridade de Renderização de Páginas e Verificação de Símbolos
     const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
 
     renderWithProviders(<InboundAgentConfig />);
-    // "Um agente por chip" (Commit 4): a tela virou uma por agente — abas
-    // renomeadas (Identidade/Prompt/Modelo/...), "Configuração Geral" saiu.
-    expect(screen.getAllByText(/Agente de Atendimento|Agente Inbound|Identidade|Assistentes Inbound/i).length).toBeGreaterThan(0);
+    // "Uma tela, um agente, de cima para baixo": lista de agentes + os seis
+    // passos numerados de cima para baixo, sem abas internas.
+    expect(screen.getAllByText(/Quem é este agente|Como fala|Agentes deste tenant/i).length).toBeGreaterThan(0);
+  });
+
+  it("[TESTE OBRIGATÓRIO] InboundAgentConfig não tem abas internas — os seis passos coexistem na mesma rolagem", async () => {
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+
+    renderWithProviders(<InboundAgentConfig />);
+    expect(screen.queryAllByRole("tab").length).toBe(0);
+    expect(screen.getByText(/Quem é este agente/)).toBeTruthy();
+    expect(screen.getByText(/Como fala/)).toBeTruthy();
+    expect(screen.getByText(/O que ele precisa descobrir/)).toBeTruthy();
+    expect(screen.getByText(/O que ele sabe/)).toBeTruthy();
+    expect(screen.getByText(/Quando ele chama gente/)).toBeTruthy();
+    expect(screen.getByText(/Testar antes de soltar/)).toBeTruthy();
   });
 
   it("Relatorios renderiza envolvido em TenantScopeBoundary sem erros", async () => {

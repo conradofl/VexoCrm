@@ -1,9 +1,7 @@
 import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bot, KanbanSquare, Settings2, BookOpen, Database } from "lucide-react";
-import ChatbotKanban from "./ChatbotKanban";
-import ChatbotSettings from "./ChatbotSettings";
+import { Bot, BookOpen, Database, Building2 } from "lucide-react";
 import InboundAgentConfig from "./InboundAgentConfig";
 import ChatbotDocs from "./ChatbotDocs";
 import { KnowledgeBaseRagTab } from "@/components/agente/KnowledgeBaseRagTab";
@@ -29,13 +27,12 @@ export default function AgenteIA() {
     hasFeatureUnlocked(selectedClient, "agente_rag");
 
   const hasAgente = isInternalUser;
-  const hasSettings = isInternalUser;
   const isVexoAdmTenant = selectedClient?.id === "vexo_adm" || selectedClient?.id === "vexo";
   const hasDocs = isAdminUser && isVexoAdmTenant;
 
   const rawTab = searchParams.get("tab");
-  const validTabs = ["operacao", "settings", "inbound", "rag", ...(hasDocs ? ["docs"] : [])];
-  const activeTab = validTabs.includes(rawTab || "") ? (rawTab as string) : "operacao";
+  const validTabs = ["agentes", "rag", ...(hasDocs ? ["docs"] : [])];
+  const activeTab = validTabs.includes(rawTab || "") ? (rawTab as string) : "agentes";
 
   const handleTabChange = (val: string) => {
     setSearchParams((prev) => {
@@ -46,7 +43,7 @@ export default function AgenteIA() {
 
   if (!isInternalUser) {
     return (
-      <PageShell title="Agente IA" subtitle="Gerencie triagem, prompts, assistentes e monitoramento em tempo real">
+      <PageShell title="Agente IA" subtitle="Gerencie os agentes que atendem cada número de WhatsApp">
         <div className="p-8 text-center text-muted-foreground">
           Você não possui permissão para acessar o ecossistema do Agente IA.
         </div>
@@ -56,7 +53,7 @@ export default function AgenteIA() {
 
   if (!isAgenteUnlocked) {
     return (
-      <PageShell title="Agente IA" subtitle="Gerencie triagem, prompts, assistentes e monitoramento em tempo real">
+      <PageShell title="Agente IA" subtitle="Gerencie os agentes que atendem cada número de WhatsApp">
         <div className="max-w-2xl mx-auto py-8">
           <UpsellCard
             title="Agente IA & Atendimento Automatizado"
@@ -76,34 +73,31 @@ export default function AgenteIA() {
   }
 
   return (
-    <PageShell title="Agente IA" subtitle="Gerencie triagem, prompts, assistentes e monitoramento em tempo real">
+    <PageShell title="Agente IA" subtitle="Gerencie os agentes que atendem cada número de WhatsApp">
       <PageShellContext.Provider value={true}>
         <div className="w-full space-y-6">
+          <div className="flex justify-end">
+            <Link
+              to="/crm/padroes-da-empresa"
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Building2 className="h-3.5 w-3.5" />
+              Padrões da empresa
+            </Link>
+          </div>
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <div className="border-b border-slate-200 dark:border-white/10 pb-2 overflow-x-auto">
               <TabsList className="flex w-max min-w-full bg-muted border border-border h-10 p-1">
                 {hasAgente && (
-                  <TabsTrigger value="operacao" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                    <KanbanSquare className="h-3.5 w-3.5 mr-1.5" />
-                    Operação
-                  </TabsTrigger>
-                )}
-                {hasSettings && (
-                  <TabsTrigger value="settings" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
-                    <Settings2 className="h-3.5 w-3.5 mr-1.5" />
-                    Configurações
-                  </TabsTrigger>
-                )}
-                {hasAgente && (
-                  <TabsTrigger value="inbound" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                  <TabsTrigger value="agentes" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
                     <Bot className="h-3.5 w-3.5 mr-1.5" />
-                    Inbound (1 Chip)
+                    Agentes
                   </TabsTrigger>
                 )}
                 {hasAgente && (
                   <TabsTrigger value="rag" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
                     <Database className="h-3.5 w-3.5 mr-1.5 text-cyan-500" />
-                    Base RAG (Arquivos)
+                    Base de Conhecimento
                   </TabsTrigger>
                 )}
                 {hasDocs && (
@@ -116,27 +110,7 @@ export default function AgenteIA() {
             </div>
 
             {hasAgente && (
-              <TabsContent value="operacao" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-                <ErrorBoundary>
-                  <TenantScopeBoundary tenantId={activeClientId}>
-                    <ChatbotKanban />
-                  </TenantScopeBoundary>
-                </ErrorBoundary>
-              </TabsContent>
-            )}
-
-            {hasSettings && (
-              <TabsContent value="settings" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
-                <ErrorBoundary>
-                  <TenantScopeBoundary tenantId={activeClientId}>
-                    <ChatbotSettings />
-                  </TenantScopeBoundary>
-                </ErrorBoundary>
-              </TabsContent>
-            )}
-
-            {hasAgente && (
-              <TabsContent value="inbound" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+              <TabsContent value="agentes" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
                 <ErrorBoundary>
                   <TenantScopeBoundary tenantId={activeClientId}>
                     <InboundAgentConfig />

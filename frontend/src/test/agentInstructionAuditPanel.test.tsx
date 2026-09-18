@@ -1,9 +1,9 @@
 // frontend/src/test/agentInstructionAuditPanel.test.tsx
 //
-// AgentInstructionAuditPanel — "Um agente, um dono para cada texto".
-// Commit 1: painel só lê e mostra; conflito nomeia as duas origens.
-// Commit 2: "Consolidar neste agente" mostra prévia antes de confirmar, e um
-// agente já consolidado vira a mensagem "é autônomo" — sem botão de novo.
+// AgentInstructionAuditPanel — "Uma tela, um agente": o painel virou um
+// aviso condicional, não mais um diagnóstico permanente. Sem conflito de
+// Coleta (ou já consolidado) → não renderiza nada. Com conflito → mostra a
+// origem de cada lado e "Resolver agora" abre a mesma prévia de sempre.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
@@ -55,12 +55,12 @@ describe("AgentInstructionAuditPanel", () => {
     const { AgentInstructionAuditPanel } = await import("@/components/agente/AgentInstructionAuditPanel");
     render(<AgentInstructionAuditPanel agentId="agente-1" />);
 
+    expect(screen.getByText(/Duas fontes competem neste agente/)).toBeTruthy();
     expect(screen.getByText(/"telefone" é pedido pelo template "generico"/)).toBeTruthy();
     expect(screen.getByText(/está na Coleta do agente mas não é pedido/)).toBeTruthy();
-    expect(screen.getByText(/Fonte: prompt padrão do tenant/)).toBeTruthy();
   });
 
-  it("sem conflito: painel diz explicitamente que as listas batem", async () => {
+  it("[TESTE OBRIGATÓRIO] sem conflito: não renderiza nada (nem card, nem 'sem conflito')", async () => {
     mockHooks({
       data: {
         agentId: "agente-1",
@@ -76,13 +76,33 @@ describe("AgentInstructionAuditPanel", () => {
     });
 
     const { AgentInstructionAuditPanel } = await import("@/components/agente/AgentInstructionAuditPanel");
-    render(<AgentInstructionAuditPanel agentId="agente-1" />);
+    const { container } = render(<AgentInstructionAuditPanel agentId="agente-1" />);
 
-    expect(screen.getByText(/Sem conflito/)).toBeTruthy();
-    expect(screen.getByText(/Fonte: este agente/)).toBeTruthy();
+    expect(container.innerHTML).toBe("");
   });
 
-  it("[TESTE OBRIGATÓRIO] não consolidado: botão abre prévia nomeando o campo que a Coleta vai ganhar, e só chama a mutação ao confirmar", async () => {
+  it("[TESTE OBRIGATÓRIO] agente consolidado: não renderiza nada, mesmo se o audit ainda trouxer conflitos antigos", async () => {
+    mockHooks({
+      data: {
+        agentId: "agente-1",
+        templateKeyEmUso: "generico",
+        consolidated: true,
+        consolidatedAt: "2026-09-17T00:00:00Z",
+        audit: {
+          prompt: { source: "agente", value: "Prompt do agente", tenantPromptText: null },
+          collection: { agentFields: [{ name: "orcamento", required: true }], templateFields: [{ name: "telefone", required: false }], templateKey: "generico", conflicts: [{ field: "telefone", emAgente: false, emTemplate: true, origemTemplate: "generico", motivo: "..." }] },
+          model: { source: "agente", value: "openai/gpt-oss-120b" },
+        },
+      },
+    });
+
+    const { AgentInstructionAuditPanel } = await import("@/components/agente/AgentInstructionAuditPanel");
+    const { container } = render(<AgentInstructionAuditPanel agentId="agente-1" />);
+
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("[TESTE OBRIGATÓRIO] não consolidado, com conflito: 'Resolver agora' abre prévia nomeando o campo que a Coleta vai ganhar, e só chama a mutação ao confirmar", async () => {
     const consolidateMutate = vi.fn();
     mockHooks({
       consolidateMutate,
@@ -107,7 +127,7 @@ describe("AgentInstructionAuditPanel", () => {
     const { AgentInstructionAuditPanel } = await import("@/components/agente/AgentInstructionAuditPanel");
     render(<AgentInstructionAuditPanel agentId="agente-1" />);
 
-    fireEvent.click(screen.getByText("Consolidar neste agente"));
+    fireEvent.click(screen.getByText(/Resolver agora/));
     expect(consolidateMutate).not.toHaveBeenCalled();
 
     const dialog = await screen.findByRole("alertdialog");
@@ -118,7 +138,7 @@ describe("AgentInstructionAuditPanel", () => {
     expect(consolidateMutate).toHaveBeenCalledTimes(1);
   });
 
-  it("[TESTE OBRIGATÓRIO] prompt efetivo vazio: botão desabilitado, com o porquê escrito na tela, e clicar não abre o diálogo nem consolida", async () => {
+  it("[TESTE OBRIGATÓRIO] conflito + prompt efetivo vazio: 'Resolver agora' desabilitado, com o porquê escrito na tela, e clicar não abre o diálogo nem consolida", async () => {
     const consolidateMutate = vi.fn();
     mockHooks({
       consolidateMutate,
@@ -129,7 +149,12 @@ describe("AgentInstructionAuditPanel", () => {
         consolidatedAt: null,
         audit: {
           prompt: { source: "nenhum", value: null, tenantPromptText: null },
-          collection: { agentFields: [], templateFields: [], templateKey: "generico", conflicts: [] },
+          collection: {
+            agentFields: [],
+            templateFields: [{ name: "telefone", required: false }],
+            templateKey: "generico",
+            conflicts: [{ field: "telefone", emAgente: false, emTemplate: true, origemTemplate: "generico", motivo: "..." }],
+          },
           model: { source: "padrão do sistema", value: "openai/gpt-oss-120b" },
         },
       },
@@ -140,34 +165,11 @@ describe("AgentInstructionAuditPanel", () => {
 
     expect(screen.getByText(/Escreva o prompt deste agente antes de consolidar/)).toBeTruthy();
 
-    const botao = screen.getByRole("button", { name: /Consolidar neste agente/ }) as HTMLButtonElement;
+    const botao = screen.getByRole("button", { name: /Resolver agora/ }) as HTMLButtonElement;
     expect(botao.disabled).toBe(true);
 
     fireEvent.click(botao);
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(consolidateMutate).not.toHaveBeenCalled();
-  });
-
-  it("[TESTE OBRIGATÓRIO] agente consolidado: mostra 'é autônomo', sem botão de consolidar", async () => {
-    mockHooks({
-      data: {
-        agentId: "agente-1",
-        templateKeyEmUso: "generico",
-        consolidated: true,
-        consolidatedAt: "2026-09-17T00:00:00Z",
-        audit: {
-          prompt: { source: "agente", value: "Prompt do agente", tenantPromptText: null },
-          collection: { agentFields: [{ name: "orcamento", required: true }, { name: "telefone", required: false }], templateFields: [], templateKey: null, conflicts: [] },
-          model: { source: "agente", value: "openai/gpt-oss-120b" },
-        },
-      },
-    });
-
-    const { AgentInstructionAuditPanel } = await import("@/components/agente/AgentInstructionAuditPanel");
-    render(<AgentInstructionAuditPanel agentId="agente-1" />);
-
-    expect(screen.getByText(/Este agente é autônomo/)).toBeTruthy();
-    expect(screen.getByText(/Nada fora daqui o instrui/)).toBeTruthy();
-    expect(screen.queryByText("Consolidar neste agente")).toBeNull();
   });
 });

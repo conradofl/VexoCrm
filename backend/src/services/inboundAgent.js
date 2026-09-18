@@ -30,75 +30,29 @@ export function normalizeSpinFields(rawSpinFields) {
     : [];
 }
 
-/**
- * Resolve a configuração inbound do número que recebeu a mensagem.
- *
- * @returns {Promise<null | {
- *   companyId: string, instanceName: string|null, enabled: boolean,
- *   model: string|null, prompt: string|null,
- *   spinFields: Array<{name: string, required: boolean}>,
- *   webhookUrl: string|null, sdrPhone: string|null, sdrTransferEnabled: boolean,
- *   instructionsConsolidated: boolean, agentKind: "atendimento"|"campanha"
- * }>} null quando o tenant não tem nenhuma linha configurada.
- */
-export async function resolveInboundAgentConfig({ supabase, clientId, instanceName }) {
-  if (!supabase || !clientId) return null;
+const INBOUND_AGENT_COLUMNS =
+  "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, agent_kind";
 
-  const { data, error } = await supabase
-    .from("followup_companies")
-    .select(
-      "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, agent_kind"
-    )
-    .eq("tenant_id", clientId);
+// Um agente pode atender VÁRIOS números (evolution_instances). A coluna antiga
+// entra como fallback para linhas anteriores à migration.
+function instancesOfRow(row) {
+  const list = Array.isArray(row?.evolution_instances) ? row.evolution_instances : [];
+  const nomes = list.map(normalize).filter(Boolean);
+  const legado = normalize(row?.evolution_instance);
+  if (legado && !nomes.includes(legado)) nomes.push(legado);
+  return nomes;
+}
 
-  if (error || !Array.isArray(data) || data.length === 0) {
-    if (error) console.warn("[inbound-agent] falha ao ler followup_companies:", error.message);
-    return null;
-  }
-
-  let tenantInstances = [];
-  try {
-    tenantInstances = await getLeadClientEvolutionInstances(clientId);
-  } catch {
-    tenantInstances = [];
-  }
-
-  const resolveAliases = (instValue) => expandChipAliases(instValue, tenantInstances);
-
-  const wanted = normalize(instanceName);
-  const wantedAliases = wanted ? resolveAliases(wanted) : [];
-
-  // Um agente pode atender VÁRIOS números (evolution_instances). A coluna antiga
-  // entra como fallback para linhas anteriores à migration.
-  const instancesOf = (row) => {
-    const list = Array.isArray(row?.evolution_instances) ? row.evolution_instances : [];
-    const nomes = list.map(normalize).filter(Boolean);
-    const legado = normalize(row?.evolution_instance);
-    if (legado && !nomes.includes(legado)) nomes.push(legado);
-    return nomes;
-  };
-
-  // Casa pelo nome da instância ou apelidos resolvidos (slug da URL, ID ou display name).
-  // Sem casamento exato, só aceita uma linha genérica se ela for a única do tenant.
-  const candidatas = wanted
-    ? data.filter((row) => {
-        const rowAliases = instancesOf(row).flatMap(resolveAliases);
-        return rowAliases.some((alias) => wantedAliases.includes(alias));
-      })
-    : [];
-  const byInstance =
-    candidatas.find((row) => row.inbound_enabled === true) ||
-    candidatas[0] ||
-    (data.length === 1 ? data[0] : null);
-  if (!byInstance) return null;
-  const row = byInstance;
-
+// Uma única função monta o objeto de configuração, não importa se a linha foi
+// achada pelo número (webhook) ou pelo id do agente (simulador testando o
+// agente antes de existir chip) — duas montagens divergiriam na primeira
+// coluna nova que alguém esquecesse de replicar na outra.
+function buildInboundAgentConfig(row) {
   const spinFields = normalizeSpinFields(row.inbound_spin_fields);
-
   return {
     companyId: row.id,
     instanceName: normalize(row.evolution_instance) || null,
-    instanceNames: instancesOf(row),
+    instanceNames: instancesOfRow(row),
     role: row.inbound_role === "qualificador" ? "qualificador" : "atendimento",
     enabled: row.inbound_enabled === true,
     model: normalize(row.inbound_model) || null,
@@ -118,6 +72,75 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
     // atendimento (atender ou qualificar).
     agentKind: row.agent_kind === "campanha" ? "campanha" : "atendimento",
   };
+}
+
+/**
+ * Resolve a configuração inbound do número que recebeu a mensagem, OU do
+ * agente pelo próprio id (simulador: testar o agente antes de ter chip).
+ *
+ * Com `agentId`: busca direta, escopada por tenant_id — fora do escopo ou
+ * inexistente, null (o chamador decide 404). Ignora `instanceName` quando
+ * `agentId` é passado.
+ *
+ * @returns {Promise<null | {
+ *   companyId: string, instanceName: string|null, enabled: boolean,
+ *   model: string|null, prompt: string|null,
+ *   spinFields: Array<{name: string, required: boolean}>,
+ *   webhookUrl: string|null, sdrPhone: string|null, sdrTransferEnabled: boolean,
+ *   instructionsConsolidated: boolean, agentKind: "atendimento"|"campanha"
+ * }>} null quando o tenant não tem nenhuma linha configurada.
+ */
+export async function resolveInboundAgentConfig({ supabase, clientId, instanceName, agentId }) {
+  if (!supabase || !clientId) return null;
+
+  if (normalize(agentId)) {
+    const { data: row, error } = await supabase
+      .from("followup_companies")
+      .select(INBOUND_AGENT_COLUMNS)
+      .eq("id", agentId)
+      .eq("tenant_id", clientId)
+      .maybeSingle();
+    if (error || !row) return null;
+    return buildInboundAgentConfig(row);
+  }
+
+  const { data, error } = await supabase
+    .from("followup_companies")
+    .select(INBOUND_AGENT_COLUMNS)
+    .eq("tenant_id", clientId);
+
+  if (error || !Array.isArray(data) || data.length === 0) {
+    if (error) console.warn("[inbound-agent] falha ao ler followup_companies:", error.message);
+    return null;
+  }
+
+  let tenantInstances = [];
+  try {
+    tenantInstances = await getLeadClientEvolutionInstances(clientId);
+  } catch {
+    tenantInstances = [];
+  }
+
+  const resolveAliases = (instValue) => expandChipAliases(instValue, tenantInstances);
+
+  const wanted = normalize(instanceName);
+  const wantedAliases = wanted ? resolveAliases(wanted) : [];
+
+  // Casa pelo nome da instância ou apelidos resolvidos (slug da URL, ID ou display name).
+  // Sem casamento exato, só aceita uma linha genérica se ela for a única do tenant.
+  const candidatas = wanted
+    ? data.filter((row) => {
+        const rowAliases = instancesOfRow(row).flatMap(resolveAliases);
+        return rowAliases.some((alias) => wantedAliases.includes(alias));
+      })
+    : [];
+  const byInstance =
+    candidatas.find((row) => row.inbound_enabled === true) ||
+    candidatas[0] ||
+    (data.length === 1 ? data[0] : null);
+  if (!byInstance) return null;
+
+  return buildInboundAgentConfig(byInstance);
 }
 
 /**

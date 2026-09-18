@@ -46,6 +46,22 @@ describe("AgentKnowledgeBaseSection", () => {
     vi.unstubAllEnvs();
   });
 
+  it("[TESTE OBRIGATÓRIO] documento herdado (da empresa) não pode ser apagado daqui — só o deste agente pode", async () => {
+    vi.stubEnv("VITE_RAG_TAB_LIVE", "true");
+    mockHooks([
+      { id: "doc-1", filename: "tabela_precos.pdf", mimeType: "application/pdf", sizeBytes: 1024, status: "ready", errorLog: null, chunkCount: 5, embeddingProvider: "gemini", embeddingModel: "x", embeddingDim: 768, companyId: "agente-1", createdAt: "2026-09-17T00:00:00Z", updatedAt: "2026-09-17T00:00:00Z", needsReindex: false },
+      { id: "doc-2", filename: "politica_geral.pdf", mimeType: "application/pdf", sizeBytes: 2048, status: "ready", errorLog: null, chunkCount: 3, embeddingProvider: "gemini", embeddingModel: "x", embeddingDim: 768, companyId: null, createdAt: "2026-09-17T00:00:00Z", updatedAt: "2026-09-17T00:00:00Z", needsReindex: false },
+    ]);
+
+    const { AgentKnowledgeBaseSection } = await import("@/components/agente/AgentKnowledgeBaseSection");
+    render(<AgentKnowledgeBaseSection clientId="geracao-digital" companyId="agente-1" />);
+
+    expect(screen.getByTitle("Apagar")).toBeTruthy();
+    expect(screen.getByTitle("Documento da empresa — apague em Padrões da empresa")).toBeTruthy();
+
+    vi.unstubAllEnvs();
+  });
+
   it("desligado (RAG_LIVE ausente): mostra 'Em breve', upload desabilitado", async () => {
     mockHooks([]);
     const { AgentKnowledgeBaseSection } = await import("@/components/agente/AgentKnowledgeBaseSection");

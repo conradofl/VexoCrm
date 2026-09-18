@@ -13,6 +13,7 @@ import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
+import { useFupCompanies } from "@/hooks/useFollowupAdmin";
 import { useChatbotTemplates, useBuiltinTemplates, useLlmModels } from "@/hooks/useChatbotTemplates";
 import { buildWebhookUrl } from "@/lib/chatbotSettings/helpers";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -300,6 +301,23 @@ export function TabGeral({ clientId, clientName, client }: { clientId: string; c
     chipsDoTenant.length > 0 &&
     !chipsDoTenant.some((chip: any) => isChipMarcado(chip));
 
+  // "Padrões da empresa": este chatbot é o destino de todo chip que não tem
+  // agente próprio (a aba Agentes). Sem esta lista, ninguém sabia quais
+  // números estão nessa situação sem ir contar um a um.
+  const { data: fupCompanies = [] } = useFupCompanies(clientId);
+  const chipsComAgente = new Set<string>();
+  fupCompanies.forEach((c: any) => {
+    const lista = Array.isArray(c.evolution_instances) && c.evolution_instances.length > 0
+      ? c.evolution_instances
+      : (c.evolution_instance ? [c.evolution_instance] : []);
+    lista.forEach((v: string) => v && chipsComAgente.add(v));
+  });
+  const chipTemAgente = (chip: any) => {
+    const inst = nomeInstancia(chip);
+    return chipsComAgente.has(inst) || (chip.id && chipsComAgente.has(chip.id)) || (chip.name && chipsComAgente.has(chip.name));
+  };
+  const chipsSemAgente = chipsDoTenant.filter((chip: any) => !chipTemAgente(chip));
+
   return (
     <div className="space-y-5 max-w-2xl">
       {/* Status */}
@@ -397,6 +415,16 @@ export function TabGeral({ clientId, clientName, client }: { clientId: string; c
               <p className="text-[11px] text-slate-500">
                 Sem nenhum marcado, o chatbot atende qualquer chip que não esteja em um agente inbound.
               </p>
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5 text-[11px] dark:border-slate-800 dark:bg-slate-900/40">
+                {chipsSemAgente.length === 0 ? (
+                  <span className="text-slate-500">Todo chip conectado já tem um agente na aba Agentes.</span>
+                ) : (
+                  <span className="text-slate-600 dark:text-slate-300">
+                    <strong>{chipsSemAgente.length}</strong> {chipsSemAgente.length === 1 ? "chip sem agente" : "chips sem agente"} — é este chatbot padrão que responde por{" "}
+                    {chipsSemAgente.map((c: any) => c.name).join(", ")}.
+                  </span>
+                )}
+              </div>
             </div>
           )}
 

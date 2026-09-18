@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Database, FileText, Trash2, RefreshCw, FileUp, AlertTriangle, XCircle, Loader2 } from "lucide-react";
+import { Database, FileText, Trash2, RefreshCw, FileUp, AlertTriangle, XCircle, Loader2, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -93,7 +93,7 @@ export function AgentKnowledgeBaseSection({ clientId, companyId }: { clientId: s
             <div>
               <CardTitle className="text-base font-bold">Base de Conhecimento deste Agente</CardTitle>
               <CardDescription className="text-xs">
-                Documentos amarrados aqui só entram nas respostas deste agente. Documentos sem agente (tenant inteiro) também aparecem, marcados abaixo.
+                Documentos amarrados aqui só entram nas respostas deste agente. Documentos da empresa (herdados, sem agente próprio) também aparecem — não podem ser apagados daqui.
               </CardDescription>
             </div>
           </div>
@@ -169,27 +169,33 @@ export function AgentKnowledgeBaseSection({ clientId, companyId }: { clientId: s
                       <RefreshCw className="w-3.5 h-3.5" />
                     </Button>
                   )}
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button size="sm" variant="ghost" disabled={deletingId === doc.id} className="h-7 w-7 p-0 text-muted-foreground hover:text-rose-500" title="Apagar">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Apagar "{doc.filename}"?</AlertDialogTitle>
-                        <AlertDialogDescription className="text-xs text-muted-foreground">
-                          Apaga o arquivo, os trechos e o registro. {doTenantInteiro ? "Vale para o tenant inteiro — outros agentes deixam de enxergar também." : "Só este agente é afetado."} Não pode ser desfeito.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleDelete(doc)} className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white">
-                          Apagar
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                  {doTenantInteiro ? (
+                    <Button size="sm" variant="ghost" disabled className="h-7 w-7 p-0 text-muted-foreground/40 cursor-not-allowed" title="Documento da empresa — apague em Padrões da empresa">
+                      <Lock className="w-3.5 h-3.5" />
+                    </Button>
+                  ) : (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="ghost" disabled={deletingId === doc.id} className="h-7 w-7 p-0 text-muted-foreground hover:text-rose-500" title="Apagar">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Apagar "{doc.filename}"?</AlertDialogTitle>
+                          <AlertDialogDescription className="text-xs text-muted-foreground">
+                            Apaga o arquivo, os trechos e o registro. Só este agente é afetado. Não pode ser desfeito.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleDelete(doc)} className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white">
+                            Apagar
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
                 </div>
               </div>
             );

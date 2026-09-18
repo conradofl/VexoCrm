@@ -3438,14 +3438,26 @@ export function registerChatbotRoutes(app, deps) {
     // numero (prompt, modelo e SPIN da tela Inbound). Sem ele, testa o chatbot
     // do tenant, como antes.
     const instanceName = normalizeString(body.instanceName ?? body.instance) || null;
+    // agentId: testa o agente pelo próprio id, sem precisar de chip vinculado
+    // ("Testar antes de soltar" — criar, escrever prompt, testar, só então
+    // amarrar ao chip). Tem prioridade sobre instanceName. Ao contrário de
+    // instanceName (que sem casamento cai pro chatbot do tenant em silêncio),
+    // um agentId que não resolve é erro do chamador — 404 sem rodar nada.
+    const agentId = normalizeString(body.agentId) || null;
 
     try {
       const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
       const chatbotModel = tenantSettings?.chatbot_model;
 
-      const inboundConfig = instanceName
-        ? await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null)
-        : null;
+      let inboundConfig = null;
+      if (agentId) {
+        inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, agentId }).catch(() => null);
+        if (!inboundConfig) {
+          return sendError(res, 404, "AGENT_NOT_FOUND", "Agente não encontrado neste tenant");
+        }
+      } else if (instanceName) {
+        inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
+      }
 
       const aiResponse = await processBatch({
         clientId,
