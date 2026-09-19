@@ -1,5 +1,8 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Lexend:wght@300;400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
-@import url("https://fonts.cdnfonts.com/css/geist-mono");
+/* As três fontes do sistema — nenhuma outra família entra sem passar por
+   aqui. Archivo = títulos/números de destaque (font-display), Public Sans =
+   corpo/rótulos/botões (font-sans, o padrão do body), JetBrains Mono =
+   números em coluna/telefones/identificadores (font-mono e font-num). */
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -47,85 +50,50 @@
 
 /* ── Base ── */
 
+/*
+ * ── Contrato de paleta ──────────────────────────────────────────────────
+ * Tela nova usa TOKEN (hsl(var(--nome))), nunca cor crua (#hex/rgb direto
+ * no className ou no style). Já existem ~7.200 cores cruas espalhadas pelo
+ * app — não convertidas nesta leva de propósito, para manter o diff
+ * revisável — mas NENHUMA NOVA deve entrar. Ao tocar uma tela por outro
+ * motivo, troque a cor crua encontrada ali pelo token equivalente abaixo.
+ *
+ * Mapa do que cada token representa (mesmo conceito nos três blocos:
+ * :root, .light e .dark sempre definem o mesmo conjunto de nomes):
+ *   --background          fundo da página
+ *   --card / --popover    superfície elevada (cartões, menus, diálogos)
+ *   --muted / --secondary --input   afundado — um degrau abaixo da
+ *                          superfície (campos, hover neutro, fundo sunken)
+ *   --foreground           texto principal
+ *   --muted-foreground      texto secundário (rótulo, legenda, texto de apoio)
+ *   --border               borda entre superfícies
+ *   --primary / --ring     acento indigo (marca, foco, links)
+ *   --accent               versão suave/tingida do acento (hover destacado)
+ *   --destructive/--success/--warning/--info   cores semânticas — SEPARADAS
+ *     do acento, mesmo significado (vermelho/verde/âmbar/azul) nos dois temas
+ */
 @layer base {
   :root {
-    /* Deep Navy / Indigo palette (Direction C Soft Tones) */
-    --background: 231 36% 5%;        /* #090A0F Deep slate dark */
-    --foreground: 210 40% 98%;       /* #F8FAFC */
-
-    --card: 231 27% 9%;             /* #11131E Visual surface card */
-    --card-foreground: 210 40% 98%;
-
-    --popover: 231 27% 9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 239 84% 67%;         /* #6366F1 Electric Indigo */
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 188 94% 53%;       /* #22D3EE Cyan Neon */
-    --secondary-foreground: 231 36% 5%;
-
-    --muted: 230 20% 10%;
-    --muted-foreground: 215 20% 65%;
-
-    --accent: 239 60% 22%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-
-    --success: 142 76% 46%;
-    --success-foreground: 0 0% 100%;
-
-    --warning: 43 96% 56%;
-    --warning-foreground: 0 0% 4%;
-
-    --info: 188 94% 53%;
-    --info-foreground: 0 0% 100%;
-
-    --border: 230 20% 14%;
-    --input: 230 20% 10%;
-    --ring: 239 84% 67%;
-
-    --radius: 1.125rem; /* Soft 18px radius */
-
-    --sidebar-background: 230 50% 5%;
-    --sidebar-foreground: 215 20% 65%;
-    --sidebar-primary: 239 84% 67%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 239 40% 14%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 230 20% 12%;
-    --sidebar-ring: 239 84% 67%;
-
-    --chart-1: 239 84% 67%;
-    --chart-2: 188 94% 53%;
-    --chart-3: 215 20% 65%;
-    --chart-4: 239 60% 50%;
-    --chart-5: 188 60% 40%;
-  }
-
-  .light {
-    --background: 220 43% 96%;
-    --foreground: 230 32% 15%;
+    --background: 228 27% 97%;
+    --foreground: 225 16% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 230 32% 15%;
+    --card-foreground: 225 16% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 230 32% 15%;
+    --popover-foreground: 225 16% 10%;
 
-    --primary: 226 70% 55%;
+    --primary: 240 68% 58%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 94%;
-    --secondary-foreground: 230 32% 15%;
+    --secondary: 228 23% 93%;
+    --secondary-foreground: 225 16% 10%;
 
-    --muted: 220 25% 91%;
-    --muted-foreground: 225 16% 42%;
+    --muted: 228 23% 93%;
+    --muted-foreground: 226 12% 31%;
 
-    --accent: 214 65% 92%;
-    --accent-foreground: 230 32% 15%;
+    --accent: 240 45% 94%;
+    --accent-foreground: 225 16% 10%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
@@ -139,44 +107,106 @@
     --info: 199 89% 48%;
     --info-foreground: 0 0% 100%;
 
-    --border: 220 22% 84%;
+    --border: 226 22% 91%;
     --input: 0 0% 100%;
-    --ring: 226 70% 55%;
+    --ring: 240 68% 58%;
 
-    --sidebar-background: 220 39% 98%;
-    --sidebar-foreground: 225 18% 34%;
-    --sidebar-primary: 226 70% 55%;
+    --radius: 0.625rem; /* 10px — cartão continua suave, elemento pequeno para de virar bolinha */
+
+    --sidebar-background: 228 23% 93%;
+    --sidebar-foreground: 226 12% 31%;
+    --sidebar-primary: 240 68% 58%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 45% 94%;
-    --sidebar-accent-foreground: 230 32% 15%;
-    --sidebar-border: 220 20% 88%;
-    --sidebar-ring: 226 70% 55%;
+    --sidebar-accent: 0 0% 100%;
+    --sidebar-accent-foreground: 225 16% 10%;
+    --sidebar-border: 226 22% 91%;
+    --sidebar-ring: 240 68% 58%;
+
+    --chart-1: 240 68% 58%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 226 12% 31%;
+    --chart-4: 142 72% 38%;
+    --chart-5: 43 96% 56%;
+  }
+
+  .light {
+    --background: 228 27% 97%;
+    --foreground: 225 16% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 225 16% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 225 16% 10%;
+
+    --primary: 240 68% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 228 23% 93%;
+    --secondary-foreground: 225 16% 10%;
+
+    --muted: 228 23% 93%;
+    --muted-foreground: 226 12% 31%;
+
+    --accent: 240 45% 94%;
+    --accent-foreground: 225 16% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 72% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 43 96% 56%;
+    --warning-foreground: 0 0% 10%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 226 22% 91%;
+    --input: 0 0% 100%;
+    --ring: 240 68% 58%;
+
+    --sidebar-background: 228 23% 93%;
+    --sidebar-foreground: 226 12% 31%;
+    --sidebar-primary: 240 68% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 100%;
+    --sidebar-accent-foreground: 225 16% 10%;
+    --sidebar-border: 226 22% 91%;
+    --sidebar-ring: 240 68% 58%;
+
+    --chart-1: 240 68% 58%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 226 12% 31%;
+    --chart-4: 142 72% 38%;
+    --chart-5: 43 96% 56%;
   }
 
   .dark {
-    --background: 231 36% 5%;       /* #090A0F Deep slate dark */
-    --foreground: 210 40% 98%;
+    --background: 228 14% 9%;
+    --foreground: 228 22% 96%;
 
-    --card: 231 27% 9%;             /* #11131E Visual surface card */
-    --card-foreground: 210 40% 98%;
+    --card: 228 14% 12%;
+    --card-foreground: 228 22% 96%;
 
-    --popover: 231 27% 9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 228 14% 12%;
+    --popover-foreground: 228 22% 96%;
 
-    --primary: 239 84% 67%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 238 100% 79%;
+    --primary-foreground: 228 14% 9%;
 
-    --secondary: 188 94% 53%;
-    --secondary-foreground: 231 36% 5%;
+    --secondary: 228 13% 16%;
+    --secondary-foreground: 228 22% 96%;
 
-    --muted: 230 20% 10%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 228 13% 16%;
+    --muted-foreground: 226 16% 80%;
 
-    --accent: 239 60% 22%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 238 35% 22%;
+    --accent-foreground: 228 22% 96%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 228 22% 96%;
 
     --success: 142 76% 46%;
     --success-foreground: 0 0% 100%;
@@ -187,18 +217,24 @@
     --info: 188 94% 53%;
     --info-foreground: 0 0% 100%;
 
-    --border: 230 20% 14%;
-    --input: 230 20% 10%;
-    --ring: 239 84% 67%;
+    --border: 228 14% 20%;
+    --input: 228 13% 16%;
+    --ring: 238 100% 79%;
 
-    --sidebar-background: 230 50% 5%;
-    --sidebar-foreground: 215 20% 65%;
-    --sidebar-primary: 239 84% 67%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 239 40% 14%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 230 20% 12%;
-    --sidebar-ring: 239 84% 67%;
+    --sidebar-background: 228 14% 9%;
+    --sidebar-foreground: 226 16% 80%;
+    --sidebar-primary: 238 100% 79%;
+    --sidebar-primary-foreground: 228 14% 9%;
+    --sidebar-accent: 228 13% 16%;
+    --sidebar-accent-foreground: 228 22% 96%;
+    --sidebar-border: 228 14% 20%;
+    --sidebar-ring: 238 100% 79%;
+
+    --chart-1: 238 100% 79%;
+    --chart-2: 188 94% 53%;
+    --chart-3: 226 16% 80%;
+    --chart-4: 142 76% 46%;
+    --chart-5: 43 96% 56%;
   }
 }
 
@@ -220,10 +256,10 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: "Lexend", "Inter", system-ui, sans-serif;
+    font-family: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     min-height: 100vh;
     overflow-x: hidden;
-    background-color: #f5f7fa; /* Direction C Light background */
+    background-color: hsl(var(--background));
     background-image:
       radial-gradient(circle at 20% 15%, rgba(59, 130, 246, 0.08), transparent 28%),
       radial-gradient(circle at 80% 10%, rgba(16, 185, 129, 0.05), transparent 22%),
@@ -232,7 +268,7 @@
   }
 
   .dark body {
-    background-color: #090a0f; /* Direction C Dark background */
+    background-color: hsl(var(--background));
     background-image:
       radial-gradient(circle at 20% 15%, rgba(99, 102, 241, 0.08), transparent 28%),
       radial-gradient(circle at 80% 10%, rgba(34, 211, 238, 0.05), transparent 22%),
@@ -304,8 +340,14 @@
     color: hsl(var(--primary-foreground));
   }
 
-  .font-mono {
-    font-family: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  /* Números em coluna (tabelas, cartões de número, contadores) não podem
+     dançar quando o dígito muda — tabular-nums trava a largura de cada
+     algarismo. font-num existia pra isso com a fonte antiga; continua
+     valendo, agora com JetBrains Mono, sem precisar reescrever tela. */
+  .font-mono,
+  .font-num {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Custom scrollbar */

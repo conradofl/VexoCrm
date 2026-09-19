@@ -120,10 +120,16 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["Lexend", "Inter", "system-ui", "sans-serif"],
-        display: ["Plus Jakarta Sans", "Inter", "system-ui", "sans-serif"],
-        num: ["Manrope", "Inter", "system-ui", "sans-serif"],
-        mono: ["Geist Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+        // As três fontes do sistema (index.css carrega do Google Fonts) —
+        // font-sans é o padrão do body, então isso muda o corpo inteiro do
+        // sistema sem tocar em componente nenhum.
+        sans: ["Public Sans", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "system-ui", "sans-serif"],
+        display: ["Archivo", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        // Números em coluna/telefones/identificadores — mesma fonte do
+        // mono, mantido como alias pra não reescrever as telas que já usam
+        // font-num.
+        num: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       borderRadius: {
         lg: "var(--radius)",
