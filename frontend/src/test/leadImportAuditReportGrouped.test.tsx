@@ -21,27 +21,6 @@ vi.mock("@/contexts/AuthContext", () => ({
 
 vi.mock("@/components/ui/use-toast", () => ({ toast: vi.fn() }));
 
-// DispatchKpiCards busca sozinho via useDispatchSummary — mocado aqui só
-// pra não escapar fetch de verdade pro ambiente de teste.
-vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
-  const actual: any = await importOriginal();
-  return {
-    ...actual,
-    useDispatchSummary: () => ({
-      isLoading: false,
-      data: {
-        campaigns: [],
-        counts: { active: 0, ended: 0 },
-        scope: "active",
-        page: 1,
-        pageSize: 1,
-        totalForScope: 0,
-        kpis: { periodLabel: "últimos 30 dias", campaigns: 3, leads: 877, sent: 256, deliveryRate: 97 },
-      },
-    }),
-  };
-});
-
 function renderWithProviders(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const utils = render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
@@ -94,21 +73,147 @@ function mockFetchForImport(importId: string, items: any[]) {
 }
 
 describe("LeadImportAuditReport — Relatório & Auditoria redesenhado", () => {
-  it("[TESTE OBRIGATÓRIO] o DispatchCampaignTracker não existe mais aqui — só os quatro cartões do período", async () => {
-    mockFetchForImport("import-1", []);
+  it("[TESTE OBRIGATÓRIO] o DispatchCampaignTracker não existe mais aqui — os cartões são da planilha, não do período", async () => {
+    const items = [
+      makeItem({ lead_import_item_id: "s1", last_status: "sent" }),
+      makeItem({ lead_import_item_id: "s2", last_status: "sent", has_replied: true }),
+      makeItem({ lead_import_item_id: "f1", last_status: "invalid_number", failure_reason: "Número inválido" }),
+    ];
+    mockFetchForImport("import-1", items);
     const { LeadImportAuditReport } = await import("@/pages/LeadImports/LeadImportAuditReport");
     renderWithProviders(
       <LeadImportAuditReport
         activeClientId="sonhare"
-        imports={[{ id: "import-1", source_name: "Planilha A", imported_rows: 10, skipped_rows: 0, created_at: "2026-09-01T00:00:00Z", source_type: "upload" }]}
+        imports={[{ id: "import-1", source_name: "Planilha A", imported_rows: 3, skipped_rows: 0, created_at: "2026-09-01T00:00:00Z", source_type: "upload" }]}
         onSelectImportForFollowup={vi.fn()}
       />
     );
 
+    // O Acompanhar Disparos (tracker + abas Ativas/Encerradas) mora só na
+    // Fila de Envios — não deve aparecer aqui de jeito nenhum.
     expect(screen.queryByText("Acompanhar Disparos")).toBeNull();
     expect(screen.queryByText(/Ativas \(/)).toBeNull();
-    expect(await screen.findByText("Campanhas")).toBeTruthy();
-    expect(screen.getByText("877")).toBeTruthy(); // leads do período
+
+    await screen.findByText("Total de leads");
+    const totalCard = screen.getByText("Total de leads").closest("div")! as HTMLElement;
+    expect(within(totalCard).getByText("3")).toBeTruthy();
+    const sentCard = screen.getByText("Enviados").closest("div")! as HTMLElement;
+    expect(within(sentCard).getByText("2")).toBeTruthy();
+  });
+
+  it("[TESTE OBRIGATÓRIO] os cartões seguem a planilha selecionada — trocar de planilha muda os cinco números", async () => {
+    // Planilha A: 10 leads — 6 enviados (2 com retorno), 3 falhas, 1 pendente
+    const itemsA = [
+      ...Array.from({ length: 4 }, (_, i) => makeItem({ lead_import_item_id: `a-sent-${i}`, last_status: "sent" })),
+      ...Array.from({ length: 2 }, (_, i) => makeItem({ lead_import_item_id: `a-sent-r-${i}`, last_status: "sent", has_replied: true })),
+      ...Array.from({ length: 3 }, (_, i) => makeItem({ lead_import_item_id: `a-fail-${i}`, last_status: "invalid_number", failure_reason: "Número inválido" })),
+      makeItem({ lead_import_item_id: "a-pend", last_status: null }),
+    ];
+    // Planilha B: 4 leads — 1 enviado, 0 falhas, 0 retorno, 3 pendentes
+    const itemsB = [
+      makeItem({ lead_import_item_id: "b-sent", last_status: "sent" }),
+      ...Array.from({ length: 3 }, (_, i) => makeItem({ lead_import_item_id: `b-pend-${i}`, last_status: null })),
+    ];
+
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = new URL(String(url), "http://localhost");
+      const reqImportId = u.searchParams.get("importId");
+      const items = reqImportId === "import-a" ? itemsA : reqImportId === "import-b" ? itemsB : [];
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        json: async () => ({ import: { id: reqImportId, source_name: "x", created_at: "2026-09-01T00:00:00Z" }, items }),
+      };
+    });
+    global.fetch = fetchMock as any;
+
+    const { LeadImportAuditReport } = await import("@/pages/LeadImports/LeadImportAuditReport");
+    const importA = { id: "import-a", source_name: "Planilha A", imported_rows: 10, skipped_rows: 0, created_at: "2026-09-01T00:00:00Z", source_type: "upload" };
+    const importB = { id: "import-b", source_name: "Planilha B", imported_rows: 4, skipped_rows: 0, created_at: "2026-09-02T00:00:00Z", source_type: "upload" };
+
+    const { rerenderWithProviders } = renderWithProviders(
+      <LeadImportAuditReport activeClientId="sonhare" imports={[importA]} onSelectImportForFollowup={vi.fn()} />
+    );
+
+    // "Falhas" também é o texto do botão de filtro — escopar a busca no
+    // grid dos cartões evita pegar o botão por engano.
+    await screen.findByText("Total de leads");
+    let statsGrid = screen.getByText("Total de leads").closest("div.grid")! as HTMLElement;
+    expect(within(statsGrid).getByText("10")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Enviados").closest("div")! as HTMLElement).getByText("6")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Falhas").closest("div")! as HTMLElement).getByText("3")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Com retorno").closest("div")! as HTMLElement).getByText("2")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Pendentes").closest("div")! as HTMLElement).getByText("1")).toBeTruthy();
+
+    rerenderWithProviders(
+      <LeadImportAuditReport activeClientId="sonhare" imports={[importB]} onSelectImportForFollowup={vi.fn()} />
+    );
+
+    await waitFor(() => {
+      statsGrid = screen.getByText("Total de leads").closest("div.grid")! as HTMLElement;
+      expect(within(statsGrid).getByText("4")).toBeTruthy();
+    });
+    expect(within(within(statsGrid).getByText("Enviados").closest("div")! as HTMLElement).getByText("1")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Falhas").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Com retorno").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Pendentes").closest("div")! as HTMLElement).getByText("3")).toBeTruthy();
+    // nada da planilha A sobra nos cartões
+    expect(within(statsGrid).queryByText("10")).toBeNull();
+  });
+
+  it("[TESTE OBRIGATÓRIO] uma fileira de filtro só — Todos/Falhas/Com Retorno aparece uma vez", async () => {
+    mockFetchForImport("import-1", [makeItem()]);
+    const { LeadImportAuditReport } = await import("@/pages/LeadImports/LeadImportAuditReport");
+    renderWithProviders(
+      <LeadImportAuditReport
+        activeClientId="sonhare"
+        imports={[{ id: "import-1", source_name: "Planilha A", imported_rows: 1, skipped_rows: 0, created_at: "2026-09-01T00:00:00Z", source_type: "upload" }]}
+        onSelectImportForFollowup={vi.fn()}
+      />
+    );
+
+    await screen.findByText("Total de leads");
+    expect(screen.getAllByRole("button", { name: "Todos" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Falhas" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Com Retorno" })).toHaveLength(1);
+  });
+
+  it("[TESTE OBRIGATÓRIO] ordenação por Nome funciona nos dois sentidos, com indicador na coluna certa", async () => {
+    const items = [
+      makeItem({ lead_import_item_id: "c", normalized_data: { nome: "Lead C" } }),
+      makeItem({ lead_import_item_id: "a", normalized_data: { nome: "Lead A" } }),
+      makeItem({ lead_import_item_id: "b", normalized_data: { nome: "Lead B" } }),
+    ];
+    mockFetchForImport("import-1", items);
+    const { LeadImportAuditReport } = await import("@/pages/LeadImports/LeadImportAuditReport");
+    renderWithProviders(
+      <LeadImportAuditReport
+        activeClientId="sonhare"
+        imports={[{ id: "import-1", source_name: "Planilha A", imported_rows: 3, skipped_rows: 0, created_at: "2026-09-01T00:00:00Z", source_type: "upload" }]}
+        onSelectImportForFollowup={vi.fn()}
+      />
+    );
+
+    await screen.findByText("Lead C");
+    const nomeHeader = screen.getByText("Nome").closest("th")! as HTMLElement;
+    expect(nomeHeader.querySelector("svg")).toBeNull(); // sem indicador antes de ordenar
+
+    fireEvent.click(screen.getByText("Nome"));
+    await waitFor(() => {
+      const names = screen.getAllByText(/^Lead [ABC]$/).map((el) => el.textContent);
+      expect(names).toEqual(["Lead A", "Lead B", "Lead C"]);
+    });
+    expect(nomeHeader.querySelector("svg")).toBeTruthy(); // indicador aparece na coluna ativa
+
+    fireEvent.click(screen.getByText("Nome"));
+    await waitFor(() => {
+      const names = screen.getAllByText(/^Lead [ABC]$/).map((el) => el.textContent);
+      expect(names).toEqual(["Lead C", "Lead B", "Lead A"]);
+    });
+
+    // outra coluna não ganha indicador — só a que está ordenando
+    const telefoneHeader = screen.getByText("Telefone").closest("th")! as HTMLElement;
+    expect(telefoneHeader.querySelector("svg")).toBeNull();
   });
 
   it("[TESTE OBRIGATÓRIO] os motivos somam — 3 invalid_number + 1 telefone ausente vira duas linhas com 3, 1 e o percentual certo", async () => {

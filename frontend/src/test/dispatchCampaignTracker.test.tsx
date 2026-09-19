@@ -254,17 +254,21 @@ describe("DispatchCampaignTracker", () => {
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
 
-    // Estrutural: nenhum quadrado de lote usa rounded-full (bolinha). O
-    // desenho aprovado pede cantos levemente arredondados, não círculo.
+    // Estrutural: raio EXPLÍCITO, não uma classe derivada do tema.
+    // --radius do tema é 18px (index.css) — num quadrado de 28px, rounded-md
+    // (16px)/rounded-sm/rounded-lg TAMBÉM viram círculo visualmente, mesmo
+    // não sendo "rounded-full" literalmente. Só rounded-[Npx] prova o raio
+    // de verdade, independente do token do tema.
     for (const n of [1, 2, 3, 4, 5]) {
       const square = screen.getByTitle(new RegExp(`^Lote ${n} —`));
-      expect(square.className).not.toMatch(/rounded-full/);
+      expect(square.className).toContain("rounded-[4px]");
+      expect(square.className).not.toMatch(/rounded-full|rounded-md|rounded-sm|rounded-lg/);
     }
 
     // Enviado — verde; Com falha — vermelho; Saindo agora — azul; Na fila —
     // cinza; Cancelado — cinza mais apagado. Cada cor da lista, no lugar
     // certo, não um tom azul-esverdeado indistinguível pra tudo.
-    expect(screen.getByTitle(/^Lote 1 — enviado/).className).toBe(`h-7 w-7 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all ${DISPATCH_SQUARE_STYLES.enviado}`);
+    expect(screen.getByTitle(/^Lote 1 — enviado/).className).toBe(`h-7 w-7 shrink-0 rounded-[4px] flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all ${DISPATCH_SQUARE_STYLES.enviado}`);
     expect(screen.getByTitle(/^Lote 2 — com falha/).className).toContain(DISPATCH_SQUARE_STYLES.falha);
     expect(screen.getByTitle(/^Lote 3 — saindo agora/).className).toContain(DISPATCH_SQUARE_STYLES.saindo);
     expect(screen.getByTitle(/^Lote 4 — na fila/).className).toContain(DISPATCH_SQUARE_STYLES.fila);

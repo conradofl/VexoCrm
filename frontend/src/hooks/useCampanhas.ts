@@ -1222,18 +1222,32 @@ export interface DispatchBulkActionResult {
   action: "pause" | "resume" | "cancel";
   affectedDispatches: number;
   affectedLeads: number;
+  // Só vem preenchido quando "resume" foi pedido com uma data/hora — é o
+  // horário DEPOIS de respeitar a janela de envio do tenant, não
+  // necessariamente o que a pessoa digitou.
+  resumedAt?: string | null;
 }
 
 export function useCampaignDispatchBulkAction() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ campaignId, action }: { campaignId: string; action: "pause" | "resume" | "cancel" }) => {
+    mutationFn: async ({
+      campaignId,
+      action,
+      scheduledAt,
+    }: {
+      campaignId: string;
+      action: "pause" | "resume" | "cancel";
+      // ISO — só faz sentido com action "resume". Omitido = retomar agora
+      // (comportamento de sempre).
+      scheduledAt?: string;
+    }) => {
       const token = await getIdToken();
       const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches/bulk-action`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...(scheduledAt ? { scheduledAt } : {}) }),
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao executar ação em massa"));
       return res.json() as Promise<DispatchBulkActionResult>;

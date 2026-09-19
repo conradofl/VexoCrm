@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Loader2,
   Sparkles,
   Trash2,
@@ -19,9 +21,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/use-toast";
 import { API_BASE_URL } from "@/lib/api";
-import { DispatchKpiCards } from "./DispatchKpiCards";
 
 const PAGE_SIZE = 50;
+
+type SortKey = "nome" | "telefone" | "status" | "tentativas" | "retorno" | "tempo";
 
 // Vocabulário de status de UMA tentativa de envio (campaign_dispatch_runs),
 // diferente do status da CAMPANHA (CampaignStatus, em useCampanhas.ts) —
@@ -252,16 +255,61 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
     const total = auditItems.length;
     const failed = reasonGroups.reduce((sum, g) => sum + g.count, 0);
     const replied = auditItems.filter((i) => i.has_replied).length;
-    return { total, failed, replied };
+    const sent = auditItems.filter((i) => i.last_status === "sent").length;
+    const pending = auditItems.filter((i) => !i.last_status || i.last_status === "pending" || i.last_status === "claimed").length;
+    return { total, failed, replied, sent, pending };
   }, [auditItems, reasonGroups]);
+
+  // Ordenação — cliente, sobre a lista já filtrada/já carregada. Sem
+  // endpoint novo: os dados já estão todos na memória.
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortValue = (item: AuditItem, key: SortKey): string | number => {
+    switch (key) {
+      case "nome":
+        return String(item.normalized_data?.nome || item.normalized_data?.name || "").toLowerCase();
+      case "telefone":
+        return item.telefone || "";
+      case "status":
+        return item.last_status && item.last_status in RUN_STATUS_LABELS ? RUN_STATUS_LABELS[item.last_status as RunStatus] : "Pendente";
+      case "tentativas":
+        return item.dispatch_count || 0;
+      case "retorno":
+        return item.has_replied ? 1 : 0;
+      case "tempo":
+        return item.last_attempt_at ? new Date(item.last_attempt_at).getTime() : -1;
+    }
+  };
+
+  const sortedItems = useMemo(() => {
+    if (!sortKey) return filteredItems;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...filteredItems].sort((a, b) => {
+      const va = sortValue(a, sortKey);
+      const vb = sortValue(b, sortKey);
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+  }, [filteredItems, sortKey, sortDir]);
 
   // Paginação só do RENDER da tabela — a seleção em massa e os motivos
   // continuam olhando pra lista filtrada inteira, não só a página visível.
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pagedItems = useMemo(
-    () => filteredItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [filteredItems, safePage]
+    () => sortedItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [sortedItems, safePage]
   );
 
   // Busca/filtro/motivo mudou o resultado — volta pra página 1, senão a
@@ -290,18 +338,6 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
       next.add(id);
     }
     setSelectedItemIds(next);
-  };
-
-  const handleSelectCohort = (type: "all" | "failed" | "replied") => {
-    let ids: string[] = [];
-    if (type === "all") {
-      ids = auditItems.map((i) => i.lead_import_item_id);
-    } else if (type === "failed") {
-      ids = auditItems.filter((i) => !!i.failure_reason).map((i) => i.lead_import_item_id);
-    } else if (type === "replied") {
-      ids = auditItems.filter((i) => i.has_replied).map((i) => i.lead_import_item_id);
-    }
-    setSelectedItemIds(new Set(ids));
   };
 
   const handleCreateCohortCampaign = async () => {
@@ -390,12 +426,9 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
 
   return (
     <div className="space-y-6">
-      {/* ── SEÇÃO 1: OS QUATRO CARTÕES DO PERÍODO (campanhas, leads, enviados,
-          taxa de entrega) — o Acompanhar Disparos mora só na Fila de Envios,
-          isso aqui é só o resumo. ─────────────────────────────────────── */}
-      <DispatchKpiCards clientId={activeClientId || null} />
-
-      {/* ── SEÇÃO 2: RESULTADO E DIAGNÓSTICO DA PLANILHA SELECIONADA ────── */}
+      {/* Os cartões do período (campanhas/leads/enviados/taxa de entrega,
+          últimos 30 dias do tenant) moram só na Fila de Envios — lá é onde
+          fazem sentido. Aqui os números são DESTA planilha. */}
       <Card className="border-border bg-card text-card-foreground shadow-lg rounded-2xl">
         <CardHeader className="pb-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -433,6 +466,16 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
             </div>
           ) : (
             <>
+              {/* ── Os cinco números DESTA planilha — não do tenant/período.
+                  Troca de planilha, troca o número. ────────────────────── */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 bg-slate-50/50 dark:bg-black/20 p-3 rounded-2xl border border-slate-200/60 dark:border-white/5">
+                <PlanilhaStatCard label="Total de leads" value={stats.total} className="text-slate-800 dark:text-slate-100" />
+                <PlanilhaStatCard label="Enviados" value={stats.sent} className="text-emerald-600 dark:text-emerald-400" />
+                <PlanilhaStatCard label="Falhas" value={stats.failed} className="text-rose-600 dark:text-rose-400" />
+                <PlanilhaStatCard label="Com retorno" value={stats.replied} className="text-indigo-600 dark:text-indigo-400" />
+                <PlanilhaStatCard label="Pendentes" value={stats.pending} className="text-slate-700 dark:text-slate-200" />
+              </div>
+
               {/* ── Por que falhou — o motivo desta tela existir. Cada linha é
                   clicável e filtra a lista abaixo. ────────────────────────── */}
               {reasonGroups.length > 0 && (
@@ -500,13 +543,6 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                       </button>
                     ))}
                   </div>
-
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-1 sm:mt-0">
-                    <span>Selecionar:</span>
-                    <button type="button" onClick={() => handleSelectCohort("all")} className="rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-0.5">Todos</button>
-                    <button type="button" onClick={() => handleSelectCohort("failed")} className="rounded-full bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 px-2 py-0.5">Falhas</button>
-                    <button type="button" onClick={() => handleSelectCohort("replied")} className="rounded-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-600 px-2 py-0.5">Com Retorno</button>
-                  </div>
                 </div>
 
                 {selectedItemIds.size > 0 && (
@@ -558,12 +594,12 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                           />
                         </TableHead>
                         <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Linha</TableHead>
-                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Nome</TableHead>
-                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Telefone</TableHead>
-                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Último Status</TableHead>
-                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Tentativas</TableHead>
-                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-center">Retorno?</TableHead>
-                        <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Há quanto tempo</TableHead>
+                        <SortableTableHead sortKey="nome" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Nome</SortableTableHead>
+                        <SortableTableHead sortKey="telefone" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Telefone</SortableTableHead>
+                        <SortableTableHead sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Último Status</SortableTableHead>
+                        <SortableTableHead sortKey="tentativas" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Tentativas</SortableTableHead>
+                        <SortableTableHead sortKey="retorno" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Retorno?</SortableTableHead>
+                        <SortableTableHead sortKey="tempo" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Há quanto tempo</SortableTableHead>
                         <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Motivo da Falha / Detalhe</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -682,5 +718,46 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function PlanilhaStatCard({ label, value, className }: { label: string; value: number; className?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center p-2 rounded-xl border border-transparent text-center">
+      <span className="text-[10px] font-bold text-slate-400 uppercase">{label}</span>
+      <span className={cn("text-base font-bold", className)}>{value}</span>
+    </div>
+  );
+}
+
+function SortableTableHead({
+  sortKey,
+  activeKey,
+  dir,
+  onSort,
+  center,
+  children,
+}: {
+  sortKey: SortKey;
+  activeKey: SortKey | null;
+  dir: "asc" | "desc";
+  onSort: (key: SortKey) => void;
+  center?: boolean;
+  children: ReactNode;
+}) {
+  const isActive = activeKey === sortKey;
+  return (
+    <TableHead
+      onClick={() => onSort(sortKey)}
+      className={cn(
+        "h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 cursor-pointer select-none hover:text-foreground transition-colors",
+        center && "text-center"
+      )}
+    >
+      <span className={cn("inline-flex items-center gap-0.5", center && "justify-center")}>
+        {children}
+        {isActive && (dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+      </span>
+    </TableHead>
   );
 }

@@ -56,6 +56,7 @@ import {
   isWithinSendWindow,
   getNextSendWindowOpening,
   resolveSendWindowConfig,
+  adjustDateToSendWindow,
 } from "../../services/sendWindow.js";
 import { getDateKey } from "../../services/analytics.js";
 import {
@@ -2816,6 +2817,20 @@ export function registerCampaignsRoutes(app, deps) {
     }
     if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
 
+    // Retomar em outra data/hora: "escolhida a data, os lotes pendentes são
+    // reagendados a partir dali, respeitando a janela de envio" — a cota do
+    // chip continua sendo aplicada por quem já executa o disparo agendado,
+    // não duplicada aqui.
+    let resumeAt = null;
+    if (action === "resume" && req.body?.scheduledAt != null) {
+      const rawScheduledAt = normalizeString(req.body.scheduledAt);
+      const parsed = rawScheduledAt ? new Date(rawScheduledAt) : null;
+      if (!parsed || Number.isNaN(parsed.getTime())) {
+        return sendError(res, 400, "INVALID_SCHEDULED_AT", "scheduledAt inválido");
+      }
+      resumeAt = parsed;
+    }
+
     try {
       const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
@@ -2831,6 +2846,11 @@ export function registerCampaignsRoutes(app, deps) {
         await ensureCampaignDispatchPausedStatusAllowed();
       }
 
+      if (resumeAt) {
+        const tenantSettings = await getLeadClientN8nSettings(authorizedClientId).catch(() => null);
+        resumeAt = adjustDateToSendWindow(resumeAt, tenantSettings || {});
+      }
+
       let query;
       let params;
       if (action === "pause") {
@@ -2842,15 +2862,25 @@ export function registerCampaignsRoutes(app, deps) {
         `;
         params = [campaignId, authorizedClientId, PAUSE_TARGET_STATUSES];
       } else if (action === "resume") {
-        query = `
-          UPDATE public.campaign_dispatches
-          SET status = 'scheduled',
-              scheduled_at = CASE WHEN scheduled_at IS NULL OR scheduled_at < now() THEN now() ELSE scheduled_at END,
-              updated_at = now()
-          WHERE campaign_id = $1 AND client_id = $2 AND status = ANY($3::text[])
-          RETURNING id, target_count
-        `;
-        params = [campaignId, authorizedClientId, RESUME_TARGET_STATUSES];
+        if (resumeAt) {
+          query = `
+            UPDATE public.campaign_dispatches
+            SET status = 'scheduled', scheduled_at = $4, updated_at = now()
+            WHERE campaign_id = $1 AND client_id = $2 AND status = ANY($3::text[])
+            RETURNING id, target_count
+          `;
+          params = [campaignId, authorizedClientId, RESUME_TARGET_STATUSES, resumeAt.toISOString()];
+        } else {
+          query = `
+            UPDATE public.campaign_dispatches
+            SET status = 'scheduled',
+                scheduled_at = CASE WHEN scheduled_at IS NULL OR scheduled_at < now() THEN now() ELSE scheduled_at END,
+                updated_at = now()
+            WHERE campaign_id = $1 AND client_id = $2 AND status = ANY($3::text[])
+            RETURNING id, target_count
+          `;
+          params = [campaignId, authorizedClientId, RESUME_TARGET_STATUSES];
+        }
       } else {
         query = `
           UPDATE public.campaign_dispatches
@@ -2869,6 +2899,7 @@ export function registerCampaignsRoutes(app, deps) {
         action,
         affectedDispatches: rows.length,
         affectedLeads,
+        resumedAt: resumeAt ? resumeAt.toISOString() : null,
       });
     } catch (err) {
       sendError(res, 500, "DISPATCH_BULK_ACTION_FAILED", err instanceof Error ? err.message : "Failed");

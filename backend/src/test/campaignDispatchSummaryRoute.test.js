@@ -396,4 +396,69 @@ describe("POST /api/campaigns/:campaignId/dispatches/bulk-action", () => {
     expect(res.statusCode).toBe(400);
     expect(pool.calls.length).toBe(0);
   });
+
+  describe("retomar em data futura", () => {
+    it("[TESTE OBRIGATÓRIO] grava o scheduled_at pedido nos lotes pendentes, sem tocar nos já enviados, e a resposta conta os leads", async () => {
+      // Só os 2 lotes 'paused' voltam do UPDATE...RETURNING — os que já
+      // terminaram (status 'done') nem entram no WHERE status = ANY(['paused']),
+      // igual ao "pausar" já prova acima pro pause. 12+8 leads, não 2.
+      const pool = makePool({ bulkUpdateRows: [{ id: "d-1", target_count: 12 }, { id: "d-2", target_count: 8 }] });
+      const deps = makeDeps({
+        pool,
+        overrides: { getLeadClientN8nSettings: async () => ({ send_window_enabled: false }) },
+      });
+      const handler = getRouteHandler(deps, "/api/campaigns/:campaignId/dispatches/bulk-action", "post");
+      const res = fakeRes();
+      const scheduledAt = "2026-09-24T12:00:00.000Z";
+      await handler({ params: { campaignId: "camp-1" }, body: { action: "resume", scheduledAt } }, res);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.affectedDispatches).toBe(2);
+      expect(res.body.affectedLeads).toBe(20); // 12+8, não 2
+      expect(res.body.resumedAt).toBe(scheduledAt);
+
+      const updateCall = pool.calls.find((c) => c.sql.includes("UPDATE public.campaign_dispatches"));
+      expect(updateCall.sql).toContain("SET status = 'scheduled', scheduled_at = $4");
+      expect(updateCall.params[2]).toEqual(["paused"]); // só os pausados são alvo
+      expect(updateCall.params[3]).toBe(scheduledAt);
+    });
+
+    it("respeita a janela de envio — data fora da janela é ajustada, não gravada como foi pedida", async () => {
+      const pool = makePool({ bulkUpdateRows: [{ id: "d-1", target_count: 5 }] });
+      const deps = makeDeps({ pool }); // getLeadClientN8nSettings default: janela ligada, padrão 08:00-20:00 em dias úteis
+      const handler = getRouteHandler(deps, "/api/campaigns/:campaignId/dispatches/bulk-action", "post");
+      const res = fakeRes();
+      // 03:00 (fora da janela, qualquer fuso razoável) — precisa ser adiada
+      const madrugada = "2026-09-27T03:00:00.000Z";
+      await handler({ params: { campaignId: "camp-1" }, body: { action: "resume", scheduledAt: madrugada } }, res);
+
+      const updateCall = pool.calls.find((c) => c.sql.includes("UPDATE public.campaign_dispatches"));
+      expect(updateCall.params[3]).not.toBe(madrugada);
+      expect(new Date(updateCall.params[3]).getTime()).toBeGreaterThan(new Date(madrugada).getTime());
+      expect(res.body.resumedAt).toBe(updateCall.params[3]);
+    });
+
+    it("scheduledAt inválido é recusado antes de tocar o banco", async () => {
+      const pool = makePool();
+      const deps = makeDeps({ pool });
+      const handler = getRouteHandler(deps, "/api/campaigns/:campaignId/dispatches/bulk-action", "post");
+      const res = fakeRes();
+      await handler({ params: { campaignId: "camp-1" }, body: { action: "resume", scheduledAt: "não-é-uma-data" } }, res);
+
+      expect(res.statusCode).toBe(400);
+      expect(pool.calls.length).toBe(0);
+    });
+
+    it("sem scheduledAt continua igual a hoje — 'retomar agora', sem resumedAt na resposta", async () => {
+      const pool = makePool({ bulkUpdateRows: [{ id: "d-1", target_count: 5 }] });
+      const deps = makeDeps({ pool });
+      const handler = getRouteHandler(deps, "/api/campaigns/:campaignId/dispatches/bulk-action", "post");
+      const res = fakeRes();
+      await handler({ params: { campaignId: "camp-1" }, body: { action: "resume" } }, res);
+
+      const updateCall = pool.calls.find((c) => c.sql.includes("UPDATE public.campaign_dispatches"));
+      expect(updateCall.sql).toContain("scheduled_at = CASE WHEN scheduled_at IS NULL OR scheduled_at < now()");
+      expect(res.body.resumedAt).toBeNull();
+    });
+  });
 });

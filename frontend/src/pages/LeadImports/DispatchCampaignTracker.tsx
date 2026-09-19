@@ -165,11 +165,18 @@ function CampaignRow({
   const sentPct = Math.round((campaign.sentTotal / total) * 100);
   const failedPct = Math.round((campaign.failedTotal / total) * 100);
 
-  const handleBulkAction = (action: "pause" | "resume" | "cancel") => {
+  const handleBulkAction = (action: "pause" | "resume" | "cancel", scheduledAt?: string) => {
     bulkAction.mutate(
-      { campaignId: campaign.campaignId, action },
+      { campaignId: campaign.campaignId, action, scheduledAt },
       {
         onSuccess: (res) => {
+          if (res.resumedAt) {
+            toast({
+              title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} reagendados`,
+              description: `${res.affectedDispatches} ${res.affectedDispatches === 1 ? "lote" : "lotes"} — retomam ${formatDateTime(res.resumedAt)}.`,
+            });
+            return;
+          }
           const verbo = action === "pause" ? "pausados" : action === "resume" ? "retomados" : "cancelados";
           toast({
             title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} ${verbo}`,
@@ -210,14 +217,11 @@ function CampaignRow({
             />
           )}
           {campaign.leadsActionable.resume > 0 && (
-            <BulkActionButton
-              action="resume"
-              icon={<Play className="h-3.5 w-3.5 mr-1" />}
-              label="Retomar"
+            <ResumeActionButton
               leadsCount={campaign.leadsActionable.resume}
               campaignName={campaign.campaignName}
               pending={bulkAction.isPending}
-              onConfirm={() => handleBulkAction("resume")}
+              onConfirm={(scheduledAt) => handleBulkAction("resume", scheduledAt)}
               className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
             />
           )}
@@ -277,7 +281,10 @@ function CampaignRow({
                   onClick={() => onOpenDispatch(b.id)}
                   title={`Lote ${i + 1} — ${DISPATCH_SQUARE_STATE_LABELS[state]} · ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
                   className={cn(
-                    "h-7 w-7 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all",
+                    // Raio EXPLÍCITO — rounded-md/sm/lg derivam de --radius
+                    // (18px no tema), que num quadrado de 28px vira círculo.
+                    // Não trocar por classe do tema.
+                    "h-7 w-7 shrink-0 rounded-[4px] flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all",
                     DISPATCH_SQUARE_STYLES[state]
                   )}
                 >
@@ -348,6 +355,112 @@ function BulkActionButton({
           >
             {label}
           </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// "Retomar" precisa de uma escolha: agora, ou numa data/hora futura — o caso
+// real de "pausei ontem, quero retomar amanhã às 9h". Por isso não usa o
+// BulkActionButton genérico (só confirma/cancela): tem um formulário dentro
+// da confirmação, e o botão de confirmar não fecha sozinho se a data ainda
+// não foi escolhida.
+function ResumeActionButton({
+  leadsCount,
+  campaignName,
+  pending,
+  onConfirm,
+  className,
+}: {
+  leadsCount: number;
+  campaignName: string;
+  pending: boolean;
+  onConfirm: (scheduledAt?: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"now" | "later">("now");
+  const [dateTimeValue, setDateTimeValue] = useState("");
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      setMode("now");
+      setDateTimeValue("");
+    }
+    setOpen(next);
+  };
+
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  const minDateTime = now.toISOString().slice(0, 16);
+
+  const confirmDisabled = mode === "later" && !dateTimeValue;
+
+  const handleConfirm = () => {
+    if (mode === "later") {
+      if (!dateTimeValue) return;
+      onConfirm(new Date(dateTimeValue).toISOString());
+    } else {
+      onConfirm(undefined);
+    }
+    setOpen(false);
+  };
+
+  const previewLabel = mode === "later" && dateTimeValue ? formatDateTime(new Date(dateTimeValue).toISOString()) : "agora";
+
+  return (
+    <AlertDialog open={open} onOpenChange={handleOpenChange}>
+      <AlertDialogTrigger asChild>
+        <Button size="sm" disabled={pending} className={cn("h-8 text-xs font-bold rounded-xl px-2.5", className)}>
+          {pending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1" />}
+          Retomar
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Retomar "{campaignName}"?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-3 text-left">
+              <p>
+                Isto vai retomar{" "}
+                <strong className="text-foreground">
+                  {leadsCount} {leadsCount === 1 ? "lead" : "leads"}
+                </strong>{" "}
+                em todos os lotes pendentes desta campanha.
+              </p>
+
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs text-foreground">
+                  <input type="radio" name="resume-mode" className="accent-indigo-600" checked={mode === "now"} onChange={() => setMode("now")} />
+                  Retomar agora
+                </label>
+                <label className="flex items-center gap-2 text-xs text-foreground">
+                  <input type="radio" name="resume-mode" className="accent-indigo-600" checked={mode === "later"} onChange={() => setMode("later")} />
+                  Retomar em outra data e hora
+                </label>
+                {mode === "later" && (
+                  <input
+                    type="datetime-local"
+                    value={dateTimeValue}
+                    min={minDateTime}
+                    onChange={(e) => setDateTimeValue(e.target.value)}
+                    className="ml-6 h-9 rounded-lg border border-input bg-background px-2.5 text-xs text-foreground"
+                  />
+                )}
+              </div>
+
+              <p className="text-[11px]">
+                Retoma <strong className="text-foreground">{previewLabel}</strong> — respeitando a janela de envio e a cota do chip.
+              </p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
+          <Button className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white" disabled={confirmDisabled} onClick={handleConfirm}>
+            Retomar
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
