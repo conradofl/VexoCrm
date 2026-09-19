@@ -3183,11 +3183,19 @@ export function registerChatbotRoutes(app, deps) {
           // configured", com o numero salvo na tela.
           // excludeNumbers fecha o ciclo pelo outro lado: o alerta nunca vai
           // para o telefone da propria conversa.
-          const sdr = resolveSdrTarget({
+          const sdr = await resolveSdrTarget({
             inboundConfig,
             tenantSettings,
             tenantSettingsReadFailed,
             excludeNumbers: [phone],
+            // Rodizio: decisao por LEAD, nao por mensagem — leadId fixa o
+            // dono no lead (leads.dados.sdr_rotation_owner), pra todo aviso
+            // seguinte deste mesmo lead ir pro mesmo numero.
+            mode: tenantSettings?.sdr_distribution === "rodizio" ? "rodizio" : "todos",
+            leadId: aiResponse._existingLead?.id || null,
+            clientId,
+            supabase,
+            pool: pgDatabasePool,
           });
           if (sdr.excluded?.length > 0) {
             console.warn("[chatbot-webhook] destino de SDR excluido para nao fechar loop", {

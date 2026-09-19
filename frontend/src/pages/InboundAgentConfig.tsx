@@ -48,11 +48,12 @@ import { cn } from "@/lib/utils";
 import { useArchiveFupCompany, useCreateFupCompany, useFupCompanies, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi } from "@/lib/api";
-import { useLeadClients, useUpdateLeadClientN8nSettings } from "@/hooks/useLeadClients";
+import { useLeadClients, useUpdateLeadClientN8nSettings, useSdrRotationNext } from "@/hooks/useLeadClients";
 import { useLlmModels, useChatbotTemplates, type ChatbotTemplate } from "@/hooks/useChatbotTemplates";
 import { assertTenantMatch } from "@/lib/tenantIsolation";
 import { AgentInstructionAuditPanel } from "@/components/agente/AgentInstructionAuditPanel";
 import { AgentKnowledgeBaseSection } from "@/components/agente/AgentKnowledgeBaseSection";
+import { SdrNumbersDialog } from "@/components/agente/SdrNumbersDialog";
 
 // Empresa "de mentira" mostrada quando o tenant ainda nao tem linha em
 // followup_companies. Salvar com ela cria a linha de verdade. Toda linha de
@@ -212,6 +213,9 @@ export default function InboundAgentConfig() {
   // Escopo de inbound e Frase de Recontato configurados no tenant (lead_client_n8n_settings)
   const [chatbotInboundScope, setChatbotInboundScope] = useState<"leads_only" | "all">("leads_only");
   const [recontactMessage, setRecontactMessage] = useState("");
+  // Rodízio de SDR: "todos" avisa a lista inteira (de sempre); "rodizio" gira
+  // um consultor por vez, fixo por lead (services/sdrTarget.js).
+  const [sdrDistribution, setSdrDistribution] = useState<"todos" | "rodizio">("todos");
 
   const tenantN8nSettings = useMemo(() => {
     return leadClients.find((c) => c.id === selectedClientId)?.n8n_settings;
@@ -221,8 +225,11 @@ export default function InboundAgentConfig() {
     if (tenantN8nSettings) {
       setChatbotInboundScope(tenantN8nSettings.chatbot_inbound_scope === "all" ? "all" : "leads_only");
       setRecontactMessage(tenantN8nSettings.recontact_message ?? "");
+      setSdrDistribution(tenantN8nSettings.sdr_distribution === "rodizio" ? "rodizio" : "todos");
     }
   }, [tenantN8nSettings]);
+
+  const rotationNext = useSdrRotationNext(selectedClientId || null, sdrDistribution === "rodizio");
 
   const [simMessages, setSimMessages] = useState<{ role: "user" | "bot"; text: string }[]>([
     { role: "bot", text: "Olá! Como posso ajudar?" }
@@ -347,6 +354,7 @@ export default function InboundAgentConfig() {
           tenantId: selectedClientId,
           chatbotInboundScope,
           recontactMessage,
+          sdrDistribution,
         });
       }
       toast({ title: "Sucesso", description: "Configurações salvas." });
@@ -788,16 +796,12 @@ export default function InboundAgentConfig() {
                     <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <Label className="text-sm">Quem recebe a qualificação</Label>
-                        <a
-                          href="/crm/padroes-da-empresa?subtab=geral"
-                          className="text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
-                        >
-                          Editar lista
-                        </a>
+                        {selectedClientId && (
+                          <SdrNumbersDialog tenantId={selectedClientId} numbers={sdrNumbersDoTenant} />
+                        )}
                       </div>
                       <p className="text-xs text-slate-500">
-                        É a mesma lista usada pelos disparos, configurada em Padrões da empresa. Vale
-                        para todos os números deste tenant.
+                        É a mesma lista usada pelos disparos. Vale para todos os agentes deste tenant.
                       </p>
                       {sdrNumbersDoTenant.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5 pt-1">
@@ -816,6 +820,52 @@ export default function InboundAgentConfig() {
                           resumo da qualificação.
                         </p>
                       )}
+
+                      {/* Todos de uma vez, ou um por vez em rodízio — decisão por LEAD, não por mensagem. */}
+                      <div className="pt-2 space-y-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSdrDistribution("todos")}
+                            className={cn(
+                              "flex-1 rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                              sdrDistribution === "todos"
+                                ? "border-indigo-400 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/30"
+                                : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                            )}
+                          >
+                            <span className="font-semibold text-foreground">Todos recebem</span>
+                            <p className="text-[11px] text-slate-500">Como hoje — o resumo vai para a lista inteira.</p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSdrDistribution("rodizio")}
+                            className={cn(
+                              "flex-1 rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                              sdrDistribution === "rodizio"
+                                ? "border-indigo-400 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/30"
+                                : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                            )}
+                          >
+                            <span className="font-semibold text-foreground">Um por vez, em rodízio</span>
+                            <p className="text-[11px] text-slate-500">
+                              Cada lead novo vai para o próximo da lista. O mesmo lead sempre volta para quem o pegou.
+                            </p>
+                          </button>
+                        </div>
+                        {sdrDistribution === "rodizio" && (
+                          <p className="text-[11px] text-slate-500 pl-1">
+                            Próximo da lista:{" "}
+                            {rotationNext.isLoading ? (
+                              "carregando..."
+                            ) : rotationNext.data?.next ? (
+                              <span className="font-mono font-semibold text-foreground">{rotationNext.data.next}</span>
+                            ) : (
+                              "—"
+                            )}
+                          </p>
+                        )}
+                      </div>
                     </div>
 
                     <div className="space-y-2 max-w-md">

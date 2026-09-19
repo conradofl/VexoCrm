@@ -15,6 +15,7 @@
 // módulo invoca a mesma factory (sem duplicar a função) e usa só maskSecretPresence.
 
 import { createLeadMessaging } from "../shared/leadMessaging.js";
+import { resolveTenantSdrNumbers } from "../../services/sdrTarget.js";
 import { syncEvolutionInstanceChatsAndMessages, getEvolutionInstanceSyncProgress } from "../../services/evolution.js";
 import { whatsappSessionManager } from "../../whatsapp.js";
 import { propagateTenantPermissions, isManagerOrAdmin } from "../../access/claims.js";
@@ -49,6 +50,7 @@ export function registerIntegrationsRoutes(app, deps) {
     requireAnyInternalPageAccess,
     requireAppViewAccess,
     requireFirebaseAuth,
+    resolveAuthorizedClientId,
     sendError,
     supabase,
     upsertLeadClientEvolutionInstance,
@@ -419,6 +421,54 @@ export function registerIntegrationsRoutes(app, deps) {
       } catch (error) {
         console.error("lead client n8n settings query error:", error);
         sendError(res, 500, "N8N_SETTINGS_QUERY_FAILED", "Failed to query n8n settings");
+      }
+    }
+  );
+
+  // GET /api/lead-clients/:tenantId/sdr-rotation-next — "escolhido o rodízio,
+  // a lista mostra quem é o próximo". Leitura pura: NUNCA avança o cursor —
+  // só espia o que o próximo lead SEM DONO receberia. Mesmo nível de acesso
+  // do GET /api/lead-clients (qualquer usuário interno, não só admin) —
+  // quem configura o agente no passo 5 não é necessariamente admin.
+  app.get(
+    "/api/lead-clients/:tenantId/sdr-rotation-next",
+    requireFirebaseAuth,
+    async (req, res) => {
+      if (!ensureDb(res)) return;
+
+      const tenantId = normalizeTenantKey(req.params?.tenantId);
+      if (!tenantId) {
+        sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
+        return;
+      }
+      const authorizedClientId = resolveAuthorizedClientId(req, res, tenantId);
+      if (!authorizedClientId) return;
+
+      try {
+        const settings = await getLeadClientN8nSettings(authorizedClientId);
+        const numbers = resolveTenantSdrNumbers(settings);
+        if (numbers.length === 0) {
+          res.json({ next: null });
+          return;
+        }
+
+        let nextCursor = 0;
+        if (pgDatabasePool) {
+          try {
+            const { rows } = await pgDatabasePool.query(
+              `SELECT cursor FROM public.sdr_rotation_state WHERE client_id = $1`,
+              [authorizedClientId]
+            );
+            if (rows.length > 0) nextCursor = rows[0].cursor + 1;
+          } catch {
+            // Tabela pode nao existir ainda (rodizio nunca usado neste tenant) —
+            // cursor 0 (o primeiro da lista) e a resposta certa nesse caso.
+          }
+        }
+        res.json({ next: numbers[nextCursor % numbers.length] });
+      } catch (error) {
+        console.error("sdr rotation next query error:", error);
+        sendError(res, 500, "SDR_ROTATION_NEXT_FAILED", "Failed to compute next SDR in rotation");
       }
     }
   );

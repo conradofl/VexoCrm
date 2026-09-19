@@ -52,6 +52,7 @@ vi.mock("@/hooks/useLeadClients", () => ({
     data: [{ id: "sonhare", n8n_settings: { evolution_instances: [{ id: "chip-1", name: "Chip 1", active: true }] } }],
   }),
   useUpdateLeadClientN8nSettings: () => ({ mutateAsync: vi.fn() }),
+  useSdrRotationNext: () => ({ data: { next: null }, isLoading: false }),
 }));
 
 vi.mock("@/hooks/useChatbotTemplates", () => ({

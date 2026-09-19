@@ -332,6 +332,16 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'followup_companies_agent_kind_check')
       )
     ) AS ok`,
+    "20260918100000_add_sdr_distribution_to_n8n_settings.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_client_n8n_settings')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='sdr_distribution')
+        AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lead_client_n8n_settings_sdr_distribution_check')
+      )
+    ) AS ok`,
+    "20260918110000_create_sdr_rotation_state.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='sdr_rotation_state')
+    ) AS ok`,
   };
 
   const query = checks[filename];

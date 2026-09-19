@@ -56,6 +56,8 @@ export interface LeadClientN8nSettingsPayload {
   segmentationConfig?: LeadClientSegmentationConfig;
   sdrWhatsappNumber?: string | null;
   sdrWhatsappNumbers?: string[];
+  /** "todos" (padrão) avisa a lista inteira; "rodizio" gira um consultor por vez, fixo por lead. */
+  sdrDistribution?: "todos" | "rodizio";
   allowedTabs?: string[] | null;
   plan_tier?: "essencial" | "avancado" | string;
   planTier?: "essencial" | "avancado" | string;
@@ -145,6 +147,8 @@ export interface LeadClientN8nSettingsSummary {
   sdr_whatsapp_number: string | null;
   /** Destinos do briefing. Substitui o campo único; os dois convivem no deploy. */
   sdr_whatsapp_numbers?: string[];
+  /** "todos" (padrão) avisa a lista inteira; "rodizio" gira um consultor por vez, fixo por lead. */
+  sdr_distribution?: "todos" | "rodizio";
   evolution_instances?: LeadClientEvolutionInstance[];
   send_window_start?: string;
   send_window_end?: string;
@@ -700,6 +704,29 @@ export function useUpdateLeadClientTicketMedio() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lead-clients"] });
+    },
+  });
+}
+
+// ─── Rodízio de SDR — "a lista mostra quem é o próximo" ────────────────────
+// Leitura pura: só espia o que o próximo lead SEM DONO receberia, nunca
+// avança o cursor. Refetch automático depois de qualquer ação que mude a
+// lista de SDR ou o modo (invalidateQueries(["lead-clients"]) já cobre,
+// mas o próprio hook também refaz a busca ao trocar de tenant).
+export function useSdrRotationNext(tenantId: string | null, enabled: boolean) {
+  const { getIdToken } = useAuth();
+  return useQuery<{ next: string | null }>({
+    queryKey: ["sdr-rotation-next", tenantId],
+    enabled: !!tenantId && enabled,
+    staleTime: 10_000,
+    queryFn: async () => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+      const res = await fetchApi(`/api/lead-clients/${encodeURIComponent(tenantId!)}/sdr-rotation-next`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Falha ao consultar o próximo da volta"));
+      return readApiJson<{ next: string | null }>(res, "sdr_rotation_next");
     },
   });
 }

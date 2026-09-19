@@ -21,7 +21,7 @@ import {
 } from "../services/inboundEngagementPolicy.js";
 
 describe("lista de numeros de SDR", () => {
-  it("valida formato: so digitos, 10 a 15", () => {
+  it("valida formato: so digitos, 10 a 15", async () => {
     expect(isValidSdrNumber("5534984085015")).toBe(true);
     expect(isValidSdrNumber("(55) 34 98408-5015")).toBe(true); // normaliza antes
     expect(isValidSdrNumber("123")).toBe(false);
@@ -29,8 +29,8 @@ describe("lista de numeros de SDR", () => {
     expect(isValidSdrNumber("abcdefghijkl")).toBe(false);
   });
 
-  it("resolve varios numeros do tenant", () => {
-    const alvo = resolveSdrTarget({
+  it("resolve varios numeros do tenant", async () => {
+    const alvo = await resolveSdrTarget({
       inboundConfig: null,
       tenantSettings: { sdr_whatsapp_numbers: ["5534984085015", "5511999998888"] },
     });
@@ -38,30 +38,30 @@ describe("lista de numeros de SDR", () => {
     expect(alvo.reason).toBe(SDR_MOTIVOS.OK);
   });
 
-  it("MIGRACAO SEM PERDA: tenant com o campo antigo continua recebendo", () => {
+  it("MIGRACAO SEM PERDA: tenant com o campo antigo continua recebendo", async () => {
     // Linha ainda nao migrada: a lista esta vazia e o numero unico existe.
-    const alvo = resolveSdrTarget({
+    const alvo = await resolveSdrTarget({
       inboundConfig: null,
       tenantSettings: { sdr_whatsapp_numbers: [], sdr_whatsapp_number: "5534984085015" },
     });
     expect(alvo.numbers).toEqual(["5534984085015"]);
   });
 
-  it("descarta invalido e repetido da lista", () => {
+  it("descarta invalido e repetido da lista", async () => {
     const numeros = resolveTenantSdrNumbers({
       sdr_whatsapp_numbers: ["5534984085015", "123", "", "5534984085015", "(55) 11 99999-8888"],
     });
     expect(numeros).toEqual(["5534984085015", "5511999998888"]);
   });
 
-  it("lista vazia devolve motivo claro, nao silencio", () => {
-    const alvo = resolveSdrTarget({ inboundConfig: null, tenantSettings: { sdr_whatsapp_numbers: [] } });
+  it("lista vazia devolve motivo claro, nao silencio", async () => {
+    const alvo = await resolveSdrTarget({ inboundConfig: null, tenantSettings: { sdr_whatsapp_numbers: [] } });
     expect(alvo.numbers).toEqual([]);
     expect(alvo.reason).toBe(SDR_MOTIVOS.SEM_NUMERO);
   });
 
-  it("transferencia desligada continua vencendo a lista do tenant", () => {
-    const alvo = resolveSdrTarget({
+  it("transferencia desligada continua vencendo a lista do tenant", async () => {
+    const alvo = await resolveSdrTarget({
       inboundConfig: { sdrTransferEnabled: false },
       tenantSettings: { sdr_whatsapp_numbers: ["5534984085015", "5511999998888"] },
     });
@@ -120,7 +120,7 @@ describe("botoes do passo sobrevivem a normalizacao", () => {
     buttons: [{ type: "url", displayText: "Link de Acesso", url: "https://vexoia.com/x" }],
   };
 
-  it("buttons NAO e descartado — era este o defeito", () => {
+  it("buttons NAO e descartado — era este o defeito", async () => {
     const meta = normalizeCampaignAnalyticsMeta({ sequence: [passoComBotao] });
     const passo = meta.sequence[0];
     expect(Array.isArray(passo.buttons)).toBe(true);
@@ -129,7 +129,7 @@ describe("botoes do passo sobrevivem a normalizacao", () => {
     expect(passo.buttons[0].type).toBe("url");
   });
 
-  it("vale para o passo after_reply, que e o da continuacao apos resposta", () => {
+  it("vale para o passo after_reply, que e o da continuacao apos resposta", async () => {
     // A continuacao reusa dispatchCampaignSequence, que normaliza a sequencia
     // do mesmo jeito: preservar aqui conserta os dois caminhos de uma vez.
     const meta = normalizeCampaignAnalyticsMeta({ sequence: [passoComBotao] });
@@ -137,7 +137,7 @@ describe("botoes do passo sobrevivem a normalizacao", () => {
     expect(meta.sequence[0].buttons[0].displayText).toBe("Link de Acesso");
   });
 
-  it("aceita o shape antigo (label/href) sem reescrever", () => {
+  it("aceita o shape antigo (label/href) sem reescrever", async () => {
     const meta = normalizeCampaignAnalyticsMeta({
       sequence: [{ ...passoComBotao, buttons: [{ label: "Abrir", href: "https://x.com" }] }],
     });
@@ -147,7 +147,7 @@ describe("botoes do passo sobrevivem a normalizacao", () => {
     expect(btn.displayText).toBe("Abrir");
   });
 
-  it("passo sem botao continua com lista vazia", () => {
+  it("passo sem botao continua com lista vazia", async () => {
     const meta = normalizeCampaignAnalyticsMeta({
       sequence: [{ id: "s1", type: "text", order: 1, text: "oi", enabled: true }],
     });
@@ -156,11 +156,11 @@ describe("botoes do passo sobrevivem a normalizacao", () => {
 });
 
 describe("o loop do alerta de SDR nao pode voltar", () => {
-  it("alerta NUNCA vai para o telefone da propria conversa", () => {
+  it("alerta NUNCA vai para o telefone da propria conversa", async () => {
     // Foi assim que o loop voltou: com o destino virando lista, um dos numeros
     // era o da conversa, o alerta chegava de volta como inbound e disparava
     // outro alerta.
-    const alvo = resolveSdrTarget({
+    const alvo = await resolveSdrTarget({
       inboundConfig: null,
       tenantSettings: { sdr_whatsapp_numbers: ["5534984085015", "5534997817660"] },
       excludeNumbers: ["5534997817660"],
@@ -169,8 +169,8 @@ describe("o loop do alerta de SDR nao pode voltar", () => {
     expect(alvo.excluded).toEqual(["5534997817660"]);
   });
 
-  it("todos os destinos excluidos: motivo proprio, nao 'sem numero'", () => {
-    const alvo = resolveSdrTarget({
+  it("todos os destinos excluidos: motivo proprio, nao 'sem numero'", async () => {
+    const alvo = await resolveSdrTarget({
       inboundConfig: null,
       tenantSettings: { sdr_whatsapp_numbers: ["5534997817660"] },
       excludeNumbers: ["5534997817660"],
@@ -180,7 +180,7 @@ describe("o loop do alerta de SDR nao pode voltar", () => {
     expect(alvo.reason).not.toBe(SDR_MOTIVOS.SEM_NUMERO);
   });
 
-  it("inbound vindo do numero do SDR nao vira conversa de lead", () => {
+  it("inbound vindo do numero do SDR nao vira conversa de lead", async () => {
     const decisao = shouldEngageInbound({
       scope: INBOUND_SCOPE_LEADS_ONLY,
       isKnownLead: true,
@@ -191,7 +191,7 @@ describe("o loop do alerta de SDR nao pode voltar", () => {
     expect(decisao.reason).toBe("numero_e_do_sdr");
   });
 
-  it("a trava do SDR vale INCLUSIVE no escopo 'all'", () => {
+  it("a trava do SDR vale INCLUSIVE no escopo 'all'", async () => {
     // "all" e sobre quem o cliente quer atender; nao autoriza o bot a conversar
     // com a propria notificacao.
     const decisao = shouldEngageInbound({

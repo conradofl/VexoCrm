@@ -50,6 +50,7 @@ vi.mock("@/hooks/useLeadClients", () => ({
   useLeadClients: () => ({ data: [mockTenant], isLoading: false }),
   useUpdateLeadClientN8nSettings: () => ({ mutateAsync: vi.fn() }),
   useUpdateLeadClientTicketMedio: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSdrRotationNext: () => ({ data: { next: null }, isLoading: false }),
 }));
 
 vi.mock("@/hooks/usePrompts", () => ({

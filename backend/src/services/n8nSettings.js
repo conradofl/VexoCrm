@@ -35,7 +35,7 @@ import {
 import { isMaskedSecretPlaceholder, getRequestBearerToken, sendError } from "./httpInfra.js";
 
 export const N8N_SETTINGS_SELECT_FIELDS =
-  "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, chatbot_llm_model, chatbot_instances, chatbot_inbound_scope, recontact_message, sdr_whatsapp_numbers, agent_name, segmentation_config, sdr_whatsapp_number, allowed_tabs, plan_tier, modulos_avulsos, chip_limit, degustacao_expira_em, send_window_start, send_window_end, send_window_days, send_window_timezone, send_window_enabled, agent_replies_outside_window, updated_at, updated_by_uid, updated_by_email";
+  "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, chatbot_llm_model, chatbot_instances, chatbot_inbound_scope, recontact_message, sdr_whatsapp_numbers, sdr_distribution, agent_name, segmentation_config, sdr_whatsapp_number, allowed_tabs, plan_tier, modulos_avulsos, chip_limit, degustacao_expira_em, send_window_start, send_window_end, send_window_days, send_window_timezone, send_window_enabled, agent_replies_outside_window, updated_at, updated_by_uid, updated_by_email";
 
 export function resolveSingleLeadClientSettings(rawRow, instances = []) {
   const masked = rawRow ? maskN8nSettings(rawRow) : null;
@@ -86,6 +86,9 @@ export function maskN8nSettings(row) {
       chatbot_inbound_scope: "leads_only",
       recontact_message: null,
       sdr_whatsapp_numbers: [],
+      // "todos" avisa a lista inteira (comportamento de sempre); "rodizio"
+      // gira um consultor por vez, decisão fixada por lead.
+      sdr_distribution: "todos",
       segmentation_config: buildDefaultSegmentationConfig("generico"),
       sdr_whatsapp_number: null,
       send_window_start: "08:00",
@@ -118,6 +121,7 @@ export function maskN8nSettings(row) {
     sdr_whatsapp_numbers: Array.isArray(row.sdr_whatsapp_numbers) && row.sdr_whatsapp_numbers.length > 0
       ? row.sdr_whatsapp_numbers
       : (row.sdr_whatsapp_number ? [row.sdr_whatsapp_number] : []),
+    sdr_distribution: row.sdr_distribution === "rodizio" ? "rodizio" : "todos",
     segmentation_config: sanitizeSegmentationConfig(row.segmentation_config, row.chatbot_model || "generico"),
     sdr_whatsapp_number: row.sdr_whatsapp_number || null,
     updated_at: row.updated_at || null,
@@ -241,6 +245,7 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const recontactMessageProvided = Object.prototype.hasOwnProperty.call(body, "recontactMessage") || Object.prototype.hasOwnProperty.call(body, "recontact_message");
   const sdrWhatsappNumberProvided = Object.prototype.hasOwnProperty.call(body, "sdrWhatsappNumber");
   const sdrWhatsappNumbersProvided = Object.prototype.hasOwnProperty.call(body, "sdrWhatsappNumbers");
+  const sdrDistributionProvided = Object.prototype.hasOwnProperty.call(body, "sdrDistribution") || Object.prototype.hasOwnProperty.call(body, "sdr_distribution");
   const allowedTabsProvided = Object.prototype.hasOwnProperty.call(body, "allowedTabs");
   const planTierProvided = Object.prototype.hasOwnProperty.call(body, "planTier") || Object.prototype.hasOwnProperty.call(body, "plan_tier");
   const modulosAvulsosProvided = Object.prototype.hasOwnProperty.call(body, "modulosAvulsos") || Object.prototype.hasOwnProperty.call(body, "modulos_avulsos");
@@ -283,6 +288,11 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
           .map((v) => String(v ?? "").replace(/\D/g, ""))
           .filter((v) => /^[0-9]{10,15}$/.test(v)))]
       : existing?.sdr_whatsapp_numbers ?? [],
+    // "todos" (padrão) avisa a lista inteira; qualquer outra coisa que não
+    // "rodizio" cai em "todos" — nunca grava um valor fora do CHECK da coluna.
+    sdr_distribution: sdrDistributionProvided
+      ? ((body.sdrDistribution ?? body.sdr_distribution) === "rodizio" ? "rodizio" : "todos")
+      : existing?.sdr_distribution ?? "todos",
     chatbot_instances: chatbotInstancesProvided
       ? (Array.isArray(body.chatbotInstances ?? body.chatbot_instances)
           ? [...new Set((body.chatbotInstances ?? body.chatbot_instances).map((v) => String(v ?? "").trim()).filter(Boolean))]
