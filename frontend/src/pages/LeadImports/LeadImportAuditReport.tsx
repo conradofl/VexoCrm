@@ -1,20 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  FileSpreadsheet,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
-  Send,
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  CAMPAIGN_STATUS_COLORS,
-  CAMPAIGN_STATUS_LABELS,
-  type CampaignStatus,
-} from "@/hooks/useCampanhas";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,9 +19,33 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/use-toast";
 import { API_BASE_URL } from "@/lib/api";
-import { formatDateTime } from "@/lib/leadImports/spreadsheet";
-import { DispatchCampaignTracker } from "./DispatchCampaignTracker";
-import { DispatchRecipientsDialog } from "./DispatchRecipientsDialog";
+import { DispatchKpiCards } from "./DispatchKpiCards";
+
+const PAGE_SIZE = 50;
+
+// Vocabulário de status de UMA tentativa de envio (campaign_dispatch_runs),
+// diferente do status da CAMPANHA (CampaignStatus, em useCampanhas.ts) —
+// misturar os dois é o motivo do enum cru (ex.: "invalid_number") vazar na
+// tela: o mapa de campanha não tem essa chave e cai no fallback vazio.
+type RunStatus = "pending" | "claimed" | "sent" | "failed" | "skipped" | "invalid_number";
+
+const RUN_STATUS_LABELS: Record<RunStatus, string> = {
+  pending: "Pendente",
+  claimed: "Reivindicado",
+  sent: "Enviado",
+  failed: "Falhou",
+  skipped: "Ignorado",
+  invalid_number: "Número inválido",
+};
+
+const RUN_STATUS_COLORS: Record<RunStatus, string> = {
+  pending: "border-slate-300 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400",
+  claimed: "border-sky-300 bg-sky-50 text-sky-600 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-400",
+  sent: "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+  failed: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+  skipped: "border-slate-300 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-500",
+  invalid_number: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+};
 
 // Sub-component for auditing lead imports and creating follow-up cohorts
 interface AuditItem {
@@ -45,6 +63,10 @@ interface AuditItem {
   last_status: string | null;
   last_error_message: string | null;
   has_replied: boolean;
+  // Um motivo só, já traduzido pelo backend — não importado usa o
+  // skip_reason da planilha, disparado-e-falho usa o tradutor de erro.
+  // null quando o lead não é uma falha (enviado, pendente, etc).
+  failure_reason: string | null;
 }
 
 interface LeadImportAuditReportProps {
@@ -58,20 +80,13 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
   const [selectedImportId, setSelectedImportId] = useState<string>("");
   const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<"all" | "sent" | "failed" | "replied" | "pending">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "failed" | "replied">("all");
+  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const [creatingSubset, setCreatingSubset] = useState(false);
   const [deletingItems, setDeletingItems] = useState(false);
-
-  const selectedImport = useMemo(() => {
-    return imports.find((imp) => imp.id === selectedImportId);
-  }, [imports, selectedImportId]);
-
-  const queryClient = useQueryClient();
-  // Abre o lote clicado num quadrado do DispatchCampaignTracker, reaproveitando
-  // a mesma tela de destinatários da Fila de Envios — não outra.
-  const [previewDispatchId, setPreviewDispatchId] = useState<string | null>(null);
 
   // ── Limpeza de estado e seleções ao trocar de empresa (tenant) ───────────
   useEffect(() => {
@@ -80,7 +95,8 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
     setSelectedItemIds(new Set());
     setSearchTerm("");
     setActiveFilter("all");
-    setPreviewDispatchId(null);
+    setSelectedReason(null);
+    setPage(1);
   }, [activeClientId]);
 
   // ── Sincronização de seleção com os imports válidos do tenant atual ──────
@@ -96,7 +112,13 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
   }, [imports, selectedImportId]);
 
   // ── Carregamento de auditoria protegido com AbortController ──────────────
+  // Troca de planilha/campanha: nenhum dado da anterior pode sobrar — motivo
+  // selecionado e página voltam ao início ANTES da nova busca terminar, não
+  // só depois (senão um clique rápido mostra o filtro velho por um instante).
   useEffect(() => {
+    setSelectedReason(null);
+    setPage(1);
+
     if (!selectedImportId || !activeClientId) {
       setAuditItems([]);
       return;
@@ -198,30 +220,59 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
       const phone = String(item.telefone || "").toLowerCase();
       const matchesSearch = name.includes(searchTerm.toLowerCase()) || phone.includes(searchTerm.toLowerCase());
       if (!matchesSearch) return false;
+      if (selectedReason && item.failure_reason !== selectedReason) return false;
 
       switch (activeFilter) {
-        case "sent":
-          return item.last_status === "sent";
         case "failed":
-          return item.last_status === "failed";
+          return !!item.failure_reason;
         case "replied":
           return item.has_replied;
-        case "pending":
-          return !item.last_status || item.last_status === "pending" || item.last_status === "claimed";
         default:
           return true;
       }
     });
-  }, [auditItems, activeFilter, searchTerm]);
+  }, [auditItems, activeFilter, searchTerm, selectedReason]);
+
+  // Motivos agrupados — a razão de existir desta tela. Calculado sobre TODOS
+  // os leads da campanha selecionada (não sobre a busca de texto), pra não
+  // fazer o percentual mudar de significado conforme o que está digitado.
+  const reasonGroups = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of auditItems) {
+      if (!item.failure_reason) continue;
+      counts.set(item.failure_reason, (counts.get(item.failure_reason) || 0) + 1);
+    }
+    const total = Array.from(counts.values()).reduce((sum, n) => sum + n, 0);
+    return Array.from(counts.entries())
+      .map(([reason, count]) => ({ reason, count, pct: total > 0 ? Math.round((count / total) * 100) : 0 }))
+      .sort((a, b) => b.count - a.count);
+  }, [auditItems]);
 
   const stats = useMemo(() => {
     const total = auditItems.length;
-    const sent = auditItems.filter((i) => i.last_status === "sent").length;
-    const failed = auditItems.filter((i) => i.last_status === "failed").length;
+    const failed = reasonGroups.reduce((sum, g) => sum + g.count, 0);
     const replied = auditItems.filter((i) => i.has_replied).length;
-    const pending = auditItems.filter((i) => !i.last_status || i.last_status === "pending" || i.last_status === "claimed").length;
-    return { total, sent, failed, replied, pending };
-  }, [auditItems]);
+    return { total, failed, replied };
+  }, [auditItems, reasonGroups]);
+
+  // Paginação só do RENDER da tabela — a seleção em massa e os motivos
+  // continuam olhando pra lista filtrada inteira, não só a página visível.
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedItems = useMemo(
+    () => filteredItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredItems, safePage]
+  );
+
+  // Busca/filtro/motivo mudou o resultado — volta pra página 1, senão a
+  // pessoa pode ficar numa página que não existe mais no conjunto novo.
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter, searchTerm, selectedReason]);
+
+  const handleReasonClick = (reason: string) => {
+    setSelectedReason((prev) => (prev === reason ? null : reason));
+  };
 
   const handleToggleSelectAll = () => {
     if (selectedItemIds.size === filteredItems.length) {
@@ -246,7 +297,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
     if (type === "all") {
       ids = auditItems.map((i) => i.lead_import_item_id);
     } else if (type === "failed") {
-      ids = auditItems.filter((i) => i.last_status === "failed").map((i) => i.lead_import_item_id);
+      ids = auditItems.filter((i) => !!i.failure_reason).map((i) => i.lead_import_item_id);
     } else if (type === "replied") {
       ids = auditItems.filter((i) => i.has_replied).map((i) => i.lead_import_item_id);
     }
@@ -339,19 +390,18 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
 
   return (
     <div className="space-y-6">
-      {/* ── SEÇÃO 1: ACOMPANHAR DISPAROS (uma linha por campanha) ───────── */}
-      <DispatchCampaignTracker
-        clientId={activeClientId || null}
-        onOpenDispatch={(dispId) => setPreviewDispatchId(dispId)}
-      />
+      {/* ── SEÇÃO 1: OS QUATRO CARTÕES DO PERÍODO (campanhas, leads, enviados,
+          taxa de entrega) — o Acompanhar Disparos mora só na Fila de Envios,
+          isso aqui é só o resumo. ─────────────────────────────────────── */}
+      <DispatchKpiCards clientId={activeClientId || null} />
 
-      {/* ── SEÇÃO 2: DETALHES DE AUDITORIA DA PLANILHA SELECIONADA ────────── */}
+      {/* ── SEÇÃO 2: RESULTADO E DIAGNÓSTICO DA PLANILHA SELECIONADA ────── */}
       <Card className="border-border bg-card text-card-foreground shadow-lg rounded-2xl">
         <CardHeader className="pb-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <CardTitle className="text-base font-bold">Relatório & Auditoria de Envios</CardTitle>
-              <CardDescription>Analise os resultados do disparo de cada planilha e crie réguas de acompanhamento automáticas</CardDescription>
+              <CardDescription>O que aconteceu, e por que falhou — motivos agrupados, com contagem e percentual</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-400">Planilha:</span>
@@ -372,51 +422,6 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {imports.length > 0 && selectedImport && !loading && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-2xl border border-border text-xs">
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300">
-                  <FileSpreadsheet className="h-4 w-4 text-indigo-500" />
-                  <span>Origem (De onde veio)</span>
-                </div>
-                <div className="space-y-1 text-muted-foreground pl-5">
-                  <p>
-                    <strong className="text-foreground">Tipo de Origem: </strong>
-                    {selectedImport.source_type === "segmentation_campaign" ? "Campanha de Segmentação" : "Upload de Planilha"}
-                  </p>
-                  <p>
-                    <strong className="text-foreground">Nome da Base: </strong>
-                    {selectedImport.source_name}
-                  </p>
-                  <p>
-                    <strong className="text-foreground">Importado em: </strong>
-                    {formatDateTime(selectedImport.created_at)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300">
-                  <Send className="h-4 w-4 text-emerald-500" />
-                  <span>Destino (Para onde direcionar)</span>
-                </div>
-                <div className="space-y-1 text-muted-foreground pl-5">
-                  <p>
-                    <strong className="text-foreground">Status Atual: </strong>
-                    Processado e direcionado para a **Fila de Envios** para disparos automatizados.
-                  </p>
-                  <p>
-                    <strong className="text-foreground">Total de Leads: </strong>
-                    {selectedImport.total_rows ?? (selectedImport.imported_rows + selectedImport.skipped_rows)} total ({selectedImport.imported_rows} válidos / {selectedImport.skipped_rows} ignorados)
-                  </p>
-                  <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
-                    💡 Use os filtros de status abaixo para segmentar os leads e criar novas campanhas de remarketing.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
           {imports.length === 0 ? (
             <div className="p-8">
               <EmptyState title="Nenhuma planilha importada" description="Importe uma planilha na aba Novo Disparo para visualizar os relatórios." />
@@ -428,59 +433,43 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 bg-slate-50/50 dark:bg-black/20 p-3 rounded-2xl border border-slate-200/60 dark:border-white/5">
-                <button
-                  onClick={() => setActiveFilter("all")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
-                    activeFilter === "all" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
-                  )}
-                >
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Total Leads</span>
-                  <span className="text-base font-bold text-slate-800 dark:text-slate-100">{stats.total}</span>
-                </button>
-                <button
-                  onClick={() => setActiveFilter("sent")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
-                    activeFilter === "sent" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
-                  )}
-                >
-                  <span className="text-[10px] font-bold text-emerald-500 uppercase">Enviados</span>
-                  <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">{stats.sent}</span>
-                </button>
-                <button
-                  onClick={() => setActiveFilter("failed")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
-                    activeFilter === "failed" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
-                  )}
-                >
-                  <span className="text-[10px] font-bold text-rose-500 uppercase">Falhas</span>
-                  <span className="text-base font-bold text-rose-600 dark:text-rose-400">{stats.failed}</span>
-                </button>
-                <button
-                  onClick={() => setActiveFilter("replied")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
-                    activeFilter === "replied" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
-                  )}
-                >
-                  <span className="text-[10px] font-bold text-indigo-500 uppercase">Com Retorno</span>
-                  <span className="text-base font-bold text-indigo-600 dark:text-indigo-400">{stats.replied}</span>
-                </button>
-                <button
-                  onClick={() => setActiveFilter("pending")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center",
-                    activeFilter === "pending" ? "bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700 shadow" : "bg-transparent border-transparent hover:bg-white/40 dark:hover:bg-white/5"
-                  )}
-                >
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Pendentes</span>
-                  <span className="text-base font-bold text-slate-700 dark:text-slate-200">{stats.pending}</span>
-                </button>
-              </div>
+              {/* ── Por que falhou — o motivo desta tela existir. Cada linha é
+                  clicável e filtra a lista abaixo. ────────────────────────── */}
+              {reasonGroups.length > 0 && (
+                <div className="bg-slate-50/50 dark:bg-black/20 p-3.5 rounded-2xl border border-slate-200/60 dark:border-white/5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                      Por que falhou
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {stats.failed} de {stats.total} {stats.total === 1 ? "lead" : "leads"} falharam
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    {reasonGroups.map((g) => (
+                      <button
+                        key={g.reason}
+                        type="button"
+                        onClick={() => handleReasonClick(g.reason)}
+                        className={cn(
+                          "w-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs transition-colors",
+                          selectedReason === g.reason
+                            ? "border-rose-300 bg-rose-50 dark:border-rose-800/60 dark:bg-rose-950/20"
+                            : "border-transparent bg-white/60 hover:bg-white dark:bg-white/5 dark:hover:bg-white/10"
+                        )}
+                      >
+                        <span className="font-semibold text-foreground truncate">{g.reason}</span>
+                        <span className="shrink-0 text-muted-foreground font-mono">
+                          {g.count} ({g.pct}%)
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
+              {/* ── Busca + filtros Todos/Falhas/Com Retorno ────────────────── */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/20 dark:bg-black/10 p-3.5 rounded-2xl border border-slate-200/60 dark:border-white/5">
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                   <Input
@@ -489,6 +478,28 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="h-9 text-xs w-full sm:w-64 rounded-xl"
                   />
+
+                  <div className="flex items-center gap-1.5">
+                    {([
+                      { key: "all", label: "Todos" },
+                      { key: "failed", label: "Falhas" },
+                      { key: "replied", label: "Com Retorno" },
+                    ] as const).map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => setActiveFilter(f.key)}
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors",
+                          activeFilter === f.key
+                            ? "bg-indigo-600 text-white"
+                            : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-muted-foreground"
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
 
                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-1 sm:mt-0">
                     <span>Selecionar:</span>
@@ -557,7 +568,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredItems.map((item) => {
+                      {pagedItems.map((item) => {
                         const isSelected = selectedItemIds.has(item.lead_import_item_id);
 
                         let timeAgo = "—";
@@ -598,9 +609,9 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                               {item.telefone}
                             </TableCell>
                             <TableCell className="py-2 text-center">
-                              {item.last_status ? (
-                                <Badge className={cn("border text-[9px] font-bold rounded-lg px-2 py-0.25", CAMPAIGN_STATUS_COLORS[item.last_status as CampaignStatus] || "")}>
-                                  {CAMPAIGN_STATUS_LABELS[item.last_status as CampaignStatus] || item.last_status}
+                              {item.last_status && item.last_status in RUN_STATUS_LABELS ? (
+                                <Badge className={cn("border text-[9px] font-bold rounded-lg px-2 py-0.25", RUN_STATUS_COLORS[item.last_status as RunStatus])}>
+                                  {RUN_STATUS_LABELS[item.last_status as RunStatus]}
                                 </Badge>
                               ) : (
                                 <span className="text-[10px] text-slate-400">Pendente</span>
@@ -621,14 +632,12 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                             <TableCell className="py-2 text-[10px] text-muted-foreground">
                               {timeAgo}
                             </TableCell>
-                            <TableCell className="py-2 text-muted-foreground truncate max-w-[200px]" title={item.last_error_message || ""}>
-                              {item.last_status === "failed" ? (
+                            <TableCell className="py-2 text-muted-foreground truncate max-w-[200px]" title={item.failure_reason || ""}>
+                              {item.failure_reason ? (
                                 <span className="text-rose-500 font-medium flex items-center gap-1.5">
                                   <AlertTriangle className="h-3 w-3 shrink-0" />
-                                  {item.last_error_message || "Erro desconhecido"}
+                                  {item.failure_reason}
                                 </span>
-                              ) : item.skip_reason ? (
-                                <span className="text-amber-500">Ignorado: {item.skip_reason}</span>
                               ) : (
                                 "—"
                               )}
@@ -640,16 +649,38 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                   </Table>
                 </div>
               )}
+
+              {filteredItems.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-muted-foreground">
+                    Página {safePage} de {totalPages} — {filteredItems.length} leads
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 w-7 p-0"
+                      disabled={safePage <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 w-7 p-0"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </CardContent>
       </Card>
-
-      <DispatchRecipientsDialog
-        dispatchId={previewDispatchId}
-        onClose={() => setPreviewDispatchId(null)}
-        onDeleted={() => queryClient.invalidateQueries({ queryKey: ["dispatch-summary"] })}
-      />
     </div>
   );
 }

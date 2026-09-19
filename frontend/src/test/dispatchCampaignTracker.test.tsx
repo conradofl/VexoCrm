@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { DISPATCH_SQUARE_STYLES } from "@/hooks/useCampanhas";
 
 vi.mock("@/components/ui/use-toast", () => ({
   toast: vi.fn(),
@@ -233,6 +234,50 @@ describe("DispatchCampaignTracker", () => {
     expect(screen.queryByRole("button", { name: /Pausar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Retomar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Cancelar o que falta/ })).toBeNull();
+  });
+
+  it("[TESTE OBRIGATÓRIO] o lote é quadrado, não bolinha — e cada estado tem a cor certa", async () => {
+    setupSummary({
+      active: [
+        makeCampaign({
+          batches: [
+            makeBatch({ id: "b1", status: "done" }),
+            makeBatch({ id: "b2", status: "failed" }),
+            makeBatch({ id: "b3", status: "running" }),
+            makeBatch({ id: "b4", status: "scheduled" }),
+            makeBatch({ id: "b5", status: "cancelled" }),
+          ],
+        }),
+      ],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    // Estrutural: nenhum quadrado de lote usa rounded-full (bolinha). O
+    // desenho aprovado pede cantos levemente arredondados, não círculo.
+    for (const n of [1, 2, 3, 4, 5]) {
+      const square = screen.getByTitle(new RegExp(`^Lote ${n} —`));
+      expect(square.className).not.toMatch(/rounded-full/);
+    }
+
+    // Enviado — verde; Com falha — vermelho; Saindo agora — azul; Na fila —
+    // cinza; Cancelado — cinza mais apagado. Cada cor da lista, no lugar
+    // certo, não um tom azul-esverdeado indistinguível pra tudo.
+    expect(screen.getByTitle(/^Lote 1 — enviado/).className).toBe(`h-7 w-7 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all ${DISPATCH_SQUARE_STYLES.enviado}`);
+    expect(screen.getByTitle(/^Lote 2 — com falha/).className).toContain(DISPATCH_SQUARE_STYLES.falha);
+    expect(screen.getByTitle(/^Lote 3 — saindo agora/).className).toContain(DISPATCH_SQUARE_STYLES.saindo);
+    expect(screen.getByTitle(/^Lote 4 — na fila/).className).toContain(DISPATCH_SQUARE_STYLES.fila);
+    expect(screen.getByTitle(/^Lote 5 — cancelado/).className).toContain(DISPATCH_SQUARE_STYLES.cancelado);
+
+    expect(DISPATCH_SQUARE_STYLES.enviado).toContain("emerald");
+    expect(DISPATCH_SQUARE_STYLES.falha).toContain("rose");
+    expect(DISPATCH_SQUARE_STYLES.saindo).toContain("blue-500");
+    expect(DISPATCH_SQUARE_STYLES.saindo).not.toContain("indigo");
+    expect(DISPATCH_SQUARE_STYLES.fila).toContain("slate");
+    expect(DISPATCH_SQUARE_STYLES.cancelado).toContain("slate");
+    // apagado de verdade: cancelado não pode ser o MESMO tom que "na fila"
+    expect(DISPATCH_SQUARE_STYLES.cancelado).not.toBe(DISPATCH_SQUARE_STYLES.fila);
   });
 
   it("[TESTE OBRIGATÓRIO] Encerradas com mais campanhas que o tamanho da página mostra paginação", async () => {

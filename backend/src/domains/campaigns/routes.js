@@ -3478,9 +3478,24 @@ export function registerCampaignsRoutes(app, deps) {
       `;
 
       const result = await pgDatabasePool.query(sql, [clientId, importId]);
+      // failure_reason — um motivo só, pronto pra agrupar na tela: quem nunca
+      // foi importado usa o skip_reason da planilha; quem foi disparado e
+      // falhou usa o mesmo tradutor de erro dos outros relatórios (não
+      // duplica a lógica de invalid_number/timeout/etc em dois lugares).
+      const items = (result.rows || []).map((item) => {
+        let failureReason = null;
+        if (!item.imported) {
+          failureReason = item.skip_reason || "Motivo não registrado";
+        } else if (item.last_status === "invalid_number") {
+          failureReason = "Número inválido";
+        } else if (item.last_status === "failed") {
+          failureReason = translateDispatchErrorMessage(item.last_error_message) || "Erro desconhecido";
+        }
+        return { ...item, failure_reason: failureReason };
+      });
       res.json({
         import: importRec,
-        items: result.rows || []
+        items,
       });
     } catch (err) {
       console.error("[import-audit] error:", err);

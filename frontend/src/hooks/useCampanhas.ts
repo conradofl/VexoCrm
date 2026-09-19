@@ -1130,7 +1130,9 @@ export const DISPATCH_SQUARE_STATE_LABELS: Record<DispatchSquareState, string> =
 export const DISPATCH_SQUARE_STYLES: Record<DispatchSquareState, string> = {
   enviado: "bg-emerald-500 text-white",
   falha: "bg-rose-500 text-white",
-  saindo: "bg-indigo-500 text-white animate-pulse",
+  // Azul puro (não o indigo da marca) — o quadrado "saindo agora" precisa
+  // se distinguir dos botões indigo da própria tela, não se camuflar neles.
+  saindo: "bg-blue-500 text-white animate-pulse",
   cancelado: "bg-slate-100 text-slate-400 line-through dark:bg-slate-800/60 dark:text-slate-600",
   fila: "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
 };
