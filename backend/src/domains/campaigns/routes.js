@@ -3534,6 +3534,62 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
+  // GET /api/campaigns/reports/message-effectiveness — por campanha, o texto
+  // da mensagem, quantos receberam e quantos responderam, só campanhas com
+  // pelo menos 30 envios (volume baixo demais pra taxa dizer algo). É o dado
+  // que dá tom real às receitas da Academy — qual mensagem, de fato, traz
+  // retorno, não qual parece boa.
+  app.get("/api/campaigns/reports/message-effectiveness", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.query.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const minSent = 30;
+    try {
+      const sql = `
+        WITH runs AS (
+          SELECT
+            r.campaign_id,
+            EXISTS (
+              SELECT 1
+              FROM public.lead_messages lm
+              WHERE lm.client_id = r.client_id
+                AND lm.phone = r.phone
+                AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+            ) AS replied
+          FROM public.campaign_dispatch_runs r
+          WHERE r.client_id = $1 AND r.status = 'sent'
+        )
+        SELECT
+          c.id AS campaign_id,
+          c.name AS campaign_name,
+          c.analytics_meta->>'message' AS message,
+          COUNT(*)::int AS sent_count,
+          COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count
+        FROM runs
+        JOIN public.campaigns c ON c.id = runs.campaign_id
+        WHERE c.client_id = $1
+        GROUP BY c.id, c.name, c.analytics_meta
+        HAVING COUNT(*) >= $2
+        ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
+      `;
+      const { rows } = await pgDatabasePool.query(sql, [clientId, minSent]);
+      const campaigns = rows.map((row) => ({
+        campaignId: row.campaign_id,
+        campaignName: row.campaign_name,
+        message: row.message || null,
+        sentCount: row.sent_count,
+        repliedCount: row.replied_count,
+        replyRate: row.sent_count > 0 ? Math.round((row.replied_count / row.sent_count) * 1000) / 10 : 0,
+      }));
+      res.json({ minSent, campaigns });
+    } catch (err) {
+      console.error("[message-effectiveness] error:", err);
+      sendError(res, 500, "MESSAGE_EFFECTIVENESS_FAILED", err instanceof Error ? err.message : "Failed to load report");
+    }
+  });
+
   // POST /api/campaigns/reports/create-import-from-subset — Cria nova base de importação a partir de um subconjunto
   app.post("/api/campaigns/reports/create-import-from-subset", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
     if (!ensureDb(res)) return;

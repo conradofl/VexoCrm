@@ -18,6 +18,7 @@ import { registerChatbotRoutes } from "./chatbot/routes.js";
 import { registerRemindersRoutes } from "./reminders/routes.js";
 import { registerCampaignsRoutes } from "./campaigns/routes.js";
 import { registerSuperAdminRoutes } from "./superadmin/routes.js";
+import { registerAcademyRoutes } from "./academy/routes.js";
 
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
@@ -48,6 +49,7 @@ export function registerAllDomainRoutes(app) {
   registerChatbotRoutes(app, routeDeps);
   registerRemindersRoutes(app, routeDeps);
   registerCampaignsRoutes(app, routeDeps);
+  registerAcademyRoutes(app, routeDeps);
 
   // ─── Fila de Follow-up (painel de moderação /api/followup-queue) ───
   registerFollowupQueueRoutes(app, routeDeps);

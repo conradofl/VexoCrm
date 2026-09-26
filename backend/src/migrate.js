@@ -342,6 +342,10 @@ async function isAlreadyApplied(pool, filename) {
     "20260918110000_create_sdr_rotation_state.sql": `SELECT (
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='sdr_rotation_state')
     ) AS ok`,
+    "20260920100000_create_academy_recipe_usage.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='academy_recipe_usage')
+      AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'academy_recipe_usage_action_check')
+    ) AS ok`,
   };
 
   const query = checks[filename];
