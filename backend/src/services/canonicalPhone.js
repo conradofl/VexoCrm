@@ -53,3 +53,27 @@ export function toCanonicalPhone(raw) {
   }
   return digits;
 }
+
+/**
+ * Espelha em JavaScript o padrão `col = $x OR SQL_CANONICAL_PHONE(col) =
+ * SQL_CANONICAL_PHONE($x)` já usado em domains/chatbot/routes.js:955 e em
+ * buildMessageEffectivenessSql (campaigns/routes.js) pro EXISTS de
+ * "respondeu": igualdade crua primeiro (usa índice no caso comum, telefone
+ * já no mesmo formato), canônica como OR pra quando o formato diverge (com
+ * DDI de um lado, sem do outro). Só existe pra dar teste real a essa
+ * comparação sem precisar de Postgres — a query continua em SQL.
+ *
+ * Vazio/null nunca casa com vazio/null, nem consigo mesmo: em SQL,
+ * `'' = ''` é verdadeiro mas `NULL = NULL` nunca é — e o telefone do run
+ * pode vir gravado como string vazia (campaigns/routes.js insere
+ * `phone || ""`). Sem essa guarda, dois telefones vazios "respondem" um ao
+ * outro.
+ */
+export function phoneMatches(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const canonicalA = toCanonicalPhone(a);
+  const canonicalB = toCanonicalPhone(b);
+  if (!canonicalA || !canonicalB) return false;
+  return canonicalA === canonicalB;
+}

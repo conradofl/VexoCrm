@@ -88,16 +88,30 @@ import {
 // dá tom real às receitas da Academy — qual mensagem, de fato, traz retorno
 // de gente qualificada, não só retorno.
 //
-// Quatro coisas que este cruzamento tem que respeitar, porque cada uma
+// Cinco coisas que este cruzamento tem que respeitar, porque cada uma
 // sozinha já fabrica número plausível e errado:
-//  1) Telefone da CLASSIFICAÇÃO (quente/morno/frio) precisa do MESMO
+//  1) `replied` (a base de repliedCount E replyRate — o número mais citado
+//     do relatório) compara lead_messages.phone com campaign_dispatch_runs
+//     .phone. A primeira vem do webhook da Evolution, sempre com DDI 55; a
+//     segunda vem do telefone do lead no momento do disparo, que pode não
+//     trazer DDI. Sem canonicalizar aqui também, repliedCount/replyRate
+//     SUBCONTAM — a direção do erro é sempre pra baixo, nunca pra cima,
+//     porque telefone em formato diferente nunca "responde" nesta conta.
+//     Comparação crua OR canônica (não só canônica) — mesmo padrão de
+//     domains/chatbot/routes.js:955 — pra manter o índice em
+//     lead_messages(client_id, phone) útil no caso comum (telefone já
+//     igual) e só pagar o custo de canonicalizar no caso que realmente
+//     diverge. Não medido contra Postgres real (sem acesso a um banco
+//     neste ambiente) — se alguém confirmar que o plano continua bom só
+//     com o canônico, pode simplificar.
+//  2) Telefone da CLASSIFICAÇÃO (quente/morno/frio) precisa do MESMO
 //     canônico dos dois lados (SQL_CANONICAL_PHONE — não regexp_replace
 //     cru), senão "11987654321" (lead importado, sem DDI) nunca casa com
 //     "5511987654321" (run da Evolution, com DDI), e tudo cai em
 //     semClassificacao. E precisa olhar tanto `telefone` quanto `phone` —
 //     as duas colunas existem em public.leads, lead com só uma preenchida
 //     não pode ficar invisível no cruzamento.
-//  2) Lead de campanha é lead IMPORTADO — quem escreve nele é a importação
+//  3) Lead de campanha é lead IMPORTADO — quem escreve nele é a importação
 //     (leads/routes.js), em `temperature` (hot/warm/cold), não o robô em
 //     `lead_temperature` (QUENTE/MORNO/FRIO). Ler só a segunda joga quase
 //     tudo em semClassificacao. As duas entram — mas `temperature` tem
@@ -107,16 +121,19 @@ import {
 //     como MORNO — só lead_temperature='MORNO' conta, porque essa coluna só
 //     é escrita por escolha. Ver SQL_LEAD_TEMPERATURE_BUCKET
 //     (services/leadTemperature.js) pra whitelist completa e o motivo.
-//  3) Whitelist fechada dos dois lados (SQL e o espelho JS que testa isso):
+//  4) Whitelist fechada dos dois lados (SQL e o espelho JS que testa isso):
 //     valor fora de QUENTE/MORNO/FRIO/hot/cold é "sem classificação", nunca
 //     um bucket que ninguém pediu nem um valor que só desaparece da soma.
-//  4) `leads` pode ter mais de uma linha pro mesmo telefone (mesmo
+//  5) `leads` pode ter mais de uma linha pro mesmo telefone (mesmo
 //     tenant) — juntar direto duplica o run que respondeu. O lado do
 //     lead precisa estar deduplicado (1 linha por telefone canônico,
 //     mais recente primeiro) ANTES do LEFT JOIN, não depois.
 //
-// Invariante que prova que os quatro acima estão corretos: em toda
-// campanha, quente+morno+frio+semClassificacao == repliedCount. Sempre.
+// Invariante que prova que 2-5 estão corretos: em toda campanha,
+// quente+morno+frio+semClassificacao == repliedCount. Sempre. (O item 1 não
+// tem invariante equivalente — repliedCount É o número que ele corrige;
+// depois desta correção, replyRate de campanha antiga sobe, nunca desce.
+// Não é bug novo, é o número saindo do erro.)
 // Exportada (não fechada dentro de registerCampaignsRoutes) pra dar teste
 // estrutural direto sobre o texto da query — ver
 // campaignMessageEffectiveness.test.js.
@@ -131,11 +148,27 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
           SELECT 1
           FROM public.lead_messages lm
           WHERE lm.client_id = r.client_id
-            AND lm.phone = r.phone
+            -- Mesmo defeito nº1 (telefone cru), na coluna que mais importa:
+            -- lead_messages.phone vem do webhook da Evolution (sempre com
+            -- DDI 55); campaign_dispatch_runs.phone vem do telefone do lead
+            -- no momento do disparo (pode não trazer DDI). Igualdade crua
+            -- OR canônica — não só canônica — no mesmo padrão de
+            -- domains/chatbot/routes.js:955: telefone já igual usa o índice
+            -- em lead_messages(client_id, phone) pelo primeiro lado do OR;
+            -- só cai na comparação canonicalizada (não indexável) quando o
+            -- formato realmente diverge. Não medido contra Postgres real
+            -- neste ambiente (ver nota no topo do arquivo de teste) — quem
+            -- tiver acesso ao banco e confirmar que o plano continua bom
+            -- pode simplificar pra só a comparação canônica.
+            AND (lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})
             AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
         ) AS replied
       FROM public.campaign_dispatch_runs r
-      WHERE r.client_id = $1 AND r.status = 'sent'
+      -- r.phone <> '' — a inserção do dispatch grava phone || '' (routes.js
+      -- ~2328): run com telefone vazio contra uma lead_messages TAMBÉM com
+      -- phone vazio bateria nos dois lados do OR ('' = '' é verdadeiro em
+      -- SQL) e contaria como respondido sem ninguém ter respondido.
+      WHERE r.client_id = $1 AND r.status = 'sent' AND r.phone <> ''
     ),
     lead_by_phone AS (
       SELECT DISTINCT ON (${canonicalLeadPhone})
