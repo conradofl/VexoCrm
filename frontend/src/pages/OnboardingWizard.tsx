@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Check, Clock, Copy, ListChecks, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BookOpen, Check, Clock, Copy, Sparkles } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,30 @@ import { useAcademyDiagnostics, useLogAcademyRecipeUsage } from "@/hooks/useAcad
 import { AcademyInstallDialog } from "@/components/academy/AcademyInstallDialog";
 import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
-import { ACADEMY_RECIPES, getAcademyRecipeById, type AcademyRecipe } from "@/data/academyRecipes";
+import {
+  ACADEMY_FUNDAMENTOS,
+  ACADEMY_RECIPES,
+  getAcademyContentById,
+  isAcademyRecipe,
+  type AcademyContent,
+  type AcademyContactTemperature,
+} from "@/data/academyRecipes";
 
-// Vexo Academy — biblioteca de receitas por objetivo. Receita é dado (vem de
-// academyRecipes.ts, não deste componente): esta tela lista, filtra, mostra
-// o conteúdo inteiro, mede o que a pessoa faz com ele e instala usando os
-// endpoints que já existem (useAcademyInstall.ts) — nunca liga nada sozinho,
-// nunca sobrescreve, sempre pergunta o que falta.
+// Vexo Academy — biblioteca de conteúdo, dois tipos que se comportam
+// diferente: fundamento (ensina o sistema, só leitura e Copiar) e receita
+// (resolve um objetivo, tem o botão que instala). Conteúdo é dado (vem de
+// academyRecipes.ts, não deste componente) — esta tela lista, filtra,
+// mostra o conteúdo inteiro, mede o que a pessoa faz com ele e instala
+// usando os endpoints que já existem (useAcademyInstall.ts) — nunca liga
+// nada sozinho, nunca sobrescreve, sempre pergunta o que falta.
 
 const ALL_FILTER = "__all__";
+
+const TEMPERATURE_LABELS: Record<AcademyContactTemperature, string> = {
+  frio: "Contato frio",
+  morno: "Contato morno",
+  quente: "Contato quente",
+};
 
 export default function OnboardingWizard() {
   const crmClient = useOptionalCrmClient();
@@ -25,8 +40,8 @@ export default function OnboardingWizard() {
   const logUsage = useLogAcademyRecipeUsage();
 
   const [segmentFilter, setSegmentFilter] = useState<string>(ALL_FILTER);
-  const [objectiveFilter, setObjectiveFilter] = useState<string>(ALL_FILTER);
-  const [openRecipeId, setOpenRecipeId] = useState<string | null>(null);
+  const [temperatureFilter, setTemperatureFilter] = useState<string>(ALL_FILTER);
+  const [openContentId, setOpenContentId] = useState<string | null>(null);
   const [installRecipeId, setInstallRecipeId] = useState<string | null>(null);
 
   const { data: diagnosticLines = [] } = useAcademyDiagnostics(selectedClientId || null);
@@ -37,30 +52,32 @@ export default function OnboardingWizard() {
     return Array.from(set).sort();
   }, []);
 
-  const objectives = useMemo(() => {
-    const set = new Set<string>();
-    ACADEMY_RECIPES.forEach((r) => set.add(r.objective));
-    return Array.from(set).sort();
+  const temperatures = useMemo(() => {
+    const set = new Set<AcademyContactTemperature>();
+    ACADEMY_RECIPES.forEach((r) => set.add(r.contactTemperature));
+    return Array.from(set);
   }, []);
 
+  // Fundamentos aparecem sempre, independentemente do filtro — valem para
+  // todos e são pré-requisito. Só as receitas respeitam segmento/contato.
   const filteredRecipes = useMemo(() => {
     return ACADEMY_RECIPES.filter((r) => {
       if (segmentFilter !== ALL_FILTER && !r.segments.includes(segmentFilter)) return false;
-      if (objectiveFilter !== ALL_FILTER && r.objective !== objectiveFilter) return false;
+      if (temperatureFilter !== ALL_FILTER && r.contactTemperature !== temperatureFilter) return false;
       return true;
     });
-  }, [segmentFilter, objectiveFilter]);
+  }, [segmentFilter, temperatureFilter]);
 
-  const openRecipe = openRecipeId ? getAcademyRecipeById(openRecipeId) : null;
+  const openContent = openContentId ? getAcademyContentById(openContentId) : null;
 
-  const handleOpenRecipe = (recipe: AcademyRecipe) => {
-    setOpenRecipeId(recipe.id);
+  const handleOpenContent = (content: AcademyContent) => {
+    setOpenContentId(content.id);
     if (selectedClientId) {
-      logUsage.mutate({ clientId: selectedClientId, recipeId: recipe.id, action: "opened" });
+      logUsage.mutate({ clientId: selectedClientId, recipeId: content.id, action: "opened" });
     }
   };
 
-  const handleCopy = async (recipe: AcademyRecipe, label: string, text: string) => {
+  const handleCopy = async (content: AcademyContent, label: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
       toast({ title: `Copiado: ${label}` });
@@ -69,35 +86,32 @@ export default function OnboardingWizard() {
       return;
     }
     if (selectedClientId) {
-      logUsage.mutate({ clientId: selectedClientId, recipeId: recipe.id, action: "copied" });
+      logUsage.mutate({ clientId: selectedClientId, recipeId: content.id, action: "copied" });
     }
   };
 
-  const handleUseRecipe = (recipe: AcademyRecipe) => {
+  const handleUseRecipe = (contentId: string) => {
     if (!selectedClientId) {
       toast({ title: "Selecione uma empresa antes de instalar", variant: "destructive" });
       return;
     }
-    setInstallRecipeId(recipe.id);
+    setInstallRecipeId(contentId);
   };
 
-  const installRecipe = installRecipeId ? getAcademyRecipeById(installRecipeId) : null;
+  const installContent = installRecipeId ? getAcademyContentById(installRecipeId) : null;
+  const installRecipe = installContent && isAcademyRecipe(installContent) ? installContent : null;
 
-  const handleDiagnosticClick = (recipeId: string) => {
-    const recipe = getAcademyRecipeById(recipeId);
-    if (recipe) handleOpenRecipe(recipe);
+  const handleDiagnosticClick = (contentId: string) => {
+    const content = getAcademyContentById(contentId);
+    if (content) handleOpenContent(content);
   };
 
-  if (openRecipe) {
+  if (openContent) {
+    const isRecipe = isAcademyRecipe(openContent);
     return (
-      <PageShell title="Vexo Academy" subtitle={openRecipe.title}>
+      <PageShell title="Vexo Academy" subtitle={openContent.title}>
         <div className="space-y-6 animate-fade-in-up">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => setOpenRecipeId(null)}
-          >
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => setOpenContentId(null)}>
             <ArrowLeft className="h-3.5 w-3.5" />
             Voltar para a lista
           </Button>
@@ -105,27 +119,36 @@ export default function OnboardingWizard() {
           <Card>
             <CardHeader className="space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-bold">
-                  {openRecipe.objective}
-                </Badge>
+                {isRecipe ? (
+                  <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-bold">
+                    {TEMPERATURE_LABELS[openContent.contactTemperature]}
+                  </Badge>
+                ) : (
+                  <Badge className="bg-muted text-muted-foreground border-border text-xs font-bold flex items-center gap-1">
+                    <BookOpen className="h-3 w-3" />
+                    Fundamento
+                  </Badge>
+                )}
                 <Badge variant="outline" className="text-xs font-bold flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  {openRecipe.estimatedMinutes} min
+                  {openContent.timeLabel}
                 </Badge>
               </div>
-              <CardTitle className="text-2xl">{openRecipe.title}</CardTitle>
-              <CardDescription className="text-base text-foreground">{openRecipe.resultPhrase}</CardDescription>
+              <CardTitle className="text-2xl">{openContent.title}</CardTitle>
+              <CardDescription className="text-base text-foreground">{openContent.resultPhrase}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="rounded-lg bg-accent border border-border p-4 text-sm text-accent-foreground">
-                <strong>O que vai acontecer: </strong>
-                {openRecipe.whatHappens}
-              </div>
+              {isRecipe && (
+                <div className="rounded-lg bg-accent border border-border p-4 text-sm text-accent-foreground">
+                  <strong>Instala: </strong>
+                  {openContent.whatHappens}
+                </div>
+              )}
 
               <div className="bg-muted/40 border border-border rounded-lg p-5 space-y-2">
                 <h4 className="font-bold text-sm">Pré-requisitos</h4>
                 <ul className="space-y-1.5 text-sm">
-                  {openRecipe.prerequisites.map((p, i) => (
+                  {openContent.prerequisites.map((p, i) => (
                     <li key={i} className="flex gap-2">
                       <Check className="h-4 w-4 mt-0.5 shrink-0 text-success" />
                       <span>{p}</span>
@@ -134,56 +157,73 @@ export default function OnboardingWizard() {
                 </ul>
               </div>
 
-              <div className="bg-muted/40 border border-border rounded-lg p-5 space-y-3">
-                <h4 className="font-bold text-sm flex items-center gap-1.5">
-                  <ListChecks className="h-4 w-4" />
-                  Passo a passo
-                </h4>
-                <ol className="space-y-3 text-sm">
-                  {openRecipe.steps.map((step, i) => (
-                    <li key={i} className="flex gap-3">
-                      <span className="shrink-0 h-5 w-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center font-mono">
-                        {i + 1}
+              {isRecipe ? (
+                <>
+                  {openContent.requiresAttachment && (
+                    <div className="rounded-lg bg-warning/10 border border-warning/30 p-4 text-sm text-warning flex gap-2">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <span>
+                        Esta receita usa um anexo que precisa ser enviado por você — a instalação cria a mensagem, mas o
+                        arquivo tem que ser anexado depois, na tela de Cadências, antes de ligar a cadência.
                       </span>
-                      <div>
-                        <span className="font-semibold text-primary">{step.screen}</span>
-                        <span className="text-muted-foreground"> — {step.instruction}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="font-bold text-sm">Conteúdo — {openRecipe.cadenceName}</h4>
-                {openRecipe.templates.map((tpl) => (
-                  <div key={tpl.label} className="border border-border rounded-lg p-4 space-y-2 bg-card">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                        {tpl.label}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-[11px] gap-1"
-                        onClick={() => handleCopy(openRecipe, tpl.label, tpl.message)}
-                      >
-                        <Copy className="h-3 w-3" />
-                        Copiar
-                      </Button>
                     </div>
-                    <p className="text-sm font-mono whitespace-pre-wrap">{tpl.message}</p>
-                  </div>
-                ))}
-              </div>
+                  )}
 
-              <Button
-                onClick={() => handleUseRecipe(openRecipe)}
-                className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground"
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Usar esta receita
-              </Button>
+                  <div className="space-y-3">
+                    <h4 className="font-bold text-sm">Conteúdo — {openContent.cadenceName}</h4>
+                    {openContent.templates.map((tpl) => (
+                      <div key={tpl.label} className="border border-border rounded-lg p-4 space-y-2 bg-card">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{tpl.label}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[11px] gap-1"
+                            onClick={() => handleCopy(openContent, tpl.label, tpl.message)}
+                          >
+                            <Copy className="h-3 w-3" />
+                            Copiar
+                          </Button>
+                        </div>
+                        <p className="text-sm font-mono whitespace-pre-wrap">{tpl.message}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-lg bg-muted/40 border border-border p-4 text-sm">
+                    <strong>Nota na tela: </strong>
+                    {openContent.screenNote}
+                  </div>
+
+                  <Button
+                    onClick={() => handleUseRecipe(openContent.id)}
+                    className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground"
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Usar esta receita
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  {openContent.sections.map((section) => (
+                    <div key={section.heading} className="border border-border rounded-lg p-4 space-y-2 bg-card">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-bold text-sm text-primary">{section.heading}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1"
+                          onClick={() => handleCopy(openContent, section.heading, section.body)}
+                        >
+                          <Copy className="h-3 w-3" />
+                          Copiar
+                        </Button>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap">{section.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -202,7 +242,7 @@ export default function OnboardingWizard() {
   return (
     <PageShell
       title="Vexo Academy"
-      subtitle="Receitas prontas por objetivo — resultado, passo a passo e o conteúdo de verdade, com um botão que instala."
+      subtitle="Fundamentos do sistema e receitas por segmento — resultado, conteúdo de verdade e um botão que instala."
     >
       <div className="space-y-6 animate-fade-in-up">
         {diagnosticLines.length > 0 && (
@@ -229,51 +269,81 @@ export default function OnboardingWizard() {
           </Card>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <FilterPills
-            options={segments}
-            active={segmentFilter}
-            onChange={setSegmentFilter}
-            allLabel="Todos os segmentos"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <FilterPills
-            options={objectives}
-            active={objectiveFilter}
-            onChange={setObjectiveFilter}
-            allLabel="Todos os objetivos"
-          />
-        </div>
-
-        {filteredRecipes.length === 0 ? (
-          <Card className="p-8 text-center text-sm text-muted-foreground">
-            Nenhuma receita para esse filtro ainda.
-          </Card>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredRecipes.map((recipe) => (
-              <button key={recipe.id} type="button" onClick={() => handleOpenRecipe(recipe)} className="text-left">
+        <section className="space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Fundamentos</h3>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {ACADEMY_FUNDAMENTOS.map((fundamento) => (
+              <button key={fundamento.id} type="button" onClick={() => handleOpenContent(fundamento)} className="text-left">
                 <Card className="h-full hover:border-primary/50 hover:shadow-md transition-all cursor-pointer">
                   <CardHeader className="space-y-2">
-                    <Badge className="w-fit bg-primary/10 text-primary border-primary/20 text-[10px] font-bold">
-                      {recipe.objective}
+                    <Badge className="w-fit bg-muted text-muted-foreground border-border text-[10px] font-bold flex items-center gap-1">
+                      <BookOpen className="h-3 w-3" />
+                      Fundamento
                     </Badge>
-                    <CardTitle className="text-base">{recipe.title}</CardTitle>
-                    <CardDescription>{recipe.resultPhrase}</CardDescription>
+                    <CardTitle className="text-base">{fundamento.title}</CardTitle>
+                    <CardDescription>{fundamento.resultPhrase}</CardDescription>
                   </CardHeader>
-                  <CardContent className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5" />
-                      {recipe.estimatedMinutes} min
-                    </span>
-                    <span>{recipe.segments.length} {recipe.segments.length === 1 ? "segmento" : "segmentos"}</span>
+                  <CardContent className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5" />
+                    {fundamento.timeLabel}
                   </CardContent>
                 </Card>
               </button>
             ))}
           </div>
-        )}
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">Receitas por segmento</h3>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterPills options={segments} active={segmentFilter} onChange={setSegmentFilter} allLabel="Todos os segmentos" />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterPills
+              options={temperatures.map((t) => TEMPERATURE_LABELS[t])}
+              active={temperatureFilter === ALL_FILTER ? ALL_FILTER : TEMPERATURE_LABELS[temperatureFilter as AcademyContactTemperature]}
+              onChange={(label) => {
+                if (label === ALL_FILTER) {
+                  setTemperatureFilter(ALL_FILTER);
+                  return;
+                }
+                const found = temperatures.find((t) => TEMPERATURE_LABELS[t] === label);
+                setTemperatureFilter(found || ALL_FILTER);
+              }}
+              allLabel="Todos os contatos"
+            />
+          </div>
+
+          {filteredRecipes.length === 0 ? (
+            <Card className="p-8 text-center text-sm text-muted-foreground">Nenhuma receita para esse filtro ainda.</Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredRecipes.map((recipe) => (
+                <button key={recipe.id} type="button" onClick={() => handleOpenContent(recipe)} className="text-left">
+                  <Card className="h-full hover:border-primary/50 hover:shadow-md transition-all cursor-pointer">
+                    <CardHeader className="space-y-2">
+                      <Badge className="w-fit bg-primary/10 text-primary border-primary/20 text-[10px] font-bold">
+                        {TEMPERATURE_LABELS[recipe.contactTemperature]}
+                      </Badge>
+                      <CardTitle className="text-base">{recipe.title}</CardTitle>
+                      <CardDescription>{recipe.resultPhrase}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        {recipe.timeLabel}
+                      </span>
+                      <span>
+                        {recipe.segments.length} {recipe.segments.length === 1 ? "segmento" : "segmentos"}
+                      </span>
+                    </CardContent>
+                  </Card>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </PageShell>
   );
@@ -297,9 +367,7 @@ function FilterPills({
         onClick={() => onChange(ALL_FILTER)}
         className={cn(
           "rounded-full px-3 py-1.5 text-xs font-bold transition-colors",
-          active === ALL_FILTER
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-muted-foreground hover:bg-muted/70"
+          active === ALL_FILTER ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
         )}
       >
         {allLabel}
@@ -311,9 +379,7 @@ function FilterPills({
           onClick={() => onChange(opt)}
           className={cn(
             "rounded-full px-3 py-1.5 text-xs font-bold transition-colors",
-            active === opt
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted text-muted-foreground hover:bg-muted/70"
+            active === opt ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
           )}
         >
           {opt}
