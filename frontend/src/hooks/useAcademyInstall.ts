@@ -89,6 +89,9 @@ export function useInstallAcademyRecipe() {
             trigger_value: tpl.trigger_value,
             trigger_unit: tpl.trigger_unit,
             trigger_direction: tpl.trigger_direction,
+            anchor_field: tpl.anchor_field,
+            scheduled_time: tpl.scheduled_time,
+            scheduled_date: tpl.scheduled_date,
             order_index: i,
           }),
         });

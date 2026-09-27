@@ -7,11 +7,13 @@
 // existiam.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { ACADEMY_CONTENT, ACADEMY_FUNDAMENTOS, ACADEMY_RECIPES, isAcademyRecipe } from "@/data/academyRecipes";
+import { ACADEMY_CONTENT, ACADEMY_FUNDAMENTOS, ACADEMY_RECIPES, isAcademyRecipe, SUPPORTED_ANCHOR_FIELDS } from "@/data/academyRecipes";
 
 const getIdTokenMock = async () => "token";
 vi.mock("@/contexts/AuthContext", () => ({
@@ -19,7 +21,7 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 vi.mock("@/hooks/useCrmClient", () => ({
-  useOptionalCrmClient: () => ({ selectedClientId: "sonhare", clients: [], isLoading: false, selectedClient: null }),
+  useOptionalCrmClient: () => ({ selectedClientId: "tenant-teste", clients: [], isLoading: false, selectedClient: null }),
 }));
 
 vi.mock("@/components/ui/use-toast", () => ({ toast: vi.fn() }));
@@ -127,12 +129,131 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     expect(screen.queryByText(/precisa ser enviado por você/)).toBeNull();
   });
 
+  it("[TESTE OBRIGATÓRIO] todo passo instalável com âncora usa uma âncora que o sistema tem de verdade", () => {
+    // ANCHOR_FIELDS no backend (followup/service.js) só tem meeting_datetime
+    // e data_nascimento — SUPPORTED_ANCHOR_FIELDS espelha essa lista. Passo
+    // instalável com before_anchor/after_anchor fora dessa lista é a tela
+    // prometendo uma data que o sistema não agenda.
+    for (const recipe of ACADEMY_RECIPES) {
+      for (const tpl of recipe.templates) {
+        if (tpl.trigger_type === "before_anchor" || tpl.trigger_type === "after_anchor") {
+          expect(tpl.anchor_field, `${recipe.id} / ${tpl.label} usa ${tpl.trigger_type} sem anchor_field`).toBeTruthy();
+          expect(
+            (SUPPORTED_ANCHOR_FIELDS as readonly string[]).includes(tpl.anchor_field!),
+            `${recipe.id} / ${tpl.label} usa anchor_field '${tpl.anchor_field}', que não existe em ANCHOR_FIELDS`
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] nenhum passo instalável promete uma âncora que o sistema não tem — vira manual ou não instala", () => {
+    // Regra da rodada 2: um cartão que diz "60 dias antes do aniversário de
+    // casamento" e agenda por after_enrollment está mentindo pra quem
+    // instala — o passo dispara dias depois da inscrição, não perto da
+    // data prometida. Esse tipo de passo não pode estar em `templates`
+    // (o array que o botão "Usar esta receita" instala).
+    const promessasSemAncora = [
+      "aniversário de casamento",
+      "época de férias",
+      "data de retorno",
+      "depois da volta",
+    ];
+    for (const recipe of ACADEMY_RECIPES) {
+      for (const tpl of recipe.templates) {
+        const haystack = `${tpl.label} ${tpl.message}`.toLowerCase();
+        for (const frase of promessasSemAncora) {
+          expect(
+            haystack.includes(frase),
+            `${recipe.id} / ${tpl.label} promete '${frase}' num passo instalável, mas isso não tem âncora real`
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] nenhuma receita instalável tem passo fixed_date — a data muda por cliente/obrigação, ninguém instala isso sozinho", () => {
+    // fixed_date exige uma data real (YYYY-MM-DD) pra passar na validação do
+    // backend. Nenhuma receita da Academy sabe essa data de antemão — ela
+    // muda por cliente e por obrigação. Um passo fixed_date em `templates`
+    // (o array que o botão instala) obrigaria inventar uma data só pra
+    // passar na validação, e isso já foi tentado e revertido (rodada 2).
+    for (const recipe of ACADEMY_RECIPES) {
+      for (const tpl of recipe.templates) {
+        expect(tpl.trigger_type, `${recipe.id} / ${tpl.label} tem trigger_type fixed_date instalável`).not.toBe("fixed_date");
+      }
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] toda receita não instalável não tem botão de instalar, e diz o que falta", async () => {
+    const naoInstalaveis = ACADEMY_RECIPES.filter((r) => r.installable === false);
+    expect(naoInstalaveis.length, "esperava 'Quem acabou de voltar' e 'Avisar prazo antes de perguntarem' como installable=false").toBe(2);
+
+    const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
+    renderWithProviders(<OnboardingWizard />);
+
+    for (const recipe of naoInstalaveis) {
+      expect(recipe.templates, `${recipe.id} não instalável mas tem templates`).toHaveLength(0);
+      expect(recipe.notInstallableReason, `${recipe.id} não instalável sem notInstallableReason`).toBeTruthy();
+      expect(recipe.manualSteps?.length, `${recipe.id} não instalável mas sem manualSteps`).toBeGreaterThan(0);
+
+      fireEvent.click(screen.getByText(recipe.title));
+      expect(screen.queryByRole("button", { name: /Usar esta receita/ })).toBeNull();
+      expect(screen.getByText(recipe.notInstallableReason!)).toBeTruthy();
+      for (const step of recipe.manualSteps || []) {
+        expect(screen.getByText((_, el) => el?.textContent === step.message)).toBeTruthy();
+      }
+      fireEvent.click(screen.getByRole("button", { name: /Voltar para a lista/ }));
+    }
+  });
+
+  it("receita parcial declara na tela o que instala e o que fica manual", async () => {
+    const parcial = ACADEMY_RECIPES.find((r) => r.partialInstallNote);
+    expect(parcial, "nenhuma receita com partialInstallNote — 'As datas que voltam todo ano' deveria ter uma").toBeTruthy();
+    expect(parcial!.templates.length).toBeGreaterThan(0);
+    expect(parcial!.manualSteps?.length).toBeGreaterThan(0);
+
+    const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
+    renderWithProviders(<OnboardingWizard />);
+
+    fireEvent.click(screen.getByText(parcial!.title));
+    expect(screen.getByText(parcial!.partialInstallNote!)).toBeTruthy();
+    // instala normalmente — o botão continua lá
+    expect(screen.getByRole("button", { name: /Usar esta receita/ })).toBeTruthy();
+  });
+
+  const FORBIDDEN_CLIENT_NAMES = ["geracao-digital", "geração digital", "sonhare", "vexo os", "infinie", "outlier"];
+
   it("[TESTE OBRIGATÓRIO] nenhum dos dez cita nome de empresa — só nome de segmento", () => {
-    const forbiddenNames = ["geracao-digital", "geração digital", "sonhare", "vexo os", "infinie", "outlier"];
     for (const content of ACADEMY_CONTENT) {
       const haystack = JSON.stringify(content).toLowerCase();
-      for (const name of forbiddenNames) {
+      for (const name of FORBIDDEN_CLIENT_NAMES) {
         expect(haystack).not.toContain(name);
+      }
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] nome de cliente real não entra nem por comentário nem por fixture de teste", () => {
+    // O teste acima só varre ACADEMY_CONTENT (o array exportado) — nome de
+    // cliente em comentário, ou em fixture de outro teste, passa batido. A
+    // regra do anonimato ("nem comentário, nem dado de teste") vale para o
+    // arquivo inteiro, então lê o arquivo-fonte bruto, sem descontar
+    // comentário (aqui, ao contrário do teste de new Date(), o comentário É
+    // o lugar onde o nome também não pode estar).
+    const filesToScan = ["src/data/academyRecipes.ts", "src/test/academyRecipes.test.tsx", "src/test/academyInstall.test.tsx"];
+    for (const relPath of filesToScan) {
+      const absPath = path.resolve(__dirname, "../../", relPath);
+      const source = fs.readFileSync(absPath, "utf-8").toLowerCase();
+      for (const name of FORBIDDEN_CLIENT_NAMES) {
+        // Cada nome aparece 1x de propósito neste próprio arquivo, dentro da
+        // lista FORBIDDEN_CLIENT_NAMES declarada acima — isso é o bloqueio,
+        // não vazamento. Só falha se aparecer de novo, fora da lista.
+        const occurrences = source.split(name).length - 1;
+        const expectedOccurrences = relPath.endsWith("academyRecipes.test.tsx") ? 1 : 0;
+        expect(
+          occurrences,
+          `${relPath} cita '${name}' ${occurrences}x (esperado ${expectedOccurrences}) — nome de cliente real fora da lista de bloqueio`
+        ).toBe(expectedOccurrences);
       }
     }
   });
@@ -177,7 +298,7 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     let call = fetchMock.mock.calls.find((c) => c[1]?.body && JSON.parse(c[1].body).action === "opened");
     expect(call).toBeTruthy();
-    expect(JSON.parse(call![1].body)).toMatchObject({ clientId: "sonhare", recipeId: recipe.id, action: "opened" });
+    expect(JSON.parse(call![1].body)).toMatchObject({ clientId: "tenant-teste", recipeId: recipe.id, action: "opened" });
 
     // copiar
     fetchMock.mockClear();
@@ -200,7 +321,7 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const call = fetchMock.mock.calls.find((c) => c[1]?.body && JSON.parse(c[1].body).action === "opened");
     expect(call).toBeTruthy();
-    expect(JSON.parse(call![1].body)).toMatchObject({ clientId: "sonhare", recipeId: fundamento.id, action: "opened" });
+    expect(JSON.parse(call![1].body)).toMatchObject({ clientId: "tenant-teste", recipeId: fundamento.id, action: "opened" });
   });
 
   it("cada receita declara tipo, contactTemperature e segmento coerentes com o conteúdo", () => {

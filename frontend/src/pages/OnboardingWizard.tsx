@@ -99,7 +99,7 @@ export default function OnboardingWizard() {
   };
 
   const installContent = installRecipeId ? getAcademyContentById(installRecipeId) : null;
-  const installRecipe = installContent && isAcademyRecipe(installContent) ? installContent : null;
+  const installRecipe = installContent && isAcademyRecipe(installContent) && installContent.installable !== false ? installContent : null;
 
   const handleDiagnosticClick = (contentId: string) => {
     const content = getAcademyContentById(contentId);
@@ -145,6 +145,20 @@ export default function OnboardingWizard() {
                 </div>
               )}
 
+              {isRecipe && openContent.partialInstallNote && (
+                <div className="rounded-lg bg-accent border border-border p-4 text-sm text-accent-foreground">
+                  <strong>O que instala e o que é manual: </strong>
+                  {openContent.partialInstallNote}
+                </div>
+              )}
+
+              {isRecipe && openContent.installable === false && (
+                <div className="rounded-lg bg-warning/10 border border-warning/30 p-4 text-sm text-warning flex gap-2">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>{openContent.notInstallableReason}</span>
+                </div>
+              )}
+
               <div className="bg-muted/40 border border-border rounded-lg p-5 space-y-2">
                 <h4 className="font-bold text-sm">Pré-requisitos</h4>
                 <ul className="space-y-1.5 text-sm">
@@ -169,39 +183,66 @@ export default function OnboardingWizard() {
                     </div>
                   )}
 
-                  <div className="space-y-3">
-                    <h4 className="font-bold text-sm">Conteúdo — {openContent.cadenceName}</h4>
-                    {openContent.templates.map((tpl) => (
-                      <div key={tpl.label} className="border border-border rounded-lg p-4 space-y-2 bg-card">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{tpl.label}</span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-[11px] gap-1"
-                            onClick={() => handleCopy(openContent, tpl.label, tpl.message)}
-                          >
-                            <Copy className="h-3 w-3" />
-                            Copiar
-                          </Button>
+                  {openContent.templates.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-bold text-sm">Conteúdo — {openContent.cadenceName}</h4>
+                      {openContent.templates.map((tpl) => (
+                        <div key={tpl.label} className="border border-border rounded-lg p-4 space-y-2 bg-card">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{tpl.label}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[11px] gap-1"
+                              onClick={() => handleCopy(openContent, tpl.label, tpl.message)}
+                            >
+                              <Copy className="h-3 w-3" />
+                              Copiar
+                            </Button>
+                          </div>
+                          <p className="text-sm font-mono whitespace-pre-wrap">{tpl.message}</p>
                         </div>
-                        <p className="text-sm font-mono whitespace-pre-wrap">{tpl.message}</p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {openContent.manualSteps && openContent.manualSteps.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-bold text-sm text-muted-foreground">Ainda manual — monte à mão em Cadências</h4>
+                      {openContent.manualSteps.map((step) => (
+                        <div key={step.label} className="border border-dashed border-border rounded-lg p-4 space-y-2 bg-muted/20">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{step.label}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[11px] gap-1"
+                              onClick={() => handleCopy(openContent, step.label, step.message)}
+                            >
+                              <Copy className="h-3 w-3" />
+                              Copiar
+                            </Button>
+                          </div>
+                          <p className="text-sm font-mono whitespace-pre-wrap">{step.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="rounded-lg bg-muted/40 border border-border p-4 text-sm">
                     <strong>Nota na tela: </strong>
                     {openContent.screenNote}
                   </div>
 
-                  <Button
-                    onClick={() => handleUseRecipe(openContent.id)}
-                    className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground"
-                  >
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Usar esta receita
-                  </Button>
+                  {openContent.installable !== false && (
+                    <Button
+                      onClick={() => handleUseRecipe(openContent.id)}
+                      className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground"
+                    >
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Usar esta receita
+                    </Button>
+                  )}
                 </>
               ) : (
                 <div className="space-y-3">

@@ -6,6 +6,8 @@
 // pede o que falta (sem agente configurado, não instala — e diz por quê).
 
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import React from "react";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -66,7 +68,7 @@ describe("AcademyInstallDialog — instalar de verdade", () => {
 
     const { AcademyInstallDialog } = await import("@/components/academy/AcademyInstallDialog");
     renderWithProviders(
-      <AcademyInstallDialog recipe={recipe} clientId="sonhare" open={true} onOpenChange={vi.fn()} />
+      <AcademyInstallDialog recipe={recipe} clientId="tenant-teste" open={true} onOpenChange={vi.fn()} />
     );
 
     expect(await screen.findByText(/Nenhum agente configurado/)).toBeTruthy();
@@ -101,7 +103,7 @@ describe("AcademyInstallDialog — instalar de verdade", () => {
 
     const { AcademyInstallDialog } = await import("@/components/academy/AcademyInstallDialog");
     renderWithProviders(
-      <AcademyInstallDialog recipe={recipe} clientId="sonhare" open={true} onOpenChange={vi.fn()} />
+      <AcademyInstallDialog recipe={recipe} clientId="tenant-teste" open={true} onOpenChange={vi.fn()} />
     );
 
     const trigger = await screen.findByRole("combobox");
@@ -167,7 +169,7 @@ describe("AcademyInstallDialog — instalar de verdade", () => {
 
     const { AcademyInstallDialog } = await import("@/components/academy/AcademyInstallDialog");
     renderWithProviders(
-      <AcademyInstallDialog recipe={recipe} clientId="sonhare" open={true} onOpenChange={vi.fn()} />
+      <AcademyInstallDialog recipe={recipe} clientId="tenant-teste" open={true} onOpenChange={vi.fn()} />
     );
 
     fireEvent.click(await screen.findByRole("combobox"));
@@ -196,5 +198,122 @@ describe("AcademyInstallDialog — instalar de verdade", () => {
     expect(touchedExisting).toBe(false);
     const patchCalls = fetchMock.mock.calls.filter(([, o]: [string, RequestInit?]) => o?.method === "PATCH");
     expect(patchCalls).toEqual([]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] passo com âncora real instala com anchor_field e scheduled_time — não silenciosamente sem eles", async () => {
+    const anchoredRecipe = ACADEMY_RECIPES.find((r) => r.id === "receita-turismo-datas-que-voltam")!;
+    fetchMock = vi.fn(async (url: string, options?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/followup/companies")) {
+        return jsonResponse({ companies: [{ id: "company-1", name: "Agente Um" }] });
+      }
+      if (u.includes("/api/followup/campaigns") && (!options || options.method === undefined)) {
+        return jsonResponse({ campaigns: [] });
+      }
+      if (u.includes("/api/followup/campaigns") && options?.method === "POST") {
+        return jsonResponse({ campaign: { id: "campaign-3", name: JSON.parse(options.body as string).name } }, 201);
+      }
+      if (u.includes("/api/followup/templates") && options?.method === "POST") {
+        return jsonResponse({ template: { id: "tpl-y" } }, 201);
+      }
+      if (u.includes("/api/academy/recipe-usage")) {
+        return jsonResponse({ success: true }, 201);
+      }
+      return jsonResponse({});
+    });
+    global.fetch = fetchMock as any;
+
+    const { AcademyInstallDialog } = await import("@/components/academy/AcademyInstallDialog");
+    renderWithProviders(<AcademyInstallDialog recipe={anchoredRecipe} clientId="tenant-teste" open={true} onOpenChange={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("combobox"));
+    fireEvent.click(await screen.findByText("Agente Um"));
+    fireEvent.click(screen.getByRole("button", { name: /^Instalar$/ }));
+
+    await waitFor(() => {
+      const templateCall = fetchMock.mock.calls.find(
+        ([u, o]: [string, RequestInit?]) => String(u).includes("/api/followup/templates") && o?.method === "POST"
+      );
+      expect(templateCall).toBeTruthy();
+    });
+
+    const templateCall = fetchMock.mock.calls.find(
+      ([u, o]: [string, RequestInit?]) => String(u).includes("/api/followup/templates") && o?.method === "POST"
+    )!;
+    const body = JSON.parse((templateCall[1] as RequestInit).body as string);
+    expect(body.trigger_type).toBe("before_anchor");
+    expect(body.anchor_field).toBe("data_nascimento");
+    expect(body.scheduled_time).toBe("09:00");
+  });
+
+  it("[TESTE OBRIGATÓRIO] scheduled_date só vai no POST quando a receita já sabe a data — nunca inventada", async () => {
+    // O passo de aniversário não tem scheduled_date (a data é a do lead,
+    // resolvida pelo anchor_field) — o payload não pode inventar uma.
+    const anchoredRecipe = ACADEMY_RECIPES.find((r) => r.id === "receita-turismo-datas-que-voltam")!;
+    expect(anchoredRecipe.templates[0].scheduled_date).toBeUndefined();
+
+    fetchMock = vi.fn(async (url: string, options?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/followup/companies")) {
+        return jsonResponse({ companies: [{ id: "company-1", name: "Agente Um" }] });
+      }
+      if (u.includes("/api/followup/campaigns") && (!options || options.method === undefined)) {
+        return jsonResponse({ campaigns: [] });
+      }
+      if (u.includes("/api/followup/campaigns") && options?.method === "POST") {
+        return jsonResponse({ campaign: { id: "campaign-4", name: JSON.parse(options.body as string).name } }, 201);
+      }
+      if (u.includes("/api/followup/templates") && options?.method === "POST") {
+        return jsonResponse({ template: { id: "tpl-z" } }, 201);
+      }
+      if (u.includes("/api/academy/recipe-usage")) {
+        return jsonResponse({ success: true }, 201);
+      }
+      return jsonResponse({});
+    });
+    global.fetch = fetchMock as any;
+
+    const { AcademyInstallDialog } = await import("@/components/academy/AcademyInstallDialog");
+    renderWithProviders(<AcademyInstallDialog recipe={anchoredRecipe} clientId="tenant-teste" open={true} onOpenChange={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("combobox"));
+    fireEvent.click(await screen.findByText("Agente Um"));
+    fireEvent.click(screen.getByRole("button", { name: /^Instalar$/ }));
+
+    await waitFor(() => {
+      const templateCall = fetchMock.mock.calls.find(
+        ([u, o]: [string, RequestInit?]) => String(u).includes("/api/followup/templates") && o?.method === "POST"
+      );
+      expect(templateCall).toBeTruthy();
+    });
+
+    const templateCall = fetchMock.mock.calls.find(
+      ([u, o]: [string, RequestInit?]) => String(u).includes("/api/followup/templates") && o?.method === "POST"
+    )!;
+    const body = JSON.parse((templateCall[1] as RequestInit).body as string);
+    expect(body.scheduled_date).toBeUndefined();
+  });
+
+  it("[TESTE OBRIGATÓRIO] nenhum lugar do código da Academy gera data a partir de new Date()", () => {
+    // O placeholder de data (rodada 2) foi removido de propósito — data
+    // inventada que parece data é o defeito que a rodada 3 caçou. Este
+    // teste é o que impede alguém reintroduzir isso "por conveniência".
+    const academySourceFiles = [
+      "src/data/academyRecipes.ts",
+      "src/hooks/useAcademyInstall.ts",
+      "src/hooks/useAcademy.ts",
+      "src/pages/OnboardingWizard.tsx",
+      "src/components/academy/AcademyInstallDialog.tsx",
+    ];
+    // Comentário explicando a regra pode citar "new Date()" como texto —
+    // só código de verdade importa aqui, então tira comentário de linha e
+    // de bloco antes de procurar.
+    const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+    for (const relPath of academySourceFiles) {
+      const absPath = path.resolve(__dirname, "../../", relPath);
+      const source = stripComments(fs.readFileSync(absPath, "utf-8"));
+      expect(source.includes("new Date("), `${relPath} usa new Date() — Academy não pode gerar data sozinha`).toBe(false);
+    }
   });
 });

@@ -18,14 +18,37 @@
 // abertura. Os textos curtos (passo 1 de contato morno/frio) são curtos DE
 // PROPÓSITO — não "melhorar" acrescentando contexto.
 //
-// Gap conhecido, documentado onde aparece: ANCHOR_FIELDS (backend,
-// followup/service.js) só tem hoje `meeting_datetime` e `data_nascimento`.
-// Receitas que descrevem outras âncoras por data do lead (aniversário de
-// casamento, época de férias, data de retorno, prazo fiscal por cliente)
-// não têm campo âncora real ainda — o trigger_type cai em
-// "after_enrollment" como ponto de partida (a cadência nasce rascunho,
-// desligada, pra revisão de qualquer forma), não porque a data esteja
-// certa. Adicionar essas âncoras é trabalho de backend, fora desta leva.
+// Regra sobre âncora e data (rodada 3, corrigindo a rodada 2, que corrigiu a
+// rodada 1): ANCHOR_FIELDS (backend, followup/service.js:18) só tem hoje
+// `meeting_datetime` e `data_nascimento` — SUPPORTED_ANCHOR_FIELDS abaixo
+// espelha a mesma lista. Passo que o cartão descreve com uma âncora que não
+// existe, ou com uma data que a receita não sabe de antemão, NÃO entra em
+// `templates` com um trigger_type aproximado ou uma data inventada — isso é
+// a tela prometendo algo que o sistema não agenda daquele jeito, sem quem
+// instala ter como saber. Em vez disso:
+//   - aniversário da pessoa → âncora real (data_nascimento), instala.
+//   - aniversário de casamento / época de férias / data de retorno → sem
+//     âncora real ainda. Viram `manualSteps` (texto pronto, sem trigger,
+//     fora do instalador) ou, quando a receita inteira depende disso,
+//     `installable: false` com `notInstallableReason`.
+//   - prazo fiscal por cliente → `fixed_date` existe (followup/service.js:70)
+//     e é o trigger certo, mas a data de cada aviso muda por cliente e por
+//     obrigação — a receita não sabe qual é. Nenhum trigger_type resolve
+//     "não sei a data ainda" além de não instalar: vira `manualSteps`
+//     também, com a instrução de montar em Follow-up → Cadências, gatilho
+//     de data fixa, preenchendo a data real.
+//
+// Nunca gerar `scheduled_date` a partir de `new Date()` (nem aqui, nem no
+// hook de instalação) só pra passar na validação do backend — a cadência
+// nasce em draft e não dispara sozinha, mas se alguém ativar sem revisar,
+// uma data inventada que parece real é pior que não instalar (rodada 2
+// tentou isso com um placeholder de "amanhã"; rodada 3 tirou).
+//
+// Backlog, não desta leva: em followup/service.js:521 a busca de
+// aniversário recorrente está amarrada em `anchor_field === "data_nascimento"`
+// escrito na mão. Toda âncora nova que entrar em ANCHOR_FIELDS (e em
+// SUPPORTED_ANCHOR_FIELDS aqui) tem que generalizar esse ponto também,
+// senão passa na validação e não agenda.
 
 export type AcademyContentType = "fundamento" | "receita";
 export type AcademyContactTemperature = "frio" | "morno" | "quente";
@@ -51,6 +74,10 @@ export interface AcademyFundamento {
  * POST /api/followup/templates espera (menos campaign_id, que só existe
  * depois de instalada).
  */
+/** Espelha ANCHOR_FIELDS do backend (followup/service.js:18) — as únicas âncoras que o sistema agenda sozinho hoje. Crescer lá exige crescer aqui. */
+export const SUPPORTED_ANCHOR_FIELDS = ["meeting_datetime", "data_nascimento"] as const;
+export type SupportedAnchorField = (typeof SUPPORTED_ANCHOR_FIELDS)[number];
+
 export interface AcademyRecipeTemplate {
   label: string;
   message: string;
@@ -58,8 +85,10 @@ export interface AcademyRecipeTemplate {
   trigger_value: number;
   trigger_unit: "minutes" | "hours" | "days";
   trigger_direction: "before" | "after" | null;
-  anchor_field?: "meeting_datetime" | "data_nascimento";
+  anchor_field?: SupportedAnchorField;
   scheduled_time?: string;
+  /** Só em passos "fixed_date" com uma data real já conhecida (YYYY-MM-DD). Quando ausente, quem instala digita a data antes de ligar a cadência. */
+  scheduled_date?: string;
   /** true só no passo que a receita descreve com anexo — o arquivo em si não existe aqui, é enviado por quem instala. */
   hasAttachment?: boolean;
 }
@@ -81,6 +110,14 @@ export interface AcademyRecipe {
   screenNote: string;
   /** true quando algum passo precisa de um arquivo que só existe fora do sistema — instalar cria a mensagem, mas o arquivo tem que ser enviado à parte, antes de ligar a cadência. */
   requiresAttachment?: boolean;
+  /** Passos que o cartão descreve mas o sistema não agenda sozinho ainda (sem âncora real) — texto pronto pra copiar, fora de `templates` e fora do instalador. */
+  manualSteps?: { label: string; message: string }[];
+  /** Só quando a receita instala uma PARTE dos passos descritos — uma frase declarando o que instala e o que fica manual. */
+  partialInstallNote?: string;
+  /** false quando nenhum passo tem como agendar do jeito descrito ainda — a tela não mostra botão de instalar, mostra `notInstallableReason` no lugar. Default: true. */
+  installable?: boolean;
+  /** Obrigatório quando installable === false — o que falta pro sistema conseguir instalar sozinho. */
+  notInstallableReason?: string;
 }
 
 export type AcademyContent = AcademyFundamento | AcademyRecipe;
@@ -270,11 +307,15 @@ export const ACADEMY_RECIPES: AcademyRecipe[] = [
     contactTemperature: "quente",
     resultPhrase: "Você chega antes do concorrente na hora da decisão.",
     segments: ["Turismo"],
-    prerequisites: ["Datas no cadastro do lead."],
+    prerequisites: ["Data de nascimento no cadastro do lead, pro passo que instala sozinho."],
     timeLabel: "25 minutos",
-    whatHappens: 'Cadência com passos "X antes de uma data do lead", hora fixa 9h. Sem saída por resposta.',
+    // Nome técnico do gatilho: before_anchor, anchor_field data_nascimento.
+    whatHappens:
+      "Instala sozinho um passo: 45 dias antes do aniversário do lead, buscado no cadastro, hora fixa 9h, sem saída por resposta.",
+    partialInstallNote:
+      "Só o aniversário da pessoa tem âncora real no sistema hoje. Aniversário de casamento e época de férias ficam abaixo, prontos pra copiar — monte à mão em Cadências quando tiver a data de cada lead.",
     cadenceName: "Datas que voltam todo ano",
-    cadenceDescription: "Cadência ancorada em datas recorrentes do lead, instalada pela Vexo Academy.",
+    cadenceDescription: "Cadência ancorada no aniversário do lead, instalada pela Vexo Academy.",
     templates: [
       {
         label: "45 dias antes do aniversário",
@@ -287,29 +328,16 @@ export const ACADEMY_RECIPES: AcademyRecipe[] = [
         anchor_field: "data_nascimento",
         scheduled_time: "09:00",
       },
+    ],
+    manualSteps: [
       {
         label: "60 dias antes do aniversário de casamento",
         message:
           "{{nome}}, faltam dois meses pro aniversário de vocês — é o prazo ideal pra fechar viagem com preço bom.\nQuer que eu monte duas opções, uma mais curta e uma mais completa?",
-        // Não existe campo âncora de "aniversário de casamento" no sistema
-        // ainda (ver nota no topo do arquivo) — after_enrollment é ponto de
-        // partida, a revisar depois de instalar.
-        trigger_type: "after_enrollment",
-        trigger_value: 60,
-        trigger_unit: "days",
-        trigger_direction: "after",
-        scheduled_time: "09:00",
       },
       {
         label: "90 dias antes da época de férias",
         message: "{{nome}}, ano passado vocês viajaram nessa época.\nSe a ideia se repetir, agora é a hora de olhar preço. Quer que eu pesquise?",
-        // Não existe campo âncora de "época de férias" no sistema ainda —
-        // mesma nota do passo anterior.
-        trigger_type: "after_enrollment",
-        trigger_value: 90,
-        trigger_unit: "days",
-        trigger_direction: "after",
-        scheduled_time: "09:00",
       },
     ],
     screenNote:
@@ -322,36 +350,27 @@ export const ACADEMY_RECIPES: AcademyRecipe[] = [
     contactTemperature: "quente",
     resultPhrase: "Avaliação enquanto a viagem está fresca, e indicação de quem está satisfeito.",
     segments: ["Turismo"],
-    prerequisites: ["Data de retorno no cadastro."],
-    timeLabel: "20 minutos",
-    whatHappens: "Cadência de 2 passos ancorados na data de retorno, 2 e 10 dias, hora fixa 11h, com saída por atendimento humano.",
+    prerequisites: ["Um campo de data de retorno no cadastro do lead — ainda não existe no sistema."],
+    timeLabel: "20 minutos, montando à mão",
+    whatHappens: "Ainda não instala sozinho: depende de uma data de retorno que o cadastro do lead não guarda hoje.",
+    installable: false,
+    notInstallableReason:
+      "Falta um campo de data de retorno no cadastro do lead — sem ele o sistema não tem quando disparar. Os textos abaixo estão prontos pra copiar e montar à mão assim que esse campo existir.",
     cadenceName: "Quem acabou de voltar",
-    cadenceDescription: "Cadência de avaliação e indicação após o retorno da viagem, instalada pela Vexo Academy.",
-    templates: [
+    cadenceDescription: "Cadência de avaliação e indicação após o retorno da viagem — ainda montada à mão.",
+    templates: [],
+    manualSteps: [
       {
         label: "Passo 1 — 2 dias depois da volta",
         message: "{{nome}}, e aí, como foi?\nConta o que você mais gostou — e se teve algo que eu podia ter feito melhor, fala sem dó.",
-        // Não existe campo âncora de "data de retorno" no sistema ainda
-        // (ver nota no topo do arquivo) — after_enrollment é ponto de
-        // partida, a revisar depois de instalar.
-        trigger_type: "after_enrollment",
-        trigger_value: 2,
-        trigger_unit: "days",
-        trigger_direction: "after",
-        scheduled_time: "11:00",
       },
       {
         label: "Passo 2 — 10 dias depois da volta",
         message: "{{nome}}, que bom que deu certo!\nSe alguém aí tiver falando em viajar, manda meu contato. Quem chega por indicação eu atendo com todo cuidado.",
-        trigger_type: "after_enrollment",
-        trigger_value: 10,
-        trigger_unit: "days",
-        trigger_direction: "after",
-        scheduled_time: "11:00",
       },
     ],
     screenNote:
-      "A primeira mensagem não pede nada — pergunta, e abre espaço para reclamação. Cliente que teve problema e foi ouvido vira fiel; cliente que teve problema e recebeu pedido de indicação vira ex-cliente. Por isso a saída por resposta importa aqui.",
+      "A primeira mensagem não pede nada — pergunta, e abre espaço para reclamação. Cliente que teve problema e foi ouvido vira fiel; cliente que teve problema e recebeu pedido de indicação vira ex-cliente. Por isso a saída por resposta vai importar aqui, quando isso puder ser montado.",
   },
   {
     id: "receita-contabilidade-proposta-sem-resposta",
@@ -409,44 +428,30 @@ export const ACADEMY_RECIPES: AcademyRecipe[] = [
     prerequisites: ["Clientes ativos no Banco."],
     timeLabel: "30 minutos",
     whatHappens:
-      'Cadência com passos em data fixa, hora fixa de manhã. Sem saída por resposta — "ok, obrigado" não pode parar os avisos seguintes.',
+      'Ainda não instala sozinho: a data de cada aviso muda por cliente e por obrigação, e o sistema não tem como saber qual é na hora de escrever o conteúdo.',
+    installable: false,
+    // Nome técnico do gatilho: fixed_date.
+    notInstallableReason:
+      "As datas mudam por cliente e por obrigação — não tem como instalar isso sozinho sem inventar uma data. Monte em Follow-up → Cadências com gatilho de data fixa, preenchendo a data real de cada aviso. Os três textos abaixo estão prontos pra copiar.",
     cadenceName: "Avisar prazo antes de perguntarem",
-    cadenceDescription: "Cadência de avisos de prazo fiscal, instalada pela Vexo Academy.",
-    templates: [
+    cadenceDescription: "Cadência de avisos de prazo fiscal, montada à mão por cliente e obrigação.",
+    templates: [],
+    manualSteps: [
       {
         label: "15 dias antes do prazo",
         message: "Bom dia, {{nome}}. O prazo de {{obrigacao}} vence dia {{data}}.\nDo seu lado precisamos de {{documento}}. Se já mandou, ignora — é só pra não pegar de surpresa.",
-        // Data fixa por obrigação/cliente — não existe campo âncora pra
-        // isso ainda (ver nota no topo do arquivo). after_enrollment é
-        // ponto de partida; o calendário real de prazos precisa ser
-        // montado à mão na revisão, um por obrigação.
-        trigger_type: "after_enrollment",
-        trigger_value: 15,
-        trigger_unit: "days",
-        trigger_direction: "before",
-        scheduled_time: "08:00",
       },
       {
         label: "3 dias antes do prazo",
         message: "{{nome}}, faltam três dias pro prazo de {{obrigacao}} e ainda estamos sem {{documento}}.\nConsegue mandar hoje? Se tiver dificuldade, me chama.",
-        trigger_type: "after_enrollment",
-        trigger_value: 3,
-        trigger_unit: "days",
-        trigger_direction: "before",
-        scheduled_time: "08:00",
       },
       {
         label: "No dia seguinte à entrega, às 17h",
         message: "{{nome}}, {{obrigacao}} entregue, tudo certo.\nGuarda o comprovante — se precisar em banco ou licitação, já está à mão.",
-        trigger_type: "after_enrollment",
-        trigger_value: 1,
-        trigger_unit: "days",
-        trigger_direction: "after",
-        scheduled_time: "17:00",
       },
     ],
     screenNote:
-      "A terceira mensagem parece dispensável e é a mais valiosa: é a única vez no mês em que o cliente vê o trabalho acontecendo. Escritório que só aparece cobrando documento é lembrado como cobrança. Data que já passou é pulada, então dá para montar o ano inteiro de uma vez.",
+      "A terceira mensagem parece dispensável e é a mais valiosa: é a única vez no mês em que o cliente vê o trabalho acontecendo. Escritório que só aparece cobrando documento é lembrado como cobrança.",
   },
   {
     id: "receita-contabilidade-documentos-cliente-novo",
