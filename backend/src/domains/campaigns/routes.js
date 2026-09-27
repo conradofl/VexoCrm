@@ -59,6 +59,8 @@ import {
   adjustDateToSendWindow,
 } from "../../services/sendWindow.js";
 import { getDateKey } from "../../services/analytics.js";
+import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
   resolveChipDailyLimit,
@@ -78,6 +80,113 @@ import {
   estimateDispatchCompletion,
   AGGREGATE_STATUS_LABELS,
 } from "../../services/campaignDispatchSummary.js";
+
+// GET /api/campaigns/reports/message-effectiveness — por campanha, o texto
+// da mensagem, quantos receberam, quantos responderam e — de quem
+// respondeu — quantos ficaram quente/morno/frio, só campanhas com pelo
+// menos 30 envios (volume baixo demais pra taxa dizer algo). É o dado que
+// dá tom real às receitas da Academy — qual mensagem, de fato, traz retorno
+// de gente qualificada, não só retorno.
+//
+// Quatro coisas que este cruzamento tem que respeitar, porque cada uma
+// sozinha já fabrica número plausível e errado:
+//  1) Telefone da CLASSIFICAÇÃO (quente/morno/frio) precisa do MESMO
+//     canônico dos dois lados (SQL_CANONICAL_PHONE — não regexp_replace
+//     cru), senão "11987654321" (lead importado, sem DDI) nunca casa com
+//     "5511987654321" (run da Evolution, com DDI), e tudo cai em
+//     semClassificacao. E precisa olhar tanto `telefone` quanto `phone` —
+//     as duas colunas existem em public.leads, lead com só uma preenchida
+//     não pode ficar invisível no cruzamento.
+//  2) Lead de campanha é lead IMPORTADO — quem escreve nele é a importação
+//     (leads/routes.js), em `temperature` (hot/warm/cold), não o robô em
+//     `lead_temperature` (QUENTE/MORNO/FRIO). Ler só a segunda joga quase
+//     tudo em semClassificacao. As duas entram — mas `temperature` tem
+//     DEFAULT 'warm' na coluna (lead-client-tables.js) e o importador cai
+//     em 'warm' quando a planilha não traz nada: 'warm' não é sinal de
+//     "morno", é sinal de "ninguém disse nada". Por isso 'warm' nunca conta
+//     como MORNO — só lead_temperature='MORNO' conta, porque essa coluna só
+//     é escrita por escolha. Ver SQL_LEAD_TEMPERATURE_BUCKET
+//     (services/leadTemperature.js) pra whitelist completa e o motivo.
+//  3) Whitelist fechada dos dois lados (SQL e o espelho JS que testa isso):
+//     valor fora de QUENTE/MORNO/FRIO/hot/cold é "sem classificação", nunca
+//     um bucket que ninguém pediu nem um valor que só desaparece da soma.
+//  4) `leads` pode ter mais de uma linha pro mesmo telefone (mesmo
+//     tenant) — juntar direto duplica o run que respondeu. O lado do
+//     lead precisa estar deduplicado (1 linha por telefone canônico,
+//     mais recente primeiro) ANTES do LEFT JOIN, não depois.
+//
+// Invariante que prova que os quatro acima estão corretos: em toda
+// campanha, quente+morno+frio+semClassificacao == repliedCount. Sempre.
+// Exportada (não fechada dentro de registerCampaignsRoutes) pra dar teste
+// estrutural direto sobre o texto da query — ver
+// campaignMessageEffectiveness.test.js.
+export function buildMessageEffectivenessSql(includeTemperatureColumn) {
+  const canonicalLeadPhone = SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)");
+  return `
+    WITH runs AS (
+      SELECT
+        r.campaign_id,
+        r.phone,
+        EXISTS (
+          SELECT 1
+          FROM public.lead_messages lm
+          WHERE lm.client_id = r.client_id
+            AND lm.phone = r.phone
+            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+        ) AS replied
+      FROM public.campaign_dispatch_runs r
+      WHERE r.client_id = $1 AND r.status = 'sent'
+    ),
+    lead_by_phone AS (
+      SELECT DISTINCT ON (${canonicalLeadPhone})
+        ${canonicalLeadPhone} AS canonical_phone,
+        ${includeTemperatureColumn ? SQL_LEAD_TEMPERATURE_BUCKET("l") : SQL_LEAD_TEMPERATURE_ONLY("l")} AS temp,
+        l.updated_at
+      FROM public.leads l
+      WHERE l.client_id = $1
+      ORDER BY ${canonicalLeadPhone}, l.updated_at DESC NULLS LAST
+    ),
+    -- Uma linha por RUN que respondeu (não por telefone único) — mesma
+    -- granularidade de "replied_count" abaixo. lead_by_phone já garante no
+    -- máximo 1 lead por telefone canônico, então este LEFT JOIN nunca
+    -- multiplica linha nenhuma.
+    replied_temperature AS (
+      SELECT
+        runs.campaign_id,
+        lb.temp
+      FROM runs
+      LEFT JOIN lead_by_phone lb ON lb.canonical_phone = ${SQL_CANONICAL_PHONE("runs.phone")}
+      WHERE runs.replied
+    ),
+    temperature_agg AS (
+      SELECT
+        campaign_id,
+        COUNT(*) FILTER (WHERE temp = 'QUENTE')::int AS quente,
+        COUNT(*) FILTER (WHERE temp = 'MORNO')::int AS morno,
+        COUNT(*) FILTER (WHERE temp = 'FRIO')::int AS frio,
+        COUNT(*) FILTER (WHERE temp IS NULL)::int AS sem_classificacao
+      FROM replied_temperature
+      GROUP BY campaign_id
+    )
+    SELECT
+      c.id AS campaign_id,
+      c.name AS campaign_name,
+      c.analytics_meta->>'message' AS message,
+      COUNT(*)::int AS sent_count,
+      COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count,
+      COALESCE(t.quente, 0) AS quente,
+      COALESCE(t.morno, 0) AS morno,
+      COALESCE(t.frio, 0) AS frio,
+      COALESCE(t.sem_classificacao, 0) AS sem_classificacao
+    FROM runs
+    JOIN public.campaigns c ON c.id = runs.campaign_id
+    LEFT JOIN temperature_agg t ON t.campaign_id = c.id
+    WHERE c.client_id = $1
+    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao
+    HAVING COUNT(*) >= $2
+    ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
+  `;
+}
 
 let _dispatchRunsClaimSchemaEnsured = false;
 let _dueDispatchTimerStarted = false;
@@ -3534,11 +3643,9 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
-  // GET /api/campaigns/reports/message-effectiveness — por campanha, o texto
-  // da mensagem, quantos receberam e quantos responderam, só campanhas com
-  // pelo menos 30 envios (volume baixo demais pra taxa dizer algo). É o dado
-  // que dá tom real às receitas da Academy — qual mensagem, de fato, traz
-  // retorno, não qual parece boa.
+  // GET /api/campaigns/reports/message-effectiveness — ver
+  // buildMessageEffectivenessSql (módulo, abaixo do import) pra saber por
+  // que o cruzamento com public.leads é feito assim.
   app.get("/api/campaigns/reports/message-effectiveness", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
     if (!ensureDb(res)) return;
     const requestedClientId = normalizeString(req.query.clientId);
@@ -3547,34 +3654,15 @@ export function registerCampaignsRoutes(app, deps) {
 
     const minSent = 30;
     try {
-      const sql = `
-        WITH runs AS (
-          SELECT
-            r.campaign_id,
-            EXISTS (
-              SELECT 1
-              FROM public.lead_messages lm
-              WHERE lm.client_id = r.client_id
-                AND lm.phone = r.phone
-                AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            ) AS replied
-          FROM public.campaign_dispatch_runs r
-          WHERE r.client_id = $1 AND r.status = 'sent'
-        )
-        SELECT
-          c.id AS campaign_id,
-          c.name AS campaign_name,
-          c.analytics_meta->>'message' AS message,
-          COUNT(*)::int AS sent_count,
-          COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count
-        FROM runs
-        JOIN public.campaigns c ON c.id = runs.campaign_id
-        WHERE c.client_id = $1
-        GROUP BY c.id, c.name, c.analytics_meta
-        HAVING COUNT(*) >= $2
-        ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
-      `;
-      const { rows } = await pgDatabasePool.query(sql, [clientId, minSent]);
+      let rows;
+      try {
+        ({ rows } = await pgDatabasePool.query(buildMessageEffectivenessSql(true), [clientId, minSent]));
+      } catch (err) {
+        // tenant sem a coluna `temperature` em `leads` (deriva de schema) —
+        // cai pra só lead_temperature em vez de derrubar a rota inteira.
+        if (!isMissingSchemaError(err)) throw err;
+        ({ rows } = await pgDatabasePool.query(buildMessageEffectivenessSql(false), [clientId, minSent]));
+      }
       const campaigns = rows.map((row) => ({
         campaignId: row.campaign_id,
         campaignName: row.campaign_name,
@@ -3582,6 +3670,12 @@ export function registerCampaignsRoutes(app, deps) {
         sentCount: row.sent_count,
         repliedCount: row.replied_count,
         replyRate: row.sent_count > 0 ? Math.round((row.replied_count / row.sent_count) * 1000) / 10 : 0,
+        repliedByTemperature: {
+          quente: row.quente,
+          morno: row.morno,
+          frio: row.frio,
+          semClassificacao: row.sem_classificacao,
+        },
       }));
       res.json({ minSent, campaigns });
     } catch (err) {
