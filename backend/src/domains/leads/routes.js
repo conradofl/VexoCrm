@@ -77,6 +77,82 @@ function classifyChatContent(messages, contactName) {
   };
 }
 
+// Membro de grupo classificado, pra decidir o que fazer com ele — nunca um
+// telefone inventado. `@lid` não tem telefone recuperável (perda
+// irreversível, ver comentário na extração de grupos). Válido é
+// @s.whatsapp.net com 10 a 14 dígitos (mesma faixa da extração por
+// conversa), fora o número do próprio chip.
+function classifyGroupParticipant(participantJid, ownerDigits) {
+  const jid = String(participantJid || "");
+  if (jid.includes("@lid")) return { kind: "lid" };
+  if (!jid.includes("@s.whatsapp.net")) return { kind: "invalid" };
+  const digits = jid.split("@")[0].replace(/\D/g, "");
+  if (!digits || digits.length < 10 || digits.length >= 15) return { kind: "invalid" };
+  if (ownerDigits && digits === ownerDigits) return { kind: "self" };
+  return { kind: "valid", digits };
+}
+
+// Resolve a instância Evolution (id/nome explícito ou padrão do tenant),
+// baseUrl, apiKey e o telefone do próprio chip (ownerDigits) — usado pelas
+// três procedências de extração (conversas, agenda, grupos) e pela prévia
+// de grupos. Extraído de dentro de POST /api/leads/extract-wa-contacts sem
+// mudar nenhum comportamento: mesmas chamadas, mesma ordem, mesmos erros.
+async function resolveEvolutionInstanceForExtraction({
+  clientId,
+  explicitInstanceId,
+  explicitInstanceName,
+  pgDatabasePool,
+  res,
+  sendError,
+}) {
+  let instance = null;
+  const allInstances = await getLeadClientEvolutionInstances(clientId, pgDatabasePool);
+
+  if (explicitInstanceId) {
+    instance = allInstances.find((i) => i.id === explicitInstanceId) || null;
+  } else if (explicitInstanceName) {
+    instance = allInstances.find((i) => i.name === explicitInstanceName) || null;
+  }
+
+  if (!instance) {
+    instance = await getDefaultLeadClientEvolutionInstance(clientId, pgDatabasePool);
+  }
+
+  if (!instance || !instance.dispatch_webhook_url) {
+    sendError(res, 400, "EVOLUTION_NOT_CONFIGURED", "Nenhuma instância ativa do WhatsApp (Evolution API) configurada para este tenant.");
+    return null;
+  }
+
+  const urlObj = new URL(instance.dispatch_webhook_url);
+  const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+  const parts = urlObj.pathname.split("/");
+  const instanceName = explicitInstanceName || parts[parts.length - 1];
+
+  if (!instanceName) {
+    sendError(res, 400, "INVALID_INSTANCE", "Instância do WhatsApp inválida.");
+    return null;
+  }
+
+  const apiKey = instance.dispatch_webhook_token || getEvolutionAdminConfig().apiKey;
+
+  let ownerDigits = "";
+  try {
+    const instRes = await fetch(`${baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`, {
+      headers: { apikey: apiKey },
+    });
+    if (instRes.ok) {
+      const iData = await instRes.json();
+      const iList = Array.isArray(iData) ? iData : [iData];
+      const found = iList.find((i) => (i?.name || i?.instance?.instanceName) === instanceName) || iList[0];
+      const owner = found?.ownerJid || found?.owner || found?.instance?.owner || "";
+      ownerDigits = String(owner).split("@")[0].replace(/\D/g, "");
+    }
+  } catch (e) {
+    console.warn("[wa-extract] não foi possível obter o número da instância:", e.message);
+  }
+
+  return { instance, baseUrl, instanceName, apiKey, ownerDigits };
+}
 
 // Fallback column auto-detection based on content and header aliases
 function detectImportColumns(rows) {
@@ -1145,36 +1221,23 @@ export function registerLeadsRoutes(app, deps) {
     const explicitInstanceId = normalizeString(req.body?.instanceId);
     const explicitInstanceName = normalizeString(req.body?.instanceName);
 
+    // sources omitido = comportamento de sempre (conversas + agenda), byte a
+    // byte — chamada antiga não muda em nada. "grupos" é opt-in e só roda
+    // com groupIds preenchido (a segunda etapa do fluxo de prévia).
+    const rawSources = Array.isArray(req.body?.sources) ? req.body.sources.map((s) => String(s)) : null;
+    const sources = new Set(rawSources && rawSources.length > 0 ? rawSources : ["conversas", "agenda"]);
+
     try {
-      let instance = null;
-      const allInstances = await getLeadClientEvolutionInstances(clientId, pgDatabasePool);
-
-      if (explicitInstanceId) {
-        instance = allInstances.find((i) => i.id === explicitInstanceId) || null;
-      } else if (explicitInstanceName) {
-        instance = allInstances.find((i) => i.name === explicitInstanceName) || null;
-      }
-
-      if (!instance) {
-        instance = await getDefaultLeadClientEvolutionInstance(clientId, pgDatabasePool);
-      }
-
-      if (!instance || !instance.dispatch_webhook_url) {
-        sendError(res, 400, "EVOLUTION_NOT_CONFIGURED", "Nenhuma instância ativa do WhatsApp (Evolution API) configurada para este tenant.");
-        return;
-      }
-
-      const urlObj = new URL(instance.dispatch_webhook_url);
-      const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-      const parts = urlObj.pathname.split("/");
-      const instanceName = explicitInstanceName || parts[parts.length - 1];
-
-      if (!instanceName) {
-        sendError(res, 400, "INVALID_INSTANCE", "Instância do WhatsApp inválida.");
-        return;
-      }
-
-      const apiKey = instance.dispatch_webhook_token || getEvolutionAdminConfig().apiKey;
+      const resolved = await resolveEvolutionInstanceForExtraction({
+        clientId,
+        explicitInstanceId,
+        explicitInstanceName,
+        pgDatabasePool,
+        res,
+        sendError,
+      });
+      if (!resolved) return;
+      const { instance, baseUrl, instanceName, apiKey, ownerDigits } = resolved;
 
       // Bloco 3: Resolve o operador responsável pelo chip de onde as conversas/contatos estão sendo extraídos
       let chipOwnerUid = instance?.owner_uid || null;
@@ -1184,27 +1247,6 @@ export function registerLeadsRoutes(app, deps) {
           instanceName: instance?.name || instanceName,
           pool: pgDatabasePool,
         });
-      }
-
-      // Evolution v2: findChats é POST (com body), não GET. GET dava HTTP 404.
-      const chatsRes = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: apiKey },
-        body: JSON.stringify({}),
-      });
-
-      if (!chatsRes.ok) {
-        const text = await chatsRes.text();
-        sendError(res, 502, "WA_FETCH_CHATS_FAILED", `Erro ao buscar conversas no WhatsApp (HTTP ${chatsRes.status}): ${text.slice(0, 200)}`);
-        return;
-      }
-
-      const rawChats = await chatsRes.json();
-      // v2 pode devolver array direto ou paginado ({ records: [...] }).
-      const chats = Array.isArray(rawChats) ? rawChats : (rawChats?.records || rawChats?.chats || []);
-      if (!Array.isArray(chats)) {
-        sendError(res, 502, "WA_INVALID_RESPONSE", "Evolution API não retornou uma lista válida de conversas.");
-        return;
       }
 
       // Telefone REAL: em contatos LID o remoteJid é "<lid>@lid" (não é telefone)
@@ -1217,34 +1259,42 @@ export function registerLeadsRoutes(app, deps) {
         if (rj.includes("@s.whatsapp.net")) return rj;
         return "";
       };
-      // Número da própria instância (o WhatsApp conectado) — não é lead. A
-      // tabela não guarda o ownerJid, então consulta a Evolution.
-      let ownerDigits = "";
-      try {
-        const instRes = await fetch(`${baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`, {
-          headers: { apikey: apiKey },
-        });
-        if (instRes.ok) {
-          const iData = await instRes.json();
-          const iList = Array.isArray(iData) ? iData : [iData];
-          const found = iList.find((i) => (i?.name || i?.instance?.instanceName) === instanceName) || iList[0];
-          const owner = found?.ownerJid || found?.owner || found?.instance?.owner || "";
-          ownerDigits = String(owner).split("@")[0].replace(/\D/g, "");
-        }
-      } catch (e) {
-        console.warn("[wa-extract] não foi possível obter o número da instância:", e.message);
-      }
 
-      const validChats = chats.filter(c => {
-        const jid = realPhoneJid(c);
-        if (!jid || jid.includes("@g.us") || jid.includes("@broadcast") || jid.includes("-group")) return false;
-        const digits = jid.split("@")[0].replace(/\D/g, "");
-        // Descarta telefone vazio/curto ("0", "WhatsApp Business" etc.), grupos (15+ dígitos) e o
-        // próprio número conectado (aparecia como lead com telefone zerado).
-        if (!digits || digits.length < 10 || digits.length >= 15) return false;
-        if (ownerDigits && digits === ownerDigits) return false;
-        return true;
-      });
+      let chats = [];
+      let validChats = [];
+      if (sources.has("conversas")) {
+        // Evolution v2: findChats é POST (com body), não GET. GET dava HTTP 404.
+        const chatsRes = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify({}),
+        });
+
+        if (!chatsRes.ok) {
+          const text = await chatsRes.text();
+          sendError(res, 502, "WA_FETCH_CHATS_FAILED", `Erro ao buscar conversas no WhatsApp (HTTP ${chatsRes.status}): ${text.slice(0, 200)}`);
+          return;
+        }
+
+        const rawChats = await chatsRes.json();
+        // v2 pode devolver array direto ou paginado ({ records: [...] }).
+        chats = Array.isArray(rawChats) ? rawChats : (rawChats?.records || rawChats?.chats || []);
+        if (!Array.isArray(chats)) {
+          sendError(res, 502, "WA_INVALID_RESPONSE", "Evolution API não retornou uma lista válida de conversas.");
+          return;
+        }
+
+        validChats = chats.filter(c => {
+          const jid = realPhoneJid(c);
+          if (!jid || jid.includes("@g.us") || jid.includes("@broadcast") || jid.includes("-group")) return false;
+          const digits = jid.split("@")[0].replace(/\D/g, "");
+          // Descarta telefone vazio/curto ("0", "WhatsApp Business" etc.), grupos (15+ dígitos) e o
+          // próprio número conectado (aparecia como lead com telefone zerado).
+          if (!digits || digits.length < 10 || digits.length >= 15) return false;
+          if (ownerDigits && digits === ownerDigits) return false;
+          return true;
+        });
+      }
 
       // NOMES: o "~nome" que aparece no WhatsApp de quem não está salvo nos
       // contatos é o pushName que a pessoa configurou no aparelho dela. Vem no
@@ -1297,8 +1347,12 @@ export function registerLeadsRoutes(app, deps) {
       let coldLeads = 0;
       let hotLeads = 0;
 
+      // validChats já é [] quando "conversas" não foi pedido (ver acima) —
+      // topChats herda isso sem precisar checar sources de novo.
       const topChats = isFinite(chatLimit) ? validChats.slice(0, chatLimit) : validChats;
-      console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} processando=${topChats.length}`);
+      if (sources.has("conversas")) {
+        console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} processando=${topChats.length}`);
+      }
 
       for (const chat of topChats) {
         const phoneJid = realPhoneJid(chat);
@@ -1438,42 +1492,121 @@ export function registerLeadsRoutes(app, deps) {
       // como lead frio marcado pela origem — o telefone e o nome, que é o que
       // faltava, ficam disponíveis para trabalhar depois.
       let addressBookCount = 0;
-      for (const ct of addressBook) {
-        const formatted = sanitizePhoneE164(ct.digits);
-        if (!formatted) continue;
-        const telefoneKey = formatted.replace(/^\+/, "");
-        if (seenPhones.has(telefoneKey)) continue;
-        seenPhones.add(telefoneKey);
-        try {
-          await upsertLeadByPhone(pgDatabasePool, clientId, telefoneKey, {
-            phone: telefoneKey,
-            nome: isRealName(ct.name) ? normalizeString(ct.name) : formatted,
-            stage: "cold",
-            stage_source: "auto",
-            temperature: "cold",
-            tags: ["agenda-whatsapp"],
-            extracted_from_wa: true,
-            lead_source: "extracao_whatsapp",
-            assigned_to: chipOwnerUid || null,
-            dados: {
-              origem: "WhatsApp Agenda",
-              lead_source_bruto: "WhatsApp Agenda",
-              origem_marketing: "extracao_whatsapp",
-            },
-          });
-          addressBookCount++;
-        } catch (insErr) {
-          insertErrors++;
-          if (insertErrors <= 3) console.warn(`[wa-extract] upsert agenda falhou p/ ${formatted}: ${insErr.message}`);
+      if (sources.has("agenda")) {
+        for (const ct of addressBook) {
+          const formatted = sanitizePhoneE164(ct.digits);
+          if (!formatted) continue;
+          const telefoneKey = formatted.replace(/^\+/, "");
+          if (seenPhones.has(telefoneKey)) continue;
+          seenPhones.add(telefoneKey);
+          try {
+            await upsertLeadByPhone(pgDatabasePool, clientId, telefoneKey, {
+              phone: telefoneKey,
+              nome: isRealName(ct.name) ? normalizeString(ct.name) : formatted,
+              stage: "cold",
+              stage_source: "auto",
+              temperature: "cold",
+              tags: ["agenda-whatsapp"],
+              extracted_from_wa: true,
+              lead_source: "extracao_whatsapp",
+              assigned_to: chipOwnerUid || null,
+              dados: {
+                origem: "WhatsApp Agenda",
+                lead_source_bruto: "WhatsApp Agenda",
+                origem_marketing: "extracao_whatsapp",
+              },
+            });
+            addressBookCount++;
+          } catch (insErr) {
+            insertErrors++;
+            if (insertErrors <= 3) console.warn(`[wa-extract] upsert agenda falhou p/ ${formatted}: ${insErr.message}`);
+          }
+        }
+        console.info(`[wa-extract] agenda: ${addressBookCount} contatos importados de ${addressBook.length} salvos`);
+      }
+
+      // GRUPOS: terceira procedência, opt-in — só roda com "grupos" em
+      // sources E groupIds preenchido (a segunda etapa do fluxo de prévia:
+      // ver POST /api/leads/extract-wa-groups/preview). Nunca lê nem grava
+      // mensagem de grupo — só a lista de membros (nome, telefone).
+      let groupLeadCount = 0;
+      let groupLidCount = 0;
+      let groupsProcessed = 0;
+      if (sources.has("grupos")) {
+        const groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((g) => String(g)) : [];
+        if (groupIds.length > 0) {
+          try {
+            const groupsRes = await fetch(`${baseUrl}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`, {
+              headers: { apikey: apiKey },
+            });
+            if (groupsRes.ok) {
+              const groupsData = await groupsRes.json();
+              const groupsList = Array.isArray(groupsData) ? groupsData : (groupsData?.records || groupsData?.groups || []);
+              const idSet = new Set(groupIds);
+              const selectedGroups = (Array.isArray(groupsList) ? groupsList : []).filter((g) => idSet.has(String(g?.id || "")));
+
+              const batchLeads = [];
+              for (const group of selectedGroups) {
+                const groupName = normalizeString(group?.subject || group?.name) || "Grupo do WhatsApp";
+                const participants = Array.isArray(group?.participants) ? group.participants : [];
+                for (const p of participants) {
+                  const pid = String(p?.id || p?.jid || "");
+                  const classified = classifyGroupParticipant(pid, ownerDigits);
+                  if (classified.kind === "lid") {
+                    groupLidCount++;
+                    continue;
+                  }
+                  if (classified.kind !== "valid") continue;
+                  const formatted = sanitizePhoneE164(classified.digits);
+                  if (!formatted) continue;
+                  const telefoneKey = formatted.replace(/^\+/, "");
+                  const contactName = contactNames.get(classified.digits);
+                  batchLeads.push({
+                    telefone: telefoneKey,
+                    phone: telefoneKey,
+                    nome: isRealName(contactName) ? normalizeString(contactName) : formatted,
+                    stage: "cold",
+                    stage_source: "auto",
+                    // Temperatura cold é julgamento, não valor padrão da
+                    // coluna: essa pessoa nunca falou com a empresa.
+                    temperature: "cold",
+                    tags: [groupName],
+                    dados: {
+                      origem: "WhatsApp Grupo",
+                      lead_source_bruto: "WhatsApp Grupo",
+                      origem_marketing: "extracao_whatsapp",
+                      grupo_nome: groupName,
+                    },
+                  });
+                }
+                groupsProcessed++;
+              }
+
+              if (batchLeads.length > 0) {
+                // upsertLeadsBatchByPhone deduplica por telefone DENTRO do
+                // lote — o mesmo participante em dois grupos selecionados
+                // vira um lead só (com as tags dos dois grupos).
+                const batchResult = await upsertLeadsBatchByPhone(pgDatabasePool, clientId, batchLeads);
+                groupLeadCount = batchResult.totalCount;
+              }
+              console.info(`[wa-extract] grupos: ${groupLeadCount} leads de ${groupsProcessed} grupo(s) selecionado(s), ${groupLidCount} participante(s) LID sem telefone recuperável`);
+            } else {
+              const text = await groupsRes.text();
+              console.warn(`[wa-extract] fetchAllGroups falhou (HTTP ${groupsRes.status}): ${text.slice(0, 200)}`);
+            }
+          } catch (e) {
+            console.warn("[wa-extract] erro ao extrair membros de grupo:", e.message);
+          }
         }
       }
-      console.info(`[wa-extract] agenda: ${addressBookCount} contatos importados de ${addressBook.length} salvos`);
 
       res.json({
         success: true,
-        extractedCount: extractedCount + addressBookCount,
+        extractedCount: extractedCount + addressBookCount + groupLeadCount,
         fromChats: extractedCount,
         fromAddressBook: addressBookCount,
+        fromGroups: groupLeadCount,
+        groupParticipantsLid: groupLidCount,
         insertErrors,
         totalChatsFound: validChats.length,
         summary: {
@@ -1487,6 +1620,75 @@ export function registerLeadsRoutes(app, deps) {
     } catch (err) {
       console.error("[wa-extract] Erro na extração:", err);
       sendError(res, 500, "WA_EXTRACT_FAILED", err.message || "Erro ao extrair contatos do WhatsApp");
+    }
+  });
+
+  // Primeira etapa da extração de membros de grupo: só leitura, nada é
+  // gravado. Por grupo, diz quanto dá pra aproveitar antes do usuário
+  // decidir — perder metade de um grupo de 300 é decisão, não detalhe.
+  app.post("/api/leads/extract-wa-groups/preview", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const explicitInstanceId = normalizeString(req.body?.instanceId);
+    const explicitInstanceName = normalizeString(req.body?.instanceName);
+
+    try {
+      const resolved = await resolveEvolutionInstanceForExtraction({
+        clientId,
+        explicitInstanceId,
+        explicitInstanceName,
+        pgDatabasePool,
+        res,
+        sendError,
+      });
+      if (!resolved) return;
+      const { baseUrl, instanceName, apiKey, ownerDigits } = resolved;
+
+      const groupsRes = await fetch(`${baseUrl}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`, {
+        headers: { apikey: apiKey },
+      });
+
+      if (!groupsRes.ok) {
+        const text = await groupsRes.text();
+        sendError(res, 502, "WA_FETCH_GROUPS_FAILED", `Erro ao buscar grupos no WhatsApp (HTTP ${groupsRes.status}): ${text.slice(0, 200)}`);
+        return;
+      }
+
+      const groupsData = await groupsRes.json();
+      const groupsList = Array.isArray(groupsData) ? groupsData : (groupsData?.records || groupsData?.groups || []);
+      if (!Array.isArray(groupsList)) {
+        sendError(res, 502, "WA_INVALID_RESPONSE", "Evolution API não retornou uma lista válida de grupos.");
+        return;
+      }
+
+      const groups = groupsList.map((g) => {
+        const participants = Array.isArray(g?.participants) ? g.participants : [];
+        let usableCount = 0;
+        let lidCount = 0;
+        for (const p of participants) {
+          const pid = String(p?.id || p?.jid || "");
+          const classified = classifyGroupParticipant(pid, ownerDigits);
+          if (classified.kind === "lid") lidCount++;
+          else if (classified.kind === "valid") usableCount++;
+          // "self" (o próprio chip) e "invalid" não entram em nenhum dos
+          // dois — não são perda de telefone recuperável, só não contam.
+        }
+        return {
+          id: String(g?.id || ""),
+          name: normalizeString(g?.subject || g?.name) || "Grupo do WhatsApp",
+          totalMembers: participants.length,
+          usableCount,
+          lidCount,
+        };
+      });
+
+      res.json({ success: true, groups });
+    } catch (err) {
+      console.error("[wa-group-preview] Erro na prévia de grupos:", err);
+      sendError(res, 500, "WA_GROUP_PREVIEW_FAILED", err.message || "Erro ao pré-visualizar grupos do WhatsApp");
     }
   });
 
