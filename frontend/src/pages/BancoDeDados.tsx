@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
 import { sanitizePhone } from "@/lib/phone";
 import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
+import { WaGroupExtractionSection } from "@/components/leads/WaGroupExtractionSection";
 import { SingleFollowupReminderModal } from "@/components/followup/SingleFollowupReminderModal";
 import { PageShell } from "@/components/PageShell";
 import { UpsellCard } from "@/components/UpsellCard";
@@ -60,6 +61,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -230,6 +232,41 @@ export function getLeadMarketingChannelId(lead?: LeadIntelligenceItem | null): s
   return "whatsapp_outros";
 }
 
+export interface WaExtractionSources {
+  conversas: boolean;
+  agenda: boolean;
+  grupos: boolean;
+}
+
+/**
+ * Corpo de POST /api/leads/extract-wa-contacts. Duas regras:
+ *   - conversas+agenda marcadas e grupos não é o estado de sempre — `sources`
+ *     nem entra no corpo, pra chamada continuar idêntica à de hoje.
+ *   - qualquer outra combinação manda `sources` com só o que está marcado.
+ * `groupIds` só entra junto de `grupos: true`.
+ */
+export function buildWaExtractionPayload(
+  base: { clientId: string; instanceId?: string; chatLimit: number | "all" },
+  sourcesSelected: WaExtractionSources,
+  waSelectedGroupIds: string[]
+): Record<string, unknown> {
+  const isDefaultCombo = sourcesSelected.conversas && sourcesSelected.agenda && !sourcesSelected.grupos;
+  if (isDefaultCombo) {
+    return { ...base };
+  }
+
+  const sources: string[] = [];
+  if (sourcesSelected.conversas) sources.push("conversas");
+  if (sourcesSelected.agenda) sources.push("agenda");
+  if (sourcesSelected.grupos) sources.push("grupos");
+
+  return {
+    ...base,
+    sources,
+    ...(sourcesSelected.grupos ? { groupIds: waSelectedGroupIds } : {}),
+  };
+}
+
 export function renderSourceBadge(sourceKey?: string | null) {
   const key = String(sourceKey || "").trim().toLowerCase();
   if (!key || key === "não informado" || key === "nao informado") {
@@ -379,6 +416,18 @@ export default function BancoDeDados() {
   const [waChatLimit, setWaChatLimit] = useState<number | "all">(100);
   const [isExtractingWA, setIsExtractingWA] = useState(false);
   const [waExtractStep, setWaExtractStep] = useState<string>("");
+  // Três procedências, cada uma marcável — conversas e agenda ligadas por
+  // padrão (comportamento de sempre), grupos desligada. Independentes: ligar
+  // grupos não arrasta as outras duas junto.
+  const [waIncludeConversas, setWaIncludeConversas] = useState(true);
+  const [waIncludeAgenda, setWaIncludeAgenda] = useState(true);
+  const [waIncludeGroups, setWaIncludeGroups] = useState(false);
+  // hasConfirmedGroupsWarning vive aqui (não dentro do componente da seção)
+  // porque o Dialog desmonta o conteúdo ao fechar — "uma vez por sessão"
+  // precisa sobreviver a fechar e reabrir o modal, só reseta em reload de
+  // página.
+  const [hasConfirmedGroupsWarning, setHasConfirmedGroupsWarning] = useState(false);
+  const [waSelectedGroupIds, setWaSelectedGroupIds] = useState<string[]>([]);
 
   // Import Modal State (Excel .xlsx/.xls + CSV)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -624,6 +673,16 @@ export default function BancoDeDados() {
     "Olá! Gostaria de adquirir o módulo avulso de Origem de Leads no Banco de Dados."
   )}`;
 
+  // Volta a origem pro estado de sempre (conversas+agenda ligadas, grupos
+  // desligada) — usado ao fechar o modal por qualquer caminho (cancelar, X,
+  // extração concluída), pra próxima abertura não herdar escolha antiga.
+  const resetWaSourceSelection = () => {
+    setWaIncludeConversas(true);
+    setWaIncludeAgenda(true);
+    setWaIncludeGroups(false);
+    setWaSelectedGroupIds([]);
+  };
+
   // Handle WhatsApp Extraction Execution
   const handleExtractWA = async () => {
     if (waChatLimit === "all" && !isAdvancedPlan) {
@@ -652,11 +711,13 @@ export default function BancoDeDados() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientId,
-          instanceId: selectedInstanceId || undefined,
-          chatLimit: waChatLimit,
-        }),
+        body: JSON.stringify(
+          buildWaExtractionPayload(
+            { clientId, instanceId: selectedInstanceId || undefined, chatLimit: waChatLimit },
+            { conversas: waIncludeConversas, agenda: waIncludeAgenda, grupos: waIncludeGroups },
+            waSelectedGroupIds
+          )
+        ),
       });
 
       if (!res.ok) {
@@ -665,11 +726,13 @@ export default function BancoDeDados() {
       }
 
       const data = await res.json();
+      const groupsNote = data.fromGroups > 0 ? ` (${data.fromGroups} de grupos)` : "";
       toast.success(`Extração Semântica Concluída! 🎉`, {
-        description: `${data.extractedCount || 0} contatos minerados e enriquecidos com IA.`,
+        description: `${data.extractedCount || 0} contatos minerados e enriquecidos com IA${groupsNote}.`,
       });
 
       setIsWAModalOpen(false);
+      resetWaSourceSelection();
       fetchLeads();
     } catch (err: any) {
       console.error("[BancoDeDados] Erro na extração WA:", err);
@@ -3072,7 +3135,17 @@ export default function BancoDeDados() {
       </div>
 
       {/* Modal A) Mineração Semântica via WhatsApp */}
-      <Dialog open={isWAModalOpen} onOpenChange={setIsWAModalOpen}>
+      <Dialog
+        open={isWAModalOpen}
+        onOpenChange={(open) => {
+          setIsWAModalOpen(open);
+          // Fechar sem extrair não pode deixar origem marcada "fantasma" —
+          // o Dialog desmonta a seção de grupos e ela reabre sem seleção;
+          // o estado do pai tem que acompanhar, senão a próxima extração
+          // herda uma escolha que a tela já não mostra mais.
+          if (!open) resetWaSourceSelection();
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -3141,6 +3214,40 @@ export default function BancoDeDados() {
               </div>
             </div>
 
+            <div className="border-t border-border pt-3">
+              <p className="text-xs font-semibold text-foreground mb-1.5">Origem dos contatos</p>
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <Checkbox
+                    checked={waIncludeConversas}
+                    onCheckedChange={(v) => setWaIncludeConversas(v === true)}
+                    disabled={isExtractingWA}
+                    aria-label="Conversas"
+                  />
+                  Conversas
+                </label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <Checkbox
+                    checked={waIncludeAgenda}
+                    onCheckedChange={(v) => setWaIncludeAgenda(v === true)}
+                    disabled={isExtractingWA}
+                    aria-label="Agenda"
+                  />
+                  Agenda
+                </label>
+                <WaGroupExtractionSection
+                  clientId={clientId}
+                  instanceId={selectedInstanceId}
+                  getIdToken={getIdToken}
+                  confirmed={hasConfirmedGroupsWarning}
+                  onConfirmedChange={setHasConfirmedGroupsWarning}
+                  onSelectionChange={setWaSelectedGroupIds}
+                  onEnabledChange={setWaIncludeGroups}
+                  disabled={isExtractingWA}
+                />
+              </div>
+            </div>
+
             {isExtractingWA && (
               <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center space-y-2">
                 <RefreshCw className="w-5 h-5 text-emerald-600 animate-spin mx-auto" />
@@ -3152,12 +3259,19 @@ export default function BancoDeDados() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsWAModalOpen(false)} disabled={isExtractingWA}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsWAModalOpen(false);
+                resetWaSourceSelection();
+              }}
+              disabled={isExtractingWA}
+            >
               Cancelar
             </Button>
             <Button
               onClick={handleExtractWA}
-              disabled={isExtractingWA}
+              disabled={isExtractingWA || (!waIncludeConversas && !waIncludeAgenda && !waIncludeGroups)}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               {isExtractingWA ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
