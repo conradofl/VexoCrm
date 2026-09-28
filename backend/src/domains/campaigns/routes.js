@@ -267,20 +267,31 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
       FROM replied_temperature
       GROUP BY campaign_id
     ),
-    -- Quatro motivos pra leadNaoEncontrado, mutuamente exclusivos por
+    -- Cinco motivos pra leadNaoEncontrado, mutuamente exclusivos por
     -- PRECEDÊNCIA (CASE para no primeiro WHEN verdadeiro): LID vence mesmo
     -- sem lead_id, porque quando é LID o cruzamento é impossível por
-    -- construção e a outra causa não muda nada. leadIdOrfao é escopado por
-    -- client_id de propósito — lead com aquele id em OUTRO tenant cai aqui
-    -- também (não é uma quinta categoria; é vazamento de tenant, investigação
-    -- separada).
+    -- construção e a outra causa não muda nada.
+    --
+    -- leadIdApagado e leadIdDeOutroTenant eram uma coisa só (leadIdOrfao) até
+    -- a medição em produção dar 100% num balde só nas duas campanhas — padrão
+    -- de perda TOTAL, não de lead apagado um a um (isso daria percentual
+    -- espalhado). As duas causas significam o oposto uma da outra: apagado é
+    -- histórico perdido (nada a fazer); de outro tenant é vazamento de dado
+    -- entre clientes (grave, investigação própria). Por isso duas checagens
+    -- EXISTS separadas, não uma:
+    --   1) existe ALGUMA linha com esse id, em qualquer tenant? Não —
+    --      leadIdApagado.
+    --   2) existe, mas o EXISTS escopado por client_id (o mesmo de sempre,
+    --      sem afrouxar) não bate? Existe em outro tenant — leadIdDeOutroTenant.
+    -- A checagem 2 é a mesma de antes, intacta — a nova é a 1, ao lado dela.
     lead_not_found_reason AS (
       SELECT
         rt.campaign_id,
         CASE
           WHEN rt.phone LIKE '%@%' THEN 'telefoneLid'
           WHEN rt.lead_id IS NULL THEN 'semLeadId'
-          WHEN NOT EXISTS (SELECT 1 FROM public.leads ll WHERE ll.id = rt.lead_id AND ll.client_id = $1) THEN 'leadIdOrfao'
+          WHEN NOT EXISTS (SELECT 1 FROM public.leads ll WHERE ll.id = rt.lead_id) THEN 'leadIdApagado'
+          WHEN NOT EXISTS (SELECT 1 FROM public.leads ll WHERE ll.id = rt.lead_id AND ll.client_id = $1) THEN 'leadIdDeOutroTenant'
           ELSE 'telefoneDivergente'
         END AS reason
       FROM replied_temperature rt
@@ -291,7 +302,8 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
         campaign_id,
         COUNT(*) FILTER (WHERE reason = 'telefoneLid')::int AS telefone_lid,
         COUNT(*) FILTER (WHERE reason = 'semLeadId')::int AS sem_lead_id,
-        COUNT(*) FILTER (WHERE reason = 'leadIdOrfao')::int AS lead_id_orfao,
+        COUNT(*) FILTER (WHERE reason = 'leadIdApagado')::int AS lead_id_apagado,
+        COUNT(*) FILTER (WHERE reason = 'leadIdDeOutroTenant')::int AS lead_id_de_outro_tenant,
         COUNT(*) FILTER (WHERE reason = 'telefoneDivergente')::int AS telefone_divergente
       FROM lead_not_found_reason
       GROUP BY campaign_id
@@ -315,14 +327,15 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
       COALESCE(t.lead_nao_encontrado, 0) AS lead_nao_encontrado,
       COALESCE(n.telefone_lid, 0) AS telefone_lid,
       COALESCE(n.sem_lead_id, 0) AS sem_lead_id,
-      COALESCE(n.lead_id_orfao, 0) AS lead_id_orfao,
+      COALESCE(n.lead_id_apagado, 0) AS lead_id_apagado,
+      COALESCE(n.lead_id_de_outro_tenant, 0) AS lead_id_de_outro_tenant,
       COALESCE(n.telefone_divergente, 0) AS telefone_divergente
     FROM runs
     JOIN public.campaigns c ON c.id = runs.campaign_id
     LEFT JOIN temperature_agg t ON t.campaign_id = c.id
     LEFT JOIN lead_not_found_agg n ON n.campaign_id = c.id
     WHERE c.client_id = $1
-    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao, t.lead_nao_encontrado, n.telefone_lid, n.sem_lead_id, n.lead_id_orfao, n.telefone_divergente
+    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao, t.lead_nao_encontrado, n.telefone_lid, n.sem_lead_id, n.lead_id_apagado, n.lead_id_de_outro_tenant, n.telefone_divergente
     HAVING COUNT(*) >= $2
     ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
   `;
@@ -3864,7 +3877,8 @@ export function registerCampaignsRoutes(app, deps) {
         leadNaoEncontradoPorMotivo: {
           telefoneLid: row.telefone_lid,
           semLeadId: row.sem_lead_id,
-          leadIdOrfao: row.lead_id_orfao,
+          leadIdApagado: row.lead_id_apagado,
+          leadIdDeOutroTenant: row.lead_id_de_outro_tenant,
           telefoneDivergente: row.telefone_divergente,
         },
       }));

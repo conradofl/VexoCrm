@@ -69,7 +69,8 @@ function baseRow(overrides = {}) {
     lead_nao_encontrado: 0,
     telefone_lid: 0,
     sem_lead_id: 0,
-    lead_id_orfao: 0,
+    lead_id_apagado: 0,
+    lead_id_de_outro_tenant: 0,
     telefone_divergente: 0,
     ...overrides,
   };
@@ -265,11 +266,29 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
     expect(runsCalls).toHaveLength(1);
   });
 
-  it("[TESTE OBRIGATÓRIO] os quatro motivos de leadNaoEncontrado somam com leadNaoEncontrado, inclusive todos zerados", async () => {
+  it("[TESTE OBRIGATÓRIO] os cinco motivos de leadNaoEncontrado somam com leadNaoEncontrado, inclusive todos zerados", async () => {
     const deps = makeDeps({
       rows: [
-        baseRow({ campaign_id: "c-cheio", replied_count: 10, lead_nao_encontrado: 7, telefone_lid: 3, sem_lead_id: 2, lead_id_orfao: 1, telefone_divergente: 1 }),
-        baseRow({ campaign_id: "c-zerado", replied_count: 4, lead_nao_encontrado: 0, telefone_lid: 0, sem_lead_id: 0, lead_id_orfao: 0, telefone_divergente: 0 }),
+        baseRow({
+          campaign_id: "c-cheio",
+          replied_count: 11,
+          lead_nao_encontrado: 8,
+          telefone_lid: 3,
+          sem_lead_id: 2,
+          lead_id_apagado: 1,
+          lead_id_de_outro_tenant: 1,
+          telefone_divergente: 1,
+        }),
+        baseRow({
+          campaign_id: "c-zerado",
+          replied_count: 4,
+          lead_nao_encontrado: 0,
+          telefone_lid: 0,
+          sem_lead_id: 0,
+          lead_id_apagado: 0,
+          lead_id_de_outro_tenant: 0,
+          telefone_divergente: 0,
+        }),
       ],
     });
     const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
@@ -277,10 +296,59 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
     await handler({ query: { clientId: "tenant-1" } }, res);
 
     for (const campaign of res.body.campaigns) {
-      const { telefoneLid, semLeadId, leadIdOrfao, telefoneDivergente } = campaign.leadNaoEncontradoPorMotivo;
-      expect(telefoneLid + semLeadId + leadIdOrfao + telefoneDivergente).toBe(campaign.repliedByTemperature.leadNaoEncontrado);
+      const { telefoneLid, semLeadId, leadIdApagado, leadIdDeOutroTenant, telefoneDivergente } = campaign.leadNaoEncontradoPorMotivo;
+      expect(telefoneLid + semLeadId + leadIdApagado + leadIdDeOutroTenant + telefoneDivergente).toBe(
+        campaign.repliedByTemperature.leadNaoEncontrado
+      );
     }
-    expect(res.body.campaigns[1].leadNaoEncontradoPorMotivo).toEqual({ telefoneLid: 0, semLeadId: 0, leadIdOrfao: 0, telefoneDivergente: 0 });
+    expect(res.body.campaigns[1].leadNaoEncontradoPorMotivo).toEqual({
+      telefoneLid: 0,
+      semLeadId: 0,
+      leadIdApagado: 0,
+      leadIdDeOutroTenant: 0,
+      telefoneDivergente: 0,
+    });
+  });
+
+  it("[TESTE OBRIGATÓRIO] leadIdApagado (não existe em tenant nenhum) é diferente de leadIdDeOutroTenant (existe, client_id diferente)", async () => {
+    const deps = makeDeps({
+      rows: [baseRow({ replied_count: 7, lead_nao_encontrado: 5, lead_id_apagado: 3, lead_id_de_outro_tenant: 2 })],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    expect(res.body.campaigns[0].leadNaoEncontradoPorMotivo).toEqual({
+      telefoneLid: 0,
+      semLeadId: 0,
+      leadIdApagado: 3,
+      leadIdDeOutroTenant: 2,
+      telefoneDivergente: 0,
+    });
+  });
+
+  it("[TESTE OBRIGATÓRIO] a resposta não carrega nenhum identificador de outro tenant — só contagem", async () => {
+    const deps = makeDeps({
+      rows: [baseRow({ replied_count: 5, lead_nao_encontrado: 5, lead_id_apagado: 2, lead_id_de_outro_tenant: 3 })],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    // percorre os VALORES da resposta (não as chaves — "leadIdDeOutroTenant"
+    // é nome de categoria aprovado, não um id de verdade) atrás de qualquer
+    // coisa que pareça client_id, uuid ou telefone de outro tenant
+    const values = [];
+    const collect = (v) => {
+      if (v && typeof v === "object") Object.values(v).forEach(collect);
+      else values.push(v);
+    };
+    collect(res.body);
+    for (const v of values) {
+      if (typeof v !== "string") continue;
+      expect(v, `valor "${v}" parece um UUID`).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(v, `valor "${v}" parece telefone (8+ dígitos seguidos)`).not.toMatch(/\d{8,}/);
+    }
   });
 
   it("[TESTE OBRIGATÓRIO] leadNaoEncontradoPorMotivo é dimensão irmã de repliedByTemperature, não aninhada nela", async () => {
@@ -504,26 +572,43 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
     expect(caseBlock).toBeTruthy();
     const lidIdx = caseBlock.indexOf("telefoneLid");
     const semLeadIdIdx = caseBlock.indexOf("semLeadId");
-    const orfaoIdx = caseBlock.indexOf("leadIdOrfao");
+    const apagadoIdx = caseBlock.indexOf("leadIdApagado");
+    const outroTenantIdx = caseBlock.indexOf("leadIdDeOutroTenant");
     const divergenteIdx = caseBlock.indexOf("telefoneDivergente");
     // ordem no texto do CASE é a ordem de avaliação em Postgres — LID
-    // primeiro, sem checar lead_id antes
+    // primeiro, sem checar lead_id antes; apagado (sem escopo de tenant)
+    // antes de outro-tenant (com escopo), porque "existe em algum lugar?" é
+    // pré-requisito de "existe NESTE tenant?"
     expect(lidIdx).toBeGreaterThan(-1);
     expect(lidIdx).toBeLessThan(semLeadIdIdx);
-    expect(semLeadIdIdx).toBeLessThan(orfaoIdx);
-    expect(orfaoIdx).toBeLessThan(divergenteIdx);
+    expect(semLeadIdIdx).toBeLessThan(apagadoIdx);
+    expect(apagadoIdx).toBeLessThan(outroTenantIdx);
+    expect(outroTenantIdx).toBeLessThan(divergenteIdx);
     // o WHEN de telefoneLid não menciona lead_id — vence sozinho, por '@'
     const lidWhenLine = caseBlock.split("\n").find((l) => l.includes("telefoneLid"));
     expect(lidWhenLine).not.toContain("lead_id");
     expect(lidWhenLine).toContain("phone LIKE '%@%'");
   });
 
-  it("[TESTE OBRIGATÓRIO] leadIdOrfao é escopado por client_id — lead em outro tenant cai aqui, não vira categoria nova", () => {
+  it("[TESTE OBRIGATÓRIO] leadIdApagado não existe em tenant nenhum — EXISTS sem escopo de client_id", () => {
     const sql = buildMessageEffectivenessSql(true, true);
-    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM public\.leads ll WHERE ll\.id = rt\.lead_id AND ll\.client_id = \$1\)/);
+    const caseBlock = sql.slice(sql.indexOf("CASE\n          WHEN rt.phone"), sql.indexOf("END AS reason"));
+    const apagadoLine = caseBlock.split("\n").find((l) => l.includes("leadIdApagado"));
+    expect(apagadoLine).toBeTruthy();
+    expect(apagadoLine).toMatch(/NOT EXISTS \(SELECT 1 FROM public\.leads ll WHERE ll\.id = rt\.lead_id\)/);
+    // essa checagem NÃO pode ter client_id — senão vira a mesma de outro-tenant
+    expect(apagadoLine).not.toContain("client_id");
   });
 
-  it("[TESTE OBRIGATÓRIO] os quatro motivos somam com lead_nao_encontrado — mesmo WHERE NOT lead_found do balde original", () => {
+  it("[TESTE OBRIGATÓRIO] leadIdDeOutroTenant existe, mas com client_id diferente — a MESMA checagem escopada de antes, intacta", () => {
+    const sql = buildMessageEffectivenessSql(true, true);
+    const caseBlock = sql.slice(sql.indexOf("CASE\n          WHEN rt.phone"), sql.indexOf("END AS reason"));
+    const outroTenantLine = caseBlock.split("\n").find((l) => l.includes("leadIdDeOutroTenant"));
+    expect(outroTenantLine).toBeTruthy();
+    expect(outroTenantLine).toMatch(/NOT EXISTS \(SELECT 1 FROM public\.leads ll WHERE ll\.id = rt\.lead_id AND ll\.client_id = \$1\)/);
+  });
+
+  it("[TESTE OBRIGATÓRIO] os cinco motivos somam com lead_nao_encontrado — mesmo WHERE NOT lead_found do balde original", () => {
     const sql = buildMessageEffectivenessSql(true, true);
     // lead_not_found_reason parte do MESMO replied_temperature filtrado por
     // NOT lead_found que já alimenta lead_nao_encontrado em temperature_agg
@@ -578,10 +663,11 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
       expect(sql, `temperature=${includeTemperature}: falta respostas_de_grupo`).toContain("respostas_de_grupo");
       expect(sql, `temperature=${includeTemperature}: falta telefone_lid`).toContain("telefone_lid");
       expect(sql, `temperature=${includeTemperature}: falta sem_lead_id`).toContain("sem_lead_id");
-      expect(sql, `temperature=${includeTemperature}: falta lead_id_orfao`).toContain("lead_id_orfao");
+      expect(sql, `temperature=${includeTemperature}: falta lead_id_apagado`).toContain("lead_id_apagado");
+      expect(sql, `temperature=${includeTemperature}: falta lead_id_de_outro_tenant`).toContain("lead_id_de_outro_tenant");
       expect(sql, `temperature=${includeTemperature}: falta telefone_divergente`).toContain("telefone_divergente");
       expect(sql, `temperature=${includeTemperature}: GROUP BY não carrega os motivos novos`).toMatch(
-        /GROUP BY c\.id, c\.name, c\.analytics_meta,.*n\.telefone_lid, n\.sem_lead_id, n\.lead_id_orfao, n\.telefone_divergente/
+        /GROUP BY c\.id, c\.name, c\.analytics_meta,.*n\.telefone_lid, n\.sem_lead_id, n\.lead_id_apagado, n\.lead_id_de_outro_tenant, n\.telefone_divergente/
       );
     }
   });
