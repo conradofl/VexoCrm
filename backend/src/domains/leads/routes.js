@@ -1296,6 +1296,7 @@ export function registerLeadsRoutes(app, deps) {
         const chatsRes = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: apiKey },
+          signal: AbortSignal.timeout(8000),
           body: JSON.stringify({}),
         });
 
@@ -1338,6 +1339,7 @@ export function registerLeadsRoutes(app, deps) {
         const contactsRes = await fetch(`${baseUrl}/chat/findContacts/${encodeURIComponent(instanceName)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: apiKey },
+          signal: AbortSignal.timeout(8000),
           body: JSON.stringify({}),
         });
         if (contactsRes.ok) {
@@ -1376,150 +1378,77 @@ export function registerLeadsRoutes(app, deps) {
       let coldLeads = 0;
       let hotLeads = 0;
 
-      // validChats já é [] quando "conversas" não foi pedido (ver acima) —
-      // topChats herda isso sem precisar checar sources de novo.
-      const topChats = isFinite(chatLimit) ? validChats.slice(0, chatLimit) : validChats;
-      if (sources.has("conversas")) {
-        console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} processando=${topChats.length}`);
-      }
+      // ── 1. GRUPOS: primeira procedência (executa primeiro: ultra-rápido em lote) ──
+      // Nunca lê nem grava mensagem de grupo — só a lista de membros (nome, telefone).
+      let groupLeadCount = 0;
+      let groupLidCount = 0;
+      let groupsProcessed = 0;
+      if (sources.has("grupos")) {
+        const groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((g) => String(g)) : [];
+        if (groupIds.length > 0) {
+          try {
+            const groupsRes = await fetch(`${baseUrl}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`, {
+              headers: { apikey: apiKey },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (groupsRes.ok) {
+              const groupsData = await groupsRes.json();
+              const groupsList = Array.isArray(groupsData) ? groupsData : (groupsData?.records || groupsData?.groups || []);
+              const idSet = new Set(groupIds);
+              const selectedGroups = (Array.isArray(groupsList) ? groupsList : []).filter((g) => idSet.has(String(g?.id || "")));
 
-      for (const chat of topChats) {
-        const phoneJid = realPhoneJid(chat);
-        const rawPhone = phoneJid.split("@")[0] || "";
-        const formattedPhone = sanitizePhoneE164(rawPhone);
-        if (!formattedPhone) continue;
-
-        // Ordem: pushName do chat > nome do findContacts > pushName da última
-        // mensagem recebida (nunca a enviada, que vem como "Você") > telefone.
-        const digitsOnly = rawPhone.replace(/\D/g, "");
-        const lastMsgName = chat?.lastMessage?.key?.fromMe === false ? chat?.lastMessage?.pushName : "";
-        const candidates = [chat.pushName, contactNames.get(digitsOnly), lastMsgName, chat.name, chat.verifiedName];
-        const name = normalizeString(candidates.find(isRealName) || formattedPhone);
-        // findMessages usa o jid REAL da conversa (remoteJid, que pode ser @lid).
-        const msgRemoteJid = chat.remoteJid || phoneJid;
-
-        let messagesText = [];
-        let lastInteractionAt = null;
-
-        try {
-          const msgsRes = await fetch(`${baseUrl}/chat/findMessages/${encodeURIComponent(instanceName)}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: apiKey
-            },
-            body: JSON.stringify({
-              where: { key: { remoteJid: msgRemoteJid } },
-              limit: 15
-            })
-          });
-
-          if (msgsRes.ok) {
-            const msgsData = await msgsRes.json();
-            // Evolution v2: findMessages devolve { messages: { records: [...] } }.
-            const recordList = Array.isArray(msgsData)
-              ? msgsData
-              : Array.isArray(msgsData?.messages?.records)
-                ? msgsData.messages.records
-                : Array.isArray(msgsData?.records)
-                  ? msgsData.records
-                  : Array.isArray(msgsData?.messages)
-                    ? msgsData.messages
-                    : [];
-            if (Array.isArray(recordList)) {
-              for (const m of recordList) {
-                const text = m.message?.conversation || m.message?.extendedTextMessage?.text || m.messageText || "";
-                if (text) messagesText.push(text);
-                if (m.messageTimestamp && !lastInteractionAt) {
-                  lastInteractionAt = new Date(m.messageTimestamp * 1000).toISOString();
+              const batchLeads = [];
+              for (const group of selectedGroups) {
+                const groupName = normalizeString(group?.subject || group?.name) || "Grupo do WhatsApp";
+                const participants = Array.isArray(group?.participants) ? group.participants : [];
+                for (const p of participants) {
+                  const classified = classifyGroupParticipantObject(p, ownerDigits);
+                  if (classified.kind === "lid") {
+                    groupLidCount++;
+                    continue;
+                  }
+                  if (classified.kind !== "valid") continue;
+                  const formatted = sanitizePhoneE164(classified.digits);
+                  if (!formatted) continue;
+                  const telefoneKey = formatted.replace(/^\+/, "");
+                  const rawName = p?.pushName || p?.name || p?.notify || contactNames.get(classified.digits);
+                  batchLeads.push({
+                    telefone: telefoneKey,
+                    phone: telefoneKey,
+                    nome: isRealName(rawName) ? normalizeString(rawName) : formatted,
+                    stage: "cold",
+                    stage_source: "auto",
+                    temperature: "cold",
+                    tags: [groupName],
+                    dados: {
+                      origem: "WhatsApp Grupo",
+                      lead_source_bruto: "WhatsApp Grupo",
+                      origem_marketing: "extracao_whatsapp",
+                      grupo_nome: groupName,
+                    },
+                  });
+                  seenPhones.add(telefoneKey);
                 }
+                groupsProcessed++;
               }
-            }
-          }
-        } catch (msgErr) {
-          console.warn(`[wa-extract] Erro ao buscar mensagens do chat ${remoteJid}:`, msgErr.message);
-        }
 
-        const classification = classifyChatContent(messagesText, name);
-        // Resumo inteligente (pontos-chave + diagnóstico + próxima ação). Se a
-        // IA não estiver disponível, mantém o resumo heurístico.
-        try {
-          const insight = await summarizeChatWithAI(messagesText, name);
-          if (insight?.summary) {
-            classification.summary = insight.summary;
-            if (insight.prioridade === "alta" && !classification.tags.includes("Prioridade alta")) {
-              classification.tags.push("Prioridade alta");
-            }
-            if (insight.canalSugerido === "followup" && !classification.tags.includes("Follow-up")) {
-              classification.tags.push("Follow-up");
-            }
-            if (insight.canalSugerido === "campanha" && !classification.tags.includes("Campanha")) {
-              classification.tags.push("Campanha");
-            }
-          }
-        } catch { /* mantém o resumo heurístico */ }
-        if (classification.stage === 'buyer') buyers++;
-        if (classification.stage === 'open_budget') openBudgets++;
-        if (classification.stage === 'cold') coldLeads++;
-        if (classification.temperature === 'hot') hotLeads++;
-
-        // UPSERT via SQL cru (o shim supabase engolia o erro em silêncio, e a
-        // extração retornava 0 sem pista). ON CONFLICT (client_id, telefone)
-        // deduplica: rodar a extração várias vezes atualiza em vez de duplicar.
-        try {
-          // Bloco 3: herda dono do chip de onde a conversa foi extraída (ou busca da mensagem)
-          let chatOwnerUid = chipOwnerUid;
-          if (!chatOwnerUid) {
-            try {
-              const msgQuery = await pgDatabasePool.query(
-                `SELECT instance_name FROM public.lead_messages 
-                 WHERE client_id = $1 AND phone = $2 AND instance_name IS NOT NULL 
-                 ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
-                [clientId, telefoneKey]
-              );
-              if (msgQuery.rows[0]?.instance_name) {
-                chatOwnerUid = await resolveEvolutionInstanceOwner({
-                  clientId,
-                  instanceName: msgQuery.rows[0].instance_name,
-                  pool: pgDatabasePool,
-                });
+              if (batchLeads.length > 0) {
+                // upsertLeadsBatchByPhone deduplica por telefone DENTRO do lote
+                const batchResult = await upsertLeadsBatchByPhone(pgDatabasePool, clientId, batchLeads);
+                groupLeadCount = batchResult.totalCount;
               }
-            } catch {}
+              console.info(`[wa-extract] grupos: ${groupLeadCount} leads de ${groupsProcessed} grupo(s) selecionado(s), ${groupLidCount} participante(s) LID sem telefone recuperável`);
+            } else {
+              const text = await groupsRes.text();
+              console.warn(`[wa-extract] fetchAllGroups falhou (HTTP ${groupsRes.status}): ${text.slice(0, 200)}`);
+            }
+          } catch (e) {
+            console.warn("[wa-extract] erro ao extrair membros de grupo:", e.message);
           }
-
-          // telefone sem "+" para casar com lead_messages.phone (sync) e
-          // deduplicar entre extração e sincronização (mesma chave).
-          const telefoneKey = formattedPhone.replace(/^\+/, "");
-          await upsertLeadByPhone(pgDatabasePool, clientId, telefoneKey, {
-            phone: telefoneKey,
-            nome: name,
-            stage: classification.stage,
-            stage_source: "auto",
-            temperature: classification.temperature,
-            tags: Array.isArray(classification.tags) ? classification.tags : [],
-            extracted_from_wa: true,
-            lead_source: "extracao_whatsapp",
-            assigned_to: chatOwnerUid || null,
-            dados: {
-              origem: "WhatsApp Extração",
-              lead_source_bruto: "WhatsApp Extração",
-              origem_marketing: "extracao_whatsapp",
-            },
-            raw_chat_summary: classification.summary,
-            last_interaction_at: lastInteractionAt || new Date().toISOString(),
-          });
-          extractedCount++;
-          seenPhones.add(telefoneKey);
-        } catch (insErr) {
-          insertErrors++;
-          if (insertErrors <= 3) console.warn(`[wa-extract] upsert falhou p/ ${formattedPhone}: ${insErr.message}`);
         }
       }
 
-      // AGENDA: importa os contatos salvos que não vieram por conversa. Sem
-      // histórico não dá para classificar estágio/temperatura, então entram
-      // como lead frio marcado pela origem — o telefone e o nome, que é o que
-      // faltava, ficam disponíveis para trabalhar depois.
+      // ── 2. AGENDA: segunda procedência (contatos salvos no chip com atribuição ao chipOwnerUid) ──
       let addressBookCount = 0;
       if (sources.has("agenda")) {
         for (const ct of addressBook) {
@@ -1554,77 +1483,150 @@ export function registerLeadsRoutes(app, deps) {
         console.info(`[wa-extract] agenda: ${addressBookCount} contatos importados de ${addressBook.length} salvos`);
       }
 
-      // GRUPOS: terceira procedência, opt-in — só roda com "grupos" em
-      // sources E groupIds preenchido (a segunda etapa do fluxo de prévia:
-      // ver POST /api/leads/extract-wa-groups/preview). Nunca lê nem grava
-      // mensagem de grupo — só a lista de membros (nome, telefone).
-      let groupLeadCount = 0;
-      let groupLidCount = 0;
-      let groupsProcessed = 0;
-      if (sources.has("grupos")) {
-        const groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((g) => String(g)) : [];
-        if (groupIds.length > 0) {
-          try {
-            const groupsRes = await fetch(`${baseUrl}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`, {
-              headers: { apikey: apiKey },
-            });
-            if (groupsRes.ok) {
-              const groupsData = await groupsRes.json();
-              const groupsList = Array.isArray(groupsData) ? groupsData : (groupsData?.records || groupsData?.groups || []);
-              const idSet = new Set(groupIds);
-              const selectedGroups = (Array.isArray(groupsList) ? groupsList : []).filter((g) => idSet.has(String(g?.id || "")));
+      // ── 3. CONVERSAS: terceira procedência (classificação semântica ágil e IA sob demanda) ──
+      let aiSummariesCount = 0;
+      const topChats = isFinite(chatLimit) ? validChats.slice(0, chatLimit) : validChats;
+      if (sources.has("conversas")) {
+        console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} processando=${topChats.length}`);
+      }
 
-              const batchLeads = [];
-              for (const group of selectedGroups) {
-                const groupName = normalizeString(group?.subject || group?.name) || "Grupo do WhatsApp";
-                const participants = Array.isArray(group?.participants) ? group.participants : [];
-                for (const p of participants) {
-                  const classified = classifyGroupParticipantObject(p, ownerDigits);
-                  if (classified.kind === "lid") {
-                    groupLidCount++;
-                    continue;
-                  }
-                  if (classified.kind !== "valid") continue;
-                  const formatted = sanitizePhoneE164(classified.digits);
-                  if (!formatted) continue;
-                  const telefoneKey = formatted.replace(/^\+/, "");
-                  const rawName = p?.pushName || p?.name || p?.notify || contactNames.get(classified.digits);
-                  batchLeads.push({
-                    telefone: telefoneKey,
-                    phone: telefoneKey,
-                    nome: isRealName(rawName) ? normalizeString(rawName) : formatted,
-                    stage: "cold",
-                    stage_source: "auto",
-                    // Temperatura cold é julgamento, não valor padrão da
-                    // coluna: essa pessoa nunca falou com a empresa.
-                    temperature: "cold",
-                    tags: [groupName],
-                    dados: {
-                      origem: "WhatsApp Grupo",
-                      lead_source_bruto: "WhatsApp Grupo",
-                      origem_marketing: "extracao_whatsapp",
-                      grupo_nome: groupName,
-                    },
-                  });
+      for (const chat of topChats) {
+        const phoneJid = realPhoneJid(chat);
+        const rawPhone = phoneJid.split("@")[0] || "";
+        const formattedPhone = sanitizePhoneE164(rawPhone);
+        if (!formattedPhone) continue;
+
+        // Telefone sem "+" para deduplicar e vincular
+        const telefoneKey = formattedPhone.replace(/^\+/, "");
+        const digitsOnly = rawPhone.replace(/\D/g, "");
+        const lastMsgName = chat?.lastMessage?.key?.fromMe === false ? chat?.lastMessage?.pushName : "";
+        const candidates = [chat.pushName, contactNames.get(digitsOnly), lastMsgName, chat.name, chat.verifiedName];
+        const name = normalizeString(candidates.find(isRealName) || formattedPhone);
+        // findMessages usa o jid REAL da conversa (remoteJid, que pode ser @lid).
+        const msgRemoteJid = chat.remoteJid || phoneJid;
+
+        let messagesText = [];
+        let lastInteractionAt = null;
+
+        try {
+          const msgsRes = await fetch(`${baseUrl}/chat/findMessages/${encodeURIComponent(instanceName)}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: apiKey
+            },
+            signal: AbortSignal.timeout(3500),
+            body: JSON.stringify({
+              where: { key: { remoteJid: msgRemoteJid } },
+              limit: 15
+            })
+          });
+
+          if (msgsRes.ok) {
+            const msgsData = await msgsRes.json();
+            // Evolution v2: findMessages devolve { messages: { records: [...] } }.
+            const recordList = Array.isArray(msgsData)
+              ? msgsData
+              : Array.isArray(msgsData?.messages?.records)
+                ? msgsData.messages.records
+                : Array.isArray(msgsData?.records)
+                  ? msgsData.records
+                  : Array.isArray(msgsData?.messages)
+                    ? msgsData.messages
+                    : [];
+            if (Array.isArray(recordList)) {
+              for (const m of recordList) {
+                const text = m.message?.conversation || m.message?.extendedTextMessage?.text || m.messageText || "";
+                if (text) messagesText.push(text);
+                if (m.messageTimestamp && !lastInteractionAt) {
+                  lastInteractionAt = new Date(m.messageTimestamp * 1000).toISOString();
                 }
-                groupsProcessed++;
               }
-
-              if (batchLeads.length > 0) {
-                // upsertLeadsBatchByPhone deduplica por telefone DENTRO do
-                // lote — o mesmo participante em dois grupos selecionados
-                // vira um lead só (com as tags dos dois grupos).
-                const batchResult = await upsertLeadsBatchByPhone(pgDatabasePool, clientId, batchLeads);
-                groupLeadCount = batchResult.totalCount;
-              }
-              console.info(`[wa-extract] grupos: ${groupLeadCount} leads de ${groupsProcessed} grupo(s) selecionado(s), ${groupLidCount} participante(s) LID sem telefone recuperável`);
-            } else {
-              const text = await groupsRes.text();
-              console.warn(`[wa-extract] fetchAllGroups falhou (HTTP ${groupsRes.status}): ${text.slice(0, 200)}`);
             }
-          } catch (e) {
-            console.warn("[wa-extract] erro ao extrair membros de grupo:", e.message);
           }
+        } catch (msgErr) {
+          console.warn(`[wa-extract] Erro ao buscar mensagens do chat ${msgRemoteJid}:`, msgErr.message);
+        }
+
+        const classification = classifyChatContent(messagesText, name);
+
+        // IA Semântica: limitada a no máximo 5 conversas comerciais mais relevantes com
+        // timeout estrito de 2500ms para evitar estourar cota Groq ou timeout da Vercel (60s).
+        // Todas as demais conversas recebem classificação e resumo heurístico instantâneos.
+        if (
+          messagesText.length > 0 &&
+          aiSummariesCount < 5 &&
+          (classification.stage === "open_budget" || classification.temperature === "hot" || classification.stage === "inquiry")
+        ) {
+          try {
+            const aiTimeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout IA")), 2500));
+            const insight = await Promise.race([summarizeChatWithAI(messagesText, name), aiTimeoutPromise]);
+            if (insight?.summary) {
+              classification.summary = insight.summary;
+              aiSummariesCount++;
+              if (insight.prioridade === "alta" && !classification.tags.includes("Prioridade alta")) {
+                classification.tags.push("Prioridade alta");
+              }
+              if (insight.canalSugerido === "followup" && !classification.tags.includes("Follow-up")) {
+                classification.tags.push("Follow-up");
+              }
+              if (insight.canalSugerido === "campanha" && !classification.tags.includes("Campanha")) {
+                classification.tags.push("Campanha");
+              }
+            }
+          } catch { /* mantém o resumo heurístico do classifyChatContent */ }
+        }
+
+        if (classification.stage === 'buyer') buyers++;
+        if (classification.stage === 'open_budget') openBudgets++;
+        if (classification.stage === 'cold') coldLeads++;
+        if (classification.temperature === 'hot') hotLeads++;
+
+        // UPSERT via SQL cru
+        try {
+          // Bloco 3: herda dono do chip de onde a conversa foi extraída (ou busca da mensagem)
+          let chatOwnerUid = chipOwnerUid;
+          if (!chatOwnerUid) {
+            try {
+              const msgQuery = await pgDatabasePool.query(
+                `SELECT instance_name FROM public.lead_messages 
+                 WHERE client_id = $1 AND phone = $2 AND instance_name IS NOT NULL 
+                 ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC LIMIT 1`,
+                [clientId, telefoneKey]
+              );
+              if (msgQuery.rows[0]?.instance_name) {
+                chatOwnerUid = await resolveEvolutionInstanceOwner({
+                  clientId,
+                  instanceName: msgQuery.rows[0].instance_name,
+                  pool: pgDatabasePool,
+                });
+              }
+            } catch {}
+          }
+
+          await upsertLeadByPhone(pgDatabasePool, clientId, telefoneKey, {
+            phone: telefoneKey,
+            nome: name,
+            stage: classification.stage,
+            stage_source: "auto",
+            temperature: classification.temperature,
+            tags: Array.isArray(classification.tags) ? classification.tags : [],
+            extracted_from_wa: true,
+            lead_source: "extracao_whatsapp",
+            assigned_to: chatOwnerUid || null,
+            dados: {
+              origem: "WhatsApp Extração",
+              lead_source_bruto: "WhatsApp Extração",
+              origem_marketing: "extracao_whatsapp",
+            },
+            raw_chat_summary: classification.summary,
+            last_interaction_at: lastInteractionAt || new Date().toISOString(),
+          });
+          extractedCount++;
+          seenPhones.add(telefoneKey);
+        } catch (insErr) {
+          insertErrors++;
+          if (insertErrors <= 3) console.warn(`[wa-extract] upsert falhou p/ ${formattedPhone}: ${insErr.message}`);
         }
       }
 

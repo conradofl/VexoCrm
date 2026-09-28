@@ -720,6 +720,7 @@ export default function BancoDeDados() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
+        signal: AbortSignal.timeout(60000),
         body: JSON.stringify(
           buildWaExtractionPayload(
             { clientId, instanceId: selectedInstanceId || undefined, chatLimit: waChatLimit },
@@ -730,8 +731,15 @@ export default function BancoDeDados() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || data.error || `HTTP ${res.status}`);
+        let errorMsg = `HTTP ${res.status}`;
+        try {
+          const errData = await res.json();
+          errorMsg = errData.message || errData.error || errorMsg;
+        } catch {
+          const text = await res.text().catch(() => "");
+          errorMsg = text ? `Erro no servidor (HTTP ${res.status}): ${text.slice(0, 150)}` : `Erro HTTP ${res.status}`;
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await res.json();
