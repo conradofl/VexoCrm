@@ -37,7 +37,11 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Instagram,
 } from "lucide-react";
+import { InstagramImportModal } from "@/components/leads/InstagramImportModal";
+import { ContactsWithoutChannelSection } from "@/components/leads/ContactsWithoutChannelSection";
+import { useContactsWithoutChannel } from "@/hooks/useContactsWithoutChannel";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -365,6 +369,9 @@ export default function BancoDeDados() {
     if (["lost", "perdidos", "perdido"].includes(t)) {
       return "lost";
     }
+    if (["contacts_without_channel", "instagram", "instagram_direct", "sem_whatsapp", "direct"].includes(t)) {
+      return "contacts_without_channel";
+    }
     return "all";
   };
 
@@ -376,6 +383,8 @@ export default function BancoDeDados() {
   const [selectedChannel, setSelectedChannel] = useState<string>("all");
   const [knownTags, setKnownTags] = useState<string[]>([]);
   const [knownSources, setKnownSources] = useState<string[]>([]);
+  const [isInstagramImportModalOpen, setIsInstagramImportModalOpen] = useState(false);
+  const { data: contactsWithoutChannel = [] } = useContactsWithoutChannel(clientId);
 
   // Sincroniza activeTab quando o parâmetro da URL mudar
   useEffect(() => {
@@ -541,7 +550,7 @@ export default function BancoDeDados() {
       if (!token) throw new Error("Usuário não autenticado.");
 
       const params = new URLSearchParams({ clientId });
-      if (activeTab !== "all") params.append("stage", activeTab);
+      if (activeTab !== "all" && activeTab !== "contacts_without_channel") params.append("stage", activeTab);
       if (searchQuery.trim()) params.append("search", searchQuery.trim());
       if (selectedTag) params.append("tag", selectedTag);
 
@@ -2040,6 +2049,17 @@ export default function BancoDeDados() {
             <Button
               variant="outline"
               size="sm"
+              data-testid="btn-import-instagram"
+              onClick={() => setIsInstagramImportModalOpen(true)}
+              className="gap-2 text-xs border-pink-500/30 bg-pink-500/5 text-pink-700 dark:text-pink-300 hover:bg-pink-500/15 font-semibold"
+            >
+              <Instagram className="w-3.5 h-3.5 text-pink-500" />
+              Importar do Instagram
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setIsTicketModalOpen(true)}
               className="gap-2 text-xs"
             >
@@ -2494,6 +2514,25 @@ export default function BancoDeDados() {
             >
               Perdidos <span className="ml-1 text-rose-600 dark:text-rose-400 font-semibold">({stageCounts.lost})</span>
             </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="tab-contacts-without-channel"
+              onClick={() => setActiveTab("contacts_without_channel")}
+              className={cn(
+                "rounded-full text-xs text-muted-foreground hover:text-foreground gap-1.5",
+                activeTab === "contacts_without_channel" && "bg-muted font-medium text-foreground shadow-sm"
+              )}
+            >
+              <Instagram className="w-3 h-3 text-pink-500" />
+              Instagram Direct / Sem WhatsApp
+              {contactsWithoutChannel.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                  {contactsWithoutChannel.length}
+                </span>
+              )}
+            </Button>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -2607,8 +2646,14 @@ export default function BancoDeDados() {
           </div>
         )}
 
-        {/* Tabela Principal */}
-        <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800">
+        {/* Tabela Principal ou Trabalho Manual do Instagram */}
+        {activeTab === "contacts_without_channel" ? (
+          <ContactsWithoutChannelSection
+            clientId={clientId}
+            onLeadConverted={fetchLeads}
+          />
+        ) : (
+          <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800">
           <CardContent className="p-0">
             {loading ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
@@ -3026,6 +3071,7 @@ export default function BancoDeDados() {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Barra Flutuante de Ações em Lote (Bulk Actions) */}
         {selectedLeadIds.length > 0 && (
@@ -4693,6 +4739,16 @@ export default function BancoDeDados() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Importação do Instagram */}
+      <InstagramImportModal
+        open={isInstagramImportModalOpen}
+        onOpenChange={setIsInstagramImportModalOpen}
+        clientId={clientId}
+        onSuccess={() => {
+          fetchLeads();
+        }}
+      />
     </PageShell>
   );
 }

@@ -1692,6 +1692,163 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
+  // Extração de contatos de exportação do Instagram — o arquivo NUNCA sobe
+  // pro servidor. A leitura e o parse acontecem no navegador (mesmo padrão
+  // do xlsx em BancoDeDados.tsx); esta rota só recebe o que já foi extraído
+  // — nome, telefone (quando achado por regex) e resumo. Conversa de
+  // terceiro não trafega e não é armazenada.
+  //
+  // Sem telefone: não é lead. Não inventa um (o caminho de import-csv:1727
+  // faz isso com prefixo 5500 — proibido aqui de propósito, é dado que
+  // parece real e não é). Vai pra contacts_without_channel, pra alguém pedir
+  // o WhatsApp manualmente depois.
+  app.post("/api/leads/import-instagram", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const contacts = Array.isArray(req.body?.contacts) ? req.body.contacts : null;
+    if (!contacts || contacts.length === 0) {
+      sendError(res, 400, "INVALID_BODY", "Nenhum contato enviado para importação");
+      return;
+    }
+
+    let leadsCreated = 0;
+    let contactsWithoutChannelCreated = 0;
+    let insertErrors = 0;
+
+    for (const raw of contacts) {
+      const name = normalizeString(raw?.name || raw?.nome);
+      const perfil = normalizeString(raw?.perfil || raw?.profile || name);
+      const resumo = typeof raw?.resumo === "string" ? raw.resumo.slice(0, 200) : null;
+      if (!name || !perfil) continue;
+
+      // Revalida no servidor com as MESMAS regras — nunca confia só no que
+      // o navegador validou. O que não passa aqui também é descartado, não
+      // corrigido: nenhum telefone é inventado neste caminho.
+      const formattedPhone = sanitizePhoneE164(raw?.phone || raw?.telefone || "");
+
+      if (formattedPhone) {
+        const telefoneKey = formattedPhone.replace(/^\+/, "");
+        try {
+          await upsertLeadByPhone(pgDatabasePool, clientId, telefoneKey, {
+            phone: telefoneKey,
+            nome: name,
+            stage: "cold",
+            stage_source: "auto",
+            // Coluna deliberada (lead_temperature, QUENTE/MORNO/FRIO — escrita
+            // por escolha), não `temperature` (default 'warm', não significa
+            // nada). A pessoa já conversou com a empresa: é morno de verdade.
+            lead_temperature: "MORNO",
+            extracted_from_wa: false,
+            lead_source: "instagram_export",
+            dados: {
+              origem: "Instagram Direct",
+              lead_source_bruto: "Instagram Direct",
+              origem_marketing: "instagram_export",
+            },
+            raw_chat_summary: resumo,
+          });
+          leadsCreated++;
+        } catch (insErr) {
+          insertErrors++;
+          if (insertErrors <= 3) console.warn(`[ig-import] upsert de lead falhou p/ ${perfil}: ${insErr.message}`);
+        }
+        continue;
+      }
+
+      try {
+        await pgDatabasePool.query(
+          `INSERT INTO public.contacts_without_channel (client_id, nome, perfil, resumo, origem)
+           VALUES ($1, $2, $3, $4, 'Instagram Direct')
+           ON CONFLICT (client_id, perfil)
+           DO UPDATE SET nome = EXCLUDED.nome, resumo = EXCLUDED.resumo, updated_at = now()`,
+          [clientId, name, perfil, resumo]
+        );
+        contactsWithoutChannelCreated++;
+      } catch (insErr) {
+        insertErrors++;
+        if (insertErrors <= 3) console.warn(`[ig-import] upsert de contato sem canal falhou p/ ${perfil}: ${insErr.message}`);
+      }
+    }
+
+    res.json({ success: true, leadsCreated, contactsWithoutChannelCreated, insertErrors });
+  });
+
+  // Lista de trabalho manual: contatos do Instagram sem telefone
+  // recuperável. Nunca aparece em seletor de campanha/cadência, nunca entra
+  // em contagem de leads — não é a tabela leads.
+  app.get("/api/contacts-without-channel", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      const { rows } = await pgDatabasePool.query(
+        `SELECT id, nome, perfil, resumo, origem, asked_whatsapp_at, became_lead_at, created_at
+         FROM public.contacts_without_channel
+         WHERE client_id = $1
+         ORDER BY created_at DESC`,
+        [clientId]
+      );
+      res.json({
+        contacts: rows.map((r) => ({
+          id: r.id,
+          nome: r.nome,
+          perfil: r.perfil,
+          resumo: r.resumo,
+          origem: r.origem,
+          askedWhatsappAt: r.asked_whatsapp_at,
+          becameLeadAt: r.became_lead_at,
+          createdAt: r.created_at,
+        })),
+      });
+    } catch (err) {
+      console.error("[contacts-without-channel] Erro ao listar:", err);
+      sendError(res, 500, "CONTACTS_WITHOUT_CHANNEL_LIST_FAILED", err.message || "Erro ao listar contatos sem canal");
+    }
+  });
+
+  // Marca "pedi o WhatsApp" ou "virou lead", com data — toggle: marcar de
+  // novo desmarca.
+  app.patch("/api/contacts-without-channel/:id", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const id = normalizeString(req.params?.id);
+    const field = req.body?.field;
+    const value = req.body?.value !== false;
+    if (!id || (field !== "asked_whatsapp" && field !== "became_lead")) {
+      sendError(res, 400, "INVALID_BODY", "Campo inválido — use asked_whatsapp ou became_lead");
+      return;
+    }
+
+    const column = field === "asked_whatsapp" ? "asked_whatsapp_at" : "became_lead_at";
+    try {
+      const { rowCount } = await pgDatabasePool.query(
+        `UPDATE public.contacts_without_channel
+         SET ${column} = $1, updated_at = now()
+         WHERE id = $2 AND client_id = $3`,
+        [value ? new Date().toISOString() : null, id, clientId]
+      );
+      if (rowCount === 0) {
+        sendError(res, 404, "NOT_FOUND", "Contato não encontrado");
+        return;
+      }
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[contacts-without-channel] Erro ao atualizar:", err);
+      sendError(res, 500, "CONTACTS_WITHOUT_CHANNEL_UPDATE_FAILED", err.message || "Erro ao atualizar contato");
+    }
+  });
+
   // Importação simplificada via CSV / Excel com Suporte a Tags de Origem
   app.post("/api/leads/import-csv", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
     if (!ensureDb(res)) return;

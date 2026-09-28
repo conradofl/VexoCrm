@@ -346,6 +346,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='academy_recipe_usage')
       AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'academy_recipe_usage_action_check')
     ) AS ok`,
+    "20260929000000_create_contacts_without_channel.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='contacts_without_channel')
+      AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contacts_without_channel_client_perfil_key')
+    ) AS ok`,
   };
 
   const query = checks[filename];
