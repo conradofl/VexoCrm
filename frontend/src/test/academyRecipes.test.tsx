@@ -44,15 +44,65 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
   });
 
-  it("[TESTE OBRIGATÓRIO] os dez entram e aparecem — quatro fundamento, seis receita", () => {
-    expect(ACADEMY_CONTENT).toHaveLength(10);
+  it("[TESTE OBRIGATÓRIO] os dezenove entram e aparecem — quatro fundamento, quinze receita", () => {
+    expect(ACADEMY_CONTENT).toHaveLength(19);
     expect(ACADEMY_FUNDAMENTOS).toHaveLength(4);
-    expect(ACADEMY_RECIPES).toHaveLength(6);
+    expect(ACADEMY_RECIPES).toHaveLength(15);
     ACADEMY_FUNDAMENTOS.forEach((f) => expect(f.tipo).toBe("fundamento"));
     ACADEMY_RECIPES.forEach((r) => expect(r.tipo).toBe("receita"));
   });
 
-  it("[TESTE OBRIGATÓRIO] os dez aparecem na tela (sem filtro nenhum)", async () => {
+  it("[TESTE OBRIGATÓRIO] três segmentos novos aparecem no filtro, junto com os dois que já existem", async () => {
+    const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
+    renderWithProviders(<OnboardingWizard />);
+
+    for (const segmento of ["Turismo", "Contabilidade", "Comércio local", "Prestadores de serviço", "Clubes de permuta e redes de negócios"]) {
+      expect(screen.getByRole("button", { name: segmento }), `filtro de segmento "${segmento}" não apareceu`).toBeTruthy();
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] toda receita nova (envio 3) é instalável — sem manualSteps, sem installable false, sem fixed_date nem âncora", () => {
+    const idsNovos = [
+      "receita-comercio-local-comprou-nao-voltou",
+      "receita-comercio-local-perguntou-preco",
+      "receita-comercio-local-lista-quer-saber-primeiro",
+      "receita-prestadores-servico-orcamento-sem-resposta",
+      "receita-prestadores-servico-depois-do-servico",
+      "receita-prestadores-servico-buraco-agenda",
+      "receita-permuta-empresa-nao-associada",
+      "receita-permuta-credito-parado",
+      "receita-permuta-associado-anunciando",
+    ];
+    expect(idsNovos.length).toBe(9);
+    for (const id of idsNovos) {
+      const recipe = ACADEMY_RECIPES.find((r) => r.id === id);
+      expect(recipe, `receita nova "${id}" não encontrada em ACADEMY_RECIPES`).toBeTruthy();
+      expect(recipe!.installable, `${id} não pode ter installable: false`).not.toBe(false);
+      expect(recipe!.manualSteps, `${id} não pode ter manualSteps`).toBeUndefined();
+      expect(recipe!.templates.length, `${id} sem templates instaláveis`).toBeGreaterThan(0);
+      for (const tpl of recipe!.templates) {
+        expect(tpl.trigger_type, `${id} usa trigger_type "${tpl.trigger_type}" — deveria ser after_enrollment ou no_reply`).toMatch(
+          /^(after_enrollment|no_reply)$/
+        );
+        expect(tpl.anchor_field, `${id} não pode ter anchor_field`).toBeUndefined();
+      }
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] as receitas de um passo só instalam uma cadência com exatamente um passo", () => {
+    const idsUmPasso = [
+      "receita-comercio-local-lista-quer-saber-primeiro",
+      "receita-prestadores-servico-buraco-agenda",
+      "receita-permuta-associado-anunciando",
+    ];
+    for (const id of idsUmPasso) {
+      const recipe = ACADEMY_RECIPES.find((r) => r.id === id);
+      expect(recipe, `receita de um passo "${id}" não encontrada`).toBeTruthy();
+      expect(recipe!.templates, `${id} deveria instalar exatamente 1 passo`).toHaveLength(1);
+    }
+  });
+
+  it("[TESTE OBRIGATÓRIO] os dezenove aparecem na tela (sem filtro nenhum)", async () => {
     const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
     renderWithProviders(<OnboardingWizard />);
 
@@ -224,7 +274,7 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
 
   const FORBIDDEN_CLIENT_NAMES = ["geracao-digital", "geração digital", "sonhare", "vexo os", "infinie", "outlier"];
 
-  it("[TESTE OBRIGATÓRIO] nenhum dos dez cita nome de empresa — só nome de segmento", () => {
+  it("[TESTE OBRIGATÓRIO] nenhum dos dezenove cita nome de empresa — só nome de segmento", () => {
     for (const content of ACADEMY_CONTENT) {
       const haystack = JSON.stringify(content).toLowerCase();
       for (const name of FORBIDDEN_CLIENT_NAMES) {
