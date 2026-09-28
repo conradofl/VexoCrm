@@ -84,34 +84,57 @@ import {
 // GET /api/campaigns/reports/message-effectiveness — por campanha, o texto
 // da mensagem, quantos receberam, quantos responderam e — de quem
 // respondeu — quantos ficaram quente/morno/frio, só campanhas com pelo
-// menos 30 envios (volume baixo demais pra taxa dizer algo). É o dado que
-// dá tom real às receitas da Academy — qual mensagem, de fato, traz retorno
-// de gente qualificada, não só retorno.
+// menos MESSAGE_EFFECTIVENESS_MIN_SENT envios (volume baixo demais pra taxa
+// dizer algo). É o dado que dá tom real às receitas da Academy — qual
+// mensagem, de fato, traz retorno de gente qualificada, não só retorno.
+export const MESSAGE_EFFECTIVENESS_MIN_SENT = 30;
+// Resposta só conta se chegar DEPOIS do envio (sent_at) e DENTRO desta
+// janela — sem isso, "respondeu" na verdade mede "já falou com a empresa
+// alguma vez", que em lista de lead já em conversa tende a 100% e não
+// existe como taxa de resposta de disparo (ver item 1 abaixo).
+export const MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS = 14;
 //
-// Cinco coisas que este cruzamento tem que respeitar, porque cada uma
+// Seis coisas que este cruzamento tem que respeitar, porque cada uma
 // sozinha já fabrica número plausível e errado:
-//  1) `replied` (a base de repliedCount E replyRate — o número mais citado
-//     do relatório) compara lead_messages.phone com campaign_dispatch_runs
-//     .phone. A primeira vem do webhook da Evolution, sempre com DDI 55; a
-//     segunda vem do telefone do lead no momento do disparo, que pode não
-//     trazer DDI. Sem canonicalizar aqui também, repliedCount/replyRate
-//     SUBCONTAM — a direção do erro é sempre pra baixo, nunca pra cima,
-//     porque telefone em formato diferente nunca "responde" nesta conta.
-//     Comparação crua OR canônica (não só canônica) — mesmo padrão de
-//     domains/chatbot/routes.js:955 — pra manter o índice em
-//     lead_messages(client_id, phone) útil no caso comum (telefone já
-//     igual) e só pagar o custo de canonicalizar no caso que realmente
-//     diverge. Não medido contra Postgres real (sem acesso a um banco
-//     neste ambiente) — se alguém confirmar que o plano continua bom só
-//     com o canônico, pode simplificar.
-//  2) Telefone da CLASSIFICAÇÃO (quente/morno/frio) precisa do MESMO
+//  1) `replied` não pode ser "existe ALGUMA lead_messages inbound daquele
+//     telefone, em qualquer data" — isso mede "já falou com a empresa",
+//     não "respondeu a este disparo". A resposta tem que estar DEPOIS de
+//     `campaign_dispatch_runs.sent_at` e dentro de
+//     MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS dias — resposta de 20 dias
+//     depois não é resposta àquela mensagem, é outra conversa. Run com
+//     status='sent' e sent_at NULL é dado sujo (a coluna deveria ter sido
+//     preenchida no dispatch) e nunca conta como respondido, mas continua
+//     valendo pro sent_count — não inventamos data pra ele, só não fingimos
+//     saber se respondeu. Cada um desses puxa replyRate pra baixo sem
+//     ninguém saber quantos são, por isso sai na resposta da rota como
+//     `sentWithoutTimestamp`.
+//  2) `replied` (a base de repliedCount E replyRate) compara
+//     lead_messages.phone com campaign_dispatch_runs.phone. A primeira vem
+//     do webhook da Evolution, sempre com DDI 55; a segunda vem do telefone
+//     do lead no momento do disparo, que pode não trazer DDI. Sem
+//     canonicalizar aqui também, repliedCount/replyRate SUBCONTAM — a
+//     direção do erro é sempre pra baixo, nunca pra cima, porque telefone
+//     em formato diferente nunca "responde" nesta conta. Comparação crua OR
+//     canônica (não só canônica) — mesmo padrão de domains/chatbot/routes.js
+//     :955 — pra manter o índice em lead_messages(client_id, phone) útil no
+//     caso comum (telefone já igual) e só pagar o custo de canonicalizar no
+//     caso que realmente diverge. Não medido contra Postgres real (sem
+//     acesso a um banco neste ambiente) — se alguém confirmar que o plano
+//     continua bom só com o canônico, pode simplificar.
+//  3) Telefone da CLASSIFICAÇÃO (quente/morno/frio) precisa do MESMO
 //     canônico dos dois lados (SQL_CANONICAL_PHONE — não regexp_replace
 //     cru), senão "11987654321" (lead importado, sem DDI) nunca casa com
-//     "5511987654321" (run da Evolution, com DDI), e tudo cai em
-//     semClassificacao. E precisa olhar tanto `telefone` quanto `phone` —
-//     as duas colunas existem em public.leads, lead com só uma preenchida
-//     não pode ficar invisível no cruzamento.
-//  3) Lead de campanha é lead IMPORTADO — quem escreve nele é a importação
+//     "5511987654321" (run da Evolution, com DDI). E precisa olhar tanto
+//     `telefone` quanto `phone` — as duas colunas existem em public.leads,
+//     lead com só uma preenchida não pode ficar invisível no cruzamento.
+//  4) "Não encontrado" e "não classificado" são coisas DIFERENTES e não
+//     podem cair no mesmo balde. `leadNaoEncontrado` é telefone que
+//     respondeu mas não bate com nenhuma linha de `public.leads` (o LEFT
+//     JOIN não achou ninguém) — quase sempre sinal de telefone sujo ou lead
+//     de outra origem, não de classificação ausente. `semClassificacao` é
+//     lead ACHADO, sem temperatura preenchida. Confundir os dois esconde um
+//     defeito de cruzamento atrás de um número que parece só "sem dado".
+//  5) Lead de campanha é lead IMPORTADO — quem escreve nele é a importação
 //     (leads/routes.js), em `temperature` (hot/warm/cold), não o robô em
 //     `lead_temperature` (QUENTE/MORNO/FRIO). Ler só a segunda joga quase
 //     tudo em semClassificacao. As duas entram — mas `temperature` tem
@@ -121,48 +144,73 @@ import {
 //     como MORNO — só lead_temperature='MORNO' conta, porque essa coluna só
 //     é escrita por escolha. Ver SQL_LEAD_TEMPERATURE_BUCKET
 //     (services/leadTemperature.js) pra whitelist completa e o motivo.
-//  4) Whitelist fechada dos dois lados (SQL e o espelho JS que testa isso):
+//     Whitelist fechada dos dois lados (SQL e o espelho JS que testa isso):
 //     valor fora de QUENTE/MORNO/FRIO/hot/cold é "sem classificação", nunca
 //     um bucket que ninguém pediu nem um valor que só desaparece da soma.
-//  5) `leads` pode ter mais de uma linha pro mesmo telefone (mesmo
+//  6) `leads` pode ter mais de uma linha pro mesmo telefone (mesmo
 //     tenant) — juntar direto duplica o run que respondeu. O lado do
 //     lead precisa estar deduplicado (1 linha por telefone canônico,
 //     mais recente primeiro) ANTES do LEFT JOIN, não depois.
 //
-// Invariante que prova que 2-5 estão corretos: em toda campanha,
-// quente+morno+frio+semClassificacao == repliedCount. Sempre. (O item 1 não
-// tem invariante equivalente — repliedCount É o número que ele corrige;
-// depois desta correção, replyRate de campanha antiga sobe, nunca desce.
-// Não é bug novo, é o número saindo do erro.)
+// Invariante que prova que 3-6 estão corretos: em toda campanha,
+// quente+morno+frio+semClassificacao+leadNaoEncontrado == repliedCount.
+// Sempre. (Os itens 1 e 2 não têm invariante equivalente — repliedCount É o
+// número que eles corrigem; depois de cada correção, replyRate de campanha
+// antiga sobe ou fica igual, nunca desce. Não é bug novo, é o número saindo
+// do erro.)
 // Exportada (não fechada dentro de registerCampaignsRoutes) pra dar teste
 // estrutural direto sobre o texto da query — ver
 // campaignMessageEffectiveness.test.js.
 export function buildMessageEffectivenessSql(includeTemperatureColumn) {
   const canonicalLeadPhone = SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)");
+  // Mesmo padrão já usado em domains/chatbot/routes.js:1372 pra "quando essa
+  // mensagem de fato aconteceu" — message_timestamp é o mais confiável
+  // quando existe (vem do payload da Evolution), delivered_at e created_at
+  // são os fallbacks, nessa ordem.
+  const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
   return `
     WITH runs AS (
       SELECT
         r.campaign_id,
         r.phone,
-        EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = r.client_id
-            -- Mesmo defeito nº1 (telefone cru), na coluna que mais importa:
-            -- lead_messages.phone vem do webhook da Evolution (sempre com
-            -- DDI 55); campaign_dispatch_runs.phone vem do telefone do lead
-            -- no momento do disparo (pode não trazer DDI). Igualdade crua
-            -- OR canônica — não só canônica — no mesmo padrão de
-            -- domains/chatbot/routes.js:955: telefone já igual usa o índice
-            -- em lead_messages(client_id, phone) pelo primeiro lado do OR;
-            -- só cai na comparação canonicalizada (não indexável) quando o
-            -- formato realmente diverge. Não medido contra Postgres real
-            -- neste ambiente (ver nota no topo do arquivo de teste) — quem
-            -- tiver acesso ao banco e confirmar que o plano continua bom
-            -- pode simplificar pra só a comparação canônica.
-            AND (lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-        ) AS replied
+        -- Continua no sent_count e nunca conta como respondido (dado sujo,
+        -- não dá pra amarrar resposta a envio sem sent_at) — mas cada um
+        -- desses puxa replyRate pra baixo sem ninguém saber quantos são.
+        -- sentWithoutTimestamp, na resposta da rota, expõe a contagem.
+        (r.sent_at IS NULL) AS sent_at_missing,
+        -- sent_at NULL é dado sujo (status='sent' sem hora de envio
+        -- gravada) — sem uma referência de "quando foi enviado" não tem
+        -- como amarrar resposta a disparo, então não conta como respondido.
+        -- O run continua valendo pro sent_count (foi enviado de fato), só
+        -- não fingimos saber a taxa dele.
+        CASE
+          WHEN r.sent_at IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1
+            FROM public.lead_messages lm
+            WHERE lm.client_id = r.client_id
+              -- Mesmo defeito nº2 (telefone cru), na coluna que mais
+              -- importa: lead_messages.phone vem do webhook da Evolution
+              -- (sempre com DDI 55); campaign_dispatch_runs.phone vem do
+              -- telefone do lead no momento do disparo (pode não trazer
+              -- DDI). Igualdade crua OR canônica — não só canônica — no
+              -- mesmo padrão de domains/chatbot/routes.js:955: telefone já
+              -- igual usa o índice em lead_messages(client_id, phone) pelo
+              -- primeiro lado do OR; só cai na comparação canonicalizada
+              -- (não indexável) quando o formato realmente diverge. Não
+              -- medido contra Postgres real neste ambiente (ver nota no
+              -- topo do arquivo de teste) — quem tiver acesso ao banco e
+              -- confirmar que o plano continua bom só com o canônico pode
+              -- simplificar.
+              AND (lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})
+              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              -- O recorte que faz isto medir "respondeu ao disparo" em vez
+              -- de "já falou com a empresa alguma vez": só mensagem depois
+              -- do envio, e só dentro da janela.
+              AND ${lmTimestamp} > r.sent_at
+              AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+          )
+        END AS replied
       FROM public.campaign_dispatch_runs r
       -- r.phone <> '' — a inserção do dispatch grava phone || '' (routes.js
       -- ~2328): run com telefone vazio contra uma lead_messages TAMBÉM com
@@ -182,11 +230,14 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
     -- Uma linha por RUN que respondeu (não por telefone único) — mesma
     -- granularidade de "replied_count" abaixo. lead_by_phone já garante no
     -- máximo 1 lead por telefone canônico, então este LEFT JOIN nunca
-    -- multiplica linha nenhuma.
+    -- multiplica linha nenhuma. lead_found separa "não achou ninguém" (o
+    -- LEFT JOIN não bateu) de "achou, mas sem temperatura" — os dois caíam
+    -- juntos em semClassificacao antes.
     replied_temperature AS (
       SELECT
         runs.campaign_id,
-        lb.temp
+        lb.temp,
+        (lb.canonical_phone IS NOT NULL) AS lead_found
       FROM runs
       LEFT JOIN lead_by_phone lb ON lb.canonical_phone = ${SQL_CANONICAL_PHONE("runs.phone")}
       WHERE runs.replied
@@ -197,7 +248,8 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
         COUNT(*) FILTER (WHERE temp = 'QUENTE')::int AS quente,
         COUNT(*) FILTER (WHERE temp = 'MORNO')::int AS morno,
         COUNT(*) FILTER (WHERE temp = 'FRIO')::int AS frio,
-        COUNT(*) FILTER (WHERE temp IS NULL)::int AS sem_classificacao
+        COUNT(*) FILTER (WHERE lead_found AND temp IS NULL)::int AS sem_classificacao,
+        COUNT(*) FILTER (WHERE NOT lead_found)::int AS lead_nao_encontrado
       FROM replied_temperature
       GROUP BY campaign_id
     )
@@ -207,15 +259,17 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
       c.analytics_meta->>'message' AS message,
       COUNT(*)::int AS sent_count,
       COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count,
+      COUNT(*) FILTER (WHERE runs.sent_at_missing)::int AS sent_without_timestamp,
       COALESCE(t.quente, 0) AS quente,
       COALESCE(t.morno, 0) AS morno,
       COALESCE(t.frio, 0) AS frio,
-      COALESCE(t.sem_classificacao, 0) AS sem_classificacao
+      COALESCE(t.sem_classificacao, 0) AS sem_classificacao,
+      COALESCE(t.lead_nao_encontrado, 0) AS lead_nao_encontrado
     FROM runs
     JOIN public.campaigns c ON c.id = runs.campaign_id
     LEFT JOIN temperature_agg t ON t.campaign_id = c.id
     WHERE c.client_id = $1
-    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao
+    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao, t.lead_nao_encontrado
     HAVING COUNT(*) >= $2
     ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
   `;
@@ -3685,7 +3739,7 @@ export function registerCampaignsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const minSent = 30;
+    const minSent = MESSAGE_EFFECTIVENESS_MIN_SENT;
     try {
       let rows;
       try {
@@ -3703,14 +3757,23 @@ export function registerCampaignsRoutes(app, deps) {
         sentCount: row.sent_count,
         repliedCount: row.replied_count,
         replyRate: row.sent_count > 0 ? Math.round((row.replied_count / row.sent_count) * 1000) / 10 : 0,
+        // Continua no denominador (foi enviado de fato) mas nunca pode
+        // contar como respondido — cada um destes puxa replyRate pra baixo
+        // sem que quem lê a taxa saiba quantos são. Mesmo motivo de
+        // replyWindowDays: dado que molda a taxa tem que estar visível.
+        sentWithoutTimestamp: row.sent_without_timestamp,
         repliedByTemperature: {
           quente: row.quente,
           morno: row.morno,
           frio: row.frio,
           semClassificacao: row.sem_classificacao,
+          leadNaoEncontrado: row.lead_nao_encontrado,
         },
       }));
-      res.json({ minSent, campaigns });
+      // replyWindowDays exposto porque quem lê replyRate precisa saber o que
+      // ela conta — sem isso, dois relatórios com janelas diferentes
+      // parecem comparáveis e não são.
+      res.json({ minSent, replyWindowDays: MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS, campaigns });
     } catch (err) {
       console.error("[message-effectiveness] error:", err);
       sendError(res, 500, "MESSAGE_EFFECTIVENESS_FAILED", err instanceof Error ? err.message : "Failed to load report");
