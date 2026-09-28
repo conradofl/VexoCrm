@@ -51,6 +51,7 @@ export function ContactsWithoutChannelSection({
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "asked" | "converted">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "leads" | "personal">("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const handleCopyMessage = async (contact: ContactWithoutChannel) => {
@@ -122,6 +123,9 @@ export function ContactsWithoutChannelSection({
     }
   };
 
+  const isPersonalContact = (c: ContactWithoutChannel) =>
+    Boolean(c.resumo && /^🚫/u.test(c.resumo.trim()));
+
   const filteredContacts = contacts.filter((c) => {
     const q = search.toLowerCase().trim();
     if (q) {
@@ -132,14 +136,16 @@ export function ContactsWithoutChannelSection({
     }
 
     if (statusFilter === "pending") {
-      return !c.askedWhatsappAt && !c.becameLeadAt;
+      if (c.askedWhatsappAt || c.becameLeadAt) return false;
+    } else if (statusFilter === "asked") {
+      if (!c.askedWhatsappAt || c.becameLeadAt) return false;
+    } else if (statusFilter === "converted") {
+      if (!c.becameLeadAt) return false;
     }
-    if (statusFilter === "asked") {
-      return !!c.askedWhatsappAt && !c.becameLeadAt;
-    }
-    if (statusFilter === "converted") {
-      return !!c.becameLeadAt;
-    }
+
+    const isPersonal = isPersonalContact(c);
+    if (categoryFilter === "leads" && isPersonal) return false;
+    if (categoryFilter === "personal" && !isPersonal) return false;
 
     return true;
   });
@@ -149,6 +155,8 @@ export function ContactsWithoutChannelSection({
     pending: contacts.filter((c) => !c.askedWhatsappAt && !c.becameLeadAt).length,
     asked: contacts.filter((c) => !!c.askedWhatsappAt && !c.becameLeadAt).length,
     converted: contacts.filter((c) => !!c.becameLeadAt).length,
+    leads: contacts.filter((c) => !isPersonalContact(c)).length,
+    personal: contacts.filter((c) => isPersonalContact(c)).length,
   };
 
   const formatDate = (isoString?: string | null) => {
@@ -203,56 +211,97 @@ export function ContactsWithoutChannelSection({
 
       {/* Barra de Filtros e Busca */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setStatusFilter("all")}
-            className={`rounded-full text-xs h-8 ${
-              statusFilter === "all" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
-            }`}
-          >
-            Todos ({counts.all})
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setStatusFilter("pending")}
-            className={`rounded-full text-xs h-8 ${
-              statusFilter === "pending" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
-            }`}
-          >
-            Pendentes de Contato ({counts.pending})
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setStatusFilter("asked")}
-            className={`rounded-full text-xs h-8 ${
-              statusFilter === "asked" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
-            }`}
-          >
-            WhatsApp Solicitado ({counts.asked})
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setStatusFilter("converted")}
-            className={`rounded-full text-xs h-8 ${
-              statusFilter === "converted" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
-            }`}
-          >
-            Virou Lead ({counts.converted})
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Status filters */}
+          <div className="flex flex-wrap items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setStatusFilter("all")}
+              className={`rounded-full text-xs h-7 px-2.5 ${
+                statusFilter === "all" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              Todos ({counts.all})
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setStatusFilter("pending")}
+              className={`rounded-full text-xs h-7 px-2.5 ${
+                statusFilter === "pending" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              Pendentes ({counts.pending})
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setStatusFilter("asked")}
+              className={`rounded-full text-xs h-7 px-2.5 ${
+                statusFilter === "asked" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              WhatsApp Pedido ({counts.asked})
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setStatusFilter("converted")}
+              className={`rounded-full text-xs h-7 px-2.5 ${
+                statusFilter === "converted" ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              Virou Lead ({counts.converted})
+            </Button>
+          </div>
+
+          {/* Categoria filters */}
+          <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-full border border-border">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter("all")}
+              className={`px-2.5 py-0.5 text-xs rounded-full font-medium transition-colors ${
+                categoryFilter === "all"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setCategoryFilter("leads")}
+              className={`px-2.5 py-0.5 text-xs rounded-full font-medium transition-colors flex items-center gap-1 ${
+                categoryFilter === "leads"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-emerald-700 dark:text-emerald-300 hover:text-foreground"
+              }`}
+            >
+              <Sparkles className="w-2.5 h-2.5" />
+              Clientes ({counts.leads})
+            </button>
+            <button
+              type="button"
+              onClick={() => setCategoryFilter("personal")}
+              className={`px-2.5 py-0.5 text-xs rounded-full font-medium transition-colors ${
+                categoryFilter === "personal"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Pessoais ({counts.personal})
+            </button>
+          </div>
         </div>
 
         <div className="relative w-full sm:w-64">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Buscar por nome ou mensagem..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 text-xs h-8"
+            className="pl-8 text-xs h-7"
           />
         </div>
       </div>
@@ -273,7 +322,7 @@ export function ContactsWithoutChannelSection({
             <Instagram className="w-8 h-8 text-muted-foreground mx-auto" />
             <p className="text-sm font-medium text-foreground">Nenhum contato encontrado</p>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              {search || statusFilter !== "all"
+              {search || statusFilter !== "all" || categoryFilter !== "all"
                 ? "Tente ajustar os filtros ou a busca para encontrar os contatos."
                 : "Quando você importar uma pasta do Instagram que contenha conversas sem telefone, elas aparecerão aqui para abordagem manual."}
             </p>
@@ -284,7 +333,7 @@ export function ContactsWithoutChannelSection({
           <Table>
             <TableHeader className="bg-muted/40">
               <TableRow className="border-b border-border text-[10px] uppercase font-semibold text-muted-foreground">
-                <TableHead className="w-[220px]">Nome & Perfil</TableHead>
+                <TableHead className="w-[200px]">Nome & Perfil</TableHead>
                 <TableHead className="min-w-[280px]">Primeira Mensagem / Dúvida</TableHead>
                 <TableHead className="w-[120px]">Data Importação</TableHead>
                 <TableHead className="w-[150px]">Pedi o WhatsApp?</TableHead>
@@ -297,6 +346,11 @@ export function ContactsWithoutChannelSection({
                 const isAsked = !!contact.askedWhatsappAt;
                 const isConverted = !!contact.becameLeadAt;
                 const isCopied = copiedId === contact.id;
+                const isPersonal = isPersonalContact(contact);
+                const cleanResumo = (contact.resumo || "")
+                  .replace(/^🚫\s*(?:Conversa\s+pessoal|Conversa\s+casual|Pessoal)?[:\s-]*/i, "")
+                  .replace(/^["']|["']$/g, "")
+                  .trim();
 
                 return (
                   <TableRow
@@ -320,9 +374,27 @@ export function ContactsWithoutChannelSection({
 
                     <TableCell className="py-3 max-w-[340px]">
                       {contact.resumo ? (
-                        <p className="text-[11.5px] text-foreground/90 italic line-clamp-2">
-                          "{contact.resumo}"
-                        </p>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            {isPersonal ? (
+                              <Badge variant="outline" className="bg-muted text-muted-foreground border-border text-[10px] py-0 px-1.5 font-normal">
+                                Conversa Pessoal
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px] py-0 px-1.5 font-medium flex items-center gap-1">
+                                <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                Possível Cliente
+                              </Badge>
+                            )}
+                          </div>
+                          <p
+                            className={`text-[11.5px] italic line-clamp-2 ${
+                              isPersonal ? "text-muted-foreground" : "text-foreground font-medium"
+                            }`}
+                          >
+                            "{cleanResumo}"
+                          </p>
+                        </div>
                       ) : (
                         <span className="text-[11px] text-muted-foreground">
                           Sem resumo da conversa

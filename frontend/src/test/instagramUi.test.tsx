@@ -217,7 +217,7 @@ describe("InstagramImportModal", () => {
     expect(screen.getByText('"Quanto custa o produto azul?"')).toBeInTheDocument();
 
     // 3. Confirmar importação envia os dados e chama callback
-    const confirmBtn = screen.getByRole("button", { name: "Confirmar Importação" });
+    const confirmBtn = screen.getByRole("button", { name: /Confirmar Importação/i });
     expect(confirmBtn).toBeEnabled();
 
     fireEvent.click(confirmBtn);
@@ -235,6 +235,84 @@ describe("InstagramImportModal", () => {
     await waitFor(() => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
       expect(onSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it("permite selecionar arquivos .json diretamente pelo input de json", async () => {
+    renderWithClient(
+      <InstagramImportModal
+        open={true}
+        onOpenChange={vi.fn()}
+        clientId="test-client"
+      />
+    );
+
+    const jsonInput = screen.getByTestId("instagram-json-input");
+    const jsonFile = createMockFile(
+      "message_1.json",
+      "message_1.json",
+      JSON.stringify({
+        participants: [{ name: "Loja" }, { name: "Cliente Direto" }],
+        messages: [
+          { sender_name: "Cliente Direto", content: "Qual o valor do produto?", timestamp_ms: 1000 },
+        ],
+      })
+    );
+
+    fireEvent.change(jsonInput, { target: { files: [jsonFile] } });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Cliente Direto").length).toBeGreaterThan(0);
+      expect(screen.getByText('"Qual o valor do produto?"')).toBeInTheDocument();
+      expect(screen.getAllByText("Possível Cliente").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("filtra entre Possíveis Clientes e Conversas Pessoais no modal", async () => {
+    renderWithClient(
+      <InstagramImportModal
+        open={true}
+        onOpenChange={vi.fn()}
+        clientId="test-client"
+      />
+    );
+
+    const folderInput = screen.getByTestId("instagram-folder-input");
+    const leadFile = createMockFile(
+      "message_1.json",
+      "export/messages/inbox/lead_1/message_1.json",
+      JSON.stringify({
+        participants: [{ name: "Loja" }, { name: "Interessado" }],
+        messages: [
+          { sender_name: "Interessado", content: "Vocês têm pronta entrega?", timestamp_ms: 1000 },
+        ],
+      })
+    );
+
+    const personalFile = createMockFile(
+      "message_1.json",
+      "export/messages/inbox/amigo_1/message_1.json",
+      JSON.stringify({
+        participants: [{ name: "Loja" }, { name: "Amigo Academia" }],
+        messages: [
+          { sender_name: "Amigo Academia", content: "tá muito frango, tem q pegar mais peso hahaha", timestamp_ms: 1000 },
+        ],
+      })
+    );
+
+    fireEvent.change(folderInput, { target: { files: [leadFile, personalFile] } });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Interessado").length).toBeGreaterThan(0);
+    });
+
+    // Filtra por Conversas Pessoais
+    const personalTab = screen.getByRole("button", { name: /Conversas Pessoais/i });
+    fireEvent.click(personalTab);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Amigo Academia").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Conversa Pessoal/i).length).toBeGreaterThan(0);
     });
   });
 });

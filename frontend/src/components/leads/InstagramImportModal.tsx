@@ -11,6 +11,11 @@ import {
   Users,
   X,
   FileArchive,
+  FileText,
+  Filter,
+  Sparkles,
+  Info,
+  CheckSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   parseInstagramExport,
@@ -31,6 +37,7 @@ import {
   isInstagramMessageHtmlPath,
   type RawExportFile,
   type InstagramParseResult,
+  type ParsedInstagramContact,
 } from "@/lib/leadImports/instagramExport";
 import { useImportInstagram } from "@/hooks/useContactsWithoutChannel";
 
@@ -48,11 +55,14 @@ export function InstagramImportModal({
   onSuccess,
 }: InstagramImportModalProps) {
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
   const [isReading, setIsReading] = useState(false);
   const [parseResult, setParseResult] = useState<InstagramParseResult | null>(null);
   const [activeGroupTab, setActiveGroupTab] = useState<"with_phone" | "without_phone">("with_phone");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "lead" | "personal">("lead");
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   const importMutation = useImportInstagram();
 
@@ -60,7 +70,10 @@ export function InstagramImportModal({
     setParseResult(null);
     setIsReading(false);
     setActiveGroupTab("with_phone");
+    setCategoryFilter("lead");
+    setSelectedKeys(new Set());
     if (folderInputRef.current) folderInputRef.current.value = "";
+    if (jsonFileInputRef.current) jsonFileInputRef.current.value = "";
     if (zipInputRef.current) zipInputRef.current.value = "";
   };
 
@@ -69,6 +82,8 @@ export function InstagramImportModal({
     onOpenChange(false);
     resetState();
   };
+
+  const getContactKey = (c: ParsedInstagramContact) => c.perfil || c.name;
 
   const handleFiles = async (files: FileList | File[]) => {
     setIsReading(true);
@@ -106,6 +121,21 @@ export function InstagramImportModal({
 
       const result = parseInstagramExport(rawFiles);
       setParseResult(result);
+
+      const all = [...result.withPhone, ...result.withoutPhone];
+      const leadKeys = new Set(
+        all.filter((c) => c.category === "lead").map(getContactKey)
+      );
+
+      // Pré-seleciona apenas os leads comerciais se houver algum, evitando poluir com contatos pessoais
+      if (leadKeys.size > 0) {
+        setSelectedKeys(leadKeys);
+        setCategoryFilter("lead");
+      } else {
+        setSelectedKeys(new Set(all.map(getContactKey)));
+        setCategoryFilter("all");
+      }
+
       if (result.withPhone.length > 0) {
         setActiveGroupTab("with_phone");
       } else if (result.withoutPhone.length > 0) {
@@ -126,20 +156,57 @@ export function InstagramImportModal({
     }
   };
 
+  const handleJsonFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+    }
+  };
+
   const handleZipChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFiles(e.target.files);
     }
   };
 
+  const toggleSelect = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectOnlyLeads = () => {
+    if (!parseResult) return;
+    const all = [...parseResult.withPhone, ...parseResult.withoutPhone];
+    const leads = all.filter((c) => c.category === "lead").map(getContactKey);
+    setSelectedKeys(new Set(leads));
+    toast.info(`${leads.length} possíveis clientes selecionados.`);
+  };
+
+  const selectAll = () => {
+    if (!parseResult) return;
+    const all = [...parseResult.withPhone, ...parseResult.withoutPhone];
+    setSelectedKeys(new Set(all.map(getContactKey)));
+  };
+
+  const deselectAll = () => {
+    setSelectedKeys(new Set());
+  };
+
   const handleConfirmImport = async () => {
     if (!parseResult || !clientId) return;
 
-    const payload = buildInstagramImportPayload(parseResult);
-    if (payload.contacts.length === 0) {
-      toast.warning("Nenhum contato para importar.");
+    const allContacts = [...parseResult.withPhone, ...parseResult.withoutPhone];
+    const selectedContacts = allContacts.filter((c) => selectedKeys.has(getContactKey(c)));
+
+    if (selectedContacts.length === 0) {
+      toast.warning("Selecione pelo menos um contato para importar.");
       return;
     }
+
+    const payload = buildInstagramImportPayload(selectedContacts);
 
     try {
       const res = await importMutation.mutateAsync({
@@ -160,6 +227,23 @@ export function InstagramImportModal({
     }
   };
 
+  const currentGroupList =
+    parseResult == null
+      ? []
+      : activeGroupTab === "with_phone"
+      ? parseResult.withPhone
+      : parseResult.withoutPhone;
+
+  const currentFilteredList = currentGroupList.filter((c) => {
+    if (categoryFilter === "lead") return c.category === "lead";
+    if (categoryFilter === "personal") return c.category === "personal";
+    return true;
+  });
+
+  const totalLeadsInGroup = currentGroupList.filter((c) => c.category === "lead").length;
+  const totalPersonalInGroup = currentGroupList.filter((c) => c.category === "personal").length;
+  const selectedCountInTotal = selectedKeys.size;
+
   const hasContacts =
     parseResult && (parseResult.withPhone.length > 0 || parseResult.withoutPhone.length > 0);
 
@@ -176,7 +260,7 @@ export function InstagramImportModal({
                 Importar Conversas do Instagram
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Selecione a pasta descompactada da exportação oficial de dados do Instagram.
+                Selecione a pasta descompactada ou os arquivos .json da exportação do Instagram.
               </DialogDescription>
             </div>
           </div>
@@ -195,6 +279,15 @@ export function InstagramImportModal({
           onChange={handleFolderChange}
         />
         <input
+          ref={jsonFileInputRef}
+          type="file"
+          accept=".json,application/json"
+          multiple
+          className="hidden"
+          data-testid="instagram-json-input"
+          onChange={handleJsonFilesChange}
+        />
+        <input
           ref={zipInputRef}
           type="file"
           accept=".zip,application/zip"
@@ -206,38 +299,64 @@ export function InstagramImportModal({
         <div className="flex-1 overflow-y-auto py-4 space-y-4">
           {/* Seletor Inicial (quando nenhum resultado ou arquivo estiver carregado) */}
           {!parseResult && !isReading && (
-            <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-border rounded-xl bg-muted/20 text-center space-y-4">
-              <div className="p-3 bg-pink-500/10 text-pink-600 rounded-full">
-                <FolderOpen className="w-8 h-8" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-foreground">
-                  Selecione a pasta da exportação
-                </p>
-                <p className="text-xs text-muted-foreground max-w-sm">
-                  O Instagram gera um arquivo compactado com suas mensagens. Descompacte-o e selecione a pasta raiz da exportação.
-                </p>
+            <div className="space-y-4">
+              <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-border rounded-xl bg-muted/20 text-center space-y-4">
+                <div className="p-3 bg-pink-500/10 text-pink-600 rounded-full">
+                  <FolderOpen className="w-8 h-8" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    Como deseja selecionar as mensagens?
+                  </p>
+                  <p className="text-xs text-muted-foreground max-w-md">
+                    O Instagram gera pastas com arquivos <code>message_1.json</code>. Você pode selecionar a pasta inteira ou escolher os arquivos JSON diretamente.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                  <Button
+                    type="button"
+                    onClick={() => folderInputRef.current?.click()}
+                    className="bg-pink-600 hover:bg-pink-700 text-white text-xs gap-2 font-medium"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    Selecionar Pasta Completa
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => jsonFileInputRef.current?.click()}
+                    className="text-xs gap-2 text-foreground font-medium"
+                  >
+                    <FileText className="w-4 h-4 text-pink-600" />
+                    Selecionar Arquivos .json
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => zipInputRef.current?.click()}
+                    className="text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <FileArchive className="w-3.5 h-3.5" />
+                    Tentei enviar .zip
+                  </Button>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                <Button
-                  type="button"
-                  onClick={() => folderInputRef.current?.click()}
-                  className="bg-pink-600 hover:bg-pink-700 text-white text-xs gap-2 font-medium"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  Selecionar Pasta Descompactada
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => zipInputRef.current?.click()}
-                  className="text-xs gap-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  <FileArchive className="w-3.5 h-3.5" />
-                  Tentei enviar .zip
-                </Button>
+              {/* Explicação útil sobre o Finder / arquivos apagados */}
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-blue-800 dark:text-blue-300">
+                    💡 Por que os arquivos .json aparecem cinzas/apagados no Mac/Windows?
+                  </p>
+                  <p className="text-blue-700/90 dark:text-blue-300/90 leading-relaxed text-[11.5px]">
+                    Ao usar <strong>"Selecionar Pasta Completa"</strong>, o sistema operacional espera que você escolha a <strong>pasta</strong> (ex: pasta <code>messages</code> ou <code>your_instagram_activity</code>) e clique no botão azul <strong>"Fazer upload"</strong> no canto do Finder. Os arquivos individuais dentro dela ficam apagados apenas porque o sistema está em modo pasta.
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -292,7 +411,7 @@ export function InstagramImportModal({
           {/* Prévia dos Dois Grupos (quando há resultado sem warning impeditivo) */}
           {parseResult && !parseResult.warning && (
             <div className="space-y-3">
-              {/* Botões das duas abas / contadores */}
+              {/* Botões das duas abas principais / contadores */}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -343,77 +462,187 @@ export function InstagramImportModal({
                 </button>
               </div>
 
-              {/* Explicação e lista do Grupo 1 (Com WhatsApp) */}
-              {activeGroupTab === "with_phone" && (
-                <div className="space-y-2">
-                  <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                    <span>Estes contatos entrarão diretamente no CRM como leads mornos.</span>
-                  </div>
-
-                  {parseResult.withPhone.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">
-                      Nenhum contato com número de WhatsApp identificado nas conversas.
-                    </div>
-                  ) : (
-                    <div className="max-h-56 overflow-y-auto border border-border rounded-lg divide-y divide-border text-xs">
-                      {parseResult.withPhone.map((c, i) => (
-                        <div key={i} className="p-2.5 flex items-start justify-between gap-3 hover:bg-muted/30">
-                          <div className="space-y-0.5">
-                            <div className="font-semibold text-foreground flex items-center gap-1.5">
-                              <User className="w-3 h-3 text-muted-foreground" />
-                              {c.name}
-                            </div>
-                            {c.resumo && (
-                              <p className="text-muted-foreground text-[11px] line-clamp-1 italic">
-                                "{c.resumo}"
-                              </p>
-                            )}
-                          </div>
-                          <Badge variant="outline" className="font-mono text-[11px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 flex-shrink-0">
-                            {c.phone}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              {/* Banner contextual da aba */}
+              {activeGroupTab === "with_phone" ? (
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>Estes contatos entrarão diretamente no CRM como leads mornos.</span>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <span>Estes contatos irão para a sua Lista de Trabalho Manual para solicitar o WhatsApp via Direct.</span>
                 </div>
               )}
 
-              {/* Explicação e lista do Grupo 2 (Sem WhatsApp) */}
-              {activeGroupTab === "without_phone" && (
-                <div className="space-y-2">
-                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                    <span>Estes contatos irão para a sua Lista de Trabalho Manual para solicitar o WhatsApp via Direct.</span>
-                  </div>
+              {/* Sub-filtros e Ações de Seleção (Possíveis Clientes vs Conversas Pessoais) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-border">
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant={categoryFilter === "lead" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setCategoryFilter("lead")}
+                    className={`h-7 px-2.5 text-xs rounded-full gap-1.5 ${
+                      categoryFilter === "lead"
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    Possíveis Clientes ({totalLeadsInGroup})
+                  </Button>
 
-                  {parseResult.withoutPhone.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">
-                      Nenhum contato sem WhatsApp nesta exportação.
-                    </div>
-                  ) : (
-                    <div className="max-h-56 overflow-y-auto border border-border rounded-lg divide-y divide-border text-xs">
-                      {parseResult.withoutPhone.map((c, i) => (
-                        <div key={i} className="p-2.5 flex items-start justify-between gap-3 hover:bg-muted/30">
-                          <div className="space-y-0.5">
-                            <div className="font-semibold text-foreground flex items-center gap-1.5">
-                              <User className="w-3 h-3 text-muted-foreground" />
-                              {c.name}
+                  <Button
+                    type="button"
+                    variant={categoryFilter === "personal" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setCategoryFilter("personal")}
+                    className={`h-7 px-2.5 text-xs rounded-full gap-1.5 ${
+                      categoryFilter === "personal"
+                        ? "bg-muted font-medium text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Users className="w-3 h-3" />
+                    Conversas Pessoais ({totalPersonalInGroup})
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant={categoryFilter === "all" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setCategoryFilter("all")}
+                    className={`h-7 px-2 text-xs rounded-full ${
+                      categoryFilter === "all"
+                        ? "bg-muted font-medium text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Todos ({currentGroupList.length})
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  {totalLeadsInGroup > 0 && (
+                    <button
+                      type="button"
+                      onClick={selectOnlyLeads}
+                      className="text-pink-600 dark:text-pink-400 hover:underline font-medium"
+                    >
+                      Selecionar Apenas Clientes
+                    </button>
+                  )}
+                  <span>•</span>
+                  <button
+                    type="button"
+                    onClick={selectAll}
+                    className="hover:underline"
+                  >
+                    Todos
+                  </button>
+                  <span>•</span>
+                  <button
+                    type="button"
+                    onClick={deselectAll}
+                    className="hover:underline"
+                  >
+                    Nenhum
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista dos Contatos do Grupo Atual */}
+              {currentFilteredList.length === 0 ? (
+                <div className="text-center py-8 text-xs text-muted-foreground border border-dashed border-border rounded-lg bg-muted/10">
+                  {categoryFilter === "lead"
+                    ? "Nenhum possível cliente identificado com dúvidas ou interesse comercial nesta aba."
+                    : categoryFilter === "personal"
+                    ? "Nenhuma conversa pessoal identificada nesta aba."
+                    : "Nenhum contato encontrado nesta exportação."}
+                </div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border text-xs">
+                  {currentFilteredList.map((c, i) => {
+                    const key = getContactKey(c);
+                    const isSelected = selectedKeys.has(key);
+                    const cleanResumo = c.resumo
+                      ? c.resumo.replace(/^🚫\s*(?:Conversa\s+pessoal|Conversa\s+casual|Pessoal)?[:\s-]*/i, "").replace(/^["']|["']$/g, "")
+                      : "";
+
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => toggleSelect(key)}
+                        className={`p-2.5 flex items-start gap-2.5 transition-colors cursor-pointer ${
+                          isSelected
+                            ? "bg-pink-500/[0.04] hover:bg-pink-500/[0.07]"
+                            : "hover:bg-muted/30 opacity-70"
+                        }`}
+                      >
+                        <Checkbox
+                          id={`select-${key}`}
+                          checked={isSelected}
+                          onCheckedChange={() => toggleSelect(key)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5"
+                        />
+
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                              <span className="font-semibold text-foreground flex items-center gap-1">
+                                <User className="w-3 h-3 text-muted-foreground" />
+                                {c.name}
+                              </span>
+
+                              {c.category === "lead" ? (
+                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px] py-0 px-1.5 font-medium flex items-center gap-1">
+                                  <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                  Possível Cliente
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-muted text-muted-foreground border-border text-[10px] py-0 px-1.5">
+                                  Conversa Pessoal
+                                </Badge>
+                              )}
+
+                              {c.intentLabel && c.category === "lead" && (
+                                <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal">
+                                  {c.intentLabel}
+                                </Badge>
+                              )}
                             </div>
-                            {c.resumo && (
-                              <p className="text-muted-foreground text-[11px] line-clamp-1 italic">
-                                "{c.resumo}"
-                              </p>
+
+                            {c.phone ? (
+                              <Badge
+                                variant="outline"
+                                className="font-mono text-[11px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 flex-shrink-0"
+                              >
+                                {c.phone}
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground font-mono flex-shrink-0">
+                                {c.perfil}
+                              </span>
                             )}
                           </div>
-                          <span className="text-[11px] text-muted-foreground flex-shrink-0">
-                            {c.perfil}
-                          </span>
+
+                          {cleanResumo && (
+                            <p
+                              className={`text-[11px] line-clamp-2 italic ${
+                                c.category === "lead"
+                                  ? "text-foreground font-medium"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              "{cleanResumo}"
+                            </p>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -430,7 +659,7 @@ export function InstagramImportModal({
               className="text-xs"
               disabled={importMutation.isPending}
             >
-              Trocar Pasta
+              Trocar Pasta / Arquivos
             </Button>
           ) : (
             <div />
@@ -454,6 +683,7 @@ export function InstagramImportModal({
               disabled={
                 !hasContacts ||
                 parseResult?.warning != null ||
+                selectedCountInTotal === 0 ||
                 importMutation.isPending ||
                 isReading
               }
@@ -465,6 +695,8 @@ export function InstagramImportModal({
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Importando...
                 </>
+              ) : selectedCountInTotal > 0 ? (
+                `Confirmar Importação (${selectedCountInTotal})`
               ) : (
                 "Confirmar Importação"
               )}

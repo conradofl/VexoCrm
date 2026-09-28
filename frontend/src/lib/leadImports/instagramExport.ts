@@ -27,6 +27,12 @@ export interface ParsedInstagramContact {
   perfil: string;
   phone: string | null;
   resumo: string;
+  /** Classificação: 'lead' (possível cliente) ou 'personal' (conversa pessoal/casual) */
+  category?: "lead" | "personal";
+  /** Rótulo da intenção identificada (ex: 'Orçamento / Preço', 'Dúvida de Serviço', 'Conversa Pessoal') */
+  intentLabel?: string;
+  /** Última mensagem da conversa */
+  lastMessage?: string;
 }
 
 export interface InstagramParseResult {
@@ -78,12 +84,133 @@ export function extractPhoneFromText(text: string): string | null {
   return null;
 }
 
+// Palavras-chave indicativas de intenção comercial / compra / contratação
+export const COMMERCIAL_KEYWORDS_REGEX =
+  /(?:orçamento|orcamento|cotação|cotacao|cotar|quanto\s+(?:custa|fica|sai|é|e|tá|ta)|qual\s+(?:o|é|e)?\s*(?:valor|preço|preco|custo|tabela)|tabela|tabela de preço|valores|preços|precos|desconto|proposta|condições|condicoes|pagamento|parcela|parcelas|parcelamento|parcelam|cartão|cartao|pix|boleto|comprar|compra|adquirir|contratar|contrato|fechar\s+negócio|fechar\s+serviço|vaga|vagas|inscrição|inscricao|matrícula|matricula|matricular|curso|mentoria|consultoria|projeto|serviço|servico|serviços|servicos|pacote|plano|planos|produto|produtos|atendimento|atendem|atende|atendimento presencial|entrega|entregam|entregas|frete|prazo|disponível|disponivel|tem pronta entrega|horário|horario|agendar|agenda|agendamento|marcar\s+horário|marcar\s+consulta|consulta|sessão|sessao|como\s+funciona|queria\s+saber\s+mais|mais\s+informações|mais\s+informacoes|informações|informacoes|detalhes|endereço|endereco|onde\s+fica|localização|localizacao|onde\s+vocês\s+estão|onde\s+voces\s+estao|qual\s+cidade|tem\s+loja|anúncio|anuncio|patrocinado)/i;
+
+// Expressões típicas de conversa pessoal / casual / amigos / família
+export const PERSONAL_CHAT_REGEX =
+  /(?:hahaha|kkkk|rsrs|hehehe|mano|véi|vei|brother|amigo|amiga|parceiro|saudades|saudade|parabéns|parabens|feliz aniversário|aniversario|churrasco|cerveja|chopp|festa|almoço|almoco|jantar|bora|vamos\s+sair|sumido|sumida|rolê|role|beijo|beijos|abraço|abraco|academia|treino|frango|pegar\s+peso|futebol|jogo|família|familia|primo|prima|tio|tia|mãe|mae|pai|irmão|irmao)/i;
+
+export interface InstagramConversationClassification {
+  category: "lead" | "personal";
+  intentLabel: string;
+  resumo: string;
+  phone: string | null;
+  lastMessage: string;
+}
+
+/**
+ * Classifica a conversa do Instagram entre "Possível Cliente" e "Conversa Pessoal".
+ * Não faz nenhuma chamada de rede nem de IA: utiliza análise semântica e heurística
+ * local no navegador, identificando dúvidas comerciais, termos de preço, serviços
+ * e separando conversas casuais de amigos/família.
+ */
+export function classifyInstagramConversation(
+  rawMessages: Array<{ sender_name?: string; content?: string; timestamp_ms?: number }>,
+  selfName: string,
+  otherName: string
+): InstagramConversationClassification {
+  const chronological = [...(rawMessages || [])].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
+
+  const otherMessages = chronological
+    .filter((m) => {
+      const sender = fixInstagramEncoding(m.sender_name || "");
+      return sender && sender !== selfName && m.content;
+    })
+    .map((m) => ({
+      content: fixInstagramEncoding(m.content || "").trim(),
+      timestamp: m.timestamp_ms || 0,
+    }))
+    .filter((m) => m.content.length > 0);
+
+  let phone: string | null = null;
+  for (const m of chronological) {
+    if (!m.content) continue;
+    phone = extractPhoneFromText(fixInstagramEncoding(m.content));
+    if (phone) break;
+  }
+
+  const lastMessage = otherMessages[otherMessages.length - 1]?.content || "";
+
+  if (otherMessages.length === 0) {
+    return {
+      category: "personal",
+      intentLabel: "Sem Mensagens",
+      resumo: "Nenhuma mensagem enviada pelo contato.",
+      phone,
+      lastMessage: "",
+    };
+  }
+
+  const commercialInquiries: string[] = [];
+  const generalQuestions: string[] = [];
+  const personalMessages: string[] = [];
+
+  for (const msg of otherMessages) {
+    const text = msg.content;
+    if (COMMERCIAL_KEYWORDS_REGEX.test(text)) {
+      commercialInquiries.push(text);
+    } else if (/\?/.test(text) && !PERSONAL_CHAT_REGEX.test(text)) {
+      generalQuestions.push(text);
+    } else if (PERSONAL_CHAT_REGEX.test(text)) {
+      personalMessages.push(text);
+    }
+  }
+
+  const isCommercial =
+    commercialInquiries.length > 0 ||
+    (generalQuestions.length > 0 && personalMessages.length === 0) ||
+    (phone != null && commercialInquiries.length > 0);
+
+  if (isCommercial) {
+    const bestInquiry = commercialInquiries[0] || generalQuestions[0] || otherMessages[0].content;
+    let label = "Dúvida de Serviço";
+    if (/(?:orçamento|orcamento|preço|preco|valor|quanto\s+custa|tabela|pagamento|parcela)/i.test(bestInquiry)) {
+      label = "Orçamento / Preço";
+    } else if (phone && /(?:whats|telefone|celular|ligar)/i.test(bestInquiry)) {
+      label = "WhatsApp / Contato";
+    } else if (/(?:onde\s+fica|endereço|endereco|cidade|localização)/i.test(bestInquiry)) {
+      label = "Localização / Atendimento";
+    }
+
+    return {
+      category: "lead",
+      intentLabel: label,
+      resumo: bestInquiry.slice(0, 200),
+      phone,
+      lastMessage,
+    };
+  }
+
+  // Não tem conteúdo comercial — conversa pessoal / amigos
+  const samplePersonal = personalMessages[0] || otherMessages[0].content;
+  const isShortReaction = /^(?:hahaha|kkkk|rsrs|😂|❤️|🔥|👏|opa|oi|ola|olá|oie)[!.]*$/i.test(samplePersonal);
+  const prefix = isShortReaction ? '🚫 Conversa casual: "' : '🚫 Conversa pessoal: "';
+  const suffix = '"';
+  const availableLen = 200 - prefix.length - suffix.length;
+  const cleanExcerpt = samplePersonal.slice(0, Math.max(availableLen, 0));
+  const resumo = `${prefix}${cleanExcerpt}${suffix}`;
+
+  return {
+    category: "personal",
+    intentLabel: "Conversa Pessoal",
+    resumo,
+    phone,
+    lastMessage,
+  };
+}
+
 export function isInstagramMessageJsonPath(path: string): boolean {
-  return /messages\/inbox\/[^/]+\/message_\d+\.json$/i.test(path);
+  if (/messages\/message_requests\//i.test(path)) return false;
+  if (/photos\/|files\/|videos\/|voice_messages\//i.test(path)) return false;
+  if (/your_scheduled_messages\.json$/i.test(path)) return false;
+  return /(?:messages\/inbox\/[^/]+\/|inbox\/[^/]+\/|^(?:[^/]*\/)?)message_\d+\.json$/i.test(path);
 }
 
 export function isInstagramMessageHtmlPath(path: string): boolean {
-  return /messages\/inbox\/[^/]+\/message_\d+\.html$/i.test(path);
+  if (/messages\/message_requests\//i.test(path)) return false;
+  return /(?:messages\/inbox\/[^/]+\/|inbox\/[^/]+\/|^(?:[^/]*\/)?)message_\d+\.html$/i.test(path);
 }
 
 interface RawInstagramMessage {
@@ -113,11 +240,6 @@ export function parseInstagramExport(files: RawExportFile[]): InstagramParseResu
     return { withPhone: [], withoutPhone: [], warning: hasHtml ? "needs_json_export" : "no_conversations_found" };
   }
 
-  // Simplificação assumida: uma conversa cabe em um message_1.json. O
-  // Instagram pode paginar conversas longas em message_2.json,
-  // message_3.json... — não mescladas aqui. Primeira mensagem da pessoa
-  // pode estar num arquivo mais antigo que não foi lido. Documentado, não
-  // escondido.
   const threads: RawInstagramThread[] = [];
   for (const f of jsonFiles) {
     try {
@@ -156,29 +278,19 @@ export function parseInstagramExport(files: RawExportFile[]): InstagramParseResu
     const other = participantNames.find((n) => n !== selfName) || participantNames[0];
     if (!other) continue;
 
-    // O export do Instagram lista mensagens da mais recente pra mais
-    // antiga — inverte pra ordem cronológica antes de procurar "a
-    // primeira".
-    const messagesChronological = Array.isArray(t.messages) ? [...t.messages].reverse() : [];
+    const classification = classifyInstagramConversation(t.messages || [], selfName, other);
 
-    let resumo = "";
-    for (const m of messagesChronological) {
-      const sender = fixInstagramEncoding(m?.sender_name || "");
-      if (sender && sender !== selfName && m?.content) {
-        resumo = fixInstagramEncoding(m.content).slice(0, 200);
-        break;
-      }
-    }
+    const contact: ParsedInstagramContact = {
+      name: other,
+      perfil: other,
+      phone: classification.phone,
+      resumo: classification.resumo,
+      category: classification.category,
+      intentLabel: classification.intentLabel,
+      lastMessage: classification.lastMessage,
+    };
 
-    let phone: string | null = null;
-    for (const m of messagesChronological) {
-      if (!m?.content) continue;
-      phone = extractPhoneFromText(fixInstagramEncoding(m.content));
-      if (phone) break;
-    }
-
-    const contact: ParsedInstagramContact = { name: other, perfil: other, phone, resumo };
-    if (phone) withPhone.push(contact);
+    if (classification.phone) withPhone.push(contact);
     else withoutPhone.push(contact);
   }
 
@@ -186,12 +298,18 @@ export function parseInstagramExport(files: RawExportFile[]): InstagramParseResu
 }
 
 /**
- * O que sobe pro backend — só isto. Nunca o arquivo, nunca a conversa
- * inteira, nunca mensagem de terceiro que não virou o resumo.
+ * O que sobe pro backend — só isto. Aceita o resultado completo ou uma lista
+ * filtrada de contatos selecionados pelo usuário na tela.
  */
-export function buildInstagramImportPayload(result: InstagramParseResult) {
+export function buildInstagramImportPayload(
+  resultOrContacts: InstagramParseResult | ParsedInstagramContact[]
+) {
+  const list = Array.isArray(resultOrContacts)
+    ? resultOrContacts
+    : [...resultOrContacts.withPhone, ...resultOrContacts.withoutPhone];
+
   return {
-    contacts: [...result.withPhone, ...result.withoutPhone].map((c) => ({
+    contacts: list.map((c) => ({
       name: c.name,
       perfil: c.perfil,
       phone: c.phone,
@@ -206,7 +324,10 @@ export function buildInstagramImportPayload(result: InstagramParseResult) {
  */
 export function formatInstagramDirectMessage(name: string, resumo?: string | null): string {
   const cleanName = (name || "").trim() || "lá";
-  const cleanResumo = (resumo || "").trim();
+  const cleanResumo = (resumo || "")
+    .replace(/^🚫\s*(?:Conversa\s+pessoal|Conversa\s+casual|Pessoal)?[:\s-]*/i, "")
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
   if (cleanResumo) {
     return `Oi ${cleanName}! Vi sua mensagem sobre '${cleanResumo}'. Me passa seu WhatsApp por aqui que te explico tudo em detalhes por lá rapidinho!`;
   }
