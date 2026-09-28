@@ -6,12 +6,13 @@
 // menos 30 envios, ordenado por taxa de retorno. É o dado que dá tom real
 // às receitas da Vexo Academy.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   registerCampaignsRoutes,
   buildMessageEffectivenessSql,
   MESSAGE_EFFECTIVENESS_MIN_SENT,
   MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS,
+  __resetMessageEffectivenessIsGroupCacheForTests,
 } from "../domains/campaigns/routes.js";
 import { isMissingSchemaError } from "../services/analytics.js";
 
@@ -38,6 +39,40 @@ function getRouteHandler(deps, path, method = "get") {
   const handler = routes[`${method} ${path}`];
   expect(handler, `rota ${method.toUpperCase()} ${path} não encontrada`).toBeDefined();
   return handler;
+}
+
+// Comentário SQL pode citar "is_group" como texto explicativo — só código
+// de verdade importa pra provar "a query não pede essa coluna".
+function stripSqlComments(sql) {
+  return sql
+    .split("\n")
+    .map((line) => line.replace(/--.*$/, ""))
+    .join("\n");
+}
+
+// Linha "cheia" com os campos que a query real sempre devolve, pra nenhum
+// teste esquecer um campo novo e deixar `undefined` vazar pra resposta.
+function baseRow(overrides = {}) {
+  return {
+    campaign_id: "c-1",
+    campaign_name: "Campanha",
+    message: "Oi",
+    sent_count: 30,
+    replied_count: 0,
+    sent_without_timestamp: 0,
+    casou_so_no_canonico: 0,
+    respostas_de_grupo: 0,
+    quente: 0,
+    morno: 0,
+    frio: 0,
+    sem_classificacao: 0,
+    lead_nao_encontrado: 0,
+    telefone_lid: 0,
+    sem_lead_id: 0,
+    lead_id_orfao: 0,
+    telefone_divergente: 0,
+    ...overrides,
+  };
 }
 
 function makeDeps({ rows = [], clientId = "tenant-1", overrides = {} } = {}) {
@@ -91,14 +126,21 @@ function makeDeps({ rows = [], clientId = "tenant-1", overrides = {} } = {}) {
 }
 
 describe("GET /api/campaigns/reports/message-effectiveness", () => {
+  // is_group é cacheado a nível de módulo (uma tabela só, não por tenant —
+  // ver comentário em routes.js). Sem resetar, o primeiro teste que rodar
+  // decide o valor pra todos os outros do arquivo.
+  beforeEach(() => {
+    __resetMessageEffectivenessIsGroupCacheForTests();
+  });
+
   it("[TESTE OBRIGATÓRIO] só campanhas com pelo menos 30 envios entram, ordenadas por taxa de retorno", async () => {
     // Mock devolve as linhas JÁ na ordem que o ORDER BY do SQL real produziria
     // (a rota confia no banco pra ordenar, não reordena em JS) — por isso a
     // de maior taxa vem primeiro aqui, simulando exatamente esse contrato.
     const deps = makeDeps({
       rows: [
-        { campaign_id: "c-alta", campaign_name: "Campanha alta taxa", message: "Olá {{nome}}, temos uma condição especial hoje.", sent_count: 30, replied_count: 15, sent_without_timestamp: 0, quente: 9, morno: 4, frio: 1, sem_classificacao: 1, lead_nao_encontrado: 0 },
-        { campaign_id: "c-baixa", campaign_name: "Campanha baixa taxa", message: "Oi {{nome}}, tudo bem?", sent_count: 40, replied_count: 4, sent_without_timestamp: 6, quente: 0, morno: 1, frio: 3, sem_classificacao: 0, lead_nao_encontrado: 0 },
+        baseRow({ campaign_id: "c-alta", campaign_name: "Campanha alta taxa", message: "Olá {{nome}}, temos uma condição especial hoje.", sent_count: 30, replied_count: 15, sent_without_timestamp: 0, quente: 9, morno: 4, frio: 1, sem_classificacao: 1, lead_nao_encontrado: 0 }),
+        baseRow({ campaign_id: "c-baixa", campaign_name: "Campanha baixa taxa", message: "Oi {{nome}}, tudo bem?", sent_count: 40, replied_count: 4, sent_without_timestamp: 6, quente: 0, morno: 1, frio: 3, sem_classificacao: 0, lead_nao_encontrado: 0 }),
       ],
     });
     const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
@@ -131,9 +173,7 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
 
   it("[TESTE OBRIGATÓRIO] a quebra por temperatura soma certo e nunca ultrapassa quem respondeu — agora com 5 baldes", async () => {
     const deps = makeDeps({
-      rows: [
-        { campaign_id: "c-1", campaign_name: "Campanha", message: "Oi", sent_count: 30, replied_count: 11, quente: 3, morno: 4, frio: 2, sem_classificacao: 1, lead_nao_encontrado: 1 },
-      ],
+      rows: [baseRow({ replied_count: 11, quente: 3, morno: 4, frio: 2, sem_classificacao: 1, lead_nao_encontrado: 1 })],
     });
     const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
     const res = fakeRes();
@@ -145,9 +185,7 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
 
   it("[TESTE OBRIGATÓRIO] telefone sem lead vai pra leadNaoEncontrado, telefone com lead sem temperatura vai pra semClassificacao — nunca o mesmo balde", async () => {
     const deps = makeDeps({
-      rows: [
-        { campaign_id: "c-1", campaign_name: "Campanha", message: "Oi", sent_count: 30, replied_count: 5, quente: 0, morno: 0, frio: 0, sem_classificacao: 2, lead_nao_encontrado: 3 },
-      ],
+      rows: [baseRow({ replied_count: 5, sem_classificacao: 2, lead_nao_encontrado: 3 })],
     });
     const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
     const res = fakeRes();
@@ -161,7 +199,7 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
       rows: [
         // 30 enviados, 4 sujos (sent_at NULL) — os 4 nunca podem aparecer
         // como respondido em bucket nenhum, só no total de enviados.
-        { campaign_id: "c-1", campaign_name: "Campanha", message: "Oi", sent_count: 30, replied_count: 9, sent_without_timestamp: 4, quente: 3, morno: 2, frio: 1, sem_classificacao: 2, lead_nao_encontrado: 1 },
+        baseRow({ replied_count: 9, sent_without_timestamp: 4, quente: 3, morno: 2, frio: 1, sem_classificacao: 2, lead_nao_encontrado: 1 }),
       ],
     });
     const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
@@ -194,7 +232,7 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
       if (sql.includes("FROM runs")) {
         attempt += 1;
         if (attempt === 1) throw columnMissing;
-        return { rows: [{ campaign_id: "c-1", campaign_name: "Campanha", message: "Oi", sent_count: 30, replied_count: 5, quente: 2, morno: 1, frio: 0, sem_classificacao: 1, lead_nao_encontrado: 1 }] };
+        return { rows: [baseRow({ replied_count: 5, quente: 2, morno: 1, frio: 0, sem_classificacao: 1, lead_nao_encontrado: 1 })] };
       }
       return { rows: [] };
     });
@@ -204,7 +242,9 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
     await handler({ query: { clientId: "tenant-1" } }, res);
 
     expect(res.statusCode).toBe(200);
-    expect(query).toHaveBeenCalledTimes(2);
+    // 1 pro probe de is_group (não é "FROM runs") + 2 pro retry de temperature
+    const runsCalls = query.mock.calls.filter(([sql]) => sql.includes("FROM runs"));
+    expect(runsCalls).toHaveLength(2);
     expect(res.body.campaigns[0].repliedByTemperature).toEqual({ quente: 2, morno: 1, frio: 0, semClassificacao: 1, leadNaoEncontrado: 1 });
   });
 
@@ -220,7 +260,115 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
     await handler({ query: { clientId: "tenant-1" } }, res);
 
     expect(res.statusCode).toBe(500);
-    expect(query).toHaveBeenCalledTimes(1);
+    // não tenta de novo — só 1 chamada "FROM runs" (mais a do probe de is_group)
+    const runsCalls = query.mock.calls.filter(([sql]) => sql.includes("FROM runs"));
+    expect(runsCalls).toHaveLength(1);
+  });
+
+  it("[TESTE OBRIGATÓRIO] os quatro motivos de leadNaoEncontrado somam com leadNaoEncontrado, inclusive todos zerados", async () => {
+    const deps = makeDeps({
+      rows: [
+        baseRow({ campaign_id: "c-cheio", replied_count: 10, lead_nao_encontrado: 7, telefone_lid: 3, sem_lead_id: 2, lead_id_orfao: 1, telefone_divergente: 1 }),
+        baseRow({ campaign_id: "c-zerado", replied_count: 4, lead_nao_encontrado: 0, telefone_lid: 0, sem_lead_id: 0, lead_id_orfao: 0, telefone_divergente: 0 }),
+      ],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    for (const campaign of res.body.campaigns) {
+      const { telefoneLid, semLeadId, leadIdOrfao, telefoneDivergente } = campaign.leadNaoEncontradoPorMotivo;
+      expect(telefoneLid + semLeadId + leadIdOrfao + telefoneDivergente).toBe(campaign.repliedByTemperature.leadNaoEncontrado);
+    }
+    expect(res.body.campaigns[1].leadNaoEncontradoPorMotivo).toEqual({ telefoneLid: 0, semLeadId: 0, leadIdOrfao: 0, telefoneDivergente: 0 });
+  });
+
+  it("[TESTE OBRIGATÓRIO] leadNaoEncontradoPorMotivo é dimensão irmã de repliedByTemperature, não aninhada nela", async () => {
+    const deps = makeDeps({
+      rows: [baseRow({ replied_count: 5, lead_nao_encontrado: 5, telefone_lid: 5 })],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    const campaign = res.body.campaigns[0];
+    expect(campaign.leadNaoEncontradoPorMotivo).toBeTruthy();
+    expect(campaign.repliedByTemperature.leadNaoEncontradoPorMotivo).toBeUndefined();
+    expect(campaign.leadNaoEncontradoPorMotivo.telefoneLid).toBe(5);
+  });
+
+  it("[TESTE OBRIGATÓRIO] casouSoNoCanonico sai como número — o tamanho medido do ganho do fix de telefone", async () => {
+    const deps = makeDeps({
+      rows: [baseRow({ replied_count: 20, casou_so_no_canonico: 6 })],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    expect(res.body.campaigns[0].casouSoNoCanonico).toBe(6);
+  });
+
+  it("[TESTE OBRIGATÓRIO] is_group ausente no tenant: respostasDeGrupo sai null, não 0 — e a query nem pede a coluna", async () => {
+    const isGroupMissing = Object.assign(new Error('column "is_group" does not exist'), { code: "42703" });
+    const query = vi.fn(async (sql) => {
+      if (sql.includes("is_group FROM public.lead_messages")) throw isGroupMissing;
+      if (sql.includes("FROM runs")) {
+        // o que o Postgres devolveria de verdade pra essa variante da query:
+        // sem a coluna, respostas_de_grupo nem é selecionado como número.
+        return { rows: [baseRow({ replied_count: 8, respostas_de_grupo: null })] };
+      }
+      return { rows: [] };
+    });
+    const deps = makeDeps({ overrides: { pgDatabasePool: { query }, isMissingSchemaError } });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.campaigns[0].respostasDeGrupo).toBeNull();
+    // a orquestração de verdade: a query "FROM runs" que foi de fato
+    // executada não pode ter pedido is_group, porque o probe já sabia que
+    // a coluna não existe
+    const runsCall = query.mock.calls.find(([sql]) => sql.includes("FROM runs"));
+    expect(stripSqlComments(runsCall[0])).not.toContain("is_group");
+  });
+
+  it("com is_group disponível, respostasDeGrupo sai como número (0 incluso) — nunca null quando foi medido", async () => {
+    const deps = makeDeps({
+      rows: [baseRow({ replied_count: 8, respostas_de_grupo: 0 })],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    expect(res.body.campaigns[0].respostasDeGrupo).toBe(0);
+    const runsCall = deps.pgDatabasePool.query.mock.calls.find(([sql]) => sql.includes("FROM runs"));
+    expect(runsCall[0]).toContain("is_group");
+  });
+
+  it("nenhum telefone sai na resposta — só contagens", async () => {
+    const deps = makeDeps({
+      rows: [baseRow({ replied_count: 3, lead_nao_encontrado: 3, telefone_lid: 3 })],
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1" } }, res);
+
+    // Checa VALORES, não chaves — `telefoneLid`/`telefoneDivergente` são
+    // nomes de categoria aprovados pela spec, não telefone de verdade. Um
+    // telefone de verdade (mascarado ou cru) apareceria como VALOR: uma
+    // sequência de 8+ dígitos, ou um `@` (marca de LID).
+    const values = [];
+    const collect = (v) => {
+      if (v && typeof v === "object") Object.values(v).forEach(collect);
+      else values.push(v);
+    };
+    collect(res.body);
+    for (const v of values) {
+      if (typeof v !== "string") continue;
+      expect(v, `valor "${v}" parece telefone (8+ dígitos seguidos)`).not.toMatch(/\d{8,}/);
+      expect(v, `valor "${v}" contém '@' (marca de LID)`).not.toContain("@");
+    }
   });
 });
 
@@ -304,11 +452,16 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
 
   it("[TESTE OBRIGATÓRIO] a janela vem da constante nomeada, não de um número solto no meio da query", () => {
     expect(MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS).toBe(14);
-    const sql = buildMessageEffectivenessSql(true);
-    // só uma ocorrência do intervalo — se alguém duplicar a lógica em outro
-    // lugar com o número escrito na mão, isso aqui não pega, mas pelo menos
-    // a origem declarada é uma só
-    expect((sql.match(/interval '\d+ days'/g) || []).length).toBe(1);
+    const sql = buildMessageEffectivenessSql(true, true);
+    // replied / replied_raw_only / replied_without_group repetem a MESMA
+    // janela (as três precisam da mesma referência de tempo pra fazer
+    // sentido comparadas entre si) — por isso aparece mais de uma vez, mas
+    // sempre o mesmo valor, sempre vindo da constante exportada.
+    const occurrences = sql.match(/interval '(\d+) days'/g) || [];
+    expect(occurrences.length).toBeGreaterThan(0);
+    for (const occ of occurrences) {
+      expect(occ).toBe(`interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'`);
+    }
   });
 
   it("[TESTE OBRIGATÓRIO] run com status='sent' e sent_at NULL nunca conta como respondido", () => {
@@ -338,5 +491,109 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
     // independentes sobre o mesmo `runs`, uma nunca implica a outra
     expect(sql).toContain("COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count");
     expect(sql.indexOf("AS sent_without_timestamp")).not.toBe(sql.indexOf("AS replied_count"));
+  });
+
+  // Os testes abaixo cobrem a quebra de leadNaoEncontrado (rodada 7). Mesma
+  // limitação já registrada acima: estruturais, não comportamentais — sem
+  // Postgres acessível neste ambiente pra provar a precedência e a definição
+  // de respostasDeGrupo com dado de verdade.
+
+  it("[TESTE OBRIGATÓRIO] precedência: telefoneLid vence mesmo com lead_id nulo — CASE para no primeiro WHEN verdadeiro", () => {
+    const sql = buildMessageEffectivenessSql(true, true);
+    const caseBlock = sql.slice(sql.indexOf("CASE\n          WHEN rt.phone"), sql.indexOf("END AS reason"));
+    expect(caseBlock).toBeTruthy();
+    const lidIdx = caseBlock.indexOf("telefoneLid");
+    const semLeadIdIdx = caseBlock.indexOf("semLeadId");
+    const orfaoIdx = caseBlock.indexOf("leadIdOrfao");
+    const divergenteIdx = caseBlock.indexOf("telefoneDivergente");
+    // ordem no texto do CASE é a ordem de avaliação em Postgres — LID
+    // primeiro, sem checar lead_id antes
+    expect(lidIdx).toBeGreaterThan(-1);
+    expect(lidIdx).toBeLessThan(semLeadIdIdx);
+    expect(semLeadIdIdx).toBeLessThan(orfaoIdx);
+    expect(orfaoIdx).toBeLessThan(divergenteIdx);
+    // o WHEN de telefoneLid não menciona lead_id — vence sozinho, por '@'
+    const lidWhenLine = caseBlock.split("\n").find((l) => l.includes("telefoneLid"));
+    expect(lidWhenLine).not.toContain("lead_id");
+    expect(lidWhenLine).toContain("phone LIKE '%@%'");
+  });
+
+  it("[TESTE OBRIGATÓRIO] leadIdOrfao é escopado por client_id — lead em outro tenant cai aqui, não vira categoria nova", () => {
+    const sql = buildMessageEffectivenessSql(true, true);
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM public\.leads ll WHERE ll\.id = rt\.lead_id AND ll\.client_id = \$1\)/);
+  });
+
+  it("[TESTE OBRIGATÓRIO] os quatro motivos somam com lead_nao_encontrado — mesmo WHERE NOT lead_found do balde original", () => {
+    const sql = buildMessageEffectivenessSql(true, true);
+    // lead_not_found_reason parte do MESMO replied_temperature filtrado por
+    // NOT lead_found que já alimenta lead_nao_encontrado em temperature_agg
+    // — não é um recorte diferente que poderia divergir
+    const reasonCteIdx = sql.indexOf("lead_not_found_reason AS (");
+    expect(reasonCteIdx).toBeGreaterThan(-1);
+    const reasonCte = sql.slice(reasonCteIdx, sql.indexOf("lead_not_found_agg AS ("));
+    expect(reasonCte).toContain("FROM replied_temperature rt");
+    expect(reasonCte).toContain("WHERE NOT rt.lead_found");
+  });
+
+  it("[TESTE OBRIGATÓRIO] respostasDeGrupo mede 'sustentaria sem grupo?', não 'tem mensagem de grupo?' — EXISTS separada, is_group IS NOT TRUE", () => {
+    const sql = buildMessageEffectivenessSql(true, true);
+    // a coluna nova é outra EXISTS correlacionada, com a MESMA janela de
+    // tempo e comparação de telefone — não um COUNT sobre is_group solto
+    expect(sql).toContain("AS replied_without_group");
+    expect(sql).toContain("AND (lm.is_group IS NOT TRUE)");
+    // IS NOT TRUE, não "= false" — é isso que faz is_group NULL contar como
+    // não-grupo (linha antiga, is_group nunca preenchido)
+    expect(sql).not.toMatch(/is_group\s*=\s*false/);
+    // o agregado final usa a MESMA semântica (IS NOT TRUE) pra decidir quem
+    // entra em respostasDeGrupo — nunca "= false" também aqui
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE runs\.replied AND runs\.replied_without_group IS NOT TRUE\)::int/);
+  });
+
+  it("[TESTE OBRIGATÓRIO] casouSoNoCanonico: EXISTS só com igualdade crua, comparada contra a EXISTS de replied", () => {
+    const sql = buildMessageEffectivenessSql(true, true);
+    expect(sql).toContain("AS replied_raw_only");
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE runs\.replied AND NOT runs\.replied_raw_only\)::int AS casou_so_no_canonico/);
+    // a variante "raw_only" não pode ter o OR canônico — senão não mede nada.
+    // Checa a ausência da ASSINATURA do canônico (length(regexp_replace(lm.phone...),
+    // não " OR " cru — o bloco tem outro OR legítimo (direction/engagement_signal).
+    const rawOnlyIdx = sql.indexOf("AS replied_raw_only");
+    const rawOnlyDeclIdx = sql.lastIndexOf("CASE WHEN r.sent_at IS NULL THEN false ELSE", rawOnlyIdx);
+    const rawOnlyBlock = sql.slice(rawOnlyDeclIdx, rawOnlyIdx);
+    expect(rawOnlyBlock).toContain("AND (lm.phone = r.phone)");
+    expect(rawOnlyBlock).not.toContain("length(regexp_replace(lm.phone");
+  });
+
+  it("[TESTE OBRIGATÓRIO] sem is_group (coluna ausente), respostasDeGrupo é NULL na query — não 0", () => {
+    const sqlComIsGroup = buildMessageEffectivenessSql(true, true);
+    const sqlSemIsGroup = buildMessageEffectivenessSql(true, false);
+    expect(sqlComIsGroup).toMatch(/COUNT\(\*\) FILTER \(WHERE runs\.replied AND runs\.replied_without_group IS NOT TRUE\)::int AS respostas_de_grupo/);
+    expect(sqlSemIsGroup).toContain("NULL::int AS respostas_de_grupo");
+    expect(stripSqlComments(sqlSemIsGroup)).not.toContain("is_group");
+  });
+
+  it("[TESTE OBRIGATÓRIO] as duas variantes de temperature (com e sem a coluna) carregam as contagens novas — nenhuma ganhou só metade", () => {
+    for (const includeTemperature of [true, false]) {
+      const sql = buildMessageEffectivenessSql(includeTemperature, true);
+      expect(sql, `temperature=${includeTemperature}: falta casou_so_no_canonico`).toContain("casou_so_no_canonico");
+      expect(sql, `temperature=${includeTemperature}: falta respostas_de_grupo`).toContain("respostas_de_grupo");
+      expect(sql, `temperature=${includeTemperature}: falta telefone_lid`).toContain("telefone_lid");
+      expect(sql, `temperature=${includeTemperature}: falta sem_lead_id`).toContain("sem_lead_id");
+      expect(sql, `temperature=${includeTemperature}: falta lead_id_orfao`).toContain("lead_id_orfao");
+      expect(sql, `temperature=${includeTemperature}: falta telefone_divergente`).toContain("telefone_divergente");
+      expect(sql, `temperature=${includeTemperature}: GROUP BY não carrega os motivos novos`).toMatch(
+        /GROUP BY c\.id, c\.name, c\.analytics_meta,.*n\.telefone_lid, n\.sem_lead_id, n\.lead_id_orfao, n\.telefone_divergente/
+      );
+    }
+  });
+
+  it("nenhum telefone aparece no texto da query fora de dentro do próprio SQL (isso é esperado — o telefone nunca sai da query pro JSON)", () => {
+    // Este teste documenta a garantia inversa da rota: o SQL PRECISA
+    // referenciar telefone pra funcionar (r.phone, lm.phone) — a garantia é
+    // que nada disso vira coluna selecionada como valor de retorno de
+    // telefone. As colunas de SELECT final são só contagens.
+    const sql = buildMessageEffectivenessSql(true, true);
+    const selectFinalIdx = sql.lastIndexOf("SELECT\n      c.id AS campaign_id");
+    const selectFinal = sql.slice(selectFinalIdx, sql.indexOf("FROM runs\n    JOIN public.campaigns"));
+    expect(selectFinal).not.toMatch(/AS\s+\w*phone\w*/i);
   });
 });

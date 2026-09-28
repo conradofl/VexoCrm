@@ -161,18 +161,44 @@ export const MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS = 14;
 // Exportada (não fechada dentro de registerCampaignsRoutes) pra dar teste
 // estrutural direto sobre o texto da query — ver
 // campaignMessageEffectiveness.test.js.
-export function buildMessageEffectivenessSql(includeTemperatureColumn) {
+export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIsGroupColumn) {
   const canonicalLeadPhone = SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)");
   // Mesmo padrão já usado em domains/chatbot/routes.js:1372 pra "quando essa
   // mensagem de fato aconteceu" — message_timestamp é o mais confiável
   // quando existe (vem do payload da Evolution), delivered_at e created_at
   // são os fallbacks, nessa ordem.
   const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
+  // As três variantes de "existe mensagem que conta como resposta" só
+  // diferem em DUAS coisas: como compara telefone, e se exige não-grupo.
+  // Extrair isso evita reescrever o recorte de tempo três vezes (e
+  // divergir por engano entre elas).
+  const repliedExists = ({ phoneCondition, extra = "" }) => `EXISTS (
+            SELECT 1
+            FROM public.lead_messages lm
+            WHERE lm.client_id = r.client_id
+              AND (${phoneCondition})
+              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              -- O recorte que faz isto medir "respondeu ao disparo" em vez
+              -- de "já falou com a empresa alguma vez": só mensagem depois
+              -- do envio, e só dentro da janela.
+              AND ${lmTimestamp} > r.sent_at
+              AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+              ${extra}
+          )`;
+  // Igualdade crua OR canônica — não só canônica — no mesmo padrão de
+  // domains/chatbot/routes.js:955: telefone já igual usa o índice em
+  // lead_messages(client_id, phone) pelo primeiro lado do OR; só cai na
+  // comparação canonicalizada (não indexável) quando o formato realmente
+  // diverge. Não medido contra Postgres real neste ambiente (ver nota no
+  // topo do arquivo de teste) — quem tiver acesso ao banco e confirmar que
+  // o plano continua bom só com o canônico pode simplificar.
+  const rawOrCanonicalPhone = `lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")}`;
   return `
     WITH runs AS (
       SELECT
         r.campaign_id,
         r.phone,
+        r.lead_id,
         -- Continua no sent_count e nunca conta como respondido (dado sujo,
         -- não dá pra amarrar resposta a envio sem sent_at) — mas cada um
         -- desses puxa replyRate pra baixo sem ninguém saber quantos são.
@@ -183,34 +209,20 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
         -- como amarrar resposta a disparo, então não conta como respondido.
         -- O run continua valendo pro sent_count (foi enviado de fato), só
         -- não fingimos saber a taxa dele.
-        CASE
-          WHEN r.sent_at IS NULL THEN false
-          ELSE EXISTS (
-            SELECT 1
-            FROM public.lead_messages lm
-            WHERE lm.client_id = r.client_id
-              -- Mesmo defeito nº2 (telefone cru), na coluna que mais
-              -- importa: lead_messages.phone vem do webhook da Evolution
-              -- (sempre com DDI 55); campaign_dispatch_runs.phone vem do
-              -- telefone do lead no momento do disparo (pode não trazer
-              -- DDI). Igualdade crua OR canônica — não só canônica — no
-              -- mesmo padrão de domains/chatbot/routes.js:955: telefone já
-              -- igual usa o índice em lead_messages(client_id, phone) pelo
-              -- primeiro lado do OR; só cai na comparação canonicalizada
-              -- (não indexável) quando o formato realmente diverge. Não
-              -- medido contra Postgres real neste ambiente (ver nota no
-              -- topo do arquivo de teste) — quem tiver acesso ao banco e
-              -- confirmar que o plano continua bom só com o canônico pode
-              -- simplificar.
-              AND (lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})
-              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-              -- O recorte que faz isto medir "respondeu ao disparo" em vez
-              -- de "já falou com a empresa alguma vez": só mensagem depois
-              -- do envio, e só dentro da janela.
-              AND ${lmTimestamp} > r.sent_at
-              AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-          )
-        END AS replied
+        CASE WHEN r.sent_at IS NULL THEN false ELSE ${repliedExists({ phoneCondition: rawOrCanonicalPhone })} END AS replied,
+        -- Só pra medir o tamanho do ganho do fix de telefone (casouSoNoCanonico
+        -- abaixo): "responderia" se só a igualdade crua existisse, sem o OR
+        -- canônico. Não decide replied — é medição isolada, nunca usada pra
+        -- contar resposta de verdade.
+        CASE WHEN r.sent_at IS NULL THEN false ELSE ${repliedExists({ phoneCondition: "lm.phone = r.phone" })} END AS replied_raw_only,
+        -- respostasDeGrupo pergunta "sustentaria a resposta SEM mensagem de
+        -- grupo?" — não "há mensagem de grupo?". Por isso é outra EXISTS,
+        -- com a mesma comparação de telefone e a mesma janela, só excluindo
+        -- is_group=true. NULL quando a coluna não existe no tenant (ver
+        -- includeIsGroupColumn) — "não medido", nunca "medido, zero".
+        ${includeIsGroupColumn
+          ? `CASE WHEN r.sent_at IS NULL THEN false ELSE ${repliedExists({ phoneCondition: rawOrCanonicalPhone, extra: "AND (lm.is_group IS NOT TRUE)" })} END`
+          : "NULL::boolean"} AS replied_without_group
       FROM public.campaign_dispatch_runs r
       -- r.phone <> '' — a inserção do dispatch grava phone || '' (routes.js
       -- ~2328): run com telefone vazio contra uma lead_messages TAMBÉM com
@@ -236,6 +248,8 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
     replied_temperature AS (
       SELECT
         runs.campaign_id,
+        runs.phone,
+        runs.lead_id,
         lb.temp,
         (lb.canonical_phone IS NOT NULL) AS lead_found
       FROM runs
@@ -252,6 +266,35 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
         COUNT(*) FILTER (WHERE NOT lead_found)::int AS lead_nao_encontrado
       FROM replied_temperature
       GROUP BY campaign_id
+    ),
+    -- Quatro motivos pra leadNaoEncontrado, mutuamente exclusivos por
+    -- PRECEDÊNCIA (CASE para no primeiro WHEN verdadeiro): LID vence mesmo
+    -- sem lead_id, porque quando é LID o cruzamento é impossível por
+    -- construção e a outra causa não muda nada. leadIdOrfao é escopado por
+    -- client_id de propósito — lead com aquele id em OUTRO tenant cai aqui
+    -- também (não é uma quinta categoria; é vazamento de tenant, investigação
+    -- separada).
+    lead_not_found_reason AS (
+      SELECT
+        rt.campaign_id,
+        CASE
+          WHEN rt.phone LIKE '%@%' THEN 'telefoneLid'
+          WHEN rt.lead_id IS NULL THEN 'semLeadId'
+          WHEN NOT EXISTS (SELECT 1 FROM public.leads ll WHERE ll.id = rt.lead_id AND ll.client_id = $1) THEN 'leadIdOrfao'
+          ELSE 'telefoneDivergente'
+        END AS reason
+      FROM replied_temperature rt
+      WHERE NOT rt.lead_found
+    ),
+    lead_not_found_agg AS (
+      SELECT
+        campaign_id,
+        COUNT(*) FILTER (WHERE reason = 'telefoneLid')::int AS telefone_lid,
+        COUNT(*) FILTER (WHERE reason = 'semLeadId')::int AS sem_lead_id,
+        COUNT(*) FILTER (WHERE reason = 'leadIdOrfao')::int AS lead_id_orfao,
+        COUNT(*) FILTER (WHERE reason = 'telefoneDivergente')::int AS telefone_divergente
+      FROM lead_not_found_reason
+      GROUP BY campaign_id
     )
     SELECT
       c.id AS campaign_id,
@@ -260,19 +303,54 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn) {
       COUNT(*)::int AS sent_count,
       COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count,
       COUNT(*) FILTER (WHERE runs.sent_at_missing)::int AS sent_without_timestamp,
+      -- Só entre quem respondeu: teria deixado de contar sem o OR canônico?
+      COUNT(*) FILTER (WHERE runs.replied AND NOT runs.replied_raw_only)::int AS casou_so_no_canonico,
+      ${includeIsGroupColumn
+        ? "COUNT(*) FILTER (WHERE runs.replied AND runs.replied_without_group IS NOT TRUE)::int"
+        : "NULL::int"} AS respostas_de_grupo,
       COALESCE(t.quente, 0) AS quente,
       COALESCE(t.morno, 0) AS morno,
       COALESCE(t.frio, 0) AS frio,
       COALESCE(t.sem_classificacao, 0) AS sem_classificacao,
-      COALESCE(t.lead_nao_encontrado, 0) AS lead_nao_encontrado
+      COALESCE(t.lead_nao_encontrado, 0) AS lead_nao_encontrado,
+      COALESCE(n.telefone_lid, 0) AS telefone_lid,
+      COALESCE(n.sem_lead_id, 0) AS sem_lead_id,
+      COALESCE(n.lead_id_orfao, 0) AS lead_id_orfao,
+      COALESCE(n.telefone_divergente, 0) AS telefone_divergente
     FROM runs
     JOIN public.campaigns c ON c.id = runs.campaign_id
     LEFT JOIN temperature_agg t ON t.campaign_id = c.id
+    LEFT JOIN lead_not_found_agg n ON n.campaign_id = c.id
     WHERE c.client_id = $1
-    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao, t.lead_nao_encontrado
+    GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao, t.lead_nao_encontrado, n.telefone_lid, n.sem_lead_id, n.lead_id_orfao, n.telefone_divergente
     HAVING COUNT(*) >= $2
     ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
   `;
+}
+
+// `is_group` é coluna de public.lead_messages, uma tabela só (não por
+// tenant) — ou existe pra todo mundo, ou não existe pra ninguém. Por isso
+// cacheia (ao contrário do fallback de `temperature`, que é por-requisição):
+// checar uma vez resolve pra sempre, e não precisa arriscar confundir "esta
+// coluna sumiu" com "aquela outra sumiu" no mesmo catch genérico.
+let _leadMessagesIsGroupAvailable = null;
+
+// Só pra teste — o cache é module-level e sobrevive entre casos do mesmo
+// arquivo de teste, o que quebraria isolamento sem isto.
+export function __resetMessageEffectivenessIsGroupCacheForTests() {
+  _leadMessagesIsGroupAvailable = null;
+}
+
+export async function isLeadMessagesIsGroupColumnAvailable(pool, isMissingSchemaErrorFn) {
+  if (_leadMessagesIsGroupAvailable !== null) return _leadMessagesIsGroupAvailable;
+  try {
+    await pool.query("SELECT is_group FROM public.lead_messages LIMIT 0");
+    _leadMessagesIsGroupAvailable = true;
+  } catch (err) {
+    if (!isMissingSchemaErrorFn(err)) throw err;
+    _leadMessagesIsGroupAvailable = false;
+  }
+  return _leadMessagesIsGroupAvailable;
 }
 
 let _dispatchRunsClaimSchemaEnsured = false;
@@ -3741,14 +3819,19 @@ export function registerCampaignsRoutes(app, deps) {
 
     const minSent = MESSAGE_EFFECTIVENESS_MIN_SENT;
     try {
+      const includeIsGroup = await isLeadMessagesIsGroupColumnAvailable(pgDatabasePool, isMissingSchemaError);
       let rows;
       try {
-        ({ rows } = await pgDatabasePool.query(buildMessageEffectivenessSql(true), [clientId, minSent]));
+        ({ rows } = await pgDatabasePool.query(buildMessageEffectivenessSql(true, includeIsGroup), [clientId, minSent]));
       } catch (err) {
         // tenant sem a coluna `temperature` em `leads` (deriva de schema) —
         // cai pra só lead_temperature em vez de derrubar a rota inteira.
+        // includeIsGroup não muda aqui: já foi resolvido à parte, e o
+        // catch genérico não diz QUAL coluna sumiu — misturar os dois
+        // fallbacks no mesmo catch arriscaria desligar temperature por um
+        // problema que era só de is_group, ou vice-versa.
         if (!isMissingSchemaError(err)) throw err;
-        ({ rows } = await pgDatabasePool.query(buildMessageEffectivenessSql(false), [clientId, minSent]));
+        ({ rows } = await pgDatabasePool.query(buildMessageEffectivenessSql(false, includeIsGroup), [clientId, minSent]));
       }
       const campaigns = rows.map((row) => ({
         campaignId: row.campaign_id,
@@ -3762,12 +3845,27 @@ export function registerCampaignsRoutes(app, deps) {
         // sem que quem lê a taxa saiba quantos são. Mesmo motivo de
         // replyWindowDays: dado que molda a taxa tem que estar visível.
         sentWithoutTimestamp: row.sent_without_timestamp,
+        // Quantos runs só contam como respondido por causa do OR canônico —
+        // o tamanho medido (não estimado) do ganho do fix de telefone.
+        casouSoNoCanonico: row.casou_so_no_canonico,
+        // null = coluna is_group ausente nesse tenant, não medido. 0 = medido,
+        // nenhum. As duas coisas não podem se confundir.
+        respostasDeGrupo: row.respostas_de_grupo === null ? null : row.respostas_de_grupo,
         repliedByTemperature: {
           quente: row.quente,
           morno: row.morno,
           frio: row.frio,
           semClassificacao: row.sem_classificacao,
           leadNaoEncontrado: row.lead_nao_encontrado,
+        },
+        // Dimensão diferente de repliedByTemperature — não aninha dentro
+        // dela porque as quatro somam com leadNaoEncontrado, não com os
+        // cinco baldes.
+        leadNaoEncontradoPorMotivo: {
+          telefoneLid: row.telefone_lid,
+          semLeadId: row.sem_lead_id,
+          leadIdOrfao: row.lead_id_orfao,
+          telefoneDivergente: row.telefone_divergente,
         },
       }));
       // replyWindowDays exposto porque quem lê replyRate precisa saber o que
