@@ -9,7 +9,11 @@
 import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import express from "express";
 import http from "http";
-import { registerLeadsRoutes } from "../domains/leads/routes.js";
+import {
+  registerLeadsRoutes,
+  classifyGroupParticipantObject,
+  classifyGroupParticipant,
+} from "../domains/leads/routes.js";
 
 function createMockDb() {
   const leads = [];
@@ -88,6 +92,7 @@ describe("Extração de membros de grupo do WhatsApp", () => {
   let mockDb;
   let originalFetch;
   let fetchCalls;
+  let groupsPayloadOverride = null;
 
   // Três grupos: um com mistura de válido/LID/o-próprio-chip/inválido, um
   // com participante repetido no outro grupo (dedupe), um não selecionado
@@ -143,7 +148,7 @@ describe("Extração de membros de grupo do WhatsApp", () => {
       }
 
       if (urlStr.includes("/group/fetchAllGroups/")) {
-        return { ok: true, status: 200, json: async () => GROUPS_PAYLOAD };
+        return { ok: true, status: 200, json: async () => groupsPayloadOverride || GROUPS_PAYLOAD };
       }
 
       if (urlStr.includes("/chat/findContacts/")) {
@@ -197,6 +202,7 @@ describe("Extração de membros de grupo do WhatsApp", () => {
   beforeEach(() => {
     mockDb.leads.length = 0;
     fetchCalls = [];
+    groupsPayloadOverride = null;
   });
 
   describe("POST /api/leads/extract-wa-groups/preview", () => {
@@ -387,4 +393,216 @@ describe("Extração de membros de grupo do WhatsApp", () => {
       expect(fetchCalls.some((u) => u.includes("/group/fetchAllGroups/"))).toBe(false);
     });
   });
+
+  describe("Evolution API moderna (LID + phoneNumber real e pushName)", () => {
+    it("[TESTE OBRIGATÓRIO 1 - PRÉVIA] participante com id @lid E phoneNumber real entra como aproveitável (usableCount: 1, lidCount: 0)", async () => {
+      groupsPayloadOverride = [
+        {
+          id: "120363000099@g.us",
+          subject: "Grupo VIP Evolution",
+          participants: [
+            {
+              id: "1829384756@lid",
+              phoneNumber: "5511988887777@s.whatsapp.net",
+              pushName: "Marcos Cliente",
+            },
+          ],
+        },
+      ];
+      const res = await fetch(`${baseUrl}/api/leads/extract-wa-groups/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: "geracao-digital", instanceName: "GD Grupos" }),
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+      const grp = data.groups.find((g) => g.id === "120363000099@g.us");
+      expect(grp).toBeDefined();
+      expect(grp.usableCount).toBe(1);
+      expect(grp.lidCount).toBe(0);
+      expect(grp.totalMembers).toBe(1);
+    });
+
+    it("[TESTE OBRIGATÓRIO 1 - EXTRAÇÃO] extrai com telefone 5511988887777 e nome Marcos Cliente", async () => {
+      groupsPayloadOverride = [
+        {
+          id: "120363000099@g.us",
+          subject: "Grupo VIP Evolution",
+          participants: [
+            {
+              id: "1829384756@lid",
+              phoneNumber: "5511988887777@s.whatsapp.net",
+              pushName: "Marcos Cliente",
+            },
+          ],
+        },
+      ];
+      const res = await fetch(`${baseUrl}/api/leads/extract-wa-contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: "geracao-digital",
+          instanceName: "GD Grupos",
+          sources: ["grupos"],
+          groupIds: ["120363000099@g.us"],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fromGroups).toBe(1);
+      expect(data.groupParticipantsLid).toBe(0);
+
+      const lead = mockDb.leads.find((l) => l.telefone === "5511988887777");
+      expect(lead).toBeDefined();
+      expect(lead.phone).toBe("5511988887777");
+      expect(lead.nome).toBe("Marcos Cliente");
+      expect(lead.stage).toBe("cold");
+      expect(lead.temperature).toBe("cold");
+      expect(lead.dados.origem).toBe("WhatsApp Grupo");
+      expect(lead.dados.grupo_nome).toBe("Grupo VIP Evolution");
+    });
+
+    it("[TESTE OBRIGATÓRIO 2] participante que só tem id @lid (sem phoneNumber) cai em lidCount: 1 e não vira lead", async () => {
+      groupsPayloadOverride = [
+        {
+          id: "120363000099@g.us",
+          subject: "Grupo VIP Evolution",
+          participants: [
+            { id: "1829384756@lid" },
+          ],
+        },
+      ];
+
+      // Prévia
+      const prevRes = await fetch(`${baseUrl}/api/leads/extract-wa-groups/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: "geracao-digital", instanceName: "GD Grupos" }),
+      });
+      const prevData = await prevRes.json();
+      const grp = prevData.groups.find((g) => g.id === "120363000099@g.us");
+      expect(grp.usableCount).toBe(0);
+      expect(grp.lidCount).toBe(1);
+
+      // Extração
+      const extRes = await fetch(`${baseUrl}/api/leads/extract-wa-contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: "geracao-digital",
+          instanceName: "GD Grupos",
+          sources: ["grupos"],
+          groupIds: ["120363000099@g.us"],
+        }),
+      });
+      const extData = await extRes.json();
+      expect(extData.fromGroups).toBe(0);
+      expect(extData.groupParticipantsLid).toBe(1);
+      expect(mockDb.leads).toHaveLength(0);
+    });
+
+    it("[TESTE OBRIGATÓRIO 3] mantém a exclusão do próprio chip (ownerDigits) mesmo com LID no id", async () => {
+      groupsPayloadOverride = [
+        {
+          id: "120363000099@g.us",
+          subject: "Grupo VIP Evolution",
+          participants: [
+            {
+              id: "1829384756@lid",
+              phoneNumber: "5511999998888@s.whatsapp.net",
+              pushName: "Meu Próprio Chip",
+            },
+          ],
+        },
+      ];
+
+      // Prévia: self não conta nem como usableCount nem como lidCount
+      const prevRes = await fetch(`${baseUrl}/api/leads/extract-wa-groups/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: "geracao-digital", instanceName: "GD Grupos" }),
+      });
+      const prevData = await prevRes.json();
+      const grp = prevData.groups.find((g) => g.id === "120363000099@g.us");
+      expect(grp.usableCount).toBe(0);
+      expect(grp.lidCount).toBe(0);
+
+      // Extração: não vira lead
+      const extRes = await fetch(`${baseUrl}/api/leads/extract-wa-contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: "geracao-digital",
+          instanceName: "GD Grupos",
+          sources: ["grupos"],
+          groupIds: ["120363000099@g.us"],
+        }),
+      });
+      const extData = await extRes.json();
+      expect(extData.fromGroups).toBe(0);
+      expect(mockDb.leads.find((l) => l.telefone === "5511999998888")).toBeUndefined();
+    });
+
+    it("classifyGroupParticipantObject avalia candidatos e prioriza phoneNumber e pushName", () => {
+      const owner = "5511999998888";
+
+      // 1. Participante Evolution com LID e phoneNumber
+      const res1 = classifyGroupParticipantObject(
+        {
+          id: "1829384756@lid",
+          phoneNumber: "5511988887777@s.whatsapp.net",
+          pushName: "Marcos Cliente",
+        },
+        owner
+      );
+      expect(res1).toEqual({ kind: "valid", digits: "5511988887777", name: "Marcos Cliente" });
+
+      // 2. Fallback para name e notify
+      const res2 = classifyGroupParticipantObject(
+        {
+          id: "1829384756@lid",
+          phoneNumber: "5511977776666@s.whatsapp.net",
+          name: "Nome Alternativo",
+        },
+        owner
+      );
+      expect(res2).toEqual({ kind: "valid", digits: "5511977776666", name: "Nome Alternativo" });
+
+      const res3 = classifyGroupParticipantObject(
+        {
+          id: "1829384756@lid",
+          phone: "5511966665555",
+          notify: "Notify User",
+        },
+        owner
+      );
+      expect(res3).toEqual({ kind: "valid", digits: "5511966665555", name: "Notify User" });
+
+      // 3. Somente LID
+      const resLid = classifyGroupParticipantObject({ id: "1829384756@lid" }, owner);
+      expect(resLid).toEqual({ kind: "lid" });
+
+      // 4. Próprio chip
+      const resSelf = classifyGroupParticipantObject(
+        { id: "1829384756@lid", phoneNumber: "5511999998888@s.whatsapp.net" },
+        owner
+      );
+      expect(resSelf).toEqual({ kind: "self" });
+
+      // 5. Compatibilidade com strings
+      expect(classifyGroupParticipantObject("5511988887777@s.whatsapp.net", owner)).toEqual({
+        kind: "valid",
+        digits: "5511988887777",
+        name: null,
+      });
+      expect(classifyGroupParticipantObject("1829384756@lid", owner)).toEqual({ kind: "lid" });
+      expect(classifyGroupParticipant("5511988887777@s.whatsapp.net", owner)).toEqual({
+        kind: "valid",
+        digits: "5511988887777",
+        name: null,
+      });
+    });
+  });
 });
+

@@ -78,18 +78,47 @@ function classifyChatContent(messages, contactName) {
 }
 
 // Membro de grupo classificado, pra decidir o que fazer com ele — nunca um
-// telefone inventado. `@lid` não tem telefone recuperável (perda
-// irreversível, ver comentário na extração de grupos). Válido é
-// @s.whatsapp.net com 10 a 14 dígitos (mesma faixa da extração por
-// conversa), fora o número do próprio chip.
-function classifyGroupParticipant(participantJid, ownerDigits) {
-  const jid = String(participantJid || "");
-  if (jid.includes("@lid")) return { kind: "lid" };
-  if (!jid.includes("@s.whatsapp.net")) return { kind: "invalid" };
-  const digits = jid.split("@")[0].replace(/\D/g, "");
-  if (!digits || digits.length < 10 || digits.length >= 15) return { kind: "invalid" };
-  if (ownerDigits && digits === ownerDigits) return { kind: "self" };
-  return { kind: "valid", digits };
+// telefone inventado. Na Evolution API moderna, cada participante de grupo traz:
+// { id: "xxxx@lid", phoneNumber: "5511999999999@s.whatsapp.net", pushName: "Nome" }
+// Avalia os campos em ordem de prioridade ([phoneNumber, phone, jid, user, id])
+// buscando candidatos sem @lid com dígitos válidos (10 a 15 dígitos numéricos).
+// Se nenhum candidato tiver telefone recuperável e algum contiver @lid, é perda irreversível (lid).
+export function classifyGroupParticipantObject(participant, ownerDigits) {
+  const p = typeof participant === "object" && participant !== null
+    ? participant
+    : (participant ? { id: String(participant), jid: String(participant) } : {});
+
+  const candidates = [p?.phoneNumber, p?.phone, p?.jid, p?.user, p?.id];
+
+  // 1. Procura entre os candidatos aquele que NÃO contém '@lid' e que possui dígitos válidos (10 a 15)
+  for (const c of candidates) {
+    if (c === null || c === undefined) continue;
+    const cStr = String(c).trim();
+    if (!cStr || cStr.includes("@lid")) continue;
+
+    const raw = cStr.includes("@") ? cStr.split("@")[0] : cStr;
+    const digits = raw.replace(/\D/g, "");
+
+    if (digits.length >= 10 && digits.length <= 15) {
+      if (ownerDigits && digits === ownerDigits) return { kind: "self" };
+      const rawName = p?.pushName || p?.name || p?.notify || null;
+      return { kind: "valid", digits, name: rawName ? String(rawName).trim() : null };
+    }
+  }
+
+  // 2. Se nenhum candidato tiver telefone recuperável e algum candidato contiver '@lid'
+  const hasLid = candidates.some((c) => {
+    if (c === null || c === undefined) return false;
+    return String(c).includes("@lid");
+  });
+  if (hasLid) return { kind: "lid" };
+
+  // 3. Se não for nenhum dos dois, inválido
+  return { kind: "invalid" };
+}
+
+export function classifyGroupParticipant(participantJid, ownerDigits) {
+  return classifyGroupParticipantObject(participantJid, ownerDigits);
 }
 
 // Resolve a instância Evolution (id/nome explícito ou padrão do tenant),
@@ -1550,8 +1579,7 @@ export function registerLeadsRoutes(app, deps) {
                 const groupName = normalizeString(group?.subject || group?.name) || "Grupo do WhatsApp";
                 const participants = Array.isArray(group?.participants) ? group.participants : [];
                 for (const p of participants) {
-                  const pid = String(p?.id || p?.jid || "");
-                  const classified = classifyGroupParticipant(pid, ownerDigits);
+                  const classified = classifyGroupParticipantObject(p, ownerDigits);
                   if (classified.kind === "lid") {
                     groupLidCount++;
                     continue;
@@ -1560,11 +1588,11 @@ export function registerLeadsRoutes(app, deps) {
                   const formatted = sanitizePhoneE164(classified.digits);
                   if (!formatted) continue;
                   const telefoneKey = formatted.replace(/^\+/, "");
-                  const contactName = contactNames.get(classified.digits);
+                  const rawName = p?.pushName || p?.name || p?.notify || contactNames.get(classified.digits);
                   batchLeads.push({
                     telefone: telefoneKey,
                     phone: telefoneKey,
-                    nome: isRealName(contactName) ? normalizeString(contactName) : formatted,
+                    nome: isRealName(rawName) ? normalizeString(rawName) : formatted,
                     stage: "cold",
                     stage_source: "auto",
                     // Temperatura cold é julgamento, não valor padrão da
@@ -1669,8 +1697,7 @@ export function registerLeadsRoutes(app, deps) {
         let usableCount = 0;
         let lidCount = 0;
         for (const p of participants) {
-          const pid = String(p?.id || p?.jid || "");
-          const classified = classifyGroupParticipant(pid, ownerDigits);
+          const classified = classifyGroupParticipantObject(p, ownerDigits);
           if (classified.kind === "lid") lidCount++;
           else if (classified.kind === "valid") usableCount++;
           // "self" (o próprio chip) e "invalid" não entram em nenhum dos
