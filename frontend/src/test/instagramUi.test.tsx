@@ -315,6 +315,46 @@ describe("InstagramImportModal", () => {
       expect(screen.getAllByText(/Conversa Pessoal/i).length).toBeGreaterThan(0);
     });
   });
+
+  it("não classifica 'Olá tô bem e vc ?' como dúvida de serviço no modal e agrupa em conversas pessoais", async () => {
+    renderWithClient(
+      <InstagramImportModal
+        open={true}
+        onOpenChange={vi.fn()}
+        clientId="test-client"
+      />
+    );
+
+    const folderInput = screen.getByTestId("instagram-folder-input");
+    const casualGreetingFile = createMockFile(
+      "message_1.json",
+      "export/messages/inbox/fran_1/message_1.json",
+      JSON.stringify({
+        participants: [{ name: "Loja" }, { name: "FranFranz" }],
+        messages: [
+          { sender_name: "FranFranz", content: "Olá tô bem e vc ?", timestamp_ms: 1000 },
+        ],
+      })
+    );
+
+    fireEvent.change(folderInput, { target: { files: [casualGreetingFile] } });
+
+    // Confirma que não foi para a lista padrão de Possíveis Clientes
+    await waitFor(() => {
+      expect(screen.queryByText("FranFranz")).not.toBeInTheDocument();
+    });
+
+    // Clica na aba de Conversas Pessoais
+    const personalTab = screen.getByRole("button", { name: /Conversas Pessoais/i });
+    fireEvent.click(personalTab);
+
+    // Deve aparecer como Conversa Pessoal e NUNCA como Dúvida de Serviço
+    await waitFor(() => {
+      expect(screen.getAllByText("FranFranz").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Dúvida de Serviço")).not.toBeInTheDocument();
+      expect(screen.getAllByText(/Conversa Pessoal/i).length).toBeGreaterThan(0);
+    });
+  });
 });
 
 describe("ContactsWithoutChannelSection", () => {

@@ -2041,7 +2041,7 @@ export default function BancoDeDados() {
               className="gap-1.5 text-xs rounded-xl border-purple-500/30 bg-purple-500/5 text-purple-700 dark:text-purple-300 hover:bg-purple-500/15 font-semibold"
             >
               <Bot className="w-3.5 h-3.5 text-purple-500" />
-              Importar com IA (Instagram / Chat / Texto)
+              Colar Texto Avulso (Chat / E-mail)
             </Button>
 
             <Button

@@ -14,6 +14,8 @@ import {
   parseInstagramExport,
   buildInstagramImportPayload,
   formatInstagramDirectMessage,
+  isTrivialGreetingOrReaction,
+  classifyInstagramConversation,
   type RawExportFile,
 } from "@/lib/leadImports/instagramExport";
 
@@ -219,7 +221,7 @@ describe("buildInstagramImportPayload", () => {
         participants: [{ name: "Loja Do Bairro" }, { name: "Fernanda" }],
         messages: [
           { sender_name: "Fernanda", content: "Meu whatsapp é 34998765432", timestamp_ms: 2000 },
-          { sender_name: "Fernanda", content: "Oi, tudo bem?", timestamp_ms: 1000 },
+          { sender_name: "Fernanda", content: "Vocês entregam em Uberlândia?", timestamp_ms: 1000 },
           { sender_name: "Loja Do Bairro", content: "informação interna da loja, não pode vazar", timestamp_ms: 3000 },
         ],
       }),
@@ -233,10 +235,96 @@ describe("buildInstagramImportPayload", () => {
     expect(Object.keys(payload.contacts[0]).sort()).toEqual(["name", "perfil", "phone", "resumo"]);
     // conteúdo interno da loja (não é o resumo) nunca aparece no corpo
     expect(body).not.toContain("informação interna da loja");
-    // resumo é só a primeira mensagem da pessoa — a de telefone (que veio
-    // depois, cronologicamente) não vaza dentro do resumo
+    // dúvida de serviço vira o resumo, e o telefone vai no campo phone separado
     expect(payload.contacts[0].resumo).not.toContain("34998765432");
-    expect(payload.contacts[0].resumo).toBe("Oi, tudo bem?");
+    expect(payload.contacts[0].resumo).toBe("Vocês entregam em Uberlândia?");
+  });
+});
+
+describe("classifyInstagramConversation - Heurísticas Semânticas", () => {
+  const SELF = "Loja Do Bairro";
+
+  it("isTrivialGreetingOrReaction identifica saudações e risadas triviais", () => {
+    expect(isTrivialGreetingOrReaction("Olá tô bem e vc ?")).toBe(true);
+    expect(isTrivialGreetingOrReaction("tudo bem?")).toBe(true);
+    expect(isTrivialGreetingOrReaction("Oi!")).toBe(true);
+    expect(isTrivialGreetingOrReaction("Kkkk")).toBe(true);
+    expect(isTrivialGreetingOrReaction("Hahahahahahaha 😂")).toBe(true);
+    expect(isTrivialGreetingOrReaction("Bom dia, tudo bem?")).toBe(true);
+    expect(isTrivialGreetingOrReaction("Oi, vocês entregam em Uberlândia?")).toBe(false);
+    expect(isTrivialGreetingOrReaction("Quanto custa o produto azul?")).toBe(false);
+  });
+
+  it("[TESTE OBRIGATÓRIO] 'Olá tô bem e vc ?' NUNCA vira dúvida de serviço nem resumo comercial", () => {
+    const classification = classifyInstagramConversation(
+      [
+        { sender_name: "FranFranz", content: "Olá tô bem e vc ?", timestamp_ms: 1000 },
+      ],
+      SELF,
+      "FranFranz"
+    );
+
+    expect(classification.category).toBe("personal");
+    expect(classification.intentLabel).toBe("Conversa Pessoal");
+    expect(classification.intentLabel).not.toBe("Dúvida de Serviço");
+    expect(classification.resumo).toContain("Olá tô bem e vc ?");
+  });
+
+  it("conversa com piada de cerveja ou academia ('Kkkk vou comprar a Itaipava', peito e dorsal) é classificada como pessoal", () => {
+    const classItaipava = classifyInstagramConversation(
+      [
+        { sender_name: "Amigo", content: "Kkkk vou comprar a Itaipava", timestamp_ms: 1000 },
+      ],
+      SELF,
+      "Amigo"
+    );
+    expect(classItaipava.category).toBe("personal");
+    expect(classItaipava.intentLabel).toBe("Conversa Pessoal");
+    expect(classItaipava.intentLabel).not.toBe("Dúvida de Serviço");
+
+    const classTreino = classifyInstagramConversation(
+      [
+        { sender_name: "Diego", content: "Sim, hoje foi dia de peito e dorsal...", timestamp_ms: 1000 },
+      ],
+      SELF,
+      "Diego"
+    );
+    expect(classTreino.category).toBe("personal");
+    expect(classTreino.intentLabel).toBe("Conversa Pessoal");
+    expect(classTreino.intentLabel).not.toBe("Dúvida de Serviço");
+  });
+
+  it("[TESTE OBRIGATÓRIO] conversa com telefone mas informal/pessoal é classificada como 'Contato Informado' (e NÃO 'Dúvida de Serviço')", () => {
+    const classification = classifyInstagramConversation(
+      [
+        { sender_name: "FranFranz", content: "Olá tô bem e vc ?", timestamp_ms: 1000 },
+        { sender_name: "FranFranz", content: "me chama no (34) 99937-9744", timestamp_ms: 2000 },
+      ],
+      SELF,
+      "FranFranz"
+    );
+
+    expect(classification.category).toBe("lead");
+    expect(classification.intentLabel).toBe("Contato Informado");
+    expect(classification.intentLabel).not.toBe("Dúvida de Serviço");
+    expect(classification.phone).toBe("+5534999379744");
+    expect(classification.resumo).toBe("me chama no (34) 99937-9744");
+  });
+
+  it("conversa comercial com saudação anterior seleciona a dúvida real (>= 15 chars) e ignora a saudação", () => {
+    const classification = classifyInstagramConversation(
+      [
+        { sender_name: "Cliente", content: "Oi! Tudo bem?", timestamp_ms: 1000 },
+        { sender_name: "Cliente", content: "Vocês têm pronta entrega do produto azul?", timestamp_ms: 2000 },
+      ],
+      SELF,
+      "Cliente"
+    );
+
+    expect(classification.category).toBe("lead");
+    expect(classification.intentLabel).toBe("Dúvida de Serviço");
+    expect(classification.resumo).toBe("Vocês têm pronta entrega do produto azul?");
+    expect(classification.resumo).not.toContain("Oi! Tudo bem?");
   });
 });
 

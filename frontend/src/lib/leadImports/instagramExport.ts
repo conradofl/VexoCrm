@@ -88,9 +88,35 @@ export function extractPhoneFromText(text: string): string | null {
 export const COMMERCIAL_KEYWORDS_REGEX =
   /(?:orçamento|orcamento|cotação|cotacao|cotar|quanto\s+(?:custa|fica|sai|é|e|tá|ta)|qual\s+(?:o|é|e)?\s*(?:valor|preço|preco|custo|tabela)|tabela|tabela de preço|valores|preços|precos|desconto|proposta|condições|condicoes|pagamento|parcela|parcelas|parcelamento|parcelam|cartão|cartao|pix|boleto|comprar|compra|adquirir|contratar|contrato|fechar\s+negócio|fechar\s+serviço|vaga|vagas|inscrição|inscricao|matrícula|matricula|matricular|curso|mentoria|consultoria|projeto|serviço|servico|serviços|servicos|pacote|plano|planos|produto|produtos|atendimento|atendem|atende|atendimento presencial|entrega|entregam|entregas|frete|prazo|disponível|disponivel|tem pronta entrega|horário|horario|agendar|agenda|agendamento|marcar\s+horário|marcar\s+consulta|consulta|sessão|sessao|como\s+funciona|queria\s+saber\s+mais|mais\s+informações|mais\s+informacoes|informações|informacoes|detalhes|endereço|endereco|onde\s+fica|localização|localizacao|onde\s+vocês\s+estão|onde\s+voces\s+estao|qual\s+cidade|tem\s+loja|anúncio|anuncio|patrocinado)/i;
 
-// Expressões típicas de conversa pessoal / casual / amigos / família
+// Expressões típicas de conversa pessoal / casual / amigos / família / academia / cerveja
 export const PERSONAL_CHAT_REGEX =
-  /(?:hahaha|kkkk|rsrs|hehehe|mano|véi|vei|brother|amigo|amiga|parceiro|saudades|saudade|parabéns|parabens|feliz aniversário|aniversario|churrasco|cerveja|chopp|festa|almoço|almoco|jantar|bora|vamos\s+sair|sumido|sumida|rolê|role|beijo|beijos|abraço|abraco|academia|treino|frango|pegar\s+peso|futebol|jogo|família|familia|primo|prima|tio|tia|mãe|mae|pai|irmão|irmao)/i;
+  /(?:hahaha|kkkk|rsrs|hehehe|mano|véi|vei|brother|amigo|amiga|parceiro|saudades|saudade|parabéns|parabens|feliz aniversário|aniversario|churrasco|cerveja|chopp|itaipava|heineken|skol|brahma|amstel|festa|almoço|almoco|jantar|bora|vamos\s+sair|sumido|sumida|rolê|role|beijo|beijos|abraço|abraco|academia|treino|peito|dorsal|bíceps|biceps|tríceps|triceps|perna|ombro|frango|pegar\s+peso|futebol|jogo|família|familia|primo|prima|tio|tia|mãe|mae|pai|irmão|irmao)/i;
+
+/**
+ * Identifica saudações curtas, cumprimentos e reações triviais.
+ * Mensagens como "Olá", "Tudo bem?", "Oi!", "Kkkk", "Hahaha", "tô bem e vc ?"
+ * NUNCA podem ser selecionadas como resumo de dúvida comercial nem classificar
+ * uma conversa como "Dúvida de Serviço".
+ */
+export function isTrivialGreetingOrReaction(text: string): boolean {
+  if (!text) return true;
+  const clean = text.trim();
+  if (clean.length === 0) return true;
+
+  // Remove risadas e caracteres não alfanuméricos/emojis
+  const withoutLaughterAndEmoji = clean
+    .replace(/(?:ha|he|kk|rs|ja|k)+/gi, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .trim();
+  if (withoutLaughterAndEmoji.length === 0) return true;
+
+  // Frases de cumprimento e saudações comuns
+  const greetingsRegex =
+    /^(?:ol[aá]|oie?|opa|fala|salve|e\s+a[ií]|tudo\s+b[eé]m|tudo\s+bom|como\s+(?:vai|est[aá]|voc[eê]\s+t[aá]|vc\s+t[aá])|t[oô]\s+b[eé]m(?:\s+e\s+(?:vc|voc[eê]))?|t[oô]\s+bem|beleza|blz|suave|bom\s+dia|boa\s+tarde|boa\s+noite|valeu|obrigad[oa]|show|top|legal|massa|combinado|fechou|sim|n[aã]o|ok|beleza|\s+)+$/iu;
+
+  const normalized = withoutLaughterAndEmoji.toLowerCase().replace(/\s+/g, " ").trim();
+  return greetingsRegex.test(normalized);
+}
 
 export interface InstagramConversationClassification {
   category: "lead" | "personal";
@@ -125,10 +151,30 @@ export function classifyInstagramConversation(
     .filter((m) => m.content.length > 0);
 
   let phone: string | null = null;
-  for (const m of chronological) {
-    if (!m.content) continue;
-    phone = extractPhoneFromText(fixInstagramEncoding(m.content));
-    if (phone) break;
+  let msgWithPhoneContent = "";
+  let msgWithPhoneIndex = -1;
+
+  for (let i = 0; i < otherMessages.length; i++) {
+    const p = extractPhoneFromText(otherMessages[i].content);
+    if (p) {
+      phone = p;
+      msgWithPhoneContent = otherMessages[i].content;
+      msgWithPhoneIndex = i;
+      break;
+    }
+  }
+
+  // Se não achou em otherMessages mas tem no chronological completo
+  if (!phone) {
+    for (const m of chronological) {
+      if (!m.content) continue;
+      const p = extractPhoneFromText(fixInstagramEncoding(m.content));
+      if (p) {
+        phone = p;
+        msgWithPhoneContent = fixInstagramEncoding(m.content).trim();
+        break;
+      }
+    }
   }
 
   const lastMessage = otherMessages[otherMessages.length - 1]?.content || "";
@@ -149,43 +195,89 @@ export function classifyInstagramConversation(
 
   for (const msg of otherMessages) {
     const text = msg.content;
+    const isGreeting = isTrivialGreetingOrReaction(text);
+    const isPersonal = PERSONAL_CHAT_REGEX.test(text);
+
+    // a) Mensagens curtas de saudação e risadas/reações NUNCA podem ser
+    // selecionadas como resumo de dúvida comercial nem como pergunta comercial
+    if (isGreeting) {
+      continue;
+    }
+
+    if (isPersonal) {
+      personalMessages.push(text);
+      continue;
+    }
+
+    // b) Dúvidas comerciais reais: prioriza mensagens com termos de preço,
+    // orçamento, agendamento, serviço, produto, entrega
     if (COMMERCIAL_KEYWORDS_REGEX.test(text)) {
       commercialInquiries.push(text);
-    } else if (/\?/.test(text) && !PERSONAL_CHAT_REGEX.test(text)) {
+    } else if (/\?/.test(text) && text.length >= 15) {
       generalQuestions.push(text);
-    } else if (PERSONAL_CHAT_REGEX.test(text)) {
-      personalMessages.push(text);
     }
   }
 
-  const isCommercial =
-    commercialInquiries.length > 0 ||
-    (generalQuestions.length > 0 && personalMessages.length === 0) ||
-    (phone != null && commercialInquiries.length > 0);
+  // Priorização para conversas comerciais: mensagens com mais de 15 caracteres contendo dúvidas
+  const bestCommercial =
+    commercialInquiries.find((t) => t.length >= 15 && /\?/.test(t)) ||
+    commercialInquiries.find((t) => t.length >= 15) ||
+    commercialInquiries[0] ||
+    generalQuestions[0];
 
-  if (isCommercial) {
-    const bestInquiry = commercialInquiries[0] || generalQuestions[0] || otherMessages[0].content;
+  // c) Para conversas onde o telefone foi passado mas a conversa é pessoal/informal:
+  // classificar como "Contato Informado" (e NÃO "Dúvida de Serviço"), usando a mensagem do telefone
+  if (phone != null && (!bestCommercial || personalMessages.length > 0)) {
+    let phoneContextSummary = msgWithPhoneContent;
+    const digitsOnly = msgWithPhoneContent.replace(/\D/g, "");
+    const isJustPhone = msgWithPhoneContent.replace(/[\s().+-]/g, "") === digitsOnly;
+
+    if (isJustPhone && msgWithPhoneIndex > 0) {
+      const prevRelevant = otherMessages
+        .slice(0, msgWithPhoneIndex)
+        .reverse()
+        .find((m) => !isTrivialGreetingOrReaction(m.content));
+      if (prevRelevant) {
+        phoneContextSummary = `${prevRelevant.content} (${msgWithPhoneContent})`;
+      }
+    }
+
+    return {
+      category: "lead",
+      intentLabel: "Contato Informado",
+      resumo: (phoneContextSummary || lastMessage || "Telefone informado na conversa.").slice(0, 200),
+      phone,
+      lastMessage,
+    };
+  }
+
+  // Conversa com dúvida comercial explícita
+  if (bestCommercial) {
     let label = "Dúvida de Serviço";
-    if (/(?:orçamento|orcamento|preço|preco|valor|quanto\s+custa|tabela|pagamento|parcela)/i.test(bestInquiry)) {
+    if (/(?:orçamento|orcamento|preço|preco|valor|quanto\s+custa|tabela|pagamento|parcela)/i.test(bestCommercial)) {
       label = "Orçamento / Preço";
-    } else if (phone && /(?:whats|telefone|celular|ligar)/i.test(bestInquiry)) {
+    } else if (phone && /(?:whats|telefone|celular|ligar)/i.test(bestCommercial)) {
       label = "WhatsApp / Contato";
-    } else if (/(?:onde\s+fica|endereço|endereco|cidade|localização)/i.test(bestInquiry)) {
+    } else if (/(?:onde\s+fica|endereço|endereco|cidade|localização)/i.test(bestCommercial)) {
       label = "Localização / Atendimento";
     }
 
     return {
       category: "lead",
       intentLabel: label,
-      resumo: bestInquiry.slice(0, 200),
+      resumo: bestCommercial.slice(0, 200),
       phone,
       lastMessage,
     };
   }
 
-  // Não tem conteúdo comercial — conversa pessoal / amigos
-  const samplePersonal = personalMessages[0] || otherMessages[0].content;
-  const isShortReaction = /^(?:hahaha|kkkk|rsrs|😂|❤️|🔥|👏|opa|oi|ola|olá|oie)[!.]*$/i.test(samplePersonal);
+  // Não tem conteúdo comercial nem telefone — conversa pessoal / amigos
+  const samplePersonal =
+    personalMessages[0] ||
+    otherMessages.find((m) => !isTrivialGreetingOrReaction(m.content))?.content ||
+    otherMessages[0].content;
+
+  const isShortReaction = isTrivialGreetingOrReaction(samplePersonal);
   const prefix = isShortReaction ? '🚫 Conversa casual: "' : '🚫 Conversa pessoal: "';
   const suffix = '"';
   const availableLen = 200 - prefix.length - suffix.length;
