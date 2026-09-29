@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { MainLayout } from "@/components/MainLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { INTERNAL_PAGE_ORDER, getDefaultClientRoute, isInternalPageAllowedForClient } from "@/lib/access";
+import { isCrmDomain } from "./lib/domainRouting";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
@@ -110,6 +111,16 @@ function ClientIndexRedirect() {
   return <Navigate to={getDefaultClientRoute(clientId, accessProfile.allowedViews)} replace />;
 }
 
+export function RootRouteHandler() {
+  const { isAuthenticated, defaultRoute } = useAuth();
+  // Se o usuário acessou pelo domínio do CRM (crm.vexoia.com)
+  if (isCrmDomain()) {
+    return <Navigate to={isAuthenticated ? defaultRoute : "/login"} replace />;
+  }
+  // Se acessou pelo domínio institucional (vexoia.com ou localhost)
+  return <LandingPage />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -119,8 +130,9 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<RootRouteHandler />} />
             <Route path="/home" element={<LandingPage />} />
+            <Route path="/institucional" element={<LandingPage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro-cliente" element={<ClientSignup />} />
             <Route path="/crm/login" element={<Navigate to="/login" replace />} />
