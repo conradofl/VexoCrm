@@ -27,6 +27,14 @@ import {
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
 import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
+import {
+  classifyLeadMessages,
+  reclassifyLeadFromMessages,
+  getFunnelSettings,
+  saveFunnelSettings,
+  importClosedSalesBatch,
+  DEFAULT_FUNNEL_VOCABULARY,
+} from "./funnelService.js";
 
 function sanitizePhoneE164(phoneInput, defaultDdd = null) {
   const s = sanitizePhone(phoneInput, defaultDdd);
@@ -35,20 +43,18 @@ function sanitizePhoneE164(phoneInput, defaultDdd = null) {
 }
 
 function classifyChatContent(messages, contactName) {
+  const result = classifyLeadMessages(messages);
   const fullText = (messages || []).join(" ").toLowerCase();
-
-  let stage = "cold";
-  let temperature = "warm";
   const tagsSet = new Set();
 
-  if (/(orçamento|orcamento|cotacao|cotação|valor|quanto custa|preço|preco|desconto|proposta|tabela|enviar valor)/i.test(fullText)) {
-    stage = "open_budget";
-    temperature = "hot";
+  if (result.stage === "buyer") {
+    tagsSet.add("Fechamento");
+  } else if (result.stage === "open_budget") {
     tagsSet.add("Orçamento");
-  } else if (/(duvida|dúvida|funciona|endereço|horário|informação|informacao|catalogo|catálogo|como faz)/i.test(fullText)) {
-    stage = "inquiry";
-    temperature = "warm";
+  } else if (result.stage === "inquiry") {
     tagsSet.add("Dúvida");
+  } else if (result.stage === "lost") {
+    tagsSet.add("Não Convertido");
   }
 
   if (/(óculos|oculos|lente|armação|armacao|solar)/i.test(fullText)) {
@@ -70,10 +76,11 @@ function classifyChatContent(messages, contactName) {
     : "Contato extraído via WhatsApp.";
 
   return {
-    stage,
-    temperature,
+    stage: result.stage,
+    temperature: result.temperature,
+    lost_reason: result.lost_reason,
     tags: Array.from(tagsSet),
-    summary
+    summary,
   };
 }
 
@@ -1917,11 +1924,16 @@ export function registerLeadsRoutes(app, deps) {
           continue;
         }
 
+        const isClosedSales = Boolean(req.body?.asClosedSales || req.body?.isClosedSales);
         const stageInput = normalizeString(row.stage || row.estagio || row.etapa)?.toLowerCase();
-        const validStage = ['buyer', 'open_budget', 'inquiry', 'cold', 'lost'].includes(stageInput) ? stageInput : 'cold';
+        const validStage = isClosedSales
+          ? "buyer"
+          : (['buyer', 'open_budget', 'inquiry', 'cold', 'lost'].includes(stageInput) ? stageInput : 'cold');
         
         const tempInput = normalizeString(row.temperature || row.temperatura)?.toLowerCase();
-        const validTemp = ['hot', 'warm', 'cold'].includes(tempInput) ? tempInput : 'warm';
+        const validTemp = isClosedSales
+          ? "hot"
+          : (['hot', 'warm', 'cold'].includes(tempInput) ? tempInput : 'warm');
 
         const rowTags = row.tags || row.tag || [];
         const parsedRowTags = Array.isArray(rowTags)
@@ -1930,13 +1942,15 @@ export function registerLeadsRoutes(app, deps) {
           ? rowTags.split(",").map((t) => t.trim()).filter(Boolean)
           : [];
 
+        const closedSalesTags = isClosedSales ? ["Venda Fechada", "Cliente Histórico"] : [];
         const originTag =
           importTagsArray.find((t) => /instagram|facebook|linkedin|tiktok|direct|messenger/i.test(t)) ||
           parsedRowTags.find((t) => /instagram|facebook|linkedin|tiktok|direct|messenger/i.test(t)) ||
-          row.origem ||
-          "Instagram Direct";
+          (isClosedSales ? "Importação Vendas Fechadas" : (row.origem || "Instagram Direct"));
 
-        const combinedTags = Array.from(new Set([...parsedRowTags, ...importTagsArray, originTag]));
+        const combinedTags = Array.from(new Set([...parsedRowTags, ...importTagsArray, ...closedSalesTags, originTag]));
+
+        const valorVenda = Number(row.valor_venda || row.valor || row.valor_total) || null;
 
         parsedLeads.push({
           client_id: clientId,
@@ -1944,14 +1958,19 @@ export function registerLeadsRoutes(app, deps) {
           phone: formattedPhone,
           nome: name,
           stage: validStage,
+          stage_source: isClosedSales ? "manual" : undefined,
           temperature: validTemp,
+          potential_contract_value: valorVenda || undefined,
           tags: combinedTags,
           dados: {
             origem: originTag,
-            origem_marketing: originTag,
-            lead_source: originTag,
-            resumo_chat: row.interesse || row.resumo_chat || "Interação no Direct",
+            origem_marketing: isClosedSales ? "vendas_fechadas" : originTag,
+            lead_source: isClosedSales ? "vendas_fechadas" : originTag,
+            resumo_chat: row.interesse || row.resumo_chat || (isClosedSales ? "Cliente histórico importado como venda fechada" : "Interação no Direct"),
             telefone_bruto: rawPhone ? String(rawPhone).trim() : null,
+            valor_venda: valorVenda || undefined,
+            data_fechamento: row.data_fechamento || undefined,
+            produto_comprado: row.produto_comprado || undefined,
           },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -1981,6 +2000,177 @@ export function registerLeadsRoutes(app, deps) {
     } catch (err) {
       console.error("[leads-csv-import] Erro ao importar CSV:", err);
       sendError(res, 500, "CSV_IMPORT_FAILED", err.message || "Falha ao importar planilha");
+    }
+  });
+
+  // Importação direta de Vendas Fechadas e Clientes Históricos (Bloco 4A)
+  app.post("/api/leads/import-closed-sales", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+    if (!rows || rows.length === 0) {
+      sendError(res, 400, "INVALID_BODY", "Nenhum cliente enviado para importação");
+      return;
+    }
+
+    try {
+      const result = await importClosedSalesBatch(pgDatabasePool, clientId, rows);
+      res.json({
+        success: true,
+        ...result,
+      });
+    } catch (err) {
+      console.error("[import-closed-sales] Erro ao importar vendas fechadas:", err);
+      sendError(res, 500, "IMPORT_CLOSED_SALES_FAILED", err.message || "Falha ao importar vendas fechadas");
+    }
+  });
+
+  // Configurações de Vocabulário do Funil por Tenant (Bloco 3)
+  app.get("/api/leads/funnel-settings", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      const { vocabulary } = await getFunnelSettings(pgDatabasePool, clientId);
+      res.json({
+        success: true,
+        vocabulary,
+      });
+    } catch (err) {
+      console.error("[get-funnel-settings] Erro ao buscar configurações do funil:", err);
+      sendError(res, 500, "FUNNEL_SETTINGS_ERROR", err.message || "Erro ao carregar configurações do funil");
+    }
+  });
+
+  const saveFunnelSettingsHandler = async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const vocabulary = req.body?.vocabulary;
+    if (!vocabulary || typeof vocabulary !== "object") {
+      sendError(res, 400, "INVALID_BODY", "Vocabulário do funil inválido");
+      return;
+    }
+
+    try {
+      const { vocabulary: updated } = await saveFunnelSettings(pgDatabasePool, clientId, vocabulary);
+      res.json({
+        success: true,
+        vocabulary: updated,
+      });
+    } catch (err) {
+      console.error("[save-funnel-settings] Erro ao salvar configurações do funil:", err);
+      sendError(res, 500, "SAVE_FUNNEL_SETTINGS_ERROR", err.message || "Erro ao salvar configurações do funil");
+    }
+  };
+
+  if (typeof app.put === "function") {
+    app.put("/api/leads/funnel-settings", requireFirebaseAuth, requireBancoDeDados, saveFunnelSettingsHandler);
+  }
+  if (typeof app.post === "function") {
+    app.post("/api/leads/funnel-settings", requireFirebaseAuth, requireBancoDeDados, saveFunnelSettingsHandler);
+  }
+
+  // Sugestão de avanço de estágio assistida por IA/Heurística no WhatsApp Inbox (Bloco 4B)
+  app.get("/api/leads/:id/stage-suggestion", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const { id } = req.params;
+    const requestedClientId = normalizeString(req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      const { rows: leadRows } = await pgDatabasePool.query(
+        `SELECT id, stage, stage_source, phone, telefone FROM public.leads WHERE id = $1 AND client_id = $2`,
+        [id, clientId]
+      );
+      if (leadRows.length === 0) {
+        sendError(res, 404, "LEAD_NOT_FOUND", "Lead não encontrado");
+        return;
+      }
+      const lead = leadRows[0];
+      const leadPhone = lead.phone || lead.telefone;
+
+      const { rows: messageRows } = await pgDatabasePool.query(
+        `SELECT message_text, direction, created_at 
+         FROM public.lead_messages 
+         WHERE client_id = $1 AND (lead_id = $2 OR (phone = $3 AND phone IS NOT NULL))
+         ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC 
+         LIMIT 10`,
+        [clientId, lead.id, leadPhone]
+      );
+
+      if (messageRows.length === 0) {
+        res.json({ success: true, hasSuggestion: false });
+        return;
+      }
+
+      const messages = messageRows.reverse().map((m) => m.message_text);
+      const classification = classifyLeadMessages(messages);
+
+      if (
+        classification.stage &&
+        classification.stage !== "cold" &&
+        classification.stage !== lead.stage
+      ) {
+        res.json({
+          success: true,
+          hasSuggestion: true,
+          suggestion: {
+            currentStage: lead.stage,
+            suggestedStage: classification.stage,
+            reason: classification.reason,
+            matchedTerm: classification.matchedTerm,
+            lostReason: classification.lost_reason,
+          },
+        });
+        return;
+      }
+
+      res.json({ success: true, hasSuggestion: false });
+    } catch (err) {
+      console.error("[stage-suggestion] Erro ao analisar sugestão:", err);
+      sendError(res, 500, "SUGGESTION_ERROR", err.message || "Erro ao analisar sugestão");
+    }
+  });
+
+  // Reclassificação de estágio de um lead a partir de mensagens com trava manual (Bloco 2)
+  app.post("/api/leads/:id/reclassify", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const { id } = req.params;
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+
+    try {
+      const result = await reclassifyLeadFromMessages({
+        pool: pgDatabasePool,
+        clientId,
+        leadId: id,
+        messages,
+      });
+
+      res.json({
+        success: true,
+        ...result,
+      });
+    } catch (err) {
+      console.error("[reclassify] Erro ao reclassificar lead:", err);
+      sendError(res, 500, "RECLASSIFY_ERROR", err.message || "Erro ao reclassificar lead");
     }
   });
 

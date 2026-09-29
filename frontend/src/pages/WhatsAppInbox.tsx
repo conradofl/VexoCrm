@@ -48,6 +48,7 @@ import {
   Paperclip,
   Trash2,
   Pencil,
+  X,
 } from "lucide-react";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
@@ -55,6 +56,7 @@ import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "sonner";
+import { useFunnelVocabulary, detectStageSuggestion, canonicalizeStageKey, StageSuggestion } from "@/hooks/useFunnelVocabulary";
 import { PageShell } from "@/components/PageShell";
 import { SectionHeader } from "@/components/SectionHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -230,10 +232,10 @@ function getPreview(chat: WhatsAppChat) {
 }
 
 const FUNNEL_STAGES = [
-  { label: "Novo", value: "novo" },
-  { label: "Atendimento", value: "em_atendimento" },
-  { label: "Qualificado", value: "qualificado" },
-  { label: "Fechado", value: "fechado" },
+  { label: "Novo", value: "cold", key: "cold" },
+  { label: "Atendimento", value: "inquiry", key: "inquiry" },
+  { label: "Qualificado", value: "open_budget", key: "open_budget" },
+  { label: "Fechado", value: "buyer", key: "buyer" },
 ] as const;
 
 
@@ -540,6 +542,8 @@ export default function WhatsAppInbox({
   };
 
   const { data: leads = [], refetch: refetchLeads } = useLeads(clientId || undefined);
+  const { getStageLabel } = useFunnelVocabulary(clientId || undefined);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Record<string, boolean>>({});
 
   // ── Resumos de Chat IA em LocalStorage ─────────────────────────────────────────
   const summariesStorageKey = `vexo_inbox_chat_summaries_${clientId || "global"}`;
@@ -1139,27 +1143,40 @@ export default function WhatsAppInbox({
 
   const currentStageIndex = useMemo(() => {
     if (!matchedLead) return 0;
-    const s = (matchedLead.status || "").toLowerCase();
-    if (s === "fechado" || s === "ganho") return 3;
-    if (s === "qualificado" || matchedLead.qualificacao === "QUENTE") return 2;
-    if (s === "em_atendimento" || s === "atendimento" || !matchedLead.finalizado) return 1;
-    return 0; // "novo"
+    const s = canonicalizeStageKey(matchedLead.stage || matchedLead.status || "");
+    if (s === "buyer") return 3;
+    if (s === "open_budget") return 2;
+    if (s === "inquiry") return 1;
+    return 0; // "cold"
   }, [matchedLead]);
 
-  const handleUpdateFunnelStage = async (newStageValue: string) => {
+  const stageSuggestion = useMemo(() => {
+    if (!selectedChatId || !rawMessages || rawMessages.length === 0) return null;
+    return detectStageSuggestion(rawMessages, matchedLead?.stage || matchedLead?.status);
+  }, [selectedChatId, rawMessages, matchedLead?.stage, matchedLead?.status]);
+
+  const activeSuggestion = selectedChatId && dismissedSuggestions[selectedChatId] ? null : stageSuggestion;
+
+  const handleUpdateFunnelStage = async (newStageValue: string, lostReason?: string | null) => {
     if (!matchedLead?.id) {
       toast.error("Cadastre o lead no CRM antes de alterar o estágio do funil.");
       return;
     }
     try {
       const token = await getIdToken();
+      const canonical = canonicalizeStageKey(newStageValue);
       const res = await fetchApi(`/api/leads/${matchedLead.id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status: newStageValue }),
+        body: JSON.stringify({
+          stage: canonical,
+          status: newStageValue,
+          stage_source: "manual",
+          lost_reason: canonical === "lost" ? (lostReason || "desinteresse") : null,
+        }),
       });
       if (!res.ok) {
         const err = await readApiErrorMessage(res, "Falha ao atualizar estágio.");
@@ -1169,6 +1186,19 @@ export default function WhatsAppInbox({
       refetchLeads();
     } catch (err: any) {
       toast.error("Erro ao atualizar estágio", { description: err.message });
+    }
+  };
+
+  const handleApplyStageSuggestion = (suggestion: StageSuggestion) => {
+    handleUpdateFunnelStage(suggestion.suggestedStage, suggestion.lostReason);
+    if (selectedChatId) {
+      setDismissedSuggestions((prev) => ({ ...prev, [selectedChatId]: true }));
+    }
+  };
+
+  const handleDismissStageSuggestion = () => {
+    if (selectedChatId) {
+      setDismissedSuggestions((prev) => ({ ...prev, [selectedChatId]: true }));
     }
   };
 
@@ -2767,6 +2797,50 @@ export default function WhatsAppInbox({
                 </div>
               </div>
 
+              {/* Sugestão Assistida por IA no Inbox (Bloco 4B) */}
+              {activeSuggestion && matchedLead && (
+                <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-2.5 space-y-2 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-1.5">
+                      <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-purple-900 dark:text-purple-200">
+                          Sugestão da IA
+                        </p>
+                        <p className="text-[11px] text-purple-800/90 dark:text-purple-300 leading-snug">
+                          {activeSuggestion.reason}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDismissStageSuggestion}
+                      className="text-purple-500 hover:text-purple-700 dark:hover:text-purple-300 p-0.5 cursor-pointer"
+                      title="Dispensar sugestão"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <Button
+                      size="sm"
+                      onClick={() => handleApplyStageSuggestion(activeSuggestion)}
+                      className="h-6 text-[11px] px-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded cursor-pointer"
+                    >
+                      Avançar para {getStageLabel(activeSuggestion.suggestedStage)}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleDismissStageSuggestion}
+                      className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      Dispensar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* 2. Trilha Horizontal do Funil Comercial (Estágios reais: Novo, Atendimento, Qualificado, Fechado) */}
               <div className="space-y-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -2778,6 +2852,7 @@ export default function WhatsAppInbox({
                     const isPast = idx < currentStageIndex;
                     const isCurrent = idx === currentStageIndex;
                     const isFuture = idx > currentStageIndex;
+                    const label = getStageLabel(s.key);
 
                     return (
                       <button
@@ -2788,7 +2863,7 @@ export default function WhatsAppInbox({
                         title={
                           !matchedLead
                             ? "Cadastre o lead para alterar o estágio"
-                            : `Mudar estágio para ${s.label}`
+                            : `Mudar estágio para ${label}`
                         }
                         className={cn(
                           "relative flex items-center justify-center py-2 px-1 rounded-lg text-center transition-all cursor-pointer border text-xs w-full min-w-0",
@@ -2800,7 +2875,7 @@ export default function WhatsAppInbox({
                       >
                         <div className="flex items-center gap-1 justify-center truncate px-0.5">
                           {isPast && <Check className="h-3 w-3 shrink-0 stroke-[2.5]" />}
-                          <span className="truncate text-[11px] leading-tight font-medium">{s.label}</span>
+                          <span className="truncate text-[11px] leading-tight font-medium">{label}</span>
                         </div>
                       </button>
                     );

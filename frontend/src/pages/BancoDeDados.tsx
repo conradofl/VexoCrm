@@ -449,6 +449,7 @@ export default function BancoDeDados() {
   const [importMapping, setImportMapping] = useState<{ telefone: string | null; nome: string | null }>({ telefone: null, nome: null });
   const [showImportAuditModal, setShowImportAuditModal] = useState(false);
   const [importTagInput, setImportTagInput] = useState<string>("");
+  const [importAsClosedSales, setImportAsClosedSales] = useState<boolean>(false);
   const [importParsedRows, setImportParsedRows] = useState<Record<string, unknown>[]>([]);
   const [importSanitizePreview, setImportSanitizePreview] = useState<{ validCount: number; invalidCount: number }>({
     validCount: 0,
@@ -883,6 +884,7 @@ export default function BancoDeDados() {
           rows: importParsedRows,
           importTags,
           defaultDdd: importDefaultDdd || undefined,
+          asClosedSales: importAsClosedSales,
         }),
       });
 
@@ -892,12 +894,18 @@ export default function BancoDeDados() {
       }
 
       const data = await res.json();
-      toast.success("Planilha higienizada e importada com sucesso! 🎉", {
-        description: `${data.importedCount || 0} leads inseridos com a tag "${importTagInput}".`,
-      });
+      toast.success(
+        importAsClosedSales
+          ? "Vendas fechadas importadas com sucesso como Compradores! 🏆"
+          : "Planilha higienizada e importada com sucesso! 🎉",
+        {
+          description: `${data.importedCount || 0} leads inseridos com a tag "${importTagInput}".`,
+        }
+      );
 
       setIsImportModalOpen(false);
       setImportFile(null);
+      setImportAsClosedSales(false);
       setImportParsedRows([]);
       setImportRawRows([]);
       fetchLeads();
@@ -3458,6 +3466,27 @@ export default function BancoDeDados() {
                   <p className="text-[11px] text-muted-foreground mt-0.5">
                     Esta tag será vinculada a todos os contatos desta importação para permitir filtros rápidos.
                   </p>
+                </div>
+
+                <div className="flex items-start space-x-2.5 p-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-950/20 text-xs">
+                  <Checkbox
+                    id="import-as-closed-sales"
+                    checked={importAsClosedSales}
+                    onCheckedChange={(checked) => setImportAsClosedSales(Boolean(checked))}
+                    className="mt-0.5 border-emerald-500 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+                  />
+                  <div className="grid gap-0.5 leading-none">
+                    <label
+                      htmlFor="import-as-closed-sales"
+                      className="text-xs font-semibold text-foreground cursor-pointer flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      Importar como Vendas Fechadas (Clientes Históricos / Já Compraram)
+                    </label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Define automaticamente estágio "Fechado" protegido contra automações, temperatura Quente e tag "Venda Fechada".
+                    </p>
+                  </div>
                 </div>
 
                 <div className="bg-muted/40 border border-border rounded-md p-3 text-xs space-y-2">

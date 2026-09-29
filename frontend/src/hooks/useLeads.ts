@@ -26,6 +26,9 @@ export interface LeadRow {
   // meta
   spin_fase: string | null;
   status: string | null;
+  stage?: string | null;
+  stage_source?: string | null;
+  lost_reason?: string | null;
   status_conversa: string | null;
   finalizado: boolean | null;
   dados: Record<string, unknown> | null;
