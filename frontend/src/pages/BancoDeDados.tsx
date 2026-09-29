@@ -2265,7 +2265,7 @@ export default function BancoDeDados() {
                     className="bg-amber-600 hover:bg-amber-700 text-white text-xs gap-1.5 h-8 font-bold shadow-sm"
                   >
                     <Rocket className="w-3.5 h-3.5" />
-                    Disparar Campanha para {activeCh.name} ({count})
+                    Criar Campanha no WhatsApp ({activeCh.name}) ({count})
                   </Button>
 
                   <Button

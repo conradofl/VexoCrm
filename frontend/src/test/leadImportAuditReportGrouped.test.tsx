@@ -142,7 +142,7 @@ describe("LeadImportAuditReport — Relatório & Auditoria redesenhado", () => {
     expect(within(statsGrid).getByText("10")).toBeTruthy();
     expect(within(within(statsGrid).getByText("Enviados").closest("div")! as HTMLElement).getByText("6")).toBeTruthy();
     expect(within(within(statsGrid).getByText("Falhas").closest("div")! as HTMLElement).getByText("3")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Com retorno").closest("div")! as HTMLElement).getByText("2")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Com retorno (14d)").closest("div")! as HTMLElement).getByText("2")).toBeTruthy();
     expect(within(within(statsGrid).getByText("Pendentes").closest("div")! as HTMLElement).getByText("1")).toBeTruthy();
 
     rerenderWithProviders(
@@ -155,7 +155,7 @@ describe("LeadImportAuditReport — Relatório & Auditoria redesenhado", () => {
     });
     expect(within(within(statsGrid).getByText("Enviados").closest("div")! as HTMLElement).getByText("1")).toBeTruthy();
     expect(within(within(statsGrid).getByText("Falhas").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Com retorno").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
+    expect(within(within(statsGrid).getByText("Com retorno (14d)").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
     expect(within(within(statsGrid).getByText("Pendentes").closest("div")! as HTMLElement).getByText("3")).toBeTruthy();
     // nada da planilha A sobra nos cartões
     expect(within(statsGrid).queryByText("10")).toBeNull();

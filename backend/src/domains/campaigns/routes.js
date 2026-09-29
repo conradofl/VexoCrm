@@ -341,6 +341,83 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
   `;
 }
 
+// GET /api/campaigns/reports/import-audit — constrói a query com janela de
+// 14 dias pós-disparo e matching canônico nos dois lados (SQL_CANONICAL_PHONE).
+// Exportada para testes estruturais e validação direta contra regressão.
+export function buildImportAuditSql() {
+  return `
+        SELECT
+          lii.id AS lead_import_item_id,
+          lii.import_id,
+          lii.telefone,
+          lii.normalized_data,
+          lii.created_at AS imported_at,
+          lii.row_number,
+          lii.imported,
+          lii.skip_reason,
+          (
+            SELECT count(*)::int
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+          ) AS dispatch_count,
+          (
+            SELECT max(sent_at)
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+          ) AS last_sent_at,
+          (
+            SELECT max(created_at)
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+          ) AS last_attempt_at,
+          (
+            SELECT status
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) AS last_status,
+          (
+            SELECT error_message
+            FROM public.campaign_dispatch_runs
+            WHERE lead_id = lii.id
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) AS last_error_message,
+          CASE
+            WHEN (
+              SELECT max(sent_at)
+              FROM public.campaign_dispatch_runs
+              WHERE lead_id = lii.id
+            ) IS NULL THEN false
+            ELSE EXISTS (
+              SELECT 1
+              FROM public.lead_messages lm
+              WHERE (
+                lm.phone = lii.telefone
+                OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("lii.telefone")}
+              )
+              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              AND lm.client_id = $1
+              AND COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at) > (
+                SELECT max(sent_at)
+                FROM public.campaign_dispatch_runs
+                WHERE lead_id = lii.id
+              )
+              AND COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at) <= (
+                SELECT max(sent_at)
+                FROM public.campaign_dispatch_runs
+                WHERE lead_id = lii.id
+              ) + interval '14 days'
+            )
+          END AS has_replied
+        FROM public.lead_import_items lii
+        WHERE lii.client_id = $1
+          AND lii.import_id = $2
+        ORDER BY lii.row_number ASC
+  `;
+}
+
 // `is_group` é coluna de public.lead_messages, uma tabela só (não por
 // tenant) — ou existe pra todo mundo, ou não existe pra ninguém. Por isso
 // cacheia (ao contrário do fallback de `temperature`, que é por-requisição):
@@ -3743,57 +3820,7 @@ export function registerCampaignsRoutes(app, deps) {
         return sendError(res, 404, "IMPORT_NOT_FOUND", "Import not found or unauthorized");
       }
 
-      const sql = `
-        SELECT
-          lii.id AS lead_import_item_id,
-          lii.import_id,
-          lii.telefone,
-          lii.normalized_data,
-          lii.created_at AS imported_at,
-          lii.row_number,
-          lii.imported,
-          lii.skip_reason,
-          (
-            SELECT count(*)::int
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-          ) AS dispatch_count,
-          (
-            SELECT max(sent_at)
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-          ) AS last_sent_at,
-          (
-            SELECT max(created_at)
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-          ) AS last_attempt_at,
-          (
-            SELECT status
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-            ORDER BY created_at DESC
-            LIMIT 1
-          ) AS last_status,
-          (
-            SELECT error_message
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-            ORDER BY created_at DESC
-            LIMIT 1
-          ) AS last_error_message,
-          EXISTS (
-            SELECT 1
-            FROM public.lead_messages lm
-            WHERE (lm.lead_id = lii.lead_id OR lm.phone = lii.telefone)
-              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-              AND lm.client_id = $1
-          ) AS has_replied
-        FROM public.lead_import_items lii
-        WHERE lii.client_id = $1
-          AND lii.import_id = $2
-        ORDER BY lii.row_number ASC
-      `;
+      const sql = buildImportAuditSql();
 
       const result = await pgDatabasePool.query(sql, [clientId, importId]);
       // failure_reason — um motivo só, pronto pra agrupar na tela: quem nunca

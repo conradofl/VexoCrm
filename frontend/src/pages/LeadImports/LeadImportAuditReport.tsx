@@ -472,7 +472,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                 <PlanilhaStatCard label="Total de leads" value={stats.total} className="text-slate-800 dark:text-slate-100" />
                 <PlanilhaStatCard label="Enviados" value={stats.sent} className="text-emerald-600 dark:text-emerald-400" />
                 <PlanilhaStatCard label="Falhas" value={stats.failed} className="text-rose-600 dark:text-rose-400" />
-                <PlanilhaStatCard label="Com retorno" value={stats.replied} className="text-indigo-600 dark:text-indigo-400" />
+                <PlanilhaStatCard label="Com retorno (14d)" value={stats.replied} className="text-indigo-600 dark:text-indigo-400" />
                 <PlanilhaStatCard label="Pendentes" value={stats.pending} className="text-slate-700 dark:text-slate-200" />
               </div>
 
@@ -598,7 +598,16 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                         <SortableTableHead sortKey="telefone" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Telefone</SortableTableHead>
                         <SortableTableHead sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Último Status</SortableTableHead>
                         <SortableTableHead sortKey="tentativas" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Tentativas</SortableTableHead>
-                        <SortableTableHead sortKey="retorno" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Retorno?</SortableTableHead>
+                        <SortableTableHead
+                          sortKey="retorno"
+                          activeKey={sortKey}
+                          dir={sortDir}
+                          onSort={handleSort}
+                          center
+                          title="Mede respostas recebidas em até 14 dias pós-disparo"
+                        >
+                          Retorno (14d)
+                        </SortableTableHead>
                         <SortableTableHead sortKey="tempo" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Há quanto tempo</SortableTableHead>
                         <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Motivo da Falha / Detalhe</TableHead>
                       </TableRow>
@@ -736,6 +745,7 @@ function SortableTableHead({
   dir,
   onSort,
   center,
+  title,
   children,
 }: {
   sortKey: SortKey;
@@ -743,12 +753,14 @@ function SortableTableHead({
   dir: "asc" | "desc";
   onSort: (key: SortKey) => void;
   center?: boolean;
+  title?: string;
   children: ReactNode;
 }) {
   const isActive = activeKey === sortKey;
   return (
     <TableHead
       onClick={() => onSort(sortKey)}
+      title={title}
       className={cn(
         "h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 cursor-pointer select-none hover:text-foreground transition-colors",
         center && "text-center"
