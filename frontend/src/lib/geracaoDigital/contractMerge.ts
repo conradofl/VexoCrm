@@ -8,11 +8,12 @@ export function buildSignatureBlock(data: Record<string, any>): string {
 
 export const CONTRACT_FILL_LINE = "______________________________";
 
-export function applyContractMerge(template: string, data: Record<string, string>): string {
+export function applyContractMerge(template: string, data: Record<string, any>): string {
   if (!template) return "";
   
   let result = template;
   for (const [key, value] of Object.entries(data || {})) {
+    if (value != null && typeof value === "object") continue;
     const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
     const val = value != null ? String(value).trim() : "";
     result = result.replace(regex, val || CONTRACT_FILL_LINE);
@@ -36,15 +37,148 @@ const FORMA_PAGAMENTO_TEXTO: Record<string, string> = {
   misto: "parte em dinheiro e parte em permuta",
 };
 
-// Monta o cronograma de vencimentos (Cláusula Quarta) a partir dos campos
-// estruturados: nº de parcelas, valor por parcela e data do 1º vencimento
-// (mensal). Ex: "1º Pagamento — Data 09/07/2026 — Valor: R$ 3.500,00".
-export function buildCronograma(numParcelas: number, valorParcela: number, dataPrimeiroVenc: string): string {
-  const n = Math.max(0, Math.floor(Number(numParcelas) || 0));
+export type FormaPagamentoParcela = "dinheiro" | "pix" | "boleto" | "cartao" | "permuta" | "misto";
+
+export interface ContractParcela {
+  id: string;               // Identificador único temporário ou uuid
+  numero: number;           // 1, 2, 3...
+  data: string;             // YYYY-MM-DD ou "a combinar"
+  valor: number;            // Valor numérico em reais (>= 0)
+  tipo: FormaPagamentoParcela; // Meio de pagamento
+  observacao?: string;      // Observações (ex: "Sinal na assinatura", "Permuta de serviços")
+}
+
+export type PeriodicidadeParcela = "mensal" | "quinzenal" | "semanal" | "livre";
+
+export interface ScheduleTotals {
+  totalGeral: number;
+  totalDinheiro: number;
+  totalPermuta: number;
+  numParcelas: number;
+}
+
+export function formatBrl(val: number): string {
+  return Number(val || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/\s/g, " ");
+}
+
+export function formatScheduleDateDisplay(dateStr: string): string {
+  if (!dateStr || dateStr === "a combinar") return "a combinar";
+  const [yyyy, mm, dd] = String(dateStr).split("-");
+  if (yyyy && mm && dd) return `${dd}/${mm}/${yyyy}`;
+  return String(dateStr);
+}
+
+export function formatTipoParcelaLabel(tipo: FormaPagamentoParcela): string {
+  const map: Record<FormaPagamentoParcela, string> = {
+    dinheiro: "Dinheiro",
+    pix: "PIX",
+    boleto: "Boleto",
+    cartao: "Cartão",
+    permuta: "Permuta",
+    misto: "Misto (Dinheiro + Permuta)",
+  };
+  return map[tipo] || tipo;
+}
+
+export function generateScheduleInstallments({
+  numParcelas,
+  valorTotal,
+  valorPorParcela,
+  dataPrimeiroVenc,
+  periodicidade = "mensal",
+  tipoPadrao = "dinheiro",
+  observacaoPadrao = "",
+}: {
+  numParcelas: number;
+  valorTotal?: number;
+  valorPorParcela?: number;
+  dataPrimeiroVenc: string;
+  periodicidade?: PeriodicidadeParcela;
+  tipoPadrao?: FormaPagamentoParcela;
+  observacaoPadrao?: string;
+}): ContractParcela[] {
+  const n = Math.max(1, Math.floor(Number(numParcelas) || 1));
+  const valor = valorPorParcela !== undefined && Number(valorPorParcela) > 0
+    ? Number(valorPorParcela)
+    : (Number(valorTotal || 0) / n);
+  const baseDate = dataPrimeiroVenc ? new Date(`${dataPrimeiroVenc}T12:00:00`) : null;
+  const parcelas: ContractParcela[] = [];
+  for (let i = 0; i < n; i++) {
+    let dataStr = "";
+    if (baseDate && !isNaN(baseDate.getTime())) {
+      const d = new Date(baseDate);
+      if (periodicidade === "semanal") {
+        d.setDate(d.getDate() + (i * 7));
+      } else if (periodicidade === "quinzenal") {
+        d.setDate(d.getDate() + (i * 15));
+      } else if (periodicidade === "mensal") {
+        d.setMonth(d.getMonth() + i);
+      }
+      dataStr = d.toISOString().slice(0, 10);
+    }
+    parcelas.push({
+      id: `parcela-${i + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      numero: i + 1,
+      data: dataStr || dataPrimeiroVenc || "",
+      valor: Math.round(valor * 100) / 100,
+      tipo: tipoPadrao,
+      observacao: i === 0 && !observacaoPadrao ? "Entrada na assinatura" : (observacaoPadrao || ""),
+    });
+  }
+  return parcelas;
+}
+
+export function calculateScheduleTotals(parcelas: ContractParcela[]): ScheduleTotals {
+  let totalGeral = 0;
+  let totalDinheiro = 0;
+  let totalPermuta = 0;
+  for (const p of parcelas || []) {
+    const val = Number(p.valor) || 0;
+    totalGeral += val;
+    if (p.tipo === "permuta") {
+      totalPermuta += val;
+    } else if (p.tipo === "misto") {
+      totalDinheiro += val / 2;
+      totalPermuta += val / 2;
+    } else {
+      totalDinheiro += val;
+    }
+  }
+  return {
+    totalGeral: Math.round(totalGeral * 100) / 100,
+    totalDinheiro: Math.round(totalDinheiro * 100) / 100,
+    totalPermuta: Math.round(totalPermuta * 100) / 100,
+    numParcelas: (parcelas || []).length,
+  };
+}
+
+export function buildCronograma(
+  numParcelasOrList: number | ContractParcela[],
+  valorParcela?: number,
+  dataPrimeiroVenc?: string
+): string {
+  // Caso 1: Array de parcelas estruturadas (Peça 4)
+  if (Array.isArray(numParcelasOrList)) {
+    const parcelas = numParcelasOrList;
+    if (parcelas.length === 0) return "";
+    const linhas = parcelas.map((p, idx) => {
+      const numOrdinal = `${idx + 1}ª Parcela`;
+      const dataFmt = formatScheduleDateDisplay(p.data);
+      const valorFmt = formatBrl(p.valor);
+      const tipoFmt = formatTipoParcelaLabel(p.tipo);
+      const obsFmt = p.observacao && p.observacao.trim() ? ` — Obs: ${p.observacao.trim()}` : "";
+      return `${numOrdinal} — Vencimento: ${dataFmt} — Valor: ${valorFmt} (${tipoFmt})${obsFmt}`;
+    });
+    const totals = calculateScheduleTotals(parcelas);
+    const resumoLinha = `Total do Contrato: ${formatBrl(totals.totalGeral)} (Em Moeda: ${formatBrl(totals.totalDinheiro)} | Em Permuta: ${formatBrl(totals.totalPermuta)})`;
+    return `${linhas.join("\n")}\n\n${resumoLinha}`;
+  }
+
+  // Caso 2: Modo legado (numParcelas, valorParcela, dataPrimeiroVenc)
+  const n = Math.max(0, Math.floor(Number(numParcelasOrList) || 0));
   const valor = Number(valorParcela) || 0;
   if (n <= 0) return "";
   const base = dataPrimeiroVenc ? new Date(`${dataPrimeiroVenc}T12:00:00`) : null;
-  const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const linhas: string[] = [];
   for (let i = 0; i < n; i++) {
     let dataStr = "a combinar";
@@ -53,16 +187,18 @@ export function buildCronograma(numParcelas: number, valorParcela: number, dataP
       d.setMonth(d.getMonth() + i);
       dataStr = d.toLocaleDateString("pt-BR");
     }
-    linhas.push(`${i + 1}º Pagamento — Data ${dataStr} — Valor: ${brl(valor)}`);
+    linhas.push(`${i + 1}ª Parcela — Data: ${dataStr} — Valor: ${formatBrl(valor)}`);
   }
   return linhas.join("\n");
 }
 
-// Enriquisce o formData com os campos derivados usados no template
+// Enriquece o formData com os campos derivados usados no template
 // (forma_pagamento por extenso, cronograma e assinaturas). Usado no preview e ao gerar.
-export function buildContractDados(formData: Record<string, any>): Record<string, string> {
+export function buildContractDados(formData: Record<string, any>): Record<string, any> {
   const forma = FORMA_PAGAMENTO_TEXTO[String(formData.forma_pagamento || "")] || String(formData.forma_pagamento || "conforme condições da proposta");
-  const cronograma = buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
+  const cronograma = Array.isArray(formData.parcelas) && formData.parcelas.length > 0
+    ? buildCronograma(formData.parcelas)
+    : buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
   const contratada = String(formData.assinatura_contratada || "").trim();
   const contratante = String(formData.assinatura_contratante || formData.razao_social || "").trim();
   const espacoAssinatura = String(formData.espaco_assinatura || "4");
@@ -72,6 +208,7 @@ export function buildContractDados(formData: Record<string, any>): Record<string
     ...formData,
     forma_pagamento: forma,
     cronograma_pagamento: cronograma || String(formData.condicoes_pagamento || "Conforme condições da proposta comercial aceita."),
+    parcelas: Array.isArray(formData.parcelas) ? formData.parcelas : undefined,
     contratada_razao_social: String(formData.contratada_razao_social || "").trim(),
     contratada_cnpj: String(formData.contratada_cnpj || "").trim(),
     contratada_representante: String(formData.contratada_representante || "").trim(),
@@ -342,9 +479,10 @@ export const STANDARD_CONTRACT_FIELDS = new Set([
   "vigencia",
   "foro_cidade",
   "cidade_assinatura",
-  // Sistema / Calculados / Assinaturas
+  // Sistema / Calculados / Assinaturas / Cronograma
   "data_extenso",
   "cronograma_pagamento",
+  "parcelas",
   "assinatura_contratada",
   "assinatura_contratante",
   "espaco_assinatura",

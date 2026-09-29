@@ -4,9 +4,8 @@ import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
 import { saveContractBuffer, getContractBuffer, CONTRACT_MAX_BYTES } from "../../services/storage.js";
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
-// NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
-import { assembleContractFromBlocks } from "./contractMerge.js";
+import { assembleContractFromBlocks, buildCronograma } from "./contractMerge.js";
 
 // Helper for formatting date
 function formatExtenseDate() {
@@ -341,6 +340,11 @@ export async function buildContractPdfBuffer(tenantId, id) {
   dados.assinatura_contratada = dados.assinatura_contratada || contratadaConfig.assinatura || "";
   if (!dados.foro_cidade && dados.contratada_comarca) {
     dados.foro_cidade = dados.contratada_comarca;
+  }
+
+  // Se o contrato tem parcelas estruturadas salvas, garante a formatação atualizada do cronograma
+  if (Array.isArray(dados?.parcelas) && dados.parcelas.length > 0) {
+    dados.cronograma_pagamento = buildCronograma(dados.parcelas);
   }
 
   // Se o usuário editou o texto final na tela, renderiza diretamente ignorando o template

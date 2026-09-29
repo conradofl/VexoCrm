@@ -185,9 +185,10 @@ export const STANDARD_CONTRACT_FIELDS = new Set([
   "vigencia",
   "foro_cidade",
   "cidade_assinatura",
-  // Sistema / Calculados / Assinaturas
+  // Sistema / Calculados / Assinaturas / Cronograma
   "data_extenso",
   "cronograma_pagamento",
+  "parcelas",
   "assinatura_contratada",
   "assinatura_contratante",
   "espaco_assinatura",
@@ -198,6 +199,167 @@ export function isSystemOrStandardField(key) {
   if (STANDARD_CONTRACT_FIELDS.has(key)) return true;
   if (key.startsWith("contratada_")) return true;
   return false;
+}
+
+/**
+ * Formata um valor numérico em moeda brasileira (BRL).
+ */
+export function formatBrl(val) {
+  return Number(val || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/\s/g, " ");
+}
+
+/**
+ * Formata a data de uma parcela (YYYY-MM-DD -> DD/MM/YYYY).
+ */
+export function formatScheduleDateDisplay(dateStr) {
+  if (!dateStr || dateStr === "a combinar") return "a combinar";
+  const [yyyy, mm, dd] = String(dateStr).split("-");
+  if (yyyy && mm && dd) return `${dd}/${mm}/${yyyy}`;
+  return String(dateStr);
+}
+
+/**
+ * Retorna o rótulo amigável para o meio de pagamento da parcela.
+ */
+export function formatTipoParcelaLabel(tipo) {
+  const map = {
+    dinheiro: "Dinheiro",
+    pix: "PIX",
+    boleto: "Boleto",
+    cartao: "Cartão",
+    permuta: "Permuta",
+    misto: "Misto (Dinheiro + Permuta)",
+  };
+  return map[tipo] || tipo;
+}
+
+/**
+ * Projeta parcelas de acordo com a periodicidade selecionada (semanal, quinzenal, mensal ou livre).
+ */
+export function generateScheduleInstallments({
+  numParcelas,
+  valorTotal,
+  valorPorParcela,
+  dataPrimeiroVenc,
+  periodicidade = "mensal",
+  tipoPadrao = "dinheiro",
+  observacaoPadrao = "",
+} = {}) {
+  const n = Math.max(1, Math.floor(Number(numParcelas) || 1));
+  const valor = valorPorParcela !== undefined && Number(valorPorParcela) > 0
+    ? Number(valorPorParcela)
+    : (Number(valorTotal || 0) / n);
+  const baseDate = dataPrimeiroVenc ? new Date(`${dataPrimeiroVenc}T12:00:00`) : null;
+  const parcelas = [];
+  for (let i = 0; i < n; i++) {
+    let dataStr = "";
+    if (baseDate && !isNaN(baseDate.getTime())) {
+      const d = new Date(baseDate);
+      if (periodicidade === "semanal") {
+        d.setDate(d.getDate() + (i * 7));
+      } else if (periodicidade === "quinzenal") {
+        d.setDate(d.getDate() + (i * 15));
+      } else if (periodicidade === "mensal") {
+        d.setMonth(d.getMonth() + i);
+      }
+      dataStr = d.toISOString().slice(0, 10);
+    }
+    parcelas.push({
+      id: `parcela-${i + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      numero: i + 1,
+      data: dataStr || dataPrimeiroVenc || "",
+      valor: Math.round(valor * 100) / 100,
+      tipo: tipoPadrao,
+      observacao: i === 0 && !observacaoPadrao ? "Entrada na assinatura" : (observacaoPadrao || ""),
+    });
+  }
+  return parcelas;
+}
+
+/**
+ * Calcula os totais segregados do cronograma: total geral, moeda corrente e permuta.
+ */
+export function calculateScheduleTotals(parcelas = []) {
+  let totalGeral = 0;
+  let totalDinheiro = 0;
+  let totalPermuta = 0;
+  for (const p of parcelas || []) {
+    const val = Number(p.valor) || 0;
+    totalGeral += val;
+    if (p.tipo === "permuta") {
+      totalPermuta += val;
+    } else if (p.tipo === "misto") {
+      totalDinheiro += val / 2;
+      totalPermuta += val / 2;
+    } else {
+      totalDinheiro += val;
+    }
+  }
+  return {
+    totalGeral: Math.round(totalGeral * 100) / 100,
+    totalDinheiro: Math.round(totalDinheiro * 100) / 100,
+    totalPermuta: Math.round(totalPermuta * 100) / 100,
+    numParcelas: (parcelas || []).length,
+  };
+}
+
+/**
+ * Monta a cláusula textual do cronograma de pagamento suportando tanto o array
+ * de parcelas flexíveis (Peça 4) quanto a assinatura legada de 3 argumentos.
+ */
+export function buildCronograma(
+  numParcelasOrList,
+  valorParcela,
+  dataPrimeiroVenc
+) {
+  // Caso 1: Array de parcelas estruturadas (Peça 4)
+  if (Array.isArray(numParcelasOrList)) {
+    const parcelas = numParcelasOrList;
+    if (parcelas.length === 0) return "";
+    const linhas = parcelas.map((p, idx) => {
+      const numOrdinal = `${idx + 1}ª Parcela`;
+      const dataFmt = formatScheduleDateDisplay(p.data);
+      const valorFmt = formatBrl(p.valor);
+      const tipoFmt = formatTipoParcelaLabel(p.tipo);
+      const obsFmt = p.observacao && p.observacao.trim() ? ` — Obs: ${p.observacao.trim()}` : "";
+      return `${numOrdinal} — Vencimento: ${dataFmt} — Valor: ${valorFmt} (${tipoFmt})${obsFmt}`;
+    });
+    const totals = calculateScheduleTotals(parcelas);
+    const resumoLinha = `Total do Contrato: ${formatBrl(totals.totalGeral)} (Em Moeda: ${formatBrl(totals.totalDinheiro)} | Em Permuta: ${formatBrl(totals.totalPermuta)})`;
+    return `${linhas.join("\n")}\n\n${resumoLinha}`;
+  }
+
+  // Caso 2: Modo legado (numParcelas, valorParcela, dataPrimeiroVenc)
+  const n = Math.max(0, Math.floor(Number(numParcelasOrList) || 0));
+  const valor = Number(valorParcela) || 0;
+  if (n <= 0) return "";
+  const base = dataPrimeiroVenc ? new Date(`${dataPrimeiroVenc}T12:00:00`) : null;
+  const linhas = [];
+  for (let i = 0; i < n; i++) {
+    let dataStr = "a combinar";
+    if (base && !isNaN(base.getTime())) {
+      const d = new Date(base);
+      d.setMonth(d.getMonth() + i);
+      dataStr = d.toLocaleDateString("pt-BR");
+    }
+    linhas.push(`${i + 1}ª Parcela — Data: ${dataStr} — Valor: ${formatBrl(valor)}`);
+  }
+  return linhas.join("\n");
+}
+
+export function buildContractDados(formData = {}) {
+  const forma = String(formData.forma_pagamento || "conforme condições da proposta");
+  const cronograma = Array.isArray(formData.parcelas) && formData.parcelas.length > 0
+    ? buildCronograma(formData.parcelas)
+    : buildCronograma(formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc);
+
+  const result = {
+    ...formData,
+    forma_pagamento: forma,
+    cronograma_pagamento: cronograma || String(formData.condicoes_pagamento || "Conforme condições da proposta comercial aceita."),
+    parcelas: Array.isArray(formData.parcelas) ? formData.parcelas : undefined,
+  };
+  return result;
 }
 
 /**

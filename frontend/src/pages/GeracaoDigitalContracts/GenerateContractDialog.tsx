@@ -20,6 +20,10 @@ import {
   ArrowDown,
   Save,
   BookmarkPlus,
+  Calendar,
+  CreditCard,
+  DollarSign,
+  RefreshCw,
 } from "lucide-react";
 import {
   buildContractDados,
@@ -30,6 +34,12 @@ import {
   extractPlaceholders,
   extractDynamicPlaceholders,
   formatFieldLabel,
+  ContractParcela,
+  FormaPagamentoParcela,
+  PeriodicidadeParcela,
+  generateScheduleInstallments,
+  calculateScheduleTotals,
+  formatBrl,
 } from "@/lib/geracaoDigital/contractMerge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -39,7 +49,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 
-const CONTRACT_DEFAULTS: Record<string, string> = {
+const CONTRACT_DEFAULTS: Record<string, any> = {
   // Contratante
   razao_social: "",
   cnpj: "",
@@ -65,6 +75,7 @@ const CONTRACT_DEFAULTS: Record<string, string> = {
   num_parcelas: "6",
   valor_parcela: "",
   data_primeiro_venc: "",
+  parcelas: [],
   // Prazo / foro / assinatura
   prazo_dias: "180",
   aviso_previo_dias: "60",
@@ -77,10 +88,13 @@ const CONTRACT_DEFAULTS: Record<string, string> = {
 };
 
 // Ignora chaves vazias para não apagar default com string em branco.
-function somentePreenchidos(obj: Record<string, any> = {}): Record<string, string> {
+function somentePreenchidos(obj: Record<string, any> = {}): Record<string, any> {
   return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "")
-  ) as Record<string, string>;
+    Object.entries(obj).filter(([, v]) => {
+      if (Array.isArray(v)) return v.length > 0;
+      return v !== undefined && v !== null && String(v).trim() !== "";
+    })
+  );
 }
 
 interface GenerateContractDialogProps {
@@ -193,6 +207,7 @@ export function GenerateContractDialog({
     }
     return map;
   }, [clausulas]);
+
 
   const handleMoveClause = (index: number, direction: -1 | 1) => {
     const targetIndex = index + direction;
@@ -333,6 +348,126 @@ export function GenerateContractDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, contractId]);
 
+  // Estados para o Gerador de Cronograma de Pagamento (Item 11)
+  const [schedulePeriodicidade, setSchedulePeriodicidade] = useState<PeriodicidadeParcela>("mensal");
+  const [scheduleTipoPadrao, setScheduleTipoPadrao] = useState<FormaPagamentoParcela>("dinheiro");
+  const [scheduleValorTotal, setScheduleValorTotal] = useState<string>("");
+
+  // Inicialização inteligente da grade de parcelas se ainda não houver array estruturado
+  useEffect(() => {
+    if (open && (!formData.parcelas || formData.parcelas.length === 0)) {
+      const n = Number(formData.num_parcelas) || 0;
+      const v = Number(formData.valor_parcela) || 0;
+      if (n > 0 && v > 0) {
+        const generated = generateScheduleInstallments({
+          numParcelas: n,
+          valorPorParcela: v,
+          dataPrimeiroVenc: formData.data_primeiro_venc || "",
+          periodicidade: schedulePeriodicidade,
+          tipoPadrao: (formData.forma_pagamento as FormaPagamentoParcela) || "dinheiro",
+        });
+        setFormData((prev) => ({ ...prev, parcelas: generated }));
+      }
+    }
+  }, [open, formData.num_parcelas, formData.valor_parcela, formData.data_primeiro_venc]);
+
+  // Totalizadores em tempo real
+  const scheduleTotals = React.useMemo(() => {
+    return calculateScheduleTotals(formData.parcelas || []);
+  }, [formData.parcelas]);
+
+  const handleGenerateSchedule = () => {
+    const n = Number(formData.num_parcelas) || 1;
+    const vParcela = Number(formData.valor_parcela) || 0;
+    const vTotal = Number(scheduleValorTotal) || 0;
+    const dt = formData.data_primeiro_venc || "";
+
+    if (n <= 0) {
+      toast({ title: "Nº de parcelas inválido", description: "Informe ao menos 1 parcela.", variant: "destructive" });
+      return;
+    }
+
+    const generated = generateScheduleInstallments({
+      numParcelas: n,
+      valorTotal: vTotal > 0 ? vTotal : undefined,
+      valorPorParcela: vParcela > 0 ? vParcela : undefined,
+      dataPrimeiroVenc: dt,
+      periodicidade: schedulePeriodicidade,
+      tipoPadrao: scheduleTipoPadrao,
+    });
+
+    setFormData((prev) => ({
+      ...prev,
+      parcelas: generated,
+      num_parcelas: String(generated.length),
+      valor_parcela: String(generated[0]?.valor || prev.valor_parcela),
+    }));
+
+    toast({
+      title: "Grade de parcelas gerada",
+      description: `${generated.length} parcela(s) gerada(s) com periodicidade ${schedulePeriodicidade}.`,
+    });
+  };
+
+  const handleUpdateParcela = (id: string, field: keyof ContractParcela, value: any) => {
+    setFormData((prev) => {
+      const current = prev.parcelas || [];
+      const updated = current.map((p) => {
+        if (p.id !== id) return p;
+        const item = { ...p, [field]: value };
+        if (field === "valor") {
+          item.valor = Math.max(0, Number(value) || 0);
+        }
+        return item;
+      });
+      return { ...prev, parcelas: updated };
+    });
+  };
+
+  const handleRemoveParcela = (id: string) => {
+    setFormData((prev) => {
+      const current = prev.parcelas || [];
+      const filtered = current.filter((p) => p.id !== id);
+      const renumbered = filtered.map((p, idx) => ({ ...p, numero: idx + 1 }));
+      return {
+        ...prev,
+        parcelas: renumbered,
+        num_parcelas: String(renumbered.length),
+      };
+    });
+  };
+
+  const handleAddParcelaAvulsa = () => {
+    setFormData((prev) => {
+      const current = prev.parcelas || [];
+      const last = current[current.length - 1];
+      let nextDate = "";
+      if (last && last.data && last.data !== "a combinar") {
+        const d = new Date(`${last.data}T12:00:00`);
+        if (!isNaN(d.getTime())) {
+          if (schedulePeriodicidade === "semanal") d.setDate(d.getDate() + 7);
+          else if (schedulePeriodicidade === "quinzenal") d.setDate(d.getDate() + 15);
+          else d.setMonth(d.getMonth() + 1);
+          nextDate = d.toISOString().slice(0, 10);
+        }
+      }
+      const newP: ContractParcela = {
+        id: `parcela-${current.length + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        numero: current.length + 1,
+        data: nextDate || prev.data_primeiro_venc || "",
+        valor: last ? last.valor : Number(prev.valor_parcela) || 0,
+        tipo: last ? last.tipo : scheduleTipoPadrao,
+        observacao: "",
+      };
+      const updated = [...current, newP];
+      return {
+        ...prev,
+        parcelas: updated,
+        num_parcelas: String(updated.length),
+      };
+    });
+  };
+
   // Puxa (de novo) tudo que já foi negociado na proposta: escopo, forma de
   // pagamento, parcelas, valor, 1º vencimento e prazo. Útil quando existe um
   // rascunho antigo no navegador, criado antes destes campos existirem.
@@ -342,7 +477,28 @@ export function GenerateContractDialog({
       toast({ title: "Nada para puxar", description: "Esta proposta não tem dados aproveitáveis.", variant: "destructive" });
       return;
     }
-    setFormData((prev) => ({ ...prev, ...vindos }));
+    const n = Number(vindos.num_parcelas) || Number(formData.num_parcelas) || 1;
+    const v = Number(vindos.valor_parcela) || Number(formData.valor_parcela) || 0;
+    const dt = vindos.data_primeiro_venc || formData.data_primeiro_venc || "";
+    const fp = (vindos.forma_pagamento as FormaPagamentoParcela) || "dinheiro";
+
+    let generatedParcelas = vindos.parcelas;
+    if (!generatedParcelas || generatedParcelas.length === 0) {
+      if (n > 0 && v > 0) {
+        generatedParcelas = generateScheduleInstallments({
+          numParcelas: n,
+          valorPorParcela: v,
+          dataPrimeiroVenc: dt,
+          tipoPadrao: fp,
+        });
+      }
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      ...vindos,
+      ...(generatedParcelas ? { parcelas: generatedParcelas } : {}),
+    }));
     toast({ title: "Dados da proposta aplicados", description: `${Object.keys(vindos).length} campo(s) preenchido(s) a partir da proposta.` });
   };
 
@@ -679,34 +835,259 @@ export function GenerateContractDialog({
                 <Input name="artes_mensais" value={formData.artes_mensais || ""} onChange={handleChange} type="number" placeholder="Ex: 15" />
               </div>
 
-              {/* Cláusula 5ª — Preço e Condições (estruturado) */}
-              <div className="md:col-span-2 border-t border-slate-200 dark:border-white/10 pt-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-purple-650 dark:text-purple-400">Preço e Condições (Cláusula 5ª)</span>
-              </div>
-              <div className="space-y-2">
-                <Label>Forma de pagamento</Label>
-                <select
-                  name="forma_pagamento"
-                  value={formData.forma_pagamento || "permuta"}
-                  onChange={handleChange}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 h-10 text-sm text-slate-800 dark:text-slate-100"
-                >
-                  <option value="permuta">100% permuta (troca de serviços)</option>
-                  <option value="dinheiro">Dinheiro</option>
-                  <option value="misto">Misto (dinheiro + permuta)</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>Nº de parcelas</Label>
-                <Input name="num_parcelas" value={formData.num_parcelas || ""} onChange={handleChange} type="number" placeholder="Ex: 6" />
-              </div>
-              <div className="space-y-2">
-                <Label>Valor por parcela (R$)</Label>
-                <Input name="valor_parcela" value={formData.valor_parcela || ""} onChange={handleChange} type="number" placeholder="Ex: 3500" />
-              </div>
-              <div className="space-y-2">
-                <Label>Data do 1º vencimento</Label>
-                <Input name="data_primeiro_venc" value={formData.data_primeiro_venc || ""} onChange={handleChange} type="date" />
+              {/* Seção de Preço e Cronograma de Pagamento (Item 11) */}
+              <div className="md:col-span-2 border-t border-slate-200 dark:border-white/10 pt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-purple-650 dark:text-purple-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-purple-650 dark:text-purple-400">
+                      Preço e Cronograma de Pagamento
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {(formData.parcelas || []).length} parcela(s) configurada(s)
+                  </span>
+                </div>
+
+                {/* Painel de Projeção / Geração Rápida de Parcelas */}
+                <div className="p-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <RefreshCw className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+                      Gerador Rápido de Parcelas
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">Projete a grade com intervalos regulares</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Periodicidade</Label>
+                      <select
+                        value={schedulePeriodicidade}
+                        onChange={(e) => setSchedulePeriodicidade(e.target.value as PeriodicidadeParcela)}
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-2.5 h-8 text-xs text-slate-800 dark:text-slate-100"
+                      >
+                        <option value="mensal">Mensal (30 dias)</option>
+                        <option value="quinzenal">Quinzenal (15 dias)</option>
+                        <option value="semanal">Semanal (7 dias)</option>
+                        <option value="livre">Datas Livres / Avulsas</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Nº de Parcelas</Label>
+                      <Input
+                        name="num_parcelas"
+                        type="number"
+                        min="1"
+                        value={formData.num_parcelas || ""}
+                        onChange={handleChange}
+                        className="h-8 text-xs"
+                        placeholder="Ex: 4"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Valor Parcela (R$)</Label>
+                      <Input
+                        name="valor_parcela"
+                        type="number"
+                        step="0.01"
+                        value={formData.valor_parcela || ""}
+                        onChange={handleChange}
+                        className="h-8 text-xs"
+                        placeholder="Ex: 1500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Ou Valor Total (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={scheduleValorTotal}
+                        onChange={(e) => setScheduleValorTotal(e.target.value)}
+                        className="h-8 text-xs"
+                        placeholder="Ex: 6000"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">1º Vencimento</Label>
+                      <Input
+                        name="data_primeiro_venc"
+                        type="date"
+                        value={formData.data_primeiro_venc || ""}
+                        onChange={handleChange}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60 dark:border-white/5">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-[11px] whitespace-nowrap">Meio Padrão:</Label>
+                      <select
+                        value={scheduleTipoPadrao}
+                        onChange={(e) => setScheduleTipoPadrao(e.target.value as FormaPagamentoParcela)}
+                        className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-2 h-7 text-xs text-slate-800 dark:text-slate-100"
+                      >
+                        <option value="dinheiro">Dinheiro</option>
+                        <option value="pix">PIX</option>
+                        <option value="boleto">Boleto</option>
+                        <option value="cartao">Cartão</option>
+                        <option value="permuta">Permuta</option>
+                        <option value="misto">Misto</option>
+                      </select>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleGenerateSchedule}
+                      className="h-7 text-xs gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Gerar / Recalcular Grade
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Grade Interativa de Parcelas (Tabela Editável) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Grade de Parcelas & Vencimentos
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddParcelaAvulsa}
+                      className="h-7 text-xs gap-1 border-dashed"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Adicionar Parcela Avulsa
+                    </Button>
+                  </div>
+
+                  {(!formData.parcelas || formData.parcelas.length === 0) ? (
+                    <div className="text-center py-6 border border-dashed rounded-lg text-muted-foreground text-xs">
+                      Nenhuma parcela configurada. Clique em <b>"Gerar / Recalcular Grade"</b> acima ou <b>"Adicionar Parcela Avulsa"</b>.
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 dark:border-white/10 rounded-lg overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 dark:bg-white/5 border-b border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400">
+                          <tr>
+                            <th className="py-2 px-2 text-left w-10">#</th>
+                            <th className="py-2 px-2 text-left w-36">Vencimento</th>
+                            <th className="py-2 px-2 text-left w-32">Valor (R$)</th>
+                            <th className="py-2 px-2 text-left w-36">Meio / Tipo</th>
+                            <th className="py-2 px-2 text-left">Observação</th>
+                            <th className="py-2 px-2 text-center w-12">Ação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                          {formData.parcelas.map((parcela, idx) => (
+                            <tr key={parcela.id || `p-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.02]">
+                              <td className="py-1.5 px-2 font-medium text-slate-500 whitespace-nowrap">
+                                {idx + 1}ª
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <Input
+                                  type="date"
+                                  value={parcela.data || ""}
+                                  onChange={(e) => handleUpdateParcela(parcela.id, "data", e.target.value)}
+                                  className="h-7 text-xs"
+                                />
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={parcela.valor !== undefined ? parcela.valor : ""}
+                                  onChange={(e) => handleUpdateParcela(parcela.id, "valor", e.target.value)}
+                                  className="h-7 text-xs font-mono"
+                                />
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <select
+                                  value={parcela.tipo || "dinheiro"}
+                                  onChange={(e) => handleUpdateParcela(parcela.id, "tipo", e.target.value as FormaPagamentoParcela)}
+                                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-2 h-7 text-xs text-slate-800 dark:text-slate-100"
+                                >
+                                  <option value="dinheiro">Dinheiro</option>
+                                  <option value="pix">PIX</option>
+                                  <option value="boleto">Boleto</option>
+                                  <option value="cartao">Cartão</option>
+                                  <option value="permuta">Permuta</option>
+                                  <option value="misto">Misto</option>
+                                </select>
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <Input
+                                  type="text"
+                                  value={parcela.observacao || ""}
+                                  placeholder="Ex: Sinal na assinatura, Entrega da 1ª remessa..."
+                                  onChange={(e) => handleUpdateParcela(parcela.id, "observacao", e.target.value)}
+                                  className="h-7 text-xs"
+                                />
+                              </td>
+                              <td className="py-1.5 px-2 text-center">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveParcela(parcela.id)}
+                                  className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                  title="Remover parcela"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Cards de Totais do Cronograma (Cálculo Reativo em Tempo Real) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <div className="p-2.5 rounded-lg border border-purple-200 dark:border-purple-800/60 bg-purple-50/60 dark:bg-purple-950/30">
+                    <div className="text-[11px] font-medium text-purple-700 dark:text-purple-300">Total do Contrato</div>
+                    <div className="text-base font-bold font-mono text-purple-900 dark:text-purple-100">
+                      {formatBrl(scheduleTotals.totalGeral)}
+                    </div>
+                    <div className="text-[10px] text-purple-600/80 dark:text-purple-400/80">
+                      {scheduleTotals.numParcelas} parcela(s)
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/30">
+                    <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">Em Moeda Corrente</div>
+                    <div className="text-base font-bold font-mono text-emerald-900 dark:text-emerald-100">
+                      {formatBrl(scheduleTotals.totalDinheiro)}
+                    </div>
+                    <div className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">
+                      PIX, Dinheiro, Boleto ou Cartão
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/30">
+                    <div className="text-[11px] font-medium text-amber-700 dark:text-amber-300">Em Permuta de Serviços</div>
+                    <div className="text-base font-bold font-mono text-amber-900 dark:text-amber-100">
+                      {formatBrl(scheduleTotals.totalPermuta)}
+                    </div>
+                    <div className="text-[10px] text-amber-600/80 dark:text-amber-400/80">
+                      Troca / contrapartida de produtos/serviços
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Dados da Contratada (neste contrato) */}

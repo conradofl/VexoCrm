@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { ContractClauseBlock } from "@/lib/geracaoDigital/contractMerge";
+import { ContractClauseBlock, ContractParcela } from "@/lib/geracaoDigital/contractMerge";
 
 export interface GdContractTemplate {
   id: string;
@@ -27,6 +27,7 @@ export interface GdContractFormData {
   texto_final?: string;
   assinatura_contratada?: string;
   assinatura_contratante?: string;
+  parcelas?: ContractParcela[];
   [key: string]: any;
 }
 
