@@ -1902,6 +1902,7 @@ export function registerLeadsRoutes(app, deps) {
 
     try {
       let importedCount = 0;
+      let skippedNoPhoneCount = 0;
       const parsedLeads = [];
 
       for (const row of rows) {
@@ -1910,9 +1911,10 @@ export function registerLeadsRoutes(app, deps) {
         const name = normalizeString(row.nome || row.name || row.cliente || row.contato || formattedPhone || "Lead Social");
 
         if (!formattedPhone) {
-          // Gera número E.164 com prefixo 5500 (13 dígitos exatos: 5500 + 9 dígitos)
-          const randomSuffix = Math.floor(100000000 + Math.random() * 900000000);
-          formattedPhone = `5500${randomSuffix}`;
+          // Sem telefone válido: não inventa número sintético 5500.
+          // Linha é pulada no cadastro de WhatsApp da planilha.
+          skippedNoPhoneCount++;
+          continue;
         }
 
         const stageInput = normalizeString(row.stage || row.estagio || row.etapa)?.toLowerCase();
@@ -1970,7 +1972,12 @@ export function registerLeadsRoutes(app, deps) {
         }
       }
 
-      res.json({ success: true, importedCount, totalRows: rows.length });
+      res.json({
+        success: true,
+        importedCount,
+        skippedNoPhoneCount,
+        totalRows: rows.length,
+      });
     } catch (err) {
       console.error("[leads-csv-import] Erro ao importar CSV:", err);
       sendError(res, 500, "CSV_IMPORT_FAILED", err.message || "Falha ao importar planilha");
