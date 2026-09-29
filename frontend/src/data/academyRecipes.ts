@@ -434,26 +434,37 @@ export const ACADEMY_RECIPES: AcademyRecipe[] = [
     prerequisites: ["Clientes ativos no Banco."],
     timeLabel: "30 minutos",
     whatHappens:
-      'Ainda não instala sozinho: a data de cada aviso muda por cliente e por obrigação, e o sistema não tem como saber qual é na hora de escrever o conteúdo.',
-    installable: false,
-    // Nome técnico do gatilho: fixed_date.
-    notInstallableReason:
-      "As datas mudam por cliente e por obrigação — não tem como instalar isso sozinho sem inventar uma data. Monte em Follow-up → Cadências com gatilho de data fixa, preenchendo a data real de cada aviso. Os três textos abaixo estão prontos pra copiar.",
+      "Cadência de 3 passos com datas fixas definidas por você na instalação (15 dias antes, 3 dias antes e no dia seguinte à entrega).",
     cadenceName: "Avisar prazo antes de perguntarem",
     cadenceDescription: "Cadência de avisos de prazo fiscal, montada à mão por cliente e obrigação.",
-    templates: [],
-    manualSteps: [
+    templates: [
       {
         label: "15 dias antes do prazo",
-        message: "Bom dia, {{nome}}. O prazo de {{obrigacao}} vence dia {{data}}.\nDo seu lado precisamos de {{documento}}. Se já mandou, ignora — é só pra não pegar de surpresa.",
+        message:
+          "Bom dia, {{nome}}. O prazo de {{obrigacao}} vence dia {{data}}.\nDo seu lado precisamos de {{documento}}. Se já mandou, ignora — é só pra não pegar de surpresa.",
+        trigger_type: "fixed_date",
+        trigger_value: 0,
+        trigger_unit: "days",
+        trigger_direction: null,
       },
       {
         label: "3 dias antes do prazo",
-        message: "{{nome}}, faltam três dias pro prazo de {{obrigacao}} e ainda estamos sem {{documento}}.\nConsegue mandar hoje? Se tiver dificuldade, me chama.",
+        message:
+          "{{nome}}, faltam três dias pro prazo de {{obrigacao}} e ainda estamos sem {{documento}}.\nConsegue mandar hoje? Se tiver dificuldade, me chama.",
+        trigger_type: "fixed_date",
+        trigger_value: 0,
+        trigger_unit: "days",
+        trigger_direction: null,
       },
       {
         label: "No dia seguinte à entrega, às 17h",
-        message: "{{nome}}, {{obrigacao}} entregue, tudo certo.\nGuarda o comprovante — se precisar em banco ou licitação, já está à mão.",
+        message:
+          "{{nome}}, {{obrigacao}} entregue, tudo certo.\nGuarda o comprovante — se precisar em banco ou licitação, já está à mão.",
+        trigger_type: "fixed_date",
+        trigger_value: 0,
+        trigger_unit: "days",
+        trigger_direction: null,
+        scheduled_time: "17:00",
       },
     ],
     screenNote:

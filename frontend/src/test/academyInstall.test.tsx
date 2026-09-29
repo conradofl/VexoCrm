@@ -294,6 +294,83 @@ describe("AcademyInstallDialog — instalar de verdade", () => {
     expect(body.scheduled_date).toBeUndefined();
   });
 
+  it("[TESTE OBRIGATÓRIO] receita com datas fixas pede as datas e envia no POST dos templates", async () => {
+    const fixedRecipe = ACADEMY_RECIPES.find((r) => r.id === "receita-contabilidade-avisar-prazo")!;
+    expect(fixedRecipe).toBeTruthy();
+    expect(fixedRecipe.templates).toHaveLength(3);
+
+    fetchMock = vi.fn(async (url: string, options?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/followup/companies")) {
+        return jsonResponse({ companies: [{ id: "company-1", name: "Agente Um" }] });
+      }
+      if (u.includes("/api/followup/campaigns") && (!options || options.method === undefined)) {
+        return jsonResponse({ campaigns: [] });
+      }
+      if (u.includes("/api/followup/campaigns") && options?.method === "POST") {
+        return jsonResponse({ campaign: { id: "campaign-fixed", name: JSON.parse(options.body as string).name } }, 201);
+      }
+      if (u.includes("/api/followup/templates") && options?.method === "POST") {
+        return jsonResponse({ template: { id: "tpl-fixed" } }, 201);
+      }
+      if (u.includes("/api/academy/recipe-usage")) {
+        return jsonResponse({ success: true }, 201);
+      }
+      return jsonResponse({});
+    });
+    global.fetch = fetchMock as any;
+
+    const { AcademyInstallDialog } = await import("@/components/academy/AcademyInstallDialog");
+    const { container } = renderWithProviders(
+      <AcademyInstallDialog recipe={fixedRecipe} clientId="tenant-teste" open={true} onOpenChange={vi.fn()} />
+    );
+
+    // 1. Verifica que os 3 inputs de data aparecem na tela
+    const dateInputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    expect(dateInputs).toHaveLength(3);
+
+    // 2. Escolhe o agente
+    fireEvent.click(await screen.findByRole("combobox"));
+    fireEvent.click(await screen.findByText("Agente Um"));
+
+    // 3. Verifica que o botão Instalar permanece disabled enquanto as 3 datas não forem digitadas
+    const btnInstalar = screen.getByRole("button", { name: /^Instalar$/ });
+    expect(btnInstalar).toHaveProperty("disabled", true);
+
+    // Digita a primeira data -> continua disabled
+    fireEvent.change(dateInputs[0], { target: { value: "2026-10-05" } });
+    expect(btnInstalar).toHaveProperty("disabled", true);
+
+    // Digita a segunda data -> continua disabled
+    fireEvent.change(dateInputs[1], { target: { value: "2026-10-17" } });
+    expect(btnInstalar).toHaveProperty("disabled", true);
+
+    // Digita a terceira data -> habilita
+    fireEvent.change(dateInputs[2], { target: { value: "2026-10-21" } });
+    expect(btnInstalar).toHaveProperty("disabled", false);
+
+    // 4. Clica em Instalar
+    fireEvent.click(btnInstalar);
+
+    // 5. Valida que os 3 POSTs de /api/followup/templates receberam exatamente as scheduled_date preenchidas
+    await waitFor(() => {
+      const templateCalls = fetchMock.mock.calls.filter(
+        ([u, o]: [string, RequestInit?]) => String(u).includes("/api/followup/templates") && o?.method === "POST"
+      );
+      expect(templateCalls).toHaveLength(3);
+    });
+
+    const templateCalls = fetchMock.mock.calls.filter(
+      ([u, o]: [string, RequestInit?]) => String(u).includes("/api/followup/templates") && o?.method === "POST"
+    );
+
+    const bodies = templateCalls.map((call) => JSON.parse((call[1] as RequestInit).body as string));
+    expect(bodies[0].scheduled_date).toBe("2026-10-05");
+    expect(bodies[1].scheduled_date).toBe("2026-10-17");
+    expect(bodies[2].scheduled_date).toBe("2026-10-21");
+    expect(bodies[2].scheduled_time).toBe("17:00");
+  });
+
   it("[TESTE OBRIGATÓRIO] nenhum lugar do código da Academy gera data a partir de new Date()", () => {
     // O placeholder de data (rodada 2) foi removido de propósito — data
     // inventada que parece data é o defeito que a rodada 3 caçou. Este

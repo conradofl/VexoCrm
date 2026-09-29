@@ -222,22 +222,19 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     }
   });
 
-  it("[TESTE OBRIGATÓRIO] nenhuma receita instalável tem passo fixed_date — a data muda por cliente/obrigação, ninguém instala isso sozinho", () => {
-    // fixed_date exige uma data real (YYYY-MM-DD) pra passar na validação do
-    // backend. Nenhuma receita da Academy sabe essa data de antemão — ela
-    // muda por cliente e por obrigação. Um passo fixed_date em `templates`
-    // (o array que o botão instala) obrigaria inventar uma data só pra
-    // passar na validação, e isso já foi tentado e revertido (rodada 2).
+  it("[TESTE OBRIGATÓRIO] nenhum passo fixed_date instalável traz scheduled_date inventada no catálogo estático", () => {
     for (const recipe of ACADEMY_RECIPES) {
       for (const tpl of recipe.templates) {
-        expect(tpl.trigger_type, `${recipe.id} / ${tpl.label} tem trigger_type fixed_date instalável`).not.toBe("fixed_date");
+        if (tpl.trigger_type === "fixed_date") {
+          expect(tpl.scheduled_date, `${recipe.id} / ${tpl.label} tem scheduled_date inventada no catálogo estático`).toBeUndefined();
+        }
       }
     }
   });
 
   it("[TESTE OBRIGATÓRIO] toda receita não instalável não tem botão de instalar, e diz o que falta", async () => {
     const naoInstalaveis = ACADEMY_RECIPES.filter((r) => r.installable === false);
-    expect(naoInstalaveis.length, "esperava 'Quem acabou de voltar' e 'Avisar prazo antes de perguntarem' como installable=false").toBe(2);
+    expect(naoInstalaveis.length, "esperava apenas 'Quem acabou de voltar' como installable=false").toBe(1);
 
     const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
     renderWithProviders(<OnboardingWizard />);

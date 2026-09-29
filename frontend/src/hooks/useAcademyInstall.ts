@@ -29,10 +29,12 @@ export function useInstallAcademyRecipe() {
       recipe,
       companyId,
       clientId,
+      stepDates,
     }: {
       recipe: AcademyRecipe;
       companyId: string;
       clientId: string;
+      stepDates?: Record<number, string>;
     }): Promise<AcademyInstallResult> => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
@@ -78,6 +80,7 @@ export function useInstallAcademyRecipe() {
       // O conteúdo de verdade da receita — as mensagens, na ordem declarada.
       for (let i = 0; i < recipe.templates.length; i += 1) {
         const tpl = recipe.templates[i];
+        const finalScheduledDate = stepDates?.[i] || tpl.scheduled_date;
         const templateRes = await fetchApi("/api/followup/templates", {
           method: "POST",
           headers: authHeaders,
@@ -91,7 +94,7 @@ export function useInstallAcademyRecipe() {
             trigger_direction: tpl.trigger_direction,
             anchor_field: tpl.anchor_field,
             scheduled_time: tpl.scheduled_time,
-            scheduled_date: tpl.scheduled_date,
+            scheduled_date: finalScheduledDate,
             order_index: i,
           }),
         });

@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useFupCompanies } from "@/hooks/useFollowupAdmin";
 import { useInstallAcademyRecipe } from "@/hooks/useAcademyInstall";
@@ -34,16 +35,28 @@ export function AcademyInstallDialog({ recipe, clientId, open, onOpenChange }: A
   const [companyId, setCompanyId] = useState("");
   const install = useInstallAcademyRecipe();
 
+  const fixedDateSteps = (recipe.templates || [])
+    .map((tpl, idx) => ({ tpl, idx }))
+    .filter(({ tpl }) => tpl.trigger_type === "fixed_date" && !tpl.scheduled_date);
+
+  const [stepDates, setStepDates] = useState<Record<number, string>>({});
+
   useEffect(() => {
-    if (open) setCompanyId("");
+    if (open) {
+      setCompanyId("");
+      setStepDates({});
+    }
   }, [open]);
 
   const hasCompanies = !isLoading && (companies?.length || 0) > 0;
+  const allFixedDatesFilled = fixedDateSteps.every(
+    ({ idx }) => typeof stepDates[idx] === "string" && stepDates[idx].trim().length > 0
+  );
 
   const handleConfirm = () => {
-    if (!companyId) return;
+    if (!companyId || !allFixedDatesFilled) return;
     install.mutate(
-      { recipe, companyId, clientId },
+      { recipe, companyId, clientId, stepDates },
       {
         onSuccess: (result) => {
           onOpenChange(false);
@@ -96,11 +109,34 @@ export function AcademyInstallDialog({ recipe, clientId, open, onOpenChange }: A
           </Select>
         )}
 
+        {fixedDateSteps.length > 0 && (
+          <div className="space-y-3 pt-3 border-t">
+            <p className="text-xs font-medium text-muted-foreground">
+              Esta receita usa datas fixas. Escolha a data de envio para cada aviso:
+            </p>
+            {fixedDateSteps.map(({ tpl, idx }) => (
+              <div key={idx} className="space-y-1">
+                <label htmlFor={`step-date-${idx}`} className="text-xs font-medium text-foreground block">
+                  {tpl.label}
+                </label>
+                <Input
+                  id={`step-date-${idx}`}
+                  type="date"
+                  value={stepDates[idx] || ""}
+                  onChange={(e) =>
+                    setStepDates((prev) => ({ ...prev, [idx]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={!companyId || install.isPending} onClick={handleConfirm}>
+          <Button disabled={!companyId || !allFixedDatesFilled || install.isPending} onClick={handleConfirm}>
             {install.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
             Instalar
           </Button>
