@@ -82,3 +82,28 @@ export function calculateBasePotential(
     isConfigured: true,
   };
 }
+
+export type BasePotentialSegmentId = "never_contacted" | "in_conversation" | "in_negotiation";
+
+/**
+ * Classifica um lead em uma das três faixas do Potencial da Base.
+ * Leads convertidos (buyer) ou descartados (lost) ficam fora das faixas (retorna null).
+ */
+export function getLeadSegment(lead: any): BasePotentialSegmentId | null {
+  if (!lead) return null;
+  if (lead.stage === "buyer" || lead.stage === "lost") return null;
+  // 1. Em Negociação: stage === 'open_budget' ou status === 'orcamento'
+  if (lead.stage === "open_budget" || lead.status === "orcamento") {
+    return "in_negotiation";
+  }
+  // 2. Em Conversa: possui resumo comercial sem escape 🚫
+  const summary =
+    lead.raw_chat_summary || lead.chat_summary || lead.summary || lead.dados?.resumo_chat;
+  const hasCommercialChat =
+    typeof summary === "string" && summary.trim().length > 0 && !/^🚫/u.test(summary.trim());
+  if (hasCommercialChat) {
+    return "in_conversation";
+  }
+  // 3. Nunca abordados: todo o restante da base ativa
+  return "never_contacted";
+}

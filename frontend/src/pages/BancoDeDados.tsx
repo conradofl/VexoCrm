@@ -38,6 +38,8 @@ import {
   ArrowUp,
   ArrowDown,
   Instagram,
+  HelpCircle,
+  CheckSquare,
 } from "lucide-react";
 import { InstagramImportModal } from "@/components/leads/InstagramImportModal";
 import { ContactsWithoutChannelSection } from "@/components/leads/ContactsWithoutChannelSection";
@@ -46,7 +48,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useUpdateLeadClientTicketMedio } from "@/hooks/useLeadClients";
-import { calculateBasePotential } from "@/lib/leads/basePotential";
+import { calculateBasePotential, getLeadSegment, type BasePotentialSegmentId } from "@/lib/leads/basePotential";
 import { API_BASE_URL, fetchApi, readApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
@@ -381,6 +383,7 @@ export default function BancoDeDados() {
   const [selectedTag, setSelectedTag] = useState<string>("");
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedChannel, setSelectedChannel] = useState<string>("all");
+  const [selectedSegment, setSelectedSegment] = useState<BasePotentialSegmentId | null>(null);
   const [knownTags, setKnownTags] = useState<string[]>([]);
   const [knownSources, setKnownSources] = useState<string[]>([]);
   const [isInstagramImportModalOpen, setIsInstagramImportModalOpen] = useState(false);
@@ -1782,10 +1785,11 @@ export default function BancoDeDados() {
       const sourceStr = getLeadSource(item);
       const sourceOk = !selectedSource || sourceStr === selectedSource;
       const channelOk = selectedChannel === "all" || getLeadMarketingChannelId(item) === selectedChannel;
+      const segmentOk = !selectedSegment || getLeadSegment(item) === selectedSegment;
 
-      return searchOk && stageOk && tagOk && sourceOk && channelOk;
+      return searchOk && stageOk && tagOk && sourceOk && channelOk && segmentOk;
     });
-  }, [leads, searchQuery, activeTab, selectedTag, selectedSource, selectedChannel]);
+  }, [leads, searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, selectedSegment]);
 
   // Sorted list based on column header clicks
   const sortedLeads = useMemo(() => {
@@ -1852,7 +1856,7 @@ export default function BancoDeDados() {
   // Reset pagination when filters, search or sort change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, pageSize, sortColumn, sortDirection]);
+  }, [searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, selectedSegment, pageSize, sortColumn, sortDirection]);
 
   const totalFilteredLeads = filteredLeads.length;
   const totalPages = Math.max(1, Math.ceil(totalFilteredLeads / pageSize));
@@ -1921,7 +1925,8 @@ export default function BancoDeDados() {
     selectedSource ||
     selectedChannel !== "all" ||
     searchQuery.trim() ||
-    activeTab !== "all"
+    activeTab !== "all" ||
+    selectedSegment !== null
   );
 
   const handleClearAllFilters = () => {
@@ -1930,7 +1935,14 @@ export default function BancoDeDados() {
     setSelectedChannel("all");
     setSearchQuery("");
     setActiveTab("all");
+    setSelectedSegment(null);
   };
+
+  const activeSegmentTitle = useMemo(() => {
+    if (!selectedSegment) return null;
+    const seg = potentialSegments.find((s) => s.id === selectedSegment);
+    return seg?.title || selectedSegment;
+  }, [selectedSegment, potentialSegments]);
 
   // Badges & Temperature Helpers
   const getStageBadge = (stage?: string | null, lostReason?: string | null, stageSource?: string | null) => {
@@ -2396,31 +2408,26 @@ export default function BancoDeDados() {
               potentialSegments.map((segment) => {
                 if (segment.count <= 0) return null;
                 const percentage = (segment.count / basePotential.activeLeadsCount) * 100;
+                const isSelected = selectedSegment === segment.id;
                 return (
-                  <Popover key={segment.id}>
-                    <PopoverTrigger asChild>
-                      <button
-                        type="button"
-                        className={cn(
-                          "h-full transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer shrink",
-                          segment.barColor
-                        )}
-                        style={{
-                          width: `${percentage}%`,
-                          minWidth: "4px",
-                        }}
-                        title={`${segment.title}: ${segment.count.toLocaleString("pt-BR")}`}
-                        aria-label={`${segment.title}: ${segment.count.toLocaleString("pt-BR")}`}
-                      />
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80 text-xs p-3 space-y-1.5" side="bottom" align="center">
-                      <div className="flex items-center gap-1.5 font-semibold text-foreground text-sm">
-                        <div className={cn("w-2 h-2 rounded-full shrink-0", segment.indicatorColor)} />
-                        <span>{segment.title}</span>
-                      </div>
-                      <p className="text-muted-foreground leading-relaxed">{segment.explanation}</p>
-                    </PopoverContent>
-                  </Popover>
+                  <button
+                    key={segment.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedSegment(isSelected ? null : (segment.id as BasePotentialSegmentId))
+                    }
+                    className={cn(
+                      "h-full transition-all hover:opacity-90 focus:outline-none cursor-pointer shrink relative",
+                      segment.barColor,
+                      isSelected && "ring-2 ring-primary ring-inset brightness-110 z-10"
+                    )}
+                    style={{
+                      width: `${percentage}%`,
+                      minWidth: "4px",
+                    }}
+                    title={`${segment.title}: ${segment.count.toLocaleString("pt-BR")} (clique para filtrar)`}
+                    aria-label={`${segment.title}: ${segment.count.toLocaleString("pt-BR")}`}
+                  />
                 );
               })
             )}
@@ -2428,18 +2435,34 @@ export default function BancoDeDados() {
 
           {/* Legenda em 3 colunas (empilha em 1 no mobile) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 pt-1">
-            {potentialSegments.map((segment) => (
-              <Popover key={segment.id}>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex items-start gap-2.5 text-left p-1.5 -m-1.5 rounded-md hover:bg-muted/40 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer group"
-                  >
-                    <div className={cn("w-1 self-stretch rounded-full shrink-0 my-0.5", segment.indicatorColor)} />
+            {potentialSegments.map((segment) => {
+              const isSelected = selectedSegment === segment.id;
+              return (
+                <div
+                  key={segment.id}
+                  onClick={() =>
+                    setSelectedSegment(isSelected ? null : (segment.id as BasePotentialSegmentId))
+                  }
+                  className={cn(
+                    "flex items-start justify-between p-2.5 rounded-lg border transition-all cursor-pointer group",
+                    isSelected
+                      ? "ring-2 ring-primary border-primary bg-primary/5 dark:bg-primary/10 shadow-sm"
+                      : "border-border/60 bg-card hover:bg-muted/40 hover:border-border"
+                  )}
+                >
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className={cn("w-1.5 self-stretch rounded-full shrink-0 my-0.5", segment.indicatorColor)} />
                     <div className="flex flex-col min-w-0">
-                      <span className="text-[11px] text-muted-foreground font-medium truncate">
-                        {segment.title} · {segment.count.toLocaleString("pt-BR")}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground font-medium truncate">
+                          {segment.title} · {segment.count.toLocaleString("pt-BR")}
+                        </span>
+                        {isSelected && (
+                          <Badge variant="secondary" className="text-[10px] ml-1.5 h-4 px-1.5 font-normal">
+                            Ativo
+                          </Badge>
+                        )}
+                      </div>
                       {basePotential.isConfigured && segment.value != null && (
                         <span className="text-[17px] font-bold text-foreground leading-tight mt-0.5">
                           {segment.value.toLocaleString("pt-BR", {
@@ -2450,17 +2473,32 @@ export default function BancoDeDados() {
                         </span>
                       )}
                     </div>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 text-xs p-3 space-y-1.5" side="bottom" align="start">
-                  <div className="flex items-center gap-1.5 font-semibold text-foreground text-sm">
-                    <div className={cn("w-2 h-2 rounded-full shrink-0", segment.indicatorColor)} />
-                    <span>{segment.title}</span>
                   </div>
-                  <p className="text-muted-foreground leading-relaxed">{segment.explanation}</p>
-                </PopoverContent>
-              </Popover>
-            ))}
+
+                  {/* Botão de Info com Popover explicativo */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-muted-foreground/60 hover:text-foreground p-1 rounded-full hover:bg-muted shrink-0 transition-colors"
+                        title="Ver explicação desta faixa"
+                        aria-label={`Explicação sobre ${segment.title}`}
+                      >
+                        <HelpCircle className="w-3.5 h-3.5" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 text-xs p-3 space-y-1.5" side="bottom" align="end">
+                      <div className="flex items-center gap-1.5 font-semibold text-foreground text-sm">
+                        <div className={cn("w-2 h-2 rounded-full shrink-0", segment.indicatorColor)} />
+                        <span>{segment.title}</span>
+                      </div>
+                      <p className="text-muted-foreground leading-relaxed">{segment.explanation}</p>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              );
+            })}
           </div>
         </Card>
 
@@ -2642,6 +2680,30 @@ export default function BancoDeDados() {
                   <X className="w-3 h-3" />
                 </button>
               </Badge>
+            )}
+            {selectedSegment && (
+              <>
+                <Badge variant="outline" className="gap-1.5 py-1 px-2.5 bg-background">
+                  <span>Faixa: <strong>{activeSegmentTitle}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSegment(null)}
+                    className="hover:text-destructive p-0.5 rounded"
+                    title="Remover filtro de faixa"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedLeadIds(filteredLeads.map((l) => l.id))}
+                  className="text-xs h-7 gap-1.5"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  Selecionar todos desta faixa ({filteredLeads.length})
+                </Button>
+              </>
             )}
             <Button
               variant="link"

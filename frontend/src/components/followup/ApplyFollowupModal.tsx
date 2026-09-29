@@ -198,6 +198,10 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
     };
   }, [cadenceId, leads.length]);
 
+  const totalSelected = leads.length;
+  const validPhoneCount = leads.filter((l) => Boolean(l.phone || l.telefone)).length;
+  const missingPhoneCount = totalSelected - validPhoneCount;
+
   const stepPreviews = steps.map((s) => ({ step: s, preview: getStepPreview(s, meetingDatetime) }));
   const validStepsCount = stepPreviews.filter((p) => p.preview.type === "valid").length;
   const hasOnlySkippedSteps = steps.length > 0 && validStepsCount === 0;
@@ -291,6 +295,18 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
         </DialogHeader>
 
         <div className="space-y-4">
+          <div className="rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground flex items-center justify-between border">
+            <span>
+              <strong>{validPhoneCount}</strong> de <strong>{totalSelected}</strong> leads com WhatsApp válido
+            </span>
+            {missingPhoneCount > 0 && (
+              <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/30 text-[11px] gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                {missingPhoneCount} sem telefone (serão pulados)
+              </Badge>
+            )}
+          </div>
+
           {errorDetails && (
             <Alert variant="destructive" className="py-2.5">
               <AlertCircle className="h-4 w-4" />

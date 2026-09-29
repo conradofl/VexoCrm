@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateBasePotential,
+  getLeadSegment,
   type BasePotentialSummary,
 } from "../lib/leads/basePotential";
 
@@ -88,5 +89,47 @@ describe("Funil de 3 Faixas — calculateBasePotential (Potencial da Base)", () 
     expect(result.inNegotiationValue).toBe(0);
     expect(result.activeLeadsCount).toBe(0);
     expect(result.totalActiveValue).toBe(0);
+  });
+});
+
+describe("Classificação de Faixa — getLeadSegment (Potencial da Base)", () => {
+  it("lead com stage 'open_budget' ou status 'orcamento' é classificado como in_negotiation", () => {
+    expect(getLeadSegment({ stage: "open_budget" })).toBe("in_negotiation");
+    expect(getLeadSegment({ status: "orcamento" })).toBe("in_negotiation");
+    expect(getLeadSegment({ stage: "open_budget", status: "orcamento" })).toBe("in_negotiation");
+    expect(getLeadSegment({ stage: "lead", status: "orcamento" })).toBe("in_negotiation");
+  });
+
+  it("lead com stage 'buyer' ou 'lost' fica fora das faixas (retorna null)", () => {
+    expect(getLeadSegment({ stage: "buyer" })).toBeNull();
+    expect(getLeadSegment({ stage: "lost" })).toBeNull();
+    // Mesmo que tenha orçamento ou conversa, buyer/lost tem precedência
+    expect(getLeadSegment({ stage: "buyer", status: "orcamento" })).toBeNull();
+    expect(getLeadSegment({ stage: "lost", raw_chat_summary: "Cliente interessado" })).toBeNull();
+  });
+
+  it("lead com resumo comercial ativo é classificado como in_conversation", () => {
+    expect(getLeadSegment({ raw_chat_summary: "Cliente perguntou preços de consultoria" })).toBe("in_conversation");
+    expect(getLeadSegment({ chat_summary: "Agendando demonstração" })).toBe("in_conversation");
+    expect(getLeadSegment({ summary: "Interesse confirmado" })).toBe("in_conversation");
+    expect(getLeadSegment({ dados: { resumo_chat: "Conversa em andamento" } })).toBe("in_conversation");
+  });
+
+  it("lead com resumo iniciando por 🚫 (não-comercial) é classificado como never_contacted", () => {
+    expect(getLeadSegment({ raw_chat_summary: "🚫 Sem interação comercial relevante" })).toBe("never_contacted");
+    expect(getLeadSegment({ chat_summary: "🚫 Mensagem automática do sistema" })).toBe("never_contacted");
+  });
+
+  it("lead sem resumo ou com histórico vazio é classificado como never_contacted", () => {
+    expect(getLeadSegment({})).toBe("never_contacted");
+    expect(getLeadSegment({ stage: "lead" })).toBe("never_contacted");
+    expect(getLeadSegment({ raw_chat_summary: "" })).toBe("never_contacted");
+    expect(getLeadSegment({ raw_chat_summary: "   " })).toBe("never_contacted");
+    expect(getLeadSegment({ raw_chat_summary: null })).toBe("never_contacted");
+  });
+
+  it("retorna null para lead nulo ou indefinido", () => {
+    expect(getLeadSegment(null)).toBeNull();
+    expect(getLeadSegment(undefined)).toBeNull();
   });
 });
