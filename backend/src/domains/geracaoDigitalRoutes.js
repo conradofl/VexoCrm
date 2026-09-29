@@ -397,6 +397,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           canais JSONB DEFAULT '{}'::jsonb,
           modulos_custom JSONB DEFAULT '{}'::jsonb,
           fechamento JSONB DEFAULT '{}'::jsonb,
+          team_users JSONB DEFAULT '[]'::jsonb,
+          knowledge_files JSONB DEFAULT '[]'::jsonb,
+          cinco_pilares JSONB DEFAULT '{}'::jsonb,
           status TEXT NOT NULL DEFAULT 'em_andamento',
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -404,6 +407,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       `);
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings DROP CONSTRAINT IF EXISTS gd_implementation_briefings_tenant_id_fkey`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings DROP CONSTRAINT IF EXISTS gd_implementation_briefings_tenant_id_fkey`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ALTER COLUMN tenant_id TYPE text USING tenant_id::text`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ALTER COLUMN tenant_id TYPE text USING tenant_id::text`));
+      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS team_users JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS team_users JSONB DEFAULT '[]'::jsonb`));
+      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS knowledge_files JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS knowledge_files JSONB DEFAULT '[]'::jsonb`));
+      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS cinco_pilares JSONB DEFAULT '{}'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS cinco_pilares JSONB DEFAULT '{}'::jsonb`));
       // Bloco de auto-migração de background REMOVIDO: a migração já foi feita
       // manualmente e o código anterior embutia a senha do banco em texto puro
       // (3 connection strings hardcoded). Migração é operação pontual, não deve
@@ -3689,6 +3695,9 @@ Condições: ${condicoes}`;
         canais = {},
         modulos_custom = {},
         fechamento = {},
+        team_users = [],
+        knowledge_files = [],
+        cinco_pilares = {},
         status = 'em_andamento',
         owner_company: ownerCompanyInput
       } = req.body;
@@ -3705,8 +3714,8 @@ Condições: ${condicoes}`;
         `INSERT INTO public.gd_implementation_briefings (
           tenant_id, client_name, model_type, suggested_model, num_employees,
           has_commercial_sector, prerequisites, operacao, inteligencia, agente_ia,
-          canais, modulos_custom, fechamento, status, owner_company
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          canais, modulos_custom, fechamento, team_users, knowledge_files, cinco_pilares, status, owner_company
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *`,
         [
           effectiveTenantId, client_name, effectiveModelType, suggested_model || effectiveModelType,
@@ -3714,7 +3723,11 @@ Condições: ${condicoes}`;
           JSON.stringify(prerequisites), JSON.stringify(operacao),
           JSON.stringify(inteligencia), JSON.stringify(agente_ia),
           JSON.stringify(canais), JSON.stringify(modulos_custom),
-          JSON.stringify(fechamento), status, owner_company
+          JSON.stringify(fechamento),
+          JSON.stringify(Array.isArray(team_users) ? team_users : []),
+          JSON.stringify(Array.isArray(knowledge_files) ? knowledge_files : []),
+          JSON.stringify(cinco_pilares || {}),
+          status, owner_company
         ]
       );
 
@@ -3752,6 +3765,9 @@ Condições: ${condicoes}`;
         canais,
         modulos_custom,
         fechamento,
+        team_users,
+        knowledge_files,
+        cinco_pilares,
         status
       } = req.body;
 
@@ -3780,9 +3796,12 @@ Condições: ${condicoes}`;
           canais = COALESCE($10, canais),
           modulos_custom = COALESCE($11, modulos_custom),
           fechamento = COALESCE($12, fechamento),
-          status = $13,
+          team_users = COALESCE($13, team_users),
+          knowledge_files = COALESCE($14, knowledge_files),
+          cinco_pilares = COALESCE($15, cinco_pilares),
+          status = $16,
           updated_at = NOW()
-        WHERE id = $14 RETURNING *`,
+        WHERE id = $17 RETURNING *`,
         [
           client_name, model_type, suggested_model,
           num_employees !== undefined ? Number(num_employees) : null,
@@ -3794,6 +3813,9 @@ Condições: ${condicoes}`;
           canais ? JSON.stringify(canais) : null,
           modulos_custom ? JSON.stringify(modulos_custom) : null,
           fechamento ? JSON.stringify(fechamento) : null,
+          team_users !== undefined ? JSON.stringify(Array.isArray(team_users) ? team_users : []) : null,
+          knowledge_files !== undefined ? JSON.stringify(Array.isArray(knowledge_files) ? knowledge_files : []) : null,
+          cinco_pilares !== undefined ? JSON.stringify(cinco_pilares || {}) : null,
           newStatus, id
         ]
       );

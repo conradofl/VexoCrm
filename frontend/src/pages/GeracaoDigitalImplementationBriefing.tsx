@@ -53,7 +53,25 @@ import {
   FileCode,
   FileSpreadsheet,
   Zap,
+  ShoppingBag,
+  DollarSign,
 } from "lucide-react";
+
+export interface CincoPilares {
+  pilar1_produtos_servicos: string;
+  pilar2_preco_condicoes: string;
+  pilar3_funcionamento_prazos: string;
+  pilar4_duvidas_frequentes: string;
+  pilar5_nao_prometer: string;
+}
+
+export const DEFAULT_CINCO_PILARES: CincoPilares = {
+  pilar1_produtos_servicos: "",
+  pilar2_preco_condicoes: "",
+  pilar3_funcionamento_prazos: "",
+  pilar4_duvidas_frequentes: "",
+  pilar5_nao_prometer: "",
+};
 
 type ModelType = "essencial" | "avancado";
 
@@ -117,6 +135,7 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     { id: "1", name: "", email: "", role: "sdr" },
   ]);
   const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFile[]>([]);
+  const [cincoPilares, setCincoPilares] = useState<CincoPilares>(DEFAULT_CINCO_PILARES);
 
   // Briefing Form State
   const [prerequisites, setPrerequisites] = useState({
@@ -306,6 +325,7 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
         fechamento,
         team_users: teamUsers,
         knowledge_files: knowledgeFiles,
+        cinco_pilares: cincoPilares,
         status,
         owner_company: isVexoCommercial ? "vexo" : "geracao-digital",
       };
@@ -357,6 +377,7 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     setCurrentStep(1);
     setTeamUsers([{ id: "1", name: "", email: "", role: "sdr" }]);
     setKnowledgeFiles([]);
+    setCincoPilares(DEFAULT_CINCO_PILARES);
     setPrerequisites({
       segmento: "",
       unidades: "1",
@@ -435,8 +456,19 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     if (b.canais) setCanais(prev => ({ ...prev, ...b.canais }));
     if (b.modulos_custom) setModulosCustom(prev => ({ ...prev, ...b.modulos_custom }));
     if (b.fechamento) setFechamento(prev => ({ ...prev, ...b.fechamento }));
-    if (Array.isArray(b.team_users)) setTeamUsers(b.team_users);
-    if (Array.isArray(b.knowledge_files)) setKnowledgeFiles(b.knowledge_files);
+    setTeamUsers(Array.isArray(b.team_users) ? b.team_users : []);
+    setKnowledgeFiles(Array.isArray(b.knowledge_files) ? b.knowledge_files : []);
+    if (b.cinco_pilares && typeof b.cinco_pilares === "object") {
+      setCincoPilares({
+        pilar1_produtos_servicos: b.cinco_pilares.pilar1_produtos_servicos || b.cinco_pilares.pilar1 || "",
+        pilar2_preco_condicoes: b.cinco_pilares.pilar2_preco_condicoes || b.cinco_pilares.pilar2 || "",
+        pilar3_funcionamento_prazos: b.cinco_pilares.pilar3_funcionamento_prazos || b.cinco_pilares.pilar3 || "",
+        pilar4_duvidas_frequentes: b.cinco_pilares.pilar4_duvidas_frequentes || b.cinco_pilares.pilar4 || "",
+        pilar5_nao_prometer: b.cinco_pilares.pilar5_nao_prometer || b.cinco_pilares.pilar5 || "",
+      });
+    } else {
+      setCincoPilares(DEFAULT_CINCO_PILARES);
+    }
 
     setActiveTabMode("form");
     setCurrentStep(1);
@@ -445,6 +477,26 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
       description: `Editando briefing técnico de ${b.client_name}.`,
     });
   };
+
+  // Ao selecionar empresa ou quando existingBriefings carregar para um briefing já em edição
+  useEffect(() => {
+    if (editingBriefingId && existingBriefings.length > 0) {
+      const b = existingBriefings.find((item: any) => item.id === editingBriefingId);
+      if (b) {
+        if (Array.isArray(b.team_users)) setTeamUsers(b.team_users);
+        if (Array.isArray(b.knowledge_files)) setKnowledgeFiles(b.knowledge_files);
+        if (b.cinco_pilares && typeof b.cinco_pilares === "object") {
+          setCincoPilares({
+            pilar1_produtos_servicos: b.cinco_pilares.pilar1_produtos_servicos || b.cinco_pilares.pilar1 || "",
+            pilar2_preco_condicoes: b.cinco_pilares.pilar2_preco_condicoes || b.cinco_pilares.pilar2 || "",
+            pilar3_funcionamento_prazos: b.cinco_pilares.pilar3_funcionamento_prazos || b.cinco_pilares.pilar3 || "",
+            pilar4_duvidas_frequentes: b.cinco_pilares.pilar4_duvidas_frequentes || b.cinco_pilares.pilar4 || "",
+            pilar5_nao_prometer: b.cinco_pilares.pilar5_nao_prometer || b.cinco_pilares.pilar5 || "",
+          });
+        }
+      }
+    }
+  }, [editingBriefingId, existingBriefings]);
 
   // Team users handlers
   const addTeamUser = () => {
@@ -1215,8 +1267,9 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
                         Formatos aceitos: PDF, TXT, DOCX, CSV (Cardápios, Tabelas de Preço, Manuais, PDFs)
                       </p>
                     </div>
-                    <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-white dark:bg-slate-900 font-bold">
-                      Arquivo ainda não é salvo — fica só na memória deste navegador até você sair da página
+                    <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-slate-900 font-bold inline-flex items-center gap-1.5">
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                      Arquivos e regras são salvos e persistidos com segurança no banco de dados
                     </Badge>
                   </div>
 
@@ -1269,14 +1322,129 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
                     )}
                   </div>
 
+                  {/* SEÇÃO DOS 5 PILARES FUNDAMENTAIS DE CONHECIMENTO */}
+                  <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                        Os 5 Pilares Fundamentais de Conhecimento do Agente IA
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Estruture o conhecimento essencial que o agente precisa para responder aos clientes com precisão, segurança e autoridade.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      {/* PILAR 1 */}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-black">1</span>
+                            O que a Empresa Vende (Catálogo & Público-Alvo)
+                          </Label>
+                          <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-200">Pilar 1</Badge>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Catálogo de produtos ou serviços principais, diferenciais competitivos e descrição do público-alvo ideal.
+                        </p>
+                        <Textarea
+                          placeholder="Ex: Somos uma clínica especializada em implantes e ortodontia invisível para adultos da classe A/B. Vendemos avaliação inicial, clareamento a laser e tratamentos ortodônticos completos."
+                          value={cincoPilares.pilar1_produtos_servicos}
+                          onChange={(e) => setCincoPilares(prev => ({ ...prev, pilar1_produtos_servicos: e.target.value }))}
+                          className="text-xs min-h-[90px] bg-white dark:bg-slate-900"
+                        />
+                      </div>
+
+                      {/* PILAR 2 */}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-black">2</span>
+                            Preço, Pagamento & Condições Comerciais
+                          </Label>
+                          <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-200">Pilar 2</Badge>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Tabela de preços, faixas de investimento, formas de pagamento aceitas, taxas e condições de parcelamento.
+                        </p>
+                        <Textarea
+                          placeholder="Ex: Consulta de avaliação custa R$ 150 (abatida no fechamento do tratamento). Clareamento R$ 900 à vista no Pix ou 3x de R$ 330. Parcelamento em até 10x sem juros no cartão ou boleto com entrada."
+                          value={cincoPilares.pilar2_preco_condicoes}
+                          onChange={(e) => setCincoPilares(prev => ({ ...prev, pilar2_preco_condicoes: e.target.value }))}
+                          className="text-xs min-h-[90px] bg-white dark:bg-slate-900"
+                        />
+                      </div>
+
+                      {/* PILAR 3 */}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-black">3</span>
+                            Funcionamento, Prazos & Entregas
+                          </Label>
+                          <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-200">Pilar 3</Badge>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Como funciona o atendimento na prática, horários de expediente, prazos de entrega ou etapas de execução.
+                        </p>
+                        <Textarea
+                          placeholder="Ex: Atendimento de Segunda a Sexta das 08h às 19h e Sábados das 08h às 12h. O procedimento de moldagem dura cerca de 45 minutos. O alinhador fica pronto em até 10 dias úteis."
+                          value={cincoPilares.pilar3_funcionamento_prazos}
+                          onChange={(e) => setCincoPilares(prev => ({ ...prev, pilar3_funcionamento_prazos: e.target.value }))}
+                          className="text-xs min-h-[90px] bg-white dark:bg-slate-900"
+                        />
+                      </div>
+
+                      {/* PILAR 4 */}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-black">4</span>
+                            Dúvidas Frequentes (FAQ Real dos Clientes)
+                          </Label>
+                          <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-200">Pilar 4</Badge>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Perguntas mais comuns que os clientes fazem diariamente no balcão e WhatsApp, acompanhadas das respostas ideais.
+                        </p>
+                        <Textarea
+                          placeholder="Ex:&#10;1) O procedimento dói? Não, aplicamos anestesia computadorizada sem agulha visível.&#10;2) Aceitam convênio? Atendemos particular com recibo para reembolso integral/parcial do seu plano.&#10;3) Estacionamento no local? Sim, conveniado com valet gratuito."
+                          value={cincoPilares.pilar4_duvidas_frequentes}
+                          onChange={(e) => setCincoPilares(prev => ({ ...prev, pilar4_duvidas_frequentes: e.target.value }))}
+                          className="text-xs min-h-[100px] bg-white dark:bg-slate-900"
+                        />
+                      </div>
+
+                      {/* PILAR 5 */}
+                      <div className="p-4 bg-red-50/40 dark:bg-red-950/20 rounded-xl border border-red-200 dark:border-red-900/50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-black text-red-900 dark:text-red-300 flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-700 text-[11px] font-black">5</span>
+                            O que NÃO Prometer (Segurança da IA & Gatilhos de Transbordo)
+                          </Label>
+                          <Badge variant="outline" className="text-[10px] text-red-600 border-red-300 bg-red-50">Segurança IA</Badge>
+                        </div>
+                        <p className="text-[11px] text-red-700 dark:text-red-400">
+                          Limites invioláveis da IA: descontos não autorizados, promessas fora de escopo e situações que exigem transbordo humano imediato.
+                        </p>
+                        <Textarea
+                          placeholder="Ex: NUNCA conceder desconto superior a 5% sem autorização do gestor. NUNCA dar diagnóstico médico definitivo pelo chat. Se o cliente solicitar falar diretamente com o responsável ou fizer reclamação, realizar transbordo imediato para um humano."
+                          value={cincoPilares.pilar5_nao_prometer}
+                          onChange={(e) => setCincoPilares(prev => ({ ...prev, pilar5_nao_prometer: e.target.value }))}
+                          className="text-xs min-h-[90px] bg-white dark:bg-slate-900 border-red-200 focus-visible:ring-red-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* CAMPO DE LINKS ADICIONAIS */}
                   <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <Label className="text-xs font-bold">Links de Drive, Sites ou Catálogos Externos</Label>
+                    <Label className="text-xs font-bold">Links Adicionais de Apoio (Drive, Sites ou Catálogos Externos)</Label>
                     <Textarea
                       placeholder="Cole aqui links adicionais de materiais de apoio (ex: https://drive.google.com/... ou https://site.com.br/catalogo)"
                       value={agenteIa.materialAnexoUrls}
                       onChange={(e) => setAgenteIa(a => ({ ...a, materialAnexoUrls: e.target.value }))}
-                      className="h-20 text-xs"
+                      className="h-16 text-xs"
                     />
                   </div>
                 </CardContent>
@@ -1442,6 +1610,7 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
                       </h4>
                       <div><strong>Usuários Cadastrados:</strong> {teamUsers.length} e-mail(s)</div>
                       <div><strong>Documentos Anexados:</strong> {knowledgeFiles.length} arquivo(s)</div>
+                      <div><strong>5 Pilares da IA:</strong> {Object.values(cincoPilares).filter(Boolean).length} de 5 preenchidos</div>
                       <div><strong>Chips WhatsApp:</strong> {canais.quantosChips} chip(s)</div>
                     </div>
                   </div>
