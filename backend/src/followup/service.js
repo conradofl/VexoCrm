@@ -515,13 +515,29 @@ export async function enrollLead(
   const tenantSettings = await getLeadClientN8nSettings(tenantId);
   const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
 
-  let leadBirthDate = data_nascimento || lead?.data_nascimento || null;
-  if (!leadBirthDate && phone && tenantId) {
-    const hasBirthdayStep = (templates || []).some(
-      (t) => (t.trigger_type === "before_anchor" || t.trigger_type === "after_anchor") && t.anchor_field === "data_nascimento"
-    );
-    if (hasBirthdayStep) {
-      leadBirthDate = await resolveLeadBirthDate({ phone, tenantId });
+  const resolvedLeadData = { ...(lead || {}) };
+  if (data_nascimento && !resolvedLeadData.data_nascimento) {
+    resolvedLeadData.data_nascimento = data_nascimento;
+  }
+
+  // Resolução generalizada de âncoras (source: 'lead')
+  const anchorSteps = (templates || []).filter(
+    (t) => (t.trigger_type === "before_anchor" || t.trigger_type === "after_anchor") && t.anchor_field
+  );
+  const neededAnchorFields = new Set(anchorSteps.map((t) => t.anchor_field));
+
+  for (const field of neededAnchorFields) {
+    const config = ANCHOR_FIELDS[field];
+    if (config && config.source === "lead") {
+      if (!resolvedLeadData[field] && phone && tenantId) {
+        const val = await resolveLeadAnchorValue({ phone, tenantId, anchorField: field });
+        if (val) {
+          resolvedLeadData[field] = val;
+          if (field === "data_nascimento") {
+            resolvedLeadData.data_nascimento = val;
+          }
+        }
+      }
     }
   }
 
@@ -534,7 +550,7 @@ export async function enrollLead(
 
   for (const tpl of templates || []) {
     // 1. calcScheduledFor (calcula a data com base em delay/dias úteis)
-    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, { ...lead, data_nascimento: leadBirthDate }, { sendWindowConfig, tenantSettings });
+    let scheduledFor = calcScheduledFor(tpl, now, meeting_datetime, resolvedLeadData, { sendWindowConfig, tenantSettings });
     if (!scheduledFor) {
       // Passo depende de data-alvo (ex.: antes/depois da reunião ou âncora) e ela não foi informada.
       skippedNoDate++;
@@ -670,28 +686,38 @@ export async function cancelPendingJobsForCampaign(campaignId) {
   );
 }
 
-// ─── Resolução Compartilhada de Aniversário (Âncora) ──────────────────────────
+// ─── Resolução Generalizada de Âncoras no Lead ───────────────────────────────
+
+export async function resolveLeadAnchorValue({ phone, tenantId, anchorField }) {
+  if (!phone || !tenantId || !anchorField) return null;
+  const config = ANCHOR_FIELDS[anchorField];
+  // Só busca no banco se for âncora com source: 'lead'
+  if (!config || config.source !== "lead") return null;
+  // Whitelist de segurança contra injeção SQL
+  const safeCol = String(anchorField).replace(/[^a-z0-9_]/gi, "");
+  if (!safeCol) return null;
+  try {
+    const table = leadsTableName(tenantId);
+    const { rows } = await query(
+      `SELECT ${safeCol} FROM public."${table}"
+       WHERE client_id = $1
+         AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+         AND ${safeCol} IS NOT NULL
+       LIMIT 1`,
+      [tenantId, phone]
+    );
+    if (rows.length) {
+      return rows[0].val ?? rows[0][safeCol] ?? Object.values(rows[0])[0] ?? null;
+    }
+  } catch (err) {
+    console.warn(`[followup/service] Falha ao buscar âncora ${safeCol}:`, err?.message || err);
+  }
+  return null;
+}
 
 export async function resolveLeadBirthDate({ phone, tenantId, initialBirthDate = null }) {
   if (initialBirthDate) return initialBirthDate;
-  if (!phone || !tenantId) return null;
-  try {
-    const table = leadsTableName(tenantId);
-    const { rows: leadRows } = await query(
-      `SELECT data_nascimento FROM public."${table}"
-        WHERE client_id = $1
-          AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-          AND data_nascimento IS NOT NULL
-        LIMIT 1`,
-      [tenantId, phone]
-    );
-    if (leadRows.length && leadRows[0].data_nascimento) {
-      return leadRows[0].data_nascimento;
-    }
-  } catch (err) {
-    console.warn("[followup/service] Falha ao buscar data_nascimento na tabela de leads:", err?.message || err);
-  }
-  return null;
+  return resolveLeadAnchorValue({ phone, tenantId, anchorField: "data_nascimento" });
 }
 
 // ─── Reagendamento de Jobs Pendentes para um Template ─────────────────────────
@@ -748,23 +774,34 @@ export async function reschedulePendingJobsForTemplate(templateId) {
     const tenantSettings = await getLeadClientN8nSettings(tenantId);
     const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
 
-    // Resolução de aniversário caso seja passo de âncora
-    let leadBirthDate = null;
-    const isBirthdayStep =
-      (template.trigger_type === "before_anchor" || template.trigger_type === "after_anchor") &&
-      template.anchor_field === "data_nascimento";
-    if (isBirthdayStep) {
-      leadBirthDate = await resolveLeadBirthDate({
-        phone: job.phone,
-        tenantId,
-      });
-    }
-
-    let scheduledFor = calcScheduledFor(template, triggerAt, job.meeting_datetime, {
+    // Resolução de âncora caso seja passo de âncora com source: 'lead'
+    const leadData = {
       lead_name: job.lead_name,
       phone: job.phone,
-      data_nascimento: leadBirthDate,
-    }, { sendWindowConfig, tenantSettings });
+    };
+
+    const isAnchorStep =
+      (template.trigger_type === "before_anchor" || template.trigger_type === "after_anchor") &&
+      template.anchor_field;
+
+    if (isAnchorStep) {
+      const anchorConfig = ANCHOR_FIELDS[template.anchor_field];
+      if (anchorConfig && anchorConfig.source === "lead") {
+        const val = await resolveLeadAnchorValue({
+          phone: job.phone,
+          tenantId,
+          anchorField: template.anchor_field,
+        });
+        if (val) {
+          leadData[template.anchor_field] = val;
+          if (template.anchor_field === "data_nascimento") {
+            leadData.data_nascimento = val;
+          }
+        }
+      }
+    }
+
+    let scheduledFor = calcScheduledFor(template, triggerAt, job.meeting_datetime, leadData, { sendWindowConfig, tenantSettings });
 
     if (!scheduledFor) {
       // Sem data-alvo disponível para recalcular
