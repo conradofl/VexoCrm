@@ -70,6 +70,12 @@ export interface FupCampaign {
   created_at: string;
 }
 
+export interface FupTemplateCondition {
+  field: string;
+  operator: "equals" | "not_equals" | "contains" | "not_contains" | "is_empty" | "is_not_empty";
+  value?: any;
+}
+
 export interface FupTemplate {
   id: string;
   campaign_id: string;
@@ -94,6 +100,10 @@ export interface FupTemplate {
   media_type?: "image" | "audio" | "document" | "video" | null;
   media_mime?: string | null;
   media_filename?: string | null;
+  step_type?: "message" | "internal_action";
+  action_type?: "create_reminder" | "change_stage" | "assign_operator" | "add_tag" | null;
+  action_payload?: Record<string, any>;
+  conditions?: FupTemplateCondition[];
   is_active: boolean;
   order_index: number;
   created_at: string;

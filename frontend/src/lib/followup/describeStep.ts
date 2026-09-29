@@ -35,6 +35,10 @@ export interface StepLike {
   media_type?: "image" | "audio" | "document" | "video" | null;
   media_mime?: string | null;
   media_filename?: string | null;
+  step_type?: "message" | "internal_action" | string;
+  action_type?: "create_reminder" | "change_stage" | "assign_operator" | "add_tag" | string | null;
+  action_payload?: Record<string, any>;
+  conditions?: Array<{ field: string; operator: string; value?: any }>;
   order_index?: number;
   is_active?: boolean;
 }
@@ -84,6 +88,34 @@ export function describeStep(
   step: StepLike,
   anchorFields?: AnchorFieldInfo[]
 ): string {
+  const conditionSuffix =
+    Array.isArray(step.conditions) && step.conditions.length > 0 && step.conditions[0]?.field
+      ? ` (Condicional: ${step.conditions[0].field})`
+      : "";
+
+  if (step.step_type === "internal_action") {
+    const payload = step.action_payload || {};
+    let label = "⚡ Ação interna";
+    switch (step.action_type) {
+      case "create_reminder":
+        label = "⚡ Criar lembrete interno";
+        break;
+      case "change_stage":
+        label = `⚡ Mudar estágio para ${payload.stage || ""}`.trim();
+        break;
+      case "assign_operator":
+        label = `⚡ Atribuir a ${payload.assigned_to || ""}`.trim();
+        break;
+      case "add_tag":
+        label = `⚡ Adicionar etiqueta ${payload.tag || ""}`.trim();
+        break;
+      default:
+        label = "⚡ Ação interna";
+        break;
+    }
+    return `${label}${conditionSuffix}`;
+  }
+
   const trigger = step.trigger_type;
   const val = Number(step.trigger_value) || 0;
   const unit = step.trigger_unit || "days";
@@ -141,7 +173,7 @@ export function describeStep(
       break;
   }
 
-  return `${base}${timeSuffix}`;
+  return `${base}${timeSuffix}${conditionSuffix}`;
 }
 
 export function requiresTargetDate(step: StepLike): boolean {

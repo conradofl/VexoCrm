@@ -60,40 +60,199 @@ export function isValidAnchorField(field) {
   return typeof field === "string" && Object.prototype.hasOwnProperty.call(ANCHOR_FIELDS, field);
 }
 
+export const VALID_STEP_TYPES = ["message", "internal_action"];
+export const VALID_ACTION_TYPES = ["create_reminder", "change_stage", "assign_operator", "add_tag"];
+export const VALID_CONDITION_OPERATORS = [
+  "equals",
+  "not_equals",
+  "contains",
+  "not_contains",
+  "in",
+  "not_in",
+  "is_empty",
+  "is_not_empty",
+];
+
+export async function ensureFollowupConditionalAndInternalColumns(pgClientOrPool) {
+  if (!pgClientOrPool) return;
+  try {
+    await pgClientOrPool.query(`
+      ALTER TABLE public.followup_templates 
+        ADD COLUMN IF NOT EXISTS step_type TEXT NOT NULL DEFAULT 'message',
+        ADD COLUMN IF NOT EXISTS action_type TEXT NULL,
+        ADD COLUMN IF NOT EXISTS action_payload JSONB DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS conditions JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE public.followup_templates DROP CONSTRAINT IF EXISTS followup_templates_step_type_check;
+      ALTER TABLE public.followup_templates
+        ADD CONSTRAINT followup_templates_step_type_check
+        CHECK (step_type IN ('message', 'internal_action'));
+      ALTER TABLE public.followup_templates DROP CONSTRAINT IF EXISTS followup_templates_action_type_check;
+      ALTER TABLE public.followup_templates
+        ADD CONSTRAINT followup_templates_action_type_check
+        CHECK (action_type IS NULL OR action_type IN ('create_reminder', 'change_stage', 'assign_operator', 'add_tag'));
+    `);
+  } catch (err) {
+    console.warn("[followup-service] Falha ao adicionar colunas de passos condicionais/ações internas em followup_templates:", err?.message || err);
+  }
+}
+
 export function validateTemplatePayload(payload = {}) {
   const triggerType = payload.trigger_type;
   const anchorField = payload.anchor_field;
 
   if (triggerType === "before_anchor" || triggerType === "after_anchor") {
     if (!anchorField || !isValidAnchorField(anchorField)) {
+      const msg = `Gatilho '${triggerType}' exige um campo âncora válido (${Object.keys(ANCHOR_FIELDS).join(", ")}).`;
       return {
         valid: false,
         code: "INVALID_ANCHOR_FIELD",
-        message: `Gatilho '${triggerType}' exige um campo âncora válido (${Object.keys(ANCHOR_FIELDS).join(", ")}).`,
+        message: msg,
+        reason: msg,
       };
     }
   }
 
   if (anchorField && !isValidAnchorField(anchorField)) {
+    const msg = `Campo âncora '${anchorField}' é inválido. Válidos: ${Object.keys(ANCHOR_FIELDS).join(", ")}.`;
     return {
       valid: false,
       code: "INVALID_ANCHOR_FIELD",
-      message: `Campo âncora '${anchorField}' é inválido. Válidos: ${Object.keys(ANCHOR_FIELDS).join(", ")}.`,
+      message: msg,
+      reason: msg,
     };
   }
 
   if (triggerType === "fixed_date") {
     const scheduledDate = payload.scheduled_date;
     if (!scheduledDate || typeof scheduledDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate.trim())) {
+      const msg = "Gatilho 'fixed_date' exige uma data agendada no formato YYYY-MM-DD.";
       return {
         valid: false,
         code: "INVALID_SCHEDULED_DATE",
-        message: "Gatilho 'fixed_date' exige uma data agendada no formato YYYY-MM-DD.",
+        message: msg,
+        reason: msg,
       };
     }
   }
 
+  if (payload.step_type !== undefined && payload.step_type !== null) {
+    if (!VALID_STEP_TYPES.includes(payload.step_type)) {
+      const msg = `Tipo de passo '${payload.step_type}' é inválido. Válidos: ${VALID_STEP_TYPES.join(", ")}.`;
+      return {
+        valid: false,
+        code: "INVALID_STEP_TYPE",
+        message: msg,
+        reason: msg,
+      };
+    }
+  }
+
+  if (payload.step_type === "internal_action") {
+    if (!payload.action_type || !VALID_ACTION_TYPES.includes(payload.action_type)) {
+      const msg = `Passo de ação interna exige action_type válido (${VALID_ACTION_TYPES.join(", ")}).`;
+      return {
+        valid: false,
+        code: "INVALID_ACTION_TYPE",
+        message: msg,
+        reason: msg,
+      };
+    }
+  }
+
+  if (payload.conditions !== undefined && payload.conditions !== null) {
+    if (!Array.isArray(payload.conditions)) {
+      const msg = "conditions deve ser um array de condições.";
+      return {
+        valid: false,
+        code: "INVALID_CONDITIONS",
+        message: msg,
+        reason: msg,
+      };
+    }
+    for (const cond of payload.conditions) {
+      if (
+        !cond ||
+        typeof cond !== "object" ||
+        !cond.field ||
+        !cond.operator ||
+        !VALID_CONDITION_OPERATORS.includes(cond.operator)
+      ) {
+        const msg = `Condição inválida no passo. Operadores permitidos: ${VALID_CONDITION_OPERATORS.join(", ")}.`;
+        return {
+          valid: false,
+          code: "INVALID_CONDITIONS",
+          message: msg,
+          reason: msg,
+        };
+      }
+    }
+  }
+
   return { valid: true };
+}
+
+export function evaluateStepConditions(conditions = [], leadData = {}) {
+  if (!Array.isArray(conditions) || conditions.length === 0) return { passed: true };
+  for (const cond of conditions) {
+    const { field, operator, value } = cond;
+    if (!field || !operator) continue;
+    const actualValue = leadData[field];
+    switch (operator) {
+      case "equals":
+        if (String(actualValue ?? "").toLowerCase() !== String(value ?? "").toLowerCase()) {
+          return { passed: false, reason: `${field} != ${value}` };
+        }
+        break;
+      case "not_equals":
+        if (String(actualValue ?? "").toLowerCase() === String(value ?? "").toLowerCase()) {
+          return { passed: false, reason: `${field} == ${value}` };
+        }
+        break;
+      case "contains": {
+        const actualStr = Array.isArray(actualValue) ? actualValue.join(",") : String(actualValue ?? "");
+        if (!actualStr.toLowerCase().includes(String(value ?? "").toLowerCase())) {
+          return { passed: false, reason: `${field} não contém ${value}` };
+        }
+        break;
+      }
+      case "not_contains": {
+        const actualStr = Array.isArray(actualValue) ? actualValue.join(",") : String(actualValue ?? "");
+        if (actualStr.toLowerCase().includes(String(value ?? "").toLowerCase())) {
+          return { passed: false, reason: `${field} contém ${value}` };
+        }
+        break;
+      }
+      case "in": {
+        const list = Array.isArray(value) ? value : String(value ?? "").split(",").map((s) => s.trim());
+        const actualStr = String(actualValue ?? "").toLowerCase();
+        if (!list.some((item) => String(item).toLowerCase() === actualStr)) {
+          return { passed: false, reason: `${field} not in [${list.join(",")}]` };
+        }
+        break;
+      }
+      case "not_in": {
+        const list = Array.isArray(value) ? value : String(value ?? "").split(",").map((s) => s.trim());
+        const actualStr = String(actualValue ?? "").toLowerCase();
+        if (list.some((item) => String(item).toLowerCase() === actualStr)) {
+          return { passed: false, reason: `${field} in [${list.join(",")}]` };
+        }
+        break;
+      }
+      case "is_empty":
+        if (actualValue !== null && actualValue !== undefined && actualValue !== "") {
+          return { passed: false, reason: `${field} não está vazio` };
+        }
+        break;
+      case "is_not_empty":
+        if (actualValue === null || actualValue === undefined || actualValue === "") {
+          return { passed: false, reason: `${field} está vazio` };
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return { passed: true };
 }
 
 export function parseTimeString(timeStr) {

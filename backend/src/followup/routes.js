@@ -1512,7 +1512,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from("followup_templates")
-        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, scheduled_date, anchor_field, media_path, media_type, media_mime, media_filename, created_at")
+        .select("id, campaign_id, name, message, trigger_type, trigger_value, trigger_unit, trigger_direction, is_active, order_index, scheduled_time, scheduled_date, anchor_field, media_path, media_type, media_mime, media_filename, step_type, action_type, action_payload, conditions, created_at")
         .eq("campaign_id", campaignId)
         .order("order_index", { ascending: true });
       if (error) throw error;
@@ -1530,11 +1530,28 @@ function normalizeInstanceList(list, fallback) {
       is_active, order_index,
       scheduled_time, scheduled_date, anchor_field,
       media_path, media_type, media_mime, media_filename,
+      step_type, action_type, action_payload, conditions,
     } = req.body || {};
-    if (!str(campaign_id) || !str(name) || !str(message) || !str(trigger_type)) {
+
+    const resolvedStepType = str(step_type) || "message";
+    let finalMessage = str(message);
+    if (resolvedStepType === "internal_action" && !finalMessage) {
+      finalMessage = (action_payload && action_payload.title) || str(action_type) || "Ação interna";
+    }
+
+    if (!str(campaign_id) || !str(name) || !finalMessage || !str(trigger_type)) {
       return sendErr(res, 400, "MISSING_FIELDS", "Campos obrigatórios faltando");
     }
-    const validation = validateTemplatePayload({ trigger_type, anchor_field, scheduled_time, scheduled_date });
+    const validation = validateTemplatePayload({
+      trigger_type,
+      anchor_field,
+      scheduled_time,
+      scheduled_date,
+      step_type: resolvedStepType,
+      action_type,
+      action_payload,
+      conditions,
+    });
     if (!validation.valid) {
       return sendErr(res, 400, validation.code, validation.message);
     }
@@ -1545,7 +1562,7 @@ function normalizeInstanceList(list, fallback) {
         .insert({
           campaign_id: str(campaign_id),
           name: str(name),
-          message: str(message),
+          message: finalMessage,
           trigger_type: str(trigger_type),
           trigger_value: Number(trigger_value) || 0,
           trigger_unit: str(trigger_unit) || "hours",
@@ -1559,6 +1576,10 @@ function normalizeInstanceList(list, fallback) {
           media_type: media_type ? str(media_type) : null,
           media_mime: media_mime ? str(media_mime) : null,
           media_filename: media_filename ? str(media_filename) : null,
+          step_type: resolvedStepType,
+          action_type: action_type ? str(action_type) : null,
+          action_payload: action_payload && typeof action_payload === "object" ? action_payload : {},
+          conditions: Array.isArray(conditions) ? conditions : [],
         })
         .select()
         .maybeSingle();
@@ -1591,8 +1612,8 @@ function normalizeInstanceList(list, fallback) {
     }
   });
 
-  // PATCH /api/followup/templates/:id — DEPOIS de /templates/reorder
-  router.patch("/templates/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+  // Handler compartilhado para PATCH e PUT /api/followup/templates/:id — DEPOIS de /templates/reorder
+  const updateTemplateHandler = async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
     try {
@@ -1619,6 +1640,7 @@ function normalizeInstanceList(list, fallback) {
         "trigger_unit", "trigger_direction", "is_active", "order_index",
         "scheduled_time", "scheduled_date", "anchor_field",
         "media_path", "media_type", "media_mime", "media_filename",
+        "step_type", "action_type", "action_payload", "conditions",
       ];
       const patch = { updated_at: new Date().toISOString() };
       for (const k of allowed) {
@@ -1662,7 +1684,10 @@ function normalizeInstanceList(list, fallback) {
     } catch (err) {
       return sendErr(res, 500, "TEMPLATE_UPDATE_FAILED", err.message);
     }
-  });
+  };
+
+  router.patch("/templates/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), updateTemplateHandler);
+  router.put("/templates/:id", requireFirebaseAuth, requireInternalPageAccess("planilhas"), updateTemplateHandler);
 
   // POST /api/followup/templates/:id/reschedule-pending — recalcula e reenfileira jobs pendentes do template
   router.post("/templates/:id/reschedule-pending", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {

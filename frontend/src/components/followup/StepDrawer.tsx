@@ -15,6 +15,8 @@ import {
   Clock,
   Zap,
   Repeat,
+  Filter,
+  MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -72,6 +74,20 @@ export default function StepDrawer({
   // Estados do formulário
   const [stepName, setStepName] = useState("");
   const [stepMessage, setStepMessage] = useState("");
+  const [stepType, setStepType] = useState<"message" | "internal_action">("message");
+  const [actionType, setActionType] = useState<"create_reminder" | "change_stage" | "assign_operator" | "add_tag">("create_reminder");
+  const [reminderTitle, setReminderTitle] = useState("");
+  const [reminderNotes, setReminderNotes] = useState("");
+  const [actionStage, setActionStage] = useState("");
+  const [actionAssignedTo, setActionAssignedTo] = useState("");
+  const [actionTag, setActionTag] = useState("");
+
+  // Condições de Execução
+  const [hasCondition, setHasCondition] = useState(false);
+  const [condField, setCondField] = useState("stage");
+  const [condOperator, setCondOperator] = useState<"equals" | "not_equals" | "contains" | "not_contains" | "is_empty" | "is_not_empty">("equals");
+  const [condValue, setCondValue] = useState("");
+
   const [whenMode, setWhenMode] = useState<WhenMode>("evento");
 
   // Modo Evento
@@ -110,6 +126,26 @@ export default function StepDrawer({
       setStepMessage(editingStep.message || "");
       setStepScheduledTime(editingStep.scheduled_time || "");
       setStepScheduledDate(editingStep.scheduled_date || "");
+      setStepType(editingStep.step_type || "message");
+      setActionType(editingStep.action_type || "create_reminder");
+      const p = editingStep.action_payload || {};
+      setReminderTitle(p.title || "");
+      setReminderNotes(p.notes || "");
+      setActionStage(p.stage || "");
+      setActionAssignedTo(p.assigned_to || "");
+      setActionTag(p.tag || "");
+
+      if (Array.isArray(editingStep.conditions) && editingStep.conditions.length > 0) {
+        setHasCondition(true);
+        setCondField(editingStep.conditions[0].field || "stage");
+        setCondOperator((editingStep.conditions[0].operator as any) || "equals");
+        setCondValue(editingStep.conditions[0].value ?? "");
+      } else {
+        setHasCondition(false);
+        setCondField("stage");
+        setCondOperator("equals");
+        setCondValue("");
+      }
 
       if (editingStep.trigger_type === "fixed_date") {
         setWhenMode("datas_fixas");
@@ -151,6 +187,17 @@ export default function StepDrawer({
       // Criação limpa
       setStepName("");
       setStepMessage("");
+      setStepType("message");
+      setActionType("create_reminder");
+      setReminderTitle("");
+      setReminderNotes("");
+      setActionStage("");
+      setActionAssignedTo("");
+      setActionTag("");
+      setHasCondition(false);
+      setCondField("stage");
+      setCondOperator("equals");
+      setCondValue("");
       setWhenMode("evento");
       setEventTrigger("after_enrollment");
       setStepValue(1);
@@ -215,9 +262,24 @@ export default function StepDrawer({
   }
 
   async function handleSave() {
-    if (!stepMessage.trim()) {
+    if (stepType === "message" && !stepMessage.trim()) {
       toast.error("Escreva a mensagem do passo.");
       return;
+    }
+
+    if (stepType === "internal_action") {
+      if (actionType === "change_stage" && !actionStage.trim()) {
+        toast.error("Informe o novo estágio do lead.");
+        return;
+      }
+      if (actionType === "assign_operator" && !actionAssignedTo.trim()) {
+        toast.error("Informe o operador a ser atribuído.");
+        return;
+      }
+      if (actionType === "add_tag" && !actionTag.trim()) {
+        toast.error("Informe a etiqueta a ser adicionada.");
+        return;
+      }
     }
 
     let finalTriggerType: FupTemplate["trigger_type"] = "after_enrollment";
@@ -255,13 +317,61 @@ export default function StepDrawer({
       finalAnchorField = stepAnchorField || "data_nascimento";
     }
 
+    const actionPayload: Record<string, any> = {};
+    if (stepType === "internal_action") {
+      if (actionType === "create_reminder") {
+        actionPayload.title = reminderTitle.trim() || stepName.trim() || "Lembrete de Follow-up";
+        if (reminderNotes.trim()) actionPayload.notes = reminderNotes.trim();
+      } else if (actionType === "change_stage") {
+        actionPayload.stage = actionStage.trim();
+      } else if (actionType === "assign_operator") {
+        actionPayload.assigned_to = actionAssignedTo.trim();
+      } else if (actionType === "add_tag") {
+        actionPayload.tag = actionTag.trim();
+      }
+    }
+
+    const conditionsPayload =
+      hasCondition && condField.trim()
+        ? [
+            {
+              field: condField.trim(),
+              operator: condOperator,
+              value:
+                condOperator === "is_empty" || condOperator === "is_not_empty"
+                  ? undefined
+                  : condValue.trim(),
+            },
+          ]
+        : [];
+
+    const defaultActionMessage =
+      actionType === "create_reminder"
+        ? (reminderTitle.trim() || "Criar lembrete interno")
+        : actionType === "change_stage"
+        ? `Mudar estágio para ${actionStage.trim()}`
+        : actionType === "assign_operator"
+        ? `Atribuir a ${actionAssignedTo.trim()}`
+        : actionType === "add_tag"
+        ? `Adicionar etiqueta ${actionTag.trim()}`
+        : "Ação interna";
+
     const payload = {
       name:
         stepName.trim() ||
         (editingStep
           ? editingStep.name
+          : stepType === "internal_action"
+          ? defaultActionMessage
           : `Passo ${stepCount + 1}`),
-      message: stepMessage.trim(),
+      message:
+        stepType === "internal_action"
+          ? defaultActionMessage
+          : stepMessage.trim(),
+      step_type: stepType,
+      action_type: stepType === "internal_action" ? actionType : null,
+      action_payload: actionPayload,
+      conditions: conditionsPayload,
       trigger_type: finalTriggerType,
       trigger_value: finalTriggerValue,
       trigger_unit: finalTriggerUnit,
@@ -269,10 +379,10 @@ export default function StepDrawer({
       scheduled_time: stepScheduledTime || null,
       scheduled_date: finalScheduledDate,
       anchor_field: finalAnchorField,
-      media_path: stepMedia?.media_path || null,
-      media_type: stepMedia?.media_type || null,
-      media_mime: stepMedia?.media_mime || null,
-      media_filename: stepMedia?.media_filename || null,
+      media_path: stepType === "message" ? (stepMedia?.media_path || null) : null,
+      media_type: stepType === "message" ? (stepMedia?.media_type || null) : null,
+      media_mime: stepType === "message" ? (stepMedia?.media_mime || null) : null,
+      media_filename: stepType === "message" ? (stepMedia?.media_filename || null) : null,
     };
 
     try {
@@ -375,21 +485,213 @@ export default function StepDrawer({
             />
           </div>
 
-          {/* Mensagem */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold text-foreground">Mensagem do WhatsApp *</Label>
-              <span className="text-[11px] text-muted-foreground">
-                Use <code className="text-indigo-600 dark:text-indigo-400 font-bold">{"{{nome}}"}</code> para personalizar
-              </span>
+          {/* Seletor de Tipo de Passo */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-foreground">Tipo de Passo</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setStepType("message")}
+                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-xs font-medium transition-all ${
+                  stepType === "message"
+                    ? "border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-semibold shadow-sm"
+                    : "border-border/80 bg-background text-muted-foreground hover:bg-muted/40"
+                }`}
+              >
+                <MessageSquare className="h-4 w-4" />
+                Mensagem WhatsApp
+              </button>
+              <button
+                type="button"
+                onClick={() => setStepType("internal_action")}
+                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-xs font-medium transition-all ${
+                  stepType === "internal_action"
+                    ? "border-amber-600 bg-amber-50/50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 font-semibold shadow-sm"
+                    : "border-border/80 bg-background text-muted-foreground hover:bg-muted/40"
+                }`}
+              >
+                <Zap className="h-4 w-4" />
+                Ação Interna (CRM)
+              </button>
             </div>
-            <Textarea
-              value={stepMessage}
-              onChange={(e) => setStepMessage(e.target.value)}
-              placeholder="Oi {{nome}}, tudo bem? Passando para lembrar da nossa conversa marcada!"
-              rows={4}
-              className="text-sm leading-relaxed resize-y"
-            />
+          </div>
+
+          {/* Conteúdo específico: Mensagem WhatsApp vs Ação Interna */}
+          {stepType === "message" ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-foreground">Mensagem do WhatsApp *</Label>
+                <span className="text-[11px] text-muted-foreground">
+                  Use <code className="text-indigo-600 dark:text-indigo-400 font-bold">{"{{nome}}"}</code> para personalizar
+                </span>
+              </div>
+              <Textarea
+                value={stepMessage}
+                onChange={(e) => setStepMessage(e.target.value)}
+                placeholder="Oi {{nome}}, tudo bem? Passando para lembrar da nossa conversa marcada!"
+                rows={4}
+                className="text-sm leading-relaxed resize-y"
+              />
+            </div>
+          ) : (
+            <div className="space-y-3 p-4 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/20 dark:bg-amber-950/10">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-foreground">Ação a Executar no CRM</Label>
+                <Select
+                  value={actionType}
+                  onValueChange={(val: any) => setActionType(val)}
+                >
+                  <SelectTrigger className="text-xs">
+                    <SelectValue placeholder="Selecione a ação" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="create_reminder">📌 Criar Lembrete Interno</SelectItem>
+                    <SelectItem value="change_stage">🔄 Mudar Estágio do Lead</SelectItem>
+                    <SelectItem value="assign_operator">👤 Atribuir Operador / Vendedor</SelectItem>
+                    <SelectItem value="add_tag">🏷️ Adicionar Etiqueta (Tag)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {actionType === "create_reminder" && (
+                <div className="space-y-3 pt-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Título do Lembrete</Label>
+                    <Input
+                      value={reminderTitle}
+                      onChange={(e) => setReminderTitle(e.target.value)}
+                      placeholder="Ex: Ligar para confirmar proposta"
+                      className="text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Notas / Instruções (opcional)</Label>
+                    <Textarea
+                      value={reminderNotes}
+                      onChange={(e) => setReminderNotes(e.target.value)}
+                      placeholder="Ex: Verificar se já assinou a minuta e se há dúvidas sobre prazo."
+                      rows={2}
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {actionType === "change_stage" && (
+                <div className="space-y-1.5 pt-2">
+                  <Label className="text-xs font-medium">Novo Estágio do Lead *</Label>
+                  <Input
+                    value={actionStage}
+                    onChange={(e) => setActionStage(e.target.value)}
+                    placeholder="Ex: negociacao, proposta_enviada, etc."
+                    className="text-xs"
+                  />
+                </div>
+              )}
+
+              {actionType === "assign_operator" && (
+                <div className="space-y-1.5 pt-2">
+                  <Label className="text-xs font-medium">Operador / Vendedor Responsável *</Label>
+                  <Input
+                    value={actionAssignedTo}
+                    onChange={(e) => setActionAssignedTo(e.target.value)}
+                    placeholder="Ex: conrado@vexo.com.br ou Nome do Vendedor"
+                    className="text-xs"
+                  />
+                </div>
+              )}
+
+              {actionType === "add_tag" && (
+                <div className="space-y-1.5 pt-2">
+                  <Label className="text-xs font-medium">Etiqueta a Adicionar *</Label>
+                  <Input
+                    value={actionTag}
+                    onChange={(e) => setActionTag(e.target.value)}
+                    placeholder="Ex: follow_up_quente, sem_resposta, vip"
+                    className="text-xs"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Condições de Execução (Filtro do Passo) */}
+          <div className="space-y-3 p-4 rounded-lg border border-border/80 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-indigo-500" />
+                <Label className="text-xs font-semibold text-foreground">
+                  Condições de Execução do Passo
+                </Label>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setHasCondition(!hasCondition)}
+                className="h-7 text-xs"
+              >
+                {hasCondition ? "Remover Condição" : "+ Adicionar Condição"}
+              </Button>
+            </div>
+
+            {hasCondition ? (
+              <div className="space-y-3 pt-1">
+                <p className="text-[11px] text-muted-foreground">
+                  O passo só será executado se o lead atender a esta regra no momento do disparo. Caso contrário, ele será pulado (status = skipped) e a cadência continuará ativa.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Campo do Lead</Label>
+                    <Select value={condField} onValueChange={setCondField}>
+                      <SelectTrigger className="text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="stage">Estágio (stage)</SelectItem>
+                        <SelectItem value="tags">Etiquetas (tags)</SelectItem>
+                        <SelectItem value="temperatura">Temperatura</SelectItem>
+                        <SelectItem value="cidade">Cidade</SelectItem>
+                        <SelectItem value="origem">Origem</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Operador</Label>
+                    <Select value={condOperator} onValueChange={(val: any) => setCondOperator(val)}>
+                      <SelectTrigger className="text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="equals">Igual a (=)</SelectItem>
+                        <SelectItem value="not_equals">Diferente de (!=)</SelectItem>
+                        <SelectItem value="contains">Contém</SelectItem>
+                        <SelectItem value="not_contains">Não contém</SelectItem>
+                        <SelectItem value="is_empty">Está vazio</SelectItem>
+                        <SelectItem value="is_not_empty">Não está vazio</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {condOperator !== "is_empty" && condOperator !== "is_not_empty" && (
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Valor esperado</Label>
+                      <Input
+                        value={condValue}
+                        onChange={(e) => setCondValue(e.target.value)}
+                        placeholder="Ex: proposta_enviada ou vip"
+                        className="text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Sem restrição. Este passo será executado para todos os leads agendados.
+              </p>
+            )}
           </div>
 
           {/* Quando Enviar: 3 Modos Conceituais */}
@@ -649,66 +951,68 @@ export default function StepDrawer({
             )}
           </div>
 
-          {/* Anexo de Mídia */}
-          <div className="space-y-2 p-3 rounded-lg border border-border/70 bg-muted/20">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold flex items-center gap-1.5">
-                <Paperclip className="h-3.5 w-3.5 text-indigo-500" />
-                Anexo de Mídia (Opcional)
-              </Label>
-              <span className="text-[10px] text-muted-foreground">PDF, Imagem, Áudio ou Vídeo</span>
-            </div>
+          {/* Anexo de Mídia (somente para mensagem) */}
+          {stepType === "message" && (
+            <div className="space-y-2 p-3 rounded-lg border border-border/70 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                  <Paperclip className="h-3.5 w-3.5 text-indigo-500" />
+                  Anexo de Mídia (Opcional)
+                </Label>
+                <span className="text-[10px] text-muted-foreground">PDF, Imagem, Áudio ou Vídeo</span>
+              </div>
 
-            {stepMedia ? (
-              <div className="flex items-center justify-between p-2 rounded-md bg-background border border-border">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600">
-                    {stepMedia.media_type === "image" && <ImageIcon className="h-4 w-4" />}
-                    {stepMedia.media_type === "document" && <FileText className="h-4 w-4" />}
-                    {stepMedia.media_type === "audio" && <Music className="h-4 w-4" />}
-                    {stepMedia.media_type === "video" && <Video className="h-4 w-4" />}
+              {stepMedia ? (
+                <div className="flex items-center justify-between p-2 rounded-md bg-background border border-border">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600">
+                      {stepMedia.media_type === "image" && <ImageIcon className="h-4 w-4" />}
+                      {stepMedia.media_type === "document" && <FileText className="h-4 w-4" />}
+                      {stepMedia.media_type === "audio" && <Music className="h-4 w-4" />}
+                      {stepMedia.media_type === "video" && <Video className="h-4 w-4" />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-foreground">{stepMedia.media_filename}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase">
+                        {stepMedia.media_type}{" "}
+                        {stepMedia.size_bytes ? `· ${(stepMedia.size_bytes / (1024 * 1024)).toFixed(1)} MB` : ""}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-foreground">{stepMedia.media_filename}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      {stepMedia.media_type}{" "}
-                      {stepMedia.size_bytes ? `· ${(stepMedia.size_bytes / (1024 * 1024)).toFixed(1)} MB` : ""}
-                    </p>
-                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setStepMedia(null)}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                    title="Remover anexo"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setStepMedia(null)}
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                  title="Remover anexo"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ) : (
-              <div>
-                <label className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-md border border-dashed border-border/80 hover:border-indigo-500 bg-background hover:bg-muted/30 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span>{isUploadingMedia ? "Enviando arquivo..." : "Selecionar arquivo do computador"}</span>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.webp,.mp3,.ogg,.wav,.mp4"
-                    onChange={handleFileUpload}
-                    disabled={isUploadingMedia}
-                  />
-                </label>
-              </div>
-            )}
+              ) : (
+                <div>
+                  <label className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-md border border-dashed border-border/80 hover:border-indigo-500 bg-background hover:bg-muted/30 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    <span>{isUploadingMedia ? "Enviando arquivo..." : "Selecionar arquivo do computador"}</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png,.webp,.mp3,.ogg,.wav,.mp4"
+                      onChange={handleFileUpload}
+                      disabled={isUploadingMedia}
+                    />
+                  </label>
+                </div>
+              )}
 
-            {stepMedia && (
-              <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
-                ℹ️ A mensagem escrita acima será enviada como legenda deste arquivo no WhatsApp.
-              </p>
-            )}
-          </div>
+              {stepMedia && (
+                <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                  ℹ️ A mensagem escrita acima será enviada como legenda deste arquivo no WhatsApp.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Rodapé com Ações */}
@@ -718,7 +1022,13 @@ export default function StepDrawer({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={isSaving || !stepMessage.trim()}
+            disabled={
+              isSaving ||
+              (stepType === "message" && !stepMessage.trim()) ||
+              (stepType === "internal_action" && actionType === "change_stage" && !actionStage.trim()) ||
+              (stepType === "internal_action" && actionType === "assign_operator" && !actionAssignedTo.trim()) ||
+              (stepType === "internal_action" && actionType === "add_tag" && !actionTag.trim())
+            }
             className="text-xs gap-1.5"
           >
             {isSaving ? (

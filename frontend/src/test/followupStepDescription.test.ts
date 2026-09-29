@@ -64,6 +64,46 @@ describe("describeStep", () => {
     );
     expect(text).toBe("5 dias depois de vencimento da fatura, às 08:30");
   });
+
+  it("descreve ações internas e condições", () => {
+    expect(
+      describeStep({
+        step_type: "internal_action",
+        action_type: "create_reminder",
+      })
+    ).toBe("⚡ Criar lembrete interno");
+
+    expect(
+      describeStep({
+        step_type: "internal_action",
+        action_type: "change_stage",
+        action_payload: { stage: "proposta_enviada" },
+      })
+    ).toBe("⚡ Mudar estágio para proposta_enviada");
+
+    expect(
+      describeStep({
+        step_type: "internal_action",
+        action_type: "assign_operator",
+        action_payload: { assigned_to: "Carlos" },
+      })
+    ).toBe("⚡ Atribuir a Carlos");
+
+    expect(
+      describeStep({
+        step_type: "internal_action",
+        action_type: "add_tag",
+        action_payload: { tag: "vip" },
+      })
+    ).toBe("⚡ Adicionar etiqueta vip");
+
+    expect(
+      describeStep({
+        trigger_type: "on_schedule",
+        conditions: [{ field: "stage", operator: "equals", value: "negociacao" }],
+      })
+    ).toBe("na hora da inscrição (imediato) (Condicional: stage)");
+  });
 });
 
 describe("requiresTargetDate", () => {

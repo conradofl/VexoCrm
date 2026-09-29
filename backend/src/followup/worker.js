@@ -39,6 +39,8 @@ import {
 } from "../services/chipQuota.js";
 import { getDateKey } from "../services/analytics.js";
 import { pgDatabasePool } from "../services/database.js";
+import { leadsTableName } from "../services/tenant.js";
+import { evaluateStepConditions } from "./service.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -171,12 +173,14 @@ export async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, t
 }
 
 export async function processJob(job) {
-  if (job.data.isMock) {
-    console.log(`[followup/worker] Job processado (mock): ${job.id}`);
+  const isMock = job?.data?.isMock || job?.isMock;
+  if (isMock) {
+    console.log(`[followup/worker] Job processado (mock): ${job?.id || job}`);
     return;
   }
 
-  const { jobId, customMessage } = job.data;
+  const jobId = typeof job === "string" ? job : (job?.data?.jobId || job?.jobId);
+  const customMessage = job?.data?.customMessage || job?.customMessage;
 
   const { rows: jobRows } = await query(
     `SELECT fj.id, fj.schedule_id, fj.template_id, fj.custom_message, fj.status as job_status,
@@ -184,6 +188,7 @@ export async function processJob(job) {
             fs.lead_name, fs.phone, fs.meeting_datetime, fs.status as schedule_status,
             fs.campaign_id, fs.company_id,
             ft.message, ft.trigger_type,
+            ft.step_type, ft.action_type, ft.action_payload, ft.conditions,
             ft.media_path as template_media_path, ft.media_type as template_media_type, ft.media_mime as template_media_mime, ft.media_filename as template_media_filename,
             fc.status as campaign_status,
             fc.exit_on_reply, fc.exit_on_won, fc.exit_on_lost, fc.exit_on_human_takeover,
@@ -339,6 +344,88 @@ export async function processJob(job) {
     } catch (takeoverCheckErr) {
       console.warn(log, "aviso ao checar takeover humano:", takeoverCheckErr?.message || takeoverCheckErr);
     }
+  }
+
+  // 5. Avaliação de Condições antes do disparo (Passo Condicional)
+  if (row.conditions && Array.isArray(row.conditions) && row.conditions.length > 0 && row.tenant_id && row.phone) {
+    const table = leadsTableName(row.tenant_id);
+    const { rows: leadRows } = await query(
+      `SELECT * FROM public."${table}"
+        WHERE client_id = $1
+          AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+        LIMIT 1`,
+      [row.tenant_id, row.phone]
+    );
+    const leadData = leadRows[0] || {};
+    const check = evaluateStepConditions(row.conditions, leadData);
+    if (!check.passed) {
+      await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
+      console.log(log, `skipped — condição do passo não atendida: ${check.reason}`);
+      return; // Pula somente este passo. Cadência segue viva!
+    }
+  }
+
+  // 6. Execução de Ação Interna (step_type === 'internal_action')
+  if (row.step_type === "internal_action") {
+    const payload = row.action_payload || {};
+    const table = leadsTableName(row.tenant_id);
+    switch (row.action_type) {
+      case "create_reminder": {
+        const title = payload.title || row.custom_message || row.message || "Lembrete de Follow-up";
+        const notes = payload.notes || "";
+        const remindAt = payload.remind_at || new Date().toISOString();
+        await query(
+          `INSERT INTO public.lead_reminders (client_id, phone, lead_name, title, notes, remind_at, status)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
+          [row.tenant_id, row.phone, row.lead_name, title, notes, remindAt]
+        );
+        break;
+      }
+      case "change_stage": {
+        if (payload.stage) {
+          await query(
+            `UPDATE public."${table}"
+                SET stage = $1, updated_at = now()
+              WHERE client_id = $2
+                AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$3::text")}`,
+            [payload.stage, row.tenant_id, row.phone]
+          );
+        }
+        break;
+      }
+      case "assign_operator": {
+        if (payload.assigned_to) {
+          await query(
+            `UPDATE public."${table}"
+                SET assigned_to = $1, updated_at = now()
+              WHERE client_id = $2
+                AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$3::text")}`,
+            [payload.assigned_to, row.tenant_id, row.phone]
+          );
+        }
+        break;
+      }
+      case "add_tag": {
+        if (payload.tag) {
+          await query(
+            `UPDATE public."${table}"
+                SET tags = array_append(COALESCE(tags, ARRAY[]::text[]), $1), updated_at = now()
+              WHERE client_id = $2
+                AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$3::text")}
+                AND NOT ($1 = ANY(COALESCE(tags, ARRAY[]::text[])))`,
+            [payload.tag, row.tenant_id, row.phone]
+          );
+        }
+        break;
+      }
+      default:
+        console.warn(log, `Ação interna desconhecida: ${row.action_type}`);
+        break;
+    }
+    // Marca o job como executado com sucesso e encerra
+    await query("UPDATE followup_jobs SET status='sent', sent_at=now() WHERE id=$1", [jobId]);
+    console.log(log, `ação interna executada com sucesso (${row.action_type})`);
+    return;
   }
 
   const rawMessage = customMessage || row.custom_message || row.message || "";

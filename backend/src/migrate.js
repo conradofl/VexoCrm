@@ -350,6 +350,15 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='contacts_without_channel')
       AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'contacts_without_channel_client_perfil_key')
     ) AS ok`,
+    "20260929100000_add_followup_conditional_and_internal_steps.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='followup_templates')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='step_type')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='action_type')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='action_payload')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='conditions')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];
