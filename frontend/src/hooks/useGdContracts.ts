@@ -1,14 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { ContractClauseBlock } from "@/lib/geracaoDigital/contractMerge";
 
 export interface GdContractTemplate {
   id: string;
   tenant_id: string;
   nome: string;
   conteudo: string;
+  clausulas?: ContractClauseBlock[];
   ativo: boolean;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface GdContractFormData {
@@ -31,6 +34,7 @@ export interface GdContract {
   id: string;
   tenant_id: string;
   proposal_id?: string | null;
+  template_id?: string | null;
   dados: GdContractFormData;
   pdf_url: string | null;
   sign_url?: string | null;
@@ -67,6 +71,78 @@ export function useGdContractTemplates() {
         throw new Error(await readApiErrorMessage(res, "Erro ao carregar templates de contratos"));
       }
       return readApiJson<GdContractTemplate[]>(res, "contract-templates");
+    },
+  });
+}
+
+export function useCreateGdContractTemplate() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { nome: string; conteudo?: string; clausulas?: ContractClauseBlock[]; ativo?: boolean }): Promise<GdContractTemplate> => {
+      const token = await getIdToken();
+      const res = await fetchApi("/api/gd/contract-templates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao criar modelo de contrato"));
+      }
+      return readApiJson<GdContractTemplate>(res, "create-contract-template");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gdContractTemplates"] });
+    },
+  });
+}
+
+export function useUpdateGdContractTemplate() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<GdContractTemplate> }): Promise<GdContractTemplate> => {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/gd/contract-templates/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao atualizar modelo de contrato"));
+      }
+      return readApiJson<GdContractTemplate>(res, "update-contract-template");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gdContractTemplates"] });
+    },
+  });
+}
+
+export function useDeleteGdContractTemplate() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/gd/contract-templates/${id}`, {
+        method: "DELETE",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao excluir modelo de contrato"));
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gdContractTemplates"] });
     },
   });
 }

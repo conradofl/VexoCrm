@@ -4,10 +4,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useCreateGdContract, useUpdateGdContract, useExtractContractData, useGdContractTemplates, GdContractFormData } from "@/hooks/useGdContracts";
+import { useCreateGdContract, useUpdateGdContract, useExtractContractData, useGdContractTemplates, useCreateGdContractTemplate, useUpdateGdContractTemplate, GdContractFormData } from "@/hooks/useGdContracts";
 import { useJuridicoSettings } from "@/hooks/useJuridico";
-import { Sparkles, AlertTriangle, Building2, ChevronDown, Info, FileText } from "lucide-react";
-import { buildContractDados } from "@/lib/geracaoDigital/contractMerge";
+import {
+  Sparkles,
+  AlertTriangle,
+  Building2,
+  ChevronDown,
+  Info,
+  FileText,
+  Layers,
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Save,
+  BookmarkPlus,
+} from "lucide-react";
+import {
+  buildContractDados,
+  ContractClauseBlock,
+  toExtenseOrdinal,
+  assembleContractFromBlocks,
+  parseTemplateContentToClauses,
+  extractPlaceholders,
+  extractDynamicPlaceholders,
+  formatFieldLabel,
+} from "@/lib/geracaoDigital/contractMerge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { ContractPreview } from "./ContractPreview";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -86,11 +112,179 @@ export function GenerateContractDialog({
   const { data: juridicoSettings } = useJuridicoSettings();
   const createContract = useCreateGdContract();
   const updateContract = useUpdateGdContract();
+  const createTemplateMutation = useCreateGdContractTemplate();
+  const updateTemplateMutation = useUpdateGdContractTemplate();
   const extractData = useExtractContractData();
   const { toast } = useToast();
   const isEdit = !!contractId;
   const [textoColado, setTextoColado] = useState("");
   const [showContratadaOverride, setShowContratadaOverride] = useState(false);
+
+  // Estados dos Modelos e Cláusulas em Blocos
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [clausulas, setClausulas] = useState<ContractClauseBlock[]>([]);
+  const [tituloPrincipal, setTituloPrincipal] = useState<string>("");
+  const [fechamento, setFechamento] = useState<string>("");
+  const [isSavingAsNew, setIsSavingAsNew] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const lastLoadedTemplateIdRef = React.useRef<string | null>(null);
+
+  // Sincronização e carregamento de templates e suas cláusulas
+  useEffect(() => {
+    if (!open) {
+      lastLoadedTemplateIdRef.current = null;
+      return;
+    }
+    if (!templates || templates.length === 0) return;
+
+    let tplId = selectedTemplateId;
+    if (!tplId || !templates.some((t) => t.id === tplId)) {
+      const defaultTpl = templates.find((t) => t.ativo !== false) || templates[0];
+      tplId = defaultTpl.id;
+      setSelectedTemplateId(tplId);
+    }
+
+    if (lastLoadedTemplateIdRef.current !== tplId) {
+      lastLoadedTemplateIdRef.current = tplId;
+      const tpl = templates.find((t) => t.id === tplId);
+      if (tpl) {
+        if (tpl.clausulas && Array.isArray(tpl.clausulas) && tpl.clausulas.length > 0) {
+          setClausulas(tpl.clausulas);
+          const parsed = parseTemplateContentToClauses(tpl.conteudo || "");
+          setTituloPrincipal(parsed.tituloPrincipal);
+          setFechamento(parsed.fechamento);
+        } else if (tpl.conteudo) {
+          const parsed = parseTemplateContentToClauses(tpl.conteudo);
+          setTituloPrincipal(parsed.tituloPrincipal);
+          setClausulas(parsed.clausulas);
+          setFechamento(parsed.fechamento);
+        }
+      }
+    }
+  }, [open, templates, selectedTemplateId]);
+
+  const currentTemplate = React.useMemo(() => {
+    return (templates || []).find((t) => t.id === selectedTemplateId) || (templates && templates[0]) || null;
+  }, [templates, selectedTemplateId]);
+
+  // Contrato montado a partir dos blocos ativos com numeração ordinal recalculada
+  const assembledContractContent = React.useMemo(() => {
+    return assembleContractFromBlocks({
+      tituloPrincipal,
+      clausulas,
+      fechamento,
+    });
+  }, [tituloPrincipal, clausulas, fechamento]);
+
+  // Marcadores detectados dinamicamente que não são campos padrão do sistema
+  const dynamicPlaceholders = React.useMemo(() => {
+    return extractDynamicPlaceholders(clausulas);
+  }, [clausulas]);
+
+  // Mapeamento dinâmico de índice ordinal para cada cláusula ativa
+  const activeIndexMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    let count = 0;
+    for (const c of clausulas) {
+      if (c && c.ativo !== false) {
+        count += 1;
+        map.set(c.id, count);
+      }
+    }
+    return map;
+  }, [clausulas]);
+
+  const handleMoveClause = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= clausulas.length) return;
+    const copy = [...clausulas];
+    const temp = copy[targetIndex];
+    copy[targetIndex] = copy[index];
+    copy[index] = temp;
+    setClausulas(copy);
+  };
+
+  const handleToggleClause = (id: string) => {
+    setClausulas((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ativo: c.ativo === false } : c))
+    );
+  };
+
+  const handleUpdateClauseTitle = (id: string, newTitle: string) => {
+    setClausulas((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, titulo: newTitle } : c))
+    );
+  };
+
+  const handleUpdateClauseContent = (id: string, newContent: string) => {
+    setClausulas((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, conteudo: newContent } : c))
+    );
+  };
+
+  const handleDeleteClause = (id: string) => {
+    setClausulas((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const handleAddClause = () => {
+    const newId = `custom_${Date.now()}`;
+    const newBlock: ContractClauseBlock = {
+      id: newId,
+      titulo: "Nova Cláusula",
+      conteudo: "O CONTRATANTE e a CONTRATADA ajustam que...",
+      ativo: true,
+    };
+    setClausulas((prev) => [...prev, newBlock]);
+    toast({ title: "Nova cláusula adicionada", description: "Edite o título e o texto da cláusula." });
+  };
+
+  const handleUpdateCurrentTemplate = () => {
+    if (!selectedTemplateId) return;
+    const tplName = currentTemplate?.nome || "Modelo";
+    updateTemplateMutation.mutate(
+      {
+        id: selectedTemplateId,
+        data: {
+          clausulas,
+          conteudo: assembledContractContent,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast({ title: "Modelo atualizado", description: `O modelo "${tplName}" foi salvo com as cláusulas atuais.` });
+        },
+        onError: (err: any) => {
+          toast({ title: "Erro ao atualizar modelo", description: err.message, variant: "destructive" });
+        },
+      }
+    );
+  };
+
+  const handleSaveAsNewTemplate = () => {
+    if (!newTemplateName.trim()) {
+      toast({ title: "Nome obrigatório", description: "Informe o nome do novo modelo de contrato.", variant: "destructive" });
+      return;
+    }
+    createTemplateMutation.mutate(
+      {
+        nome: newTemplateName.trim(),
+        clausulas,
+        conteudo: assembledContractContent,
+        ativo: true,
+      },
+      {
+        onSuccess: (newTpl) => {
+          toast({ title: "Modelo criado com sucesso", description: `Modelo "${newTpl.nome}" criado e selecionado.` });
+          setIsSavingAsNew(false);
+          setNewTemplateName("");
+          setSelectedTemplateId(newTpl.id);
+        },
+        onError: (err: any) => {
+          toast({ title: "Erro ao criar modelo", description: err.message, variant: "destructive" });
+        },
+      }
+    );
+  };
 
   // Isolamento estrito de chave para nunca haver colisão de rascunhos:
   // - Edição: isolado por contractId
@@ -166,13 +360,19 @@ export function GenerateContractDialog({
       return;
     }
 
-    const templateId = templates && templates.length > 0 ? templates[0].id : undefined;
+    const templateId = selectedTemplateId || (templates && templates.length > 0 ? templates[0].id : undefined);
 
     // Modo edição: atualiza o contrato existente (o PDF é remontado on the fly,
     // então a correção aparece no documento na hora).
     if (contractId) {
       updateContract.mutate(
-        { id: contractId, data: { dados: buildContractDados(formData) as GdContractFormData } },
+        {
+          id: contractId,
+          data: {
+            dados: buildContractDados(formData) as GdContractFormData,
+            template_id: templateId || null,
+          },
+        },
         {
           onSuccess: () => {
             toast({ title: "Contrato atualizado", description: "As alterações foram salvas." });
@@ -297,10 +497,95 @@ export function GenerateContractDialog({
           </div>
         )}
 
+        {/* Seletor e Gestão de Modelos de Contrato */}
+        <div className="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-white/10 space-y-2.5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 w-full sm:w-auto">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shrink-0">
+                <Layers className="h-4 w-4 text-purple-650 dark:text-purple-400" />
+                <span>Modelo de Contrato:</span>
+              </div>
+              <div className="w-full sm:w-[260px]">
+                <Select value={selectedTemplateId} onValueChange={(val) => setSelectedTemplateId(val)}>
+                  <SelectTrigger className="h-8 text-xs bg-white dark:bg-slate-950">
+                    <SelectValue placeholder="Selecione um modelo..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(templates || []).map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.nome} {!t.ativo ? "(Inativo)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleUpdateCurrentTemplate}
+                disabled={!selectedTemplateId || updateTemplateMutation.isPending}
+                className="h-8 text-xs gap-1.5 text-slate-700 dark:text-slate-200"
+                title="Salva as alterações de cláusulas no modelo selecionado"
+              >
+                <Save className="h-3.5 w-3.5 text-purple-650" />
+                <span>{updateTemplateMutation.isPending ? "Salvando..." : "Atualizar Modelo"}</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setIsSavingAsNew((v) => !v)}
+                className="h-8 text-xs gap-1.5 text-purple-750 dark:text-purple-300 border-purple-200 dark:border-purple-800 hover:bg-purple-50 dark:hover:bg-purple-950/40"
+              >
+                <BookmarkPlus className="h-3.5 w-3.5 text-purple-650" />
+                <span>Salvar como Novo</span>
+              </Button>
+            </div>
+          </div>
+
+          {isSavingAsNew && (
+            <div className="bg-purple-50/70 dark:bg-purple-950/30 p-2.5 rounded-lg border border-purple-200 dark:border-purple-800/60 flex items-center gap-2">
+              <Input
+                placeholder="Nome do novo modelo (ex: Modelo Energia Solar / Odonto)..."
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                className="h-8 text-xs bg-white dark:bg-slate-950"
+                autoFocus
+              />
+              <Button
+                size="sm"
+                onClick={handleSaveAsNewTemplate}
+                disabled={createTemplateMutation.isPending || !newTemplateName.trim()}
+                className="h-8 text-xs bg-purple-650 hover:bg-purple-700 text-white shrink-0"
+              >
+                {createTemplateMutation.isPending ? "Criando..." : "Confirmar e Salvar"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setIsSavingAsNew(false); setNewTemplateName(""); }}
+                className="h-8 text-xs shrink-0"
+              >
+                Cancelar
+              </Button>
+            </div>
+          )}
+        </div>
+
         <Tabs defaultValue="form" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="form">Formulário de Preenchimento</TabsTrigger>
-            <TabsTrigger value="preview">Preview do Contrato</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 mb-4">
+            <TabsTrigger value="form">1. Dados / Variáveis</TabsTrigger>
+            <TabsTrigger value="clausulas" className="flex items-center gap-1.5">
+              <span>2. Cláusulas</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 font-bold">
+                {clausulas.filter((c) => c.ativo !== false).length}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="preview">3. Preview do Contrato</TabsTrigger>
           </TabsList>
 
           <TabsContent value="form" className="space-y-4">
@@ -578,12 +863,194 @@ export function GenerateContractDialog({
                   <option value="8">Extra Amplo (8 linhas - carimbos grandes com QR Code)</option>
                 </select>
               </div>
+
+              {/* Variáveis Dinâmicas Específicas do Modelo */}
+              {dynamicPlaceholders.length > 0 && (
+                <div className="md:col-span-2 border-t border-purple-200 dark:border-white/10 pt-3">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-bold uppercase tracking-wider text-purple-650 dark:text-purple-400">
+                      Variáveis Específicas do Modelo ({dynamicPlaceholders.length})
+                    </span>
+                    <span className="text-[10px] bg-purple-100 text-purple-750 dark:bg-purple-950/60 dark:text-purple-300 px-2 py-0.5 rounded-full font-medium">
+                      Campos Dinâmicos
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+                    Estes campos foram detectados automaticamente a partir dos marcadores {"{{...}}"} contidos nas cláusulas ativas deste modelo.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {dynamicPlaceholders.map((key) => (
+                      <div key={key} className="space-y-1.5">
+                        <Label className="text-xs font-medium">
+                          {formatFieldLabel(key)} <span className="font-mono text-[10px] text-purple-600 dark:text-purple-400">({"{{"+key+"}}"})</span>
+                        </Label>
+                        <Input
+                          name={key}
+                          value={formData[key] ?? ""}
+                          onChange={handleChange}
+                          placeholder={`Preencher ${formatFieldLabel(key).toLowerCase()}...`}
+                          className="text-xs"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="clausulas" className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200 dark:border-white/10">
+              <div>
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-purple-650" />
+                  Gestão Modular de Cláusulas
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Reordene e ative/desative cláusulas. A numeração por extenso (Primeira, Segunda, Terceira...) é recalculada automaticamente sem buracos.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleAddClause}
+                className="h-8 text-xs bg-purple-650 hover:bg-purple-700 text-white gap-1.5 shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Nova Cláusula
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {clausulas.map((clause, index) => {
+                const isAtivo = clause.ativo !== false;
+                const ordinalIndex = activeIndexMap.get(clause.id);
+                const ordinalName = ordinalIndex ? toExtenseOrdinal(ordinalIndex) : "";
+                const placeholdersInClause = extractPlaceholders(clause.conteudo);
+
+                return (
+                  <div
+                    key={clause.id || `clause-${index}`}
+                    className={`rounded-xl border transition-all p-3 space-y-2.5 ${
+                      isAtivo
+                        ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 shadow-sm"
+                        : "bg-slate-50/80 dark:bg-slate-950/40 border-dashed border-slate-300 dark:border-white/10 opacity-70"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-white/5 pb-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                        {/* Botões de Reordenação ▲ / ▼ */}
+                        <div className="flex items-center border border-slate-200 dark:border-white/10 rounded-md overflow-hidden bg-slate-50 dark:bg-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveClause(index, -1)}
+                            disabled={index === 0}
+                            title="Subir cláusula"
+                            className="px-1.5 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </button>
+                          <div className="w-px h-4 bg-slate-200 dark:bg-white/10" />
+                          <button
+                            type="button"
+                            onClick={() => handleMoveClause(index, 1)}
+                            disabled={index === clausulas.length - 1}
+                            title="Descer cláusula"
+                            className="px-1.5 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Badge de Numeração Ordinal Dinâmica */}
+                        {isAtivo && ordinalIndex ? (
+                          <Badge className="bg-purple-650 text-white font-mono text-[10px] shrink-0">
+                            {ordinalIndex}ª – Cláusula {ordinalName}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-mono text-[10px] shrink-0">
+                            Desativada
+                          </Badge>
+                        )}
+
+                        {/* Título Editável */}
+                        <Input
+                          value={clause.titulo}
+                          onChange={(e) => handleUpdateClauseTitle(clause.id, e.target.value)}
+                          placeholder="Título da cláusula (ex: Do Objeto, Do Foro)..."
+                          className="h-8 text-xs font-semibold flex-1 min-w-[150px]"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {/* Switch Ativo / Desativado */}
+                        <div className="flex items-center gap-1.5">
+                          <Switch
+                            checked={isAtivo}
+                            onCheckedChange={() => handleToggleClause(clause.id)}
+                            id={`switch-${clause.id}`}
+                          />
+                          <Label htmlFor={`switch-${clause.id}`} className="text-xs cursor-pointer select-none">
+                            {isAtivo ? "Ativa" : "Desativada"}
+                          </Label>
+                        </div>
+
+                        {/* Botão Excluir */}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteClause(clause.id)}
+                          disabled={clause.obrigatorio}
+                          title={clause.obrigatorio ? "Cláusula obrigatória não pode ser removida" : "Excluir cláusula"}
+                          className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 disabled:opacity-30"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Conteúdo da Cláusula */}
+                    <div className="space-y-1.5">
+                      <Textarea
+                        value={clause.conteudo}
+                        onChange={(e) => handleUpdateClauseContent(clause.id, e.target.value)}
+                        rows={4}
+                        placeholder="Texto da cláusula contendo marcadores {{variavel}}..."
+                        className="text-xs font-mono leading-relaxed bg-white dark:bg-slate-950"
+                      />
+
+                      {/* Marcadores detectados na cláusula */}
+                      {placeholdersInClause.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 pt-1">
+                          <span className="text-[10px] text-slate-400">Variáveis detectadas:</span>
+                          {placeholdersInClause.map((ph) => (
+                            <span
+                              key={ph}
+                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10"
+                            >
+                              {"{{"}{ph}{"}}"}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {clausulas.length === 0 && (
+                <div className="p-8 text-center text-slate-500 bg-slate-50 dark:bg-slate-900 rounded-xl border border-dashed border-slate-300 dark:border-white/10">
+                  Nenhuma cláusula definida para este modelo. Clique em <strong>+ Nova Cláusula</strong> para adicionar.
+                </div>
+              )}
             </div>
           </TabsContent>
 
           <TabsContent value="preview">
             <ContractPreview
-              template={template}
+              template={currentTemplate}
+              rawTemplateContent={assembledContractContent}
               formData={buildContractDados(formData) as GdContractFormData}
               onChangeTextoFinal={(text) => setFormData((prev) => ({ ...prev, texto_final: text }))}
             />

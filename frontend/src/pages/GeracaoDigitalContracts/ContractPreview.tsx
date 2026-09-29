@@ -8,22 +8,24 @@ interface ContractPreviewProps {
   template: GdContractTemplate | null;
   formData: GdContractFormData;
   onChangeTextoFinal?: (text: string | undefined) => void;
+  rawTemplateContent?: string;
 }
 
-export function ContractPreview({ template, formData, onChangeTextoFinal }: ContractPreviewProps) {
+export function ContractPreview({ template, formData, onChangeTextoFinal, rawTemplateContent }: ContractPreviewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Texto padrão gerado mesclando os dados atuais do formulário com o template ativo
+  // Texto padrão gerado mesclando os dados atuais do formulário com o template ativo ou blocos montados
   const defaultMergedText = useMemo(() => {
-    if (!template) return "";
+    const templateContent = rawTemplateContent !== undefined ? rawTemplateContent : (template?.conteudo || "");
+    if (!templateContent) return "";
     const mergedData = {
       ...formData,
       data_extenso: formatExtenseDateClient(),
     };
-    return applyContractMerge(template.conteudo, mergedData);
-  }, [template, formData]);
+    return applyContractMerge(templateContent, mergedData);
+  }, [template, rawTemplateContent, formData]);
 
-  if (!template) {
+  if (!template && !rawTemplateContent) {
     return (
       <div className="flex h-[400px] items-center justify-center text-slate-500 bg-slate-50 dark:bg-slate-900 rounded-md border border-slate-200 dark:border-white/10">
         Nenhum template ativo encontrado.

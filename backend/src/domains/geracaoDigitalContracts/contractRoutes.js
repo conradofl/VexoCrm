@@ -8,6 +8,9 @@ import { pgDatabasePool } from "../../services/database.js";
 import {
   listContractTemplates,
   getContractTemplate,
+  createContractTemplate,
+  updateContractTemplate,
+  deleteContractTemplate,
   createContract,
   listContracts,
   getContract,
@@ -39,6 +42,9 @@ export function registerContractRoutes(app) {
   app.post("/api/gd/contracts/:id/enviar-juridico", requireFirebaseAuth, guardContratoVexo, sendContractToJuridico);
   app.get("/api/gd/contract-templates", requireFirebaseAuth, listContractTemplates);
   app.get("/api/gd/contract-templates/:id", requireFirebaseAuth, getContractTemplate);
+  app.post("/api/gd/contract-templates", requireFirebaseAuth, createContractTemplate);
+  app.put("/api/gd/contract-templates/:id", requireFirebaseAuth, updateContractTemplate);
+  app.delete("/api/gd/contract-templates/:id", requireFirebaseAuth, deleteContractTemplate);
   
   // Preenchimento assistido por IA: recebe texto colado, devolve campos.
   app.post("/api/gd/contracts/extract", requireFirebaseAuth, extractContractData);

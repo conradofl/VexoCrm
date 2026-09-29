@@ -359,6 +359,13 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_templates' AND column_name='conditions')
       )
     ) AS ok`,
+    "20260929120000_add_clausulas_to_gd_contract_templates.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='gd_contract_templates')
+      OR (
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contract_templates' AND column_name='clausulas')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='template_id')
+      )
+    ) AS ok`,
   };
 
   const query = checks[filename];

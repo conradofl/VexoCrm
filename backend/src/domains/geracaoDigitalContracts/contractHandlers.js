@@ -6,6 +6,7 @@ import { saveContractBuffer, getContractBuffer, CONTRACT_MAX_BYTES } from "../..
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
 // NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
+import { assembleContractFromBlocks } from "./contractMerge.js";
 
 // Helper for formatting date
 function formatExtenseDate() {
@@ -39,7 +40,7 @@ export async function listContractTemplates(req, res) {
     if (!tenantId) return;
 
     const { rows } = await db.query(
-      "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC",
+      "SELECT id, tenant_id, nome, conteudo, COALESCE(clausulas, '[]'::jsonb) as clausulas, ativo, created_at, updated_at FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC",
       [tenantId]
     );
 
@@ -57,7 +58,7 @@ export async function getContractTemplate(req, res) {
     const { id } = req.params;
 
     const { rows } = await db.query(
-      "SELECT * FROM gd_contract_templates WHERE id = $1 AND tenant_id = $2",
+      "SELECT id, tenant_id, nome, conteudo, COALESCE(clausulas, '[]'::jsonb) as clausulas, ativo, created_at, updated_at FROM gd_contract_templates WHERE id = $1 AND tenant_id = $2",
       [id, tenantId]
     );
 
@@ -69,6 +70,100 @@ export async function getContractTemplate(req, res) {
   } catch (error) {
     console.error("[getContractTemplate] Error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Erro ao buscar template de contrato");
+  }
+}
+
+export async function createContractTemplate(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+
+    const { nome, conteudo, clausulas, ativo } = req.body;
+    if (!nome || !String(nome).trim()) {
+      return sendError(res, 400, "BAD_REQUEST", "nome é obrigatório");
+    }
+
+    const finalConteudo = conteudo || (Array.isArray(clausulas) ? assembleContractFromBlocks({ clausulas }) : "");
+    const finalClausulas = Array.isArray(clausulas) ? JSON.stringify(clausulas) : "[]";
+    const finalAtivo = typeof ativo === "boolean" ? ativo : true;
+
+    const { rows } = await db.query(
+      `INSERT INTO gd_contract_templates (tenant_id, nome, conteudo, clausulas, ativo)
+       VALUES ($1, $2, $3, $4::jsonb, $5)
+       RETURNING id, tenant_id, nome, conteudo, clausulas, ativo, created_at, updated_at`,
+      [tenantId, String(nome).trim(), finalConteudo, finalClausulas, finalAtivo]
+    );
+
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    console.error("[createContractTemplate] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Erro ao criar template de contrato");
+  }
+}
+
+export async function updateContractTemplate(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+    const { id } = req.params;
+    const { nome, conteudo, clausulas, ativo } = req.body;
+
+    const finalClausulas = clausulas !== undefined
+      ? (Array.isArray(clausulas) ? JSON.stringify(clausulas) : "[]")
+      : null;
+
+    const { rows } = await db.query(
+      `UPDATE gd_contract_templates
+       SET nome = COALESCE($1, nome),
+           conteudo = COALESCE($2, conteudo),
+           clausulas = CASE WHEN $3::text IS NOT NULL THEN $3::jsonb ELSE clausulas END,
+           ativo = COALESCE($4, ativo),
+           updated_at = NOW()
+       WHERE id = $5 AND tenant_id = $6
+       RETURNING id, tenant_id, nome, conteudo, clausulas, ativo, created_at, updated_at`,
+      [
+        nome !== undefined ? String(nome).trim() : null,
+        conteudo !== undefined ? conteudo : null,
+        finalClausulas,
+        typeof ativo === "boolean" ? ativo : null,
+        id,
+        tenantId
+      ]
+    );
+
+    if (rows.length === 0) {
+      return sendError(res, 404, "NOT_FOUND", "Template não encontrado");
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error("[updateContractTemplate] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Erro ao atualizar template de contrato");
+  }
+}
+
+export async function deleteContractTemplate(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+    const { id } = req.params;
+
+    const { rows } = await db.query(
+      `UPDATE gd_contract_templates
+       SET ativo = false, updated_at = NOW()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id`,
+      [id, tenantId]
+    );
+
+    if (rows.length === 0) {
+      return sendError(res, 404, "NOT_FOUND", "Template não encontrado");
+    }
+
+    res.json({ success: true, id: rows[0].id });
+  } catch (error) {
+    console.error("[deleteContractTemplate] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", "Erro ao excluir template de contrato");
   }
 }
 
@@ -108,10 +203,10 @@ export async function createContract(req, res) {
     }
 
     const { rows: contractRows } = await db.query(
-      `INSERT INTO gd_contracts (tenant_id, proposal_id, dados, status, owner_company)
-       VALUES ($1, $2, $3, 'rascunho', $4)
+      `INSERT INTO gd_contracts (tenant_id, proposal_id, dados, status, owner_company, template_id)
+       VALUES ($1, $2, $3, 'rascunho', $4, $5)
        RETURNING *`,
-      [tenantId, proposal_id || null, dados, finalOwnerCompany]
+      [tenantId, proposal_id || null, dados, finalOwnerCompany, resolvedTemplateId || null]
     );
 
     res.status(201).json(contractRows[0]);
@@ -150,7 +245,6 @@ export async function listContracts(req, res) {
     query += " ORDER BY created_at DESC";
 
     const { rows } = await db.query(query, params);
-
     res.json(rows);
   } catch (error) {
     console.error("[listContracts] Error:", error);
@@ -185,17 +279,25 @@ export async function updateContract(req, res) {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
     const { id } = req.params;
-    const { dados, status, arquivado } = req.body;
+    const { dados, status, arquivado, template_id } = req.body;
 
     const { rows } = await db.query(
       `UPDATE gd_contracts
        SET dados = COALESCE($1, dados),
            status = COALESCE($2, status),
            arquivado = COALESCE($3, arquivado),
+           template_id = COALESCE($4, template_id),
            updated_at = NOW()
-       WHERE id = $4 AND tenant_id = $5
+       WHERE id = $5 AND tenant_id = $6
        RETURNING *`,
-      [dados, status, typeof arquivado === "boolean" ? arquivado : null, id, tenantId]
+      [
+        dados,
+        status,
+        typeof arquivado === "boolean" ? arquivado : null,
+        template_id !== undefined ? template_id : null,
+        id,
+        tenantId
+      ]
     );
 
     if (rows.length === 0) {
@@ -247,17 +349,34 @@ export async function buildContractPdfBuffer(tenantId, id) {
     return { contract, dados, pdfData };
   }
 
-  const { rows: templateRows } = await db.query(
-    "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1",
-    [tenantId]
-  );
+  let templateQuery;
+  let templateParams;
+  if (contract.template_id) {
+    templateQuery = "SELECT * FROM gd_contract_templates WHERE id = $1 AND tenant_id = $2";
+    templateParams = [contract.template_id, tenantId];
+  } else {
+    templateQuery = "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1";
+    templateParams = [tenantId];
+  }
+
+  const { rows: templateRows } = await db.query(templateQuery, templateParams);
   if (templateRows.length === 0) {
     const e = new Error("Template de contrato não encontrado");
     e.code = "TEMPLATE_NOT_FOUND";
     throw e;
   }
 
-  const pdfData = await renderContractPdf(templateRows[0].conteudo, dados);
+  const template = templateRows[0];
+  let templateConteudo = template.conteudo;
+  if (Array.isArray(template.clausulas) && template.clausulas.length > 0) {
+    templateConteudo = assembleContractFromBlocks({
+      tituloPrincipal: template.conteudo ? parseTemplateContentToClauses(template.conteudo).tituloPrincipal : "",
+      clausulas: template.clausulas,
+      fechamento: template.conteudo ? parseTemplateContentToClauses(template.conteudo).fechamento : "",
+    });
+  }
+
+  const pdfData = await renderContractPdf(templateConteudo, dados);
   return { contract, dados, pdfData };
 }
 

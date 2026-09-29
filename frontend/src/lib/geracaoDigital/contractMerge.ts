@@ -164,3 +164,210 @@ export function toggleBoldMarkdown(text: string, start: number, end: number): { 
   };
 }
 
+export interface ContractClauseBlock {
+  id: string;            // Identificador único (ex: "partes", "objeto", "plataforma", "obrigacoes", "preco", "prazo", "foro", ou uuid)
+  titulo: string;        // Título temático da cláusula (ex: "Das Partes", "Dos Objetos", "Da Plataforma Vexo OS", "Das Obrigações das Partes", "Do Preço e Condições", "Do Prazo", "Do Foro")
+  conteudo: string;      // Corpo do texto da cláusula com seus marcadores {{marcador}}
+  ativo: boolean;        // Se está incluída no contrato
+  obrigatorio?: boolean; // Opcional: protege cláusulas fundamentais (ex: "Das Partes")
+}
+
+export const ORDINAIS_EXTENSO = [
+  "", "Primeira", "Segunda", "Terceira", "Quarta", "Quinta",
+  "Sexta", "Sétima", "Oitava", "Nona", "Décima",
+  "Décima Primeira", "Décima Segunda", "Décima Terceira", "Décima Quarta", "Décima Quinta",
+  "Décima Sexta", "Décima Sétima", "Décima Oitava", "Décima Nona", "Vigésima",
+  "Vigésima Primeira", "Vigésima Segunda", "Vigésima Terceira", "Vigésima Quarta", "Vigésima Quinta",
+  "Vigésima Sexta", "Vigésima Sétima", "Vigésima Oitava", "Vigésima Nona", "Trigésima"
+];
+
+export function toExtenseOrdinal(index: number): string {
+  const n = Math.floor(Number(index) || 0);
+  return ORDINAIS_EXTENSO[n] || `${n}ª`;
+}
+
+export function assembleContractFromBlocks({
+  tituloPrincipal,
+  clausulas = [],
+  fechamento,
+}: {
+  tituloPrincipal?: string;
+  clausulas: ContractClauseBlock[];
+  fechamento?: string;
+}): string {
+  const activeClauses = (clausulas || []).filter((c) => c && c.ativo !== false);
+
+  const assembledClauses = activeClauses.map((c, idx) => {
+    const ordinal = toExtenseOrdinal(idx + 1);
+    const cleanTitle = (c.titulo || "")
+      .replace(/^Cláusula\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*/i, "")
+      .trim();
+    const header = `Cláusula ${ordinal} – ${cleanTitle}`;
+    const body = (c.conteudo || "").trim();
+    return body ? `${header}\n${body}` : header;
+  });
+
+  const parts: string[] = [];
+  if (tituloPrincipal && tituloPrincipal.trim()) {
+    parts.push(tituloPrincipal.trim());
+  }
+  if (assembledClauses.length > 0) {
+    parts.push(assembledClauses.join("\n\n"));
+  }
+  if (fechamento && fechamento.trim()) {
+    parts.push(fechamento.trim());
+  }
+  return parts.join("\n\n");
+}
+
+export function parseTemplateContentToClauses(conteudo: string): {
+  tituloPrincipal: string;
+  clausulas: ContractClauseBlock[];
+  fechamento: string;
+} {
+  if (!conteudo || typeof conteudo !== "string") {
+    return { tituloPrincipal: "", clausulas: [], fechamento: "" };
+  }
+
+  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*([^\n]+)/gi;
+  const matches = [...conteudo.matchAll(clauseRegex)];
+
+  if (matches.length === 0) {
+    return {
+      tituloPrincipal: "",
+      clausulas: [
+        {
+          id: "conteudo-geral",
+          titulo: "Conteúdo Geral",
+          conteudo: conteudo.trim(),
+          ativo: true,
+          obrigatorio: true,
+        },
+      ],
+      fechamento: "",
+    };
+  }
+
+  const firstMatch = matches[0];
+  const firstIndex = (firstMatch.index ?? 0) + (firstMatch[0].startsWith("\n") ? 1 : 0);
+  const tituloPrincipal = conteudo.slice(0, firstIndex).trim();
+
+  const fechamentoRegex = /(?:\n\n|\n)(E,?\s*por\s*estarem\s*assim[\s\S]*)$/i;
+  const fechamentoMatch = conteudo.match(fechamentoRegex);
+  let fechamento = "";
+  let endOfClauses = conteudo.length;
+
+  if (fechamentoMatch && fechamentoMatch.index !== undefined) {
+    fechamento = fechamentoMatch[1].trim();
+    endOfClauses = fechamentoMatch.index;
+  }
+
+  const clausulas: ContractClauseBlock[] = [];
+
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    const matchStart = (match.index ?? 0) + (match[0].startsWith("\n") ? 1 : 0);
+    const headerLineEnd = matchStart + match[0].trim().length;
+
+    let bodyEnd = endOfClauses;
+    if (i + 1 < matches.length) {
+      const nextMatch = matches[i + 1];
+      bodyEnd = (nextMatch.index ?? 0) + (nextMatch[0].startsWith("\n") ? 1 : 0);
+    }
+
+    const rawTitle = (match[2] || "").trim();
+    const clauseBody = conteudo.slice(headerLineEnd, bodyEnd).trim();
+
+    const slug = rawTitle
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `clausula-${i + 1}`;
+
+    const isPartes = /^(das\s+partes|partes|dos\s+contratantes)$/i.test(rawTitle.trim());
+
+    clausulas.push({
+      id: slug,
+      titulo: rawTitle,
+      conteudo: clauseBody,
+      ativo: true,
+      obrigatorio: isPartes,
+    });
+  }
+
+  return {
+    tituloPrincipal,
+    clausulas,
+    fechamento,
+  };
+}
+
+export function extractPlaceholders(textOrClauses: string | ContractClauseBlock[]): string[] {
+  const text = typeof textOrClauses === "string"
+    ? textOrClauses
+    : (textOrClauses || [])
+        .filter((c) => c && c.ativo !== false)
+        .map((c) => c.conteudo || "")
+        .join("\n");
+
+  const matches = text.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g);
+  const found = new Set<string>();
+  for (const m of matches) {
+    if (m[1]) found.add(m[1]);
+  }
+  return Array.from(found);
+}
+
+export const STANDARD_CONTRACT_FIELDS = new Set([
+  // Contratante
+  "razao_social",
+  "cnpj",
+  "telefone",
+  "telefone2",
+  "email",
+  "representante",
+  "endereco",
+  // Objeto & Preço
+  "produtos",
+  "artes_mensais",
+  "forma_pagamento",
+  "num_parcelas",
+  "valor_parcela",
+  "data_primeiro_venc",
+  "condicoes_pagamento",
+  // Prazo, Foro & Assinatura
+  "prazo_dias",
+  "aviso_previo_dias",
+  "vigencia",
+  "foro_cidade",
+  "cidade_assinatura",
+  // Sistema / Calculados / Assinaturas
+  "data_extenso",
+  "cronograma_pagamento",
+  "assinatura_contratada",
+  "assinatura_contratante",
+  "espaco_assinatura",
+]);
+
+export function isSystemOrStandardField(key: string): boolean {
+  if (!key) return false;
+  if (STANDARD_CONTRACT_FIELDS.has(key)) return true;
+  if (key.startsWith("contratada_")) return true;
+  return false;
+}
+
+export function extractDynamicPlaceholders(textOrClauses: string | ContractClauseBlock[]): string[] {
+  const all = extractPlaceholders(textOrClauses);
+  return all.filter((key) => !isSystemOrStandardField(key));
+}
+
+export function formatFieldLabel(key: string): string {
+  if (!key) return "";
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b[a-zÀ-ÿ]/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+
