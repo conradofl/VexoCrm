@@ -120,6 +120,9 @@ export async function ensureLeadClientTable(pgClientOrPool, tenantId, schemaType
       spin_fase TEXT CHECK (spin_fase IS NULL OR spin_fase IN ('situacao', 'problema', 'implicacao', 'necessidade')),
       dados JSONB NOT NULL DEFAULT '{}'::jsonb,
       data_nascimento DATE,
+      aniversario_casamento DATE,
+      epoca_ferias DATE,
+      data_retorno TIMESTAMPTZ,
       ultima_visita DATE,
       perfil_musical TEXT,${extraColumns}
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -138,8 +141,23 @@ export async function ensureLeadClientTable(pgClientOrPool, tenantId, schemaType
   }
 
   await ensureLeadIntelligenceColumns(pgClientOrPool);
+  await ensureLeadAnchorColumns(pgClientOrPool);
 
   return status;
+}
+
+export async function ensureLeadAnchorColumns(pgClientOrPool) {
+  if (!pgClientOrPool) return;
+  try {
+    await pgClientOrPool.query(`
+      ALTER TABLE public.leads 
+        ADD COLUMN IF NOT EXISTS aniversario_casamento DATE,
+        ADD COLUMN IF NOT EXISTS epoca_ferias DATE,
+        ADD COLUMN IF NOT EXISTS data_retorno TIMESTAMPTZ;
+    `);
+  } catch (err) {
+    console.warn("[lead-tables] Falha ao adicionar colunas de âncoras em public.leads:", err?.message || err);
+  }
 }
 
 export async function ensureLeadIntelligenceColumns(pgClientOrPool) {

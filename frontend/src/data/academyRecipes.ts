@@ -74,8 +74,14 @@ export interface AcademyFundamento {
  * POST /api/followup/templates espera (menos campaign_id, que só existe
  * depois de instalada).
  */
-/** Espelha ANCHOR_FIELDS do backend (followup/service.js:18) — as únicas âncoras que o sistema agenda sozinho hoje. Crescer lá exige crescer aqui. */
-export const SUPPORTED_ANCHOR_FIELDS = ["meeting_datetime", "data_nascimento"] as const;
+/** Espelha ANCHOR_FIELDS do backend (followup/service.js:18) — as âncoras que o sistema agenda sozinho. */
+export const SUPPORTED_ANCHOR_FIELDS = [
+  "meeting_datetime",
+  "data_nascimento",
+  "aniversario_casamento",
+  "epoca_ferias",
+  "data_retorno",
+] as const;
 export type SupportedAnchorField = (typeof SUPPORTED_ANCHOR_FIELDS)[number];
 
 export interface AcademyRecipeTemplate {

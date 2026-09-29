@@ -18,6 +18,9 @@ import { leadsTableName } from "../services/tenant.js";
 export const ANCHOR_FIELDS = {
   meeting_datetime: { source: "schedule", recurring: false },
   data_nascimento: { source: "lead", recurring: true },
+  aniversario_casamento: { source: "lead", recurring: true },
+  epoca_ferias: { source: "lead", recurring: true },
+  data_retorno: { source: "lead", recurring: false },
 };
 
 export const ANCHOR_FIELD_METADATA = {
@@ -28,6 +31,18 @@ export const ANCHOR_FIELD_METADATA = {
   data_nascimento: {
     label: "Aniversário",
     description: "Data de nascimento buscada automaticamente no cadastro do lead",
+  },
+  aniversario_casamento: {
+    label: "Aniversário de Casamento",
+    description: "Data anual de casamento buscada no cadastro do lead",
+  },
+  epoca_ferias: {
+    label: "Época de Férias",
+    description: "Data ou mês de férias anual buscada no cadastro do lead",
+  },
+  data_retorno: {
+    label: "Data de Retorno",
+    description: "Data pontual combinada para retorno de contato ou volta de viagem",
   },
 };
 
@@ -150,7 +165,18 @@ export function resolveAnchorDate(anchorField, context = {}, refDate = new Date(
   const config = ANCHOR_FIELDS[anchorField];
   if (!config) return null;
 
-  const rawValue = context[anchorField] || (anchorField === "data_nascimento" ? context.nascimento || context.birth_date : null);
+  let rawValue = context[anchorField];
+  if (!rawValue) {
+    if (anchorField === "data_nascimento") {
+      rawValue = context.nascimento || context.birth_date;
+    } else if (anchorField === "aniversario_casamento") {
+      rawValue = context.wedding_anniversary || context.casamento;
+    } else if (anchorField === "epoca_ferias") {
+      rawValue = context.ferias || context.vacation;
+    } else if (anchorField === "data_retorno") {
+      rawValue = context.return_date || context.retorno;
+    }
+  }
   if (!rawValue) return null;
 
   if (config.recurring) {
