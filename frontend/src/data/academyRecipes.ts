@@ -308,6 +308,61 @@ export const ACADEMY_FUNDAMENTOS: AcademyFundamento[] = [
       },
     ],
   },
+  {
+    id: "fundamento-conducao-conversa",
+    tipo: "fundamento",
+    title: "Quem conduz a conversa",
+    resultPhrase: "Você para de sair de reunião sem saber o que ficou combinado.",
+    segments: ["Todos os segmentos"],
+    prerequisites: ["Nada."],
+    timeLabel: "15 minutos de leitura",
+    sections: [
+      {
+        heading: "O bastão invisível",
+        body: "Em toda conversa de venda existe uma coisa que muda de mão sem ninguém anunciar: quem está conduzindo. O cliente decide se compra — isso é dele e sempre será. Mas quem conduz a conversa é você. No instante em que essa condução passa para o outro lado, a venda acabou, mesmo que a conversa continue por mais meia hora.\n\nE ela quase nunca é tomada de frente. É tomada por frases pequenas.",
+      },
+      {
+        heading: "As frases que tiram a condução de você",
+        body: "\"Essa reunião vai demorar muito?\" — antes de qualquer coisa, isso é um teste. Responder \"não, é rapidinho\" é entregar o bastão: você acabou de concordar que o tempo importa mais que o problema. Devolva a escolha para onde ela pertence: \"depende do que você quer resolver — a gente pode ver o essencial em quinze minutos ou entender direito em quarenta. O que faz mais sentido pro seu caso?\".\n\n\"Só quero saber o que vocês fazem.\" — parece curiosidade e é fuga. Quem só quer saber o que você faz não marcou horário. \"Posso te explicar em dois minutos, mas aí vai ser genérico e provavelmente inútil. Me conta antes o que te fez procurar a gente — aí eu falo só da parte que interessa.\"\n\n\"Essa parte eu já sei como funciona.\" — pode ser verdade e geralmente é pressa. \"Ótimo, então vou ser rápido aqui. Só me confirma uma coisa pra eu não repetir o que você já sabe\" — e faça uma pergunta específica. Se ele souber, pule de verdade. Se hesitar, você acabou de descobrir onde está o buraco.",
+      },
+      {
+        heading: "A condução também se perde em silêncio",
+        body: "A pessoa responde por mensagem no meio da conversa, atende outra ligação, responde com uma palavra. Isso não é falta de educação, é sinal — ela não está ali.\n\nNomeie, sem acusar: \"percebi que você tá no meio de outra coisa. Sem problema nenhum, mas eu prefiro remarcar a fazer isso pela metade — o que você me contar agora é o que eu vou usar pra montar a proposta. Prefere seguir ou marcar outro horário?\".\n\nIsso parece arriscado e é o contrário. Você acabou de mostrar que o seu tempo tem valor e que a conversa serve para alguma coisa. Quem remarca depois disso chega diferente.",
+      },
+      {
+        heading: "A analogia que resolve quase tudo",
+        body: "Pense no médico. Ele não pergunta se você acha que a reunião vai demorar. Não pergunta se faz sentido fazer o exame. Não tenta ser seu amigo antes de examinar. Ele pergunta o que está acontecendo, examina, e diz o que encontrou e o que recomenda.\n\nNinguém acha o médico mal-educado por isso. Acha competente.\n\nVendedor que tenta virar amigo antes de entender o problema está criando uma dívida que vai cobrar no fim — e quando chegar a hora de falar de dinheiro, a amizade vira constrangimento dos dois lados. Cordial sim, amigo não. São coisas diferentes e o cliente sente a diferença.",
+      },
+      {
+        heading: "Confiança não nasce no cliente. Nasce em você",
+        body: "Por isso as perguntas que pedem aprovação custam tão caro — elas anunciam insegurança antes de qualquer argumento. Quem apresenta uma recomendação e pergunta se faz sentido está dizendo que não tem certeza do que acabou de recomendar.\n\nApresente ligando o que você encontrou ao que ela te contou: \"você me disse que perde cliente por demorar pra responder. É por isso que eu comecei por aqui, e não pelo resto.\" A confiança vem dessa ligação, não da pergunta no fim.",
+      },
+      {
+        heading: "Quando chegar ao preço, seja específico na dor",
+        body: "O erro comum é abrir o valor solto: \"nosso plano custa tanto\". Isso convida à comparação e nada mais.\n\nRetome, antes do número, o que a própria pessoa disse que queria resolver — com as palavras dela, na ordem em que ela contou. \"Pra resolver o atraso na resposta, organizar o que hoje está em três cadernos, e você parar de perder o fim de semana respondendo mensagem: é isso aqui.\" Aí o número.\n\nO valor deixa de ser um preço avulso e passa a ser o custo de resolver três coisas que ela mesma nomeou.",
+      },
+      {
+        heading: "E se ela sinalizou o orçamento, use",
+        body: "Quando a pessoa já disse o que tem disponível, a condição se abre em cima disso, não de uma tabela: \"você comentou que tem cinco mil agora — dá pra fazer essa parte à vista e o restante parcelado.\" Isso mostra que você ouviu, e tira da conversa a negociação que viria depois.",
+      },
+      {
+        heading: "O que não fazer no WhatsApp",
+        body: "Quase tudo daqui vale para conversa ao vivo ou por telefone, com a pessoa presente e o horário marcado. Por texto, com alguém que você nunca falou, boa parte disso vira agressão.\n\nNão confronte por escrito. Não questione se a pessoa está falando sério. Não mande sequência de mensagens cobrando atenção. Quem faz isso por texto é bloqueado — e no WhatsApp bloqueio custa o número inteiro, não só aquele cliente.\n\nPor texto, a condução se mantém de outro jeito: uma pergunta por vez, específica, fácil de responder. E quando a conversa esfria, o caminho não é insistir — é chamar para uma ligação ou um horário, que é onde essas ferramentas funcionam.",
+      },
+      {
+        heading: "Termine sempre com um acordo",
+        body: "Este é o ponto que liga tudo. Conversa bem conduzida que termina solta vira a mesma coisa que conversa mal conduzida: \"vou pensar\".\n\nAntes de encerrar, deixe claro o que acontece agora, quem faz e quando. Não \"eu te mando mais informação\" — e sim \"eu te mando a simulação hoje até as seis, e você me diz amanhã se os valores fecham\". Não \"vou ver com meu sócio\" — e sim \"você fala com ele quinta, e sexta de manhã a gente se fala de novo\".\n\nFollow-up bom não é mensagem bonita. É a cobrança de algo que ficou combinado. Se não houve combinado, não existe follow-up — existe insistência.",
+      },
+      {
+        heading: "No sistema",
+        body: "A ficha do lead registra o acordo do jeito que ele foi combinado, e quando não houve, ela diz isso com todas as letras. Esse aviso é o mais útil da ficha: lead sem acordo não precisa de mais uma mensagem, precisa de uma ligação.\n\nE quando o acordo tem data, a cadência sai no dia seguinte ao prometido — o que transforma a mensagem de cobrança em continuidade da conversa.",
+      },
+      {
+        heading: "O resumo",
+        body: "Quem decide é o cliente, quem conduz é você. A condução se perde em frases pequenas, não em brigas. Cordialidade não é amizade. Confiança nasce em você. E nenhuma conversa termina sem saber o que acontece agora, quem faz e quando.",
+      },
+    ],
+  },
 ];
 
 export const ACADEMY_RECIPES: AcademyRecipe[] = [

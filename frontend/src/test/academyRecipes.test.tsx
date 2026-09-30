@@ -44,9 +44,9 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
   });
 
-  it("[TESTE OBRIGATÓRIO] os vinte entram e aparecem — cinco fundamento, quinze receita", () => {
-    expect(ACADEMY_CONTENT).toHaveLength(20);
-    expect(ACADEMY_FUNDAMENTOS).toHaveLength(5);
+  it("[TESTE OBRIGATÓRIO] os vinte e um entram e aparecem — seis fundamento, quinze receita", () => {
+    expect(ACADEMY_CONTENT).toHaveLength(21);
+    expect(ACADEMY_FUNDAMENTOS).toHaveLength(6);
     expect(ACADEMY_RECIPES).toHaveLength(15);
     ACADEMY_FUNDAMENTOS.forEach((f) => expect(f.tipo).toBe("fundamento"));
     ACADEMY_RECIPES.forEach((r) => expect(r.tipo).toBe("receita"));
@@ -384,10 +384,11 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
   });
 
   describe("Envio 4 — Fundamento sobre objeção na Academy", () => {
-    it("[TESTE OBRIGATÓRIO] vinte conteúdos na biblioteca: cinco fundamentos e quinze receitas", () => {
-      expect(ACADEMY_CONTENT).toHaveLength(20);
-      expect(ACADEMY_FUNDAMENTOS).toHaveLength(5);
-      expect(ACADEMY_RECIPES).toHaveLength(15);
+    it("[TESTE OBRIGATÓRIO] o conteúdo do Envio 4 está presente na biblioteca com id e título corretos", () => {
+      const objecao = ACADEMY_FUNDAMENTOS.find((f) => f.id === "fundamento-trabalhar-objecao");
+      expect(objecao, "fundamento 'fundamento-trabalhar-objecao' não encontrado").toBeDefined();
+      expect(objecao!.title).toBe("Trabalhar objeção sem empurrar");
+      expect(objecao!.tipo).toBe("fundamento");
     });
 
     it("[TESTE OBRIGATÓRIO] o novo conteúdo é fundamento: não tem botão de instalar, não tem passo, não tem cadência", async () => {
@@ -455,6 +456,85 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     it("[TESTE OBRIGATÓRIO] nenhum nome de empresa, rede ou pessoa no fundamento novo", () => {
       const objecao = ACADEMY_FUNDAMENTOS.find((f) => f.id === "fundamento-trabalhar-objecao")!;
       const serialized = JSON.stringify(objecao).toLowerCase();
+      for (const name of FORBIDDEN_CLIENT_NAMES) {
+        expect(serialized).not.toContain(name);
+      }
+    });
+  });
+
+  describe("Envio 5 — Segundo fundamento na Academy ('Quem conduz a conversa')", () => {
+    it("[TESTE OBRIGATÓRIO] vinte e um conteúdos na biblioteca: seis fundamentos e quinze receitas", () => {
+      expect(ACADEMY_CONTENT).toHaveLength(21);
+      expect(ACADEMY_FUNDAMENTOS).toHaveLength(6);
+      expect(ACADEMY_RECIPES).toHaveLength(15);
+    });
+
+    it("[TESTE OBRIGATÓRIO] o novo é fundamento: sem botão de instalar, sem passo, sem cadência", async () => {
+      const conducao = ACADEMY_FUNDAMENTOS.find((f) => f.id === "fundamento-conducao-conversa");
+      expect(conducao, "fundamento 'fundamento-conducao-conversa' não encontrado").toBeDefined();
+      expect(conducao!.title).toBe("Quem conduz a conversa");
+      expect(conducao!.tipo).toBe("fundamento");
+      expect((conducao as any).templates).toBeUndefined();
+      expect((conducao as any).cadenceName).toBeUndefined();
+      expect((conducao as any).cadenceDescription).toBeUndefined();
+      expect((conducao as any).manualSteps).toBeUndefined();
+
+      const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
+      renderWithProviders(<OnboardingWizard />);
+
+      fireEvent.click(screen.getByText(conducao!.title));
+      expect(screen.queryByRole("button", { name: /Usar esta receita/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Instalar/ })).toBeNull();
+    });
+
+    it("[TESTE OBRIGATÓRIO] aparece junto dos outros fundamentos, antes das receitas, fora do filtro de segmento", async () => {
+      // 1. Ordem: aparece entre os fundamentos (índice 5) antes de qualquer receita
+      const indexOfNewFundamento = ACADEMY_CONTENT.findIndex((c) => c.id === "fundamento-conducao-conversa");
+      expect(indexOfNewFundamento).toBe(5);
+      expect(indexOfNewFundamento).toBeLessThan(ACADEMY_FUNDAMENTOS.length);
+      const firstRecipeIndex = ACADEMY_CONTENT.findIndex((c) => c.tipo === "receita");
+      expect(indexOfNewFundamento).toBeLessThan(firstRecipeIndex);
+
+      // 2. Na tela, com filtro de segmento aplicado (ex: Turismo, Contabilidade, Comércio local)
+      const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
+      renderWithProviders(<OnboardingWizard />);
+
+      for (const segmento of ["Turismo", "Contabilidade", "Comércio local"]) {
+        fireEvent.click(screen.getByRole("button", { name: segmento }));
+        // O fundamento novo continua visível independentemente do filtro
+        expect(screen.getByText("Quem conduz a conversa")).toBeTruthy();
+      }
+    });
+
+    it("[TESTE OBRIGATÓRIO] o texto chega inteiro na tela, sem truncar", async () => {
+      const conducao = ACADEMY_FUNDAMENTOS.find((f) => f.id === "fundamento-conducao-conversa")!;
+      expect(conducao.sections).toHaveLength(11);
+
+      // Prova de que o texto não foi truncado: tamanho total superior a 4500 caracteres
+      const totalChars = conducao.sections.reduce((acc, s) => acc + s.body.length, 0);
+      expect(totalChars, "texto do fundamento menor que o esperado (possível truncamento)").toBeGreaterThan(4500);
+
+      const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
+      renderWithProviders(<OnboardingWizard />);
+
+      fireEvent.click(screen.getByText(conducao.title));
+
+      const exactTextContent = (expected: string) => (_: string, element: Element | null) => element?.textContent === expected;
+      for (const section of conducao.sections) {
+        expect(screen.getByText(section.heading)).toBeTruthy();
+        expect(screen.getByText(exactTextContent(section.body))).toBeTruthy();
+      }
+
+      // Parágrafos críticos que não podem sumir
+      expect(screen.getByText(/Em toda conversa de venda existe uma coisa que muda de mão/)).toBeTruthy();
+      expect(screen.getByText(/Follow-up bom não é mensagem bonita/)).toBeTruthy();
+      expect(screen.getByText(/Vendedor que tenta virar amigo antes de entender o problema/)).toBeTruthy();
+      expect(screen.getByText(/Quem decide é o cliente, quem conduz é você/)).toBeTruthy();
+    });
+
+    it("[TESTE OBRIGATÓRIO] nenhum nome de empresa, rede ou pessoa no fundamento novo", () => {
+      const conducao = ACADEMY_FUNDAMENTOS.find((f) => f.id === "fundamento-conducao-conversa")!;
+      const serialized = JSON.stringify(conducao).toLowerCase();
       for (const name of FORBIDDEN_CLIENT_NAMES) {
         expect(serialized).not.toContain(name);
       }
