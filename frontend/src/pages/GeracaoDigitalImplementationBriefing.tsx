@@ -56,6 +56,15 @@ import {
   ShoppingBag,
   DollarSign,
 } from "lucide-react";
+import { BriefingDocumentKitAndObjections } from "./GeracaoDigitalImplementationBriefing/BriefingDocumentKitAndObjections";
+import {
+  DocumentoKitItem,
+  ParObjecao,
+  DEFAULT_CINCO_OBJECOES,
+  getKitForSegmento,
+  mergeKitWithSegmento,
+  normalizeObjecoes,
+} from "@/lib/geracaoDigital/briefingSegmentKits";
 
 export interface CincoPilares {
   pilar1_produtos_servicos: string;
@@ -63,6 +72,9 @@ export interface CincoPilares {
   pilar3_funcionamento_prazos: string;
   pilar4_duvidas_frequentes: string;
   pilar5_nao_prometer: string;
+  segmento?: string;
+  documentos_kit?: DocumentoKitItem[];
+  cinco_objecoes?: ParObjecao[];
 }
 
 export const DEFAULT_CINCO_PILARES: CincoPilares = {
@@ -71,6 +83,9 @@ export const DEFAULT_CINCO_PILARES: CincoPilares = {
   pilar3_funcionamento_prazos: "",
   pilar4_duvidas_frequentes: "",
   pilar5_nao_prometer: "",
+  segmento: "",
+  documentos_kit: [],
+  cinco_objecoes: DEFAULT_CINCO_OBJECOES,
 };
 
 type ModelType = "essencial" | "avancado";
@@ -136,6 +151,18 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
   ]);
   const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFile[]>([]);
   const [cincoPilares, setCincoPilares] = useState<CincoPilares>(DEFAULT_CINCO_PILARES);
+  const [segmentoKit, setSegmentoKit] = useState<string>("");
+  const [documentosKit, setDocumentosKit] = useState<DocumentoKitItem[]>(() => getKitForSegmento(""));
+  const [cincoObjecoes, setCincoObjecoes] = useState<ParObjecao[]>(DEFAULT_CINCO_OBJECOES);
+
+  const handleSegmentoKitChange = (newSegmento: string) => {
+    setSegmentoKit(newSegmento);
+    setDocumentosKit(prev => mergeKitWithSegmento(prev, newSegmento));
+    setPrerequisites(prev => ({
+      ...prev,
+      segmento: prev.segmento ? prev.segmento : newSegmento,
+    }));
+  };
 
   // Briefing Form State
   const [prerequisites, setPrerequisites] = useState({
@@ -325,7 +352,15 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
         fechamento,
         team_users: teamUsers,
         knowledge_files: knowledgeFiles,
-        cinco_pilares: cincoPilares,
+        cinco_pilares: {
+          ...cincoPilares,
+          segmento: segmentoKit || prerequisites.segmento || "",
+          documentos_kit: documentosKit,
+          cinco_objecoes: cincoObjecoes,
+        },
+        segmento: segmentoKit || prerequisites.segmento || "",
+        documentos_kit: documentosKit,
+        cinco_objecoes: cincoObjecoes,
         status,
         owner_company: isVexoCommercial ? "vexo" : "geracao-digital",
       };
@@ -378,6 +413,9 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     setTeamUsers([{ id: "1", name: "", email: "", role: "sdr" }]);
     setKnowledgeFiles([]);
     setCincoPilares(DEFAULT_CINCO_PILARES);
+    setSegmentoKit("");
+    setDocumentosKit(getKitForSegmento(""));
+    setCincoObjecoes(DEFAULT_CINCO_OBJECOES);
     setPrerequisites({
       segmento: "",
       unidades: "1",
@@ -458,6 +496,16 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     if (b.fechamento) setFechamento(prev => ({ ...prev, ...b.fechamento }));
     setTeamUsers(Array.isArray(b.team_users) ? b.team_users : []);
     setKnowledgeFiles(Array.isArray(b.knowledge_files) ? b.knowledge_files : []);
+
+    const cp = b.cinco_pilares && typeof b.cinco_pilares === "object" ? b.cinco_pilares : {};
+    const loadedSegmento = cp.segmento || b.segmento || b.prerequisites?.segmento || "";
+    const loadedDocKit = Array.isArray(cp.documentos_kit)
+      ? cp.documentos_kit
+      : (Array.isArray(b.documentos_kit) ? b.documentos_kit : getKitForSegmento(loadedSegmento));
+    const loadedObjecoes = Array.isArray(cp.cinco_objecoes)
+      ? cp.cinco_objecoes
+      : (Array.isArray(b.cinco_objecoes) ? b.cinco_objecoes : DEFAULT_CINCO_OBJECOES);
+
     if (b.cinco_pilares && typeof b.cinco_pilares === "object") {
       setCincoPilares({
         pilar1_produtos_servicos: b.cinco_pilares.pilar1_produtos_servicos || b.cinco_pilares.pilar1 || "",
@@ -465,10 +513,17 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
         pilar3_funcionamento_prazos: b.cinco_pilares.pilar3_funcionamento_prazos || b.cinco_pilares.pilar3 || "",
         pilar4_duvidas_frequentes: b.cinco_pilares.pilar4_duvidas_frequentes || b.cinco_pilares.pilar4 || "",
         pilar5_nao_prometer: b.cinco_pilares.pilar5_nao_prometer || b.cinco_pilares.pilar5 || "",
+        segmento: loadedSegmento,
+        documentos_kit: loadedDocKit,
+        cinco_objecoes: normalizeObjecoes(loadedObjecoes),
       });
     } else {
       setCincoPilares(DEFAULT_CINCO_PILARES);
     }
+
+    setSegmentoKit(loadedSegmento);
+    setDocumentosKit(loadedDocKit);
+    setCincoObjecoes(normalizeObjecoes(loadedObjecoes));
 
     setActiveTabMode("form");
     setCurrentStep(1);
@@ -486,13 +541,28 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
         if (Array.isArray(b.team_users)) setTeamUsers(b.team_users);
         if (Array.isArray(b.knowledge_files)) setKnowledgeFiles(b.knowledge_files);
         if (b.cinco_pilares && typeof b.cinco_pilares === "object") {
+          const loadedSegmento = b.cinco_pilares.segmento || b.segmento || b.prerequisites?.segmento || "";
+          const loadedDocKit = Array.isArray(b.cinco_pilares.documentos_kit)
+            ? b.cinco_pilares.documentos_kit
+            : (Array.isArray(b.documentos_kit) ? b.documentos_kit : getKitForSegmento(loadedSegmento));
+          const loadedObjecoes = Array.isArray(b.cinco_pilares.cinco_objecoes)
+            ? b.cinco_pilares.cinco_objecoes
+            : (Array.isArray(b.cinco_objecoes) ? b.cinco_objecoes : DEFAULT_CINCO_OBJECOES);
+
           setCincoPilares({
             pilar1_produtos_servicos: b.cinco_pilares.pilar1_produtos_servicos || b.cinco_pilares.pilar1 || "",
             pilar2_preco_condicoes: b.cinco_pilares.pilar2_preco_condicoes || b.cinco_pilares.pilar2 || "",
             pilar3_funcionamento_prazos: b.cinco_pilares.pilar3_funcionamento_prazos || b.cinco_pilares.pilar3 || "",
             pilar4_duvidas_frequentes: b.cinco_pilares.pilar4_duvidas_frequentes || b.cinco_pilares.pilar4 || "",
             pilar5_nao_prometer: b.cinco_pilares.pilar5_nao_prometer || b.cinco_pilares.pilar5 || "",
+            segmento: loadedSegmento,
+            documentos_kit: loadedDocKit,
+            cinco_objecoes: normalizeObjecoes(loadedObjecoes),
           });
+
+          setSegmentoKit(loadedSegmento);
+          setDocumentosKit(loadedDocKit);
+          setCincoObjecoes(normalizeObjecoes(loadedObjecoes));
         }
       }
     }
@@ -1320,6 +1390,18 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
                         ))}
                       </div>
                     )}
+                  </div>
+
+                  {/* KIT DE DOCUMENTOS POR SEGMENTO E AS CINCO OBJEÇÕES REAIS */}
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <BriefingDocumentKitAndObjections
+                      segmento={segmentoKit || prerequisites.segmento || ""}
+                      onSegmentoChange={handleSegmentoKitChange}
+                      documentosKit={documentosKit}
+                      onDocumentosKitChange={setDocumentosKit}
+                      cincoObjecoes={cincoObjecoes}
+                      onCincoObjecoesChange={setCincoObjecoes}
+                    />
                   </div>
 
                   {/* SEÇÃO DOS 5 PILARES FUNDAMENTAIS DE CONHECIMENTO */}

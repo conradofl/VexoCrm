@@ -3653,7 +3653,13 @@ Condições: ${condicoes}`;
       const queryStr = `SELECT * FROM public.gd_implementation_briefings ${whereClause} ORDER BY created_at DESC`;
 
       const { rows } = await pool.query(queryStr, queryParams);
-      res.json({ success: true, data: rows });
+      const formattedRows = rows.map((r) => ({
+        ...r,
+        segmento: r.cinco_pilares?.segmento || r.segmento,
+        documentos_kit: r.cinco_pilares?.documentos_kit || r.documentos_kit || [],
+        cinco_objecoes: r.cinco_pilares?.cinco_objecoes || r.cinco_objecoes || [],
+      }));
+      res.json({ success: true, data: formattedRows });
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao buscar briefings de implantação:", error);
       res.status(500).json({ error: "Erro interno ao buscar briefings de implantação." });
@@ -3671,7 +3677,14 @@ Condições: ${condicoes}`;
       if (rows.length === 0) {
         return res.status(404).json({ error: "Briefing de implantação não encontrado." });
       }
-      res.json({ success: true, data: rows[0] });
+      const item = rows[0];
+      const responseData = {
+        ...item,
+        segmento: item.cinco_pilares?.segmento || item.segmento,
+        documentos_kit: item.cinco_pilares?.documentos_kit || item.documentos_kit || [],
+        cinco_objecoes: item.cinco_pilares?.cinco_objecoes || item.cinco_objecoes || [],
+      };
+      res.json({ success: true, data: responseData });
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao buscar briefing de implantação:", error);
       res.status(500).json({ error: "Erro interno ao buscar briefing de implantação." });
@@ -3710,6 +3723,17 @@ Condições: ${condicoes}`;
       const effectiveTenantId = String(tenant_id || client_name || "default-tenant").trim();
       const effectiveModelType = model_type || suggested_model || "essencial";
 
+      let finalCincoPilares = (typeof cinco_pilares === "object" && cinco_pilares !== null) ? { ...cinco_pilares } : {};
+      if (req.body.segmento !== undefined && finalCincoPilares.segmento === undefined) {
+        finalCincoPilares.segmento = req.body.segmento;
+      }
+      if (req.body.documentos_kit !== undefined && finalCincoPilares.documentos_kit === undefined) {
+        finalCincoPilares.documentos_kit = req.body.documentos_kit;
+      }
+      if (req.body.cinco_objecoes !== undefined && finalCincoPilares.cinco_objecoes === undefined) {
+        finalCincoPilares.cinco_objecoes = req.body.cinco_objecoes;
+      }
+
       const { rows } = await pool.query(
         `INSERT INTO public.gd_implementation_briefings (
           tenant_id, client_name, model_type, suggested_model, num_employees,
@@ -3726,12 +3750,18 @@ Condições: ${condicoes}`;
           JSON.stringify(fechamento),
           JSON.stringify(Array.isArray(team_users) ? team_users : []),
           JSON.stringify(Array.isArray(knowledge_files) ? knowledge_files : []),
-          JSON.stringify(cinco_pilares || {}),
+          JSON.stringify(finalCincoPilares),
           status, owner_company
         ]
       );
 
       const record = rows[0];
+      const responseData = {
+        ...record,
+        segmento: record.cinco_pilares?.segmento || record.segmento,
+        documentos_kit: record.cinco_pilares?.documentos_kit || record.documentos_kit || [],
+        cinco_objecoes: record.cinco_pilares?.cinco_objecoes || record.cinco_objecoes || [],
+      };
 
       if (status === 'concluido') {
         try {
@@ -3741,7 +3771,7 @@ Condições: ${condicoes}`;
         }
       }
 
-      res.json({ success: true, data: record });
+      res.json({ success: true, data: responseData });
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao criar briefing de implantação:", error);
       res.status(500).json({ error: `Erro ao criar briefing de implantação: ${error.message}` });
@@ -3782,6 +3812,30 @@ Condições: ${condicoes}`;
       const curr = currentRows[0];
       const newStatus = status || curr.status;
 
+      let updatedCincoPilares = cinco_pilares !== undefined
+        ? { ...(typeof cinco_pilares === "object" && cinco_pilares !== null ? cinco_pilares : {}) }
+        : undefined;
+
+      if (updatedCincoPilares !== undefined) {
+        if (req.body.segmento !== undefined && updatedCincoPilares.segmento === undefined) {
+          updatedCincoPilares.segmento = req.body.segmento;
+        }
+        if (req.body.documentos_kit !== undefined && updatedCincoPilares.documentos_kit === undefined) {
+          updatedCincoPilares.documentos_kit = req.body.documentos_kit;
+        }
+        if (req.body.cinco_objecoes !== undefined && updatedCincoPilares.cinco_objecoes === undefined) {
+          updatedCincoPilares.cinco_objecoes = req.body.cinco_objecoes;
+        }
+      } else if (req.body.segmento !== undefined || req.body.documentos_kit !== undefined || req.body.cinco_objecoes !== undefined) {
+        const currentPilares = curr.cinco_pilares && typeof curr.cinco_pilares === "object" ? curr.cinco_pilares : {};
+        updatedCincoPilares = {
+          ...currentPilares,
+          ...(req.body.segmento !== undefined ? { segmento: req.body.segmento } : {}),
+          ...(req.body.documentos_kit !== undefined ? { documentos_kit: req.body.documentos_kit } : {}),
+          ...(req.body.cinco_objecoes !== undefined ? { cinco_objecoes: req.body.cinco_objecoes } : {}),
+        };
+      }
+
       const { rows } = await pool.query(
         `UPDATE public.gd_implementation_briefings SET
           client_name = COALESCE($1, client_name),
@@ -3815,12 +3869,18 @@ Condições: ${condicoes}`;
           fechamento ? JSON.stringify(fechamento) : null,
           team_users !== undefined ? JSON.stringify(Array.isArray(team_users) ? team_users : []) : null,
           knowledge_files !== undefined ? JSON.stringify(Array.isArray(knowledge_files) ? knowledge_files : []) : null,
-          cinco_pilares !== undefined ? JSON.stringify(cinco_pilares || {}) : null,
+          updatedCincoPilares !== undefined ? JSON.stringify(updatedCincoPilares) : null,
           newStatus, id
         ]
       );
 
       const updatedRecord = rows[0];
+      const responseData = {
+        ...updatedRecord,
+        segmento: updatedRecord.cinco_pilares?.segmento || updatedRecord.segmento,
+        documentos_kit: updatedRecord.cinco_pilares?.documentos_kit || updatedRecord.documentos_kit || [],
+        cinco_objecoes: updatedRecord.cinco_pilares?.cinco_objecoes || updatedRecord.cinco_objecoes || [],
+      };
 
       if (newStatus === 'concluido') {
         try {
@@ -3830,7 +3890,7 @@ Condições: ${condicoes}`;
         }
       }
 
-      res.json({ success: true, data: updatedRecord });
+      res.json({ success: true, data: responseData });
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao atualizar briefing de implantação:", error);
       res.status(500).json({ error: `Erro ao atualizar briefing de implantação: ${error.message}` });
