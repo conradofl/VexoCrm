@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AlertTriangle, Loader2, Users } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -38,7 +38,7 @@ interface WaGroupExtractionSectionProps {
   confirmed: boolean;
   onConfirmedChange: (confirmed: boolean) => void;
   /** Chamado sempre que a seleção de grupos muda — vazio quando a opção está desmarcada. */
-  onSelectionChange: (groupIds: string[]) => void;
+  onSelectionChange: (groupIds: string[], selectedGroups?: WaGroupPreviewItem[]) => void;
   /** Chamado sempre que o checkbox "Membros de grupos" muda — independente de já ter algum grupo escolhido na prévia. O pai usa isso pra montar `sources` e pra decidir se o botão de extrair fica habilitado. */
   onEnabledChange: (enabled: boolean) => void;
   disabled?: boolean;
@@ -72,7 +72,10 @@ export function WaGroupExtractionSection({
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [errorMessage, setErrorMessage] = useState("");
 
-  const fetchPreview = async () => {
+  const prevInstanceIdRef = useRef(instanceId);
+
+  const fetchPreview = async (targetInstanceId?: string) => {
+    const activeInstanceId = targetInstanceId !== undefined ? targetInstanceId : instanceId;
     setPreviewState("loading");
     setErrorMessage("");
     try {
@@ -80,7 +83,7 @@ export function WaGroupExtractionSection({
       const res = await fetch(`${API_BASE_URL}/api/leads/extract-wa-groups/preview`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, instanceId: instanceId || undefined }),
+        body: JSON.stringify({ clientId, instanceId: activeInstanceId || undefined }),
       });
       if (!res.ok) {
         const msg = await readApiErrorMessage(res, "Erro ao pré-visualizar grupos do WhatsApp");
@@ -98,6 +101,23 @@ export function WaGroupExtractionSection({
     }
   };
 
+  // Trocar de instância: limpa lista e seleção, e recarrega a prévia automaticamente se marcada
+  useEffect(() => {
+    if (prevInstanceIdRef.current !== instanceId) {
+      prevInstanceIdRef.current = instanceId;
+      setGroups([]);
+      setSelectedGroupIds(new Set());
+      onSelectionChange([], []);
+      if (enabled) {
+        if (confirmed) {
+          fetchPreview(instanceId);
+        }
+      } else {
+        setPreviewState("idle");
+      }
+    }
+  }, [instanceId, enabled, confirmed]);
+
   const handleCheckboxChange = (checked: boolean) => {
     if (checked) {
       setEnabled(true);
@@ -113,7 +133,7 @@ export function WaGroupExtractionSection({
       setGroups([]);
       setSelectedGroupIds(new Set());
       setPreviewState("idle");
-      onSelectionChange([]);
+      onSelectionChange([], []);
     }
   };
 
@@ -137,7 +157,8 @@ export function WaGroupExtractionSection({
     if (checked) next.add(groupId);
     else next.delete(groupId);
     setSelectedGroupIds(next);
-    onSelectionChange(Array.from(next));
+    const selectedList = groups.filter((g) => next.has(g.id));
+    onSelectionChange(Array.from(next), selectedList);
   };
 
   const { contacts, lost } = sumGroupSelection(groups, selectedGroupIds);

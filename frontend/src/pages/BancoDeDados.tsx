@@ -54,7 +54,12 @@ import { cn } from "@/lib/utils";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
 import { sanitizePhone } from "@/lib/phone";
 import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
-import { WaGroupExtractionSection } from "@/components/leads/WaGroupExtractionSection";
+import { WaGroupExtractionSection, type WaGroupPreviewItem } from "@/components/leads/WaGroupExtractionSection";
+import {
+  resolveEffectiveChatLimit,
+  runWaExtractionPipeline,
+  type WaExtractionProgress,
+} from "@/lib/leads/waExtractionRunner";
 import { SingleFollowupReminderModal } from "@/components/followup/SingleFollowupReminderModal";
 import { PageShell } from "@/components/PageShell";
 import { UpsellCard } from "@/components/UpsellCard";
@@ -425,7 +430,8 @@ export default function BancoDeDados() {
 
   // WhatsApp Extraction Modal State
   const [isWAModalOpen, setIsWAModalOpen] = useState(false);
-  const [waChatLimit, setWaChatLimit] = useState<number | "all">(100);
+  const effectiveChatLimit = resolveEffectiveChatLimit(isAdvancedPlan);
+  const [waChatLimit, setWaChatLimit] = useState<number | "all">(effectiveChatLimit);
   const [isExtractingWA, setIsExtractingWA] = useState(false);
   const [waExtractStep, setWaExtractStep] = useState<string>("");
   // Três procedências, cada uma marcável — conversas e agenda ligadas por
@@ -440,6 +446,10 @@ export default function BancoDeDados() {
   // página.
   const [hasConfirmedGroupsWarning, setHasConfirmedGroupsWarning] = useState(false);
   const [waSelectedGroupIds, setWaSelectedGroupIds] = useState<string[]>([]);
+  const [waSelectedGroups, setWaSelectedGroups] = useState<WaGroupPreviewItem[]>([]);
+  const [waGroupsInstanceId, setWaGroupsInstanceId] = useState<string>("");
+  const [waExtractProgress, setWaExtractProgress] = useState<WaExtractionProgress | null>(null);
+  const abortExtractionRef = useRef(false);
 
   // Import Modal State (Excel .xlsx/.xls + CSV)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -694,62 +704,82 @@ export default function BancoDeDados() {
     setWaIncludeAgenda(true);
     setWaIncludeGroups(false);
     setWaSelectedGroupIds([]);
+    setWaSelectedGroups([]);
+    setWaGroupsInstanceId("");
+    setWaExtractProgress(null);
   };
 
   // Handle WhatsApp Extraction Execution
   const handleExtractWA = async () => {
-    if (waChatLimit === "all" && !isAdvancedPlan) {
-      toast.info("A extração ilimitada de contatos é exclusiva do Plano Avançado. No Plano Essencial o limite é de até 500 contatos.");
-      setWaChatLimit(500);
-      return;
+    if (waIncludeGroups && waSelectedGroupIds.length > 0) {
+      if (waGroupsInstanceId && waGroupsInstanceId !== selectedInstanceId) {
+        toast.error("Instância selecionada foi alterada. Recarregue os grupos antes de iniciar a extração.");
+        return;
+      }
     }
 
     setIsExtractingWA(true);
-    setWaExtractStep("Conectando à Evolution API...");
+    abortExtractionRef.current = false;
+    setWaExtractStep("Iniciando extração do WhatsApp...");
 
     try {
-      const token = await getIdToken();
-      
-      setTimeout(() => {
-        setWaExtractStep("Buscando mensagens recentes e minerando contatos...");
-      }, 1500);
+      const groupsToExtract = waSelectedGroups.length > 0
+        ? waSelectedGroups.map((g) => ({ id: g.id, name: g.name }))
+        : waSelectedGroupIds.map((id) => ({ id, name: id }));
 
-      setTimeout(() => {
-        setWaExtractStep("Classificando conversas com IA semântica...");
-      }, 3500);
-
-      const res = await fetch(`${API_BASE_URL}/api/leads/extract-wa-contacts`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+      const result = await runWaExtractionPipeline(
+        {
+          clientId,
+          instanceId: selectedInstanceId || undefined,
+          groupsInstanceId: waGroupsInstanceId,
+          isAdvancedPlan,
+          sources: {
+            conversas: waIncludeConversas,
+            agenda: waIncludeAgenda,
+            grupos: waIncludeGroups,
+          },
+          selectedGroups: groupsToExtract,
         },
-        signal: AbortSignal.timeout(60000),
-        body: JSON.stringify(
-          buildWaExtractionPayload(
-            { clientId, instanceId: selectedInstanceId || undefined, chatLimit: waChatLimit },
-            { conversas: waIncludeConversas, agenda: waIncludeAgenda, grupos: waIncludeGroups },
-            waSelectedGroupIds
-          )
-        ),
-      });
-
-      if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}`;
-        try {
-          const errData = await res.json();
-          errorMsg = errData.message || errData.error || errorMsg;
-        } catch {
-          const text = await res.text().catch(() => "");
-          errorMsg = text ? `Erro no servidor (HTTP ${res.status}): ${text.slice(0, 150)}` : `Erro HTTP ${res.status}`;
+        {
+          getIdToken,
+          onProgress: (p) => {
+            setWaExtractProgress(p);
+            setWaExtractStep(p.statusMessage);
+          },
+          isCancelled: () => abortExtractionRef.current,
         }
-        throw new Error(errorMsg);
+      );
+
+      if (result.cancelled) {
+        toast.info("Extração interrompida", {
+          description: `${result.totalExtracted} contatos minerados até o momento.`,
+        });
+        setIsWAModalOpen(false);
+        resetWaSourceSelection();
+        fetchLeads();
+        return;
       }
 
-      const data = await res.json();
-      const groupsNote = data.fromGroups > 0 ? ` (${data.fromGroups} de grupos)` : "";
-      toast.success(`Extração Semântica Concluída! 🎉`, {
-        description: `${data.extractedCount || 0} contatos minerados e enriquecidos com IA${groupsNote}.`,
+      if (result.failedGroups.length > 0) {
+        const failNames = result.failedGroups.map((f) => `${f.groupName} (${f.error})`).join(", ");
+        if (result.totalExtracted > 0) {
+          toast.warning(`Extração parcial concluída: ${result.totalExtracted} contatos minerados.`, {
+            description: `${result.failedGroups.length} grupo(s) falharam: ${failNames}`,
+          });
+        } else {
+          toast.error("Falha na extração dos grupos", {
+            description: `${result.failedGroups.length} grupo(s) falharam: ${failNames}`,
+          });
+        }
+        setIsWAModalOpen(false);
+        resetWaSourceSelection();
+        fetchLeads();
+        return;
+      }
+
+      const groupsNote = result.fromGroups > 0 ? ` (${result.fromGroups} de grupos)` : "";
+      toast.success("Extração Semântica Concluída! 🎉", {
+        description: `${result.totalExtracted} contatos minerados e enriquecidos com IA${groupsNote}.`,
       });
 
       setIsWAModalOpen(false);
@@ -763,6 +793,7 @@ export default function BancoDeDados() {
     } finally {
       setIsExtractingWA(false);
       setWaExtractStep("");
+      setWaExtractProgress(null);
     }
   };
 
@@ -3287,7 +3318,14 @@ export default function BancoDeDados() {
               <label className="text-xs font-semibold text-foreground">Instância Conectada</label>
               <select
                 value={selectedInstanceId}
-                onChange={(e) => setSelectedInstanceId(e.target.value)}
+                onChange={(e) => {
+                  const newInst = e.target.value;
+                  setSelectedInstanceId(newInst);
+                  setWaSelectedGroupIds([]);
+                  setWaSelectedGroups([]);
+                  setWaGroupsInstanceId(newInst);
+                }}
+                disabled={isExtractingWA}
                 className="w-full h-9 px-3 mt-1 rounded-md border border-input bg-background text-xs"
               >
                 {evolutionInstances.length === 0 ? (
@@ -3302,41 +3340,14 @@ export default function BancoDeDados() {
               </select>
             </div>
 
-            <div>
-              <label className="text-xs font-semibold text-foreground">Limite de Conversas para Analisar</label>
-              <div className="grid grid-cols-4 gap-1.5 mt-1.5">
-                {[
-                  { value: 50, label: "50" },
-                  { value: 100, label: "100" },
-                  { value: 500, label: "500" },
-                  { value: "all", label: "Ilimitado" },
-                ].map((opt) => {
-                  const isLocked = opt.value === "all" && !isAdvancedPlan;
-                  return (
-                    <Button
-                      key={String(opt.value)}
-                      type="button"
-                      variant={waChatLimit === (opt.value as any) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => {
-                        if (isLocked) {
-                          toast.info("A extração ilimitada de contatos é exclusiva do Plano Avançado. No Plano Essencial o limite é de até 500 contatos.");
-                          return;
-                        }
-                        setWaChatLimit(opt.value as any);
-                      }}
-                      className={cn(
-                        "text-xs gap-1",
-                        isLocked && "opacity-75 border-dashed"
-                      )}
-                    >
-                      {opt.label} {opt.value !== "all" ? "chats" : ""}
-                      {isLocked && <Lock className="w-3 h-3 text-amber-500 shrink-0" />}
-                    </Button>
-                  );
-                })}
+            {!isAdvancedPlan && (
+              <div data-testid="wa-plan-limit-notice" className="text-[11px] text-muted-foreground flex items-center gap-1.5 bg-muted/40 p-2 rounded-md border border-border/50">
+                <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span>
+                  No Plano Essencial, a extração analisa até <strong>500 conversas</strong> recentes (ilimitado no Plano Avançado).
+                </span>
               </div>
-            </div>
+            )}
 
             <div className="border-t border-border pt-3">
               <p className="text-xs font-semibold text-foreground mb-1.5">Origem dos contatos</p>
@@ -3365,7 +3376,11 @@ export default function BancoDeDados() {
                   getIdToken={getIdToken}
                   confirmed={hasConfirmedGroupsWarning}
                   onConfirmedChange={setHasConfirmedGroupsWarning}
-                  onSelectionChange={setWaSelectedGroupIds}
+                  onSelectionChange={(groupIds, selectedList) => {
+                    setWaSelectedGroupIds(groupIds);
+                    setWaSelectedGroups(selectedList || []);
+                    setWaGroupsInstanceId(selectedInstanceId);
+                  }}
                   onEnabledChange={setWaIncludeGroups}
                   disabled={isExtractingWA}
                 />
@@ -3375,9 +3390,30 @@ export default function BancoDeDados() {
             {isExtractingWA && (
               <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center space-y-2">
                 <RefreshCw className="w-5 h-5 text-emerald-600 animate-spin mx-auto" />
-                <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
                   {waExtractStep || "Minerando contatos..."}
                 </p>
+                {waExtractProgress && waExtractProgress.totalGroups > 0 && (
+                  <div className="text-[11px] text-muted-foreground space-y-0.5">
+                    <p>
+                      Grupo {waExtractProgress.currentGroupIndex} de {waExtractProgress.totalGroups}
+                      {waExtractProgress.remainingGroups > 0 ? ` · Restam ${waExtractProgress.remainingGroups}` : ""}
+                    </p>
+                    <p className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                      {waExtractProgress.totalExtracted} contato{waExtractProgress.totalExtracted === 1 ? "" : "s"} já minerado{waExtractProgress.totalExtracted === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                )}
+                {waExtractProgress && waExtractProgress.failedGroups.length > 0 && (
+                  <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/20 rounded p-1.5 text-left space-y-0.5">
+                    <p className="font-semibold">Grupos com erro ({waExtractProgress.failedGroups.length}):</p>
+                    {waExtractProgress.failedGroups.map((f) => (
+                      <p key={f.groupId} className="truncate">
+                        • {f.groupName}: {f.error}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3386,20 +3422,24 @@ export default function BancoDeDados() {
             <Button
               variant="outline"
               onClick={() => {
-                setIsWAModalOpen(false);
-                resetWaSourceSelection();
+                if (isExtractingWA) {
+                  abortExtractionRef.current = true;
+                  setWaExtractStep("Interrompendo extração...");
+                } else {
+                  setIsWAModalOpen(false);
+                  resetWaSourceSelection();
+                }
               }}
-              disabled={isExtractingWA}
             >
-              Cancelar
+              {isExtractingWA ? "Parar" : "Cancelar"}
             </Button>
             <Button
               onClick={handleExtractWA}
-              disabled={isExtractingWA || (!waIncludeConversas && !waIncludeAgenda && !waIncludeGroups)}
+              disabled={isExtractingWA || (!waIncludeConversas && !waIncludeAgenda && !waIncludeGroups) || (waIncludeGroups && waSelectedGroupIds.length === 0 && !waIncludeConversas && !waIncludeAgenda)}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               {isExtractingWA ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
-              Iniciar Extração
+              {isExtractingWA ? "Extraindo..." : "Iniciar Extração"}
             </Button>
           </DialogFooter>
         </DialogContent>

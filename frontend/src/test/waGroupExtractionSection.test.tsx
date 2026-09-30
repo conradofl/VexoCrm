@@ -10,17 +10,21 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { WaGroupExtractionSection, sumGroupSelection, type WaGroupPreviewItem } from "@/components/leads/WaGroupExtractionSection";
 
-function Harness({ initialConfirmed = false }: { initialConfirmed?: boolean }) {
+function Harness({ initialConfirmed = false, initialInstanceId = "inst-1" }: { initialConfirmed?: boolean; initialInstanceId?: string }) {
+  const [instanceId, setInstanceId] = React.useState(initialInstanceId);
   const [confirmed, setConfirmed] = React.useState(initialConfirmed);
   const [selection, setSelection] = React.useState<string[]>([]);
   const [groupsEnabled, setGroupsEnabled] = React.useState(false);
   return (
     <div>
+      <button onClick={() => setInstanceId("inst-2")} data-testid="switch-instance">
+        Trocar Instância
+      </button>
       <div data-testid="selection">{JSON.stringify(selection)}</div>
       <div data-testid="enabled">{String(groupsEnabled)}</div>
       <WaGroupExtractionSection
         clientId="tenant-teste"
-        instanceId="inst-1"
+        instanceId={instanceId}
         getIdToken={async () => "token"}
         confirmed={confirmed}
         onConfirmedChange={setConfirmed}
@@ -149,5 +153,52 @@ describe("WaGroupExtractionSection", () => {
     const selected = new Set(["g1@g.us", "g3@g.us"]);
     expect(sumGroupSelection(GROUPS, selected)).toEqual({ contacts: 160, lost: 150 });
     expect(sumGroupSelection(GROUPS, new Set())).toEqual({ contacts: 0, lost: 0 });
+  });
+
+  it("[TESTE OBRIGATÓRIO] trocar de instância limpa lista e seleção, e recarrega quando a caixa está marcada", async () => {
+    const GROUPS_INST1: WaGroupPreviewItem[] = [
+      { id: "g1@g.us", name: "Grupo Instancia 1", totalMembers: 50, usableCount: 50, lidCount: 0 },
+    ];
+    const GROUPS_INST2: WaGroupPreviewItem[] = [
+      { id: "g2@g.us", name: "Grupo Instancia 2", totalMembers: 80, usableCount: 80, lidCount: 0 },
+    ];
+
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      if (body.instanceId === "inst-2") {
+        return {
+          ok: true,
+          json: async () => ({ success: true, groups: GROUPS_INST2 }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ success: true, groups: GROUPS_INST1 }),
+      };
+    });
+
+    render(<Harness initialConfirmed />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Membros de grupos" }));
+
+    // Aparece grupo da inst-1
+    await screen.findByText("Grupo Instancia 1");
+
+    // Seleciona o grupo
+    fireEvent.click(screen.getByRole("checkbox", { name: "Grupo Instancia 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("selection").textContent).toBe(JSON.stringify(["g1@g.us"]));
+    });
+
+    // Troca de instância para inst-2
+    fireEvent.click(screen.getByTestId("switch-instance"));
+
+    // Seleção foi limpa imediatamente
+    await waitFor(() => {
+      expect(screen.getByTestId("selection").textContent).toBe(JSON.stringify([]));
+    });
+
+    // Novo grupo da inst-2 é carregado e exibido
+    await screen.findByText("Grupo Instancia 2");
+    expect(screen.queryByText("Grupo Instancia 1")).toBeNull();
   });
 });

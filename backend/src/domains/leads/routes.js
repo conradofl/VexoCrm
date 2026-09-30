@@ -24,6 +24,7 @@ import {
   getLeadClientEvolutionInstances,
   resolveEvolutionInstanceOwner,
 } from "../../services/evolution.js";
+import { getLeadClientN8nSettings as getLeadClientN8nSettingsService } from "../../services/n8nSettings.js";
 
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
@@ -127,6 +128,48 @@ export function classifyGroupParticipantObject(participant, ownerDigits) {
 
 export function classifyGroupParticipant(participantJid, ownerDigits) {
   return classifyGroupParticipantObject(participantJid, ownerDigits);
+}
+
+/**
+ * Resolve o limite efetivo de extração de contatos (WhatsApp) no servidor.
+ * - Plano Avançado (ou com módulo avulso 'extracao_ilimitada'): teto é Infinity.
+ * - Demais planos (Essencial, Modular sem o módulo, etc.): teto é 500 contatos.
+ * - O corpo da requisição só pode REDUZIR o limite, NUNCA aumentar além do teto do plano.
+ * - Pedir "all", "unlimited" ou valor maior que o teto em plano não avançado resulta no teto do plano (500).
+ */
+export function resolveServerExtractionLimit({ planTier, modulosAvulsos = [], requestedLimit } = {}) {
+  const tier = String(planTier || "").toLowerCase().trim();
+  const rawModulos = Array.isArray(modulosAvulsos)
+    ? modulosAvulsos
+    : typeof modulosAvulsos === "string"
+      ? modulosAvulsos.split(",")
+      : [];
+  const modulos = rawModulos.map((m) => String(m).toLowerCase().trim().replace(/^(mod_|modulo_)/, ""));
+
+  const isAdvancedPlan =
+    tier.includes("avancad") ||
+    tier.includes("advanced") ||
+    tier === "pro" ||
+    modulos.includes("extracao_ilimitada");
+
+  const planCeiling = isAdvancedPlan ? Infinity : 500;
+
+  const isRequestedUnlimited =
+    requestedLimit === "all" ||
+    requestedLimit === "unlimited" ||
+    requestedLimit === 0 ||
+    requestedLimit === Infinity;
+
+  let requestedValue = Infinity;
+  if (!isRequestedUnlimited && requestedLimit !== undefined && requestedLimit !== null && requestedLimit !== "") {
+    const parsed = parseInt(requestedLimit, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      requestedValue = parsed;
+    }
+  }
+
+  // O valor que vem no corpo só pode reduzir, nunca aumentar
+  return Math.min(planCeiling, requestedValue);
 }
 
 // Resolve a instância Evolution (id/nome explícito ou padrão do tenant),
@@ -1251,9 +1294,38 @@ export function registerLeadsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const rawLimit = req.body?.chatLimit || req.body?.limit;
-    const isUnlimited = rawLimit === "all" || rawLimit === "unlimited" || rawLimit === 0;
-    const chatLimit = isUnlimited ? Infinity : Math.max(10, parseInt(rawLimit || "100", 10));
+    // Resolução do plano do tenant no servidor (a trava fica no backend)
+    const resolveSettingsFn = typeof getLeadClientN8nSettings === "function" ? getLeadClientN8nSettings : getLeadClientN8nSettingsService;
+    let tenantSettings = null;
+    if (typeof resolveSettingsFn === "function") {
+      try {
+        tenantSettings = await resolveSettingsFn(clientId);
+      } catch (e) {
+        console.warn(`[wa-extract] falha ao buscar n8n_settings para ${clientId}:`, e.message);
+      }
+    }
+
+    if (!tenantSettings && pgDatabasePool) {
+      try {
+        const settingsRes = await pgDatabasePool.query(
+          `SELECT plan_tier, modulos_avulsos FROM public.lead_client_n8n_settings WHERE client_id = $1 LIMIT 1`,
+          [clientId]
+        );
+        if (settingsRes.rows && settingsRes.rows[0]) {
+          tenantSettings = settingsRes.rows[0];
+        }
+      } catch (e) {
+        console.warn(`[wa-extract] falha ao buscar n8n_settings via pool para ${clientId}:`, e.message);
+      }
+    }
+
+    const rawLimit = req.body?.chatLimit ?? req.body?.limit;
+    const chatLimit = resolveServerExtractionLimit({
+      planTier: tenantSettings?.plan_tier,
+      modulosAvulsos: tenantSettings?.modulos_avulsos,
+      requestedLimit: rawLimit,
+    });
+    let remainingBudget = chatLimit;
 
     const explicitInstanceId = normalizeString(req.body?.instanceId);
     const explicitInstanceName = normalizeString(req.body?.instanceName);
@@ -1391,7 +1463,7 @@ export function registerLeadsRoutes(app, deps) {
       let groupLeadCount = 0;
       let groupLidCount = 0;
       let groupsProcessed = 0;
-      if (sources.has("grupos")) {
+      if (sources.has("grupos") && (!isFinite(remainingBudget) || remainingBudget > 0)) {
         const groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((g) => String(g)) : [];
         if (groupIds.length > 0) {
           try {
@@ -1410,6 +1482,9 @@ export function registerLeadsRoutes(app, deps) {
                 const groupName = normalizeString(group?.subject || group?.name) || "Grupo do WhatsApp";
                 const participants = Array.isArray(group?.participants) ? group.participants : [];
                 for (const p of participants) {
+                  if (isFinite(remainingBudget) && batchLeads.length >= remainingBudget) {
+                    break;
+                  }
                   const classified = classifyGroupParticipantObject(p, ownerDigits);
                   if (classified.kind === "lid") {
                     groupLidCount++;
@@ -1419,6 +1494,7 @@ export function registerLeadsRoutes(app, deps) {
                   const formatted = sanitizePhoneE164(classified.digits);
                   if (!formatted) continue;
                   const telefoneKey = formatted.replace(/^\+/, "");
+                  if (seenPhones.has(telefoneKey)) continue;
                   const rawName = p?.pushName || p?.name || p?.notify || contactNames.get(classified.digits);
                   batchLeads.push({
                     telefone: telefoneKey,
@@ -1438,12 +1514,18 @@ export function registerLeadsRoutes(app, deps) {
                   seenPhones.add(telefoneKey);
                 }
                 groupsProcessed++;
+                if (isFinite(remainingBudget) && batchLeads.length >= remainingBudget) {
+                  break;
+                }
               }
 
               if (batchLeads.length > 0) {
                 // upsertLeadsBatchByPhone deduplica por telefone DENTRO do lote
                 const batchResult = await upsertLeadsBatchByPhone(pgDatabasePool, clientId, batchLeads);
                 groupLeadCount = batchResult.totalCount;
+                if (isFinite(remainingBudget)) {
+                  remainingBudget = Math.max(0, remainingBudget - groupLeadCount);
+                }
               }
               console.info(`[wa-extract] grupos: ${groupLeadCount} leads de ${groupsProcessed} grupo(s) selecionado(s), ${groupLidCount} participante(s) LID sem telefone recuperável`);
             } else {
@@ -1458,8 +1540,11 @@ export function registerLeadsRoutes(app, deps) {
 
       // ── 2. AGENDA: segunda procedência (contatos salvos no chip com atribuição ao chipOwnerUid) ──
       let addressBookCount = 0;
-      if (sources.has("agenda")) {
+      if (sources.has("agenda") && (!isFinite(remainingBudget) || remainingBudget > 0)) {
         for (const ct of addressBook) {
+          if (isFinite(remainingBudget) && addressBookCount >= remainingBudget) {
+            break;
+          }
           const formatted = sanitizePhoneE164(ct.digits);
           if (!formatted) continue;
           const telefoneKey = formatted.replace(/^\+/, "");
@@ -1488,17 +1573,24 @@ export function registerLeadsRoutes(app, deps) {
             if (insertErrors <= 3) console.warn(`[wa-extract] upsert agenda falhou p/ ${formatted}: ${insErr.message}`);
           }
         }
+        if (isFinite(remainingBudget)) {
+          remainingBudget = Math.max(0, remainingBudget - addressBookCount);
+        }
         console.info(`[wa-extract] agenda: ${addressBookCount} contatos importados de ${addressBook.length} salvos`);
       }
 
       // ── 3. CONVERSAS: terceira procedência (classificação semântica ágil e IA sob demanda) ──
       let aiSummariesCount = 0;
-      const topChats = isFinite(chatLimit) ? validChats.slice(0, chatLimit) : validChats;
+      const topChats = isFinite(remainingBudget) ? validChats.slice(0, remainingBudget) : validChats;
       if (sources.has("conversas")) {
         console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} processando=${topChats.length}`);
       }
 
-      for (const chat of topChats) {
+      if (sources.has("conversas") && (!isFinite(remainingBudget) || remainingBudget > 0)) {
+        for (const chat of topChats) {
+          if (isFinite(remainingBudget) && extractedCount >= remainingBudget) {
+            break;
+          }
         const phoneJid = realPhoneJid(chat);
         const rawPhone = phoneJid.split("@")[0] || "";
         const formattedPhone = sanitizePhoneE164(rawPhone);
@@ -1637,6 +1729,7 @@ export function registerLeadsRoutes(app, deps) {
           if (insertErrors <= 3) console.warn(`[wa-extract] upsert falhou p/ ${formattedPhone}: ${insErr.message}`);
         }
       }
+    }
 
       res.json({
         success: true,

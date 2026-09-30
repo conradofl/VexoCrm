@@ -281,6 +281,7 @@ export function hasFeatureUnlocked(client: any, featureKey: string): boolean {
     "origem_leads",
     "antiban_groq",
     "agente_campanha",
+    "extracao_ilimitada",
   ]);
 
   if (!ADVANCED_ONLY_FEATURES.has(featureKey)) {
