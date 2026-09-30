@@ -11,6 +11,7 @@
 
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
 import { summarizeChatWithAI } from "../leads/chatInsight.js";
+import { saveLeadAgreement } from "../../services/leadAgreement.js";
 import { applyCorsHeaders } from "../../services/corsPolicy.js";
 import { upsertLeadByPhone, isRealName } from "../../services/leadUpsert.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
@@ -1185,31 +1186,47 @@ export function registerChatbotRoutes(app, deps) {
       // Atualiza no banco de dados SOMENTE quando o resumo REAL da IA foi gerado com sucesso
       if (cleanPhone && clientId && pgDatabasePool) {
         const last8 = cleanPhone.slice(-8);
-        const updRes = await pgDatabasePool
-          .query(
-            `UPDATE public.leads 
-             SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{resumo_chat}', to_jsonb($1::text)),
-                 raw_chat_summary = $1,
-                 updated_at = NOW()
-             WHERE client_id = $2 AND (
-               telefone = $3 OR phone = $3 OR 
-               telefone = $4 OR phone = $4 OR
-               telefone LIKE $5 OR phone LIKE $5
-             )`,
-            [summaryText, clientId, cleanPhone, `+${cleanPhone}`, `%${last8}`]
-          )
-          .catch((e) => {
-            console.warn("[summarize-chat] DB update warning:", e.message);
-            return null;
-          });
+        try {
+          const leadRow = await pgDatabasePool.query(
+            `SELECT id, dados FROM public.leads 
+             WHERE client_id = $1 AND (
+               telefone = $2 OR phone = $2 OR 
+               telefone = $3 OR phone = $3 OR
+               telefone LIKE $4 OR phone LIKE $4
+             ) LIMIT 1`,
+            [clientId, cleanPhone, `+${cleanPhone}`, `%${last8}`]
+          );
 
-        if (!updRes || updRes.rowCount === 0) {
-          await upsertLeadByPhone(pgDatabasePool, clientId, cleanPhone, {
-            nome: contactName && contactName !== "não informado" ? contactName : null,
-            phone: cleanPhone,
-            raw_chat_summary: summaryText,
-            extracted_from_wa: true,
-          }).catch((e) => console.warn("[summarize-chat] DB upsert warning:", e.message));
+          let updatedDados = leadRow?.rows?.[0]?.dados || {};
+          if (insight?.acordo_sugerido) {
+            updatedDados = saveLeadAgreement(updatedDados, insight.acordo_sugerido);
+          }
+          updatedDados.resumo_chat = summaryText;
+
+          const updRes = await pgDatabasePool.query(
+            `UPDATE public.leads 
+             SET dados = $1,
+                 raw_chat_summary = $2,
+                 updated_at = NOW()
+             WHERE client_id = $3 AND (
+               telefone = $4 OR phone = $4 OR 
+               telefone = $5 OR phone = $5 OR
+               telefone LIKE $6 OR phone LIKE $6
+             )`,
+            [JSON.stringify(updatedDados), summaryText, clientId, cleanPhone, `+${cleanPhone}`, `%${last8}`]
+          );
+
+          if (!updRes || updRes.rowCount === 0) {
+            await upsertLeadByPhone(pgDatabasePool, clientId, cleanPhone, {
+              nome: contactName && contactName !== "não informado" ? contactName : null,
+              phone: cleanPhone,
+              raw_chat_summary: summaryText,
+              dados: updatedDados,
+              extracted_from_wa: true,
+            }).catch((e) => console.warn("[summarize-chat] DB upsert warning:", e.message));
+          }
+        } catch (e) {
+          console.warn("[summarize-chat] DB update warning:", e.message);
         }
       }
 
@@ -3452,6 +3469,7 @@ export function registerChatbotRoutes(app, deps) {
     // instanceName (que sem casamento cai pro chatbot do tenant em silêncio),
     // um agentId que não resolve é erro do chamador — 404 sem rodar nada.
     const agentId = normalizeString(body.agentId) || null;
+    const isSimulation = body.isSimulation === true || body.noPersist === true || body.simulation === true;
 
     try {
       const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
@@ -3481,6 +3499,8 @@ export function registerChatbotRoutes(app, deps) {
         instanceName,
         companyId: inboundConfig?.companyId || null,
         instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
+        isSimulation,
+        noPersist: isSimulation,
       });
 
       if (!aiResponse?.mensagem) {

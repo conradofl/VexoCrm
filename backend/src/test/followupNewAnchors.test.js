@@ -48,6 +48,7 @@ describe("Item 05 — As Três Novas Âncoras no Follow-up", () => {
         aniversario_casamento: { source: "lead", recurring: true },
         epoca_ferias: { source: "lead", recurring: true },
         data_retorno: { source: "lead", recurring: false },
+        prazo_acordo: { source: "lead", recurring: false },
       });
     });
 
@@ -60,9 +61,9 @@ describe("Item 05 — As Três Novas Âncoras no Follow-up", () => {
       expect(isValidAnchorField("ancora_fantasma")).toBe(false);
     });
 
-    it("getAnchorFieldsMetadata() retorna a lista de 5 elementos com chaves, rótulos e flags corretas", () => {
+    it("getAnchorFieldsMetadata() retorna a lista de 6 elementos com chaves, rótulos e flags corretas", () => {
       const meta = getAnchorFieldsMetadata();
-      expect(meta).toHaveLength(5);
+      expect(meta).toHaveLength(6);
 
       const casamento = meta.find((m) => m.key === "aniversario_casamento");
       expect(casamento).toBeDefined();

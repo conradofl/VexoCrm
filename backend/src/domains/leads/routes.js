@@ -17,6 +17,7 @@ import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
 import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadUpsert.js";
 import { summarizeChatWithAI, temConversaComercial } from "./chatInsight.js";
+import { confirmLeadAgreement, saveLeadAgreement } from "../../services/leadAgreement.js";
 import {
   getDefaultLeadClientEvolutionInstance,
   getEvolutionAdminConfig,
@@ -2171,6 +2172,47 @@ export function registerLeadsRoutes(app, deps) {
     } catch (err) {
       console.error("[reclassify] Erro ao reclassificar lead:", err);
       sendError(res, 500, "RECLASSIFY_ERROR", err.message || "Erro ao reclassificar lead");
+    }
+  });
+
+  // Confirmação de acordo comercial sugerido pela IA (Trava Humana no Inbox)
+  app.post("/api/leads/:id/confirm-agreement", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const { id } = req.params;
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const confirmedBy = normalizeString(req.body?.confirmedBy || req.user?.name || req.user?.email || "consultor");
+
+    try {
+      const table = leadsTableName(clientId);
+      const { rows } = await pgDatabasePool.query(
+        `SELECT id, dados FROM public."${table}" WHERE id = $1 AND client_id = $2 LIMIT 1`,
+        [id, clientId]
+      );
+      if (!rows.length) {
+        return sendError(res, 404, "LEAD_NOT_FOUND", "Lead não encontrado.");
+      }
+
+      const updatedDados = confirmLeadAgreement(rows[0].dados || {}, {
+        confirmedBy,
+        confirmedAt: new Date().toISOString(),
+      });
+
+      await pgDatabasePool.query(
+        `UPDATE public."${table}" SET dados = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3`,
+        [JSON.stringify(updatedDados), id, clientId]
+      );
+
+      res.json({
+        success: true,
+        acordo: updatedDados.acordo,
+      });
+    } catch (err) {
+      console.error("[confirm-agreement] Erro ao confirmar acordo:", err);
+      sendError(res, 500, "CONFIRM_AGREEMENT_ERROR", err.message || "Erro ao confirmar acordo.");
     }
   });
 

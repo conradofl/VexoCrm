@@ -170,7 +170,7 @@ describe("PARTE 2B — Follow-up: Timing Fixo (scheduled_time) e Campos Âncora"
 
     it("getAnchorFieldsMetadata exporta lista de âncoras com rótulo e descrição para o frontend", () => {
       const meta = getAnchorFieldsMetadata();
-      expect(meta).toHaveLength(5);
+      expect(meta).toHaveLength(6);
       expect(meta).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

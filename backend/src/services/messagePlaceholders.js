@@ -1,6 +1,8 @@
 // Serviço Central de Substituição de Variáveis / Placeholders em Mensagens de Saída.
 // Garante que NENHUM template ou variável como {{nome}} chegue crua ao lead.
 
+import { sanitizeAgreementForMessage, hasConfirmedAgreement } from "./leadAgreement.js";
+
 function normalizeString(value) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -65,7 +67,37 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     raw = raw.replace(/\{\{\s*(?:scheduling_link|link|agendamento)\s*\}\}/gi, schedulingLink);
   }
 
-  // 5. Variáveis de reunião / follow-up
+  // 5. Variável de acordo comercial (SOMENTE se confirmado por humano)
+  const hasAcordoPlaceholder = /\{\{\s*(?:acordo|combinado)\s*\}\}/gi.test(raw);
+  if (hasAcordoPlaceholder) {
+    const acordoObj =
+      leadObj?.dados?.acordo ||
+      leadObj?.acordo ||
+      extraObj?.dados?.acordo ||
+      extraObj?.acordo;
+
+    const isConfirmed = Boolean(
+      acordoObj &&
+      acordoObj.confirmado_por &&
+      acordoObj.confirmado_em &&
+      acordoObj.texto &&
+      typeof acordoObj.texto === "string" &&
+      acordoObj.texto.trim().length > 0
+    );
+
+    if (isConfirmed) {
+      const cleanAcordo = sanitizeAgreementForMessage(acordoObj.texto);
+      if (cleanAcordo) {
+        raw = raw.replace(/\{\{\s*(?:acordo|combinado)\s*\}\}/gi, cleanAcordo);
+      }
+      // Se cleanAcordo for null (porque excedeu limite de tamanho), NÃO substitui
+      // para que a guarda de saída bloqueie o envio da mensagem crua!
+    }
+    // Se NÃO confirmado, NÃO substitui — o placeholder cru causará bloqueio pela guarda de saída
+    // garantindo que acordo não confirmado NUNCA chegue ao lead por nenhum caminho!
+  }
+
+  // 6. Variáveis de reunião / follow-up
   if (extraObj.meeting_date || leadObj.meeting_date || leadObj.meeting_datetime) {
     const d = extraObj.meeting_datetime || leadObj.meeting_datetime ? new Date(extraObj.meeting_datetime || leadObj.meeting_datetime) : null;
     const dateStr = extraObj.meeting_date || leadObj.meeting_date || (d ? d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "");
@@ -75,7 +107,7 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
       .replace(/\{\{\s*meeting_time\s*\}\}/gi, timeStr);
   }
 
-  // 6. Dados dinâmicos adicionais (normalized_data, dados, extraContext)
+  // 7. Dados dinâmicos adicionais (normalized_data, dados, extraContext)
   const customData = {
     ...leadObj,
     ...(leadObj.normalized_data || {}),
@@ -83,6 +115,11 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     ...(leadObj.dados || {}),
     ...extraObj,
   };
+
+  // Trava de segurança: impede que dados brutos ou objetos vazem nos placeholders de acordo
+  delete customData.acordo;
+  delete customData.combinado;
+  delete customData.acordo_pendente;
 
   for (const [key, value] of Object.entries(customData)) {
     if (typeof value === "string" || typeof value === "number") {

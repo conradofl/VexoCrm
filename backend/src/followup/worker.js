@@ -13,6 +13,7 @@ import Groq from "groq-sdk";
 import { ResendProvider } from "../providers/ResendProvider.js";
 import { applyMessagePlaceholders } from "../services/messagePlaceholders.js";
 import { validateOutboundMessage } from "../services/jsonExtractor.js";
+import { sanitizeAgreementForMessage, hasConfirmedAgreement } from "../services/leadAgreement.js";
 
 import {
   getLeadClientEvolutionInstances,
@@ -116,10 +117,10 @@ export async function resolveEvolutionInstanceForFollowup(tenantId, instanceName
   };
 }
 
-function renderMessage(template, { lead_name, meeting_datetime, phone = "" }) {
+function renderMessage(template, { lead_name, meeting_datetime, phone = "", dados = null }) {
   return applyMessagePlaceholders(
     template,
-    { nome: lead_name, lead_name },
+    { nome: lead_name, lead_name, dados },
     phone,
     { meeting_datetime }
   );
@@ -429,10 +430,51 @@ export async function processJob(job) {
   }
 
   const rawMessage = customMessage || row.custom_message || row.message || "";
+  const usesAcordo = /\{\{\s*(?:acordo|combinado)\s*\}\}/i.test(rawMessage);
+
+  let leadDados = null;
+  if ((usesAcordo || row.conditions) && row.tenant_id && row.phone) {
+    try {
+      const table = leadsTableName(row.tenant_id);
+      const { rows: leadRows } = await query(
+        `SELECT dados FROM public."${table}"
+          WHERE client_id = $1
+            AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+          LIMIT 1`,
+        [row.tenant_id, row.phone]
+      );
+      leadDados = leadRows[0]?.dados || null;
+    } catch (e) {
+      console.warn(log, "aviso ao buscar dados do lead:", e?.message || e);
+    }
+  }
+
+  // Validação estrita de acordo comercial:
+  // Só pode ser citado após confirmação humana explícita. Sem confirmação, não envia.
+  // Acordo que excede o limite de tamanho também não é enviado para não truncar frase.
+  if (usesAcordo) {
+    const isConfirmed = hasConfirmedAgreement({ dados: leadDados });
+    if (!isConfirmed) {
+      const reasonMsg = "Passo não enviado: lead sem acordo confirmado para variável {{acordo}}";
+      await query("UPDATE followup_jobs SET status='skipped', error_log=$1 WHERE id=$2", [reasonMsg, jobId]);
+      console.log(log, `skipped — ${reasonMsg}`);
+      return;
+    }
+
+    const cleanAcordo = sanitizeAgreementForMessage(leadDados?.acordo?.texto);
+    if (!cleanAcordo) {
+      const reasonMsg = "Passo não enviado: acordo confirmado excede limite de tamanho e não pode ser truncado";
+      await query("UPDATE followup_jobs SET status='skipped', error_log=$1 WHERE id=$2", [reasonMsg, jobId]);
+      console.log(log, `skipped — ${reasonMsg}`);
+      return;
+    }
+  }
+
   const text = renderMessage(rawMessage, {
     lead_name: row.lead_name,
     meeting_datetime: row.meeting_datetime,
     phone: row.phone,
+    dados: leadDados,
   });
 
   // Guarda de saída obrigatória (válida tanto para mensagem textual pura quanto para legenda de mídia)

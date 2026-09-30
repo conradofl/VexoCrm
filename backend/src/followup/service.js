@@ -21,6 +21,7 @@ export const ANCHOR_FIELDS = {
   aniversario_casamento: { source: "lead", recurring: true },
   epoca_ferias: { source: "lead", recurring: true },
   data_retorno: { source: "lead", recurring: false },
+  prazo_acordo: { source: "lead", recurring: false },
 };
 
 export const ANCHOR_FIELD_METADATA = {
@@ -43,6 +44,10 @@ export const ANCHOR_FIELD_METADATA = {
   data_retorno: {
     label: "Data de Retorno",
     description: "Data pontual combinada para retorno de contato ou volta de viagem",
+  },
+  prazo_acordo: {
+    label: "Prazo do Acordo",
+    description: "Data prometida no acordo confirmado com o lead",
   },
 };
 
@@ -196,7 +201,20 @@ export function evaluateStepConditions(conditions = [], leadData = {}) {
   for (const cond of conditions) {
     const { field, operator, value } = cond;
     if (!field || !operator) continue;
-    const actualValue = leadData[field];
+    let actualValue = leadData[field];
+
+    // Condição especial de acordo comercial confirmado por humano
+    if (field === "tem_acordo_confirmado" || field === "acordo_confirmado") {
+      const acordo = leadData?.dados?.acordo || leadData?.acordo;
+      actualValue = Boolean(
+        acordo &&
+        acordo.confirmado_por &&
+        acordo.confirmado_em &&
+        acordo.texto &&
+        typeof acordo.texto === "string" &&
+        acordo.texto.trim().length > 0
+      );
+    }
     switch (operator) {
       case "equals":
         if (String(actualValue ?? "").toLowerCase() !== String(value ?? "").toLowerCase()) {
@@ -334,6 +352,12 @@ export function resolveAnchorDate(anchorField, context = {}, refDate = new Date(
       rawValue = context.ferias || context.vacation;
     } else if (anchorField === "data_retorno") {
       rawValue = context.return_date || context.retorno;
+    } else if (anchorField === "prazo_acordo") {
+      rawValue =
+        context.prazo_acordo ||
+        context.dados?.acordo?.prazo_data ||
+        context.acordo?.prazo_data ||
+        context.dados?.prazo_acordo;
     }
   }
   if (!rawValue) return null;
@@ -878,6 +902,29 @@ export async function resolveLeadAnchorValue({ phone, tenantId, anchorField }) {
   const config = ANCHOR_FIELDS[anchorField];
   // Só busca no banco se for âncora com source: 'lead'
   if (!config || config.source !== "lead") return null;
+
+  // prazo_acordo vive dentro do JSONB dados do lead, sem coluna nova
+  if (anchorField === "prazo_acordo") {
+    try {
+      const table = leadsTableName(tenantId);
+      const { rows } = await query(
+        `SELECT COALESCE(dados->'acordo'->>'prazo_data', dados->>'prazo_acordo') as prazo_data
+         FROM public."${table}"
+         WHERE client_id = $1
+           AND ${SQL_CANONICAL_PHONE("telefone")} = ${SQL_CANONICAL_PHONE("$2::text")}
+           AND (dados->'acordo'->>'prazo_data' IS NOT NULL OR dados->>'prazo_acordo' IS NOT NULL)
+         LIMIT 1`,
+        [tenantId, phone]
+      );
+      if (rows.length && rows[0].prazo_data) {
+        return rows[0].prazo_data;
+      }
+    } catch (err) {
+      console.warn(`[followup/service] Falha ao buscar âncora prazo_acordo:`, err?.message || err);
+    }
+    return null;
+  }
+
   // Whitelist de segurança contra injeção SQL
   const safeCol = String(anchorField).replace(/[^a-z0-9_]/gi, "");
   if (!safeCol) return null;
