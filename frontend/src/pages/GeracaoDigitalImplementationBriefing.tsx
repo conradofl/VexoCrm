@@ -57,6 +57,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { BriefingDocumentKitAndObjections } from "./GeracaoDigitalImplementationBriefing/BriefingDocumentKitAndObjections";
+import { BriefingSimulatorAndReadiness } from "./GeracaoDigitalImplementationBriefing/BriefingSimulatorAndReadiness";
 import {
   DocumentoKitItem,
   ParObjecao,
@@ -229,6 +230,8 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     dataGoLive: "",
     proximoContatoQuem: "",
     proximoContatoData: "",
+    test_performed_at: null as string | null,
+    test_questions_count: 0,
   });
 
   // Calculate suggested model based on rules
@@ -350,6 +353,8 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
         canais,
         modulos_custom: modulosCustom,
         fechamento,
+        test_performed_at: fechamento.test_performed_at,
+        test_questions_count: fechamento.test_questions_count,
         team_users: teamUsers,
         knowledge_files: knowledgeFiles,
         cinco_pilares: {
@@ -474,6 +479,8 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
       dataGoLive: "",
       proximoContatoQuem: "",
       proximoContatoData: "",
+      test_performed_at: null,
+      test_questions_count: 0,
     });
   };
 
@@ -493,7 +500,22 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
     if (b.agente_ia) setAgenteIa(prev => ({ ...prev, ...b.agente_ia }));
     if (b.canais) setCanais(prev => ({ ...prev, ...b.canais }));
     if (b.modulos_custom) setModulosCustom(prev => ({ ...prev, ...b.modulos_custom }));
-    if (b.fechamento) setFechamento(prev => ({ ...prev, ...b.fechamento }));
+    if (b.fechamento) {
+      setFechamento({
+        ...b.fechamento,
+        test_performed_at: b.test_performed_at || b.fechamento?.test_performed_at || null,
+        test_questions_count: b.test_questions_count ?? b.fechamento?.test_questions_count ?? 0,
+      });
+    } else {
+      setFechamento({
+        recapitulado: true,
+        dataGoLive: "",
+        proximoContatoQuem: "",
+        proximoContatoData: "",
+        test_performed_at: b.test_performed_at || null,
+        test_questions_count: b.test_questions_count || 0,
+      });
+    }
     setTeamUsers(Array.isArray(b.team_users) ? b.team_users : []);
     setKnowledgeFiles(Array.isArray(b.knowledge_files) ? b.knowledge_files : []);
 
@@ -540,6 +562,13 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
       if (b) {
         if (Array.isArray(b.team_users)) setTeamUsers(b.team_users);
         if (Array.isArray(b.knowledge_files)) setKnowledgeFiles(b.knowledge_files);
+        if (b.fechamento) {
+          setFechamento({
+            ...b.fechamento,
+            test_performed_at: b.test_performed_at || b.fechamento?.test_performed_at || null,
+            test_questions_count: b.test_questions_count ?? b.fechamento?.test_questions_count ?? 0,
+          });
+        }
         if (b.cinco_pilares && typeof b.cinco_pilares === "object") {
           const loadedSegmento = b.cinco_pilares.segmento || b.segmento || b.prerequisites?.segmento || "";
           const loadedDocKit = Array.isArray(b.cinco_pilares.documentos_kit)
@@ -1654,6 +1683,27 @@ export default function GeracaoDigitalImplementationBriefing({ isVexoCommercial 
           {/* PASSO 5: CONCLUSÃO & SINCRONIZAÇÃO */}
           {currentStep === 5 && (
             <div className="space-y-6">
+              {/* O SIMULADOR NO FIM DA IMPLANTAÇÃO & CHECKLIST DO QUE FALTA PARA SOLTAR */}
+              <BriefingSimulatorAndReadiness
+                tenantId={selectedTenantId || clientName || "geracao-digital"}
+                clientName={clientName}
+                segmento={segmentoKit || prerequisites.segmento || ""}
+                cincoObjecoes={cincoObjecoes}
+                briefingId={editingBriefingId}
+                testPerformedAt={fechamento.test_performed_at}
+                testQuestionsCount={fechamento.test_questions_count}
+                knowledgeFilesCount={knowledgeFiles.length}
+                promptContent={agenteIa.precisaSaber}
+                onTestRecorded={(data) => {
+                  setFechamento((f) => ({
+                    ...f,
+                    test_performed_at: data.test_performed_at,
+                    test_questions_count: data.test_questions_count,
+                  }));
+                }}
+                onGoToStep={(step) => setCurrentStep(step)}
+              />
+
               <Card className="border-emerald-200 dark:border-emerald-900/50 bg-gradient-to-br from-emerald-50/40 to-slate-50 dark:from-emerald-950/20 dark:to-slate-900 shadow-sm">
                 <CardHeader>
                   <div className="flex items-center justify-between">

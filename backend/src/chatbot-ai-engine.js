@@ -1654,6 +1654,8 @@ export async function processBatch({
   instanceName = null,
   companyId = null,
   instructionsConsolidated = false,
+  isSimulation = false,
+  noPersist = false,
 }) {
   const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
   const effectivePersonaModel = model || tenantSettings?.chatbot_model || "generico";
@@ -1694,7 +1696,7 @@ export async function processBatch({
   // O aviso de recontato sai UMA vez. Da segunda mensagem em diante a conversa
   // REABRE e o lead volta ao atendimento normal.
   let isPrimeiroRecontato = false;
-  if (existing?.finalizado) {
+  if (existing?.finalizado && !isSimulation && !noPersist) {
     const dadosAntigos = existing.dados || {};
     const jaAvisadoEm = String(dadosAntigos.recontato_avisado_em ?? "").trim();
 
@@ -1770,7 +1772,7 @@ export async function processBatch({
       bot_loop_detected_at: new Date().toISOString(),
     };
 
-    if (existing?.id) {
+    if (existing?.id && !isSimulation && !noPersist) {
       await supabase
         .from(leadsTable)
         .update({
@@ -1845,7 +1847,9 @@ export async function processBatch({
   }
 
   // Garante que todas as colunas do template existam na tabela (fire-and-forget nos erros)
-  await ensureTemplateColumns(supabase, leadsTable, template?.data_fields);
+  if (!isSimulation && !noPersist) {
+    await ensureTemplateColumns(supabase, leadsTable, template?.data_fields);
+  }
 
   const fieldContext = buildFieldContext(template);
   const baseSystemPrompt = fieldContext
@@ -2074,13 +2078,15 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
   // { error }. Sem conferir, uma falha de escrita some — e com ela o historico,
   // que e o unico lugar de onde a conversa e relida no turno seguinte.
   let persistErro = null;
-  try {
-    const resultado = existing?.id
-      ? await supabase.from(leadsTable).update(payload).eq("id", existing.id)
-      : await supabase.from(leadsTable).insert([{ ...payload, created_at: new Date().toISOString() }]);
-    persistErro = resultado?.error || null;
-  } catch (err) {
-    persistErro = err;
+  if (!isSimulation && !noPersist) {
+    try {
+      const resultado = existing?.id
+        ? await supabase.from(leadsTable).update(payload).eq("id", existing.id)
+        : await supabase.from(leadsTable).insert([{ ...payload, created_at: new Date().toISOString() }]);
+      persistErro = resultado?.error || null;
+    } catch (err) {
+      persistErro = err;
+    }
   }
 
   if (persistErro) {

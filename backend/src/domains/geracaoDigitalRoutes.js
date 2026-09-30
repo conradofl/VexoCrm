@@ -13,6 +13,7 @@ import {
 } from "../access/vexoCommercialGate.js";
 import { isManagerOrAdmin } from "../access/claims.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
+import { calculateImplementationReadiness } from "./geracaoDigital/briefingReadiness.js";
 
 // Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
 // grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
@@ -410,6 +411,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS team_users JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS team_users JSONB DEFAULT '[]'::jsonb`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS knowledge_files JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS knowledge_files JSONB DEFAULT '[]'::jsonb`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS cinco_pilares JSONB DEFAULT '{}'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS cinco_pilares JSONB DEFAULT '{}'::jsonb`));
+      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_performed_at TIMESTAMPTZ`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_performed_at TIMESTAMPTZ`));
+      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_questions_count INTEGER DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_questions_count INTEGER DEFAULT 0`));
       // Bloco de auto-migração de background REMOVIDO: a migração já foi feita
       // manualmente e o código anterior embutia a senha do banco em texto puro
       // (3 connection strings hardcoded). Migração é operação pontual, não deve
@@ -3658,6 +3661,8 @@ Condições: ${condicoes}`;
         segmento: r.cinco_pilares?.segmento || r.segmento,
         documentos_kit: r.cinco_pilares?.documentos_kit || r.documentos_kit || [],
         cinco_objecoes: r.cinco_pilares?.cinco_objecoes || r.cinco_objecoes || [],
+        test_performed_at: r.test_performed_at || r.fechamento?.test_performed_at || null,
+        test_questions_count: r.test_questions_count ?? r.fechamento?.test_questions_count ?? 0,
       }));
       res.json({ success: true, data: formattedRows });
     } catch (error) {
@@ -3683,6 +3688,8 @@ Condições: ${condicoes}`;
         segmento: item.cinco_pilares?.segmento || item.segmento,
         documentos_kit: item.cinco_pilares?.documentos_kit || item.documentos_kit || [],
         cinco_objecoes: item.cinco_pilares?.cinco_objecoes || item.cinco_objecoes || [],
+        test_performed_at: item.test_performed_at || item.fechamento?.test_performed_at || null,
+        test_questions_count: item.test_questions_count ?? item.fechamento?.test_questions_count ?? 0,
       };
       res.json({ success: true, data: responseData });
     } catch (error) {
@@ -3734,6 +3741,12 @@ Condições: ${condicoes}`;
         finalCincoPilares.cinco_objecoes = req.body.cinco_objecoes;
       }
 
+      const effectiveFechamento = {
+        ...(typeof fechamento === "object" && fechamento !== null ? fechamento : {}),
+        ...(req.body.test_performed_at !== undefined ? { test_performed_at: req.body.test_performed_at } : {}),
+        ...(req.body.test_questions_count !== undefined ? { test_questions_count: Number(req.body.test_questions_count) } : {}),
+      };
+
       const { rows } = await pool.query(
         `INSERT INTO public.gd_implementation_briefings (
           tenant_id, client_name, model_type, suggested_model, num_employees,
@@ -3747,7 +3760,7 @@ Condições: ${condicoes}`;
           JSON.stringify(prerequisites), JSON.stringify(operacao),
           JSON.stringify(inteligencia), JSON.stringify(agente_ia),
           JSON.stringify(canais), JSON.stringify(modulos_custom),
-          JSON.stringify(fechamento),
+          JSON.stringify(effectiveFechamento),
           JSON.stringify(Array.isArray(team_users) ? team_users : []),
           JSON.stringify(Array.isArray(knowledge_files) ? knowledge_files : []),
           JSON.stringify(finalCincoPilares),
@@ -3761,6 +3774,8 @@ Condições: ${condicoes}`;
         segmento: record.cinco_pilares?.segmento || record.segmento,
         documentos_kit: record.cinco_pilares?.documentos_kit || record.documentos_kit || [],
         cinco_objecoes: record.cinco_pilares?.cinco_objecoes || record.cinco_objecoes || [],
+        test_performed_at: record.test_performed_at || effectiveFechamento.test_performed_at || null,
+        test_questions_count: record.test_questions_count ?? effectiveFechamento.test_questions_count ?? 0,
       };
 
       if (status === 'concluido') {
@@ -3836,6 +3851,18 @@ Condições: ${condicoes}`;
         };
       }
 
+      let updatedFechamento = fechamento !== undefined
+        ? { ...(typeof fechamento === "object" && fechamento !== null ? fechamento : {}) }
+        : undefined;
+
+      if (req.body.test_performed_at !== undefined || req.body.test_questions_count !== undefined) {
+        if (!updatedFechamento) {
+          updatedFechamento = { ...(typeof curr.fechamento === "object" && curr.fechamento !== null ? curr.fechamento : {}) };
+        }
+        if (req.body.test_performed_at !== undefined) updatedFechamento.test_performed_at = req.body.test_performed_at;
+        if (req.body.test_questions_count !== undefined) updatedFechamento.test_questions_count = Number(req.body.test_questions_count);
+      }
+
       const { rows } = await pool.query(
         `UPDATE public.gd_implementation_briefings SET
           client_name = COALESCE($1, client_name),
@@ -3866,7 +3893,7 @@ Condições: ${condicoes}`;
           agente_ia ? JSON.stringify(agente_ia) : null,
           canais ? JSON.stringify(canais) : null,
           modulos_custom ? JSON.stringify(modulos_custom) : null,
-          fechamento ? JSON.stringify(fechamento) : null,
+          updatedFechamento ? JSON.stringify(updatedFechamento) : (fechamento ? JSON.stringify(fechamento) : null),
           team_users !== undefined ? JSON.stringify(Array.isArray(team_users) ? team_users : []) : null,
           knowledge_files !== undefined ? JSON.stringify(Array.isArray(knowledge_files) ? knowledge_files : []) : null,
           updatedCincoPilares !== undefined ? JSON.stringify(updatedCincoPilares) : null,
@@ -3880,6 +3907,8 @@ Condições: ${condicoes}`;
         segmento: updatedRecord.cinco_pilares?.segmento || updatedRecord.segmento,
         documentos_kit: updatedRecord.cinco_pilares?.documentos_kit || updatedRecord.documentos_kit || [],
         cinco_objecoes: updatedRecord.cinco_pilares?.cinco_objecoes || updatedRecord.cinco_objecoes || [],
+        test_performed_at: updatedRecord.test_performed_at || updatedRecord.fechamento?.test_performed_at || updatedFechamento?.test_performed_at || null,
+        test_questions_count: updatedRecord.test_questions_count ?? updatedRecord.fechamento?.test_questions_count ?? updatedFechamento?.test_questions_count ?? 0,
       };
 
       if (newStatus === 'concluido') {
@@ -3894,6 +3923,155 @@ Condições: ${condicoes}`;
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao atualizar briefing de implantação:", error);
       res.status(500).json({ error: `Erro ao atualizar briefing de implantação: ${error.message}` });
+    }
+  });
+
+  // POST /api/gd/implementation-briefings/:id/record-test — Registra data do teste e quantidade de perguntas
+  // NENHUMA resposta do modelo é gravada: armazena estritamente data e contador de perguntas.
+  app.post("/api/gd/implementation-briefings/:id/record-test", requireFirebaseAuth, guardBriefingVexo, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const count = Math.max(1, Number(req.body.test_questions_count || req.body.questionsCount || 1));
+      const nowIso = new Date().toISOString();
+
+      const { rows } = await pool.query(
+        "SELECT * FROM public.gd_implementation_briefings WHERE id = $1",
+        [id]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "Briefing de implantação não encontrado." });
+      }
+
+      const curr = rows[0];
+      const currFechamento = typeof curr.fechamento === "object" && curr.fechamento !== null ? curr.fechamento : {};
+      const newCount = (Number(currFechamento.test_questions_count || curr.test_questions_count || 0)) + count;
+
+      const updatedFechamento = {
+        ...currFechamento,
+        test_performed_at: nowIso,
+        test_questions_count: newCount,
+      };
+
+      try {
+        const resUpdate = await pool.query(
+          `UPDATE public.gd_implementation_briefings
+           SET fechamento = $1, test_performed_at = $2, test_questions_count = $3, updated_at = NOW()
+           WHERE id = $4 RETURNING *`,
+          [JSON.stringify(updatedFechamento), nowIso, newCount, id]
+        );
+        return res.json({
+          success: true,
+          test_performed_at: nowIso,
+          test_questions_count: newCount,
+          data: resUpdate.rows[0],
+        });
+      } catch {
+        // Fallback defensivo caso a coluna ainda não exista no schema em teste
+        const resFallback = await pool.query(
+          `UPDATE public.gd_implementation_briefings
+           SET fechamento = $1, updated_at = NOW()
+           WHERE id = $2 RETURNING *`,
+          [JSON.stringify(updatedFechamento), id]
+        );
+        return res.json({
+          success: true,
+          test_performed_at: nowIso,
+          test_questions_count: newCount,
+          data: resFallback.rows[0],
+        });
+      }
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao registrar teste do simulador:", error);
+      res.status(500).json({ error: "Erro interno ao registrar teste do simulador." });
+    }
+  });
+
+  // GET /api/gd/implementation-readiness/:tenantId — Lista do que falta para soltar
+  // Avalia o estado real: chip conectado, agente vinculado ao chip, agente ligado,
+  // base de conhecimento com pelo menos um documento, prompt aprovado.
+  app.get("/api/gd/implementation-readiness/:tenantId", requireFirebaseAuth, async (req, res) => {
+    try {
+      const rawTenantId = req.params.tenantId;
+      const tenantId = resolveAuthorizedClientId(req, res, rawTenantId);
+      if (!tenantId) return;
+
+      // 1. Chips conectados
+      let activeChipsCount = 0;
+      try {
+        const { rows } = await pool.query(
+          "SELECT count(*)::int as count FROM public.lead_client_evolution_instances WHERE client_id = $1 AND active = true",
+          [tenantId]
+        );
+        activeChipsCount = Number(rows[0]?.count || 0);
+      } catch (err) {
+        console.warn("[readiness] falha ao buscar chips:", err.message);
+      }
+
+      // 2. Agente inbound (followup_companies)
+      let inboundAgent = null;
+      try {
+        const { rows } = await pool.query(
+          "SELECT id, evolution_instances, evolution_instance, inbound_enabled, inbound_prompt FROM public.followup_companies WHERE tenant_id = $1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1",
+          [tenantId]
+        );
+        inboundAgent = rows[0] || null;
+      } catch (err) {
+        console.warn("[readiness] falha ao buscar agente:", err.message);
+      }
+
+      // 3. Settings do tenant (lead_client_n8n_settings)
+      let chatbotEnabled = false;
+      try {
+        const { rows } = await pool.query(
+          "SELECT chatbot_enabled FROM public.lead_client_n8n_settings WHERE client_id = $1 LIMIT 1",
+          [tenantId]
+        );
+        chatbotEnabled = Boolean(rows[0]?.chatbot_enabled);
+      } catch (err) {
+        console.warn("[readiness] falha ao buscar n8n settings:", err.message);
+      }
+
+      // 4. Base de conhecimento (rag_documents e knowledge_files do briefing)
+      let documentsCount = 0;
+      try {
+        const { rows } = await pool.query(
+          "SELECT count(*)::int as count FROM public.rag_documents WHERE client_id = $1",
+          [tenantId]
+        );
+        documentsCount += Number(rows[0]?.count || 0);
+      } catch {}
+
+      try {
+        const { rows } = await pool.query(
+          "SELECT knowledge_files FROM public.gd_implementation_briefings WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1",
+          [tenantId]
+        );
+        const kFiles = Array.isArray(rows[0]?.knowledge_files) ? rows[0].knowledge_files : [];
+        documentsCount += kFiles.length;
+      } catch {}
+
+      // 5. Prompt padrão (chatbot_prompts)
+      let promptContent = null;
+      try {
+        const { rows } = await pool.query(
+          "SELECT content FROM public.chatbot_prompts WHERE client_id = $1 AND type = 'padrao' LIMIT 1",
+          [tenantId]
+        );
+        promptContent = rows[0]?.content || null;
+      } catch {}
+
+      const report = calculateImplementationReadiness({
+        activeChipsCount,
+        inboundAgent,
+        chatbotEnabled,
+        documentsCount,
+        promptContent,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao avaliar prontidão da implantação:", error);
+      res.status(500).json({ error: "Erro interno ao avaliar prontidão da implantação." });
     }
   });
 
