@@ -44,6 +44,33 @@ function sanitizePhoneE164(phoneInput, defaultDdd = null) {
   return s.startsWith("+") ? s : `+${s}`;
 }
 
+// Cache em memória de sessões de extração WA com TTL curto (5 minutos).
+// Evita refazer findChats e findContacts (custosos) a cada lote paginado.
+//
+// NOTA DE ARQUITETURA MULTI-RÉPLICA / ESCALABILIDADE:
+// Esta sessão vive exclusivamente na memória do processo Node.js atual.
+// Hoje o backend opera com réplica única, garantindo integridade e latência zero.
+// SE O BACKEND FOR ESCALADO HORIZONTALMENTE COM MÚLTIPLAS RÉPLICAS (ex: Kubernetes, múltiplos containers):
+// Requisições subsequentes de lotes (cursor > 0) podem cair em processos diferentes e receber erro 410.
+// Caso escale para mais de uma réplica, DEVE-SE adotar uma destas duas soluções:
+// 1) Cache compartilhado distribuído (ex: Redis / Memcached com TTL de 5 minutos); OU
+// 2) Afinidade de sessão no Load Balancer / Ingress (Sticky Sessions por IP / Cookie de sessão).
+export const extractionSessions = new Map();
+export const EXTRACTION_SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+export function clearExtractionSessions() {
+  extractionSessions.clear();
+}
+
+export function purgeExpiredExtractionSessions() {
+  const now = Date.now();
+  for (const [key, session] of extractionSessions.entries()) {
+    if (now - session.lastAccessAt > EXTRACTION_SESSION_TTL_MS) {
+      extractionSessions.delete(key);
+    }
+  }
+}
+
 function classifyChatContent(messages, contactName) {
   const result = classifyLeadMessages(messages);
   const fullText = (messages || []).join(" ").toLowerCase();
@@ -1336,6 +1363,10 @@ export function registerLeadsRoutes(app, deps) {
     const rawSources = Array.isArray(req.body?.sources) ? req.body.sources.map((s) => String(s)) : null;
     const sources = new Set(rawSources && rawSources.length > 0 ? rawSources : ["conversas", "agenda"]);
 
+    const sessionId = normalizeString(req.body?.sessionId);
+    const chatCursor = Math.max(0, parseInt(req.body?.cursor ?? req.body?.chatOffset ?? req.body?.offset ?? 0, 10) || 0);
+    const agendaCursor = Math.max(0, parseInt(req.body?.cursor ?? req.body?.agendaOffset ?? req.body?.offset ?? 0, 10) || 0);
+
     try {
       const resolved = await resolveEvolutionInstanceForExtraction({
         clientId,
@@ -1347,6 +1378,43 @@ export function registerLeadsRoutes(app, deps) {
       });
       if (!resolved) return;
       const { instance, baseUrl, instanceName, apiKey, ownerDigits } = resolved;
+
+      purgeExpiredExtractionSessions();
+      const effectiveInstanceKey = normalizeString(instanceName || instance?.name || instance?.id) || "default";
+      const sessionKey = sessionId ? `${clientId}:${effectiveInstanceKey}:${sessionId}` : null;
+      let currentSession = sessionKey ? extractionSessions.get(sessionKey) : null;
+
+      // Se o cursor for maior que zero mas a sessão não existir ou tiver expirado,
+      // devolve erro claro (HTTP 410) pedindo para recomeçar, não resultado parcial silencioso.
+      if (sources.has("conversas") && chatCursor > 0 && (!currentSession || !Array.isArray(currentSession.validChats))) {
+        sendError(
+          res,
+          410,
+          "WA_EXTRACTION_SESSION_EXPIRED",
+          "Sessão de extração expirada ou não encontrada. Por favor, reinicie a extração."
+        );
+        return;
+      }
+
+      if (sources.has("agenda") && agendaCursor > 0 && (!currentSession || !Array.isArray(currentSession.addressBook))) {
+        sendError(
+          res,
+          410,
+          "WA_EXTRACTION_SESSION_EXPIRED",
+          "Sessão de extração expirada ou não encontrada. Por favor, reinicie a extração."
+        );
+        return;
+      }
+
+      if (sessionKey && !currentSession) {
+        currentSession = {
+          createdAt: Date.now(),
+          lastAccessAt: Date.now(),
+          clientId,
+          instanceName: effectiveInstanceKey,
+        };
+        extractionSessions.set(sessionKey, currentSession);
+      }
 
       // Bloco 3: Resolve o operador responsável pelo chip de onde as conversas/contatos estão sendo extraídos
       let chipOwnerUid = instance?.owner_uid || null;
@@ -1372,74 +1440,106 @@ export function registerLeadsRoutes(app, deps) {
       let chats = [];
       let validChats = [];
       if (sources.has("conversas")) {
-        // Evolution v2: findChats é POST (com body), não GET. GET dava HTTP 404.
-        const chatsRes = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: apiKey },
-          signal: AbortSignal.timeout(8000),
-          body: JSON.stringify({}),
-        });
+        if (currentSession && Array.isArray(currentSession.validChats)) {
+          // Reutiliza a lista minerada e ordenada deterministicamente na sessão
+          validChats = currentSession.validChats;
+          chats = currentSession.rawChats || validChats;
+        } else {
+          // Evolution v2: findChats é POST (com body), não GET. GET dava HTTP 404.
+          const chatsRes = await fetch(`${baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: apiKey },
+            signal: AbortSignal.timeout(8000),
+            body: JSON.stringify({}),
+          });
 
-        if (!chatsRes.ok) {
-          const text = await chatsRes.text();
-          sendError(res, 502, "WA_FETCH_CHATS_FAILED", `Erro ao buscar conversas no WhatsApp (HTTP ${chatsRes.status}): ${text.slice(0, 200)}`);
-          return;
+          if (!chatsRes.ok) {
+            const text = await chatsRes.text();
+            sendError(res, 502, "WA_FETCH_CHATS_FAILED", `Erro ao buscar conversas no WhatsApp (HTTP ${chatsRes.status}): ${text.slice(0, 200)}`);
+            return;
+          }
+
+          const rawChats = await chatsRes.json();
+          // v2 pode devolver array direto ou paginado ({ records: [...] }).
+          chats = Array.isArray(rawChats) ? rawChats : (rawChats?.records || rawChats?.chats || []);
+          if (!Array.isArray(chats)) {
+            sendError(res, 502, "WA_INVALID_RESPONSE", "Evolution API não retornou uma lista válida de conversas.");
+            return;
+          }
+
+          validChats = chats.filter(c => {
+            const jid = realPhoneJid(c);
+            if (!jid || jid.includes("@g.us") || jid.includes("@broadcast") || jid.includes("-group")) return false;
+            const digits = jid.split("@")[0].replace(/\D/g, "");
+            // Descarta telefone vazio/curto ("0", "WhatsApp Business" etc.), grupos (15+ dígitos) e o
+            // próprio número conectado (aparecia como lead com telefone zerado).
+            if (!digits || digits.length < 10 || digits.length >= 15) return false;
+            if (ownerDigits && digits === ownerDigits) return false;
+            return true;
+          });
+
+          // Ordenação determinística antes de fatiar: a mesma conversa nunca pula ou repete
+          validChats.sort((a, b) => {
+            const idA = String(realPhoneJid(a) || a?.remoteJid || a?.id || "");
+            const idB = String(realPhoneJid(b) || b?.remoteJid || b?.id || "");
+            return idA.localeCompare(idB);
+          });
+
+          if (currentSession) {
+            currentSession.validChats = validChats;
+            currentSession.rawChats = chats;
+            currentSession.lastAccessAt = Date.now();
+          }
         }
-
-        const rawChats = await chatsRes.json();
-        // v2 pode devolver array direto ou paginado ({ records: [...] }).
-        chats = Array.isArray(rawChats) ? rawChats : (rawChats?.records || rawChats?.chats || []);
-        if (!Array.isArray(chats)) {
-          sendError(res, 502, "WA_INVALID_RESPONSE", "Evolution API não retornou uma lista válida de conversas.");
-          return;
-        }
-
-        validChats = chats.filter(c => {
-          const jid = realPhoneJid(c);
-          if (!jid || jid.includes("@g.us") || jid.includes("@broadcast") || jid.includes("-group")) return false;
-          const digits = jid.split("@")[0].replace(/\D/g, "");
-          // Descarta telefone vazio/curto ("0", "WhatsApp Business" etc.), grupos (15+ dígitos) e o
-          // próprio número conectado (aparecia como lead com telefone zerado).
-          if (!digits || digits.length < 10 || digits.length >= 15) return false;
-          if (ownerDigits && digits === ownerDigits) return false;
-          return true;
-        });
       }
 
-      // NOMES: o "~nome" que aparece no WhatsApp de quem não está salvo nos
-      // contatos é o pushName que a pessoa configurou no aparelho dela. Vem no
-      // chat, mas quando a última mensagem é nossa o pushName é "Você"; então
-      // buscamos também /chat/findContacts, que traz pushName por contato.
+      // NOMES E AGENDA: busca apenas quando a requisição precisa de conversas ou agenda.
+      // Requisição exclusiva de grupos ("grupos") NUNCA chama findContacts.
       const contactNames = new Map();
-      // Agenda completa do chip: contatos salvos com telefone real. Muitos nunca
-      // trocaram mensagem (ou a conversa foi apagada), então não aparecem em
-      // findChats — mas são exatamente os leads que o Banco de Dados quer.
       const addressBook = [];
-      try {
-        const contactsRes = await fetch(`${baseUrl}/chat/findContacts/${encodeURIComponent(instanceName)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: apiKey },
-          signal: AbortSignal.timeout(8000),
-          body: JSON.stringify({}),
-        });
-        if (contactsRes.ok) {
-          const cData = await contactsRes.json();
-          const cList = Array.isArray(cData) ? cData : (cData?.records || cData?.contacts || []);
-          for (const ct of cList) {
-            const jid = String(ct?.remoteJid || ct?.id || "");
-            const digits = jid.split("@")[0].replace(/\D/g, "");
-            const nm = String(ct?.pushName || ct?.name || ct?.verifiedName || "").trim();
-            if (digits && nm && nm.toLowerCase() !== "você" && nm.toLowerCase() !== "voce") {
-              contactNames.set(digits, nm);
-            }
-            if (jid.endsWith("@s.whatsapp.net") && digits.length >= 10 && digits.length < 15 && digits !== ownerDigits) {
-              addressBook.push({ digits, name: nm });
-            }
+
+      if (sources.has("conversas") || sources.has("agenda")) {
+        if (currentSession && currentSession.contactNames && Array.isArray(currentSession.addressBook)) {
+          for (const [k, v] of currentSession.contactNames.entries()) {
+            contactNames.set(k, v);
           }
-          console.info(`[wa-extract] findContacts: ${contactNames.size} nomes carregados`);
+          addressBook.push(...currentSession.addressBook);
+        } else {
+          try {
+            const contactsRes = await fetch(`${baseUrl}/chat/findContacts/${encodeURIComponent(instanceName)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: apiKey },
+              signal: AbortSignal.timeout(8000),
+              body: JSON.stringify({}),
+            });
+            if (contactsRes.ok) {
+              const cData = await contactsRes.json();
+              const cList = Array.isArray(cData) ? cData : (cData?.records || cData?.contacts || []);
+              for (const ct of cList) {
+                const jid = String(ct?.remoteJid || ct?.id || "");
+                const digits = jid.split("@")[0].replace(/\D/g, "");
+                const nm = String(ct?.pushName || ct?.name || ct?.verifiedName || "").trim();
+                if (digits && nm && nm.toLowerCase() !== "você" && nm.toLowerCase() !== "voce") {
+                  contactNames.set(digits, nm);
+                }
+                if (jid.endsWith("@s.whatsapp.net") && digits.length >= 10 && digits.length < 15 && digits !== ownerDigits) {
+                  addressBook.push({ digits, name: nm });
+                }
+              }
+              // Ordenação determinística da agenda antes de fatiar
+              addressBook.sort((a, b) => String(a.digits || "").localeCompare(String(b.digits || "")));
+              console.info(`[wa-extract] findContacts: ${contactNames.size} nomes carregados`);
+            }
+          } catch (e) {
+            console.warn("[wa-extract] findContacts indisponível:", e.message);
+          }
+
+          if (currentSession) {
+            currentSession.contactNames = new Map(contactNames);
+            currentSession.addressBook = [...addressBook];
+            currentSession.lastAccessAt = Date.now();
+          }
         }
-      } catch (e) {
-        console.warn("[wa-extract] findContacts indisponível:", e.message);
       }
 
       const isRealName = (n) => {
@@ -1467,16 +1567,44 @@ export function registerLeadsRoutes(app, deps) {
         const groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((g) => String(g)) : [];
         if (groupIds.length > 0) {
           try {
-            const groupsRes = await fetch(`${baseUrl}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`, {
-              headers: { apikey: apiKey },
-              signal: AbortSignal.timeout(10000),
-            });
-            if (groupsRes.ok) {
-              const groupsData = await groupsRes.json();
-              const groupsList = Array.isArray(groupsData) ? groupsData : (groupsData?.records || groupsData?.groups || []);
-              const idSet = new Set(groupIds);
-              const selectedGroups = (Array.isArray(groupsList) ? groupsList : []).filter((g) => idSet.has(String(g?.id || "")));
+            let selectedGroups = [];
+            // 1. Tenta buscar cada grupo especificamente via findGroupInfos (evita carregar participantes de todos os grupos da instância)
+            for (const gid of groupIds) {
+              try {
+                const singleRes = await fetch(`${baseUrl}/group/findGroupInfos/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(gid)}`, {
+                  headers: { apikey: apiKey },
+                  signal: AbortSignal.timeout(8000),
+                });
+                if (singleRes.ok) {
+                  const gData = await singleRes.json();
+                  const groupObj = gData?.group || gData;
+                  if (groupObj && (groupObj.id || groupObj.subject || groupObj.name || Array.isArray(groupObj.participants))) {
+                    selectedGroups.push(groupObj);
+                  }
+                }
+              } catch {
+                // segue para fallback se findGroupInfos falhar
+              }
+            }
 
+            // 2. Fallback: se nenhum grupo foi obtido via findGroupInfos (instâncias legadas ou mocks sem endpoint individual)
+            if (selectedGroups.length === 0) {
+              const groupsRes = await fetch(`${baseUrl}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`, {
+                headers: { apikey: apiKey },
+                signal: AbortSignal.timeout(10000),
+              });
+              if (groupsRes.ok) {
+                const groupsData = await groupsRes.json();
+                const groupsList = Array.isArray(groupsData) ? groupsData : (groupsData?.records || groupsData?.groups || []);
+                const idSet = new Set(groupIds);
+                selectedGroups = (Array.isArray(groupsList) ? groupsList : []).filter((g) => idSet.has(String(g?.id || "")));
+              } else {
+                const text = await groupsRes.text();
+                console.warn(`[wa-extract] fetchAllGroups falhou (HTTP ${groupsRes.status}): ${text.slice(0, 200)}`);
+              }
+            }
+
+            if (selectedGroups.length > 0) {
               const batchLeads = [];
               for (const group of selectedGroups) {
                 const groupName = normalizeString(group?.subject || group?.name) || "Grupo do WhatsApp";
@@ -1528,9 +1656,6 @@ export function registerLeadsRoutes(app, deps) {
                 }
               }
               console.info(`[wa-extract] grupos: ${groupLeadCount} leads de ${groupsProcessed} grupo(s) selecionado(s), ${groupLidCount} participante(s) LID sem telefone recuperável`);
-            } else {
-              const text = await groupsRes.text();
-              console.warn(`[wa-extract] fetchAllGroups falhou (HTTP ${groupsRes.status}): ${text.slice(0, 200)}`);
             }
           } catch (e) {
             console.warn("[wa-extract] erro ao extrair membros de grupo:", e.message);
@@ -1540,8 +1665,34 @@ export function registerLeadsRoutes(app, deps) {
 
       // ── 2. AGENDA: segunda procedência (contatos salvos no chip com atribuição ao chipOwnerUid) ──
       let addressBookCount = 0;
+      let paginationCursor = undefined;
+      let paginationNextCursor = undefined;
+      let paginationHasMore = false;
+      let paginationTotalAvailable = undefined;
+
       if (sources.has("agenda") && (!isFinite(remainingBudget) || remainingBudget > 0)) {
-        for (const ct of addressBook) {
+        const allowedAgenda = isFinite(remainingBudget) ? addressBook.slice(0, remainingBudget) : addressBook;
+        const agendaCursorProvided = req.body?.cursor !== undefined || req.body?.agendaOffset !== undefined || req.body?.offset !== undefined;
+        const agendaCursor = Math.max(0, parseInt(req.body?.cursor ?? req.body?.agendaOffset ?? req.body?.offset ?? 0, 10) || 0);
+        const defaultAgendaBatch = 50;
+        const agendaBatchSize = Math.max(1, Math.min(parseInt(req.body?.batchSize ?? req.body?.limit ?? defaultAgendaBatch, 10) || defaultAgendaBatch, 100));
+
+        let agendaToProcess;
+        if (agendaCursorProvided || req.body?.batchSize !== undefined) {
+          agendaToProcess = allowedAgenda.slice(agendaCursor, agendaCursor + agendaBatchSize);
+          paginationCursor = agendaCursor;
+          paginationNextCursor = agendaCursor + agendaToProcess.length;
+          paginationHasMore = paginationNextCursor < allowedAgenda.length && (!isFinite(remainingBudget) || remainingBudget > 0);
+          paginationTotalAvailable = allowedAgenda.length;
+        } else {
+          agendaToProcess = allowedAgenda;
+          paginationCursor = 0;
+          paginationNextCursor = allowedAgenda.length;
+          paginationHasMore = false;
+          paginationTotalAvailable = allowedAgenda.length;
+        }
+
+        for (const ct of agendaToProcess) {
           if (isFinite(remainingBudget) && addressBookCount >= remainingBudget) {
             break;
           }
@@ -1576,17 +1727,37 @@ export function registerLeadsRoutes(app, deps) {
         if (isFinite(remainingBudget)) {
           remainingBudget = Math.max(0, remainingBudget - addressBookCount);
         }
-        console.info(`[wa-extract] agenda: ${addressBookCount} contatos importados de ${addressBook.length} salvos`);
+        console.info(`[wa-extract] agenda: ${addressBookCount} contatos importados de ${addressBook.length} salvos (lote de ${agendaToProcess.length})`);
       }
 
       // ── 3. CONVERSAS: terceira procedência (classificação semântica ágil e IA sob demanda) ──
       let aiSummariesCount = 0;
-      const topChats = isFinite(remainingBudget) ? validChats.slice(0, remainingBudget) : validChats;
+      const allowedChats = isFinite(remainingBudget) ? validChats.slice(0, remainingBudget) : validChats;
       if (sources.has("conversas")) {
-        console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} processando=${topChats.length}`);
+        console.info(`[wa-extract] client=${clientId} instancia=${instanceName} chats=${chats.length} validos=${validChats.length} permitidos=${allowedChats.length}`);
       }
 
       if (sources.has("conversas") && (!isFinite(remainingBudget) || remainingBudget > 0)) {
+        const chatCursorProvided = req.body?.cursor !== undefined || req.body?.chatOffset !== undefined || req.body?.offset !== undefined;
+        const chatCursor = Math.max(0, parseInt(req.body?.cursor ?? req.body?.chatOffset ?? req.body?.offset ?? 0, 10) || 0);
+        const defaultChatBatch = 15;
+        const chatBatchSize = Math.max(1, Math.min(parseInt(req.body?.batchSize ?? req.body?.limit ?? defaultChatBatch, 10) || defaultChatBatch, 50));
+
+        let topChats;
+        if (chatCursorProvided || req.body?.batchSize !== undefined) {
+          topChats = allowedChats.slice(chatCursor, chatCursor + chatBatchSize);
+          paginationCursor = chatCursor;
+          paginationNextCursor = chatCursor + topChats.length;
+          paginationHasMore = paginationNextCursor < allowedChats.length && (!isFinite(remainingBudget) || remainingBudget > 0);
+          paginationTotalAvailable = allowedChats.length;
+        } else {
+          topChats = allowedChats;
+          paginationCursor = 0;
+          paginationNextCursor = allowedChats.length;
+          paginationHasMore = false;
+          paginationTotalAvailable = allowedChats.length;
+        }
+
         for (const chat of topChats) {
           if (isFinite(remainingBudget) && extractedCount >= remainingBudget) {
             break;
@@ -1731,8 +1902,13 @@ export function registerLeadsRoutes(app, deps) {
       }
     }
 
+      if (currentSession) {
+        currentSession.lastAccessAt = Date.now();
+      }
+
       res.json({
         success: true,
+        sessionId: sessionId || undefined,
         extractedCount: extractedCount + addressBookCount + groupLeadCount,
         fromChats: extractedCount,
         fromAddressBook: addressBookCount,
@@ -1740,6 +1916,10 @@ export function registerLeadsRoutes(app, deps) {
         groupParticipantsLid: groupLidCount,
         insertErrors,
         totalChatsFound: validChats.length,
+        cursor: paginationCursor,
+        nextCursor: paginationNextCursor,
+        hasMore: paginationHasMore,
+        totalAvailable: paginationTotalAvailable,
         summary: {
           buyers,
           openBudgets,

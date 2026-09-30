@@ -24,6 +24,12 @@ export interface WaGroupExtractionFailure {
   error: string;
 }
 
+export interface WaPhaseFailure {
+  phase: "conversas" | "agenda" | "grupos";
+  label: string;
+  error: string;
+}
+
 export interface WaExtractionProgress {
   phase: "connecting" | "conversas" | "agenda" | "grupos" | "done" | "cancelled";
   currentGroupIndex: number;
@@ -32,6 +38,7 @@ export interface WaExtractionProgress {
   totalExtracted: number;
   remainingGroups: number;
   failedGroups: WaGroupExtractionFailure[];
+  failures: WaPhaseFailure[];
   statusMessage: string;
 }
 
@@ -42,6 +49,7 @@ export interface WaExtractionResult {
   fromAddressBook: number;
   fromGroups: number;
   failedGroups: WaGroupExtractionFailure[];
+  failures: WaPhaseFailure[];
   cancelled: boolean;
 }
 
@@ -98,9 +106,9 @@ export interface RunWaExtractionOptions {
 
 /**
  * Orquestrador da extração de contatos do WhatsApp.
- * - Conversas e agenda rodam cada uma na sua própria requisição.
+ * - Conversas e agenda rodam paginadas em lotes confortáveis para não estourar o timeout.
  * - Grupos rodam UM por requisição, sequencialmente, reportando progresso.
- * - Falha em um grupo não aborta os demais.
+ * - Falha em uma fase ou grupo não aborta as demais fases.
  * - Cancelamento interrompe o fluxo preservando contatos já minerados.
  */
 export async function runWaExtractionPipeline(
@@ -125,6 +133,11 @@ export async function runWaExtractionPipeline(
   // 2. Limite com trava de plano mantida
   const effectiveChatLimit = resolveEffectiveChatLimit(plan.isAdvancedPlan);
 
+  // Identificador único da sessão de extração para manter integridade entre os lotes
+  const sessionId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : `extract-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
   const token = await options.getIdToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -136,6 +149,7 @@ export async function runWaExtractionPipeline(
   let fromAddressBook = 0;
   let fromGroups = 0;
   const failedGroups: WaGroupExtractionFailure[] = [];
+  const failures: WaPhaseFailure[] = [];
 
   const notifyProgress = (
     phase: WaExtractionProgress["phase"],
@@ -154,77 +168,170 @@ export async function runWaExtractionPipeline(
       totalExtracted,
       remainingGroups: remaining,
       failedGroups: [...failedGroups],
+      failures: [...failures],
       statusMessage,
     });
   };
 
-  // 3. Conversas (uma requisição isolada)
+  // 3. Conversas (paginada em lotes para não estourar teto de tempo de 30s)
   if (plan.sources.conversas) {
-    if (isCancelled()) {
-      return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, cancelled: true };
-    }
-    notifyProgress("conversas", 0, undefined, "Buscando e minerando conversas recentes...");
-    const signal = createTimeoutSignal(timeoutMs);
-    const res = await fetchFn(`${baseUrl}/api/leads/extract-wa-contacts`, {
-      method: "POST",
-      headers,
-      ...(signal ? { signal } : {}),
-      body: JSON.stringify({
-        clientId: plan.clientId,
-        instanceId: plan.instanceId || undefined,
-        chatLimit: effectiveChatLimit,
-        sources: ["conversas"],
-      }),
-    });
-    if (!res.ok) {
-      let errorMsg = `HTTP ${res.status}`;
-      try {
-        const errJson = await res.json();
-        errorMsg = errJson.message || errJson.error || errorMsg;
-      } catch {
-        const errText = await res.text().catch(() => "");
-        if (errText) errorMsg = errText.slice(0, 150);
+    let cursor = 0;
+    let hasMore = true;
+    const CHAT_BATCH_SIZE = 15;
+
+    while (hasMore) {
+      if (isCancelled()) {
+        notifyProgress("cancelled", 0, undefined, "Extração interrompida pelo usuário");
+        return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, failures, cancelled: true };
       }
-      throw new Error(`Falha ao extrair conversas: ${errorMsg}`);
+
+      notifyProgress(
+        "conversas",
+        0,
+        undefined,
+        cursor === 0
+          ? "Buscando e minerando conversas recentes..."
+          : `Minerando conversas recentes (a partir de ${cursor})...`
+      );
+
+      try {
+        const signal = createTimeoutSignal(timeoutMs);
+        const res = await fetchFn(`${baseUrl}/api/leads/extract-wa-contacts`, {
+          method: "POST",
+          headers,
+          ...(signal ? { signal } : {}),
+          body: JSON.stringify({
+            clientId: plan.clientId,
+            instanceId: plan.instanceId || undefined,
+            chatLimit: effectiveChatLimit,
+            sources: ["conversas"],
+            sessionId,
+            cursor,
+            batchSize: CHAT_BATCH_SIZE,
+          }),
+        });
+
+        if (!res.ok) {
+          let errorMsg = `HTTP ${res.status}`;
+          try {
+            const errJson = await res.json();
+            errorMsg = errJson.message || errJson.error || errorMsg;
+          } catch {
+            const errText = await res.text().catch(() => "");
+            if (errText) errorMsg = errText.slice(0, 150);
+          }
+          failures.push({ phase: "conversas", label: "Conversas", error: errorMsg });
+          break; // Falha em conversas NÃO aborta agenda nem grupos
+        }
+
+        const data = await res.json();
+        const count = Number(data.extractedCount || data.fromChats || 0);
+        totalExtracted += count;
+        fromChats += count;
+
+        hasMore = Boolean(data.hasMore);
+        if (typeof data.nextCursor === "number") {
+          cursor = data.nextCursor;
+        } else {
+          cursor += CHAT_BATCH_SIZE;
+        }
+
+        notifyProgress(
+          "conversas",
+          0,
+          undefined,
+          data.totalAvailable
+            ? `Conversas: ${Math.min(cursor, data.totalAvailable)} de ${data.totalAvailable} processadas (${fromChats} mineradas)...`
+            : `Conversas: ${fromChats} mineradas...`
+        );
+      } catch (err: any) {
+        const errorMsg = err?.name === "AbortError" || err?.name === "TimeoutError"
+          ? "Timeout na requisição de conversas"
+          : (err?.message || "Falha ao extrair conversas");
+        failures.push({ phase: "conversas", label: "Conversas", error: errorMsg });
+        break; // Falha em conversas NÃO aborta agenda nem grupos
+      }
     }
-    const data = await res.json();
-    const count = Number(data.extractedCount || data.fromChats || 0);
-    totalExtracted += count;
-    fromChats += count;
   }
 
-  // 4. Agenda (uma requisição isolada)
+  // 4. Agenda (paginada em lotes para instâncias com muitos contatos)
   if (plan.sources.agenda) {
-    if (isCancelled()) {
-      return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, cancelled: true };
-    }
-    notifyProgress("agenda", 0, undefined, "Minerando contatos salvos na agenda...");
-    const signal = createTimeoutSignal(timeoutMs);
-    const res = await fetchFn(`${baseUrl}/api/leads/extract-wa-contacts`, {
-      method: "POST",
-      headers,
-      ...(signal ? { signal } : {}),
-      body: JSON.stringify({
-        clientId: plan.clientId,
-        instanceId: plan.instanceId || undefined,
-        sources: ["agenda"],
-      }),
-    });
-    if (!res.ok) {
-      let errorMsg = `HTTP ${res.status}`;
-      try {
-        const errJson = await res.json();
-        errorMsg = errJson.message || errJson.error || errorMsg;
-      } catch {
-        const errText = await res.text().catch(() => "");
-        if (errText) errorMsg = errText.slice(0, 150);
+    let cursor = 0;
+    let hasMore = true;
+    const AGENDA_BATCH_SIZE = 50;
+
+    while (hasMore) {
+      if (isCancelled()) {
+        notifyProgress("cancelled", 0, undefined, "Extração interrompida pelo usuário");
+        return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, failures, cancelled: true };
       }
-      throw new Error(`Falha ao extrair agenda: ${errorMsg}`);
+
+      notifyProgress(
+        "agenda",
+        0,
+        undefined,
+        cursor === 0
+          ? "Minerando contatos salvos na agenda..."
+          : `Minerando contatos da agenda (a partir de ${cursor})...`
+      );
+
+      try {
+        const signal = createTimeoutSignal(timeoutMs);
+        const res = await fetchFn(`${baseUrl}/api/leads/extract-wa-contacts`, {
+          method: "POST",
+          headers,
+          ...(signal ? { signal } : {}),
+          body: JSON.stringify({
+            clientId: plan.clientId,
+            instanceId: plan.instanceId || undefined,
+            sources: ["agenda"],
+            sessionId,
+            cursor,
+            batchSize: AGENDA_BATCH_SIZE,
+          }),
+        });
+
+        if (!res.ok) {
+          let errorMsg = `HTTP ${res.status}`;
+          try {
+            const errJson = await res.json();
+            errorMsg = errJson.message || errJson.error || errorMsg;
+          } catch {
+            const errText = await res.text().catch(() => "");
+            if (errText) errorMsg = errText.slice(0, 150);
+          }
+          failures.push({ phase: "agenda", label: "Agenda", error: errorMsg });
+          break; // Falha em agenda NÃO aborta grupos
+        }
+
+        const data = await res.json();
+        const count = Number(data.extractedCount || data.fromAddressBook || 0);
+        totalExtracted += count;
+        fromAddressBook += count;
+
+        hasMore = Boolean(data.hasMore);
+        if (typeof data.nextCursor === "number") {
+          cursor = data.nextCursor;
+        } else {
+          cursor += AGENDA_BATCH_SIZE;
+        }
+
+        notifyProgress(
+          "agenda",
+          0,
+          undefined,
+          data.totalAvailable
+            ? `Agenda: ${Math.min(cursor, data.totalAvailable)} de ${data.totalAvailable} contatos processados (${fromAddressBook} minerados)...`
+            : `Agenda: ${fromAddressBook} minerados...`
+        );
+      } catch (err: any) {
+        const errorMsg = err?.name === "AbortError" || err?.name === "TimeoutError"
+          ? "Timeout na requisição da agenda"
+          : (err?.message || "Falha ao extrair agenda");
+        failures.push({ phase: "agenda", label: "Agenda", error: errorMsg });
+        break; // Falha em agenda NÃO aborta grupos
+      }
     }
-    const data = await res.json();
-    const count = Number(data.extractedCount || data.fromAddressBook || 0);
-    totalExtracted += count;
-    fromAddressBook += count;
   }
 
   // 5. Grupos (UMA requisição por grupo)
@@ -233,7 +340,7 @@ export async function runWaExtractionPipeline(
     for (let i = 0; i < totalGroups; i++) {
       if (isCancelled()) {
         notifyProgress("cancelled", i, undefined, "Extração interrompida pelo usuário");
-        return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, cancelled: true };
+        return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, failures, cancelled: true };
       }
 
       const group = plan.selectedGroups[i];
@@ -255,6 +362,7 @@ export async function runWaExtractionPipeline(
             clientId: plan.clientId,
             instanceId: plan.instanceId || undefined,
             sources: ["grupos"],
+            sessionId,
             groupIds: [group.id],
           }),
         });
@@ -268,7 +376,9 @@ export async function runWaExtractionPipeline(
             const text = await res.text().catch(() => "");
             if (text) errorMsg = `Erro ${res.status}: ${text.slice(0, 100)}`;
           }
-          failedGroups.push({ groupId: group.id, groupName: group.name, error: errorMsg });
+          const failItem = { groupId: group.id, groupName: group.name, error: errorMsg };
+          failedGroups.push(failItem);
+          failures.push({ phase: "grupos", label: `Grupo "${group.name}"`, error: errorMsg });
         } else {
           const data = await res.json();
           const count = Number(data.extractedCount || data.fromGroups || 0);
@@ -276,16 +386,15 @@ export async function runWaExtractionPipeline(
           fromGroups += count;
         }
       } catch (err: any) {
-        failedGroups.push({
-          groupId: group.id,
-          groupName: group.name,
-          error: err?.message || "Timeout ou falha na rede",
-        });
+        const errorMsg = err?.message || "Timeout ou falha na rede";
+        const failItem = { groupId: group.id, groupName: group.name, error: errorMsg };
+        failedGroups.push(failItem);
+        failures.push({ phase: "grupos", label: `Grupo "${group.name}"`, error: errorMsg });
       }
 
       if (isCancelled()) {
         notifyProgress("cancelled", groupNum, undefined, "Extração interrompida pelo usuário");
-        return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, cancelled: true };
+        return { success: true, totalExtracted, fromChats, fromAddressBook, fromGroups, failedGroups, failures, cancelled: true };
       }
     }
   }
@@ -298,6 +407,7 @@ export async function runWaExtractionPipeline(
     fromAddressBook,
     fromGroups,
     failedGroups,
+    failures,
     cancelled: false,
   };
 }

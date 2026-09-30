@@ -760,15 +760,19 @@ export default function BancoDeDados() {
         return;
       }
 
-      if (result.failedGroups.length > 0) {
-        const failNames = result.failedGroups.map((f) => `${f.groupName} (${f.error})`).join(", ");
+      const allFailures = result.failures && result.failures.length > 0
+        ? result.failures
+        : result.failedGroups.map((f) => ({ phase: "grupos" as const, label: f.groupName, error: f.error }));
+
+      if (allFailures.length > 0) {
+        const failNames = allFailures.map((f) => `${f.label} (${f.error})`).join(", ");
         if (result.totalExtracted > 0) {
           toast.warning(`Extração parcial concluída: ${result.totalExtracted} contatos minerados.`, {
-            description: `${result.failedGroups.length} grupo(s) falharam: ${failNames}`,
+            description: `${allFailures.length} etapa(s)/grupo(s) falharam: ${failNames}`,
           });
         } else {
-          toast.error("Falha na extração dos grupos", {
-            description: `${result.failedGroups.length} grupo(s) falharam: ${failNames}`,
+          toast.error("Falha na extração de contatos", {
+            description: `${allFailures.length} etapa(s)/grupo(s) falharam: ${failNames}`,
           });
         }
         setIsWAModalOpen(false);
@@ -3393,23 +3397,25 @@ export default function BancoDeDados() {
                 <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
                   {waExtractStep || "Minerando contatos..."}
                 </p>
-                {waExtractProgress && waExtractProgress.totalGroups > 0 && (
+                {waExtractProgress && (
                   <div className="text-[11px] text-muted-foreground space-y-0.5">
-                    <p>
-                      Grupo {waExtractProgress.currentGroupIndex} de {waExtractProgress.totalGroups}
-                      {waExtractProgress.remainingGroups > 0 ? ` · Restam ${waExtractProgress.remainingGroups}` : ""}
-                    </p>
+                    {waExtractProgress.totalGroups > 0 && waExtractProgress.phase === "grupos" && (
+                      <p>
+                        Grupo {waExtractProgress.currentGroupIndex} de {waExtractProgress.totalGroups}
+                        {waExtractProgress.remainingGroups > 0 ? ` · Restam ${waExtractProgress.remainingGroups}` : ""}
+                      </p>
+                    )}
                     <p className="text-emerald-600 dark:text-emerald-400 font-semibold">
                       {waExtractProgress.totalExtracted} contato{waExtractProgress.totalExtracted === 1 ? "" : "s"} já minerado{waExtractProgress.totalExtracted === 1 ? "" : "s"}
                     </p>
                   </div>
                 )}
-                {waExtractProgress && waExtractProgress.failedGroups.length > 0 && (
+                {waExtractProgress && ((waExtractProgress.failures && waExtractProgress.failures.length > 0) || waExtractProgress.failedGroups.length > 0) && (
                   <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/20 rounded p-1.5 text-left space-y-0.5">
-                    <p className="font-semibold">Grupos com erro ({waExtractProgress.failedGroups.length}):</p>
-                    {waExtractProgress.failedGroups.map((f) => (
-                      <p key={f.groupId} className="truncate">
-                        • {f.groupName}: {f.error}
+                    <p className="font-semibold">Itens com erro ({(waExtractProgress.failures || waExtractProgress.failedGroups).length}):</p>
+                    {(waExtractProgress.failures || waExtractProgress.failedGroups.map((f) => ({ label: f.groupName, error: f.error }))).map((f, idx) => (
+                      <p key={idx} className="truncate">
+                        • {f.label}: {f.error}
                       </p>
                     ))}
                   </div>

@@ -102,7 +102,7 @@ describe("Extração de membros de grupo do WhatsApp", () => {
       id: "120363000001@g.us",
       subject: "Clientes VIP",
       participants: [
-        { id: "5511988887777@s.whatsapp.net" }, // válido
+        { id: "5511988887777@s.whatsapp.net", pushName: "Fernanda VIP" }, // válido
         { id: "5511988886666@s.whatsapp.net" }, // válido — também está no grupo B (dedupe)
         { id: "18293847561029384756@lid" }, // LID — perdido
         { id: "5511999998888@s.whatsapp.net" }, // é o próprio chip (ownerDigits) — excluído
@@ -145,6 +145,15 @@ describe("Extração de membros de grupo do WhatsApp", () => {
           status: 200,
           json: async () => [{ name: "GD Grupos", owner: "5511999998888@s.whatsapp.net" }],
         };
+      }
+
+      if (urlStr.includes("/group/findGroupInfos/")) {
+        const url = new URL(urlStr);
+        const jid = url.searchParams.get("groupJid");
+        const list = groupsPayloadOverride || GROUPS_PAYLOAD;
+        const found = list.find((g) => g.id === jid);
+        if (found) return { ok: true, status: 200, json: async () => found };
+        return { ok: false, status: 404, text: async () => "Not Found" };
       }
 
       if (urlStr.includes("/group/fetchAllGroups/")) {
@@ -347,11 +356,11 @@ describe("Extração de membros de grupo do WhatsApp", () => {
       expect(lead.dados.origem).toBe("WhatsApp Grupo");
       expect(lead.dados.grupo_nome).toBe("Clientes VIP");
       expect(lead.tags).toContain("Clientes VIP");
-      // nome veio do mapa de findContacts
+      // nome veio do pushName do participante no grupo
       expect(lead.nome).toBe("Fernanda VIP");
     });
 
-    it("sem nome no findContacts, o nome fica sendo o telefone", async () => {
+    it("sem nome no participante do grupo, o nome fica sendo o telefone", async () => {
       await fetch(`${baseUrl}/api/leads/extract-wa-contacts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -391,6 +400,46 @@ describe("Extração de membros de grupo do WhatsApp", () => {
       const data = await res.json();
       expect(data.fromGroups).toBe(0);
       expect(fetchCalls.some((u) => u.includes("/group/fetchAllGroups/"))).toBe(false);
+    });
+
+    it("[TESTE OBRIGATÓRIO] extrair um grupo faz uma chamada para aquele grupo (findGroupInfos), não para todos (fetchAllGroups)", async () => {
+      const res = await fetch(`${baseUrl}/api/leads/extract-wa-contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: "geracao-digital",
+          instanceName: "GD Grupos",
+          sources: ["grupos"],
+          groupIds: ["120363000001@g.us"],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fromGroups).toBe(2);
+
+      // Chamou findGroupInfos para aquele grupo específico
+      const findInfosCalls = fetchCalls.filter((u) => u.includes("/group/findGroupInfos/"));
+      expect(findInfosCalls).toHaveLength(1);
+      expect(findInfosCalls[0]).toContain("groupJid=120363000001%40g.us");
+
+      // NÃO chamou fetchAllGroups (não carrega participantes de todos os grupos da instância)
+      expect(fetchCalls.some((u) => u.includes("/group/fetchAllGroups/"))).toBe(false);
+    });
+
+    it("[TESTE OBRIGATÓRIO] requisição de grupo não chama findChats nem findContacts", async () => {
+      const res = await fetch(`${baseUrl}/api/leads/extract-wa-contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: "geracao-digital",
+          instanceName: "GD Grupos",
+          sources: ["grupos"],
+          groupIds: ["120363000001@g.us"],
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(fetchCalls.some((u) => u.includes("/chat/findChats/"))).toBe(false);
+      expect(fetchCalls.some((u) => u.includes("/chat/findContacts/"))).toBe(false);
     });
   });
 

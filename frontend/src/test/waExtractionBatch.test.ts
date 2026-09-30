@@ -259,4 +259,401 @@ describe("waExtractionBatch (Regras e Orquestração de Extração)", () => {
     // Mas preservou os 25 contatos que já entraram!
     expect(result.totalExtracted).toBe(25);
   });
+
+  it("[TESTE OBRIGATÓRIO] conversas em instância grande é processada em vários lotes, e nenhum lote sozinho passa do teto de tempo", async () => {
+    let callIndex = 0;
+    const batchSizesObserved: number[] = [];
+    const cursorsObserved: number[] = [];
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      batchSizesObserved.push(body.batchSize);
+      cursorsObserved.push(body.cursor);
+      callIndex++;
+
+      // Simula 3 lotes de 15 conversas (total 45 conversas)
+      if (callIndex === 1) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            extractedCount: 15,
+            fromChats: 15,
+            hasMore: true,
+            nextCursor: 15,
+            totalAvailable: 45,
+          }),
+        } as any;
+      } else if (callIndex === 2) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            extractedCount: 15,
+            fromChats: 15,
+            hasMore: true,
+            nextCursor: 30,
+            totalAvailable: 45,
+          }),
+        } as any;
+      } else {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            extractedCount: 15,
+            fromChats: 15,
+            hasMore: false,
+            nextCursor: 45,
+            totalAvailable: 45,
+          }),
+        } as any;
+      }
+    });
+
+    const conversasPlan: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: true,
+      sources: {
+        conversas: true,
+        agenda: false,
+        grupos: false,
+      },
+      selectedGroups: [],
+    };
+
+    const result = await runWaExtractionPipeline(conversasPlan, {
+      fetchFn: fetchMock,
+      getIdToken: async () => "token-123",
+      apiBaseUrl: "https://api.test",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.totalExtracted).toBe(45);
+    expect(result.fromChats).toBe(45);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // Cada lote foi de 15 conversas (escolhido por tempo para não estourar os 30s)
+    expect(batchSizesObserved).toEqual([15, 15, 15]);
+    expect(cursorsObserved).toEqual([0, 15, 30]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] falha em conversas não impede agenda nem grupos; o resultado mostra o que entrou e o que falhou", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      const source = body.sources?.[0];
+
+      if (source === "conversas") {
+        return {
+          ok: false,
+          status: 504,
+          json: async () => ({ error: "TimeoutError: signal timed out" }),
+        } as any;
+      }
+
+      if (source === "agenda") {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            extractedCount: 20,
+            fromAddressBook: 20,
+            hasMore: false,
+          }),
+        } as any;
+      }
+
+      if (source === "grupos") {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            extractedCount: 10,
+            fromGroups: 10,
+          }),
+        } as any;
+      }
+
+      return { ok: false, status: 404 } as any;
+    });
+
+    const fullPlan: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: true,
+      sources: {
+        conversas: true,
+        agenda: true,
+        grupos: true,
+      },
+      selectedGroups: [
+        { id: "g1@g.us", name: "Grupo Alfa" },
+        { id: "g2@g.us", name: "Grupo Beta" },
+      ],
+    };
+
+    const result = await runWaExtractionPipeline(fullPlan, {
+      fetchFn: fetchMock,
+      getIdToken: async () => "token-123",
+      apiBaseUrl: "https://api.test",
+    });
+
+    // Pipeline completou sem lançar exceção!
+    expect(result.success).toBe(true);
+    // Conversas falhou (0), mas agenda (20) e grupos (2 x 10 = 20) entraram perfeitamente!
+    expect(result.fromChats).toBe(0);
+    expect(result.fromAddressBook).toBe(20);
+    expect(result.fromGroups).toBe(20);
+    expect(result.totalExtracted).toBe(40);
+
+    // O erro de conversas foi registrado no relatório de falhas
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].phase).toBe("conversas");
+    expect(result.failures[0].label).toBe("Conversas");
+    expect(result.failures[0].error).toContain("TimeoutError");
+  });
+
+  it("[TESTE OBRIGATÓRIO] falha em agenda não impede grupos", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      const source = body.sources?.[0];
+
+      if (source === "agenda") {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: "Erro interno no servidor ao ler agenda" }),
+        } as any;
+      }
+
+      if (source === "grupos") {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            extractedCount: 12,
+            fromGroups: 12,
+          }),
+        } as any;
+      }
+
+      return { ok: false, status: 404 } as any;
+    });
+
+    const agendaGroupPlan: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: false,
+      sources: {
+        conversas: false,
+        agenda: true,
+        grupos: true,
+      },
+      selectedGroups: [{ id: "g1@g.us", name: "Grupo 1" }],
+    };
+
+    const result = await runWaExtractionPipeline(agendaGroupPlan, {
+      fetchFn: fetchMock,
+      getIdToken: async () => "token-123",
+      apiBaseUrl: "https://api.test",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fromAddressBook).toBe(0);
+    expect(result.fromGroups).toBe(12);
+    expect(result.totalExtracted).toBe(12);
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].phase).toBe("agenda");
+    expect(result.failures[0].label).toBe("Agenda");
+  });
+
+  it("[TESTE OBRIGATÓRIO] o progresso mostra a fase e o quanto já foi feito em cada uma", async () => {
+    const progressList: WaExtractionProgress[] = [];
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      const source = body.sources?.[0];
+
+      if (source === "conversas") {
+        return {
+          ok: true,
+          json: async () => ({ success: true, extractedCount: 8, fromChats: 8, hasMore: false, totalAvailable: 8 }),
+        } as any;
+      }
+      if (source === "agenda") {
+        return {
+          ok: true,
+          json: async () => ({ success: true, extractedCount: 15, fromAddressBook: 15, hasMore: false, totalAvailable: 15 }),
+        } as any;
+      }
+      if (source === "grupos") {
+        return {
+          ok: true,
+          json: async () => ({ success: true, extractedCount: 5, fromGroups: 5 }),
+        } as any;
+      }
+      return { ok: true, json: async () => ({ success: true }) } as any;
+    });
+
+    const plan: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: true,
+      sources: {
+        conversas: true,
+        agenda: true,
+        grupos: true,
+      },
+      selectedGroups: [{ id: "g1@g.us", name: "Grupo Único" }],
+    };
+
+    await runWaExtractionPipeline(plan, {
+      fetchFn: fetchMock,
+      getIdToken: async () => "token-123",
+      apiBaseUrl: "https://api.test",
+      onProgress: (p) => progressList.push({ ...p }),
+    });
+
+    const phasesReported = progressList.map((p) => p.phase);
+    expect(phasesReported).toContain("conversas");
+    expect(phasesReported).toContain("agenda");
+    expect(phasesReported).toContain("grupos");
+    expect(phasesReported).toContain("done");
+
+    // Mensagens descritivas em cada fase
+    const conversasProg = progressList.find((p) => p.phase === "conversas");
+    expect(conversasProg?.statusMessage).toMatch(/conversas/i);
+
+    const agendaProg = progressList.find((p) => p.phase === "agenda");
+    expect(agendaProg?.statusMessage).toMatch(/agenda/i);
+
+    const gruposProg = progressList.find((p) => p.phase === "grupos");
+    expect(gruposProg?.statusMessage).toMatch(/Grupo Único/);
+  });
+
+  it("[TESTE OBRIGATÓRIO] parar no meio preserva o que já entrou, em qualquer fase", async () => {
+    // 1. Parar durante conversas
+    let cancelFlag = false;
+    let conversasBatch = 0;
+    const fetchMockConversas = vi.fn(async () => {
+      conversasBatch++;
+      if (conversasBatch === 1) {
+        cancelFlag = true; // cancela logo após o 1º lote de conversas
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          extractedCount: 15,
+          fromChats: 15,
+          hasMore: true,
+          nextCursor: 15,
+          totalAvailable: 60,
+        }),
+      } as any;
+    });
+
+    const planConversas: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: true,
+      sources: { conversas: true, agenda: true, grupos: false },
+      selectedGroups: [],
+    };
+
+    const res1 = await runWaExtractionPipeline(planConversas, {
+      fetchFn: fetchMockConversas,
+      getIdToken: async () => "token-123",
+      isCancelled: () => cancelFlag,
+    });
+
+    expect(res1.cancelled).toBe(true);
+    expect(res1.totalExtracted).toBe(15);
+    expect(res1.fromChats).toBe(15);
+    // Não executou nem o 2º lote de conversas nem a agenda
+    expect(fetchMockConversas).toHaveBeenCalledTimes(1);
+
+    // 2. Parar durante a agenda
+    let cancelInAgenda = false;
+    const fetchMockAgenda = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      if (body.sources?.[0] === "conversas") {
+        return {
+          ok: true,
+          json: async () => ({ success: true, extractedCount: 10, fromChats: 10, hasMore: false }),
+        } as any;
+      }
+      if (body.sources?.[0] === "agenda") {
+        cancelInAgenda = true;
+        return {
+          ok: true,
+          json: async () => ({ success: true, extractedCount: 25, fromAddressBook: 25, hasMore: true }),
+        } as any;
+      }
+      return { ok: true, json: async () => ({ success: true, extractedCount: 50, fromGroups: 50 }) } as any;
+    });
+
+    const planAgenda: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: true,
+      sources: { conversas: true, agenda: true, grupos: true },
+      selectedGroups: [{ id: "g1@g.us", name: "Grupo Alpha" }],
+    };
+
+    const res2 = await runWaExtractionPipeline(planAgenda, {
+      fetchFn: fetchMockAgenda,
+      getIdToken: async () => "token-123",
+      isCancelled: () => cancelInAgenda,
+    });
+
+    expect(res2.cancelled).toBe(true);
+    expect(res2.fromChats).toBe(10);
+    expect(res2.fromAddressBook).toBe(25);
+    expect(res2.fromGroups).toBe(0);
+    expect(res2.totalExtracted).toBe(35);
+  });
+
+  it("[TESTE OBRIGATÓRIO] um mesmo sessionId gerado no início é enviado em todas as fases", async () => {
+    const sessionIdsReceived: string[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}"));
+      if (body.sessionId) {
+        sessionIdsReceived.push(body.sessionId);
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          extractedCount: 5,
+          fromChats: 5,
+          fromAddressBook: 5,
+          fromGroups: 5,
+          hasMore: false,
+        }),
+      } as any;
+    });
+
+    const plan: WaExtractionPlan = {
+      clientId: "tenant-teste",
+      instanceId: "inst-1",
+      isAdvancedPlan: true,
+      sources: { conversas: true, agenda: true, grupos: true },
+      selectedGroups: [{ id: "g1@g.us", name: "Grupo 1" }],
+    };
+
+    await runWaExtractionPipeline(plan, {
+      fetchFn: fetchMock,
+      getIdToken: async () => "token-123",
+      apiBaseUrl: "https://api.test",
+    });
+
+    // 1 requisição para conversas, 1 para agenda, 1 para grupo 1 = 3 requisições
+    expect(sessionIdsReceived).toHaveLength(3);
+    // Todas usaram exatamente o mesmo sessionId!
+    expect(new Set(sessionIdsReceived).size).toBe(1);
+    expect(sessionIdsReceived[0]).toBeTruthy();
+  });
 });
