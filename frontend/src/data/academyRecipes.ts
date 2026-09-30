@@ -257,6 +257,57 @@ export const ACADEMY_FUNDAMENTOS: AcademyFundamento[] = [
       },
     ],
   },
+  {
+    id: "fundamento-trabalhar-objecao",
+    tipo: "fundamento",
+    title: "Trabalhar objeção sem empurrar",
+    resultPhrase: "Você para de perder venda para \"vou pensar\".",
+    segments: ["Todos os segmentos"],
+    prerequisites: ["Nada."],
+    timeLabel: "15 minutos de leitura",
+    sections: [
+      {
+        heading: "A frase que muda tudo",
+        body: "Objeção não é não. Em venda quase ninguém diz não — a pessoa diz \"vou pensar\", \"vou ver com meu sócio\", \"depois eu te chamo\". Se ela quisesse dizer não, teria dito. O que ela está dizendo é que falta alguma coisa, e ela não sabe nomear o quê.\n\nPensar é falta de informação. Ninguém pensa sobre uma decisão que já entende por completo — decide. Quando alguém pede tempo para pensar, o que está faltando não é tempo, é um dado. Sua única pergunta é: qual dado.",
+      },
+      {
+        heading: "O erro que quase todo mundo comete",
+        body: "Recebe a objeção e responde com argumento. \"Tá caro\" e vem a lista de benefícios. \"Vou pensar\" e vem o desconto. Isso é responder uma pergunta que não foi feita — e enquanto você argumenta, perde a única chance de descobrir o que realmente aconteceu.\n\nO vendedor comum tem resposta para tudo. O bom tem pergunta para tudo.",
+      },
+      {
+        heading: "O caminho, em quatro passos",
+        body: "A pessoa traz a objeção. Você devolve uma pergunta, curta, sem defesa: \"claro — o que ficou faltando pra você decidir?\", \"caro em relação a quê?\", \"o que seu sócio vai querer saber que você ainda não tem?\".\n\nEla responde. E na resposta dela estão os dados que você não tinha.\n\nAí sim você responde — com as palavras que ela usou, não com o folheto. Se ela disse que o problema é o prazo, sua resposta começa pelo prazo. Se disse que precisa alinhar com alguém, sua resposta é sobre como facilitar esse alinhamento.\n\nRepare no que aconteceu: a resposta que resolve a objeção veio dela, não de você. É por isso que funciona.",
+      },
+      {
+        heading: "Quando parar. Esta parte é a mais importante no WhatsApp",
+        body: "Se a pessoa repetir a objeção, ou não responder sua pergunta, pare. Uma pergunta por objeção, nunca duas. Insistir em conversa de texto com alguém que já recuou duas vezes não gera venda — gera bloqueio, e no WhatsApp bloqueio custa o número inteiro, não só aquele cliente.\n\nQuem insiste no terceiro contato está vendendo para o próprio ego.",
+      },
+      {
+        heading: "O vocabulário que entrega insegurança",
+        body: "Estas seis frases custam venda, todas pelo mesmo motivo: pedem permissão e convidam ao não.\n\n\"Faz sentido?\" · \"Você acredita que isso serve pra você?\" · \"Você vê valor nisso?\" · \"Acha que vale a pena?\" · \"Concorda comigo?\" · \"Isso é interessante pra você?\"\n\nPense num médico. Ele não termina a consulta perguntando se você acha que faz sentido operar. Ele diz o que encontrou e o que recomenda. A confiança nasce em você, não no cliente — se você pergunta se faz sentido, está dizendo que não tem certeza.\n\nNo lugar, confirme entendimento sem pedir aprovação: \"ficou claro como isso resolve o que você falou do atraso?\", \"consegui explicar como a gente chega nesse resultado?\". A diferença parece pequena e não é: a primeira pede voto, a segunda confirma que você foi claro.",
+      },
+      {
+        heading: "Quando a pessoa só quer o preço",
+        body: "Numa reunião marcada dá para segurar o preço e conduzir. No WhatsApp, não: quem segura preço vê a pessoa sumir.\n\nMande o preço e pergunte junto para quando ela está pensando em resolver. Você entrega o que ela pediu e ganha a informação que precisa — e a resposta a essa pergunta vale mais que o preço, porque separa quem está pesquisando de quem está decidindo.",
+      },
+      {
+        heading: "E o que fazer com o que você descobriu: combine algo",
+        body: "Aqui está o erro que faz follow-up não funcionar. A conversa termina com \"vou pensar\", você anota \"vai pensar\", e três dias depois manda \"passando para saber se ainda tem interesse\". Isso não é follow-up, é lembrete de que você quer vender.\n\nA qualidade do follow-up não está na mensagem que você manda depois. Está no acordo que você fez antes.\n\n\"Vou pensar\" não é acordo. Acordo é: ela confere o limite do cartão e responde na segunda. É o sócio que vai olhar a proposta na quinta. É você que manda a simulação hoje e liga na sexta. Tem ação, tem quem faz, tem quando.\n\nCom acordo, a mensagem seguinte se escreve sozinha e não tem nada de constrangedor: \"oi, tudo bem? você ia confirmar com seu sócio hoje — deu certo falar com ele?\". Isso não é cobrança, é continuidade.\n\nSem acordo, qualquer mensagem que você mandar vai soar como insistência, porque é.",
+      },
+      {
+        heading: "O que fazer quando não houve acordo nenhum",
+        body: "Não invente um. Ligue. Se a conversa terminou solta, o texto não conserta — foi a conversa que ficou incompleta, e é ela que precisa ser retomada por voz.",
+      },
+      {
+        heading: "No sistema",
+        body: "A ficha do lead traz três coisas que vieram desta lógica: a objeção que apareceu, com as palavras da pessoa; o que ela sinalizou sobre dinheiro, e quando não falou nada o sistema diz que não falou, em vez de chutar; e o acordo combinado — ou \"saiu sem acordo\", que é o aviso de que aquele lead precisa de uma ligação, não de mais uma mensagem.\n\nO acordo só vira mensagem automática depois que uma pessoa confirma que foi aquilo mesmo que ficou combinado. Sistema nenhum manda para o seu cliente uma frase começando com \"conforme combinado\" sem alguém ter lido antes.\n\nE quando o acordo tem data, a cadência sai no dia seguinte ao prometido, não num prazo genérico contado da inscrição.",
+      },
+      {
+        heading: "O resumo, se você só levar uma coisa daqui",
+        body: "Objeção é informação faltando, não recusa. Pergunte uma vez, use as palavras da pessoa, pare se ela repetir, e não termine nenhuma conversa sem saber o que fica de acontecer, quem faz, e quando.",
+      },
+    ],
+  },
 ];
 
 export const ACADEMY_RECIPES: AcademyRecipe[] = [
