@@ -948,8 +948,32 @@ Schema JSON obrigatório:
   "finalizado": true | false,
   "nao_comercial": true | false,
   "motivo_nao_comercial": "string curta — motivo quando nao_comercial for true (ex: 'pedido de comida', 'conversa pessoal', 'engano'), ou null",
-  "precisa_humano": true | false
+  "precisa_humano": true | false,
+  "objecao_detectada": "string curta com a objeção nas palavras do lead, ou null"
 }
+
+COMO RESPONDER QUANDO APARECE OBJEÇÃO:
+• Objeção aqui é quando a pessoa sinaliza recuo sem dizer não: "vou pensar", "tá caro", "vou ver com meu sócio", "depois eu te chamo", "só queria saber o preço".
+• O agente deve fazer o seguinte, nesta ordem:
+  1. Primeiro, uma pergunta de volta, uma só, curta, sem julgamento, para descobrir o que está por trás. "Vou pensar" vira "claro — o que ficou faltando pra você decidir?". "Tá caro" vira "entendi — caro em relação a quê?". A pergunta é sobre a informação que falta, nunca sobre o compromisso da pessoa.
+  2. Depois, com a resposta dela, responder usando as palavras que ela mesma usou, não um argumento genérico do produto.
+• TRAVA OBRIGATÓRIA: se a pessoa repetir a objeção ou não responder à pergunta, o agente para de perguntar. Marca precisa_humano: true e encerra com naturalidade. Sem segunda tentativa, sem reformular a pergunta, sem insistir. Robô que insiste em desconhecido no WhatsApp é bloqueado e denunciado.
+• Regra literal da trava: uma pergunta por objeção, nunca duas.
+• Se houver objeção detectada, preencha o campo "objecao_detectada" com uma string curta com a objeção nas palavras do lead (ex: "vou pensar", "tá caro"). Se não houver objeção, preencha com null.
+
+VOCABULÁRIO PROIBIDO:
+• O agente nunca escreve nenhuma destas, nem variação delas:
+  - "Faz sentido?"
+  - "Você acredita que isso serve pra você?"
+  - "Você vê valor nisso?"
+  - "Acha que vale a pena?"
+  - "Concorda comigo?"
+  - "Isso é interessante pra você?"
+• Todas pedem permissão e convidam ao não. No lugar, use verificação de clareza, que confirma entendimento sem pedir aprovação: "ficou claro como isso resolve o que você falou do X?", "consegui explicar como a gente chega nesse resultado?".
+
+PREÇO PERGUNTADO LOGO DE CARA:
+• A regra é mandar o preço e perguntar junto para quando a pessoa está pensando em resolver. Não segure preço para forçar conversa — no WhatsApp isso faz a pessoa sumir, ao contrário de uma reunião marcada.
+• Se o prompt da empresa orientar a não informar preço, a instrução da empresa vence. Nesse caso o agente não inventa desculpa: diz que quem passa o valor é um consultor, pergunta para quando a pessoa está pensando em resolver, e marca precisa_humano: true.
 
 BASE DE CONHECIMENTO (QUANDO HOUVER UM BLOCO "BASE DE CONHECIMENTO" ANEXADO ABAIXO NESTE PROMPT):
 • Responda a pergunta do lead SOMENTE com o que estiver naquele bloco. Não complete com conhecimento geral, não invente, não "ache que sabe".
@@ -1226,6 +1250,7 @@ export async function runChatbotAI({ systemPrompt, history, newMessages, existin
       classificacao: null,
       finalizado: false,
       spin_fase: null,
+      objecao_detectada: null,
     };
   }
 
@@ -1240,6 +1265,12 @@ function extractValidClassificacao(val) {
   return LEADS_OUTLIER_TEMPERATURE.has(s) ? s : null;
 }
 
+export function normalizeObjecaoDetectada(val) {
+  if (typeof val !== "string") return null;
+  const trimmed = val.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function parseAIResponse(raw, fullSystemPrompt = null) {
   if (raw === null || raw === undefined) {
     console.error("[chatbot-ai] CONTRATO QUEBRADO: modelo nao devolveu conteudo algum.");
@@ -1251,6 +1282,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
       classificacao: null,
       finalizado: false,
       spin_fase: null,
+      objecao_detectada: null,
       contratoQuebrado: true,
     };
   }
@@ -1278,6 +1310,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
             ? raw.motivo_nao_comercial.trim().slice(0, 150)
             : null,
         precisa_humano: raw.precisa_humano === true,
+        objecao_detectada: normalizeObjecaoDetectada(raw.objecao_detectada),
         contratoQuebrado: true,
       };
     }
@@ -1295,6 +1328,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
           ? raw.motivo_nao_comercial.trim().slice(0, 150)
           : null,
       precisa_humano: raw.precisa_humano === true,
+      objecao_detectada: normalizeObjecaoDetectada(raw.objecao_detectada),
     };
   }
 
@@ -1325,6 +1359,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
               ? parsed.motivo_nao_comercial.trim().slice(0, 150)
               : null,
           precisa_humano: parsed.precisa_humano === true,
+          objecao_detectada: normalizeObjecaoDetectada(parsed.objecao_detectada),
           contratoQuebrado: true,
         };
       }
@@ -1343,6 +1378,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
           parsed.nao_comercial === true && typeof parsed.motivo_nao_comercial === "string"
             ? parsed.motivo_nao_comercial.trim().slice(0, 150)
             : null,
+        objecao_detectada: normalizeObjecaoDetectada(parsed.objecao_detectada),
       };
     }
   } catch (_) {}
@@ -1365,6 +1401,8 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
       spin_fase: null,
       nao_comercial: false,
       motivo_nao_comercial: null,
+      precisa_humano: false,
+      objecao_detectada: null,
       contratoQuebrado: true,
     };
   }
@@ -1386,6 +1424,8 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
     spin_fase: null,
     nao_comercial: false,
     motivo_nao_comercial: null,
+    precisa_humano: false,
+    objecao_detectada: null,
     contratoQuebrado: true,
   };
 }
@@ -1954,6 +1994,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     contratoQuebrado: aiResponse.contratoQuebrado === true,
     finalizado: isPrimeiroRecontato ? true : aiResponse.finalizado,
     isRecontact: isPrimeiroRecontato,
+    objecao_detectada: aiResponse.objecao_detectada,
     msgPreview: aiResponse.mensagem.slice(0, 60),
     phone: phone.slice(-4),
   });
@@ -1984,6 +2025,9 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
   };
   if (rawLeadSource) {
     dadosBase.lead_source_bruto = String(rawLeadSource).trim();
+  }
+  if (aiResponse.objecao_detectada) {
+    dadosBase.objecao_detectada = aiResponse.objecao_detectada;
   }
   if (isPrimeiroRecontato) {
     dadosBase.recontato_avisado_em = new Date().toISOString();
