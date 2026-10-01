@@ -93,6 +93,64 @@ import { DispatchPromptDialog } from "./LeadImports/DispatchPromptDialog";
 type SheetTab = "campanha" | "enviadas" | "agendamentos" | "planilhas" | "relatorios";
 type CampaignTemplateStrategy = "single" | "ai_variations";
 
+export interface BancoAudienceInfo {
+  description: string;
+  count: number;
+}
+
+export function resolveEffectiveAudienceSource(params: {
+  selectedFile: File | null;
+  bancoAudience: BancoAudienceInfo | null;
+  selectedImportId: string;
+  selectedImportIds: string[];
+  parsedRows: Record<string, unknown>[];
+  importedRows: Record<string, unknown>[];
+}): {
+  sourceType: "file" | "banco" | "imported";
+  rows: Record<string, unknown>[];
+  activeImportIdParam: string | null;
+} {
+  if (params.selectedFile) {
+    return { sourceType: "file", rows: params.parsedRows, activeImportIdParam: null };
+  }
+  if (params.bancoAudience) {
+    return { sourceType: "banco", rows: params.parsedRows, activeImportIdParam: null };
+  }
+  let activeParam: string | null = null;
+  if (params.selectedImportIds.length > 0) activeParam = params.selectedImportIds.join(",");
+  else if (params.selectedImportId) activeParam = params.selectedImportId;
+
+  return { sourceType: "imported", rows: params.importedRows, activeImportIdParam: activeParam };
+}
+
+export function validateCampaignSubmission(params: {
+  activeClientId?: string | null;
+  campaignName?: string;
+  hasFile: boolean;
+  hasBancoAudience: boolean;
+  selectedImportIds: string[];
+  selectedImportId: string;
+  enabledStepsCount: number;
+  filteredRowsCount: number;
+}): { isValid: boolean; errorMessage?: string } {
+  if (!params.activeClientId) {
+    return { isValid: false, errorMessage: "Selecione uma empresa no seletor." };
+  }
+  if (!params.campaignName || !params.campaignName.trim()) {
+    return { isValid: false, errorMessage: "Defina um nome de identificação para o envio." };
+  }
+  if (!params.hasFile && !params.hasBancoAudience && params.selectedImportIds.length === 0 && (!params.selectedImportId || params.selectedImportId === "all")) {
+    return { isValid: false, errorMessage: "Por favor, carregue uma planilha ou selecione uma base ativa (ou CRM)." };
+  }
+  if (params.enabledStepsCount === 0) {
+    return { isValid: false, errorMessage: "Adicione pelo menos um passo ativo na timeline de envio." };
+  }
+  if (params.filteredRowsCount === 0) {
+    return { isValid: false, errorMessage: "Não é possível disparar uma campanha sem nenhum lead selecionado." };
+  }
+  return { isValid: true };
+}
+
 interface LeadImportsProps {
   fixedClientId?: string;
   fixedClientName?: string;
@@ -175,6 +233,7 @@ export default function LeadImports({
 
   // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [bancoAudience, setBancoAudience] = useState<BancoAudienceInfo | null>(null);
   const [defaultDdd, setDefaultDdd] = useState<string>("34");
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
   const [showNumbersModal, setShowNumbersModal] = useState(false);
@@ -193,13 +252,17 @@ export default function LeadImports({
   // Hooks queries
   const { data: imports = [], refetch: refetchImports } = useLeadImports(activeClientId);
 
+  // Parâmetro de importação ativo resolvido pela função única de verdade
   const activeImportIdParam = useMemo(() => {
-    if (selectedFile) return null;
-    if (selectedImportIds.length > 0) return selectedImportIds.join(",");
-    if (selectedImportId === CRM_BASE_VALUE) return CRM_BASE_VALUE;
-    if (selectedImportId === ALL_IMPORTS_VALUE) return ALL_IMPORTS_VALUE;
-    return selectedImportId || null;
-  }, [selectedFile, selectedImportIds, selectedImportId]);
+    return resolveEffectiveAudienceSource({
+      selectedFile,
+      bancoAudience,
+      selectedImportId,
+      selectedImportIds,
+      parsedRows: [],
+      importedRows: [],
+    }).activeImportIdParam;
+  }, [selectedFile, bancoAudience, selectedImportIds, selectedImportId]);
 
   const { data: importedItemsData, isLoading: isLoadingImportedItems } = useLeadImportItems(
     activeClientId,
@@ -207,12 +270,11 @@ export default function LeadImports({
     undefined,
     {
       status: "imported",
-      enabled: !selectedFile && !!activeImportIdParam && activeTab === "campanha",
+      enabled: !selectedFile && !bancoAudience && !!activeImportIdParam && activeTab === "campanha",
     }
   );
 
-  const sourceRows = useMemo(() => {
-    if (selectedFile) return parsedRows;
+  const rawImportedRows = useMemo(() => {
     if (!importedItemsData?.items) return [];
     return importedItemsData.items.map((item) => {
       const importRecord = imports.find((imp) => imp.id === item.import_id);
@@ -237,7 +299,20 @@ export default function LeadImports({
           "",
       };
     });
-  }, [selectedFile, parsedRows, importedItemsData, imports]);
+  }, [importedItemsData, imports]);
+
+  const audienceSource = useMemo(() => {
+    return resolveEffectiveAudienceSource({
+      selectedFile,
+      bancoAudience,
+      selectedImportId,
+      selectedImportIds,
+      parsedRows,
+      importedRows: rawImportedRows,
+    });
+  }, [selectedFile, bancoAudience, selectedImportId, selectedImportIds, parsedRows, rawImportedRows]);
+
+  const sourceRows = audienceSource.rows;
 
   const spreadsheetColumns = useMemo(() => {
     if (sourceRows.length === 0) return [];
@@ -661,10 +736,20 @@ export default function LeadImports({
           if (data.campaignName) {
             setCampaignName(data.campaignName);
           }
+          const desc =
+            data.sourceDescription ||
+            `${data.rows.length} contatos vindos do Banco de Dados, filtrados por tag`;
+          setBancoAudience({
+            description: desc,
+            count: data.rows.length,
+          });
+          setSelectedImportId("");
+          setSelectedImportIds([]);
+          setSelectedFile(null);
           setActiveTab("campanha");
           toast({
             title: "Público-Alvo Carregado! 🎯",
-            description: `${data.rows.length} contatos carregados para a nova campanha.`,
+            description: desc,
           });
         }
         localStorage.removeItem("vexo_pending_campaign_audience");
@@ -682,6 +767,7 @@ export default function LeadImports({
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
+    setBancoAudience(null);
     setSelectedFile(file);
     setParseError(null);
     setParsedRows([]);
@@ -1005,6 +1091,7 @@ export default function LeadImports({
     setSelectedImportIds([]);
     setSelectedImportId(ALL_IMPORTS_VALUE);
     setSelectedFile(null);
+    setBancoAudience(null);
     setParsedRows([]);
     setFilterRules([]);
     setParseError(null);
@@ -1014,22 +1101,23 @@ export default function LeadImports({
   }
 
   async function handleCreateAndDispatch() {
-    if (!activeClientId) {
-      toast({ title: "Seção Inválida", description: "Selecione uma empresa no seletor.", variant: "destructive" });
-      return;
-    }
-    if (!campaignName.trim()) {
-      toast({ title: "Nome ausente", description: "Defina um nome de identificação para o envio.", variant: "destructive" });
-      return;
-    }
-    if (!selectedFile && selectedImportIds.length === 0 && selectedImportId === ALL_IMPORTS_VALUE) {
-      toast({ title: "Base de leads ausente", description: "Por favor, carregue uma planilha ou selecione uma base ativa (ou CRM).", variant: "destructive" });
-      return;
-    }
-
     const enabledSteps = campaignSequence.filter((s) => s.enabled);
-    if (enabledSteps.length === 0) {
-      toast({ title: "Mensagem vazia", description: "Adicione pelo menos um passo ativo na timeline de envio.", variant: "destructive" });
+    const validation = validateCampaignSubmission({
+      activeClientId,
+      campaignName,
+      hasFile: !!selectedFile,
+      hasBancoAudience: !!bancoAudience,
+      selectedImportIds,
+      selectedImportId,
+      enabledStepsCount: enabledSteps.length,
+      filteredRowsCount: filteredRows.length,
+    });
+    if (!validation.isValid) {
+      toast({
+        title: "Atenção",
+        description: validation.errorMessage || "Verifique os dados da campanha.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -1096,6 +1184,15 @@ export default function LeadImports({
   }
 
   async function executeCreateAndDispatch() {
+    if (filteredRows.length === 0) {
+      toast({
+        title: "Nenhum lead selecionado",
+        description: "Não é possível disparar uma campanha sem nenhum lead selecionado.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmittingStatus("Preparando importação de leads...");
 
@@ -1125,6 +1222,16 @@ export default function LeadImports({
           sourceName: selectedFile.name,
           sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
           rows: finalRows,
+        });
+        finalImportId = importRes.item.id;
+      } else if (bancoAudience && filteredRows.length > 0) {
+        setSubmittingStatus("Registrando público do Banco de Dados...");
+        finalRowsCount = filteredRows.length;
+        const importRes = await createLeadImport.mutateAsync({
+          clientId: activeClientId,
+          sourceName: bancoAudience.description || `Banco de Dados (${filteredRows.length} leads)`,
+          sourceType: "banco",
+          rows: filteredRows,
         });
         finalImportId = importRes.item.id;
       }
@@ -1159,7 +1266,7 @@ export default function LeadImports({
         name: campaignName.trim(),
         clientId: activeClientId,
         importId: finalImportId === ALL_IMPORTS_VALUE ? null : finalImportId,
-        importIds: selectedFile ? [] : selectedImportIds,
+        importIds: (selectedFile || bancoAudience) ? [] : selectedImportIds,
         limitPerRun: limitForCampaign,
         mode: campaignMode,
         campaignPromptId,
@@ -1217,7 +1324,7 @@ export default function LeadImports({
       const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
 
       let totalLeads = 0;
-      if (selectedFile) {
+      if (selectedFile || bancoAudience) {
         totalLeads = finalRowsCount;
       } else {
         totalLeads = filteredRows.length;
@@ -1470,6 +1577,7 @@ export default function LeadImports({
     const seq = normalizeCampaignSequence(c.analytics_meta);
     const limitPerRun = c.limit_per_run || 50;
 
+    setBancoAudience(null);
     setEditingCampaignId(c.id);
     setCampaignName(c.name || "");
     setCampaignLimitPerRun(String(limitPerRun));
@@ -1554,6 +1662,7 @@ export default function LeadImports({
       order: idx + 1,
     }));
 
+    setBancoAudience(null);
     setEditingCampaignId(null);
     setCampaignName(`${c.name || "Campanha"} (cópia)`);
     setCampaignLimitPerRun(String(c.limit_per_run || 50));
@@ -1756,6 +1865,12 @@ export default function LeadImports({
               isMultiSpreadsheet={isMultiSpreadsheet}
               missingColumnWarnings={missingColumnWarnings}
               onToggleIncludeMissing={handleToggleIncludeMissing}
+              bancoAudience={bancoAudience}
+              onDiscardBancoAudience={() => {
+                setBancoAudience(null);
+                setParsedRows([]);
+                setFilterRules([]);
+              }}
             />
 
             <MessageSequenceStep

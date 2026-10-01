@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { Filter, Info, Trash2, Plus, Check, ChevronDown, Loader2, AlertTriangle, AlertCircle, CheckCircle2, FileSpreadsheet } from "lucide-react";
+import { Filter, Info, Trash2, Plus, Check, ChevronDown, Loader2, AlertTriangle, AlertCircle, CheckCircle2, FileSpreadsheet, Database } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,11 @@ export interface PhoneAuditStats {
   incompleteCount: number;
   completedList: Array<{ original: string; result: string }>;
   incompleteList: Array<{ original: string; reason: string }>;
+}
+
+export interface BancoAudienceInfo {
+  description: string;
+  count: number;
 }
 
 interface LeadSourceStepProps {
@@ -70,6 +76,27 @@ interface LeadSourceStepProps {
     includeMissing: boolean;
   }>;
   onToggleIncludeMissing?: (column: string) => void;
+
+  bancoAudience?: BancoAudienceInfo | null;
+  onDiscardBancoAudience?: () => void;
+}
+
+export function handleSelectSavedBaseAudience(
+  hasBancoAudience: boolean,
+  onDiscard: () => void,
+  clearUpload: () => void,
+  action: () => void
+): { discarded: boolean; warningMessage?: string } {
+  let discarded = false;
+  let warningMessage: string | undefined;
+  if (hasBancoAudience) {
+    onDiscard();
+    discarded = true;
+    warningMessage = "Público do Banco de Dados descartado ao selecionar uma base salva.";
+  }
+  clearUpload();
+  action();
+  return { discarded, warningMessage };
 }
 
 export function LeadSourceStep({
@@ -105,6 +132,8 @@ export function LeadSourceStep({
   isMultiSpreadsheet = false,
   missingColumnWarnings = [],
   onToggleIncludeMissing,
+  bancoAudience,
+  onDiscardBancoAudience,
 }: LeadSourceStepProps) {
   const [showPhoneAuditModal, setShowPhoneAuditModal] = useState(false);
 
@@ -114,6 +143,19 @@ export function LeadSourceStep({
     setParsedRows([]);
     setFilterRules([]);
   };
+
+  const handleSelectSavedBase = (action: () => void) => {
+    const res = handleSelectSavedBaseAudience(
+      !!bancoAudience,
+      () => onDiscardBancoAudience?.(),
+      clearUpload,
+      action
+    );
+    if (res.discarded && res.warningMessage) {
+      toast.info(res.warningMessage);
+    }
+  };
+
   const totalSelectedLeads = imports
     .filter((imp) => selectedImportIds.includes(imp.id))
     .reduce((acc, imp) => acc + (imp.imported_rows || 0), 0);
@@ -139,6 +181,30 @@ export function LeadSourceStep({
             className="h-12 rounded-xl border-indigo-100 bg-white dark:border-indigo-900/40 dark:bg-slate-900 focus-visible:ring-indigo-500"
           />
         </div>
+
+        {bancoAudience && (
+          <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-200">
+            <div className="flex items-center gap-2.5">
+              <Database className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="font-semibold text-foreground">Público do Banco de Dados Ativo</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{bancoAudience.description}</p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                onDiscardBancoAudience?.();
+                toast.info("Público do Banco de Dados descartado.");
+              }}
+              className="h-7 text-xs border-amber-500/30 hover:bg-amber-500/20 text-amber-900 dark:text-amber-100"
+            >
+              Descartar
+            </Button>
+          </div>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -174,15 +240,17 @@ export function LeadSourceStep({
                   className="flex h-12 w-full items-center justify-between rounded-xl border border-input bg-background px-3 text-sm text-left"
                 >
                   <span className="truncate">
-                    {selectedImportIds.length > 0
-                      ? `${selectedImportIds.length} ${selectedImportIds.length === 1 ? "planilha selecionada" : "planilhas selecionadas"} (${totalSelectedLeads} leads)`
-                      : selectedImportId === CRM_BASE_VALUE
-                        ? "Todos os leads do CRM"
-                        : selectedImportId === ALL_IMPORTS_VALUE
-                          ? "Todas as bases importadas"
-                          : imports.find(i => i.id === selectedImportId)
-                            ? `${imports.find(i => i.id === selectedImportId)?.source_name} (${imports.find(i => i.id === selectedImportId)?.imported_rows} leads)`
-                            : "Selecione uma base"}
+                    {bancoAudience
+                      ? "Nenhuma base selecionada (usando público do Banco)"
+                      : selectedImportIds.length > 0
+                        ? `${selectedImportIds.length} ${selectedImportIds.length === 1 ? "planilha selecionada" : "planilhas selecionadas"} (${totalSelectedLeads} leads)`
+                        : selectedImportId === CRM_BASE_VALUE
+                          ? "Todos os leads do CRM"
+                          : selectedImportId === ALL_IMPORTS_VALUE
+                            ? "Todas as bases importadas"
+                            : imports.find(i => i.id === selectedImportId)
+                              ? `${imports.find(i => i.id === selectedImportId)?.source_name} (${imports.find(i => i.id === selectedImportId)?.imported_rows} leads)`
+                              : "Selecione uma base"}
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
                 </button>
@@ -191,18 +259,28 @@ export function LeadSourceStep({
                 <div className="max-h-72 overflow-y-auto">
                   <button
                     type="button"
-                    onClick={() => { setSelectedImportIds([]); setSelectedImportId(ALL_IMPORTS_VALUE); clearUpload(); }}
+                    onClick={() => {
+                      handleSelectSavedBase(() => {
+                        setSelectedImportIds([]);
+                        setSelectedImportId(ALL_IMPORTS_VALUE);
+                      });
+                    }}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-accent"
                   >
-                    <Check className={cn("h-4 w-4", selectedImportIds.length === 0 && selectedImportId === ALL_IMPORTS_VALUE ? "opacity-100" : "opacity-0")} />
+                    <Check className={cn("h-4 w-4", !bancoAudience && selectedImportIds.length === 0 && selectedImportId === ALL_IMPORTS_VALUE ? "opacity-100" : "opacity-0")} />
                     Todas as bases importadas
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setSelectedImportIds([]); setSelectedImportId(CRM_BASE_VALUE); clearUpload(); }}
+                    onClick={() => {
+                      handleSelectSavedBase(() => {
+                        setSelectedImportIds([]);
+                        setSelectedImportId(CRM_BASE_VALUE);
+                      });
+                    }}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-accent"
                   >
-                    <Check className={cn("h-4 w-4", selectedImportIds.length === 0 && selectedImportId === CRM_BASE_VALUE ? "opacity-100" : "opacity-0")} />
+                    <Check className={cn("h-4 w-4", !bancoAudience && selectedImportIds.length === 0 && selectedImportId === CRM_BASE_VALUE ? "opacity-100" : "opacity-0")} />
                     Todos os leads do CRM
                   </button>
 
@@ -212,7 +290,7 @@ export function LeadSourceStep({
                         Planilhas importadas
                       </p>
                       {imports.map((imp) => {
-                        const checked = selectedImportIds.includes(imp.id) || (selectedImportIds.length === 0 && selectedImportId === imp.id);
+                        const checked = !bancoAudience && (selectedImportIds.includes(imp.id) || (selectedImportIds.length === 0 && selectedImportId === imp.id));
                         return (
                           <label
                             key={imp.id}
@@ -221,15 +299,16 @@ export function LeadSourceStep({
                             <Checkbox
                               checked={checked}
                               onCheckedChange={() => {
-                                setSelectedImportIds((current) => {
-                                  const already = current.includes(imp.id);
-                                  if (already) {
-                                    return current.filter((id) => id !== imp.id);
-                                  }
-                                  return [...current, imp.id];
+                                handleSelectSavedBase(() => {
+                                  setSelectedImportIds((current) => {
+                                    const already = current.includes(imp.id);
+                                    if (already) {
+                                      return current.filter((id) => id !== imp.id);
+                                    }
+                                    return [...current, imp.id];
+                                  });
+                                  setSelectedImportId("");
                                 });
-                                setSelectedImportId("");
-                                clearUpload();
                               }}
                             />
                             <span className="truncate">

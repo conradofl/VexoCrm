@@ -106,6 +106,82 @@ import {
 import { parseSpreadsheetFile, detectSpreadsheetColumns } from "@/lib/leadImports/spreadsheet";
 import { toast } from "sonner";
 
+export function toggleStageFilter(current: string[], stageToToggle: string): string[] {
+  if (stageToToggle === "all") {
+    return ["all"];
+  }
+  const cleanCurrent = current.filter((s) => s !== "all");
+  let next: string[];
+  if (cleanCurrent.includes(stageToToggle)) {
+    next = cleanCurrent.filter((s) => s !== stageToToggle);
+  } else {
+    next = [...cleanCurrent, stageToToggle];
+  }
+  if (next.length === 0) {
+    return ["all"];
+  }
+  return next;
+}
+
+export function buildCampaignTitle(stageFilters: string[], tagFilter?: string, count: number = 0): string {
+  const isAllStages = stageFilters.length === 0 || stageFilters.includes("all");
+  const stageLabel = isAllStages
+    ? "TODOS OS ESTÁGIOS"
+    : stageFilters.map((s) => s.toUpperCase()).join("+");
+
+  let descriptor = stageLabel;
+  if (tagFilter && tagFilter.trim()) {
+    descriptor = isAllStages
+      ? `Tag: ${tagFilter.trim()}`
+      : `${stageLabel} | Tag: ${tagFilter.trim()}`;
+  }
+
+  return `Campanha Funil [${descriptor}] (${count} leads)`;
+}
+
+export function calculateEffectiveSelectedCount(
+  filteredLeadIds: string[],
+  selectedLeadIds: string[]
+): number {
+  const validFilteredIds = new Set(filteredLeadIds);
+  return selectedLeadIds.filter((id) => validFilteredIds.has(id)).length;
+}
+
+export function serializeCampaignFiltersKey(
+  stageFilters: string[],
+  tagFilter?: string,
+  filterRules?: any[]
+): string {
+  return JSON.stringify({
+    stages: stageFilters,
+    tag: tagFilter || "",
+    rules: filterRules || [],
+  });
+}
+
+export function reconcileCampaignSelection(params: {
+  prevFiltersKey: string;
+  currentFiltersKey: string;
+  currentFilteredLeads: Array<Record<string, any>>;
+  currentSelection: string[];
+}): {
+  newSelection: string[];
+  filtersChanged: boolean;
+} {
+  if (params.prevFiltersKey !== params.currentFiltersKey) {
+    // Filtros em si mudaram (tag, estágios ou regras): redefine a seleção para os novos leads filtrados
+    return {
+      newSelection: params.currentFilteredLeads.map((l) => String(l.id || "")).filter(Boolean),
+      filtersChanged: true,
+    };
+  }
+  // Filtros não mudaram (ex: recarga da lista de leads): preserva a seleção manual do usuário
+  return {
+    newSelection: params.currentSelection,
+    filtersChanged: false,
+  };
+}
+
 export interface LeadIntelligenceItem {
   id: string;
   client_id: string;
@@ -1134,7 +1210,16 @@ export default function BancoDeDados() {
   // Open Campaign Wizard
   const handleOpenCampaignWizard = () => {
     setIsCampaignWizardOpen(true);
+    const initialTag = selectedTag || "";
+    setCampaignTagFilter(initialTag);
+    const initialStages = activeTab && activeTab !== "all" ? [activeTab] : ["all"];
+    setCampaignStageFilters(initialStages);
     setCampaignSelectedLeadIds(filteredLeads.map((l) => l.id));
+    prevFiltersKeyRef.current = serializeCampaignFiltersKey(
+      initialStages,
+      initialTag,
+      campaignFunnelFilterRules
+    );
   };
 
   // Handle Campaign Wizard File Select
@@ -1200,6 +1285,43 @@ export default function BancoDeDados() {
     return applyDynamicRules(base, campaignFunnelFilterRules);
   }, [leads, campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules]);
 
+  // Atualiza seleção automaticamente APENAS quando os filtros da campanha mudam (tag, estágios, regras).
+  // Recarga da lista de leads não altera os filtros e preserva a seleção manual do usuário.
+  const prevFiltersKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentKey = serializeCampaignFiltersKey(
+      campaignStageFilters,
+      campaignTagFilter,
+      campaignFunnelFilterRules
+    );
+
+    if (prevFiltersKeyRef.current === null) {
+      prevFiltersKeyRef.current = currentKey;
+      return;
+    }
+
+    const { newSelection, filtersChanged } = reconcileCampaignSelection({
+      prevFiltersKey: prevFiltersKeyRef.current,
+      currentFiltersKey: currentKey,
+      currentFilteredLeads: campaignFunnelFilteredLeads,
+      currentSelection: campaignSelectedLeadIds,
+    });
+
+    if (filtersChanged) {
+      prevFiltersKeyRef.current = currentKey;
+      setCampaignSelectedLeadIds(newSelection);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules, campaignFunnelFilteredLeads]);
+
+  const effectiveSelectedCount = useMemo(() => {
+    return calculateEffectiveSelectedCount(
+      campaignFunnelFilteredLeads.map((l) => l.id),
+      campaignSelectedLeadIds
+    );
+  }, [campaignFunnelFilteredLeads, campaignSelectedLeadIds]);
+
   const campaignSpreadsheetFilteredRows = useMemo(() => {
     return applyDynamicRules(campaignSpreadsheetRows, campaignSpreadsheetRules);
   }, [campaignSpreadsheetRows, campaignSpreadsheetRules]);
@@ -1210,9 +1332,12 @@ export default function BancoDeDados() {
     let campaignTitleName = "";
 
     if (campaignSourceType === "funnel") {
-      const selected = campaignFunnelFilteredLeads.filter((l) => campaignSelectedLeadIds.includes(l.id));
+      const validFilteredIds = new Set(campaignFunnelFilteredLeads.map((l) => l.id));
+      const selected = campaignFunnelFilteredLeads.filter(
+        (l) => campaignSelectedLeadIds.includes(l.id) && validFilteredIds.has(l.id)
+      );
       if (selected.length === 0) {
-        toast.error("Selecione pelo menos 1 lead para a campanha.");
+        toast.error("Nenhum lead selecionado para a campanha.");
         return;
       }
       finalRows = selected.map((l) => ({
@@ -1223,10 +1348,7 @@ export default function BancoDeDados() {
         tags: Array.isArray(l.tags) ? l.tags.join(", ") : "",
         resumo_ia: l.raw_chat_summary || "",
       }));
-      const stageLabel = campaignStageFilters.includes("all") || campaignStageFilters.length === 0
-        ? "TODOS OS ESTÁGIOS"
-        : campaignStageFilters.map(s => s.toUpperCase()).join("+");
-      campaignTitleName = `Campanha Funil [${stageLabel}] (${selected.length} leads)`;
+      campaignTitleName = buildCampaignTitle(campaignStageFilters, campaignTagFilter, selected.length);
     } else {
       if (campaignSpreadsheetFilteredRows.length === 0) {
         toast.error("Nenhum contato encontrado na planilha com os filtros aplicados.");
@@ -1241,6 +1363,9 @@ export default function BancoDeDados() {
       JSON.stringify({
         campaignName: campaignTitleName,
         rows: finalRows,
+        sourceDescription: campaignTagFilter
+          ? `${finalRows.length} contatos vindos do Banco de Dados, filtrados por tag "${campaignTagFilter}"`
+          : `${finalRows.length} contatos vindos do Banco de Dados`,
       })
     );
 
@@ -1772,6 +1897,11 @@ export default function BancoDeDados() {
     }
     setCampaignSourceType("funnel");
     setCampaignSelectedLeadIds(leadsForChannel.map((l) => l.id));
+    prevFiltersKeyRef.current = serializeCampaignFiltersKey(
+      campaignStageFilters,
+      campaignTagFilter,
+      campaignFunnelFilterRules
+    );
     setIsCampaignWizardOpen(true);
     toast.success(`Disparo Segmentado: ${chDef.icon} ${chDef.name}`, {
       description: `${leadsForChannel.length} contatos selecionados para a campanha.`,
@@ -3967,7 +4097,7 @@ export default function BancoDeDados() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="w-64 p-2 space-y-1 z-[100]">
                         <div
-                          onClick={() => setCampaignStageFilters(["all"])}
+                          onClick={() => setCampaignStageFilters(toggleStageFilter(campaignStageFilters, "all"))}
                           className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer hover:bg-muted font-medium ${
                             campaignStageFilters.includes("all") || campaignStageFilters.length === 0 ? "bg-amber-500/10 text-amber-600 font-semibold" : ""
                           }`}
@@ -3995,16 +4125,7 @@ export default function BancoDeDados() {
                             <div
                               key={stageItem.id}
                               onClick={() => {
-                                let next: string[] = [];
-                                if (campaignStageFilters.includes("all")) {
-                                  next = [stageItem.id];
-                                } else if (isChecked) {
-                                  next = campaignStageFilters.filter((s) => s !== stageItem.id);
-                                  if (next.length === 0) next = ["all"];
-                                } else {
-                                  next = [...campaignStageFilters, stageItem.id];
-                                }
-                                setCampaignStageFilters(next);
+                                setCampaignStageFilters(toggleStageFilter(campaignStageFilters, stageItem.id));
                               }}
                               className={`flex items-center justify-between px-2.5 py-1.5 rounded text-xs cursor-pointer hover:bg-muted ${
                                 isChecked ? "bg-amber-500/10 text-amber-600 font-semibold" : ""
@@ -4047,20 +4168,20 @@ export default function BancoDeDados() {
                 {/* Seleção Manual com Tabela */}
                 <div className="border border-border rounded-lg overflow-hidden">
                   <div className="bg-muted/50 px-3 py-2 border-b border-border flex items-center justify-between text-xs font-semibold">
-                    <span>Lista de Leads Selecionados ({campaignSelectedLeadIds.length} de {campaignFunnelFilteredLeads.length})</span>
+                    <span>Lista de Leads Selecionados ({effectiveSelectedCount} de {campaignFunnelFilteredLeads.length})</span>
                     <Button
                       size="sm"
                       variant="ghost"
                       className="h-6 text-[11px] px-2"
                       onClick={() => {
-                        if (campaignSelectedLeadIds.length === campaignFunnelFilteredLeads.length) {
+                        if (effectiveSelectedCount === campaignFunnelFilteredLeads.length) {
                           setCampaignSelectedLeadIds([]);
                         } else {
                           setCampaignSelectedLeadIds(campaignFunnelFilteredLeads.map((l) => l.id));
                         }
                       }}
                     >
-                      {campaignSelectedLeadIds.length === campaignFunnelFilteredLeads.length ? "Desmarcar Todos" : "Selecionar Todos"}
+                      {effectiveSelectedCount === campaignFunnelFilteredLeads.length && campaignFunnelFilteredLeads.length > 0 ? "Desmarcar Todos" : "Selecionar Todos"}
                     </Button>
                   </div>
 
