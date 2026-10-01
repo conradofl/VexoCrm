@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import { isFilterShape, normalizeFilters } from "./segmentation.js";
-import { applyMessagePlaceholders } from "./services/messagePlaceholders.js";
+import { applyMessagePlaceholders, findUnresolvedPlaceholders } from "./services/messagePlaceholders.js";
 import { validateOutboundMessage } from "./services/jsonExtractor.js";
 
-export { applyMessagePlaceholders };
+export { applyMessagePlaceholders, findUnresolvedPlaceholders };
 
 export const DEFAULT_LEAD_DELAY_SECONDS = 2;
 export const DEFAULT_STEP_DELAY_SECONDS = 5;
@@ -81,15 +81,23 @@ function shuffledOrder(length, seed) {
 function leadVariableIsFilled(name, lead, phone) {
   const key = normalizeString(name).toLowerCase();
   if (!key) return false;
-  if (key === "nome") return Boolean(normalizeString(lead?.nome));
-  if (key === "telefone") {
+  if (key === "nome" || key === "name" || key === "cliente" || key === "lead_name") {
+    // {{nome}} tem fallback seguro para "cliente" e nunca bloqueia
+    return true;
+  }
+  if (key === "telefone" || key === "phone" || key === "celular") {
     return Boolean(normalizeString(phone) || normalizeString(lead?.telefone || lead?.phone));
   }
+
+  const leadDados = lead?.dados && typeof lead?.dados === "object" ? lead.dados : {};
+  const customCampos = leadDados.campos && typeof leadDados.campos === "object" ? leadDados.campos : {};
 
   const customData = {
     ...(lead || {}),
     ...(lead?.normalized_data || {}),
     ...(lead?.normalizedData || {}),
+    ...leadDados,
+    ...customCampos,
   };
   for (const [dataKey, value] of Object.entries(customData)) {
     if (dataKey.toLowerCase() !== key) continue;
@@ -102,13 +110,9 @@ function leadVariableIsFilled(name, lead, phone) {
 function variantHasUnfilledVariable(text, lead, phone) {
   const raw = normalizeString(text);
   if (!raw) return false;
-  const pattern = /\{\{\s*([\p{L}0-9_]+)\s*\}\}/gu;
-  let match = pattern.exec(raw);
-  while (match) {
-    if (!leadVariableIsFilled(match[1], lead, phone)) return true;
-    match = pattern.exec(raw);
-  }
-  return false;
+  const rendered = applyMessagePlaceholders(raw, lead, phone);
+  const unresolved = findUnresolvedPlaceholders(rendered);
+  return unresolved.length > 0;
 }
 
 /**
@@ -736,6 +740,66 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
   }
 }
 
+/**
+ * Avalia se um lead deve ser retido preventivamente devido a variáveis ausentes
+ * ou violação da guarda de saída em qualquer passo habilitado da sequência.
+ *
+ * @param {Array} sequence - Passos da campanha
+ * @param {Object} lead - Objeto do lead
+ * @param {string} [phone] - Telefone do lead
+ * @param {Object} [options] - Opções de resolução (leadIndex, campaignId, etc.)
+ * @returns {{ held: boolean, reason: string|null, step: Object|null, missingVar: string|null }}
+ */
+export function evaluateLeadSequenceRetention(sequence, lead, phone = "", options = {}) {
+  const steps = Array.isArray(sequence) ? sequence : [];
+  const enabledSteps = steps.filter((step) => step && step.enabled !== false && step.is_active !== false && step.active !== false);
+  const leadIndex = options.leadIndex || 0;
+  const rotationCampaignId = options.campaignId || "";
+
+  for (let sIdx = 0; sIdx < enabledSteps.length; sIdx += 1) {
+    const stepToCheck = enabledSteps[sIdx];
+    const rawStepText = resolveStepTextForLead(stepToCheck, leadIndex, null, {
+      lead,
+      phone,
+      campaignId: rotationCampaignId,
+    });
+
+    if (rawStepText) {
+      const resolvedStepText = applyMessagePlaceholders(rawStepText, lead, phone);
+      const unresolvedVars = findUnresolvedPlaceholders(resolvedStepText);
+
+      if (unresolvedVars.length > 0) {
+        const missingVar = unresolvedVars[0];
+        const stepNum = stepToCheck.order || (sIdx + 1);
+        return {
+          held: true,
+          reason: `Variável '${missingVar}' ausente no passo ${stepNum}`,
+          step: stepToCheck,
+          missingVar,
+        };
+      }
+
+      const guard = validateOutboundMessage(resolvedStepText);
+      if (!guard.valid) {
+        const stepNum = stepToCheck.order || (sIdx + 1);
+        return {
+          held: true,
+          reason: `Bloqueio de guarda no passo ${stepNum}: ${guard.reason}`,
+          step: stepToCheck,
+          missingVar: null,
+        };
+      }
+    }
+  }
+
+  return {
+    held: false,
+    reason: null,
+    step: null,
+    missingVar: null,
+  };
+}
+
 export async function dispatchCampaignSequence({
   webhookUrl,
   webhookToken = null,
@@ -802,6 +866,37 @@ export async function dispatchCampaignSequence({
         });
         continue;
       }
+    }
+
+    // Validação atômica de todas as variáveis da sequência para este lead:
+    // Antes de enviar qualquer passo para um lead, resolva os textos de todos os passos
+    // da sequência e procure sobra em todos. Encontrou em qualquer um: nenhum passo é
+    // enviado para aquele lead, e o motivo diz qual variável e em qual passo.
+    const retention = evaluateLeadSequenceRetention(enabledSteps, lead, phone, {
+      leadIndex,
+      campaignId: rotationCampaignId,
+    });
+
+    if (retention.held) {
+      failedPhones.add(phone);
+      summary.failureCount += 1;
+      summary.failures.push({
+        phone,
+        stepId: retention.step?.id || null,
+        stepType: retention.step?.type || null,
+        reason: retention.reason,
+      });
+      if (typeof onLeadFailed === "function") {
+        try {
+          await onLeadFailed({ lead, phone, reason: retention.reason });
+        } catch (callbackError) {
+          console.warn("[campaign-outbound] lead_failed_callback_failed", {
+            phone: maskOutboundPhone(phone),
+            reason: callbackError instanceof Error ? callbackError.message : String(callbackError),
+          });
+        }
+      }
+      continue;
     }
 
     let leadWebhookUrl = webhookUrl;

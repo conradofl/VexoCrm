@@ -183,7 +183,7 @@ export const ACADEMY_FUNDAMENTOS: AcademyFundamento[] = [
       },
       {
         heading: "Montando",
-        body: "Campanhas → Novo Disparo. Três coisas mudam o resultado. Use {{nome}} — mas confira a planilha: nome vazio faz o sistema bloquear o envio por variável não substituída, e o lote falha em vez de sair torto. Escreva como gente escreve: a mensagem mais curta é a que mais responde. E não mande link no primeiro contato — link de número desconhecido é padrão de golpe.",
+        body: "Campanhas → Novo Disparo. Três coisas mudam o resultado. Use {{nome}} sem medo: se a planilha não tiver o nome preenchido, o sistema usa automaticamente 'cliente' como fallback seguro e o disparo segue normal. Já variáveis de campos customizados (como {{cidade}} ou {{plano}}) exigem preenchimento: se faltar em algum lead, apenas aquele lead específico é segurado com aviso no relatório de disparo, enquanto o restante do lote é enviado normalmente. Escreva como gente escreve: a mensagem mais curta é a que mais responde. E não mande link no primeiro contato — link de número desconhecido é padrão de golpe.",
       },
       {
         heading: "Espalhe os envios",

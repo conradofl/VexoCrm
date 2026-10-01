@@ -113,12 +113,14 @@ export interface CampaignDispatchOptions {
   replyAgent?: "passos" | "campanha" | "atendimento";
 }
 
-export type SegmentationOperator = "equals" | "contains" | "gt" | "lt";
+export type SegmentationOperator = "equals" | "contains" | "gt" | "lt" | "before" | "after" | "between";
 
 export interface SegmentationFilter {
   field: string;
   operator: SegmentationOperator;
   value: string | number;
+  secondValue?: string | number;
+  includeMissing?: boolean;
 }
 
 // Shape unificado: filters[] dinâmico (campos do catálogo da empresa).

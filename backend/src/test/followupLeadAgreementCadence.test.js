@@ -44,7 +44,7 @@ describe("Follow-up: Acordo Comercial em Cadências (followupLeadAgreementCadenc
     // 2. validateOutboundMessage bloqueia a saída com erro de variável crua
     const guard = validateOutboundMessage(rendered);
     expect(guard.valid).toBe(false);
-    expect(guard.reason).toBe("contains_unresolved_variable");
+    expect(guard.reason).toBe("contains_unresolved_variable:{{acordo}}");
 
     // 3. hasConfirmedAgreement retorna false
     expect(hasConfirmedAgreement(leadComAcordoNaoConfirmado)).toBe(false);

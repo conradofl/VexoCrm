@@ -44,7 +44,7 @@ describe("Guarda de Saída contra Variáveis Não Substituídas (validateOutboun
     const msg = "Oi {{nome}}, tudo bem? Aqui e o Conrado, da Vexo.";
     const guard = validateOutboundMessage(msg);
     expect(guard.valid).toBe(false);
-    expect(guard.reason).toBe("contains_unresolved_variable");
+    expect(guard.reason).toBe("contains_unresolved_variable:{{nome}}");
   });
 
   it("BLOQUEIA mensagens com chaves duplas soltas como {{ ou }}", () => {

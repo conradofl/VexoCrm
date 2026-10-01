@@ -1155,17 +1155,34 @@ export default function BancoDeDados() {
   // Export Leads (Excel .xlsx)
   const handleExportXLSX = () => {
     try {
-      const exportData = filteredLeads.map((l) => ({
-        "ID": l.id,
-        "Nome": l.nome || "",
-        "Telefone (E.164)": l.phone || l.telefone || "",
-        "Estágio": l.stage || "cold",
-        "Temperatura": l.temperature || "warm",
-        "Tags": Array.isArray(l.tags) ? l.tags.join(", ") : "",
-        "Resumo IA": l.raw_chat_summary || "",
-        "Última Interação": l.last_interaction_at ? new Date(l.last_interaction_at).toLocaleString("pt-BR") : "",
-        "Data de Cadastro": new Date(l.created_at).toLocaleString("pt-BR"),
-      }));
+      // Coleta todas as chaves customizadas presentes nos leads filtrados
+      const allCustomKeys = new Set<string>();
+      filteredLeads.forEach((l) => {
+        const campos = (l.dados as any)?.campos;
+        if (campos && typeof campos === "object") {
+          Object.keys(campos).forEach((k) => allCustomKeys.add(k));
+        }
+      });
+      const customKeyList = Array.from(allCustomKeys).sort();
+
+      const exportData = filteredLeads.map((l) => {
+        const row: Record<string, unknown> = {
+          "ID": l.id,
+          "Nome": l.nome || "",
+          "Telefone (E.164)": l.phone || l.telefone || "",
+          "Estágio": l.stage || "cold",
+          "Temperatura": l.temperature || "warm",
+          "Tags": Array.isArray(l.tags) ? l.tags.join(", ") : "",
+          "Resumo IA": l.raw_chat_summary || "",
+          "Última Interação": l.last_interaction_at ? new Date(l.last_interaction_at).toLocaleString("pt-BR") : "",
+          "Data de Cadastro": new Date(l.created_at).toLocaleString("pt-BR"),
+        };
+        const campos = (l.dados as any)?.campos;
+        customKeyList.forEach((key) => {
+          row[key] = campos && campos[key] !== undefined && campos[key] !== null ? campos[key] : "";
+        });
+        return row;
+      });
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
@@ -4663,6 +4680,29 @@ export default function BancoDeDados() {
                     <span className="text-muted-foreground text-[11px]">
                       Motivo: {LOST_REASONS.find((r) => r.id === selectedLead.lost_reason)?.label || selectedLead.lost_reason || "Não informado"}
                     </span>
+                  </div>
+                )}
+
+                {/* Seção Campos do Lead */}
+                {Boolean(
+                  (selectedLead.dados as any)?.campos &&
+                  typeof (selectedLead.dados as any).campos === "object" &&
+                  Object.keys((selectedLead.dados as any).campos).length > 0
+                ) && (
+                  <div className="space-y-2 pt-3 border-t border-border">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" /> Campos do Lead
+                    </label>
+                    <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-1.5 text-xs">
+                      {Object.entries((selectedLead.dados as any).campos).map(([key, val]) => (
+                        <div key={key} className="flex justify-between items-center gap-2">
+                          <span className="text-muted-foreground font-medium truncate max-w-[130px]">{key}:</span>
+                          <span className="font-semibold text-foreground truncate max-w-[200px]" title={String(val ?? "")}>
+                            {val !== null && val !== undefined && String(val).trim() !== "" ? String(val) : "—"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

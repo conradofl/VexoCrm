@@ -12,8 +12,10 @@ export interface StepActionButton {
 
 export interface FilterRule {
   column: string;
-  operator: "equals" | "contains" | "gt" | "lt";
+  operator: "equals" | "contains" | "gt" | "lt" | "before" | "after" | "between";
   value: string;
+  secondValue?: string;
+  type?: "text" | "number" | "date";
   includeMissing?: boolean;
 }
 
@@ -260,6 +262,390 @@ export function getLeadField(data: Record<string, unknown>, keys: string[]) {
     if (value !== undefined && value !== null && String(value).trim()) return String(value);
   }
   return "";
+}
+
+/**
+ * Faz o parsing de valores de data em múltiplos formatos (pt-BR DD/MM/YYYY, ISO YYYY-MM-DD, Date),
+ * retornando timestamp em milissegundos para comparações cronológicas precisas.
+ */
+export function parseDateValue(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    const t = val.getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+  const s = String(val).trim();
+  if (!s) return null;
+
+  // Formato brasileiro DD/MM/YYYY ou DD-MM-YYYY (com ou sem hora)
+  const brMatch = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (brMatch) {
+    const day = parseInt(brMatch[1], 10);
+    const month = parseInt(brMatch[2], 10) - 1;
+    const year = parseInt(brMatch[3], 10);
+    const hour = brMatch[4] ? parseInt(brMatch[4], 10) : 0;
+    const min = brMatch[5] ? parseInt(brMatch[5], 10) : 0;
+    const sec = brMatch[6] ? parseInt(brMatch[6], 10) : 0;
+    const d = new Date(year, month, day, hour, min, sec);
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+
+  // Formato ISO
+  const isoTime = Date.parse(s);
+  if (!Number.isNaN(isoTime)) return isoTime;
+
+  return null;
+}
+
+/**
+ * Resolve o valor de uma variável ou campo em um lead procurando em:
+ * 1. dados.campos (campos mapeados/customizados da importação ou banco)
+ * 2. dados (raiz de dados extras do lead)
+ * 3. Na raiz do objeto do lead (colunas diretas de planilhas ou campos do banco)
+ * 4. normalized_data / normalizedData
+ */
+export function resolveLeadFieldValue(lead: Record<string, unknown> | null | undefined, varName: string): unknown {
+  if (!lead || typeof lead !== "object" || !varName) return undefined;
+
+  const rawKey = varName.trim();
+  const normalizedKey = normalizeFieldKey(rawKey);
+
+  const dados = lead.dados && typeof lead.dados === "object" ? (lead.dados as Record<string, unknown>) : null;
+  const campos = dados && dados.campos && typeof dados.campos === "object" ? (dados.campos as Record<string, unknown>) : null;
+  const normData = (lead.normalized_data || lead.normalizedData) && typeof (lead.normalized_data || lead.normalizedData) === "object"
+    ? ((lead.normalized_data || lead.normalizedData) as Record<string, unknown>)
+    : null;
+
+  const sources: Array<Record<string, unknown> | null> = [
+    campos,
+    dados,
+    lead,
+    normData,
+  ];
+
+  for (const src of sources) {
+    if (!src) continue;
+    if (src[rawKey] !== undefined && src[rawKey] !== null) {
+      const v = src[rawKey];
+      if (typeof v === "string" ? v.trim() !== "" : true) return v;
+    }
+    if (normalizedKey && src[normalizedKey] !== undefined && src[normalizedKey] !== null) {
+      const v = src[normalizedKey];
+      if (typeof v === "string" ? v.trim() !== "" : true) return v;
+    }
+    for (const [k, v] of Object.entries(src)) {
+      if (normalizeFieldKey(k) === normalizedKey && v !== undefined && v !== null) {
+        if (typeof v === "string" ? v.trim() !== "" : true) return v;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Verifica se o lead possui um acordo com validação humana confirmada.
+ * Regra: acordo confirmado por pessoa (confirmado_por + confirmado_em + texto válido), não campo preenchido.
+ */
+export function hasConfirmedAgreement(lead: Record<string, unknown> | null | undefined): boolean {
+  if (!lead || typeof lead !== "object") return false;
+  const dados = lead.dados && typeof lead.dados === "object" ? (lead.dados as Record<string, unknown>) : null;
+  const acordo = (dados?.acordo || lead.acordo) as Record<string, unknown> | null | undefined;
+  return Boolean(
+    acordo &&
+    acordo.texto &&
+    typeof acordo.texto === "string" &&
+    acordo.texto.trim().length > 0 &&
+    acordo.confirmado_por &&
+    acordo.confirmado_em
+  );
+}
+
+export function evaluateLeadFilterRule(
+  lead: Record<string, unknown>,
+  rule: FilterRule,
+  fieldDef?: { type?: "text" | "number" | "date" }
+): boolean {
+  if (!rule.column) return true;
+
+  const rawValue = resolveLeadFieldValue(lead, rule.column);
+  const isMissing = rawValue === undefined || rawValue === null || (typeof rawValue === "string" && rawValue.trim() === "");
+
+  if (isMissing) {
+    return !!rule.includeMissing;
+  }
+
+  const effectiveType = rule.type || fieldDef?.type || inferColumnType([rawValue]);
+
+  if (effectiveType === "number") {
+    const num = parseNumberValue(rawValue);
+    const ruleNum = parseNumberValue(rule.value);
+    if (Number.isNaN(num) || Number.isNaN(ruleNum)) return false;
+
+    switch (rule.operator) {
+      case "equals":
+        return num === ruleNum;
+      case "gt":
+        return num > ruleNum;
+      case "lt":
+        return num < ruleNum;
+      default:
+        return false;
+    }
+  }
+
+  if (effectiveType === "date") {
+    const leadDateMs = parseDateValue(rawValue);
+    const ruleDateMs = parseDateValue(rule.value);
+    if (leadDateMs === null || ruleDateMs === null) return false;
+
+    switch (rule.operator) {
+      case "before":
+        return leadDateMs < ruleDateMs;
+      case "after":
+        return leadDateMs > ruleDateMs;
+      case "between": {
+        const secondDateMs = parseDateValue(rule.secondValue);
+        if (secondDateMs === null) return false;
+        const minDate = Math.min(ruleDateMs, secondDateMs);
+        const maxDate = Math.max(ruleDateMs, secondDateMs);
+        return leadDateMs >= minDate && leadDateMs <= maxDate;
+      }
+      case "equals":
+        return leadDateMs === ruleDateMs;
+      default:
+        return false;
+    }
+  }
+
+  // text
+  const strVal = String(rawValue).toLowerCase().trim();
+  const ruleStr = (rule.value || "").toLowerCase().trim();
+
+  switch (rule.operator) {
+    case "equals":
+      return strVal === ruleStr;
+    case "contains":
+      return strVal.includes(ruleStr);
+    default:
+      return true;
+  }
+}
+
+export interface VariableAuditItem {
+  variable: string;
+  placeholder: string;
+  missingCount: number;
+  totalCount: number;
+  missingLeads: Array<Record<string, unknown>>;
+}
+
+export interface CampaignPreDispatchAudit {
+  totalLeads: number;
+  heldLeadsCount: number;
+  sendableLeadsCount: number;
+  heldLeads: Array<Record<string, unknown>>;
+  variableAudits: VariableAuditItem[];
+}
+
+export function findPlaceholdersInText(text: string): string[] {
+  if (!text || typeof text !== "string") return [];
+  const matches = text.match(/\{\{\s*([^{}]+?)\s*\}\}/g);
+  if (!matches) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const m of matches) {
+    const inner = m.replace(/^\{\{\s*|\s*\}\}$/g, "").trim();
+    const normalized = `{{${inner}}}`;
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+export function auditMessageVariablesAgainstLeads(
+  messages: string[],
+  leads: Array<Record<string, unknown>>
+): CampaignPreDispatchAudit {
+  const combinedText = Array.isArray(messages) ? messages.filter(Boolean).join(" ") : "";
+  const placeholders = findPlaceholdersInText(combinedText);
+  const totalLeads = Array.isArray(leads) ? leads.length : 0;
+
+  if (totalLeads === 0 || placeholders.length === 0) {
+    return {
+      totalLeads,
+      heldLeadsCount: 0,
+      sendableLeadsCount: totalLeads,
+      heldLeads: [],
+      variableAudits: [],
+    };
+  }
+
+  const heldLeadsSet = new Set<Record<string, unknown>>();
+  const variableAudits: VariableAuditItem[] = [];
+
+  for (const ph of placeholders) {
+    const rawKey = ph.replace(/^\{\{\s*|\s*\}\}$/g, "").trim();
+    const lowerKey = rawKey.toLowerCase();
+
+    // 1. {{nome}} (e sinônimos) tem fallback para "cliente" e nunca bloqueia
+    if (["nome", "name", "cliente", "lead_name"].includes(lowerKey)) {
+      continue;
+    }
+
+    // 2. {{telefone}} (e sinônimos)
+    if (["telefone", "phone", "celular"].includes(lowerKey)) {
+      continue;
+    }
+
+    // 3. {{acordo}} / {{combinado}}
+    if (["acordo", "combinado"].includes(lowerKey)) {
+      const missingForThisVar: Array<Record<string, unknown>> = [];
+      for (const lead of leads) {
+        if (!hasConfirmedAgreement(lead)) {
+          missingForThisVar.push(lead);
+          heldLeadsSet.add(lead);
+        }
+      }
+      if (missingForThisVar.length > 0) {
+        variableAudits.push({
+          variable: "acordo",
+          placeholder: ph,
+          missingCount: missingForThisVar.length,
+          totalCount: totalLeads,
+          missingLeads: missingForThisVar,
+        });
+      }
+      continue;
+    }
+
+    // 4. Campos customizados
+    const missingForThisVar: Array<Record<string, unknown>> = [];
+    for (const lead of leads) {
+      const val = resolveLeadFieldValue(lead, rawKey);
+      if (val === undefined || val === null || (typeof val === "string" && val.trim() === "")) {
+        missingForThisVar.push(lead);
+        heldLeadsSet.add(lead);
+      }
+    }
+
+    if (missingForThisVar.length > 0) {
+      variableAudits.push({
+        variable: rawKey,
+        placeholder: ph,
+        missingCount: missingForThisVar.length,
+        totalCount: totalLeads,
+        missingLeads: missingForThisVar,
+      });
+    }
+  }
+
+  const heldLeads = Array.from(heldLeadsSet);
+
+  return {
+    totalLeads,
+    heldLeadsCount: heldLeads.length,
+    sendableLeadsCount: Math.max(0, totalLeads - heldLeads.length),
+    heldLeads,
+    variableAudits,
+  };
+}
+
+export interface CustomFieldDefinition {
+  key: string;
+  label: string;
+  type: "text" | "number" | "date";
+}
+
+export function extractCustomFieldsFromRows(rows: Array<Record<string, unknown>>): CustomFieldDefinition[] {
+  const fieldsMap = new Map<string, { label: string; values: unknown[] }>();
+
+  for (const row of rows) {
+    const dados = row.dados && typeof row.dados === "object" ? (row.dados as Record<string, unknown>) : null;
+    const campos = dados && dados.campos && typeof dados.campos === "object" ? (dados.campos as Record<string, unknown>) : null;
+    if (campos) {
+      for (const [k, v] of Object.entries(campos)) {
+        if (!k || ["nome", "telefone", "phone", "celular", "name", "cliente"].includes(k.toLowerCase())) continue;
+        if (!fieldsMap.has(k)) {
+          fieldsMap.set(k, { label: k, values: [] });
+        }
+        if (v !== null && v !== undefined && String(v).trim() !== "") {
+          fieldsMap.get(k)!.values.push(v);
+        }
+      }
+    }
+  }
+
+  const result: CustomFieldDefinition[] = [];
+  for (const [key, info] of fieldsMap.entries()) {
+    result.push({
+      key,
+      label: info.label,
+      type: inferColumnType(info.values),
+    });
+  }
+  return result;
+}
+
+export function getCommonCustomFields(
+  basesFields: Array<{ baseId: string; baseName?: string; fields: CustomFieldDefinition[] }>
+): {
+  commonFields: CustomFieldDefinition[];
+  excludedFields: Array<{ key: string; label: string; missingInBaseNames: string[]; count: number }>;
+} {
+  if (!Array.isArray(basesFields) || basesFields.length === 0) {
+    return { commonFields: [], excludedFields: [] };
+  }
+
+  if (basesFields.length === 1) {
+    return { commonFields: basesFields[0].fields, excludedFields: [] };
+  }
+
+  const allKeys = new Set<string>();
+  for (const base of basesFields) {
+    for (const f of base.fields) {
+      allKeys.add(f.key);
+    }
+  }
+
+  const commonFields: CustomFieldDefinition[] = [];
+  const excludedFields: Array<{ key: string; label: string; missingInBaseNames: string[]; count: number }> = [];
+
+  for (const key of allKeys) {
+    const presentIn = basesFields.filter((b) => b.fields.some((f) => f.key === key));
+    const missingIn = basesFields.filter((b) => !b.fields.some((f) => f.key === key));
+
+    const sampleField = presentIn[0]?.fields.find((f) => f.key === key);
+    const label = sampleField?.label || key;
+    const type = sampleField?.type || "text";
+
+    if (presentIn.length === basesFields.length) {
+      commonFields.push({ key, label, type });
+    } else {
+      excludedFields.push({
+        key,
+        label,
+        missingInBaseNames: missingIn.map((b) => b.baseName || b.baseId),
+        count: missingIn.length,
+      });
+    }
+  }
+
+  return { commonFields, excludedFields };
+}
+
+export function getMissingFieldCount(leads: Array<Record<string, unknown>>, fieldKey: string): number {
+  if (!Array.isArray(leads) || leads.length === 0 || !fieldKey) return 0;
+  let count = 0;
+  for (const lead of leads) {
+    const v = resolveLeadFieldValue(lead, fieldKey);
+    if (v === undefined || v === null || (typeof v === "string" && v.trim() === "")) {
+      count++;
+    }
+  }
+  return count;
 }
 
 export function getLeadNormalizedData(item: { normalized_data?: Record<string, unknown> | null }) {

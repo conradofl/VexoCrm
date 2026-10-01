@@ -1,0 +1,271 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LeadVariableRetentionTestCases",
+  "description": "Fixture canônica compartilhada entre Frontend (auditoria prévia em spreadsheet.ts) e Backend (validação atômica em campaign-outbound.js) para garantir paridade absoluta na retenção de leads por variáveis faltantes.",
+  "cases": [
+    {
+      "id": "case_1_and_2_custom_field_presence",
+      "description": "Lead sem campo customizado é retido e lead com campo preenchido é enviado",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{nome}}, confirmamos seu plano {{plano}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-sem-plano",
+          "nome": "Lucas",
+          "telefone": "5511999991001",
+          "dados": { "campos": {} }
+        },
+        {
+          "id": "lead-com-plano",
+          "nome": "Beatriz",
+          "telefone": "5511999991002",
+          "dados": { "campos": { "plano": "Premium" } }
+        }
+      ],
+      "expectedHeldLeadIds": ["lead-sem-plano"],
+      "expectedSendableLeadIds": ["lead-com-plano"]
+    },
+    {
+      "id": "case_3_variable_in_step_2_not_step_1",
+      "description": "Variável no passo 2 e não no 1 retém o lead atômica e preventivamente (0 mensagens)",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{nome}}, obrigado pelo seu contato!"
+        },
+        {
+          "order": 2,
+          "enabled": true,
+          "text": "Segue o seu código de desconto exclusivo: {{cupom}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-sem-cupom",
+          "nome": "Daniel",
+          "telefone": "5511999992001",
+          "dados": { "campos": {} }
+        },
+        {
+          "id": "lead-com-cupom",
+          "nome": "Elena",
+          "telefone": "5511999992002",
+          "dados": { "campos": { "cupom": "PROMO2026" } }
+        }
+      ],
+      "expectedHeldLeadIds": ["lead-sem-cupom"],
+      "expectedSendableLeadIds": ["lead-com-cupom"]
+    },
+    {
+      "id": "case_4_missing_nome_fallback",
+      "description": "{{nome}} ausente faz fallback seguro para 'cliente' e NUNCA retém o lead",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{nome}}, seja bem-vindo ao portal da Vexo!"
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-nome-vazio",
+          "nome": "",
+          "telefone": "5511999993001",
+          "dados": {}
+        },
+        {
+          "id": "lead-nome-nulo",
+          "nome": null,
+          "telefone": "5511999993002",
+          "dados": { "campos": {} }
+        },
+        {
+          "id": "lead-nome-preenchido",
+          "nome": "Rodrigo",
+          "telefone": "5511999993003",
+          "dados": {}
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": ["lead-nome-vazio", "lead-nome-nulo", "lead-nome-preenchido"]
+    },
+    {
+      "id": "case_5_unconfirmed_agreement_holds",
+      "description": "{{acordo}} sem confirmação humana válida retém o lead preventivamente",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Conforme conversamos: {{acordo}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-acordo-sem-confirmacao",
+          "nome": "Juliana",
+          "telefone": "5511999994001",
+          "dados": {
+            "acordo": {
+              "texto": "Desconto de 20%",
+              "confirmado_por": null,
+              "confirmado_em": null
+            }
+          }
+        },
+        {
+          "id": "lead-acordo-string-bruta",
+          "nome": "Fabio",
+          "telefone": "5511999994002",
+          "dados": {
+            "acordo": "Condição negociada no WhatsApp"
+          }
+        },
+        {
+          "id": "lead-sem-nenhum-acordo",
+          "nome": "Renata",
+          "telefone": "5511999994003",
+          "dados": {}
+        }
+      ],
+      "expectedHeldLeadIds": [
+        "lead-acordo-sem-confirmacao",
+        "lead-acordo-string-bruta",
+        "lead-sem-nenhum-acordo"
+      ],
+      "expectedSendableLeadIds": []
+    },
+    {
+      "id": "case_6_confirmed_agreement_sends",
+      "description": "{{acordo}} validado e confirmado por humano é liberado e NÃO retém o lead",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Conforme combinado: {{acordo}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-acordo-confirmado",
+          "nome": "Thiago",
+          "telefone": "5511999995001",
+          "dados": {
+            "acordo": {
+              "texto": "Parcelamento em 10x sem juros no cartão",
+              "confirmado_por": "usr-admin-gerente",
+              "confirmado_em": "2026-09-20T14:30:00Z"
+            }
+          }
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": ["lead-acordo-confirmado"]
+    },
+    {
+      "id": "case_7_banco_dados_campos",
+      "description": "Lead vindo do Banco de Dados com campos customizados em dados.campos",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{nome}}, identificamos sua empresa {{empresa}} no setor {{setor}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-banco-completo",
+          "nome": "Camila",
+          "telefone": "5511999996001",
+          "dados": {
+            "campos": {
+              "empresa": "Acme Tecnologia",
+              "setor": "Software"
+            }
+          }
+        },
+        {
+          "id": "lead-banco-faltando-setor",
+          "nome": "Bruno",
+          "telefone": "5511999996002",
+          "dados": {
+            "campos": {
+              "empresa": "Beta Logística"
+            }
+          }
+        }
+      ],
+      "expectedHeldLeadIds": ["lead-banco-faltando-setor"],
+      "expectedSendableLeadIds": ["lead-banco-completo"]
+    },
+    {
+      "id": "case_8_spreadsheet_root_columns",
+      "description": "Lead vindo de planilha com as colunas customizadas mapeadas diretamente na raiz do objeto",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{nome}}, confirmamos sua filial {{filial}} e matrícula {{matricula}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-planilha-completo",
+          "nome": "Vanessa",
+          "telefone": "5511999997001",
+          "filial": "Campinas",
+          "matricula": "98765"
+        },
+        {
+          "id": "lead-planilha-sem-matricula",
+          "nome": "Marcos",
+          "telefone": "5511999997002",
+          "filial": "Campinas"
+        }
+      ],
+      "expectedHeldLeadIds": ["lead-planilha-sem-matricula"],
+      "expectedSendableLeadIds": ["lead-planilha-completo"]
+    },
+    {
+      "id": "case_9_accent_and_space_variable",
+      "description": "Variável com acentos e espaços internos é resolvida corretamente e retém apenas os leads incompletos",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Emitido para {{razão social}} - responsável: {{nome do cliente}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-especial-completo",
+          "nome": "Paula",
+          "telefone": "5511999998001",
+          "dados": {
+            "campos": {
+              "razão social": "Comércio Silva ME",
+              "nome do cliente": "Paula Silva"
+            }
+          }
+        },
+        {
+          "id": "lead-especial-sem-cliente",
+          "nome": "Renato",
+          "telefone": "5511999998002",
+          "dados": {
+            "campos": {
+              "razão social": "Renato Auto Peças"
+            }
+          }
+        }
+      ],
+      "expectedHeldLeadIds": ["lead-especial-sem-cliente"],
+      "expectedSendableLeadIds": ["lead-especial-completo"]
+    }
+  ]
+}

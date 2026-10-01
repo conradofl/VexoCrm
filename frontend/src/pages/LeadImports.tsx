@@ -80,6 +80,12 @@ import {
   validateColumnMappings,
   findMatchingRememberedMapping,
   applyColumnMappingsToRow,
+  auditMessageVariablesAgainstLeads,
+  extractCustomFieldsFromRows,
+  getCommonCustomFields,
+  getMissingFieldCount,
+  evaluateLeadFilterRule,
+  type CustomFieldDefinition,
   type ColumnMappingItem,
   type FilterRule,
   type StepActionButton,
@@ -323,8 +329,52 @@ export default function LeadImports({
   }, [selectedFile, bancoAudience, selectedImportId, selectedImportIds, parsedRows, rawImportedRows]);
 
   const sourceRows = audienceSource.rows;
+  const isMultiSpreadsheet = selectedImportIds.length > 1 || selectedImportId === ALL_IMPORTS_VALUE;
+
+  const basesCustomFields = useMemo(() => {
+    if (sourceRows.length === 0) {
+      return {
+        commonFields: [] as CustomFieldDefinition[],
+        excludedFields: [] as Array<{ key: string; label: string; missingInBaseNames: string[]; count: number }>,
+        isMultiBase: false,
+      };
+    }
+    if (!isMultiSpreadsheet) {
+      const fields = extractCustomFieldsFromRows(sourceRows);
+      return {
+        commonFields: fields,
+        excludedFields: [],
+        isMultiBase: false,
+      };
+    }
+    // Multi-planilha: agrupa por import_id ou __importName
+    const basesMap = new Map<string, { baseId: string; baseName: string; rows: Record<string, unknown>[] }>();
+    for (const r of sourceRows) {
+      const bId = String(r.import_id || r.__importName || "default");
+      const imp = imports.find((i) => i.id === bId);
+      const bName = imp?.source_name || (r.__importName as string) || bId;
+      if (!basesMap.has(bId)) {
+        basesMap.set(bId, { baseId: bId, baseName: bName, rows: [] });
+      }
+      basesMap.get(bId)!.rows.push(r);
+    }
+    const basesList = Array.from(basesMap.values()).map((b) => ({
+      baseId: b.baseId,
+      baseName: b.baseName,
+      fields: extractCustomFieldsFromRows(b.rows),
+    }));
+    const result = getCommonCustomFields(basesList);
+    return {
+      commonFields: result.commonFields,
+      excludedFields: result.excludedFields,
+      isMultiBase: true,
+    };
+  }, [sourceRows, isMultiSpreadsheet, imports]);
 
   const spreadsheetColumns = useMemo(() => {
+    if (basesCustomFields.commonFields.length > 0) {
+      return basesCustomFields.commonFields.map((f) => f.key);
+    }
     if (sourceRows.length === 0) return [];
     const keys = new Set<string>();
     const reserved = new Set([
@@ -346,7 +396,7 @@ export default function LeadImports({
       }
     }
     return Array.from(keys);
-  }, [sourceRows]);
+  }, [basesCustomFields.commonFields, sourceRows]);
 
   const missingColumnWarnings = useMemo(() => {
     if (filterRules.length === 0 || sourceRows.length === 0) return [];
@@ -410,47 +460,15 @@ export default function LeadImports({
     if (filterRules.length === 0) return sourceRows;
     return sourceRows.filter((row) => {
       return filterRules.every((rule) => {
-        if (!rule.column) return true;
-        const hasCol =
-          rule.column in row &&
-          row[rule.column] !== undefined &&
-          row[rule.column] !== null &&
-          String(row[rule.column]).trim() !== "";
-
-        if (!hasCol) {
-          // Condição 2: se a planilha não possui a coluna:
-          // Padrão (includeMissing = false): descarta.
-          // Se o usuário marcou "Incluir mesmo assim" (includeMissing = true): mantém.
-          return !!rule.includeMissing;
-        }
-
-        const rawValue = row[rule.column];
-        const valStr = String(rawValue ?? "").trim();
-        const ruleVal = (rule.value || "").trim();
-
-        switch (rule.operator) {
-          case "equals":
-            return valStr.toLowerCase() === ruleVal.toLowerCase();
-          case "contains":
-            return valStr.toLowerCase().includes(ruleVal.toLowerCase());
-          case "gt": {
-            const num = parseFloat(valStr.replace(/[^\d\.,-]/g, "").replace(",", "."));
-            const ruleNum = parseFloat(ruleVal);
-            return !isNaN(num) && !isNaN(ruleNum) && num > ruleNum;
-          }
-          case "lt": {
-            const num = parseFloat(valStr.replace(/[^\d\.,-]/g, "").replace(",", "."));
-            const ruleNum = parseFloat(ruleVal);
-            return !isNaN(num) && !isNaN(ruleNum) && num < ruleNum;
-          }
-          default:
-            return true;
-        }
+        const fieldDef = basesCustomFields.commonFields.find((f) => f.key === rule.column);
+        return evaluateLeadFilterRule(row, rule, fieldDef);
       });
     });
-  }, [sourceRows, filterRules]);
+  }, [sourceRows, filterRules, basesCustomFields.commonFields]);
 
-  const isMultiSpreadsheet = selectedImportIds.length > 1 || selectedImportId === ALL_IMPORTS_VALUE;
+  const getMissingCountForField = (fieldKey: string) => {
+    return getMissingFieldCount(sourceRows, fieldKey);
+  };
   const previewRows = useMemo(() => filteredRows.slice(0, 15), [filteredRows]);
 
   const phoneAuditStats: PhoneAuditStats = useMemo(() => {
@@ -540,6 +558,13 @@ export default function LeadImports({
   ]);
   const [campaignTemplateStrategy, setCampaignTemplateStrategy] = useLocalStorage<CampaignTemplateStrategy>(`vexo_campaignStrategy_${activeClientId}`, "single");
   const [dispatchOptions, setDispatchOptions] = useLocalStorage<CampaignDispatchOptions>(`vexo_campaignDispatchOpts_${activeClientId}`, defaultDispatchOptions);
+
+  const preDispatchAudit = useMemo(() => {
+    const messages = campaignSequence
+      .filter((s) => s.enabled !== false)
+      .map((s) => s.text || "");
+    return auditMessageVariablesAgainstLeads(messages, filteredRows);
+  }, [campaignSequence, filteredRows]);
 
   // Scheduling & parameters states
   const [multiAgendaEnabled, setMultiAgendaEnabled] = useLocalStorage(`vexo_multiAgenda_${activeClientId}`, false);
@@ -1908,6 +1933,10 @@ export default function LeadImports({
               columnMappings={columnMappings}
               setColumnMappings={handleColumnMappingsChange}
               knownCustomFields={knownCustomFields}
+              availableCustomFields={basesCustomFields.commonFields}
+              excludedCustomFields={basesCustomFields.excludedFields}
+              isMultiBaseCustomFields={basesCustomFields.isMultiBase}
+              getMissingCountForField={getMissingCountForField}
             />
 
             <MessageSequenceStep
@@ -1978,6 +2007,7 @@ export default function LeadImports({
                 setCampaignSequence([createCampaignStep("text", 1)]);
               }}
               onNovaCampanha={handleNovaCampanha}
+              preDispatchAudit={preDispatchAudit}
             />
           </div>
 

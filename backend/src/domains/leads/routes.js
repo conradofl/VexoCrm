@@ -2522,7 +2522,7 @@ export function registerLeadsRoutes(app, deps) {
     try {
       let query = supabase
         .from("leads")
-        .select("nome, telefone, stage, temperature, tags, raw_chat_summary, created_at, last_interaction_at")
+        .select("nome, telefone, stage, temperature, tags, raw_chat_summary, created_at, last_interaction_at, dados")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false });
 
@@ -2537,7 +2537,21 @@ export function registerLeadsRoutes(app, deps) {
       if (error) throw error;
 
       const leads = data || [];
-      const csvHeader = "Nome,Telefone,Estágio,Temperatura,Tags,Última Interação,Resumo Chat\n";
+
+      // Coleta dinâmica de todas as chaves customizadas dos leads
+      const allCustomKeys = new Set();
+      leads.forEach(l => {
+        const campos = l.dados && typeof l.dados === "object" ? l.dados.campos : null;
+        if (campos && typeof campos === "object") {
+          Object.keys(campos).forEach(k => allCustomKeys.add(k));
+        }
+      });
+      const customKeyList = Array.from(allCustomKeys).sort();
+
+      const baseHeaders = ["Nome", "Telefone", "Estágio", "Temperatura", "Tags", "Última Interação", "Resumo Chat"];
+      const allHeaders = [...baseHeaders, ...customKeyList];
+      const csvHeader = allHeaders.map(h => `"${h.replace(/"/g, '""')}"`).join(",") + "\n";
+
       const csvRows = leads.map(l => {
         const nome = `"${(l.nome || '').replace(/"/g, '""')}"`;
         const fone = `"${(l.telefone || '').replace(/"/g, '""')}"`;
@@ -2546,7 +2560,16 @@ export function registerLeadsRoutes(app, deps) {
         const tgs = `"${(Array.isArray(l.tags) ? l.tags.join("; ") : '').replace(/"/g, '""')}"`;
         const last = `"${l.last_interaction_at ? new Date(l.last_interaction_at).toLocaleString('pt-BR') : ''}"`;
         const sum = `"${(l.raw_chat_summary || '').replace(/"/g, '""')}"`;
-        return `${nome},${fone},${stg},${tmp},${tgs},${last},${sum}`;
+        const baseCols = [nome, fone, stg, tmp, tgs, last, sum];
+
+        const campos = (l.dados && typeof l.dados === "object" && l.dados.campos) || {};
+        const customCols = customKeyList.map(k => {
+          const val = campos[k];
+          const strVal = val !== undefined && val !== null ? String(val) : "";
+          return `"${strVal.replace(/"/g, '""')}"`;
+        });
+
+        return [...baseCols, ...customCols].join(",");
       }).join("\n");
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");

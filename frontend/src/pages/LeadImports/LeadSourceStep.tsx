@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { InfoTip } from "@/components/InfoTip";
 import { cn } from "@/lib/utils";
 import { ALL_IMPORTS_VALUE, CRM_BASE_VALUE, type LeadImportItem } from "@/hooks/useLeadImports";
-import { getLeadField, type FilterRule, type ColumnMappingItem, type CustomFieldType } from "@/lib/leadImports/spreadsheet";
+import { getLeadField, type FilterRule, type ColumnMappingItem, type CustomFieldType, type CustomFieldDefinition } from "@/lib/leadImports/spreadsheet";
 import { darkSelectContentClass, darkSelectItemClass } from "./styles";
 import { SpreadsheetUploader } from "./SpreadsheetUploader";
 import { ColumnMappingStep } from "./ColumnMappingStep";
@@ -86,6 +86,10 @@ interface LeadSourceStepProps {
   columnMappings?: ColumnMappingItem[];
   setColumnMappings?: (mappings: ColumnMappingItem[]) => void;
   knownCustomFields?: Array<{ key: string; label: string; type: CustomFieldType }>;
+  availableCustomFields?: CustomFieldDefinition[];
+  excludedCustomFields?: Array<{ key: string; label: string; missingInBaseNames: string[]; count: number }>;
+  isMultiBaseCustomFields?: boolean;
+  getMissingCountForField?: (fieldKey: string) => number;
 }
 
 export function handleSelectSavedBaseAudience(
@@ -146,6 +150,10 @@ export function LeadSourceStep({
   columnMappings = [],
   setColumnMappings,
   knownCustomFields = [],
+  availableCustomFields,
+  excludedCustomFields = [],
+  isMultiBaseCustomFields = false,
+  getMissingCountForField,
 }: LeadSourceStepProps) {
   const [showPhoneAuditModal, setShowPhoneAuditModal] = useState(false);
 
@@ -174,6 +182,13 @@ export function LeadSourceStep({
     .reduce((acc, imp) => acc + (imp.imported_rows || 0), 0);
 
   const canShowFiltersAndPreview = hasSourceRows || parsedRows.length > 0;
+  // Se não tem campos customizados: esconder o bloco de filtros!
+  const hasCustomFields = availableCustomFields ? availableCustomFields.length > 0 : spreadsheetColumns.length > 0;
+  const canShowFilters = !isLoadingSourceRows && canShowFiltersAndPreview && hasCustomFields;
+
+  const selectableFields = availableCustomFields && availableCustomFields.length > 0
+    ? availableCustomFields
+    : spreadsheetColumns.map((c) => ({ key: c, label: c, type: "text" as const }));
 
   return (
     <Card className="border-border bg-card shadow-sm text-card-foreground rounded-2xl">
@@ -364,7 +379,7 @@ export function LeadSourceStep({
         )}
 
         {/* Dynamic Spreadsheet Filter Builder */}
-        {!isLoadingSourceRows && canShowFiltersAndPreview && (
+        {canShowFilters && (
           <div className="rounded-xl border border-indigo-100/60 bg-indigo-50/10 p-4 dark:border-indigo-950/20 dark:bg-indigo-950/5 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
@@ -379,18 +394,33 @@ export function LeadSourceStep({
               )}
             </div>
 
+            {/* Aviso de campos excluídos em multi-bases */}
+            {isMultiBaseCustomFields && excludedCustomFields.length > 0 && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-amber-300/60 bg-amber-500/10 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold">
+                    {excludedCustomFields.length} {excludedCustomFields.length === 1 ? "campo foi excluído" : "campos foram excluídos"} por não {excludedCustomFields.length === 1 ? "estar presente" : "estarem presentes"} em todas as bases selecionadas:
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {excludedCustomFields.map((f) => `${f.label} (ausente em: ${f.missingInBaseNames.join(", ")})`).join("; ")}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Help/explanation box for spreadsheet filters */}
             <div className="flex items-start gap-2.5 rounded-lg border border-blue-400/20 bg-blue-500/5 p-3 text-[11px] leading-relaxed text-blue-700 dark:text-blue-300">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
               <div className="space-y-1">
                 <p className="font-semibold">Como funciona a segmentação da planilha?</p>
                 <p>
-                  Você pode filtrar os contatos dinamicamente antes de realizar o envio. O sistema lê as colunas da base selecionada e permite criar regras de segmentação personalizadas.
+                  Você pode filtrar os contatos dinamicamente antes de realizar o envio. O sistema lê os campos customizados da base selecionada e permite criar regras tipadas de segmentação.
                 </p>
                 <ul className="list-disc pl-4 space-y-0.5 mt-1">
-                  <li><strong>Igual a:</strong> Busca exata (ex: <em>Sexo</em> igual a <em>Feminino</em>).</li>
-                  <li><strong>Contém:</strong> Busca parcial de texto (ex: <em>Interesse</em> contém <em>consórcio</em>).</li>
-                  <li><strong>Maior que / Menor que:</strong> Comparação numérica ou financeira (ex: <em>Valor</em> maior que <em>50000</em>).</li>
+                  <li><strong>Número:</strong> Comparação numérica real (40 &gt; 9, menor que, igual a).</li>
+                  <li><strong>Data:</strong> Cronologia real (anterior a, posterior a, entre datas).</li>
+                  <li><strong>Texto:</strong> Busca por texto (contém, igual a).</li>
                 </ul>
                 <p className="text-muted-foreground text-[10px] mt-1">
                   * Apenas os leads que atenderem a todas as regras ativas serão inseridos na fila de disparos.
@@ -401,28 +431,45 @@ export function LeadSourceStep({
             <div className="space-y-2">
               {filterRules.map((rule, idx) => {
                 const warning = missingColumnWarnings.find((w) => w.column === rule.column);
+                const fieldDef = selectableFields.find((f) => f.key === rule.column);
+                const effectiveType = rule.type || fieldDef?.type || "text";
+                const missingCount = getMissingCountForField ? getMissingCountForField(rule.column) : 0;
+
                 return (
                   <div key={idx} className="space-y-2">
                     <div className="flex flex-wrap gap-2 items-center bg-white dark:bg-black/35 p-2.5 rounded-xl border border-slate-200/80 dark:border-white/5 shadow-sm">
-                      <Select
-                        value={rule.column}
-                        onValueChange={(val) => {
-                          const updated = [...filterRules];
-                          updated[idx].column = val;
-                          setFilterRules(updated);
-                        }}
-                      >
-                        <SelectTrigger className="h-9 text-xs flex-1 min-w-[120px]">
-                          <SelectValue placeholder="Coluna..." />
-                        </SelectTrigger>
-                        <SelectContent className={darkSelectContentClass}>
-                          {spreadsheetColumns.map((col) => (
-                            <SelectItem key={col} value={col} className={darkSelectItemClass}>
-                              {col}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex-1 min-w-[140px] flex flex-col gap-0.5">
+                        <Select
+                          value={rule.column}
+                          onValueChange={(val) => {
+                            const updated = [...filterRules];
+                            const selectedDef = selectableFields.find((f) => f.key === val);
+                            const newType = selectedDef?.type || "text";
+                            updated[idx].column = val;
+                            updated[idx].type = newType;
+                            if (newType === "number") updated[idx].operator = "gt";
+                            else if (newType === "date") updated[idx].operator = "after";
+                            else updated[idx].operator = "contains";
+                            setFilterRules(updated);
+                          }}
+                        >
+                          <SelectTrigger className="h-9 text-xs">
+                            <SelectValue placeholder="Campo..." />
+                          </SelectTrigger>
+                          <SelectContent className={darkSelectContentClass}>
+                            {selectableFields.map((f) => (
+                              <SelectItem key={f.key} value={f.key} className={darkSelectItemClass}>
+                                {f.label || f.key} {f.type ? `(${f.type})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {missingCount > 0 && (
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400 pl-1">
+                            {missingCount} leads não têm este campo preenchido
+                          </span>
+                        )}
+                      </div>
 
                       <Select
                         value={rule.operator}
@@ -432,27 +479,77 @@ export function LeadSourceStep({
                           setFilterRules(updated);
                         }}
                       >
-                        <SelectTrigger className="h-9 text-xs max-w-[120px]">
+                        <SelectTrigger className="h-9 text-xs max-w-[130px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className={darkSelectContentClass}>
-                          <SelectItem value="equals" className={darkSelectItemClass}>Igual a</SelectItem>
-                          <SelectItem value="contains" className={darkSelectItemClass}>Contém</SelectItem>
-                          <SelectItem value="gt" className={darkSelectItemClass}>Maior que</SelectItem>
-                          <SelectItem value="lt" className={darkSelectItemClass}>Menor que</SelectItem>
+                          {effectiveType === "number" && (
+                            <>
+                              <SelectItem value="equals" className={darkSelectItemClass}>Igual a</SelectItem>
+                              <SelectItem value="gt" className={darkSelectItemClass}>Maior que</SelectItem>
+                              <SelectItem value="lt" className={darkSelectItemClass}>Menor que</SelectItem>
+                            </>
+                          )}
+                          {effectiveType === "date" && (
+                            <>
+                              <SelectItem value="before" className={darkSelectItemClass}>Anterior a</SelectItem>
+                              <SelectItem value="after" className={darkSelectItemClass}>Posterior a</SelectItem>
+                              <SelectItem value="between" className={darkSelectItemClass}>Entre</SelectItem>
+                              <SelectItem value="equals" className={darkSelectItemClass}>Na data</SelectItem>
+                            </>
+                          )}
+                          {effectiveType === "text" && (
+                            <>
+                              <SelectItem value="contains" className={darkSelectItemClass}>Contém</SelectItem>
+                              <SelectItem value="equals" className={darkSelectItemClass}>Igual a</SelectItem>
+                            </>
+                          )}
                         </SelectContent>
                       </Select>
 
-                      <Input
-                        placeholder="Valor de comparação..."
-                        value={rule.value}
-                        onChange={(e) => {
-                          const updated = [...filterRules];
-                          updated[idx].value = e.target.value;
-                          setFilterRules(updated);
-                        }}
-                        className="h-9 text-xs flex-1 min-w-[140px]"
-                      />
+                      {rule.operator === "between" ? (
+                        <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
+                          <Input
+                            placeholder="De (DD/MM/AAAA)..."
+                            value={rule.value}
+                            onChange={(e) => {
+                              const updated = [...filterRules];
+                              updated[idx].value = e.target.value;
+                              setFilterRules(updated);
+                            }}
+                            className="h-9 text-xs flex-1"
+                          />
+                          <span className="text-xs text-muted-foreground">até</span>
+                          <Input
+                            placeholder="Até (DD/MM/AAAA)..."
+                            value={rule.secondValue || ""}
+                            onChange={(e) => {
+                              const updated = [...filterRules];
+                              updated[idx].secondValue = e.target.value;
+                              setFilterRules(updated);
+                            }}
+                            className="h-9 text-xs flex-1"
+                          />
+                        </div>
+                      ) : (
+                        <Input
+                          type={effectiveType === "number" ? "number" : "text"}
+                          placeholder={
+                            effectiveType === "date"
+                              ? "Data (DD/MM/AAAA)..."
+                              : effectiveType === "number"
+                              ? "Número (ex: 40)..."
+                              : "Valor de comparação..."
+                          }
+                          value={rule.value}
+                          onChange={(e) => {
+                            const updated = [...filterRules];
+                            updated[idx].value = e.target.value;
+                            setFilterRules(updated);
+                          }}
+                          className="h-9 text-xs flex-1 min-w-[140px]"
+                        />
+                      )}
 
                       <Button
                         type="button"
@@ -495,16 +592,18 @@ export function LeadSourceStep({
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  if (spreadsheetColumns.length > 0) {
+                  if (selectableFields.length > 0) {
+                    const first = selectableFields[0];
+                    const op = first.type === "number" ? "gt" : first.type === "date" ? "after" : "equals";
                     setFilterRules([
                       ...filterRules,
-                      { column: spreadsheetColumns[0], operator: "equals", value: "" }
+                      { column: first.key, operator: op, value: "", type: first.type }
                     ]);
                   }
                 }}
                 className="w-full h-9 text-xs border-dashed border-indigo-200 hover:border-indigo-300 text-indigo-600 dark:border-indigo-800/40 dark:text-indigo-400 bg-transparent rounded-xl"
               >
-                <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Filtro de Coluna
+                <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar Filtro de Campo
               </Button>
             </div>
           </div>

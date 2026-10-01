@@ -53,8 +53,11 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
   // 3. Resolução de Links e Agendamento
   const schedulingLink =
     normalizeString(extraObj.scheduling_link) ||
+    normalizeString(extraObj.link) ||
     normalizeString(leadObj.scheduling_link) ||
+    normalizeString(leadObj.link) ||
     normalizeString(leadObj.normalized_data?.scheduling_link) ||
+    normalizeString(leadObj.normalized_data?.link) ||
     normalizeString(leadObj.normalizedData?.scheduling_link) ||
     "";
 
@@ -107,12 +110,16 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
       .replace(/\{\{\s*meeting_time\s*\}\}/gi, timeStr);
   }
 
-  // 7. Dados dinâmicos adicionais (normalized_data, dados, extraContext)
+  // 7. Dados dinâmicos adicionais (normalized_data, dados, dados.campos, extraContext)
+  const leadDados = leadObj.dados && typeof leadObj.dados === "object" ? leadObj.dados : {};
+  const customCampos = leadDados.campos && typeof leadDados.campos === "object" ? leadDados.campos : {};
+
   const customData = {
     ...leadObj,
     ...(leadObj.normalized_data || {}),
     ...(leadObj.normalizedData || {}),
-    ...(leadObj.dados || {}),
+    ...leadDados,
+    ...customCampos,
     ...extraObj,
   };
 
@@ -121,14 +128,57 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
   delete customData.combinado;
   delete customData.acordo_pendente;
 
+  // Proteção estrita de chaves de sistema: campo do cliente chamado "nome" ou "telefone"
+  // nunca sobrescreve o valor do sistema.
+  delete customData.nome;
+  delete customData.name;
+  delete customData.lead_name;
+  delete customData.cliente;
+  delete customData.telefone;
+  delete customData.phone;
+  delete customData.celular;
+  delete customData.scheduling_link;
+  delete customData.link;
+  delete customData.agendamento;
+  delete customData.meeting_date;
+  delete customData.meeting_time;
+  delete customData.campos;
+
   for (const [key, value] of Object.entries(customData)) {
     if (typeof value === "string" || typeof value === "number") {
-      const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "gi");
+      const escapedKey = String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, "gi");
       raw = raw.replace(regex, String(value));
     }
   }
 
   return raw;
+}
+
+/**
+ * Detecta placeholders/variáveis não resolvidas remanescentes no texto.
+ * A detecção é mais larga que a substituição: qualquer {{ até }},
+ * capturando acento, espaço, hífen e pontuação (ex: {{razão social}}, {{nome do cliente}}, {{CNPJ-MATRIZ}}).
+ *
+ * @param {string} text - Texto a ser inspecionado
+ * @returns {string[]} Lista de placeholders detectados (ex: ["{{razão social}}"])
+ */
+export function findUnresolvedPlaceholders(text) {
+  if (!text || typeof text !== "string") return [];
+  const matches = text.match(/\{\{\s*([^{}]+?)\s*\}\}/g);
+  if (!matches) return [];
+
+  const seen = new Set();
+  const result = [];
+  for (const match of matches) {
+    const inner = match.replace(/^\{\{\s*|\s*\}\}$/g, "").trim();
+    const normalized = `{{${inner}}}`;
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
 }
 
 /**

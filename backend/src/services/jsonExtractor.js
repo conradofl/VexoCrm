@@ -1,5 +1,5 @@
-// Extrator resiliente de JSON para saídas de LLM e Guarda de Saída do WhatsApp.
-// Garante que NENHUM JSON cru ou chave interna do contrato seja enviada ao lead.
+import { findUnresolvedPlaceholders } from "./messagePlaceholders.js";
+export { findUnresolvedPlaceholders };
 
 export const INTERNAL_CONTRACT_KEYS = [
   "status_conversa",
@@ -100,7 +100,12 @@ export function validateOutboundMessage(text) {
   }
 
   // Guarda estrita de variáveis: impede envio de templates com {{...}} ou tags não substituídas ao lead
-  if (trimmed.includes("{{") || trimmed.includes("}}") || /\{\{.*?\}\}/.test(trimmed)) {
+  const unresolvedVars = findUnresolvedPlaceholders(trimmed);
+  if (unresolvedVars.length > 0) {
+    const varName = unresolvedVars[0];
+    return { valid: false, reason: `contains_unresolved_variable:${varName}`, variable: varName, variables: unresolvedVars };
+  }
+  if (trimmed.includes("{{") || trimmed.includes("}}")) {
     return { valid: false, reason: "contains_unresolved_variable" };
   }
 

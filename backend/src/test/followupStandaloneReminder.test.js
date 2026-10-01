@@ -48,7 +48,7 @@ describe("Follow-up Lembrete Avulso (Standalone Reminder)", () => {
       const guard = validateOutboundMessage(brokenText);
 
       expect(guard.valid).toBe(false);
-      expect(guard.reason).toBe("contains_unresolved_variable");
+      expect(guard.reason).toBe("contains_unresolved_variable:{{nome}}");
     });
 
     it("guarda de saída APROVA mensagem após todas as variáveis serem substituídas", () => {

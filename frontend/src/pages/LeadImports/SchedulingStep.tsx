@@ -1,7 +1,8 @@
-import { type Dispatch, type SetStateAction, useMemo } from "react";
+import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
 import { AlertTriangle, Archive, Bot, Clock3, FilePlus2, Pause, Play, Plus, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { formatSendWindowNotice } from "@/lib/sendWindow";
 import type { CampaignDispatchOptions } from "@/hooks/useCampanhas";
+import type { CampaignPreDispatchAudit } from "@/lib/leadImports/spreadsheet";
 import { isConsultantPermissionError } from "@/hooks/useConsultantSchedules";
 import type {
   ConsultantSchedule,
@@ -80,6 +82,7 @@ interface SchedulingStepProps {
   onCancelEdit: () => void;
   /** Zera o formulario inteiro e volta ao estado de campanha nova. */
   onNovaCampanha: () => void;
+  preDispatchAudit?: CampaignPreDispatchAudit;
 }
 
 export function SchedulingStep({
@@ -122,9 +125,12 @@ export function SchedulingStep({
   editingCampaignId,
   onCancelEdit,
   onNovaCampanha,
+  preDispatchAudit,
 }: SchedulingStepProps) {
-  const { data: client } = useOptionalCrmClient(activeClientId);
-  const sendWindow = client?.n8n_settings?.send_window;
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const crmContext = useOptionalCrmClient();
+  const client = crmContext?.selectedClient;
+  const sendWindow = (client?.n8n_settings as { send_window?: any } | undefined)?.send_window;
   const sendWindowNotice = useMemo(() => formatSendWindowNotice(sendWindow), [sendWindow]);
 
   const selectedInst =
@@ -527,6 +533,34 @@ export function SchedulingStep({
           )}
         </div>
 
+        {/* Aviso de Auditoria Pré-Disparo (não bloqueia o envio) */}
+        {preDispatchAudit && preDispatchAudit.heldLeadsCount > 0 && (
+          <div className="rounded-xl border border-amber-300/60 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {preDispatchAudit.heldLeadsCount} de {preDispatchAudit.totalLeads} leads serão segurados por não terem {preDispatchAudit.variableAudits.map((v) => v.placeholder).join(", ")} preenchido
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    O disparo seguirá normalmente para os {preDispatchAudit.sendableLeadsCount} leads restantes.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowAuditModal(true)}
+                className="h-7 text-xs border-amber-500/40 hover:bg-amber-500/20 text-amber-900 dark:text-amber-100 shrink-0"
+              >
+                Ver leads afetados
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="pt-2">
           <Button
             onClick={onSubmit}
@@ -563,6 +597,50 @@ export function SchedulingStep({
             Criar nova campanha (limpa o formulário)
           </Button>
         </div>
+
+        {/* Modal de Auditoria de Variáveis / Leads Segurados */}
+        {preDispatchAudit && (
+          <Dialog open={showAuditModal} onOpenChange={setShowAuditModal}>
+            <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle className="text-sm font-bold flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Leads Segurados por Falta de Variável ({preDispatchAudit.heldLeadsCount})
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Estes leads não receberão as mensagens porque contêm variáveis que não foram preenchidas na base de dados. O restante da base ({preDispatchAudit.sendableLeadsCount} leads) será disparado normalmente.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-y-auto border rounded-xl divide-y text-xs mt-2">
+                {preDispatchAudit.heldLeads.map((lead: any, idx: number) => {
+                  const name = lead.nome || lead.name || lead.dados?.nome || "Sem nome";
+                  const phone = lead.telefone || lead.phone || "—";
+                  const missingVars = preDispatchAudit.variableAudits
+                    .filter((v) => v.missingLeads.includes(lead))
+                    .map((v) => v.placeholder);
+
+                  return (
+                    <div key={idx} className="p-3 flex items-center justify-between gap-4 bg-white dark:bg-slate-900">
+                      <div>
+                        <p className="font-semibold text-foreground">{name}</p>
+                        <p className="font-mono text-[11px] text-muted-foreground">{phone}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400 block">
+                          Falta preencher
+                        </span>
+                        <span className="font-mono text-xs text-rose-500 font-semibold">
+                          {missingVars.join(", ") || "Variável ausente"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
       </CardContent>
     </Card>
   );
