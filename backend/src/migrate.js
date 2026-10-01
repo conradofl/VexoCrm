@@ -366,6 +366,10 @@ async function isAlreadyApplied(pool, filename) {
         AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gd_contracts' AND column_name='template_id')
       )
     ) AS ok`,
+    "20261001120000_create_lead_custom_fields.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_custom_fields')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_imports' AND column_name='column_mapping')
+    ) AS ok`,
   };
 
   const query = checks[filename];

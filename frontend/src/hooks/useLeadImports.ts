@@ -7,6 +7,17 @@ const LEAD_IMPORT_REQUEST_TIMEOUT_MS = 15000;
 export const ALL_IMPORTS_VALUE = "__all__";
 export const CRM_BASE_VALUE = "__crm__";
 
+export interface LeadCustomField {
+  id: string;
+  client_id: string;
+  key: string;
+  label: string;
+  type: "text" | "number" | "date";
+  import_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LeadImportItem {
   id: string;
   client_id: string;
@@ -18,6 +29,16 @@ export interface LeadImportItem {
   uploaded_by_uid: string | null;
   uploaded_by_email: string | null;
   created_at: string;
+  column_mapping?: {
+    columns: string[];
+    mapping: Array<{
+      column: string;
+      target: "ignore" | "telefone" | "nome" | "custom";
+      label?: string;
+      type?: "text" | "number" | "date";
+      key?: string;
+    }>;
+  } | null;
 }
 
 export interface LeadImportPreviewItem {
@@ -36,11 +57,35 @@ interface CreateLeadImportPayload {
   sourceType: string;
   rows: Record<string, unknown>[];
   defaultDdd?: string;
+  columnMapping?: Array<{
+    column: string;
+    target: "ignore" | "telefone" | "nome" | "custom";
+    label?: string;
+    type?: "text" | "number" | "date";
+    key?: string;
+  }> | {
+    columns: string[];
+    mapping: Array<{
+      column: string;
+      target: "ignore" | "telefone" | "nome" | "custom";
+      label?: string;
+      type?: "text" | "number" | "date";
+      key?: string;
+    }>;
+  };
 }
 
 interface CreateLeadImportResponse {
   item: LeadImportItem;
   preview: LeadImportPreviewItem[];
+  warnings?: Array<{
+    column: string;
+    label: string;
+    key: string;
+    detectedType: string;
+    registeredType: string;
+    message: string;
+  }>;
 }
 
 interface CreateN8nDispatchPayload {
@@ -309,7 +354,34 @@ export function useCreateLeadImport() {
       queryClient.invalidateQueries({ queryKey: ["lead-imports", variables.clientId] });
       queryClient.invalidateQueries({ queryKey: ["lead-import-items", variables.clientId] });
       queryClient.invalidateQueries({ queryKey: ["leads", variables.clientId] });
+      queryClient.invalidateQueries({ queryKey: ["lead-custom-fields", variables.clientId] });
     },
+  });
+}
+
+export function useLeadCustomFields(clientId?: string | null) {
+  const { getIdToken } = useAuth();
+
+  return useQuery({
+    queryKey: ["lead-custom-fields", clientId],
+    queryFn: async (): Promise<LeadCustomField[]> => {
+      if (!clientId) return [];
+      const token = await getIdToken();
+      if (!token) return [];
+
+      const res = await fetchLeadImports(`/api/lead-custom-fields?clientId=${encodeURIComponent(clientId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to fetch custom fields: ${res.status}`);
+      }
+
+      const json = await readLeadImportsJson<{ items: LeadCustomField[] }>(res, "lead_custom_fields");
+      return json.items || [];
+    },
+    enabled: !!clientId,
+    staleTime: 60 * 1000,
   });
 }
 

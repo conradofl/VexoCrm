@@ -562,6 +562,54 @@ export function parseCsvToRows(csv) {
   return rows;
 }
 
+export function parseNumberValue(val) {
+  if (typeof val === "number") return Number.isFinite(val) ? val : NaN;
+  if (val === null || val === undefined) return NaN;
+  const s = String(val).trim().replace(/^R\$\s*/i, "").trim();
+  if (!s) return NaN;
+
+  // Se contiver espaços no meio, não é um número válido (ex: "10 20")
+  if (/\s/.test(s)) return NaN;
+
+  if (s.includes(".") && s.includes(",")) {
+    if (s.indexOf(".") < s.indexOf(",")) {
+      // Formato brasileiro: 1.500,50
+      const normalized = s.replace(/\./g, "").replace(",", ".");
+      if ((normalized.match(/\./g) || []).length > 1) return NaN;
+      if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return NaN;
+      return parseFloat(normalized);
+    } else {
+      // Formato americano: 1,500.50
+      const normalized = s.replace(/,/g, "");
+      if ((normalized.match(/\./g) || []).length > 1) return NaN;
+      if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return NaN;
+      return parseFloat(normalized);
+    }
+  }
+
+  // Dois ou mais pontos sem vírgula (ex: "1.2.3") -> inválido (dois pontos decimais)
+  if ((s.match(/\./g) || []).length > 1) {
+    return NaN;
+  }
+
+  // Duas ou mais vírgulas sem ponto (ex: "1,2,3") -> inválido
+  if ((s.match(/,/g) || []).length > 1) {
+    return NaN;
+  }
+
+  if (s.includes(",")) {
+    const normalized = s.replace(",", ".");
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return NaN;
+    return parseFloat(normalized);
+  }
+
+  if (!/^-?\d+(?:\.\d+)?$/.test(s)) {
+    return NaN;
+  }
+
+  return parseFloat(s);
+}
+
 export function normalizeHeaderKey(value) {
   const normalized = normalizeString(value);
   if (!normalized) return "";
@@ -588,31 +636,84 @@ export function pickRowValue(row, aliases) {
   return null;
 }
 
-export function normalizeImportedLead(row, clientId, defaultDdd = null) {
-  const rawTelefone = pickRowValue(row, [
-    "telefone",
-    "telefones",
-    "fone",
-    "fones",
-    "celular",
-    "celulares",
-    "whatsapp",
-    "whatsapps",
-    "phone",
-    "phones",
-    "numero",
-    "numeros",
-    "numero_telefone",
-    "numero_telefones",
-    "telefone_whatsapp",
-    "telefones_whatsapp",
-  ]);
+export function normalizeImportedLead(row, clientId, defaultDdd = null, customMapping = null) {
+  let rawTelefone = null;
+  let telefone = null;
+  let nome = null;
+  const customCampos = {};
 
-  const telefone = sanitizePhone(rawTelefone, defaultDdd);
+  const mappingItems = Array.isArray(customMapping)
+    ? customMapping
+    : Array.isArray(customMapping?.mapping)
+    ? customMapping.mapping
+    : null;
 
-  const nome = normalizeString(
-    pickRowValue(row, ["nome", "name", "cliente", "contato", "lead", "responsavel"])
-  );
+  if (mappingItems && mappingItems.length > 0) {
+    const phoneMapping = mappingItems.find((m) => m.target === "telefone");
+    const nameMapping = mappingItems.find((m) => m.target === "nome");
+    const customItems = mappingItems.filter((m) => m.target === "custom");
+
+    rawTelefone = phoneMapping ? row[phoneMapping.column] : null;
+    telefone = sanitizePhone(rawTelefone, defaultDdd);
+
+    const rawNome = nameMapping ? row[nameMapping.column] : null;
+    const cleanNome = normalizeString(rawNome);
+    nome = cleanNome || telefone;
+
+    for (const m of customItems) {
+      const normKey = m.key || normalizeHeaderKey(m.label || m.column);
+      if (!normKey) continue;
+
+      const rawVal = row[m.column] !== undefined && row[m.column] !== null
+        ? row[m.column]
+        : (row.dados && typeof row.dados === "object" && row.dados.campos ? row.dados.campos[normKey] : undefined);
+      if (rawVal === undefined || rawVal === null) continue;
+      const str = String(rawVal).trim();
+      if (str === "") continue;
+
+      if (m.type === "number") {
+        const parsed = parseNumberValue(rawVal);
+        customCampos[normKey] = !Number.isNaN(parsed) ? parsed : str;
+      } else {
+        customCampos[normKey] = str;
+      }
+    }
+  } else {
+    rawTelefone = pickRowValue(row, [
+      "telefone",
+      "telefones",
+      "fone",
+      "fones",
+      "celular",
+      "celulares",
+      "whatsapp",
+      "whatsapps",
+      "phone",
+      "phones",
+      "numero",
+      "numeros",
+      "numero_telefone",
+      "numero_telefones",
+      "telefone_whatsapp",
+      "telefones_whatsapp",
+    ]);
+
+    telefone = sanitizePhone(rawTelefone, defaultDdd);
+
+    nome = normalizeString(
+      pickRowValue(row, ["nome", "name", "cliente", "contato", "lead", "responsavel"])
+    );
+
+    // Se a linha já possuir dados.campos pré-montados
+    if (row.dados && typeof row.dados.campos === "object" && row.dados.campos) {
+      for (const [k, v] of Object.entries(row.dados.campos)) {
+        if (v !== undefined && v !== null && String(v).trim() !== "") {
+          customCampos[k] = v;
+        }
+      }
+    }
+  }
+
   const tipoCliente = normalizeString(
     pickRowValue(row, ["tipo_cliente", "tipo", "perfil", "segmento", "classificacao"])
   );
@@ -646,10 +747,17 @@ export function normalizeImportedLead(row, clientId, defaultDdd = null) {
     ])
   );
 
+  const dadosObj = {
+    telefone_bruto: rawTelefone !== null && rawTelefone !== undefined ? String(rawTelefone).trim() : null,
+  };
+  if (Object.keys(customCampos).length > 0) {
+    dadosObj.campos = customCampos;
+  }
+
   return {
     client_id: clientId,
     telefone,
-    nome,
+    nome: nome || telefone,
     tipo_cliente: tipoCliente,
     faixa_consumo: faixaConsumo,
     cidade,
@@ -657,9 +765,7 @@ export function normalizeImportedLead(row, clientId, defaultDdd = null) {
     status,
     data_hora: dataHora,
     qualificacao,
-    dados: {
-      telefone_bruto: rawTelefone !== null && rawTelefone !== undefined ? String(rawTelefone).trim() : null,
-    },
+    dados: dadosObj,
   };
 }
 

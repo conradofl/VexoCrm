@@ -12,9 +12,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { InfoTip } from "@/components/InfoTip";
 import { cn } from "@/lib/utils";
 import { ALL_IMPORTS_VALUE, CRM_BASE_VALUE, type LeadImportItem } from "@/hooks/useLeadImports";
-import { getLeadField, type FilterRule } from "@/lib/leadImports/spreadsheet";
+import { getLeadField, type FilterRule, type ColumnMappingItem, type CustomFieldType } from "@/lib/leadImports/spreadsheet";
 import { darkSelectContentClass, darkSelectItemClass } from "./styles";
 import { SpreadsheetUploader } from "./SpreadsheetUploader";
+import { ColumnMappingStep } from "./ColumnMappingStep";
 
 export interface PhoneAuditStats {
   total: number;
@@ -79,6 +80,12 @@ interface LeadSourceStepProps {
 
   bancoAudience?: BancoAudienceInfo | null;
   onDiscardBancoAudience?: () => void;
+
+  uploadedColumns?: string[];
+  rawUploadedRows?: Record<string, unknown>[];
+  columnMappings?: ColumnMappingItem[];
+  setColumnMappings?: (mappings: ColumnMappingItem[]) => void;
+  knownCustomFields?: Array<{ key: string; label: string; type: CustomFieldType }>;
 }
 
 export function handleSelectSavedBaseAudience(
@@ -134,6 +141,11 @@ export function LeadSourceStep({
   onToggleIncludeMissing,
   bancoAudience,
   onDiscardBancoAudience,
+  uploadedColumns = [],
+  rawUploadedRows = [],
+  columnMappings = [],
+  setColumnMappings,
+  knownCustomFields = [],
 }: LeadSourceStepProps) {
   const [showPhoneAuditModal, setShowPhoneAuditModal] = useState(false);
 
@@ -142,6 +154,7 @@ export function LeadSourceStep({
     setSelectedFile(null);
     setParsedRows([]);
     setFilterRules([]);
+    if (setColumnMappings) setColumnMappings([]);
   };
 
   const handleSelectSavedBase = (action: () => void) => {
@@ -325,6 +338,22 @@ export function LeadSourceStep({
             </Popover>
           </div>
         </div>
+
+        {/* Etapa de Mapeamento de Colunas da Planilha Carregada */}
+        {selectedFile && uploadedColumns.length > 0 && setColumnMappings && (
+          <ColumnMappingStep
+            columns={uploadedColumns}
+            sampleRows={rawUploadedRows}
+            mappings={columnMappings}
+            onMappingChange={setColumnMappings}
+            knownCustomFields={knownCustomFields}
+            isImporting={isImportingFile}
+            onConfirmImport={onImportSpreadsheetOnly}
+            onCancel={clearUpload}
+            totalRowsCount={rawUploadedRows.length}
+            fileName={selectedFile.name}
+          />
+        )}
 
         {/* Loading state for imported spreadsheets */}
         {isLoadingSourceRows && (

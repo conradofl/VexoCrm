@@ -25,6 +25,7 @@ import {
   useDeleteLeadImport,
   useLeadImports,
   useLeadImportItems,
+  useLeadCustomFields,
   type LeadImportItem,
   type LeadImportPreviewItem,
 } from "@/hooks/useLeadImports";
@@ -75,6 +76,11 @@ import {
   getLeadField,
   normalizeCampaignSequence,
   parseSpreadsheetFile,
+  proposeColumnMappings,
+  validateColumnMappings,
+  findMatchingRememberedMapping,
+  applyColumnMappingsToRow,
+  type ColumnMappingItem,
   type FilterRule,
   type StepActionButton,
 } from "@/lib/leadImports/spreadsheet";
@@ -236,6 +242,9 @@ export default function LeadImports({
   const [bancoAudience, setBancoAudience] = useState<BancoAudienceInfo | null>(null);
   const [defaultDdd, setDefaultDdd] = useState<string>("34");
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
+  const [rawUploadedRows, setRawUploadedRows] = useState<Record<string, unknown>[]>([]);
+  const [uploadedColumns, setUploadedColumns] = useState<string[]>([]);
+  const [columnMappings, setColumnMappings] = useState<ColumnMappingItem[]>([]);
   const [showNumbersModal, setShowNumbersModal] = useState(false);
   const [isImportingFile, setIsImportingFile] = useState(false);
   const [filterRules, setFilterRules] = useState<FilterRule[]>([]);
@@ -251,6 +260,7 @@ export default function LeadImports({
 
   // Hooks queries
   const { data: imports = [], refetch: refetchImports } = useLeadImports(activeClientId);
+  const { data: knownCustomFields = [] } = useLeadCustomFields(activeClientId);
 
   // Parâmetro de importação ativo resolvido pela função única de verdade
   const activeImportIdParam = useMemo(() => {
@@ -771,80 +781,99 @@ export default function LeadImports({
     setSelectedFile(file);
     setParseError(null);
     setParsedRows([]);
+    setRawUploadedRows([]);
+    setUploadedColumns([]);
+    setColumnMappings([]);
     setFilterRules([]);
 
     if (!file) return;
     try {
       const rows = await parseSpreadsheetFile(file);
-      const mapping = detectSpreadsheetColumns(rows);
-      const normalizedRows = rows.map((row) => {
-        const newRow = { ...row };
-        if (mapping.telefone) {
-          newRow.telefone = String(row[mapping.telefone] ?? "").trim();
-          if (mapping.telefone !== "telefone") {
-            delete newRow[mapping.telefone];
-          }
-        }
-        if (mapping.nome) {
-          newRow.nome = String(row[mapping.nome] ?? "").trim();
-          if (mapping.nome !== "nome") {
-            delete newRow[mapping.nome];
-          }
-        }
-        return newRow;
+      const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+      const remembered = findMatchingRememberedMapping(cols, imports);
+      const initialMappings = proposeColumnMappings({
+        columns: cols,
+        sampleRows: rows,
+        rememberedMapping: remembered,
+        knownCustomFields,
       });
-      const filteredNormalizedRows = normalizedRows.filter((row) => {
-        const phoneVal = String(row.telefone ?? "").trim().toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]+/g, "");
-        const nameVal = String(row.nome ?? "").trim().toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]+/g, "");
 
-        // If phone value matches header keywords (like "telefone", "whatsapp", "phone") and name matches name keywords
-        const isPhoneHeader = ["telefone", "celular", "phone", "fone", "whatsapp", "number", "numero"].some(alias => phoneVal.includes(alias));
-        const isNameHeader = ["nome", "name", "cliente", "contato", "lead", "responsavel"].some(alias => nameVal.includes(alias));
+      setRawUploadedRows(rows);
+      setUploadedColumns(cols);
+      setColumnMappings(initialMappings);
 
-        if (isPhoneHeader && isNameHeader) {
-          return false;
-        }
-
-        // Also if phone contains only letters (e.g. "telefone" or "celular"), it is definitely a header and not a phone number
-        if (phoneVal !== "" && /^[a-zA-Z_]+$/.test(phoneVal)) {
-          return false;
-        }
-
-        // Also if name matches a header and phone is empty/invalid, it is likely a header
-        if ((phoneVal === "" || phoneVal === "telefone") && ["nome", "name", "cliente", "contato", "lead", "responsavel"].includes(nameVal)) {
-          return false;
-        }
-
-        return true;
+      const mappedRows = rows.map((row) => {
+        const mapped = applyColumnMappingsToRow(row, initialMappings);
+        return {
+          ...row,
+          telefone: mapped.telefone,
+          nome: mapped.nome,
+          dados: mapped.dados,
+        };
       });
-      setParsedRows(filteredNormalizedRows);
+
+      setParsedRows(mappedRows);
       setCampaignName(file.name.replace(/\.[^/.]+$/, ""));
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Falha ao analisar a planilha.");
     }
   }
 
+  function handleColumnMappingsChange(newMappings: ColumnMappingItem[]) {
+    setColumnMappings(newMappings);
+    if (rawUploadedRows.length > 0) {
+      const updatedMappedRows = rawUploadedRows.map((row) => {
+        const mapped = applyColumnMappingsToRow(row, newMappings);
+        return {
+          ...row,
+          telefone: mapped.telefone,
+          nome: mapped.nome,
+          dados: mapped.dados,
+        };
+      });
+      setParsedRows(updatedMappedRows);
+    }
+  }
+
   async function handleImportSpreadsheetOnly() {
-    if (!selectedFile || parsedRows.length === 0) return;
+    if (!selectedFile || rawUploadedRows.length === 0) return;
+
+    const validation = validateColumnMappings(columnMappings, uploadedColumns, rawUploadedRows);
+    if (!validation.isValid) {
+      toast({
+        title: "Mapeamento inválido",
+        description: validation.errorMessage || "Verifique o mapeamento das colunas.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsImportingFile(true);
     try {
       const importRes = await createLeadImport.mutateAsync({
         clientId: activeClientId,
         sourceName: selectedFile.name,
         sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
-        rows: parsedRows,
+        rows: rawUploadedRows,
+        columnMapping: {
+          columns: uploadedColumns,
+          mapping: columnMappings,
+        },
         defaultDdd: defaultDdd || undefined,
       });
 
+      if (importRes.warnings && importRes.warnings.length > 0) {
+        for (const w of importRes.warnings) {
+          toast({
+            title: "Aviso de tipo de campo",
+            description: w.message,
+          });
+        }
+      }
+
       toast({
         title: "Planilha importada",
-        description: `A base "${selectedFile.name}" foi importada com sucesso com ${parsedRows.length} contatos.`,
+        description: `A base "${selectedFile.name}" foi importada com sucesso com ${importRes.item.imported_rows} contatos.`,
       });
 
       await refetchImports();
@@ -852,6 +881,9 @@ export default function LeadImports({
 
       setSelectedFile(null);
       setParsedRows([]);
+      setRawUploadedRows([]);
+      setUploadedColumns([]);
+      setColumnMappings([]);
       setFilterRules([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
@@ -1871,6 +1903,11 @@ export default function LeadImports({
                 setParsedRows([]);
                 setFilterRules([]);
               }}
+              uploadedColumns={uploadedColumns}
+              rawUploadedRows={rawUploadedRows}
+              columnMappings={columnMappings}
+              setColumnMappings={handleColumnMappingsChange}
+              knownCustomFields={knownCustomFields}
             />
 
             <MessageSequenceStep

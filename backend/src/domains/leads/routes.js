@@ -12,6 +12,7 @@ import {
   ensureLeadClientTable as ensureDynamicLeadClientTable,
   ensureLeadIntelligenceColumns,
   ensureLeadsClientsTicketMedioColumn,
+  ensureLeadCustomFieldsTable,
 } from "../../lead-client-tables.js";
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
@@ -26,7 +27,14 @@ import {
 } from "../../services/evolution.js";
 import { getLeadClientN8nSettings as getLeadClientN8nSettingsService } from "../../services/n8nSettings.js";
 
-import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
+import {
+  buildPhoneLookupVariants,
+  sanitizePhone,
+  normalizeHeaderKey,
+  normalizeImportedLead as defaultNormalizeImportedLead,
+  isImportedLeadEmpty as defaultIsImportedLeadEmpty,
+  buildImportPreview as defaultBuildImportPreview,
+} from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
 import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
 import {
@@ -379,7 +387,7 @@ export function registerLeadsRoutes(app, deps) {
 
   const {
     buildDispatchLeads,
-    buildImportPreview,
+    buildImportPreview: inputBuildImportPreview,
     ensureDb,
     ensureSharedRoutePageAccess,
     extractManagedAccessClaims,
@@ -388,12 +396,12 @@ export function registerLeadsRoutes(app, deps) {
     getLeadClientN8nSettings,
     internalErrorPayloadDetails,
     isDuplicateKeyError,
-    isImportedLeadEmpty,
+    isImportedLeadEmpty: inputIsImportedLeadEmpty,
     isMissingSchemaError,
     leadsTableName,
     listAllFirebaseUsers,
     maskN8nSettings,
-    normalizeImportedLead,
+    normalizeImportedLead: inputNormalizeImportedLead,
     normalizeIsoDate,
     normalizeString,
     normalizeTenantKey,
@@ -412,6 +420,17 @@ export function registerLeadsRoutes(app, deps) {
     validateLeadWebhookBearer,
     validateN8nInboundBearer,
   } = deps;
+
+  const normalizeImportedLead = inputNormalizeImportedLead || defaultNormalizeImportedLead;
+  const isImportedLeadEmpty = inputIsImportedLeadEmpty || defaultIsImportedLeadEmpty;
+  const buildImportPreview = inputBuildImportPreview || defaultBuildImportPreview;
+
+  // Bootstrap idempotente da tabela lead_custom_fields e coluna column_mapping
+  if (pgDatabasePool) {
+    ensureLeadCustomFieldsTable(pgDatabasePool).catch((err) => {
+      console.warn("[leads-routes] ensureLeadCustomFieldsTable failed:", err?.message || err);
+    });
+  }
 
   // P0.1 SECURITY FIX: SSRF in /api/sheets - Add authentication, validation, and timeout
   const VALID_GOOGLE_SHEETS_REGEX = /^[a-zA-Z0-9-_]{44}$/; // UUID do Google Sheets
@@ -2829,7 +2848,7 @@ export function registerLeadsRoutes(app, deps) {
     try {
       const { data, error } = await supabase
         .from("lead_imports")
-        .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at")
+        .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at, column_mapping")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -2842,6 +2861,31 @@ export function registerLeadsRoutes(app, deps) {
     } catch (error) {
       console.error("lead imports query error:", error);
       sendError(res, 500, "LEAD_IMPORTS_QUERY_FAILED", "Failed to query imported spreadsheets");
+    }
+  });
+
+  app.get("/api/lead-custom-fields", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const requestedClientId = normalizeString(req.query.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("lead_custom_fields")
+        .select("id, client_id, key, label, type, import_id, created_at, updated_at")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        throw error;
+      }
+
+      res.json({ items: data || [] });
+    } catch (error) {
+      console.error("lead custom fields query error:", error);
+      sendError(res, 500, "LEAD_CUSTOM_FIELDS_QUERY_FAILED", "Failed to query custom fields");
     }
   });
 
@@ -3052,6 +3096,12 @@ export function registerLeadsRoutes(app, deps) {
     const sourceType = normalizeString(req.body?.sourceType) || "spreadsheet";
     const defaultDdd = normalizeString(req.body?.defaultDdd);
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+    const columnMapping = req.body?.columnMapping || req.body?.mapping || null;
+    const mappingItems = Array.isArray(columnMapping)
+      ? columnMapping
+      : Array.isArray(columnMapping?.mapping)
+      ? columnMapping.mapping
+      : null;
 
     if (!clientId || !rows) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId or rows");
@@ -3069,20 +3119,70 @@ export function registerLeadsRoutes(app, deps) {
     }
 
     try {
+      // 1. Processamento e identificação de campos customizados conhecidos
+      const typeWarnings = [];
+      const fieldsToInsert = [];
+      if (Array.isArray(mappingItems)) {
+        const customItems = mappingItems.filter((m) => m && m.target === "custom");
+        for (const item of customItems) {
+          const key = item.key || normalizeHeaderKey(item.label || item.column);
+          const label = item.label || item.column;
+          const detectedType = item.type || "text";
+
+          const { data: existingField } = await supabase
+            .from("lead_custom_fields")
+            .select("id, client_id, key, label, type, import_id")
+            .eq("client_id", clientId)
+            .eq("key", key)
+            .maybeSingle();
+
+          if (existingField) {
+            // Reaproveita campo existente sem sobrescrever o tipo caso haja divergência
+            if (existingField.type !== detectedType) {
+              typeWarnings.push({
+                column: item.column,
+                label,
+                key,
+                detectedType,
+                registeredType: existingField.type,
+                message: `A coluna '${item.column}' veio com valores do tipo '${detectedType}', mas o campo '${label}' já está cadastrado como '${existingField.type}'. O tipo original foi mantido.`,
+              });
+            }
+          } else {
+            // Novo campo customizado a ser cadastrado com seu import_id correto
+            fieldsToInsert.push({
+              key,
+              label,
+              type: detectedType,
+            });
+          }
+        }
+      }
+
       const filteredRows = rows.filter(row => !isRowHeader(row));
-      const mapping = detectImportColumns(filteredRows);
+      const autoMapping = detectImportColumns(filteredRows);
       const parsedItems = filteredRows.map((row, index) => {
         const enrichedRow = { ...row };
-        if (mapping.telefone && !enrichedRow.telefone) {
-          enrichedRow.telefone = row[mapping.telefone];
-        }
-        if (mapping.nome && !enrichedRow.nome) {
-          enrichedRow.nome = row[mapping.nome];
+        if (!mappingItems) {
+          if (autoMapping.telefone && !enrichedRow.telefone) {
+            enrichedRow.telefone = row[autoMapping.telefone];
+          }
+          if (autoMapping.nome && !enrichedRow.nome) {
+            enrichedRow.nome = row[autoMapping.nome];
+          }
         }
 
-        const normalized = normalizeImportedLead(enrichedRow, clientId, defaultDdd);
+        const normalized = normalizeImportedLead(
+          enrichedRow,
+          clientId,
+          defaultDdd,
+          mappingItems || null
+        );
         const imported = !!normalized.telefone;
-        const rawPhone = String(enrichedRow.telefone ?? "").trim();
+        const phoneMapping = mappingItems?.find((m) => m.target === "telefone");
+        const rawPhone = phoneMapping
+          ? String(row[phoneMapping.column] ?? "").trim()
+          : String(enrichedRow.telefone ?? "").trim();
         const rawDigits = rawPhone.replace(/\D/g, "");
         const skipReason = imported
           ? null
@@ -3121,14 +3221,30 @@ export function registerLeadsRoutes(app, deps) {
           total_rows: parsedItems.length,
           imported_rows: validRows.length,
           skipped_rows: skippedRows,
+          column_mapping: columnMapping || null,
           uploaded_by_uid: req.authAccess?.uid || null,
           uploaded_by_email: req.authAccess?.email || null,
         })
-        .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at")
+        .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at, column_mapping")
         .single();
 
       if (importError) {
         throw importError;
+      }
+
+      if (importRecord?.id && fieldsToInsert.length > 0) {
+        const seenKeys = new Set();
+        for (const field of fieldsToInsert) {
+          if (seenKeys.has(field.key)) continue;
+          seenKeys.add(field.key);
+          await supabase.from("lead_custom_fields").insert({
+            client_id: clientId,
+            key: field.key,
+            label: field.label,
+            type: field.type,
+            import_id: importRecord.id,
+          });
+        }
       }
 
       const importItems = parsedItems.map((item) => ({
@@ -3151,6 +3267,7 @@ export function registerLeadsRoutes(app, deps) {
       res.status(201).json({
         item: importRecord,
         preview: buildImportPreview(parsedItems),
+        warnings: typeWarnings,
       });
     } catch (error) {
       console.error("lead import create error:", error);
