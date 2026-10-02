@@ -7,14 +7,24 @@ import type { ActionAlert } from "@/hooks/useDashboard";
 
 interface Block3ActionAlertsProps {
   alerts: ActionAlert[];
+  // Algum aviso não pôde ser avaliado (faltou um número de que ele depende): a lista pode estar incompleta
+  incomplete?: boolean;
 }
 
-export function Block3ActionAlerts({ alerts }: Block3ActionAlertsProps) {
+const INCOMPLETE_NOTE = "Não foi possível verificar todos os avisos agora — esta lista pode estar incompleta.";
+
+export function Block3ActionAlerts({ alerts, incomplete = false }: Block3ActionAlertsProps) {
   const navigate = useNavigate();
 
-  // Se o dado não suporta a frase, nenhuma frase/aviso aparece (sem aviso fixo decorativo)
+  // Se o dado não suporta a frase, nenhuma frase/aviso aparece (sem aviso fixo decorativo).
+  // Mas se algum aviso não pôde ser avaliado, dizer isso: silêncio aqui pareceria "está tudo bem".
   if (!alerts || alerts.length === 0) {
-    return null;
+    if (!incomplete) return null;
+    return (
+      <p role="status" className="text-xs text-muted-foreground">
+        {INCOMPLETE_NOTE}
+      </p>
+    );
   }
 
   // No máximo 3 frases
@@ -93,6 +103,11 @@ export function Block3ActionAlerts({ alerts }: Block3ActionAlertsProps) {
           );
         })}
       </div>
+      {incomplete && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {INCOMPLETE_NOTE}
+        </p>
+      )}
     </section>
   );
 }

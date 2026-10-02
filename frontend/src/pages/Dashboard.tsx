@@ -93,13 +93,14 @@ export default function Dashboard({
             summary={data.summary}
             hasProposalsAndContracts={data.hasProposalsAndContracts}
             periodLabel={periodLabel}
+            unavailableBlocks={data.unavailableBlocks}
           />
 
           {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}
           <Block2Rankings rankings={data.rankings} />
 
           {/* Terceiro bloco: o que fazer agora (no máximo 3 frases com ação direta) */}
-          <Block3ActionAlerts alerts={data.alerts} />
+          <Block3ActionAlerts alerts={data.alerts} incomplete={data.unavailableBlocks?.includes("alerts")} />
         </div>
       ) : null}
     </PageShell>

@@ -13,8 +13,11 @@
 // 6. Rankings respeitam volume mínimo (mínimo de 30 envios em mensagens).
 // 7. Motivos de falha agrupados somam exatamente 100%.
 // 8. Avisos de ação derivados estritamente dos números (máximo 3, só aparecem quando a condição for verdadeira).
+// 9. Cada bloco falha sozinho. Bloco que não pôde ser calculado vira `null` no payload e entra em
+//    `unavailableBlocks` — indisponível NÃO é zero. Só vira erro quando nenhum bloco foi calculado.
 
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
+import { isMissingSchemaError } from "./analytics.js";
 import { MESSAGE_EFFECTIVENESS_MIN_SENT, MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS } from "./messageEffectiveness.js";
 import { resolveChipDailyLimit } from "./chipQuota.js";
 
@@ -211,6 +214,49 @@ export async function ensureDashboardMetricsCacheTable(pool) {
 }
 
 /**
+ * Registra no log do servidor POR QUE um bloco do dashboard não pôde ser calculado:
+ * nome do bloco, tenant, período, código e mensagem do Postgres. Sem isso a causa só
+ * existia na resposta HTTP e ninguém a via. Schema ausente (tabela/coluna que o tenant
+ * não tem) é caso esperado → warn; o resto é falha de verdade → error.
+ */
+function logBlockFailure(blockName, clientId, period, err) {
+  const code = err?.code ? ` [${err.code}]` : "";
+  const message = String(err?.message || err);
+  const line = `[dashboard] bloco "${blockName}" indisponível (client=${clientId}, period=${period})${code}: ${message}`;
+  if (isMissingSchemaError(err)) console.warn(line);
+  else console.error(line);
+}
+
+/**
+ * Cria o executor de blocos: cada bloco roda isolado; se lançar, o erro é registrado,
+ * o nome entra em `unavailable` e o valor volta como `null` — nunca como zero.
+ */
+function createBlockRunner(clientId, period, unavailable, failures = []) {
+  return async function runBlock(name, fn) {
+    try {
+      return { ok: true, value: await fn(), error: null };
+    } catch (err) {
+      logBlockFailure(name, clientId, period, err);
+      unavailable.push(name);
+      failures.push({ name, error: err });
+      return { ok: false, value: null, error: err };
+    }
+  };
+}
+
+// Blocos que entram na regra "só devolve erro quando nada pôde ser calculado".
+// Propostas/contratos ficam de fora: um tenant sem Geração Digital não os calcula nunca.
+const CORE_BLOCKS = [
+  "summary.sent",
+  "summary.replied",
+  "summary.meetings",
+  "rankings.messages",
+  "rankings.chips",
+  "rankings.regions",
+  "rankings.failureReasons",
+];
+
+/**
  * Executa o cálculo analítico completo para um tenant e período.
  * Esta função deve ser chamada apenas na pré-computação ou atualização em background,
  * nunca diretamente no ciclo de renderização síncrona da tela se o dado já estiver em cache.
@@ -223,6 +269,10 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
   const rawOrCanonicalPhone = `lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")}`;
 
+  const unavailableBlocks = [];
+  const blockFailures = [];
+  const runBlock = createBlockRunner(clientId, normalizedPeriod, unavailableBlocks, blockFailures);
+
   // ── Bloco 1: Métricas do Topo ───────────────────────────────────────────
 
   // 1. Enviados (atual e anterior)
@@ -233,15 +283,18 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     FROM public.campaign_dispatch_runs
     WHERE client_id = $1 AND status = 'sent';
   `;
-  const { rows: sentRows } = await pool.query(sentQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-    previousStart.toISOString(),
-    previousEnd.toISOString(),
-  ]);
-  const sentCurrent = sentRows[0]?.current_sent || 0;
-  const sentPrevious = sentRows[0]?.previous_sent || 0;
+  const sentBlock = await runBlock("summary.sent", async () => {
+    const { rows } = await pool.query(sentQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+      previousStart.toISOString(),
+      previousEnd.toISOString(),
+    ]);
+    return { current: rows[0]?.current_sent || 0, previous: rows[0]?.previous_sent || 0 };
+  });
+  const sentCurrent = sentBlock.ok ? sentBlock.value.current : null;
+  const sentPrevious = sentBlock.ok ? sentBlock.value.previous : null;
 
   // 2. Responderam (cruzamento provado por telefone canônico com janela de 14 dias)
   const repliesQuery = `
@@ -272,17 +325,30 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       COUNT(*) FILTER (WHERE replied AND sent_at >= $4 AND sent_at < $5)::int AS previous_replied
     FROM valid_runs;
   `;
-  const { rows: replyRows } = await pool.query(repliesQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-    previousStart.toISOString(),
-    previousEnd.toISOString(),
-  ]);
-  const repliedCurrent = replyRows[0]?.current_replied || 0;
-  const repliedPrevious = replyRows[0]?.previous_replied || 0;
-  const responseRateCurrent = sentCurrent > 0 ? Number(((repliedCurrent / sentCurrent) * 100).toFixed(1)) : 0;
-  const responseRatePrevious = sentPrevious > 0 ? Number(((repliedPrevious / sentPrevious) * 100).toFixed(1)) : 0;
+  const repliedBlock = await runBlock("summary.replied", async () => {
+    const { rows } = await pool.query(repliesQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+      previousStart.toISOString(),
+      previousEnd.toISOString(),
+    ]);
+    return { current: rows[0]?.current_replied || 0, previous: rows[0]?.previous_replied || 0 };
+  });
+  const repliedCurrent = repliedBlock.ok ? repliedBlock.value.current : null;
+  const repliedPrevious = repliedBlock.ok ? repliedBlock.value.previous : null;
+  // A taxa precisa dos dois números (respostas e envios). Faltando um, a taxa é indisponível — não 0%.
+  const bothCountsOk = sentBlock.ok && repliedBlock.ok;
+  const responseRateCurrent = !bothCountsOk
+    ? null
+    : sentCurrent > 0
+    ? Number(((repliedCurrent / sentCurrent) * 100).toFixed(1))
+    : 0;
+  const responseRatePrevious = !bothCountsOk
+    ? null
+    : sentPrevious > 0
+    ? Number(((repliedPrevious / sentPrevious) * 100).toFixed(1))
+    : 0;
 
   // 3. Agendaram Reunião (followup_schedules + crm_consultant_schedules)
   const meetingsQuery = `
@@ -318,15 +384,18 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
         ), 0)
       )::int AS previous_meetings;
   `;
-  const { rows: meetingRows } = await pool.query(meetingsQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-    previousStart.toISOString(),
-    previousEnd.toISOString(),
-  ]);
-  const meetingsCurrent = meetingRows[0]?.current_meetings || 0;
-  const meetingsPrevious = meetingRows[0]?.previous_meetings || 0;
+  // followup_schedules + crm_consultant_schedules numa consulta só: se uma das duas faltar o bloco
+  // inteiro fica indisponível — somar só uma das tabelas daria um número parcial que parece completo.
+  const meetingsBlock = await runBlock("summary.meetings", async () => {
+    const { rows } = await pool.query(meetingsQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+      previousStart.toISOString(),
+      previousEnd.toISOString(),
+    ]);
+    return { current: rows[0]?.current_meetings || 0, previous: rows[0]?.previous_meetings || 0 };
+  });
 
   // 4 & 5. Propostas Criadas e Contratos Fechados
   // Verifica se tenant usa esses módulos
@@ -346,8 +415,19 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       )
     ) AS has_gd;
   `;
-  const { rows: gdUsageRows } = await pool.query(gdUsageQuery, [clientId]);
-  const hasProposalsAndContracts = Boolean(gdUsageRows[0]?.has_gd);
+  // Tabela de GD ausente = tenant que não usa Geração Digital: caso esperado, os dois números
+  // ficam escondidos (regra 5) e o painel segue. Qualquer outro erro: não dá para saber se o
+  // tenant usa GD, então os dois ficam indisponíveis (e não zerados nem sumidos sem aviso).
+  let hasProposalsAndContracts = false;
+  try {
+    const { rows: gdUsageRows } = await pool.query(gdUsageQuery, [clientId]);
+    hasProposalsAndContracts = Boolean(gdUsageRows[0]?.has_gd);
+  } catch (err) {
+    logBlockFailure("summary.gdUsage", clientId, normalizedPeriod, err);
+    if (!isMissingSchemaError(err)) {
+      unavailableBlocks.push("summary.proposals", "summary.contracts");
+    }
+  }
 
   let proposalsData = null;
   let contractsData = null;
@@ -360,20 +440,19 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       FROM public.gd_proposals p
       WHERE (p.tenant_id::text = $1 OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id = p.tenant_id AND t.name ILIKE $1));
     `;
-    const { rows: proposalRows } = await pool.query(proposalsQuery, [
+    const proposalsBlock = await runBlock("summary.proposals", async () => {
+      const { rows } = await pool.query(proposalsQuery, [
       clientId,
       currentStart.toISOString(),
       currentEnd.toISOString(),
       previousStart.toISOString(),
       previousEnd.toISOString(),
     ]);
-    const proposalsCurrent = proposalRows[0]?.current_proposals || 0;
-    const proposalsPrevious = proposalRows[0]?.previous_proposals || 0;
-    proposalsData = {
-      current: proposalsCurrent,
-      previous: proposalsPrevious,
-      delta: calculateDelta(proposalsCurrent, proposalsPrevious),
-    };
+      const current = rows[0]?.current_proposals || 0;
+      const previous = rows[0]?.previous_proposals || 0;
+      return { current, previous, delta: calculateDelta(current, previous) };
+    });
+    proposalsData = proposalsBlock.value;
 
     const contractsQuery = `
       SELECT
@@ -394,20 +473,19 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       FROM public.gd_contracts c
       WHERE (c.tenant_id::text = $1 OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id = c.tenant_id AND t.name ILIKE $1));
     `;
-    const { rows: contractRows } = await pool.query(contractsQuery, [
+    const contractsBlock = await runBlock("summary.contracts", async () => {
+      const { rows } = await pool.query(contractsQuery, [
       clientId,
       currentStart.toISOString(),
       currentEnd.toISOString(),
       previousStart.toISOString(),
       previousEnd.toISOString(),
     ]);
-    const contractsCurrent = contractRows[0]?.current_contracts || 0;
-    const contractsPrevious = contractRows[0]?.previous_contracts || 0;
-    contractsData = {
-      current: contractsCurrent,
-      previous: contractsPrevious,
-      delta: calculateDelta(contractsCurrent, contractsPrevious),
-    };
+      const current = rows[0]?.current_contracts || 0;
+      const previous = rows[0]?.previous_contracts || 0;
+      return { current, previous, delta: calculateDelta(current, previous) };
+    });
+    contractsData = contractsBlock.value;
   }
 
   // ── Bloco 2: Quatro Rankings Curtos (3 linhas cada, melhor e pior) ──────
@@ -448,15 +526,19 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     HAVING COUNT(*) >= $4
     ORDER BY reply_rate DESC;
   `;
-  const { rows: messageEffectivenessRows } = await pool.query(messageRankingQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-    MESSAGE_EFFECTIVENESS_MIN_SENT,
-  ]);
+  const messageRankingBlock = await runBlock("rankings.messages", async () => {
+    const { rows } = await pool.query(messageRankingQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+      MESSAGE_EFFECTIVENESS_MIN_SENT,
+    ]);
+    return rows;
+  });
+  const messageEffectivenessRows = messageRankingBlock.value;
 
-  let rankingMensagens = [];
-  if (messageEffectivenessRows.length > 0) {
+  let rankingMensagens = messageRankingBlock.ok ? [] : null;
+  if (messageEffectivenessRows && messageEffectivenessRows.length > 0) {
     if (messageEffectivenessRows.length <= 3) {
       rankingMensagens = messageEffectivenessRows;
     } else {
@@ -470,6 +552,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   }
 
   // 2. Chip — envios, respostas e cota consumida por instância
+  // evolution_instance_daily_usage.instance_id é criada como TEXT (chipQuota.js) e como UUID
+  // (evolution.js); quem criou primeiro define o tipo em cada banco. Comparar com os DOIS lados
+  // em ::text funciona nos dois casos — `uuid = text` estourava e derrubava o painel inteiro.
   const chipQuery = `
     SELECT
       i.id AS instance_id,
@@ -481,24 +566,18 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
         (
           SELECT sent_count
           FROM public.evolution_instance_daily_usage
-          WHERE instance_id = i.id::text AND date = CURRENT_DATE
+          WHERE instance_id::text = i.id::text AND date = CURRENT_DATE
           LIMIT 1
         ), 0
       )::int AS sent_today
     FROM public.lead_client_evolution_instances i
     LEFT JOIN public.evolution_instance_daily_usage u
-      ON u.instance_id = i.id::text
+      ON u.instance_id::text = i.id::text
       AND u.date >= $2::date AND u.date <= $3::date
     WHERE i.client_id = $1
     GROUP BY i.id, i.name, i.chip_state, i.daily_limit_override
     ORDER BY sent_period DESC;
   `;
-  const { rows: chipRows } = await pool.query(chipQuery, [
-    clientId,
-    currentStart.toISOString().slice(0, 10),
-    currentEnd.toISOString().slice(0, 10),
-  ]);
-
   // Respostas associadas a cada instância através de campaign_dispatches
   const instanceRepliesQuery = `
     WITH runs_by_instance AS (
@@ -531,35 +610,46 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     FROM runs_by_instance
     GROUP BY evolution_instance_id;
   `;
-  const { rows: instReplyRows } = await pool.query(instanceRepliesQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-  ]);
-  const repliesByInstance = new Map(instReplyRows.map((r) => [String(r.instance_id), r]));
+  // Envios por chip e respostas por chip são um número só na tela: se uma das consultas cair,
+  // o ranking inteiro fica indisponível (respostas desconhecidas não viram "0 respostas").
+  const chipsBlock = await runBlock("rankings.chips", async () => {
+    const { rows: chipRows } = await pool.query(chipQuery, [
+      clientId,
+      currentStart.toISOString().slice(0, 10),
+      currentEnd.toISOString().slice(0, 10),
+    ]);
 
-  const chipList = chipRows.map((chip) => {
-    const quotaLimit = resolveChipDailyLimit(chip);
-    const instStats = repliesByInstance.get(String(chip.instance_id));
-    const enviados = instStats ? instStats.sent_count : chip.sent_period;
-    const respostas = instStats ? instStats.replied_count : 0;
-    const quotaPct = quotaLimit > 0 ? Math.round((chip.sent_today / quotaLimit) * 100) : 0;
+    const { rows: instReplyRows } = await pool.query(instanceRepliesQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+    ]);
+    const repliesByInstance = new Map(instReplyRows.map((r) => [String(r.instance_id), r]));
 
-    return {
-      instanceId: chip.instance_id,
-      name: chip.instance_name || String(chip.instance_id),
-      chipState: chip.chip_state || "cold",
-      sent: enviados,
-      replies: respostas,
-      sentToday: chip.sent_today,
-      quotaLimit,
-      quotaConsumedText: `${chip.sent_today} de ${quotaLimit} (${quotaPct}%)`,
-      quotaPercentage: quotaPct,
-    };
+    return chipRows.map((chip) => {
+      const quotaLimit = resolveChipDailyLimit(chip);
+      const instStats = repliesByInstance.get(String(chip.instance_id));
+      const enviados = instStats ? instStats.sent_count : chip.sent_period;
+      const respostas = instStats ? instStats.replied_count : 0;
+      const quotaPct = quotaLimit > 0 ? Math.round((chip.sent_today / quotaLimit) * 100) : 0;
+
+      return {
+        instanceId: chip.instance_id,
+        name: chip.instance_name || String(chip.instance_id),
+        chipState: chip.chip_state || "cold",
+        sent: enviados,
+        replies: respostas,
+        sentToday: chip.sent_today,
+        quotaLimit,
+        quotaConsumedText: `${chip.sent_today} de ${quotaLimit} (${quotaPct}%)`,
+        quotaPercentage: quotaPct,
+      };
+    });
   });
+  const chipList = chipsBlock.value;
 
-  let rankingChips = [];
-  if (chipList.length > 0) {
+  let rankingChips = chipsBlock.ok ? [] : null;
+  if (chipList && chipList.length > 0) {
     if (chipList.length <= 3) {
       rankingChips = chipList;
     } else {
@@ -606,26 +696,29 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     GROUP BY ddd, cidade
     ORDER BY sent DESC;
   `;
-  const { rows: regionRows } = await pool.query(regionQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-  ]);
+  const regionBlock = await runBlock("rankings.regions", async () => {
+    const { rows: regionRows } = await pool.query(regionQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+    ]);
 
-  const regionList = regionRows.map((r) => {
-    const label = r.cidade ? `${r.cidade} (DDD ${r.ddd})` : `DDD ${r.ddd}`;
-    return {
-      label,
-      ddd: r.ddd,
-      cidade: r.cidade || null,
-      sent: r.sent,
-      replies: r.replies,
-      replyRate: r.reply_rate,
-    };
+    return regionRows.map((r) => {
+      const label = r.cidade ? `${r.cidade} (DDD ${r.ddd})` : `DDD ${r.ddd}`;
+      return {
+        label,
+        ddd: r.ddd,
+        cidade: r.cidade || null,
+        sent: r.sent,
+        replies: r.replies,
+        replyRate: r.reply_rate,
+      };
+    });
   });
+  const regionList = regionBlock.value;
 
-  let rankingRegiao = [];
-  if (regionList.length > 0) {
+  let rankingRegiao = regionBlock.ok ? [] : null;
+  if (regionList && regionList.length > 0) {
     if (regionList.length <= 3) {
       rankingRegiao = regionList;
     } else {
@@ -646,88 +739,108 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       )
       AND created_at >= $2 AND created_at < $3;
   `;
-  const { rows: failedRows } = await pool.query(failureQuery, [
-    clientId,
-    currentStart.toISOString(),
-    currentEnd.toISOString(),
-  ]);
+  const failuresBlock = await runBlock("rankings.failureReasons", async () => {
+    const { rows: failedRows } = await pool.query(failureQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+    ]);
 
-  const countsByCategory = {
-    "Número inexistente": 0,
-    "Sem WhatsApp": 0,
-    "Chip fora do ar": 0,
-    "Variável sem valor": 0,
-    Outros: 0,
-  };
+    const countsByCategory = {
+      "Número inexistente": 0,
+      "Sem WhatsApp": 0,
+      "Chip fora do ar": 0,
+      "Variável sem valor": 0,
+      Outros: 0,
+    };
 
-  for (const row of failedRows) {
-    const cat = categorizeFailureReason(row.error_message, row.status);
-    countsByCategory[cat] = (countsByCategory[cat] || 0) + 1;
-  }
+    for (const row of failedRows) {
+      const cat = categorizeFailureReason(row.error_message, row.status);
+      countsByCategory[cat] = (countsByCategory[cat] || 0) + 1;
+    }
 
-  const rawFailureList = Object.entries(countsByCategory)
-    .filter(([_, count]) => count > 0)
-    .map(([reason, count]) => ({ reason, count }))
-    .sort((a, b) => b.count - a.count);
+    const rawFailureList = Object.entries(countsByCategory)
+      .filter(([_, count]) => count > 0)
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count);
 
-  const normalizedFailures = normalizePercentages(rawFailureList);
-  // Mantém no máximo 3 linhas
-  const rankingMotivoFalha = normalizedFailures.slice(0, 3);
-  // Re-normaliza se foram selecionadas <= 3 linhas de mais opções
-  const finalRankingMotivoFalha = normalizePercentages(rankingMotivoFalha);
+    const normalizedFailures = normalizePercentages(rawFailureList);
+    // Mantém no máximo 3 linhas
+    const rankingMotivoFalha = normalizedFailures.slice(0, 3);
+    // Re-normaliza se foram selecionadas <= 3 linhas de mais opções
+    const finalRankingMotivoFalha = normalizePercentages(rankingMotivoFalha);
+    return { failedRows, countsByCategory, ranking: finalRankingMotivoFalha };
+  });
+  const failedRows = failuresBlock.ok ? failuresBlock.value.failedRows : null;
+  const countsByCategory = failuresBlock.ok ? failuresBlock.value.countsByCategory : null;
+  const finalRankingMotivoFalha = failuresBlock.ok ? failuresBlock.value.ranking : null;
 
   // ── Bloco 3: O que fazer agora (No máximo 3 frases com ação) ────────────
+  // Cada aviso só é avaliado quando os números de que depende existem. Número indisponível
+  // não dispara nem "apaga" aviso por engano: o aviso fica não avaliado e o bloco `alerts`
+  // entra em unavailableBlocks, para a tela dizer que esta lista pode estar incompleta.
   const actionAlerts = [];
+  let alertsNotEvaluated = false;
 
   // Alerta 1: Chip com percentual de inválidos acima do normal
-  const totalFailedCount = failedRows.length;
-  const invalidCount = (countsByCategory["Número inexistente"] || 0) + (countsByCategory["Sem WhatsApp"] || 0);
-  const totalRunsPeriod = sentCurrent + totalFailedCount;
-  const invalidPercentage = totalRunsPeriod > 0 ? (invalidCount / totalRunsPeriod) * 100 : 0;
+  if (sentBlock.ok && failuresBlock.ok) {
+    const totalFailedCount = failedRows.length;
+    const invalidCount = (countsByCategory["Número inexistente"] || 0) + (countsByCategory["Sem WhatsApp"] || 0);
+    const totalRunsPeriod = sentCurrent + totalFailedCount;
+    const invalidPercentage = totalRunsPeriod > 0 ? (invalidCount / totalRunsPeriod) * 100 : 0;
 
-  if (invalidCount >= 3 && invalidPercentage > 15) {
-    actionAlerts.push({
-      id: "alert_invalid_numbers",
-      text: "Chip com percentual de inválidos acima do normal — limpe a lista antes do próximo disparo.",
-      actionLabel: "Limpar lista",
-      actionUrl: "/crm/campanhas",
-      severity: "warning",
-    });
-  }
-
-  // Alerta 2: Campanha com taxa de resposta muito abaixo das outras
-  if (messageEffectivenessRows.length >= 2) {
-    const avgReplyRate =
-      messageEffectivenessRows.reduce((s, r) => s + r.reply_rate, 0) / messageEffectivenessRows.length;
-    const worstCampaign = messageEffectivenessRows[messageEffectivenessRows.length - 1];
-    if (worstCampaign && worstCampaign.reply_rate < avgReplyRate * 0.5 && worstCampaign.reply_rate <= 10) {
+    if (invalidCount >= 3 && invalidPercentage > 15) {
       actionAlerts.push({
-        id: "alert_underperforming_campaign",
-        text: `Campanha com taxa de resposta muito abaixo das outras — a mensagem não está funcionando.`,
-        actionLabel: "Revisar mensagens",
+        id: "alert_invalid_numbers",
+        text: "Chip com percentual de inválidos acima do normal — limpe a lista antes do próximo disparo.",
+        actionLabel: "Limpar lista",
         actionUrl: "/crm/campanhas",
         severity: "warning",
       });
     }
+  } else {
+    alertsNotEvaluated = true;
+  }
+
+  // Alerta 2: Campanha com taxa de resposta muito abaixo das outras
+  if (messageRankingBlock.ok) {
+    if (messageEffectivenessRows.length >= 2) {
+      const avgReplyRate =
+        messageEffectivenessRows.reduce((s, r) => s + r.reply_rate, 0) / messageEffectivenessRows.length;
+      const worstCampaign = messageEffectivenessRows[messageEffectivenessRows.length - 1];
+      if (worstCampaign && worstCampaign.reply_rate < avgReplyRate * 0.5 && worstCampaign.reply_rate <= 10) {
+        actionAlerts.push({
+          id: "alert_underperforming_campaign",
+          text: `Campanha com taxa de resposta muito abaixo das outras — a mensagem não está funcionando.`,
+          actionLabel: "Revisar mensagens",
+          actionUrl: "/crm/campanhas",
+          severity: "warning",
+        });
+      }
+    }
+  } else {
+    alertsNotEvaluated = true;
   }
 
   // Alerta 3: Leads que responderam e ainda não têm responsável
-  const orphanedRepliesQuery = `
-    SELECT COUNT(*)::int AS count
-    FROM public.leads l
-    WHERE l.client_id = $1
-      AND l.assigned_to IS NULL
-      AND EXISTS (
-        SELECT 1
-        FROM public.lead_messages lm
-        WHERE lm.client_id = l.client_id
-          AND (${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)")})
-          AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-      );
-  `;
-  const { rows: orphanedRows } = await pool.query(orphanedRepliesQuery, [clientId]);
-  const orphanedCount = orphanedRows[0]?.count || 0;
-  if (orphanedCount > 0) {
+  const orphanedBlock = await runBlock("alerts", async () => {
+    const orphanedRepliesQuery = `
+      SELECT COUNT(*)::int AS count
+      FROM public.leads l
+      WHERE l.client_id = $1
+        AND l.assigned_to IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.lead_messages lm
+          WHERE lm.client_id = l.client_id
+            AND (${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)")})
+            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+        );
+    `;
+    const { rows } = await pool.query(orphanedRepliesQuery, [clientId]);
+    return rows[0]?.count || 0;
+  });
+  if (orphanedBlock.ok && orphanedBlock.value > 0) {
     actionAlerts.push({
       id: "alert_orphaned_replies",
       text: "Leads que responderam e ainda não têm responsável — tem gente esperando.",
@@ -738,47 +851,66 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   }
 
   // Alerta 4: Chip frio com volume perto do teto
-  const nearLimitColdChip = chipList.find(
-    (chip) => chip.chipState === "cold" && chip.quotaPercentage >= 80
-  );
-  if (nearLimitColdChip && actionAlerts.length < 3) {
-    actionAlerts.push({
-      id: "alert_cold_chip_limit",
-      text: "Chip frio com volume perto do teto — risco de bloqueio.",
-      actionLabel: "Ver chips",
-      actionUrl: "/crm/chips-whatsapp",
-      severity: "urgent",
-    });
+  if (chipsBlock.ok) {
+    const nearLimitColdChip = chipList.find(
+      (chip) => chip.chipState === "cold" && chip.quotaPercentage >= 80
+    );
+    if (nearLimitColdChip && actionAlerts.length < 3) {
+      actionAlerts.push({
+        id: "alert_cold_chip_limit",
+        text: "Chip frio com volume perto do teto — risco de bloqueio.",
+        actionLabel: "Ver chips",
+        actionUrl: "/crm/chips-whatsapp",
+        severity: "urgent",
+      });
+    }
+  } else {
+    alertsNotEvaluated = true;
   }
+
+  if (alertsNotEvaluated && !unavailableBlocks.includes("alerts")) unavailableBlocks.push("alerts");
 
   // Limita estritamente a 3 alertas
   const selectedAlerts = actionAlerts.slice(0, 3);
 
+  // ── Só vira erro quando nenhum bloco pôde ser calculado ─────────────────
+  const coreCalculated = CORE_BLOCKS.filter((name) => !unavailableBlocks.includes(name)).length;
+  if (coreCalculated === 0) {
+    const first = blockFailures[0]?.error;
+    const error = new Error(
+      `Dashboard: nenhum bloco pôde ser calculado (${unavailableBlocks.join(", ")}). ` +
+        `Primeira causa: ${String(first?.message || first)}`
+    );
+    error.code = first?.code;
+    error.cause = first;
+    error.failures = blockFailures.map(({ name, error: e }) => ({ block: name, message: String(e?.message || e), code: e?.code }));
+    throw error;
+  }
+
   // ── Montagem do Payload Final ───────────────────────────────────────────
+  // Bloco indisponível = `null` + nome em `unavailableBlocks`. Nunca zero.
+  const withDelta = (block) =>
+    block.ok ? { current: block.value.current, previous: block.value.previous, delta: calculateDelta(block.value.current, block.value.previous) } : null;
+
   return {
     period: normalizedPeriod,
     lastUpdatedAt: refDate.toISOString(),
     cacheStatus: "fresh",
     hasProposalsAndContracts,
+    unavailableBlocks,
     summary: {
-      sent: {
-        current: sentCurrent,
-        previous: sentPrevious,
-        delta: calculateDelta(sentCurrent, sentPrevious),
-      },
-      replied: {
-        current: repliedCurrent,
-        previous: repliedPrevious,
-        delta: calculateDelta(repliedCurrent, repliedPrevious),
-        rate: responseRateCurrent,
-        previousRate: responseRatePrevious,
-        ruleDeclaration: RESPONSE_RATE_DECLARATION,
-      },
-      meetings: {
-        current: meetingsCurrent,
-        previous: meetingsPrevious,
-        delta: calculateDelta(meetingsCurrent, meetingsPrevious),
-      },
+      sent: withDelta(sentBlock),
+      replied: repliedBlock.ok
+        ? {
+            current: repliedCurrent,
+            previous: repliedPrevious,
+            delta: calculateDelta(repliedCurrent, repliedPrevious),
+            rate: responseRateCurrent,
+            previousRate: responseRatePrevious,
+            ruleDeclaration: RESPONSE_RATE_DECLARATION,
+          }
+        : null,
+      meetings: withDelta(meetingsBlock),
       proposals: proposalsData,
       contracts: contractsData,
     },
@@ -794,6 +926,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
 
 // Limite de idade do cache: 15 minutos (constante nomeada obrigatória)
 export const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
+// Resultado com bloco indisponível não pode ficar congelado 15 minutos: uma falha passageira
+// (timeout, deploy) apagaria números do painel por um quarto de hora. Vence em 2 minutos.
+export const DASHBOARD_PARTIAL_CACHE_TTL_MS = 2 * 60 * 1000;
 
 // Trava de concorrência por tenant e período
 const _activeRecalculations = new Map();
@@ -815,15 +950,24 @@ export async function recalculateAndCacheDashboardMetrics(pool, clientId, normal
   const computePromise = (async () => {
     try {
       const computed = await calculateDashboardMetrics(pool, clientId, normalizedPeriod, options);
-      await pool.query(
-        `
-          INSERT INTO public.dashboard_metrics_cache (client_id, period, data, status, calculated_at, last_error)
-          VALUES ($1, $2, $3, 'fresh', NOW(), NULL)
-          ON CONFLICT (client_id, period)
-          DO UPDATE SET data = EXCLUDED.data, status = 'fresh', calculated_at = NOW(), last_error = NULL;
-        `,
-        [clientId, normalizedPeriod, JSON.stringify(computed)]
-      );
+      // Gravar o cache é otimização: se a tabela não existir ou a escrita falhar, o número já
+      // calculado vai para a tela do mesmo jeito (antes, isso virava 500 e jogava o cálculo fora).
+      try {
+        await pool.query(
+          `
+            INSERT INTO public.dashboard_metrics_cache (client_id, period, data, status, calculated_at, last_error)
+            VALUES ($1, $2, $3, 'fresh', NOW(), NULL)
+            ON CONFLICT (client_id, period)
+            DO UPDATE SET data = EXCLUDED.data, status = 'fresh', calculated_at = NOW(), last_error = NULL;
+          `,
+          [clientId, normalizedPeriod, JSON.stringify(computed)]
+        );
+      } catch (cacheErr) {
+        const code = cacheErr?.code ? ` [${cacheErr.code}]` : "";
+        console.error(
+          `[dashboard] cache não gravado (client=${clientId}, period=${normalizedPeriod})${code}: ${String(cacheErr?.message || cacheErr)}`
+        );
+      }
       return computed;
     } catch (err) {
       console.error("[dashboard] computation failed:", err);
@@ -894,7 +1038,8 @@ export async function getOrComputeDashboardMetrics(pool, clientId, periodKey = "
         const calculatedAtDate = rows[0].calculated_at ? new Date(rows[0].calculated_at) : null;
         const nowMs = options.now ? new Date(options.now).getTime() : Date.now();
         const ageMs = calculatedAtDate ? nowMs - calculatedAtDate.getTime() : Infinity;
-        const isExpired = ageMs > DASHBOARD_CACHE_TTL_MS;
+        const isPartial = Array.isArray(cached.unavailableBlocks) && cached.unavailableBlocks.length > 0;
+        const isExpired = ageMs > (isPartial ? DASHBOARD_PARTIAL_CACHE_TTL_MS : DASHBOARD_CACHE_TTL_MS);
 
         if (isExpired) {
           // Cache expirado (> 15 min): devolve imediatamente e recalcula em background

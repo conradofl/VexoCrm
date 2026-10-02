@@ -336,10 +336,10 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
           rows: [{ data: cachedPayload, calculated_at: fixedTime }],
         };
       }
-      if (sql.includes("COUNT(*) FILTER (WHERE sent_at")) {
-        throw new Error("Query timeout during calculation");
-      }
-      return { rows: [] };
+      // Todos os blocos caem. Só quando NADA pôde ser calculado o recálculo falha e o cache
+      // anterior é devolvido como stale (um bloco isolado que cai não derruba mais o painel —
+      // ver dashboardBlockIsolation.test.js).
+      throw new Error("Query timeout during calculation");
     });
 
     const staleRes = await getOrComputeDashboardMetrics(failingPool, "tenant-a", "30d", { forceRefresh: true });

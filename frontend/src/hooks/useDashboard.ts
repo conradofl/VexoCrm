@@ -11,15 +11,19 @@ export interface MetricComparison {
 }
 
 export interface RepliedMetricComparison extends MetricComparison {
-  rate: number;
-  previousRate: number;
+  // null = a taxa não pôde ser calculada (faltou o número de envios) — não é 0%
+  rate: number | null;
+  previousRate: number | null;
   ruleDeclaration: string;
 }
 
+// Cada bloco é calculado isolado. `null` aqui significa "não foi possível calcular agora"
+// (o nome do bloco vem em `unavailableBlocks`) — NUNCA zero. Em `proposals`/`contracts`,
+// `null` também é "tenant não usa Geração Digital" (ver `hasProposalsAndContracts`).
 export interface DashboardSummary {
-  sent: MetricComparison;
-  replied: RepliedMetricComparison;
-  meetings: MetricComparison;
+  sent: MetricComparison | null;
+  replied: RepliedMetricComparison | null;
+  meetings: MetricComparison | null;
   proposals: MetricComparison | null;
   contracts: MetricComparison | null;
 }
@@ -78,12 +82,15 @@ export interface DashboardPayload {
   cacheStatus: "fresh" | "stale" | "error";
   lastError?: string | null;
   hasProposalsAndContracts: boolean;
+  // Blocos que não puderam ser calculados: "summary.sent", "rankings.chips", "alerts"...
+  // Ausente em payloads gravados antes desse campo existir.
+  unavailableBlocks?: string[];
   summary: DashboardSummary;
   rankings: {
-    messages: MessageRankingItem[];
-    chips: ChipRankingItem[];
-    regions: RegionRankingItem[];
-    failureReasons: FailureReasonItem[];
+    messages: MessageRankingItem[] | null;
+    chips: ChipRankingItem[] | null;
+    regions: RegionRankingItem[] | null;
+    failureReasons: FailureReasonItem[] | null;
   };
   alerts: ActionAlert[];
 }

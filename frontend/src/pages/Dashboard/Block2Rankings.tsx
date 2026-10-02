@@ -8,12 +8,29 @@ interface Block2RankingsProps {
   rankings: DashboardPayload["rankings"];
 }
 
+// Ranking que não pôde ser calculado. Diferente de "lista vazia" (que é um dado: ninguém no período).
+function RankingUnavailable() {
+  return (
+    <div
+      role="status"
+      className="h-28 flex items-center justify-center text-xs text-muted-foreground text-center px-2"
+    >
+      Indisponível — não foi possível calcular agora
+    </div>
+  );
+}
+
 export function Block2Rankings({ rankings }: Block2RankingsProps) {
   // Garantir no máximo 3 linhas por ranking
   const topMessages = (rankings?.messages || []).slice(0, 3);
   const topChips = (rankings?.chips || []).slice(0, 3);
   const topRegions = (rankings?.regions || []).slice(0, 3);
   const failureReasons = (rankings?.failureReasons || []).slice(0, 3);
+  // null = bloco indisponível; undefined (payload antigo) segue tratado como lista vazia
+  const messagesUnavailable = rankings?.messages === null;
+  const chipsUnavailable = rankings?.chips === null;
+  const regionsUnavailable = rankings?.regions === null;
+  const failuresUnavailable = rankings?.failureReasons === null;
 
   return (
     <section className="space-y-3">
@@ -44,7 +61,9 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 pb-4 flex-1">
-            {topMessages.length === 0 ? (
+            {messagesUnavailable ? (
+              <RankingUnavailable />
+            ) : topMessages.length === 0 ? (
               <div className="h-28 flex items-center justify-center text-xs text-muted-foreground text-center px-2">
                 Nenhuma mensagem com 30+ disparos no período
               </div>
@@ -94,7 +113,9 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 pb-4 flex-1">
-            {topChips.length === 0 ? (
+            {chipsUnavailable ? (
+              <RankingUnavailable />
+            ) : topChips.length === 0 ? (
               <div className="h-28 flex items-center justify-center text-xs text-muted-foreground text-center px-2">
                 Nenhum disparo por chip no período
               </div>
@@ -150,7 +171,9 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 pb-4 flex-1">
-            {topRegions.length === 0 ? (
+            {regionsUnavailable ? (
+              <RankingUnavailable />
+            ) : topRegions.length === 0 ? (
               <div className="h-28 flex items-center justify-center text-xs text-muted-foreground text-center px-2">
                 Nenhum lead com região identificada
               </div>
@@ -200,7 +223,9 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 pb-4 flex-1">
-            {failureReasons.length === 0 ? (
+            {failuresUnavailable ? (
+              <RankingUnavailable />
+            ) : failureReasons.length === 0 ? (
               <div className="h-28 flex items-center justify-center text-xs text-muted-foreground text-center px-2">
                 Nenhuma falha de envio registrada
               </div>
