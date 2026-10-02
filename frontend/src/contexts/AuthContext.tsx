@@ -91,6 +91,7 @@ interface AuthContextType {
   register: (email: string, password: string, displayName?: string) => Promise<void>;
   signUp: (email: string, password: string, displayName?: string) => Promise<void>;
   updateInitialPassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
@@ -321,7 +322,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const updateInitialPassword = useCallback(
+  const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
       if (!firebaseUser) {
         throw new Error("Usuário não autenticado.");
@@ -331,9 +332,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(true);
         await changeFirebasePassword(currentPassword, newPassword);
 
-        // Limpa a flag must_change_password no backend (fonte de verdade) e força o refresh
-        // do token para o próximo carregamento já vir sem a claim. Best-effort: mesmo que o
-        // backend falhe, o marcador local abaixo evita novo bloqueio.
+        // Limpa a marca de primeiro acesso de forma incondicional e idempotente,
+        // tanto no primeiro acesso quanto na troca normal, garantindo que mesmo
+        // se o estado local ainda não refletir a claim do backend, a flag seja removida.
         try {
           const token = await getFirebaseIdToken(true);
           if (token) {
@@ -353,6 +354,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [firebaseUser]
+  );
+
+  const updateInitialPassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      return changePassword(currentPassword, newPassword);
+    },
+    [changePassword]
   );
 
   const getIdToken = useCallback(async (forceRefresh = false): Promise<string | null> => {
@@ -445,6 +453,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signIn: login,
         register,
         signUp: register,
+        changePassword,
         updateInitialPassword,
         logout,
         signOut: logout,

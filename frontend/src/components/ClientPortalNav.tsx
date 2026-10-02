@@ -1,9 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { Building2, FileSpreadsheet, LayoutDashboard, LogOut, MessageCircle, TableProperties } from "lucide-react";
+import { Building2, FileSpreadsheet, KeyRound, LayoutDashboard, LogOut, MessageCircle, TableProperties } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState } from "react";
+import { ChangePasswordDialog } from "@/components/auth/ChangePasswordDialog";
 
 interface ClientPortalNavProps {
   clientId: string;
@@ -14,6 +15,7 @@ interface ClientPortalNavProps {
 export function ClientPortalNav({ clientId, clientName, active }: ClientPortalNavProps) {
   const { isInternalUser, logout, canAccessView } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -67,10 +69,32 @@ export function ClientPortalNav({ clientId, clientName, active }: ClientPortalNa
           <Link to="/crm/dashboard">Abrir CRM</Link>
         </Button>
       )}
-      <Button size="sm" variant="ghost" onClick={handleLogout} disabled={isLoggingOut} className="rounded-full">
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => setIsChangePasswordOpen(true)}
+        className="rounded-full gap-1.5"
+        aria-label="Trocar senha"
+      >
+        <KeyRound className="h-4 w-4" />
+        Trocar senha
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={handleLogout}
+        disabled={isLoggingOut}
+        className="rounded-full gap-1.5"
+        aria-label="Sair"
+      >
         <LogOut className="h-4 w-4" />
         {isLoggingOut ? "Saindo..." : "Sair"}
       </Button>
+
+      <ChangePasswordDialog
+        open={isChangePasswordOpen}
+        onOpenChange={setIsChangePasswordOpen}
+      />
     </div>
   );
 }

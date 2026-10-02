@@ -1,8 +1,11 @@
-import { LogOut } from "lucide-react";
+import { useState } from "react";
+import { KeyRound, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ChangePasswordDialog } from "@/components/auth/ChangePasswordDialog";
 
 // ─── SidebarFooter ────────────────────────────────────────────────────────────
-// Footer: usuário + logout
+// Footer: usuário + ações de conta (trocar senha, sair)
 function SidebarFooter({
   collapsed,
   userName,
@@ -14,6 +17,8 @@ function SidebarFooter({
   isLoggingOut: boolean;
   onLogout: () => void;
 }) {
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
   return (
     <div
       className={cn(
@@ -35,19 +40,66 @@ function SidebarFooter({
         )}
       </div>
 
-      <button
-        onClick={onLogout}
-        disabled={isLoggingOut}
-        className={cn(
-          "flex w-full border border-slate-200/80 bg-white/80 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/72 dark:hover:bg-white/[0.06] dark:hover:text-white",
-          collapsed
-            ? "h-9 items-center justify-center rounded-xl px-0"
-            : "items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-[13px]"
+      <div className="flex flex-col gap-1.5">
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setIsChangePasswordOpen(true)}
+                aria-label="Trocar senha"
+                className="flex h-9 w-full items-center justify-center rounded-xl border border-slate-200/80 bg-white/80 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/72 dark:hover:bg-white/[0.06] dark:hover:text-white"
+              >
+                <KeyRound className="h-4 w-4 shrink-0" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Trocar senha</TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsChangePasswordOpen(true)}
+            aria-label="Trocar senha"
+            className="flex w-full items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2 text-[13px] font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/72 dark:hover:bg-white/[0.06] dark:hover:text-white"
+          >
+            <KeyRound className="h-4 w-4 shrink-0" />
+            <span>Trocar senha</span>
+          </button>
         )}
-      >
-        <LogOut className="h-4 w-4 shrink-0" />
-        {!collapsed && <span>{isLoggingOut ? "Saindo..." : "Sair"}</span>}
-      </button>
+
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onLogout}
+                disabled={isLoggingOut}
+                aria-label={isLoggingOut ? "Saindo..." : "Sair"}
+                className="flex h-9 w-full items-center justify-center rounded-xl border border-slate-200/80 bg-white/80 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/72 dark:hover:bg-white/[0.06] dark:hover:text-white"
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Sair</TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            type="button"
+            onClick={onLogout}
+            disabled={isLoggingOut}
+            aria-label={isLoggingOut ? "Saindo..." : "Sair"}
+            className="flex w-full items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-2 text-[13px] font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/72 dark:hover:bg-white/[0.06] dark:hover:text-white"
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span>{isLoggingOut ? "Saindo..." : "Sair"}</span>
+          </button>
+        )}
+      </div>
+
+      <ChangePasswordDialog
+        open={isChangePasswordOpen}
+        onOpenChange={setIsChangePasswordOpen}
+      />
     </div>
   );
 }

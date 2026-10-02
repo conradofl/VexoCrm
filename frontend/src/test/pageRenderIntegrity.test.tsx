@@ -29,6 +29,7 @@ vi.mock("@/contexts/AuthContext", () => ({
     isAuthenticated: true,
     isAdminUser: true,
     canAccessInternalPage: () => true,
+    canAccessView: () => true,
     getIdToken: async () => "mock-token",
   }),
 }));
