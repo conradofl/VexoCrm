@@ -52,6 +52,7 @@ import {
 } from "@/hooks/useCampanhas";
 import { DispatchRecipientsDialog } from "./LeadImports/DispatchRecipientsDialog";
 import { DuplicateDispatchWarningDialog } from "./LeadImports/DuplicateDispatchWarningDialog";
+import { SavedSheetsCards } from "./LeadImports/SavedSheetsCards";
 import {
   useConsultantSchedules,
   useCreateConsultantSchedule,
@@ -1645,8 +1646,8 @@ export default function LeadImports({
     // Restaura Loteamento / Batches
     const hasBatchConfig = Boolean(c.limit_per_run && c.limit_per_run > 0);
     setBatchingEnabled(hasBatchConfig);
-    setBatchSize(String(c.limit_per_run || meta.dispatchOptions?.batchSize || 100));
-    setBatchIntervalHours(String(meta.dispatchOptions?.batchIntervalHours || meta.batchIntervalHours || "1"));
+    setBatchSize(String(c.limit_per_run || (meta.dispatchOptions as any)?.batchSize || 100));
+    setBatchIntervalHours(String((meta.dispatchOptions as any)?.batchIntervalHours || (meta as any).batchIntervalHours || "1"));
 
     // Restaura Estratégia de Variações
     const hasVariants = seq.some(s => s.textVariants && s.textVariants.length > 0);
@@ -1659,14 +1660,14 @@ export default function LeadImports({
       const texts = [s.text, ...(Array.isArray(s.textVariants) ? s.textVariants : [])].filter(Boolean);
       return texts.some(t => /\{\{\s*scheduling_link\s*\}\}/i.test(t));
     });
-    setMultiAgendaEnabled(Boolean(meta.dispatchOptions?.multiAgendaEnabled || hasSchedulingLink));
+    setMultiAgendaEnabled(Boolean((meta.dispatchOptions as any)?.multiAgendaEnabled || hasSchedulingLink));
 
     // Restaura Opções de Disparo (incluindo instance do WhatsApp)
-    const savedDispatchOptions = meta.dispatchOptions || {};
+    const savedDispatchOptions = (meta.dispatchOptions as any) || {};
     setDispatchOptions({
       ...defaultDispatchOptions,
       ...savedDispatchOptions,
-      evolutionInstanceId: savedDispatchOptions.evolutionInstanceId ?? c.evolution_instance_id ?? null,
+      evolutionInstanceId: savedDispatchOptions.evolutionInstanceId ?? (c as any).evolution_instance_id ?? null,
     });
 
     // Restaura Cérebro que atende
@@ -2046,61 +2047,12 @@ export default function LeadImports({
             </p>
           </div>
 
-          {imports.length === 0 ? (
-            <p className="text-xs text-slate-400 py-8 text-center">
-              Nenhuma planilha importada ainda.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Planilha</TableHead>
-                  <TableHead className="text-right">Leads</TableHead>
-                  <TableHead className="text-right">Ignorados</TableHead>
-                  <TableHead>Importada em</TableHead>
-                  <TableHead>Por</TableHead>
-                  <TableHead className="w-[110px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {imports.map((imp) => (
-                  <TableRow
-                    key={imp.id}
-                    className="cursor-pointer"
-                    onClick={() => setViewingImport(imp)}
-                  >
-                    <TableCell className="font-semibold text-xs">{imp.source_name}</TableCell>
-                    <TableCell className="text-right text-xs">{imp.imported_rows}</TableCell>
-                    <TableCell className="text-right text-xs text-slate-400">{imp.skipped_rows}</TableCell>
-                    <TableCell className="text-xs text-slate-500">
-                      {imp.created_at ? new Date(imp.created_at).toLocaleString("pt-BR") : "—"}
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-500">{imp.uploaded_by_email || "—"}</TableCell>
-                    <TableCell className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title="Ver leads desta planilha"
-                        onClick={() => setViewingImport(imp)}
-                        className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={deleteLeadImport.isPending}
-                        onClick={() => handleDeleteImport(imp.id, imp.source_name)}
-                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <SavedSheetsCards
+            imports={imports}
+            isDeleting={deleteLeadImport.isPending}
+            onViewImport={(imp) => setViewingImport(imp)}
+            onDeleteImport={(id, name) => handleDeleteImport(id, name)}
+          />
         </div>
       )}
 
