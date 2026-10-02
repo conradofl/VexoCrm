@@ -7,7 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
-import { LeadClientEvolutionInstance, useEvolutionInstanceSyncStatus } from "@/hooks/useLeadClients";
+import {
+  LeadClientEvolutionInstance,
+  useEvolutionInstanceSyncStatus,
+  useLeadClientEvolutionInstanceStatus,
+} from "@/hooks/useLeadClients";
 import { EvolutionInstanceStatusBadge } from "./EvolutionInstanceStatusBadge";
 import { resolveChipLimit, getChipColor } from "@/lib/evolutionChips/utils";
 
@@ -82,6 +86,8 @@ export function EvolutionInstanceCard({
     ? assignedOperator.displayName || assignedOperator.email || instance.owner_uid
     : instance.owner_uid || "Nenhum (compartilhado)";
 
+  const { data: instanceStatus } = useLeadClientEvolutionInstanceStatus(tenantId, instance.id);
+
   return (
     <div
       data-testid={`evolution-card-${instance.id}`}
@@ -93,16 +99,14 @@ export function EvolutionInstanceCard({
       )}
     >
       {/* 
-        Cabeçalho resumido do cartão:
-        Quando fechado, mostra estritamente os 4 campos essenciais:
-        1. Nome do chip
-        2. Estado da conexão
-        3. Operador responsável
-        4. Cota do dia no formato "enviados de limite"
+        Cabeçalho resumido do cartão (fechado em três linhas nesta ordem de prioridade):
+        1ª linha: ponto de cor, nome do chip ocupando o espaço disponível, e a seta de abrir encostada à direita. Mais nada.
+        2ª linha: selo de estado da conexão e o telefone, lado a lado. O selo primeiro.
+        3ª linha: operador responsável à esquerda e cota à direita ("enviados de limite").
       */}
       <div className="flex flex-col gap-2.5">
-        <div className="flex items-center justify-between gap-2">
-          {/* 1. Nome do chip com ponto de identificação estável */}
+        {/* Linha 1: ponto de cor, nome do chip ocupando o espaço disponível, e a seta de abrir encostada à direita */}
+        <div data-testid={`card-line-1-${instance.id}`} className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <span
               className={cn("h-2.5 w-2.5 rounded-full shrink-0", chipColor.dot)}
@@ -110,48 +114,52 @@ export function EvolutionInstanceCard({
               aria-hidden="true"
             />
             <p
-              className="truncate font-display font-semibold text-foreground text-sm"
+              data-testid={`chip-name-${instance.id}`}
+              className="truncate font-display font-semibold text-foreground text-sm min-w-0 flex-1"
               title={instance.name}
             >
               {instance.name}
             </p>
           </div>
 
-          {/* 2. Estado da conexão (não misturado com a cor do chip) e botão de alternar */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <EvolutionInstanceStatusBadge tenantId={tenantId} instanceId={instance.id} />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5"
-              onClick={toggleExpand}
-              aria-expanded={expanded}
-              aria-label={expanded ? `Recolher detalhes de ${instance.name}` : `Ver detalhes de ${instance.name}`}
-              title={expanded ? "Recolher detalhes" : "Ver detalhes"}
-            >
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 transition-transform duration-200",
-                  expanded && "rotate-180 text-foreground"
-                )}
-              />
-            </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 ml-auto"
+            onClick={toggleExpand}
+            aria-expanded={expanded}
+            aria-label={expanded ? `Recolher detalhes de ${instance.name}` : `Ver detalhes de ${instance.name}`}
+            title={expanded ? "Recolher detalhes" : "Ver detalhes"}
+          >
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 transition-transform duration-200",
+                expanded && "rotate-180 text-foreground"
+              )}
+            />
+          </Button>
+        </div>
+
+        {/* Linha 2: selo de estado da conexão e telefone, lado a lado. Selo primeiro. */}
+        <div data-testid={`card-line-2-${instance.id}`} className="flex items-center gap-1.5 flex-wrap min-w-0">
+          <EvolutionInstanceStatusBadge tenantId={tenantId} instanceId={instance.id} />
+        </div>
+
+        {/* Linha 3: operador responsável à esquerda e cota à direita, no formato que já está */}
+        <div data-testid={`card-line-3-${instance.id}`} className="flex items-center justify-between gap-2 text-xs pt-1 border-t border-slate-100 dark:border-white/5 min-w-0">
+          <div data-testid={`chip-operator-${instance.id}`} className="flex items-center gap-1.5 min-w-0 flex-1 text-muted-foreground">
+            <UserCheck className="h-3.5 w-3.5 shrink-0 text-sky-500" aria-hidden="true" />
+            <span className="truncate" title={`Operador: ${operatorName}`}>
+              {operatorName}
+            </span>
           </div>
-        </div>
 
-        {/* 3. Operador Responsável */}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground truncate">
-          <UserCheck className="h-3.5 w-3.5 shrink-0 text-sky-500" />
-          <span className="truncate" title={`Operador responsável: ${operatorName}`}>
-            {operatorName}
-          </span>
-        </div>
-
-        {/* 4. Cota do dia no formato "enviados de limite" */}
-        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100 dark:border-white/5">
-          <span className="text-muted-foreground">Cota hoje</span>
-          <span className="font-num font-semibold text-foreground">
+          <span
+            data-testid={`chip-quota-${instance.id}`}
+            className="font-num font-semibold text-foreground shrink-0 text-right"
+            title={`Cota diária: ${sent} de ${displayLimit}`}
+          >
             {sent} de {displayLimit}
           </span>
         </div>
@@ -186,6 +194,15 @@ export function EvolutionInstanceCard({
                   api key
                 </Badge>
               ) : null}
+              {instanceStatus?.profileName && (
+                <Badge
+                  variant="outline"
+                  className="border border-slate-200/80 text-muted-foreground rounded-xl text-[10px] bg-slate-50 dark:border-white/10 dark:bg-white/[0.03]"
+                  title="Nome de perfil no WhatsApp"
+                >
+                  WhatsApp: {instanceStatus.profileName}
+                </Badge>
+              )}
             </div>
 
             <Tooltip>

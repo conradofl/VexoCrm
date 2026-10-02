@@ -321,6 +321,275 @@ describe("Chips WhatsApp: Cards compactos e cor por chip", () => {
     expect(screen.getByRole("button", { name: /remover/i })).toBeInTheDocument();
   });
 
+  describe("Ajuste no cabeçalho do cartão de chip (Reorganização em 3 linhas)", () => {
+    it("teste 1: o cartão fechado é organizado estritamente em três linhas nesta ordem de prioridade", () => {
+      render(
+        <TooltipProvider>
+          <EvolutionInstanceCard
+            tenantId="tenant-1"
+            instance={mockInstance1}
+            draft={{ chipState: "cold", dailyLimitOverride: "" }}
+            onChipStateChange={vi.fn()}
+            onLimitOverrideChange={vi.fn()}
+            onSaveChip={vi.fn()}
+            onToggleDefault={vi.fn()}
+            onToggleActive={vi.fn()}
+            onToggleWebhook={vi.fn()}
+            onDelete={vi.fn()}
+            canEdit={true}
+            canManageOwner={true}
+            operatorOptions={[
+              { uid: "op-1", displayName: "Carlos Operador", email: "carlos@vexo.com" },
+            ]}
+            isSavePending={false}
+            isDeletePending={false}
+            isExpanded={false}
+          />
+        </TooltipProvider>
+      );
+
+      // Linha 1: o ponto de cor, o nome do chip ocupando o espaço disponível, e a seta de abrir encostada à direita. Mais nada.
+      const line1 = screen.getByTestId("card-line-1-inst-chip-1");
+      expect(line1).toBeInTheDocument();
+      expect(line1).toHaveTextContent("WhatsApp Comercial 01");
+      // Não deve ter badges de status, telefone, operador ou cota na linha 1
+      expect(line1).not.toHaveTextContent("Conectado");
+      expect(line1).not.toHaveTextContent("5511");
+      expect(line1).not.toHaveTextContent("Carlos Operador");
+      expect(line1).not.toHaveTextContent("42 de 50");
+      // A seta de abrir está presente na linha 1
+      const chevronBtn = line1.querySelector("button");
+      expect(chevronBtn).toBeInTheDocument();
+
+      // Linha 2: o selo de estado da conexão e o telefone, lado a lado. O selo primeiro.
+      const line2 = screen.getByTestId("card-line-2-inst-chip-1");
+      expect(line2).toBeInTheDocument();
+      expect(line2).toHaveTextContent("Conectado");
+      expect(line2).toHaveTextContent("+5511999999999");
+      // Ordem dos elementos na linha 2: o selo de conexão vem primeiro
+      const badgesLine2 = line2.querySelectorAll(".text-\\[10px\\]");
+      expect(badgesLine2.length).toBeGreaterThanOrEqual(2);
+      expect(badgesLine2[0]).toHaveTextContent("Conectado");
+      expect(badgesLine2[1]).toHaveTextContent("+5511999999999");
+
+      // Linha 3: o operador responsável à esquerda e a cota à direita, no formato que já está
+      const line3 = screen.getByTestId("card-line-3-inst-chip-1");
+      expect(line3).toBeInTheDocument();
+      const operatorEl = screen.getByTestId("chip-operator-inst-chip-1");
+      const quotaEl = screen.getByTestId("chip-quota-inst-chip-1");
+      expect(operatorEl).toHaveTextContent("Carlos Operador");
+      expect(quotaEl).toHaveTextContent("42 de 50");
+      // Operador possui ícone UserCheck
+      expect(operatorEl.querySelector("svg")).toBeInTheDocument();
+    });
+
+    it("teste 2: nome longo do chip não é truncado abaixo de um limite razoável enquanto houver espaço", () => {
+      const longNameInstance: LeadClientEvolutionInstance = {
+        ...mockInstance1,
+        id: "inst-long-name",
+        name: "WhatsApp Atendimento Central e Vendas Regional Sul Especializado 2026",
+      };
+
+      render(
+        <TooltipProvider>
+          <EvolutionInstanceCard
+            tenantId="tenant-1"
+            instance={longNameInstance}
+            draft={{ chipState: "cold", dailyLimitOverride: "" }}
+            onChipStateChange={vi.fn()}
+            onLimitOverrideChange={vi.fn()}
+            onSaveChip={vi.fn()}
+            onToggleDefault={vi.fn()}
+            onToggleActive={vi.fn()}
+            onToggleWebhook={vi.fn()}
+            onDelete={vi.fn()}
+            canEdit={true}
+            canManageOwner={true}
+            operatorOptions={[]}
+            isSavePending={false}
+            isDeletePending={false}
+            isExpanded={false}
+          />
+        </TooltipProvider>
+      );
+
+      const nameEl = screen.getByTestId("chip-name-inst-long-name");
+      expect(nameEl).toBeInTheDocument();
+      expect(nameEl).toHaveTextContent("WhatsApp Atendimento Central e Vendas Regional Sul Especializado 2026");
+      expect(nameEl).toHaveAttribute(
+        "title",
+        "WhatsApp Atendimento Central e Vendas Regional Sul Especializado 2026"
+      );
+
+      // Classes garantem que o nome ocupa todo o espaço livre e tem truncamento fluido com reticências
+      expect(nameEl.className).toContain("flex-1");
+      expect(nameEl.className).toContain("min-w-0");
+      expect(nameEl.className).toContain("truncate");
+
+      // O container da linha 1 não contém elementos concorrentes além do ponto de cor e do botão chevron
+      const line1 = screen.getByTestId("card-line-1-inst-long-name");
+      expect(line1.children.length).toBe(2); // Bloco do nome (com ponto) + Botão de expandir
+    });
+
+    it("teste 3: nenhum elemento sobrepõe outro em largura de celular (1 coluna)", () => {
+      const longOperatorInstance: LeadClientEvolutionInstance = {
+        ...mockInstance1,
+        id: "inst-narrow",
+        owner_uid: "op-long",
+      };
+
+      render(
+        <TooltipProvider>
+          <div style={{ width: "280px" }}>
+            <EvolutionInstanceCard
+              tenantId="tenant-1"
+              instance={longOperatorInstance}
+              draft={{ chipState: "cold", dailyLimitOverride: "" }}
+              onChipStateChange={vi.fn()}
+              onLimitOverrideChange={vi.fn()}
+              onSaveChip={vi.fn()}
+              onToggleDefault={vi.fn()}
+              onToggleActive={vi.fn()}
+              onToggleWebhook={vi.fn()}
+              onDelete={vi.fn()}
+              canEdit={true}
+              canManageOwner={true}
+              operatorOptions={[
+                {
+                  uid: "op-long",
+                  displayName: "Operador Com Nome Extremamente Longo Que Nunca Deve Colidir",
+                  email: "long@vexo.com",
+                },
+              ]}
+              isSavePending={false}
+              isDeletePending={false}
+              isExpanded={false}
+            />
+          </div>
+        </TooltipProvider>
+      );
+
+      // Linha 2 tem flex-wrap para nunca transbordar nem colidir em largura ultraestreita
+      const line2 = screen.getByTestId("card-line-2-inst-narrow");
+      expect(line2.className).toContain("flex-wrap");
+      expect(line2.className).toContain("min-w-0");
+
+      // Linha 3 tem justify-between, operador com flex-1 min-w-0 truncate e cota com shrink-0
+      const line3 = screen.getByTestId("card-line-3-inst-narrow");
+      expect(line3.className).toContain("justify-between");
+      expect(line3.className).toContain("min-w-0");
+
+      const operatorEl = screen.getByTestId("chip-operator-inst-narrow");
+      expect(operatorEl.className).toContain("min-w-0");
+      expect(operatorEl.className).toContain("flex-1");
+
+      const quotaEl = screen.getByTestId("chip-quota-inst-narrow");
+      expect(quotaEl.className).toContain("shrink-0");
+      expect(quotaEl).toHaveTextContent("42 de 50");
+    });
+
+    it("teste 4: sem informação repetida: perfil do WhatsApp não compete na linha 2 do cartão fechado e operador é diferenciado", () => {
+      render(
+        <TooltipProvider>
+          <EvolutionInstanceCard
+            tenantId="tenant-1"
+            instance={mockInstance1}
+            draft={{ chipState: "cold", dailyLimitOverride: "" }}
+            onChipStateChange={vi.fn()}
+            onLimitOverrideChange={vi.fn()}
+            onSaveChip={vi.fn()}
+            onToggleDefault={vi.fn()}
+            onToggleActive={vi.fn()}
+            onToggleWebhook={vi.fn()}
+            onDelete={vi.fn()}
+            canEdit={true}
+            canManageOwner={true}
+            operatorOptions={[
+              { uid: "op-1", displayName: "Carlos Operador", email: "carlos@vexo.com" },
+            ]}
+            isSavePending={false}
+            isDeletePending={false}
+            isExpanded={false}
+          />
+        </TooltipProvider>
+      );
+
+      // Na linha 2, não deve aparecer o profileName ("Chip Comercial") como badge solto
+      const line2 = screen.getByTestId("card-line-2-inst-chip-1");
+      expect(line2).not.toHaveTextContent("Chip Comercial");
+
+      // O nome do chip está na linha 1
+      const line1 = screen.getByTestId("card-line-1-inst-chip-1");
+      expect(line1).toHaveTextContent("WhatsApp Comercial 01");
+
+      // O operador está na linha 3 com ícone claro
+      const line3 = screen.getByTestId("card-line-3-inst-chip-1");
+      expect(line3).toHaveTextContent("Carlos Operador");
+      expect(line3.querySelector("svg")).toBeInTheDocument();
+    });
+
+    it("teste 5: o cartão aberto continua com tudo que tem hoje, incluindo dados do perfil", () => {
+      render(
+        <TooltipProvider>
+          <EvolutionInstanceCard
+            tenantId="tenant-1"
+            instance={mockInstance1}
+            draft={{ chipState: "cold", dailyLimitOverride: "" }}
+            onChipStateChange={vi.fn()}
+            onLimitOverrideChange={vi.fn()}
+            onSaveChip={vi.fn()}
+            onToggleDefault={vi.fn()}
+            onToggleActive={vi.fn()}
+            onToggleWebhook={vi.fn()}
+            onDelete={vi.fn()}
+            onSyncNow={vi.fn()}
+            canEdit={true}
+            canManageOwner={true}
+            operatorOptions={[
+              { uid: "op-1", displayName: "Carlos Operador", email: "carlos@vexo.com" },
+            ]}
+            isSavePending={false}
+            isDeletePending={false}
+            isExpanded={true}
+          />
+        </TooltipProvider>
+      );
+
+      // As 3 linhas do cabeçalho continuam lá
+      expect(screen.getByTestId("card-line-1-inst-chip-1")).toBeInTheDocument();
+      expect(screen.getByTestId("card-line-2-inst-chip-1")).toBeInTheDocument();
+      expect(screen.getByTestId("card-line-3-inst-chip-1")).toBeInTheDocument();
+
+      // No cartão aberto, o perfil do WhatsApp é exibido nos badges de configuração
+      expect(screen.getByText("WhatsApp: Chip Comercial")).toBeInTheDocument();
+
+      // Badges de configuração
+      expect(screen.getByText("padrão")).toBeInTheDocument();
+      expect(screen.getByText("ativa")).toBeInTheDocument();
+      expect(screen.getByText("api key")).toBeInTheDocument();
+
+      // Webhook URL
+      expect(screen.getByText("https://webhook.evolution.com/dispatch-1")).toBeInTheDocument();
+
+      // Controles de cota
+      expect(screen.getByText("Cota Diária de Envios")).toBeInTheDocument();
+      expect(screen.getByText("42 / 50")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /salvar cota/i })).toBeInTheDocument();
+
+      // Sincronização
+      expect(screen.getByText("Sincronizar Conversas no CRM")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /sincronizar agora/i })).toBeInTheDocument();
+
+      // Operador
+      expect(screen.getAllByText("Operador Responsável").length).toBeGreaterThanOrEqual(1);
+
+      // Botões de ação
+      expect(screen.getByRole("button", { name: /tornar padrão/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /desativar/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /remover/i })).toBeInTheDocument();
+    });
+  });
+
   describe("Tabela compartilhada de cotas (shared/chipQuotaTestCases.json) — Frontend", () => {
     quotaTestCases.forEach(({ description, chip_state, daily_limit_override, expected }) => {
       it(description, () => {
