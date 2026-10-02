@@ -86,6 +86,11 @@ function setupSummary({ active, ended }: { active: any[]; ended: any[] }) {
   });
 }
 
+function expandFirstCard() {
+  const btn = screen.queryByRole("button", { name: /detalhes/i });
+  if (btn) fireEvent.click(btn);
+}
+
 describe("DispatchCampaignTracker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,6 +110,7 @@ describe("DispatchCampaignTracker", () => {
     setupSummary({ active: [makeCampaign()], ended: [] });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+    expandFirstCard();
 
     expect(screen.getByText(/GD Gabriel/)).toBeTruthy();
     expect(screen.getByText(/100 leads/)).toBeTruthy();
@@ -112,7 +118,7 @@ describe("DispatchCampaignTracker", () => {
     expect(screen.getByText("15")).toBeTruthy(); // responderam
     expect(screen.getByText("10")).toBeTruthy(); // falharam
     expect(screen.getByText("20")).toBeTruthy(); // na fila
-    expect(screen.getByText(/quinta-feira, por volta das 20h/)).toBeTruthy();
+    expect(screen.getAllByText(/quinta-feira, por volta das 20h/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("[TESTE OBRIGATÓRIO] clicar num quadrado abre o lote daquele quadrado, reaproveitando a tela de destinatários", async () => {
@@ -123,6 +129,7 @@ describe("DispatchCampaignTracker", () => {
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={onOpenDispatch} />);
+    expandFirstCard();
 
     const squares = screen.getAllByTitle(/Lote 1 — enviado/);
     fireEvent.click(squares[0]);
@@ -147,6 +154,7 @@ describe("DispatchCampaignTracker", () => {
     const onOpenDispatch = vi.fn();
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={onOpenDispatch} />);
+    expandFirstCard();
 
     for (const n of [1, 2, 3, 4, 5]) {
       const square = screen.getByTitle(new RegExp(`^Lote ${n} —`));
@@ -177,6 +185,7 @@ describe("DispatchCampaignTracker", () => {
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+    expandFirstCard();
 
     const cancelado = screen.getByTitle(/^Lote 1 — cancelado/);
     const naFila = screen.getByTitle(/^Lote 2 — na fila/);
@@ -194,6 +203,7 @@ describe("DispatchCampaignTracker", () => {
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+    expandFirstCard();
 
     expect(screen.getByText("45 lotes — clique em um para ver os leads dele")).toBeTruthy();
     for (const n of [1, 23, 45]) {
@@ -210,6 +220,7 @@ describe("DispatchCampaignTracker", () => {
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+    expandFirstCard();
 
     fireEvent.click(screen.getByRole("button", { name: /Cancelar o que falta/ }));
     const dialog = await screen.findByRole("alertdialog");
@@ -230,6 +241,7 @@ describe("DispatchCampaignTracker", () => {
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+    expandFirstCard();
 
     expect(screen.queryByRole("button", { name: /Pausar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Retomar/ })).toBeNull();
@@ -253,6 +265,7 @@ describe("DispatchCampaignTracker", () => {
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+    expandFirstCard();
 
     // Estrutural: raio EXPLÍCITO, não uma classe derivada do tema.
     // --radius do tema é 18px (index.css) — num quadrado de 28px, rounded-md

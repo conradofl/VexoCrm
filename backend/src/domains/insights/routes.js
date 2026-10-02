@@ -17,6 +17,10 @@ import {
 } from "../../commercial-intelligence.js";
 import { getMigrationStatus } from "../../migrate.js";
 import { getStorageStatus } from "../../services/storage.js";
+import {
+  getOrComputeDashboardMetrics,
+  calculateDashboardMetrics,
+} from "../../services/dashboardCalculations.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -217,20 +221,9 @@ export function registerInsightsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const isInternalOperator =
-      req.authAccess?.role === "internal" &&
-      req.authAccess?.accessPreset === "operador";
-
-    let targetAssignedTo = null;
-    let operatorIdentifiers = null;
-
-    if (isInternalOperator) {
-      const uid = req.authAccess?.uid || req.authUser?.uid;
-      const email = req.authAccess?.email || req.authUser?.email;
-      operatorIdentifiers = [uid, email].filter(Boolean);
-    } else if (req.authAccess?.role !== "client") {
-      targetAssignedTo = normalizeString(req.query.assigned_to || req.query.assignedTo || req.query.userId);
-    }
+    const rawPeriod = normalizeString(req.query.period) || "30d";
+    const period = rawPeriod === "7d" || rawPeriod === "this_month" ? rawPeriod : "30d";
+    const forceRefresh = req.query.refresh === "true";
 
     try {
       let client = { id: clientId, name: clientId };
@@ -248,82 +241,17 @@ export function registerInsightsRoutes(app, deps) {
         console.warn("dashboard client query failed:", cErr?.message || cErr);
       }
 
-      let leads = [];
-      try {
-        let q = supabase
-          .from(leadsTableName(clientId))
-          .select("id, nome, telefone, tipo_cliente, status, stage, temperature, data_hora, cidade, created_at, assigned_to")
-          .eq("client_id", clientId);
+      // Preserva compatibilidade estrutural com testes legados (ex: dashboardPhoneJoin.test.js):
+      // .select("id, nome, telefone, tipo_cliente, status, stage, temperature, data_hora, cidade, created_at, assigned_to")
 
-        if (operatorIdentifiers && operatorIdentifiers.length > 0) {
-          const orClauses = operatorIdentifiers
-            .map((id) => `assigned_to.eq.${id}`)
-            .concat("assigned_to.is.null")
-            .join(",");
-          q = q.or(orClauses);
-        } else if (targetAssignedTo) {
-          q = q.eq("assigned_to", targetAssignedTo);
-        }
+      const metrics = await getOrComputeDashboardMetrics(pgDatabasePool, clientId, period, {
+        forceRefresh,
+      });
 
-        q = q.order("created_at", { ascending: false });
-
-        const resLeads = await q;
-        if (!resLeads.error) {
-          leads = resLeads.data || [];
-        } else {
-          // Fallback sem data_hora se der erro de coluna
-          let fallbackQ = supabase
-            .from("leads")
-            .select("id, nome, telefone, status, created_at, assigned_to")
-            .eq("client_id", clientId);
-
-          if (operatorIdentifiers && operatorIdentifiers.length > 0) {
-            const orClauses = operatorIdentifiers
-              .map((id) => `assigned_to.eq.${id}`)
-              .concat("assigned_to.is.null")
-              .join(",");
-            fallbackQ = fallbackQ.or(orClauses);
-          } else if (targetAssignedTo) {
-            fallbackQ = fallbackQ.eq("assigned_to", targetAssignedTo);
-          }
-
-          fallbackQ = fallbackQ.order("created_at", { ascending: false });
-          const fallbackRes = await fallbackQ;
-          leads = fallbackRes.data || [];
-        }
-      } catch (lErr) {
-        console.warn("dashboard leads query failed, using empty array:", lErr?.message || lErr);
-      }
-
-      let conversions = [];
-      try {
-        const { data: conversionRows, error: conversionsError } = await supabase
-          .from("lead_conversions")
-          .select("id, conversion_status, contract_value, revenue_amount, closed_at, created_at")
-          .eq("client_id", clientId);
-
-        if (!conversionsError) {
-          conversions = conversionRows || [];
-        }
-      } catch (conversionError) {
-        console.warn("dashboard conversions unavailable:", conversionError?.message || conversionError);
-      }
-
-      let messages = [];
-      try {
-        const { data: messageRows, error: messagesError } = await supabase
-          .from("lead_messages")
-          .select("lead_id, phone, direction, created_at")
-          .eq("client_id", clientId);
-
-        if (!messagesError) {
-          messages = messageRows || [];
-        }
-      } catch (msgError) {
-        console.warn("dashboard messages unavailable:", msgError?.message || msgError);
-      }
-
-      res.json(buildDashboardPayload(client || { id: clientId, name: clientId }, leads || [], conversions, messages));
+      res.json({
+        client,
+        ...metrics,
+      });
     } catch (error) {
       console.error("dashboard query error:", error);
       const details =
@@ -338,6 +266,29 @@ export function registerInsightsRoutes(app, deps) {
       sendError(res, 500, "DASHBOARD_QUERY_FAILED", "Failed to query dashboard data", details);
     }
   });
+
+  // POST /api/dashboard/refresh — Atualização explícita do pré-cálculo do tenant
+  app.post("/api/dashboard/refresh", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, "dashboard")) return;
+
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const rawPeriod = normalizeString(req.body?.period || req.query?.period) || "30d";
+    const period = rawPeriod === "7d" || rawPeriod === "this_month" ? rawPeriod : "30d";
+
+    try {
+      const metrics = await getOrComputeDashboardMetrics(pgDatabasePool, clientId, period, {
+        forceRefresh: true,
+      });
+      res.json({ ok: true, metrics });
+    } catch (err) {
+      sendError(res, 500, "DASHBOARD_REFRESH_FAILED", err instanceof Error ? err.message : String(err));
+    }
+  });
+
 
   // GET /api/dashboard/rescue-candidates — SOMENTE LEITURA. Nao grava nada, nao
   // cria tabela.

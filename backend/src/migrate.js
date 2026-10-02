@@ -370,6 +370,11 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_custom_fields')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_imports' AND column_name='column_mapping')
     ) AS ok`,
+    "20261002090000_create_dashboard_metrics_cache.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='dashboard_metrics_cache')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='dashboard_metrics_cache' AND column_name='calculated_at')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='dashboard_metrics_cache' AND column_name='status')
+    ) AS ok`,
   };
 
   const query = checks[filename];
