@@ -1,0 +1,56 @@
+[
+  {
+    "description": "chip frio sem limite próprio",
+    "chip_state": "cold",
+    "daily_limit_override": null,
+    "expected": 50
+  },
+  {
+    "description": "chip aquecido sem limite próprio",
+    "chip_state": "warm",
+    "daily_limit_override": null,
+    "expected": 500
+  },
+  {
+    "description": "chip frio com limite explícito string",
+    "chip_state": "cold",
+    "daily_limit_override": "120",
+    "expected": 120
+  },
+  {
+    "description": "chip aquecido com limite explícito string",
+    "chip_state": "warm",
+    "daily_limit_override": "350",
+    "expected": 350
+  },
+  {
+    "description": "chip frio com limite explícito numérico",
+    "chip_state": "cold",
+    "daily_limit_override": 80,
+    "expected": 80
+  },
+  {
+    "description": "chip aquecido com limite explícito numérico",
+    "chip_state": "warm",
+    "daily_limit_override": 600,
+    "expected": 600
+  },
+  {
+    "description": "chip frio com limite inválido (zero) recai no padrão",
+    "chip_state": "cold",
+    "daily_limit_override": 0,
+    "expected": 50
+  },
+  {
+    "description": "chip aquecido com limite inválido (negativo) recai no padrão",
+    "chip_state": "warm",
+    "daily_limit_override": -10,
+    "expected": 500
+  },
+  {
+    "description": "chip frio com limite não numérico recai no padrão",
+    "chip_state": "cold",
+    "daily_limit_override": "invalido",
+    "expected": 50
+  }
+]

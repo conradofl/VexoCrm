@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
   ensureEvolutionInstanceDailyUsageTable,
@@ -9,6 +11,9 @@ import {
   resolveChipDailyLimit,
   setChipQuotaDbPool,
 } from "../services/chipQuota.js";
+
+const sharedCasesPath = resolve(__dirname, "../../../shared/chipQuotaTestCases.json");
+const quotaTestCases = JSON.parse(readFileSync(sharedCasesPath, "utf-8"));
 
 describe("chipQuota service", () => {
   beforeEach(() => {
@@ -37,6 +42,14 @@ describe("chipQuota service", () => {
       expect(resolveChipDailyLimit({ chip_state: "warm", daily_limit_override: -10 })).toBe(500);
       expect(resolveChipDailyLimit({ chip_state: "warm", daily_limit_override: "invalido" })).toBe(500);
       expect(resolveChipDailyLimit({ chip_state: "cold", daily_limit_override: null })).toBe(50);
+    });
+  });
+
+  describe("tabela compartilhada de cotas (shared/chipQuotaTestCases.json) — Backend", () => {
+    quotaTestCases.forEach(({ description, chip_state, daily_limit_override, expected }) => {
+      it(description, () => {
+        expect(resolveChipDailyLimit({ chip_state, daily_limit_override })).toBe(expected);
+      });
     });
   });
 

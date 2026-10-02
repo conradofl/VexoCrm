@@ -97,6 +97,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
   >({});
   const [qrModal, setQrModal] = useState<{ base64: string; tenantName: string; instanceName: string | null; instanceId: string | null } | null>(null);
   const [createMode, setCreateMode] = useState<"provision" | "manual">("provision");
+  const [expandedInstanceId, setExpandedInstanceId] = useState<string | null>(null);
 
   const evolutionInstances: LeadClientEvolutionInstance[] = tenant.n8n_settings?.evolution_instances ?? [];
 
@@ -323,7 +324,7 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
         </div>
 
         {evolutionInstances.length > 0 ? (
-          <div className="grid gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 items-start">
             {evolutionInstances.map((instance) => {
               const draft = getChipDraft(instance);
               return (
@@ -332,6 +333,10 @@ export function EvolutionChipsPanel({ tenant, canEdit = true }: Props) {
                   tenantId={tenant.id}
                   instance={instance}
                   draft={draft}
+                  isExpanded={expandedInstanceId === instance.id}
+                  onToggleExpand={() =>
+                    setExpandedInstanceId((prev) => (prev === instance.id ? null : instance.id))
+                  }
                   onChipStateChange={(v) => updateChipDraft(instance.id, { chipState: v })}
                   onLimitOverrideChange={(v) => updateChipDraft(instance.id, { dailyLimitOverride: v })}
                   onSaveChip={() => void handleSaveChipSettings(instance)}
