@@ -2246,7 +2246,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const {
         client_id, prospect_name, itens, condicoes, status, payment_link, cobrar_setup, valor_setup_vexo, condicoes_pagamento, periodo_plano, validade_ate, valor_apos_validade, observacao_validade, descontos_concedidos, arquivada, meio_pagamento, package_id, package_vexo_id, valor_vp, pacotes_ofertados, segment_id, custom_segment_name, customSegmentName, prospect_logo,
         condicoes_especiais, desconto_setup_pct, desconto_mensal_pct, vexi_plan, vexi_price, vexo_plan, vexo_price,
-        esconder_valores
+        esconder_valores, carencia_dias
       } = req.body;
       const tenantId = await resolveTenantUuid(client_id);
 
@@ -2317,6 +2317,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       const finalVexoPlan = vexo_plan || vexi_plan || current.vexo_plan || current.vexi_plan;
       const finalVexoPrice = vexo_price !== undefined ? Number(vexo_price || 0) : (vexi_price !== undefined ? Number(vexi_price || 0) : current.vexo_price);
       const finalOwnerCompany = req.body.owner_company || req.body.ownerCompany || (req.body.isVexo ? "vexo" : null);
+      // Carência do 1º vencimento (dias). Antes NENHUMA rota gravava esta coluna — só lia —, então a
+      // carência escolhida no formulário da proposta se perdia ao salvar. Ausente no corpo = mantém.
+      const finalCarenciaDias = carencia_dias !== undefined
+        ? (carencia_dias === null || carencia_dias === "" || !Number.isFinite(Number(carencia_dias)) ? null : Math.max(0, Math.trunc(Number(carencia_dias))))
+        : (current.carencia_dias !== null && current.carencia_dias !== undefined ? Number(current.carencia_dias) : null);
 
       let finalPresentationSlides = req.body.presentation_slides !== undefined ? req.body.presentation_slides : current.presentation_slides;
       if (finalPresentationSlides) {
@@ -2417,7 +2422,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
              presentation_slides = COALESCE($31, presentation_slides),
              descontos_por_periodo = $32,
              vp_percent = $33,
-             esconder_valores = $34${segLogoSet}
+             esconder_valores = $34,
+             carencia_dias = $35${segLogoSet}
          WHERE id = $19 AND tenant_id = $20 RETURNING *`,
         [
           prospect_name,
@@ -2453,7 +2459,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           finalPresentationSlides ? JSON.stringify(finalPresentationSlides) : null,
           finalDescontosPorPeriodo,
           finalVpPercent,
-          finalEsconderValores
+          finalEsconderValores,
+          finalCarenciaDias
         ]
       );
 

@@ -1,0 +1,183 @@
+{
+  "_comment": "Campos que o formulário único de proposta (frontend ProposalEditor) envia no PUT /api/gd/proposals/:id e a coluna de gd_proposals que cada um grava. O teste do frontend garante que o formulário não envia campo fora desta lista; o teste do backend garante que o PUT grava cada campo daqui. Campo novo no formulário = uma linha aqui, e os dois lados reclamam se faltar a gravação.",
+  "persisted": [
+    {
+      "field": "prospect_name",
+      "column": "prospect_name",
+      "sample": "Clínica Exemplo"
+    },
+    {
+      "field": "itens",
+      "column": "itens",
+      "sample": [
+        {
+          "descricao": "Pacote: X (Recorrência)",
+          "categoria": "gd",
+          "valor": 900,
+          "recorrencia": "mensal"
+        }
+      ]
+    },
+    {
+      "field": "condicoes",
+      "column": "condicoes",
+      "sample": "Condição legada"
+    },
+    {
+      "field": "payment_link",
+      "column": "payment_link",
+      "sample": "https://pay.exemplo/abc"
+    },
+    {
+      "field": "cobrar_setup",
+      "column": "cobrar_setup",
+      "sample": true
+    },
+    {
+      "field": "valor_setup_vexo",
+      "column": "valor_setup_vexo",
+      "sample": 3000
+    },
+    {
+      "field": "condicoes_pagamento",
+      "column": "condicoes_pagamento",
+      "sample": {
+        "ofertadas": [
+          {
+            "id": "pix_avista",
+            "nome": "Pix à vista"
+          }
+        ],
+        "escolhida": null
+      }
+    },
+    {
+      "field": "periodo_plano",
+      "column": "periodo_plano",
+      "sample": "trimestral"
+    },
+    {
+      "field": "validade_ate",
+      "column": "validade_ate",
+      "sample": "2026-12-31T23:59:59.000Z"
+    },
+    {
+      "field": "valor_apos_validade",
+      "column": "valor_apos_validade",
+      "sample": 1500
+    },
+    {
+      "field": "observacao_validade",
+      "column": "observacao_validade",
+      "sample": "Depois da validade, preço de tabela."
+    },
+    {
+      "field": "carencia_dias",
+      "column": "carencia_dias",
+      "sample": 15
+    },
+    {
+      "field": "package_id",
+      "column": "package_id",
+      "sample": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "field": "package_vexo_id",
+      "column": "package_vexo_id",
+      "sample": "22222222-2222-4222-8222-222222222222"
+    },
+    {
+      "field": "pacotes_ofertados",
+      "column": "pacotes_ofertados",
+      "sample": [
+        "11111111-1111-4111-8111-111111111111"
+      ]
+    },
+    {
+      "field": "segment_id",
+      "column": "segment_id",
+      "sample": "Energia Solar"
+    },
+    {
+      "field": "prospect_logo",
+      "column": "prospect_logo",
+      "sample": "data:image/png;base64,AAAA"
+    },
+    {
+      "field": "condicoes_especiais",
+      "column": "condicoes_especiais",
+      "sample": "Texto especial"
+    },
+    {
+      "field": "desconto_setup_pct",
+      "column": "desconto_setup_pct",
+      "sample": 100
+    },
+    {
+      "field": "desconto_mensal_pct",
+      "column": "desconto_mensal_pct",
+      "sample": 10
+    },
+    {
+      "field": "descontos_por_periodo",
+      "column": "descontos_por_periodo",
+      "sample": {
+        "mensal": 0,
+        "trimestral": 10,
+        "semestral": 0,
+        "anual": 0
+      }
+    },
+    {
+      "field": "valor_vp",
+      "column": "valor_vp",
+      "sample": 270
+    },
+    {
+      "field": "vp_percent",
+      "column": "vp_percent",
+      "sample": 12.5
+    },
+    {
+      "field": "vexo_plan",
+      "column": "vexo_plan",
+      "sample": "essencial"
+    },
+    {
+      "field": "vexo_price",
+      "column": "vexo_price",
+      "sample": 397
+    },
+    {
+      "field": "esconder_valores",
+      "column": "esconder_valores",
+      "sample": true
+    },
+    {
+      "field": "owner_company",
+      "column": "owner_company",
+      "sample": "vexo"
+    },
+    {
+      "field": "presentation_slides",
+      "column": "presentation_slides",
+      "sample": [
+        {
+          "id": 1,
+          "kind": "cover",
+          "title": "Capa"
+        }
+      ]
+    }
+  ],
+  "transient": [
+    {
+      "field": "client_id",
+      "why": "resolve o tenant da proposta; não é coluna"
+    },
+    {
+      "field": "custom_segment_name",
+      "why": "o nome livre do segmento vira o segment_id gravado"
+    }
+  ]
+}

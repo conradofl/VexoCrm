@@ -10,10 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { calculateProposalValues, isCobrancaUnica, isCobrancaMensal, temPacote, isLinhaDePacote } from "@/lib/geracaoDigital/proposalCalculator";
-import PlanoEditor from "@/components/geracaoDigital/PlanoEditor";
-import { type Plano, type PeriodoKey, planoVazio, planoValido, planoDeProposta, vpMensalDoPrazo, PERIODOS } from "@/lib/geracaoDigital/plano";
-import FormasPagamentoEditor from "@/components/geracaoDigital/FormasPagamentoEditor";
-import { type FormasSelecionadas, formasVazias, formasParaTerms, termsParaFormas, termsLegados } from "@/lib/geracaoDigital/formasPagamento";
+import { planoValido } from "@/lib/geracaoDigital/plano";
 import { syncPlanoPackages } from "@/lib/geracaoDigital/planoSync";
 import { buildContractInitialData } from "@/lib/geracaoDigital/contractFromProposal";
 import { API_BASE_URL, fetchApi } from "@/lib/api";
@@ -66,8 +63,16 @@ import { ShareProposalDialog } from "./GeracaoDigitalProposals/ShareProposalDial
 import { SlideEditorModal } from "@/components/presentation/SlideEditorModal";
 import { PitchBriefingModal } from "@/components/presentation/PitchBriefingModal";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { useProposalWizard } from "@/hooks/useProposalWizard";
-import { ProposalWizard } from "@/components/geracaoDigital/ProposalWizard";
+import { useProposalEditor } from "@/hooks/useProposalEditor";
+import { ProposalEditor } from "@/components/geracaoDigital/ProposalEditor";
+import {
+  type EditorMode,
+  PROPOSTA_BASE_VAZIA,
+  buildProposalBody,
+  emptyProposalEditorValues,
+  proposalEditorValuesFromProposal,
+  validateProposalEditor,
+} from "@/lib/geracaoDigital/proposalEditorModel";
 
 interface ProposalItem {
   product_id?: string | null;
@@ -154,43 +159,28 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
   const [reopenMotivo, setReopenMotivo] = useState<string>("");
   const [isReopening, setIsReopening] = useState<boolean>(false);
 
-  // Modo condições especiais (esconder valores de planos na proposta pública/pitch)
-  const [editEsconderValores, setEditEsconderValores] = useState<boolean>(false);
-
-  // Proposal form editor state
-  const [prospectName, setProspectName] = useState<string>("");
-  const [condicoes, setCondicoes] = useState<string>("");
+  // O formulário único de proposta (criar e editar). Um objeto só — ver proposalEditorModel.ts.
+  const editor = useProposalEditor();
+  const ev = editor.values;
+  // true = o formulário está em modo "Nova Proposta" (a proposta ainda não existe). O ref espelha o
+  // estado para os handlers com closure antiga: uma carga de propostas que termina DEPOIS de abrir
+  // "Nova Proposta" (atalho por URL) não pode apagar o que o vendedor já começou a preencher.
+  const [isCreating, setIsCreatingState] = useState<boolean>(false);
+  const isCreatingRef = useRef<boolean>(false);
+  const setIsCreating = (v: boolean) => {
+    isCreatingRef.current = v;
+    setIsCreatingState(v);
+  };
+  // Itens derivados do pacote escolhido (a lista que o efeito abaixo mantém em sincronia)
   const [items, setItems] = useState<ProposalItem[]>([]);
-  const [paymentLink, setPaymentLink] = useState<string>("");
-  const [editPackageId, setEditPackageId] = useState<string>("");
-  const [editPackageVexoId, setEditPackageVexoId] = useState<string>("");
-  const [editPacotesOfertados, setEditPacotesOfertados] = useState<string[]>([]);
-  // Plano da proposta em edição (escopo × prazos) — mesmo editor do wizard.
-  const [editPlano, setEditPlano] = useState<Plano>(planoVazio);
   const [planoSaving, setPlanoSaving] = useState<boolean>(false);
-
-  // Regrava as linhas de preço desta proposta a partir do plano editado.
-  const [editValorVp, setEditValorVp] = useState<number>(0);
-  const [vpActive, setVpActive] = useState<boolean>(false);
-  const [editCarencia, setEditCarencia] = useState<string>("");
-
-  // Setup Vexo opcional
-  const [cobrarSetup, setCobrarSetup] = useState<boolean>(false);
-  const [valorSetupVexo, setValorSetupVexo] = useState<number>(0);
-  // Fase 5a: alavancas que moravam na Mesa de Negociação agora são campos
-  // editáveis da própria proposta. 0/vazio = usa o preço do pacote no catálogo.
-  const [editMensalidadeNegociada, setEditMensalidadeNegociada] = useState<number>(0);
 
   // Condições de pagamento
   const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
   const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
   // Formas fixas de pagamento (Pix/cartão) marcadas nesta proposta.
-  const [formasPgto, setFormasPgto] = useState<FormasSelecionadas>(formasVazias);
   // Corpo do card: preview por padrão, formulário só quando pedido.
   const [showConfig, setShowConfig] = useState<boolean>(false);
-  const [editSegmentId, setEditSegmentId] = useState<string>("");
-  const [customEditSegment, setCustomEditSegment] = useState<string>("");
-  const [editProspectLogo, setEditProspectLogo] = useState<string | null>(null);
   // Muda para forçar o iframe do preview a recarregar depois de salvar.
   const [previewNonce, setPreviewNonce] = useState<number>(0);
 
@@ -238,42 +228,12 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     setShowSlideEditorModal(true);
   };
 
-  // Hook customizado para gerenciar estado/ações do wizard de criação de proposta
-  const wizardState = useProposalWizard({
-    clientId,
-    getIdToken,
-    availablePackages,
-    vexoProducts,
-    gdProducts,
-    availableTerms,
-    loadProposals,
-    toast,
-    isVexoCommercial
-  });
-
-  const {
-    showNewForm,
-    setShowNewForm,
-    newCondicoes,
-    resetWizard,
-    setNewProspect,
-    setNewSegmentId,
-    setNewProspectLogo,
-    setNewPackageId,
-    setNewPackageVexoId,
-    setNewPacotesOfertados,
-    setNewOfferedTermIds,
-    setNewVexoAvulsoIds,
-    setNewGdAvulsoIds,
-    setNewCarencia,
-    setNewCobrarSetup,
-    setNewValorSetup,
-    setNewPeriodo,
-    setNewValidade,
-    setNewCondicoes,
-    setNewPaymentLink,
-    setEditingProposalId
-  } = wizardState;
+  // "Nova Proposta": abre o MESMO formulário da edição, com os campos vazios.
+  const startNewProposal = (prefillName = "") => {
+    editor.reset(emptyProposalEditorValues({ prospectName: prefillName }));
+    setIsCreating(true);
+    setShowConfig(false);
+  };
 
   // Auto-carrega dados do lead e abre o formulário de proposta quando navega de Ações Rápidas (Conversas)
   const location = useLocation();
@@ -282,10 +242,9 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     const phone = params.get("phone");
     const nome = params.get("nome") || params.get("prospect");
     if (phone || nome) {
-      setShowNewForm(true);
-      setNewProspect(nome || phone || "");
+      startNewProposal(nome || phone || "");
     }
-  }, [location.search, setShowNewForm, setNewProspect]);
+  }, [location.search]);
 
 
   // Modal de compartilhamento da proposta
@@ -306,13 +265,6 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
   // Condições criadas antes das formas fixas. Vivem no jsonb da própria
   // proposta, não na biblioteca (que sempre esteve vazia) — por isso são
   // guardadas daqui, senão salvar a proposta as apagaria.
-  const [legadosPgto, setLegadosPgto] = useState<any[]>([]);
-
-  // Período do plano e validade da proposta
-  const [periodoPlano, setPeriodoPlano] = useState<string>("");
-  const [validadeAte, setValidadeAte] = useState<string>("");
-  const [valorAposValidade, setValorAposValidade] = useState<string>("");
-  const [observacaoValidade, setObservacaoValidade] = useState<string>("");
 
   // Signature form state
   const [signerName, setSignerName] = useState<string>("");
@@ -423,7 +375,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     const finalItems: ProposalItem[] = [];
 
     // 1. Add GD package item
-    const selectedGdPkg = availablePackages.find(p => p.id === editPackageId && (p.tipo === "gd" || !p.tipo));
+    const selectedGdPkg = availablePackages.find(p => p.id === ev.packageId && (p.tipo === "gd" || !p.tipo));
     if (selectedGdPkg) {
       const val = Number(selectedGdPkg.valor || 0);
       const PERIOD_MONTHS: Record<string, number> = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
@@ -459,7 +411,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     }
 
     // 2. Add Vexo package item
-    const selectedVexoPkg = availablePackages.find(p => p.id === editPackageVexoId && p.tipo === "vexo");
+    const selectedVexoPkg = availablePackages.find(p => p.id === ev.packageVexoId && p.tipo === "vexo");
     if (selectedVexoPkg) {
       const val = Number(selectedVexoPkg.valor || 0);
       const PERIOD_MONTHS: Record<string, number> = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
@@ -517,7 +469,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     if (serialize(dedupedItems) !== serialize(items)) {
       setItems(dedupedItems);
     }
-  }, [editPackageId, editPackageVexoId, availablePackages, vexoProducts, gdProducts, selectedProposal]);
+  }, [ev.packageId, ev.packageVexoId, availablePackages, vexoProducts, gdProducts, selectedProposal]);
 
   async function loadPaymentTerms() {
     try {
@@ -538,7 +490,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     }
   }
 
-  async function loadProposals() {
+  async function loadProposals(selectId?: string) {
     try {
       setIsLoading(true);
       setError(null);
@@ -564,7 +516,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
           // sempre em data.data[0] — toda vez que loadProposals() rodava
           // (salvar, arquivar, voltar da proposta pública) a seleção pulava
           // para o primeiro cliente da lista.
-          const alvoId = selectedProposalRef.current?.id || propostaIdUrl;
+          const alvoId = selectId || selectedProposalRef.current?.id || propostaIdUrl;
           const alvo = data.data.find((p: any) => p.id === alvoId) || data.data[0];
           selectProposal(alvo, refPkgs);
         }
@@ -587,80 +539,36 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
   // chama passa a lista direto. Sem isso o editor de plano abria zerado.
   const selectProposal = (prop: Proposal, pkgsRecemCarregados: any[] = []) => {
     setSelectedProposal(prop);
-    setProspectName(prop.prospect_name);
-    setCondicoes(prop.condicoes);
-    setNewCondicoes((prop as any).condicoes_especiais || (prop as any).condicao_especial || "");
-    setEditEsconderValores((prop as any).esconder_valores === true);
     setItems(Array.isArray(prop.itens) ? prop.itens : []);
     setSignerName(prop.signer_name || "");
-    setPaymentLink(prop.payment_link || "");
-    setCobrarSetup(prop.cobrar_setup === true);
-    setValorSetupVexo(Number(prop.valor_setup_vexo || 0));
-    // Preço negociado só existe se a proposta gravou override no item do pacote.
-    const pkgItem = (Array.isArray(prop.itens) ? prop.itens : []).find(
-      (i: any) => i?.descricao?.startsWith("Pacote:") && i?.valor_override === true
-    );
-    setEditMensalidadeNegociada(pkgItem ? Number(pkgItem.valor || 0) : 0);
-    setVpActive(!!prop.valor_vp);
-    setEditValorVp(Number(prop.valor_vp || 0));
     setOfferedTermIds(
       Array.isArray(prop.condicoes_pagamento?.ofertadas)
         ? prop.condicoes_pagamento!.ofertadas.map((t) => t.id)
         : []
     );
-    setFormasPgto(termsParaFormas(prop.condicoes_pagamento?.ofertadas || []));
-    setLegadosPgto(termsLegados(prop.condicoes_pagamento?.ofertadas || []));
-    const currentSeg = (prop as any).segment_id || "";
-    const isKnownSeg = segmentsList.some((s) => s.id === currentSeg);
-    if (currentSeg && !isKnownSeg) {
-      setEditSegmentId("custom");
-      setCustomEditSegment(currentSeg);
-    } else {
-      setEditSegmentId(currentSeg);
-      setCustomEditSegment("");
-    }
-    setEditProspectLogo((prop as any).prospect_logo || null);
     setAdhocTerms(
       Array.isArray(prop.condicoes_pagamento?.ofertadas)
         ? prop.condicoes_pagamento!.ofertadas.filter((t) => String(t.id).startsWith("adhoc-"))
         : []
     );
-    setPeriodoPlano(prop.periodo_plano || "");
-    setValidadeAte(prop.validade_ate ? prop.validade_ate.slice(0, 10) : "");
-    setValorAposValidade(
-      prop.valor_apos_validade !== null && prop.valor_apos_validade !== undefined
-        ? String(prop.valor_apos_validade)
-        : ""
-    );
-    setObservacaoValidade(prop.observacao_validade || "");
+    // Todo o resto do formulário vem do modelo: o MESMO que cria e que edita. O plano
+    // (escopo × prazos) é reconstruído das linhas de preço já gravadas — por isso o catálogo
+    // recém-carregado entra na conta (o setState de availablePackages ainda não refletiu).
+    // Enquanto o vendedor está criando, o formulário é o rascunho dele: não se sobrescreve.
+    if (!isCreatingRef.current) {
+      editor.reset(
+        proposalEditorValuesFromProposal(prop, {
+          catalogo: [...availablePackages, ...pkgsRecemCarregados],
+          segmentsList,
+        })
+      );
+    }
+  };
 
-    setEditPackageId(prop.package_id || "");
-    setEditPackageVexoId(prop.package_vexo_id || "");
-    const ofertados: string[] = Array.isArray((prop as any).pacotes_ofertados)
-      ? (prop as any).pacotes_ofertados
-      : ([prop.package_id, prop.package_vexo_id].filter(Boolean) as string[]);
-    setEditPacotesOfertados(ofertados);
-    // Reconstrói o plano (escopo × prazos) a partir das linhas de preço já
-    // gravadas, para editar aqui com o mesmo editor do wizard.
-    const catalogo = [...availablePackages, ...pkgsRecemCarregados];
-    setEditPlano(
-      planoDeProposta(
-        ofertados
-          .map((pid) => catalogo.find((p: any) => p.id === pid))
-          .filter(Boolean),
-        Array.isArray(prop.itens) ? prop.itens : [],
-        prop
-      )
-    );
-    // O escopo agora vive no plano (editPlano, acima). A hidratação antiga
-    // marcava como "avulso" QUALQUER item vexo com product_id que não fosse a
-    // linha do pacote — inclusive o conteúdo do próprio pacote, gravado a
-    // valor 0. Era daí que saía a lista "Módulos Avulsos Extras" repetindo
-    // CRM Vexo, Automação de WhatsApp, Chips, Follow-up... que já estavam
-    // dentro do combo logo acima.
-    setEditCarencia(
-      prop.carencia_dias !== null && prop.carencia_dias !== undefined ? String(prop.carencia_dias) : ""
-    );
+  // Escolha do usuário na lista: abrir outra proposta cancela a criação em andamento.
+  const handlePickProposal = (prop: Proposal) => {
+    setIsCreating(false);
+    selectProposal(prop);
   };
 
   // Live total calculations
@@ -675,7 +583,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     ? items.filter(isLinhaDePacote).reduce((sum, i) => sum + Number(i.valor || 0), 0)
     : items.filter(isCobrancaMensal).reduce((sum, i) => sum + Number(i.valor || 0), 0);
 
-  const setupVexoValue = cobrarSetup ? Number(valorSetupVexo || 0) : 0;
+  const setupVexoValue = ev.cobrarSetup ? Number(ev.valorSetupVexo || 0) : 0;
   const grandTotal = setupTotal + recurringTotal + setupVexoValue;
 
   const offeredTerms = [...availableTerms, ...adhocTerms].filter((t) => offeredTermIds.includes(t.id));
@@ -774,10 +682,22 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     setInlineTerm((prev) => ({ ...prev, config: { ...prev.config, [field]: value } }));
   };
 
-  // Fecha a negociação: grava concessões e abre a proposta pública final
-  // Save proposal updates
+  // Grava o formulário único. Criar e editar passam por AQUI: mesma validação, mesma montagem do
+  // corpo (buildProposalBody), mesma gravação (PUT). Criar só acrescenta, antes, um POST que cria a
+  // linha da proposta (nome + dono) para dar o id — o POST não grava link de pagamento, carência,
+  // preço negociado nem a escada de descontos, e duas rotas gravando campos é o mesmo problema dos
+  // dois formulários. Quem grava os campos é sempre o PUT.
   const handleSaveProposal = async () => {
-    if (!selectedProposal) return;
+    const mode: EditorMode = isCreating ? "new" : "edit";
+    if (mode === "edit" && !selectedProposal) return;
+
+    const verdict = validateProposalEditor(ev, mode);
+    if (!verdict.ok) {
+      toast({ title: verdict.title || "Dados inválidos", description: verdict.message || "", variant: "destructive" });
+      return;
+    }
+
+    const base: any = mode === "new" ? PROPOSTA_BASE_VAZIA : selectedProposal;
     setPlanoSaving(true);
     try {
       const token = await getIdToken();
@@ -792,17 +712,17 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
       // plano. Quem digitava preços em Mensal/Trimestral/Semestral e clicava
       // direto em Salvar perdia os valores (ficavam só no estado do React).
       let catalogo = availablePackages;
-      let pkgId = editPackageId;
-      let pacotesOfertados = editPacotesOfertados;
-      if (planoValido(editPlano)) {
+      let pkgId = ev.packageId;
+      let pacotesOfertados = ev.pacotesOfertados;
+      if (planoValido(ev.plano)) {
         const r = await syncPlanoPackages({
-          plano: editPlano,
-          nomeBase: selectedProposal.prospect_name || "Plano",
+          plano: ev.plano,
+          nomeBase: base.prospect_name || ev.prospectName || "Plano",
           clientId,
           gdProducts,
           vexoProducts,
           existentes: availablePackages.filter(
-            (p: any) => p?.ad_hoc && editPacotesOfertados.includes(p.id)
+            (p: any) => p?.ad_hoc && ev.pacotesOfertados.includes(p.id)
           ),
           getIdToken,
         });
@@ -813,269 +733,76 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         pkgId = r.packageId;
         pacotesOfertados = r.pacotesOfertados;
         setAvailablePackages(catalogo);
-        setEditPacotesOfertados(pacotesOfertados);
-        setEditPackageId(pkgId);
+        editor.patch({ pacotesOfertados, packageId: pkgId });
       }
 
-      // Construct finalItems array
-      const finalItems: any[] = [];
-
-      // Setup Vexo: extrai do plano em edição com fallback nos estados locais
-      const setupDoPlano = Number((editPlano as any).valorSetupVexo ?? (editPlano as any).valor_setup_vexo ?? valorSetupVexo ?? 0);
-      const cobrarSetupFinal = setupDoPlano > 0 ? true : (cobrarSetup || false);
-
-      // 1. Add GD package item
-      const selectedGdPkg = catalogo.find(p => p.id === pkgId && (p.tipo === "gd" || !p.tipo));
-      // VP MENSAL do prazo selecionado (%, do plano). Alimenta o item (período)
-      // e a coluna valor_vp da proposta (mensal). Com plano válido e % preenchido, o % manda;
-      // senão, cai no VP manual antigo (editValorVp ou selectedProposal.valor_vp).
-      const periodoSel = String(selectedGdPkg?.periodo || periodoPlano || selectedProposal.periodo_plano || "anual");
-      const vpMensalPlano =
-        Number(editPlano.vpPercent || 0) > 0 && (PERIODOS as readonly any[]).some((p) => p.key === periodoSel)
-          ? vpMensalDoPrazo(editPlano, periodoSel as any)
-          : (Number(editValorVp || 0) > 0 ? Number(editValorVp) : (Number(selectedProposal.valor_vp || 0) > 0 ? Number(selectedProposal.valor_vp) : 0));
-      if (selectedGdPkg) {
-        const val = Number(selectedGdPkg.valor || 0);
-        const PERIOD_MONTHS: Record<string, number> = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
-        const meses = selectedGdPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedGdPkg.periodo] ?? 1);
-        const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
-        const valorTabela = Number(selectedGdPkg.valor_tabela || 0);
-        // Preço negociado desta proposta (fase 5a). Quando preenchido, vence o
-        // pacote vivo do catálogo — é a alavanca de desconto que morava na Mesa.
-        const negociada = Number(editMensalidadeNegociada || 0);
-        const usaOverride = negociada > 0 && meses !== null;
-        const mensalidadeFinalItem = usaOverride ? negociada : mensalidade;
-
-        // VP do prazo selecionado, derivado do % do plano. O valor_vp do item
-        // é o total do PERÍODO (o que computeVpFromItems soma no resumo). A
-        // coluna valor_vp da proposta guarda o MENSAL (o que a página pública
-        // usa para dividir a mensalidade).
-        const vpItemPeriodo =
-          meses && vpMensalPlano > 0 ? Math.round(vpMensalPlano * meses * 100) / 100 : null;
-
-        finalItems.push({
-          product_id: null,
-          descricao: `Pacote: ${selectedGdPkg.nome} (${selectedGdPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
-          categoria: "gd",
-          valor: mensalidadeFinalItem,
-          valor_vp: vpItemPeriodo,
-          valor_override: usaOverride || undefined,
-          recorrencia: meses ? "mensal" : "unico",
-          periodo: selectedGdPkg.periodo,
-          meses,
-          total_periodo: meses ? (usaOverride ? mensalidadeFinalItem * meses : val) : null,
-          valor_tabela: valorTabela > val ? valorTabela : null
-        });
-
-        if (Array.isArray(selectedGdPkg.produtos_incluidos)) {
-          selectedGdPkg.produtos_incluidos.forEach((p: any) => {
-            const isVexo = p.origem === "vexo";
-            const desc = isVexo ? (String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`) : p.nome;
-            finalItems.push({
-              product_id: p.product_id || null,
-              descricao: desc,
-              categoria: isVexo ? "vexo" : "gd",
-              valor: 0,
-              recorrencia: "mensal"
-            });
-          });
-        }
-      }
-
-      // 2. Add Vexo package item
-      const selectedVexoPkg = availablePackages.find(p => p.id === editPackageVexoId && p.tipo === "vexo");
-      if (selectedVexoPkg) {
-        const val = Number(selectedVexoPkg.valor || 0);
-        const PERIOD_MONTHS: Record<string, number> = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 };
-        const meses = selectedVexoPkg.periodo === "unico" ? null : (PERIOD_MONTHS[selectedVexoPkg.periodo] ?? 1);
-        const mensalidade = meses ? Math.round((val / meses) * 100) / 100 : val;
-        const valorTabela = Number(selectedVexoPkg.valor_tabela || 0);
-
-        finalItems.push({
-          product_id: null,
-          descricao: `Pacote Vexo: ${selectedVexoPkg.nome} (${selectedVexoPkg.periodo === "unico" ? "Setup" : "Recorrência"})`,
-          categoria: "vexo",
-          valor: mensalidade,
-          recorrencia: meses ? "mensal" : "unico",
-          periodo: selectedVexoPkg.periodo,
-          meses,
-          total_periodo: meses ? val : null,
-          valor_tabela: valorTabela > val ? valorTabela : null
-        });
-
-        if (Array.isArray(selectedVexoPkg.produtos_incluidos)) {
-          selectedVexoPkg.produtos_incluidos.forEach((p: any) => {
-            const desc = String(p.nome).startsWith("Módulo:") ? p.nome : `Módulo: ${p.nome}`;
-            if (!finalItems.some(it => it.descricao === desc)) {
-              finalItems.push({
-                product_id: p.product_id || null,
-                descricao: desc,
-                categoria: "vexo",
-                valor: 0,
-                recorrencia: "mensal"
-              });
-            }
-          });
-        }
-      }
-
-      // Deduplica itens por descrição (evita repetições de valor zero)
-      const seenItens = new Set<string>();
-      const dedupedFinalItems = finalItems.filter((i) => {
-        const desc = String(i.descricao || "").trim();
-        if (!desc) return false;
-        if (Number(i.valor || 0) === 0) {
-          if (seenItens.has(desc)) return false;
-          seenItens.add(desc);
-        }
-        return true;
+      const built = buildProposalBody({
+        values: ev,
+        base,
+        catalogo,
+        pkgId,
+        pacotesOfertados,
+        clientId,
+        isVexoCommercial,
+        mode,
       });
 
-      // Nada de avulso com valor: um serviço está no plano ou não está na
-      // proposta. Ver o efeito de montagem de itens acima.
-
-      let updatedSlides = Array.isArray(selectedProposal.presentation_slides) && selectedProposal.presentation_slides.length > 0
-        ? JSON.parse(JSON.stringify(selectedProposal.presentation_slides))
-        : null;
-
-      if (updatedSlides) {
-        const gdItems: string[] = [];
-        const pkgItem = dedupedFinalItems.find((it: any) => {
-          const desc = String(it.descricao || it.nome || "").trim();
-          return desc.toLowerCase().startsWith("pacote:") && !desc.toLowerCase().includes("vexo");
+      // Criar: primeiro a linha da proposta (para ter o id). Daqui em diante o formulário já é o
+      // de uma proposta existente — se o PUT falhar, o "Salvar" seguinte edita ESTA proposta em vez
+      // de criar outra.
+      let proposalId: string = base.id;
+      if (mode === "new") {
+        const createRes = await fetchApi(`/api/gd/proposals`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            client_id: clientId,
+            prospect_name: ev.prospectName.trim(),
+            owner_company: isVexoCommercial ? "vexo" : "geracao-digital",
+          }),
         });
-        if (pkgItem) {
-          gdItems.push(pkgItem.descricao || pkgItem.nome);
+        if (!createRes.ok) {
+          const errorData = await createRes.json().catch(() => ({}));
+          throw new Error(errorData.error || "Erro ao criar proposta.");
         }
-
-        dedupedFinalItems.forEach((it: any) => {
-          const desc = String(it.descricao || it.nome || "").trim();
-          const cat = String(it.categoria || "").toLowerCase();
-          if (!desc) return;
-          if (desc.toLowerCase().startsWith("pacote:") && !desc.toLowerCase().includes("vexo")) return;
-          const isVexo = cat === "vexo" || desc.toLowerCase().includes("plano") || desc.toLowerCase().includes("vexo") || desc.toLowerCase().includes("chatbot");
-          if (!isVexo) {
-            if (!gdItems.includes(desc)) gdItems.push(desc);
-          }
-        });
-
-        const vexoItems: string[] = [];
-        dedupedFinalItems.forEach((it: any) => {
-          const desc = String(it.descricao || it.nome || "").trim();
-          const cat = String(it.categoria || "").toLowerCase();
-          if (!desc) return;
-          if (desc.toLowerCase().startsWith("pacote:") && !desc.toLowerCase().includes("vexo")) return;
-          const isVexo = cat === "vexo" || desc.toLowerCase().includes("plano") || desc.toLowerCase().includes("vexo") || desc.toLowerCase().includes("chatbot");
-          if (isVexo) {
-            if (!vexoItems.includes(desc)) vexoItems.push(desc);
-          }
-        });
-        if (vexoItems.length === 0) {
-          vexoItems.push("Plano Avançado Vexo OS", "Chatbot IA de Qualificação", "Jornadas de Follow-up");
-        }
-
-        updatedSlides = updatedSlides.map((s: any) => {
-          if (s.kind === "partnership" || s.id === 5) {
-            return {
-              ...s,
-              fronts: [
-                {
-                  label: "Geração Digital",
-                  tag: "Atração & Posicionamento",
-                  items: gdItems.length > 0 ? gdItems : ["Gestão de Redes Sociais", "Tráfego Pago", "Posicionamento"],
-                },
-                {
-                  label: "Vexo Atendimento",
-                  tag: "IA & Automação Comercial",
-                  items: vexoItems,
-                },
-              ],
-            };
-          }
-          return s;
-        });
+        const createdBody = await createRes.json();
+        const created = createdBody?.data;
+        if (!created?.id) throw new Error("O servidor não devolveu o id da proposta criada.");
+        proposalId = created.id;
+        setProposals((prev) => [created as Proposal, ...prev]);
+        setSelectedProposal(created as Proposal);
+        setIsCreating(false);
+        setShowConfig(true);
       }
 
-      const finalPeriodoPlano = (() => {
-        const gdPkg = catalogo.find((p: any) => p.id === pkgId && (p.tipo === "gd" || !p.tipo));
-        const vexoPkg = catalogo.find((p: any) => p.id === editPackageVexoId && p.tipo === "vexo");
-        return gdPkg?.periodo || vexoPkg?.periodo || selectedProposal.periodo_plano || "mensal";
-      })();
-
-      const body = {
-        client_id: clientId,
-        prospect_name: prospectName,
-        package_id: pkgId || null,
-        // Reenvia a lista de prazos ofertados, agora derivada do próprio plano
-        // na tela (pacotesOfertados). O clobber 3→1 do Dr. Diogo vinha de mandar
-        // uma lista vazia quando o editor abria zerado — bug já corrigido. Com
-        // a lista vindo do plano visível, reenviar é correto e necessário: é o
-        // que faz os prazos novos (Mensal/Trimestral/Semestral) entrarem.
-        pacotes_ofertados: pacotesOfertados,
-        package_vexo_id: editPackageVexoId || null,
-        itens: dedupedFinalItems,
-        presentation_slides: updatedSlides || undefined,
-        condicoes,
-        payment_link: paymentLink,
-        cobrar_setup: cobrarSetupFinal,
-        // Mantém o valor gravado mesmo isentando, para exibir o riscado.
-        valor_setup_vexo: setupDoPlano > 0 ? setupDoPlano : (cobrarSetupFinal && Number(valorSetupVexo || 0) > 0 ? Number(valorSetupVexo) : null),
-        segment_id: editSegmentId === "custom" ? (customEditSegment.trim() || "custom") : (editSegmentId || null),
-        custom_segment_name: editSegmentId === "custom" ? (customEditSegment.trim() || null) : null,
-        prospect_logo: editProspectLogo || null,
-        condicoes_pagamento: {
-          // Formas fixas primeiro; condições legadas da biblioteca seguem
-          // sendo gravadas enquanto estiverem marcadas.
-          ofertadas: [...formasParaTerms(formasPgto, finalPeriodoPlano), ...legadosPgto],
-          escolhida: selectedProposal.condicoes_pagamento?.escolhida ?? null
-        },
-        periodo_plano: finalPeriodoPlano,
-        validade_ate: validadeAte ? new Date(`${validadeAte}T23:59:59`).toISOString() : null,
-        valor_apos_validade: valorAposValidade !== "" ? Number(valorAposValidade) : null,
-        observacao_validade: observacaoValidade || null,
-        carencia_dias: editCarencia !== "" ? Number(editCarencia) : null,
-        // Coluna valor_vp = VP MENSAL do prazo selecionado (a página pública
-        // divide a mensalidade por ele). Vem do % do plano, com fallback no
-        // VP manual antigo.
-        valor_vp: vpMensalPlano > 0 ? vpMensalPlano : null,
-        vp_percent: Number(editPlano.vpPercent || 0) > 0 ? Number(editPlano.vpPercent) : null,
-        condicoes_especiais: newCondicoes || (editPlano as any).condicoesEspeciais || null,
-        esconder_valores: editEsconderValores,
-        desconto_setup_pct: (editPlano as any).descontoSetupPorcentagem ?? (editPlano as any).desconto_setup_pct ?? 0,
-        descontos_por_periodo: editPlano.descontosPorPeriodo || null,
-        desconto_mensal_pct: (() => {
-          const p = (finalPeriodoPlano || "mensal") as PeriodoKey;
-          if (editPlano.descontosPorPeriodo && editPlano.descontosPorPeriodo[p] !== undefined) {
-            return Number(editPlano.descontosPorPeriodo[p] || 0);
-          }
-          return (editPlano as any).descontoMensalPorcentagem ?? (editPlano as any).desconto_mensal_pct ?? 0;
-        })(),
-        vexo_plan: (editPlano as any).vexoPlan || null,
-        vexo_price: (editPlano as any).vexoPlan === "essencial" ? 397 : (editPlano as any).vexoPlan === "avancado" ? 897 : 0,
-        owner_company: isVexoCommercial ? "vexo" : ((selectedProposal as any).owner_company || "geracao-digital")
-      };
-
-      const res = await fetchApi(`/api/gd/proposals/${selectedProposal.id}`, {
+      const res = await fetchApi(`/api/gd/proposals/${proposalId}`, {
         method: "PUT",
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(built.body)
       });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "Erro ao atualizar proposta comercial no servidor.");
+        throw new Error(
+          mode === "new"
+            ? `A proposta foi criada, mas os detalhes não foram gravados: ${errorData.error || "erro no servidor"}. Clique em Salvar para tentar de novo.`
+            : errorData.error || "Erro ao atualizar proposta comercial no servidor."
+        );
       }
 
       const data = await res.json();
       if (data.success) {
         toast({
-          title: "Proposta Salva",
-          description: "Os itens e condições foram atualizados e o faturamento recalculado."
+          title: mode === "new" ? "Proposta Criada" : "Proposta Salva",
+          description:
+            mode === "new"
+              ? `Rascunho para ${ev.prospectName} pronto para edição e negociação.`
+              : "Os itens e condições foram atualizados e o faturamento recalculado."
         });
-        if (updatedSlides) {
-          setSelectedProposal(prev => prev ? { ...prev, presentation_slides: updatedSlides } : prev);
+        if (built.slides) {
+          setSelectedProposal(prev => prev ? { ...prev, presentation_slides: built.slides } : prev);
         }
-        loadProposals();
+        loadProposals(proposalId);
         // Recarrega o preview e volta para ele: salvar é o fim da edição.
         setPreviewNonce((n) => n + 1);
         setShowConfig(false);
@@ -1083,7 +810,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
     } catch (err: any) {
       console.error(err);
       toast({
-        title: "Erro ao Salvar",
+        title: mode === "new" ? "Erro ao Criar" : "Erro ao Salvar",
         description: err.message || "Falha de comunicação com o servidor ao salvar proposta.",
         variant: "destructive"
       });
@@ -1377,27 +1104,25 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
               <p className="text-xs text-slate-650 dark:text-slate-200">
                 {error}
               </p>
-              <Button onClick={loadProposals} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-6 py-2 rounded-xl">
+              <Button onClick={() => loadProposals()} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-6 py-2 rounded-xl">
                 Tentar Novamente
               </Button>
             </CardContent>
           </Card>
         ) : proposals.length === 0 ? (
-          showNewForm ? (
+          isCreating ? (
             <div className="w-full relative z-10">
-              <ProposalWizard
-                onClose={() => { setShowNewForm(false); resetWizard(); }}
-                availablePackages={availablePackages}
-                vexoProducts={vexoProducts}
-                gdProducts={gdProducts}
-                availableTerms={availableTerms}
-                wizardState={wizardState}
-                toast={toast}
-                clientId={clientId}
-                getIdToken={getIdToken}
-                onPackageCreated={(pkg) => setAvailablePackages((prev) => [...prev, pkg])}
+              <ProposalEditor
+                mode="new"
+                values={ev}
+                onChange={editor.patch}
                 segmentsList={segmentsList}
+                gdProducts={gdProducts}
+                vexoProducts={vexoProducts}
                 isVexoCommercial={isVexoCommercial}
+                saving={planoSaving}
+                onSave={handleSaveProposal}
+                onCancel={() => setIsCreating(false)}
               />
             </div>
           ) : (
@@ -1414,7 +1139,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                 </p>
                 <Button
                   size="sm"
-                  onClick={() => { setShowNewForm(true); resetWizard(); }}
+                  onClick={() => startNewProposal()}
                   className="bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold text-xs"
                 >
                   <Plus className="h-3.5 w-3.5 mr-1" />
@@ -1425,21 +1150,19 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
           )
         ) : (
           <div className="grid gap-6 lg:grid-cols-4 relative z-10">
-            {showNewForm && (
+            {isCreating && (
               <div className="lg:col-span-4">
-                <ProposalWizard
-                  onClose={() => { setShowNewForm(false); resetWizard(); }}
-                  availablePackages={availablePackages}
-                  vexoProducts={vexoProducts}
-                  gdProducts={gdProducts}
-                  availableTerms={availableTerms}
-                  wizardState={wizardState}
-                  toast={toast}
-                  clientId={clientId}
-                  getIdToken={getIdToken}
-                  onPackageCreated={(pkg) => setAvailablePackages((prev) => [...prev, pkg])}
+                <ProposalEditor
+                  mode="new"
+                  values={ev}
+                  onChange={editor.patch}
                   segmentsList={segmentsList}
+                  gdProducts={gdProducts}
+                  vexoProducts={vexoProducts}
                   isVexoCommercial={isVexoCommercial}
+                  saving={planoSaving}
+                  onSave={handleSaveProposal}
+                  onCancel={() => setIsCreating(false)}
                 />
               </div>
             )}
@@ -1451,7 +1174,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
               </div>
               <Button
                 size="sm"
-                onClick={() => { setShowNewForm(true); resetWizard(); }}
+                onClick={() => startNewProposal()}
                 className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 text-white font-bold text-xs mb-1"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
@@ -1514,7 +1237,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
               {viewProposta === "list" && propostasFiltradas.map((prop) => (
                 <button
                   key={prop.id}
-                  onClick={() => selectProposal(prop)}
+                  onClick={() => handlePickProposal(prop)}
                   className={cn(
                     "w-full text-left px-3 py-2 rounded-lg border transition-all flex items-center justify-between gap-2",
                     selectedProposal?.id === prop.id
@@ -1583,7 +1306,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                         >
                           <div
                             className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
-                            onClick={() => selectProposal(prop)}
+                            onClick={() => handlePickProposal(prop)}
                           >
                             <span
                               data-testid={`proposal-color-dot-${prop.id}`}
@@ -1667,7 +1390,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                             className="h-5 px-1.5 text-[10px] text-purple-650 hover:text-purple-700 dark:text-purple-400 font-semibold"
                             onClick={(e) => {
                               e.stopPropagation();
-                              selectProposal(prop);
+                              handlePickProposal(prop);
                             }}
                           >
                             {isSelected ? "Selecionada" : "Selecionar"}
@@ -1724,7 +1447,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-black text-slate-800 dark:text-white">{prospectName}</h2>
+                      <h2 className="text-xl font-black text-slate-800 dark:text-white">{ev.prospectName}</h2>
                       {selectedProposal.status === "aceita" && (
                         <Badge className="bg-emerald-500 text-white font-bold flex items-center gap-1">
                           <CheckCircle className="h-3 w-3" />
@@ -1758,10 +1481,8 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                       </Button>
                     )}
 
-                    {/* Um único editor. O antigo "Gerar/Editar Proposta" abria o
-                        wizard — que, desde que o painel de configuração ganhou o
-                        PlanoEditor, fazia exatamente a mesma coisa em 4 passos.
-                        O wizard ficou só para CRIAR. */}
+                    {/* Um único formulário: "Nova Proposta" e "Editar Proposta" abrem o
+                        mesmo ProposalEditor (o assistente de 4 passos foi removido). */}
                     {selectedProposal.status !== "aceita" && (
                       <Button
                         size="sm"
@@ -1903,201 +1624,19 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                       </div>
                     )}
 
-                    {/* Configuração da Proposta — interativa, editável ao vivo com o cliente */}
+                    {/* Configuração da Proposta — o MESMO formulário de "Nova Proposta" */}
                     {showConfig && selectedProposal.status !== "aceita" && (
-                      <div className="p-4 rounded-xl bg-white dark:bg-slate-800/40 border border-purple-200 dark:border-purple-900/30 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-black text-purple-700 dark:text-purple-300 uppercase tracking-wider">Configuração da Proposta</h4>
-                        </div>
-
-                        {/* Segmento e logo moraram só no wizard até agora. Com o
-                            wizard restrito a criar, precisam existir aqui — senão
-                            não haveria como trocar o roteiro da apresentação nem
-                            a marca do cliente depois que a proposta existe. */}
-                        <div className="flex flex-wrap items-end gap-4">
-                          {/* Nome do prospect: o estado já era carregado e já ia
-                              no corpo do save, mas não havia campo — depois de
-                              criada a proposta não dava para corrigir o nome que
-                              aparece na apresentação e no PDF. */}
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Nome da empresa (aparece na apresentação)</Label>
-                            <input
-                              type="text"
-                              value={prospectName}
-                              onChange={(e) => setProspectName(e.target.value)}
-                              placeholder="Ex.: Clínica Dr. Diogo Teodoro"
-                              className="block w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-2 h-8 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Segmento (roteiro da apresentação)</Label>
-                            <select
-                              value={editSegmentId}
-                              onChange={(e) => {
-                                setEditSegmentId(e.target.value);
-                                if (e.target.value !== "custom") setCustomEditSegment("");
-                              }}
-                              className="block bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-2 h-8 text-xs text-slate-800 dark:text-white focus:outline-none"
-                            >
-                              <option value="">Selecione o segmento…</option>
-                              <option value="custom" className="font-bold text-purple-600 dark:text-purple-400">
-                                ✨ Outro Segmento (Personalizado com IA)...
-                              </option>
-                              {(() => {
-                                  const allSegs = [...segmentsList];
-                                  if (!allSegs.some(s => String(s.nome).toLowerCase().includes("turismo"))) {
-                                    allSegs.push({ id: "turismo", nome: "Agências de Turismo & Viagens" });
-                                  }
-                                  if (!allSegs.some(s => String(s.nome).toLowerCase().includes("cafeteria") || String(s.nome).toLowerCase().includes("café"))) {
-                                    allSegs.push({ id: "cafeteria", nome: "Cafeterias, Bistrôs & Cafés Especiais" });
-                                  }
-                                  allSegs.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR"));
-                                  return allSegs.map((sg: any) => (
-                                    <option key={sg.id} value={sg.id}>{sg.nome}</option>
-                                  ));
-                                })()}
-                            </select>
-                            {editSegmentId === "custom" && (
-                              <input
-                                type="text"
-                                value={customEditSegment}
-                                onChange={(e) => setCustomEditSegment(e.target.value)}
-                                placeholder="Digite o nicho livre..."
-                                className="block w-64 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-800 rounded-lg px-2 h-8 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-purple-500 mt-1"
-                              />
-                            )}
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Logo do cliente</Label>
-                            <div className="flex items-center gap-2">
-                              {editProspectLogo && (
-                                <img src={editProspectLogo} alt="logo" className="h-8 w-8 rounded object-contain border border-slate-200 dark:border-slate-700 bg-white" />
-                              )}
-                              <input
-                                type="file"
-                                accept="image/png,image/jpeg,image/webp"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (!file) return;
-                                  const reader = new FileReader();
-                                  reader.onload = () => setEditProspectLogo(reader.result as string);
-                                  reader.readAsDataURL(file);
-                                }}
-                                className="text-[10px] text-slate-500 dark:text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-indigo-50 file:px-2 file:py-0.5 file:text-indigo-600 file:text-[10px]"
-                              />
-                              {editProspectLogo && (
-                                <button type="button" onClick={() => setEditProspectLogo(null)} className="text-[10px] text-slate-500 hover:underline">Remover</button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Alavancas de negociação — antes só existiam na Mesa (fase 5a). */}
-                        <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100 dark:border-white/5">
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Mensalidade negociada (R$)</Label>
-                            <Input
-                              type="number"
-                              placeholder="usa o pacote"
-                              value={editMensalidadeNegociada === 0 ? "" : editMensalidadeNegociada}
-                              onChange={(e) => setEditMensalidadeNegociada(e.target.value === "" ? 0 : Number(e.target.value))}
-                              className="bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-xs h-8 w-44 font-mono"
-                            />
-                            <span className="block text-[9px] text-slate-450">
-                              Vazio = usa o preço do pacote. Preenchido, vence o catálogo só nesta proposta.
-                            </span>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">Carência do 1º vencimento</Label>
-                            <select
-                              value={editCarencia}
-                              onChange={(e) => setEditCarencia(e.target.value)}
-                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded px-2 text-xs text-slate-850 dark:text-white h-8"
-                            >
-                              <option value="">Imediato (na contratação)</option>
-                              <option value="15">15 dias</option>
-                              <option value="20">20 dias</option>
-                              <option value="30">30 dias</option>
-                            </select>
-                            <span className="block text-[9px] text-slate-450">Não altera valores — só a data.</span>
-                          </div>
-                        </div>
-
-                        {/* Formas de pagamento fixas — o caminho principal.
-                            A biblioteca de condições continua abaixo só para
-                            casos que fujam dessas seis. */}
-                        <div className="pt-3 border-t border-slate-100 dark:border-white/5">
-                          {(() => {
-                            const setupVal = Number((editPlano as any).valorSetupVexo ?? (editPlano as any).valor_setup_vexo ?? valorSetupVexo ?? 0);
-                            const cobrar = setupVal > 0 || cobrarSetup;
-                            const c = calculateProposalValues(
-                              {
-                                cobrar_setup: cobrar,
-                                valor_setup_vexo: setupVal,
-                                package_id: editPackageId || null,
-                                package_vexo_id: editPackageVexoId || null,
-                                periodo_plano: periodoPlano || "mensal",
-                                itens: items,
-                                desconto_setup_pct: (editPlano as any).descontoSetupPorcentagem ?? (editPlano as any).desconto_setup_pct ?? 0,
-                                desconto_mensal_pct: (editPlano as any).descontoMensalPorcentagem ?? (editPlano as any).desconto_mensal_pct ?? 0,
-                                descontos_por_periodo: editPlano.descontosPorPeriodo,
-                                vp_percent: editPlano.vpPercent,
-                              },
-                              availablePackages
-                            );
-                            return (
-                              <FormasPagamentoEditor
-                                formas={formasPgto}
-                                onChange={setFormasPgto}
-                                totalSetup={c.setupFinal}
-                                mensalidade={c.mensalidadeFinal}
-                                meses={c.mesesPeriodo}
-                                condicaoEspecialTexto={newCondicoes}
-                                onCondicaoEspecialChange={setNewCondicoes}
-                                esconderValores={editEsconderValores}
-                                onEsconderValoresChange={setEditEsconderValores}
-                              />
-                            );
-                          })()}
-                        </div>
-
-                        {/* A biblioteca de condições foi removida: a tabela
-                            gd_payment_terms nunca teve uma linha e as seis
-                            formas fixas acima cobrem todos os casos reais.
-                            Condições legadas seguem gravadas na proposta
-                            (legadosPgto) e são preservadas ao salvar. */}
-
-
-                        {/* Plano: escopo × prazos, o mesmo editor do wizard.
-                            Antes não dava para trocar o plano aqui — só os
-                            valores —, o que obrigava a recriar a proposta. */}
-                        <div className="pt-3 border-t border-slate-100 dark:border-white/5 space-y-3">
-                          <PlanoEditor
-                            plano={editPlano}
-                            onChange={(novoPlano) => {
-                              setEditPlano(novoPlano);
-                              const setupVal = Number((novoPlano as any).valorSetupVexo ?? (novoPlano as any).valor_setup_vexo ?? 0);
-                              setValorSetupVexo(setupVal);
-                              setCobrarSetup(setupVal > 0);
-                              if (novoPlano.vpPercent > 0) {
-                                setVpActive(true);
-                              }
-                            }}
-                            gdProducts={gdProducts}
-                            vexoProducts={vexoProducts}
-                            isVexoCommercial={isVexoCommercial}
-                          />
-                        </div>
-
-                        {/* Um botão só: aplica o plano e grava a proposta. O
-                            "Aplicar plano" separado foi removido — era o passo
-                            que ninguém sabia que precisava dar. */}
-                        <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-white/5">
-                          <Button size="sm" disabled={planoSaving} onClick={handleSaveProposal} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs">
-                            {planoSaving ? "Salvando..." : "Salvar Configuração"}
-                          </Button>
-                        </div>
-                      </div>
+                      <ProposalEditor
+                        mode="edit"
+                        values={ev}
+                        onChange={editor.patch}
+                        segmentsList={segmentsList}
+                        gdProducts={gdProducts}
+                        vexoProducts={vexoProducts}
+                        isVexoCommercial={isVexoCommercial}
+                        saving={planoSaving}
+                        onSave={handleSaveProposal}
+                      />
                     )}
                   </CardContent>
                 </Card>
