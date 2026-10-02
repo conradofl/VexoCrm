@@ -27,62 +27,19 @@ import {
 } from "./dashboardAnalysis.js";
 import { MESSAGE_EFFECTIVENESS_MIN_SENT, MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS } from "./messageEffectiveness.js";
 import { resolveChipDailyLimit } from "./chipQuota.js";
+import {
+  DASHBOARD_DEFAULT_TIMEZONE,
+  dateKeyInTimezone,
+  calculatePeriodDates,
+  normalizeDashboardPeriodKey,
+  parseCustomPeriodKey,
+} from "./dashboardPeriod.js";
 
-// A cota diária do chip é gravada com a data no fuso do tenant (campaigns/routes.js: getDateKey),
-// não no fuso do banco. Ler com CURRENT_DATE fazia a cota de "hoje" zerar à noite.
-export const DASHBOARD_DEFAULT_TIMEZONE = "America/Sao_Paulo";
-
-export function dateKeyInTimezone(date, timeZone = DASHBOARD_DEFAULT_TIMEZONE) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(date));
-}
+// Período (atalhos e intervalo personalizado) mora em dashboardPeriod.js; reexportado aqui porque
+// é daqui que o resto do backend e os testes sempre importaram.
+export { DASHBOARD_DEFAULT_TIMEZONE, dateKeyInTimezone, calculatePeriodDates };
 
 export const RESPONSE_RATE_DECLARATION = "conversou depois do envio (janela de 14 dias)";
-
-/**
- * Calcula os intervalos [currentStart, currentEnd] e [previousStart, previousEnd]
- * garantindo que o período anterior tenha EXATAMENTE a mesma duração do período atual.
- *
- * Em "this_month", se estamos no dia D do mês (duração D), o período anterior
- * corresponde aos D dias imediatamente anteriores ao início do mês atual (não o mês calendário anterior completo).
- */
-export function calculatePeriodDates(periodKey = "30d", referenceDate = new Date()) {
-  const now = new Date(referenceDate);
-  const normalizedKey = periodKey === "7d" || periodKey === "this_month" ? periodKey : "30d";
-
-  let currentStart;
-  let currentEnd = new Date(now);
-  let previousStart;
-  let previousEnd;
-
-  if (normalizedKey === "7d") {
-    const durationMs = 7 * 24 * 60 * 60 * 1000;
-    currentStart = new Date(now.getTime() - durationMs);
-    previousEnd = new Date(currentStart);
-    previousStart = new Date(currentStart.getTime() - durationMs);
-  } else if (normalizedKey === "this_month") {
-    currentStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const durationMs = currentEnd.getTime() - currentStart.getTime();
-    previousEnd = new Date(currentStart);
-    previousStart = new Date(currentStart.getTime() - durationMs);
-  } else {
-    // Padrão: 30d
-    const durationMs = 30 * 24 * 60 * 60 * 1000;
-    currentStart = new Date(now.getTime() - durationMs);
-    previousEnd = new Date(currentStart);
-    previousStart = new Date(currentStart.getTime() - durationMs);
-  }
-
-  const durationMs = currentEnd.getTime() - currentStart.getTime();
-
-  return {
-    periodKey: normalizedKey,
-    currentStart,
-    currentEnd,
-    previousStart,
-    previousEnd,
-    durationMs,
-  };
-}
 
 /**
  * Calcula variação percentual inteira entre período atual e anterior.
@@ -285,8 +242,15 @@ const CORE_BLOCKS = [
  */
 export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d", options = {}) {
   const refDate = options.referenceDate ? new Date(options.referenceDate) : new Date();
-  const { currentStart, currentEnd, previousStart, previousEnd, periodKey: normalizedPeriod } =
-    calculatePeriodDates(periodKey, refDate);
+  const {
+    currentStart,
+    currentEnd,
+    previousStart,
+    previousEnd,
+    asOf,
+    periodInfo,
+    periodKey: normalizedPeriod,
+  } = calculatePeriodDates(periodKey, refDate, options.timezone);
 
   const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
   const rawOrCanonicalPhone = `lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")}`;
@@ -654,7 +618,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   // virar "0 envios" no chip. O contador da cota (evolution_instance_daily_usage) é do DIA, outra
   // unidade, e vai separado (sentToday).
   const periodStartKey = dateKeyInTimezone(currentStart, options.timezone);
-  const periodEndKey = dateKeyInTimezone(currentEnd, options.timezone);
+  const periodEndKey = dateKeyInTimezone(new Date(currentEnd.getTime() - 1), options.timezone);
   const todayKey = dateKeyInTimezone(refDate, options.timezone);
   const chipsBlock = await runBlock("rankings.chips", async () => {
     const { rows: chipRows } = await pool.query(chipQuery, [clientId, periodStartKey, periodEndKey, todayKey]);
@@ -851,7 +815,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const failureTotals = failuresBlock.ok ? failuresBlock.value.totals : null;
 
   // ── Fase 1.5: medidas com dado que já existe (cada uma isolada) ─────────
-  const analysisCtx = { clientId, currentStart, currentEnd, previousStart, previousEnd };
+  const analysisCtx = { clientId, currentStart, currentEnd, previousStart, previousEnd, asOf, now: refDate };
   const closingsBlock = await runBlock("summary.closings", () => measureClosings(pool, analysisCtx));
   const leadClassificationBlock = await runBlock("analysis.leadClassification", () => measureLeadClassification(pool, analysisCtx));
   const firstReplyOnlyBlock = await runBlock("analysis.firstReplyOnly", () => measureFirstReplyOnly(pool, analysisCtx));
@@ -919,9 +883,10 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
           WHERE lm.client_id = l.client_id
             AND (${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)")})
             AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+            AND ${lmTimestamp} >= $2 AND ${lmTimestamp} < $3
         );
     `;
-    const { rows } = await pool.query(orphanedRepliesQuery, [clientId]);
+    const { rows } = await pool.query(orphanedRepliesQuery, [clientId, currentStart.toISOString(), currentEnd.toISOString()]);
     return rows[0]?.count || 0;
   });
   if (orphanedBlock.ok && orphanedBlock.value > 0) {
@@ -934,8 +899,12 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     });
   }
 
-  // Alerta 4: Chip frio com volume perto do teto
-  if (chipsBlock.ok) {
+  // Alerta 4: Chip frio com volume perto do teto. É sobre a cota de HOJE: só se aplica quando o
+  // período escolhido inclui hoje. Fora disso não é falha nem "não avaliado" — simplesmente não vale.
+  const periodIncludesToday = todayKey >= periodInfo.current.from && todayKey <= periodInfo.current.to;
+  if (!periodIncludesToday) {
+    // não se aplica a este período
+  } else if (chipsBlock.ok) {
     const nearLimitColdChip = chipList.find(
       (chip) => chip.chipState === "cold" && chip.quotaPercentage >= 80
     );
@@ -977,7 +946,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     block.ok ? { current: block.value.current, previous: block.value.previous, delta: calculateDelta(block.value.current, block.value.previous) } : null;
 
   return {
-    period: normalizedPeriod,
+    // Atalho ("7d", "30d", "this_month") ou "custom"; a chave completa e as datas ficam em periodInfo.
+    period: periodInfo.isCustom ? "custom" : normalizedPeriod,
+    periodInfo,
     lastUpdatedAt: refDate.toISOString(),
     cacheStatus: "fresh",
     hasProposalsAndContracts,
@@ -1025,6 +996,8 @@ export const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
 // Resultado com bloco indisponível não pode ficar congelado 15 minutos: uma falha passageira
 // (timeout, deploy) apagaria números do painel por um quarto de hora. Vence em 2 minutos.
 export const DASHBOARD_PARTIAL_CACHE_TTL_MS = 2 * 60 * 1000;
+// Intervalos personalizados não consultados há mais que isso são apagados do cache.
+export const CUSTOM_CACHE_RETENTION_DAYS = 7;
 
 // Trava de concorrência por tenant e período
 const _activeRecalculations = new Map();
@@ -1063,6 +1036,19 @@ export async function recalculateAndCacheDashboardMetrics(pool, clientId, normal
         console.error(
           `[dashboard] cache não gravado (client=${clientId}, period=${normalizedPeriod})${code}: ${String(cacheErr?.message || cacheErr)}`
         );
+      }
+      // Cada intervalo personalizado distinto vira uma linha no cache: limpa os antigos do tenant
+      // para a tabela não crescer sem limite. Faxina é otimização — falhar aqui não derruba nada.
+      if (parseCustomPeriodKey(normalizedPeriod)) {
+        try {
+          await pool.query(
+            `DELETE FROM public.dashboard_metrics_cache
+             WHERE client_id = $1 AND period LIKE 'custom:%' AND calculated_at < NOW() - interval '${CUSTOM_CACHE_RETENTION_DAYS} days'`,
+            [clientId]
+          );
+        } catch (pruneErr) {
+          console.warn(`[dashboard] limpeza do cache de intervalos antigos falhou (client=${clientId}): ${String(pruneErr?.message || pruneErr)}`);
+        }
       }
       return computed;
     } catch (err) {
@@ -1118,7 +1104,9 @@ export function triggerBackgroundRecalculation(pool, clientId, normalizedPeriod,
  * A checagem da tabela ocorre uma única vez por processo.
  */
 export async function getOrComputeDashboardMetrics(pool, clientId, periodKey = "30d", options = {}) {
-  const normalizedPeriod = periodKey === "7d" || periodKey === "this_month" ? periodKey : "30d";
+  // Chave do cache = tenant + período. Intervalo personalizado tem chave própria
+  // (`custom:AAAA-MM-DD:AAAA-MM-DD`): sem isso um usuário veria o resultado do intervalo de outro.
+  const normalizedPeriod = normalizeDashboardPeriodKey(periodKey);
 
   await ensureDashboardMetricsCacheTable(pool);
 

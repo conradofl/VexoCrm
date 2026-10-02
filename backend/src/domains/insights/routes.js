@@ -21,6 +21,7 @@ import {
   getOrComputeDashboardMetrics,
   calculateDashboardMetrics,
 } from "../../services/dashboardCalculations.js";
+import { parseDashboardPeriodRequest } from "../../services/dashboardPeriod.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -221,8 +222,17 @@ export function registerInsightsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const rawPeriod = normalizeString(req.query.period) || "30d";
-    const period = rawPeriod === "7d" || rawPeriod === "this_month" ? rawPeriod : "30d";
+    // Atalho (7d, 30d, this_month) ou intervalo personalizado (period=custom&from=AAAA-MM-DD&to=AAAA-MM-DD).
+    // Intervalo inválido (invertido, no futuro, grande demais) é recusado com a mensagem do motivo.
+    const parsedPeriod = parseDashboardPeriodRequest({
+      period: normalizeString(req.query.period),
+      from: normalizeString(req.query.from),
+      to: normalizeString(req.query.to),
+    });
+    if (!parsedPeriod.ok) {
+      return sendError(res, 400, "DASHBOARD_INVALID_PERIOD", parsedPeriod.message);
+    }
+    const period = parsedPeriod.periodKey;
     const forceRefresh = req.query.refresh === "true";
 
     try {
@@ -276,8 +286,15 @@ export function registerInsightsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const rawPeriod = normalizeString(req.body?.period || req.query?.period) || "30d";
-    const period = rawPeriod === "7d" || rawPeriod === "this_month" ? rawPeriod : "30d";
+    const parsedPeriod = parseDashboardPeriodRequest({
+      period: normalizeString(req.body?.period || req.query?.period),
+      from: normalizeString(req.body?.from || req.query?.from),
+      to: normalizeString(req.body?.to || req.query?.to),
+    });
+    if (!parsedPeriod.ok) {
+      return sendError(res, 400, "DASHBOARD_INVALID_PERIOD", parsedPeriod.message);
+    }
+    const period = parsedPeriod.periodKey;
 
     try {
       const metrics = await getOrComputeDashboardMetrics(pgDatabasePool, clientId, period, {

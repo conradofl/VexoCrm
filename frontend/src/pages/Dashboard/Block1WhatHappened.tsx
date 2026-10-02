@@ -2,7 +2,14 @@ import { Send, MessageSquareReply, CalendarCheck, FileSpreadsheet, CheckCircle2,
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatMetricNumber, formatDelta } from "@/lib/dashboard/formatters";
+import {
+  formatMetricNumber,
+  formatDelta,
+  describeComparison,
+  describePreviousPeriod,
+  describePeriodStatus,
+  type DashboardPeriodInfo,
+} from "@/lib/dashboard/formatters";
 import type { DashboardSummary } from "@/hooks/useDashboard";
 
 interface Block1WhatHappenedProps {
@@ -10,6 +17,8 @@ interface Block1WhatHappenedProps {
   hasProposalsAndContracts: boolean;
   periodLabel: string;
   unavailableBlocks?: string[];
+  // Período calculado pelo backend (datas atual e anterior). Ausente em payload antigo.
+  comparison?: DashboardPeriodInfo | null;
 }
 
 // Número que não pôde ser calculado. Não mostra 0: zero é um dado, e aqui o dado não existe.
@@ -27,7 +36,12 @@ export function Block1WhatHappened({
   hasProposalsAndContracts,
   periodLabel,
   unavailableBlocks = [],
+  comparison = null,
 }: Block1WhatHappenedProps) {
+  // Todo "vs N" diz com o que está comparando: nos 30 dias anteriores / em 21 a 30 de setembro
+  const previousLabel = describePreviousPeriod(comparison);
+  // Período que ainda não terminou: o número do período atual está incompleto
+  const periodStatus = describePeriodStatus(comparison);
   const sentDelta = formatDelta(summary.sent?.delta);
   const repliedDelta = formatDelta(summary.replied?.delta);
   const meetingsDelta = formatDelta(summary.meetings?.delta);
@@ -48,9 +62,12 @@ export function Block1WhatHappened({
           <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
             O que aconteceu · {periodLabel}
           </h2>
-          <p className="text-xs text-muted-foreground">
-            Comparação com o período anterior de mesma duração
-          </p>
+          <p className="text-xs text-muted-foreground">{describeComparison(comparison)}</p>
+          {periodStatus && (
+            <p role="note" className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+              {periodStatus}
+            </p>
+          )}
         </div>
       </div>
 
@@ -78,7 +95,7 @@ export function Block1WhatHappened({
                     {formatMetricNumber(summary.sent.current)}
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    vs {formatMetricNumber(summary.sent.previous)} no anterior
+                    vs {formatMetricNumber(summary.sent.previous)} {previousLabel}
                   </p>
                 </>
               ) : (
@@ -130,7 +147,7 @@ export function Block1WhatHappened({
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
                     vs {formatMetricNumber(summary.replied.previous)}
-                    {summary.replied.previousRate == null ? "" : ` (${summary.replied.previousRate}%)`} no anterior
+                    {summary.replied.previousRate == null ? "" : ` (${summary.replied.previousRate}%)`} {previousLabel}
                   </p>
                 </>
               ) : (
@@ -160,7 +177,7 @@ export function Block1WhatHappened({
                     {formatMetricNumber(summary.meetings.current)}
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    vs {formatMetricNumber(summary.meetings.previous)} no anterior
+                    vs {formatMetricNumber(summary.meetings.previous)} {previousLabel}
                   </p>
                 </>
               ) : (
@@ -188,7 +205,7 @@ export function Block1WhatHappened({
                       {formatMetricNumber(summary.closings.current)}
                     </p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      vs {formatMetricNumber(summary.closings.previous)} no anterior
+                      vs {formatMetricNumber(summary.closings.previous)} {previousLabel}
                     </p>
                   </>
                 ) : (
@@ -217,7 +234,7 @@ export function Block1WhatHappened({
                       {formatMetricNumber(summary.proposals.current)}
                     </p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      vs {formatMetricNumber(summary.proposals.previous)} no anterior
+                      vs {formatMetricNumber(summary.proposals.previous)} {previousLabel}
                     </p>
                   </>
                 ) : (
@@ -246,7 +263,7 @@ export function Block1WhatHappened({
                       {formatMetricNumber(summary.contracts.current)}
                     </p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      vs {formatMetricNumber(summary.contracts.previous)} no anterior
+                      vs {formatMetricNumber(summary.contracts.previous)} {previousLabel}
                     </p>
                   </>
                 ) : (

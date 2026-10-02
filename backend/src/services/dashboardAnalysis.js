@@ -248,13 +248,14 @@ export function buildBaseHealthResult(row) {
   };
 }
 
-export async function measureBaseHealth(pool, { clientId, currentEnd }) {
+// Base de leads ATÉ o fim do período (asOf): leads criados depois, mensagens e envios posteriores não entram.
+export async function measureBaseHealth(pool, { clientId, currentEnd, asOf = currentEnd }) {
   const { rows } = await pool.query(
     `
       WITH base AS (
         SELECT l.id, ${SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)")} AS cphone
         FROM public.leads l
-        WHERE l.client_id = $1
+        WHERE l.client_id = $1 AND l.created_at < $2
       ),
       msg AS (
         SELECT
@@ -265,12 +266,13 @@ export async function measureBaseHealth(pool, { clientId, currentEnd }) {
         WHERE lm.client_id = $1
           AND lm.phone IS NOT NULL AND lm.phone <> ''
           AND lm.is_group IS NOT TRUE
+          AND ${MSG_TS} < $2
         GROUP BY 1
       ),
       sent_runs AS (
         SELECT ${SQL_CANONICAL_PHONE("r.phone")} AS cphone, MIN(r.sent_at) AS first_sent
         FROM public.campaign_dispatch_runs r
-        WHERE r.client_id = $1 AND r.status = 'sent' AND r.phone <> '' AND r.sent_at IS NOT NULL
+        WHERE r.client_id = $1 AND r.status = 'sent' AND r.phone <> '' AND r.sent_at IS NOT NULL AND r.sent_at < $2
         GROUP BY 1
       ),
       flags AS (
@@ -295,7 +297,7 @@ export async function measureBaseHealth(pool, { clientId, currentEnd }) {
         )::int AS no_reply_over_days
       FROM flags;
     `,
-    [clientId, iso(currentEnd)]
+    [clientId, iso(asOf)]
   );
   return buildBaseHealthResult(rows[0]);
 }
@@ -320,7 +322,9 @@ export function buildFirstHumanResponseResult(row) {
   };
 }
 
-export async function measureFirstHumanResponse(pool, { clientId, currentStart, currentEnd }) {
+// A resposta humana é buscada sem limite de data (a coorte é quem escreveu no período, mas o tempo
+// de resposta real vale mesmo que venha depois); por isso "esperando há mais de X h" conta até AGORA.
+export async function measureFirstHumanResponse(pool, { clientId, currentStart, currentEnd, now = currentEnd }) {
   const { rows } = await pool.query(
     `
       WITH m AS (
@@ -353,7 +357,7 @@ export async function measureFirstHumanResponse(pool, { clientId, currentStart, 
         COUNT(*) FILTER (WHERE human_at IS NULL)::int AS waiting,
         COUNT(*) FILTER (
           WHERE human_at IS NULL
-            AND in_at < $3::timestamptz - make_interval(hours => ${SLOW_FIRST_RESPONSE_HOURS})
+            AND in_at < $4::timestamptz - make_interval(hours => ${SLOW_FIRST_RESPONSE_HOURS})
         )::int AS waiting_over_threshold,
         (percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (human_at - in_at)) / 60.0)
           FILTER (WHERE human_at IS NOT NULL))::float AS median_minutes,
@@ -361,7 +365,7 @@ export async function measureFirstHumanResponse(pool, { clientId, currentStart, 
           FILTER (WHERE human_at IS NOT NULL))::float AS p90_minutes
       FROM answered;
     `,
-    [clientId, iso(currentStart), iso(currentEnd)]
+    [clientId, iso(currentStart), iso(currentEnd), iso(now)]
   );
   return buildFirstHumanResponseResult(rows[0]);
 }

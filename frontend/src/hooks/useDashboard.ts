@@ -1,8 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
+import type { DashboardPeriodInfo, PeriodRange } from "@/lib/dashboard/formatters";
 
-export type DashboardPeriod = "7d" | "30d" | "this_month";
+// "custom" = intervalo escolhido (data inicial e final); as datas vão à parte, em `range`.
+export type DashboardPeriod = "7d" | "30d" | "this_month" | "custom";
+
+export type DashboardRange = PeriodRange;
 
 export interface MetricComparison {
   current: number;
@@ -144,6 +148,9 @@ export interface DashboardPayload {
     name: string;
   };
   period: DashboardPeriod;
+  // Datas do período e do período anterior, para escrever a comparação por extenso.
+  // Ausente em payload gravado antes de existir.
+  periodInfo?: DashboardPeriodInfo;
   lastUpdatedAt: string | null;
   cacheStatus: "fresh" | "stale" | "error";
   lastError?: string | null;
@@ -166,19 +173,36 @@ export interface DashboardPayload {
   alerts: ActionAlert[];
 }
 
-export function useDashboard(clientId: string, period: DashboardPeriod = "30d") {
+// Parâmetros de período na URL: atalho, ou period=custom&from=…&to=….
+export function buildDashboardPeriodQuery(period: DashboardPeriod, range?: DashboardRange | null): string {
+  const params = new URLSearchParams({ period });
+  if (period === "custom" && range) {
+    params.set("from", range.from);
+    params.set("to", range.to);
+  }
+  return params.toString();
+}
+
+// Chave do cache da tela: o intervalo faz parte dela, então dois intervalos nunca compartilham resultado.
+export function dashboardQueryKey(clientId: string, period: DashboardPeriod, range?: DashboardRange | null) {
+  return ["dashboard", clientId, period, range?.from ?? null, range?.to ?? null] as const;
+}
+
+export function useDashboard(clientId: string, period: DashboardPeriod = "30d", range?: DashboardRange | null) {
   const { isAuthenticated, getIdToken } = useAuth();
+  // "Personalizado" só consulta depois que as datas foram aplicadas
+  const hasRange = period !== "custom" || !!range;
 
   return useQuery({
-    queryKey: ["dashboard", clientId, period],
-    enabled: isAuthenticated && !!clientId,
+    queryKey: dashboardQueryKey(clientId, period, range),
+    enabled: isAuthenticated && !!clientId && hasRange,
     queryFn: async (): Promise<DashboardPayload> => {
       const token = await getIdToken();
       if (!token) {
         throw new Error("Usuario nao autenticado.");
       }
 
-      const res = await fetchApi(`/api/dashboard?clientId=${encodeURIComponent(clientId)}&period=${encodeURIComponent(period)}`, {
+      const res = await fetchApi(`/api/dashboard?clientId=${encodeURIComponent(clientId)}&${buildDashboardPeriodQuery(period, range)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -188,7 +212,8 @@ export function useDashboard(clientId: string, period: DashboardPeriod = "30d") 
 
       return readApiJson<DashboardPayload>(res, "dashboard");
     },
-    retry: 1,
+    // período inválido (400) não melhora tentando de novo
+    retry: (failureCount, error) => failureCount < 1 && !/ 400 /.test(String((error as Error)?.message)),
     staleTime: 60 * 1000,
   });
 }
@@ -198,7 +223,7 @@ export function useRefreshDashboard(clientId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (period: DashboardPeriod = "30d") => {
+    mutationFn: async ({ period = "30d", range }: { period?: DashboardPeriod; range?: DashboardRange | null } = {}) => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuario nao autenticado.");
       const res = await fetchApi(`/api/dashboard/refresh`, {
@@ -207,7 +232,7 @@ export function useRefreshDashboard(clientId: string) {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ clientId, period }),
+        body: JSON.stringify({ clientId, period, ...(period === "custom" && range ? { from: range.from, to: range.to } : {}) }),
       });
       if (!res.ok) {
         const errText = await readApiErrorMessage(res, "Refresh failed");

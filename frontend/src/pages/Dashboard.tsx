@@ -3,7 +3,8 @@ import { PageShell } from "@/components/PageShell";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
-import { useDashboard, useRefreshDashboard, type DashboardPeriod } from "@/hooks/useDashboard";
+import { useDashboard, useRefreshDashboard, type DashboardPeriod, type DashboardRange } from "@/hooks/useDashboard";
+import { formatDateRange } from "@/lib/dashboard/formatters";
 import { DashboardHeader } from "./Dashboard/DashboardHeader";
 import { Block1WhatHappened } from "./Dashboard/Block1WhatHappened";
 import { Block2Rankings } from "./Dashboard/Block2Rankings";
@@ -30,14 +31,19 @@ export default function Dashboard({
   const selectedClient = crmClient?.selectedClient || null;
   const resolvedClientName = fixedClientName || selectedClient?.name || effectiveClientId;
 
-  // Seletor de período no topo: 7 dias, 30 dias, este mês. Padrão: 30 dias.
+  // Seletor de período no topo: 7 dias, 30 dias, este mês ou intervalo escolhido. Padrão: 30 dias.
   const [period, setPeriod] = useState<DashboardPeriod>("30d");
+  // Intervalo personalizado JÁ aplicado (o rascunho das datas fica no cabeçalho)
+  const [customRange, setCustomRange] = useState<DashboardRange | null>(null);
+  const range = period === "custom" ? customRange : null;
 
-  const { data, isLoading, error } = useDashboard(effectiveClientId, period);
+  const { data, isLoading, error } = useDashboard(effectiveClientId, period, range);
   const refreshMutation = useRefreshDashboard(effectiveClientId);
 
   const periodLabel = useMemo(() => {
     switch (period) {
+      case "custom":
+        return range ? formatDateRange(range) : "Período personalizado";
       case "7d":
         return "Últimos 7 dias";
       case "this_month":
@@ -46,7 +52,7 @@ export default function Dashboard({
       default:
         return "Últimos 30 dias";
     }
-  }, [period]);
+  }, [period, range]);
 
   if (!effectiveClientId) {
     return (
@@ -73,40 +79,50 @@ export default function Dashboard({
     >
       <ErrorMessage message={error ? (error as Error).message : null} variant="banner" />
 
-      {isLoading && !data ? (
-        <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground animate-pulse">
-          Carregando métricas pré-calculadas...
-        </div>
-      ) : data ? (
-        <div className="space-y-6">
-          {/* Seletor de período e hora da última atualização */}
-          <DashboardHeader
-            period={period}
-            onPeriodChange={setPeriod}
-            lastUpdatedAt={data.lastUpdatedAt || new Date().toISOString()}
-            cacheStatus={normalizedCacheStatus}
-            onRefresh={() => refreshMutation.mutate(period)}
-            isRefreshing={refreshMutation.isPending}
-          />
+      {/* O seletor de período fica SEMPRE na tela: sem dados ainda, ou com intervalo recusado pelo
+          servidor, é por ele que o usuário escolhe outro período. */}
+      <div className="space-y-6">
+        <DashboardHeader
+          period={period}
+          onPeriodChange={setPeriod}
+          lastUpdatedAt={data?.lastUpdatedAt ?? null}
+          cacheStatus={normalizedCacheStatus}
+          onRefresh={() => refreshMutation.mutate({ period, range })}
+          customRange={customRange}
+          onCustomRangeApply={setCustomRange}
+          isRefreshing={refreshMutation.isPending}
+        />
 
-          {/* Primeiro bloco: o que aconteceu (5 números ou 3 dependendo dos módulos GD) */}
-          <Block1WhatHappened
-            summary={data.summary}
-            hasProposalsAndContracts={data.hasProposalsAndContracts}
-            periodLabel={periodLabel}
-            unavailableBlocks={data.unavailableBlocks}
-          />
+        {period === "custom" && !customRange ? (
+          <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+            Escolha a data inicial e a data final e clique em Aplicar.
+          </div>
+        ) : isLoading && !data ? (
+          <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground animate-pulse">
+            Carregando métricas pré-calculadas...
+          </div>
+        ) : data ? (
+          <>
+            {/* Primeiro bloco: o que aconteceu (5 números ou 3 dependendo dos módulos GD) */}
+            <Block1WhatHappened
+              summary={data.summary}
+              hasProposalsAndContracts={data.hasProposalsAndContracts}
+              periodLabel={periodLabel}
+              unavailableBlocks={data.unavailableBlocks}
+              comparison={data.periodInfo}
+            />
 
-          {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}
-          <Block2Rankings rankings={data.rankings} />
+            {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}
+            <Block2Rankings rankings={data.rankings} />
 
-          {/* Análise: leads por temperatura/estágio, perfil que converte, saúde da base, tempo de resposta */}
-          <Block4Analysis analysis={data.analysis} />
+            {/* Análise: leads por temperatura/estágio, perfil que converte, saúde da base, tempo de resposta */}
+            <Block4Analysis analysis={data.analysis} />
 
-          {/* Terceiro bloco: o que fazer agora (no máximo 3 frases com ação direta) */}
-          <Block3ActionAlerts alerts={data.alerts} incomplete={data.unavailableBlocks?.includes("alerts")} />
-        </div>
-      ) : null}
+            {/* Terceiro bloco: o que fazer agora (no máximo 3 frases com ação direta) */}
+            <Block3ActionAlerts alerts={data.alerts} incomplete={data.unavailableBlocks?.includes("alerts")} />
+          </>
+        ) : null}
+      </div>
     </PageShell>
   );
 }
