@@ -12,6 +12,7 @@ import { INTERNAL_PAGE_ORDER, getDefaultClientRoute, isInternalPageAllowedForCli
 import { isCrmDomain } from "./lib/domainRouting";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { NewVersionBanner } from "@/components/NewVersionBanner";
 import Dashboard from "./pages/Dashboard";
 import ClientPortalDashboard from "./pages/ClientPortalDashboard";
 import ClientPortalLeads from "./pages/ClientPortalLeads";
@@ -126,6 +127,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <NewVersionBanner />
       {/* Particles removed */}
       <BrowserRouter>
         <AuthProvider>
