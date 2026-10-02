@@ -31,6 +31,8 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
   const chipsUnavailable = rankings?.chips === null;
   const regionsUnavailable = rankings?.regions === null;
   const failuresUnavailable = rankings?.failureReasons === null;
+  const unattributedSent = rankings?.chipsUnattributedSent ?? 0;
+  const failureTotals = rankings?.failureTotals ?? null;
 
   return (
     <section className="space-y-3">
@@ -125,7 +127,6 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
                   const name = c.name || c.instanceName || "Instância";
                   const sent = c.sent ?? 0;
                   const replies = c.replies ?? 0;
-                  const quotaText = c.quotaConsumedText || c.consumedQuotaText || `${c.sentToday || 0} de ${c.quotaLimit || 50}`;
                   const rate = c.replyRate ?? (sent > 0 ? Number(((replies / sent) * 100).toFixed(1)) : 0);
 
                   return (
@@ -134,8 +135,12 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
                         <p className="font-semibold text-foreground truncate" title={name}>
                           {idx + 1}. {name}
                         </p>
+                        {/* Duas unidades, dois rótulos: envios são do PERÍODO, a cota é do DIA */}
                         <p className="text-[10px] text-muted-foreground">
-                          {formatMetricNumber(sent)} envios · cota: {quotaText}
+                          {formatMetricNumber(sent)} envios no período
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          cota de hoje: {formatMetricNumber(c.sentToday ?? 0)} de {formatMetricNumber(c.quotaLimit ?? 0)}
                         </p>
                       </div>
                       <div className="text-right shrink-0">
@@ -149,6 +154,12 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
                     </div>
                   );
                 })}
+                {unattributedSent > 0 && (
+                  <p className="py-2 text-[10px] text-muted-foreground">
+                    + {formatMetricNumber(unattributedSent)} envios sem chip registrado (usaram o chip principal ou o rodízio) —
+                    não dá para atribuí-los a um chip.
+                  </p>
+                )}
               </div>
             )}
           </CardContent>
@@ -239,6 +250,7 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
                       </p>
                       <p className="text-[10px] text-muted-foreground">
                         {formatMetricNumber(f.count)} ocorrências
+                        {f.distinctNumbers != null && ` · ${formatMetricNumber(f.distinctNumbers)} números`}
                       </p>
                     </div>
                     <span className="text-xs font-mono font-bold text-red-600 dark:text-red-400 shrink-0">
@@ -246,6 +258,12 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
                     </span>
                   </div>
                 ))}
+                {failureTotals && (
+                  <p className="py-2 text-[10px] text-muted-foreground">
+                    Percentuais sobre o total de falhas: {formatMetricNumber(failureTotals.occurrences)} ocorrências em{" "}
+                    {formatMetricNumber(failureTotals.distinctNumbers)} números.
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

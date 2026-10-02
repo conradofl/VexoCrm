@@ -17,9 +17,24 @@
 //    `unavailableBlocks` — indisponível NÃO é zero. Só vira erro quando nenhum bloco foi calculado.
 
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
-import { isMissingSchemaError } from "./analytics.js";
+import {
+  measureLeadClassification,
+  measureFirstReplyOnly,
+  measureClosings,
+  measureTopProfiles,
+  measureBaseHealth,
+  measureFirstHumanResponse,
+} from "./dashboardAnalysis.js";
 import { MESSAGE_EFFECTIVENESS_MIN_SENT, MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS } from "./messageEffectiveness.js";
 import { resolveChipDailyLimit } from "./chipQuota.js";
+
+// A cota diária do chip é gravada com a data no fuso do tenant (campaigns/routes.js: getDateKey),
+// não no fuso do banco. Ler com CURRENT_DATE fazia a cota de "hoje" zerar à noite.
+export const DASHBOARD_DEFAULT_TIMEZONE = "America/Sao_Paulo";
+
+export function dateKeyInTimezone(date, timeZone = DASHBOARD_DEFAULT_TIMEZONE) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(date));
+}
 
 export const RESPONSE_RATE_DECLARATION = "conversou depois do envio (janela de 14 dias)";
 
@@ -219,11 +234,18 @@ export async function ensureDashboardMetricsCacheTable(pool) {
  * existia na resposta HTTP e ninguém a via. Schema ausente (tabela/coluna que o tenant
  * não tem) é caso esperado → warn; o resto é falha de verdade → error.
  */
+// Tabela inexistente (42P01) é o ÚNICO caso "esperado" — tenant que não usa o módulo. Não usar
+// isMissingSchemaError aqui: ele casa qualquer mensagem com "does not exist", inclusive
+// "operator does not exist: uuid = text", e aí um bug de tipo vira "tenant não usa GD" em silêncio.
+export function isExpectedMissingTable(err) {
+  return err?.code === "42P01";
+}
+
 function logBlockFailure(blockName, clientId, period, err) {
   const code = err?.code ? ` [${err.code}]` : "";
   const message = String(err?.message || err);
   const line = `[dashboard] bloco "${blockName}" indisponível (client=${clientId}, period=${period})${code}: ${message}`;
-  if (isMissingSchemaError(err)) console.warn(line);
+  if (isExpectedMissingTable(err)) console.warn(line);
   else console.error(line);
 }
 
@@ -399,32 +421,34 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
 
   // 4 & 5. Propostas Criadas e Contratos Fechados
   // Verifica se tenant usa esses módulos
+  // tenants.id é UUID e gd_*.tenant_id é TEXT (ou UUID, conforme o banco): comparar sempre em ::text.
   const gdUsageQuery = `
     SELECT (
       EXISTS (
         SELECT 1 FROM public.gd_proposals p
         WHERE p.tenant_id::text = $1
-           OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id = p.tenant_id AND t.name ILIKE $1)
+           OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id::text = p.tenant_id::text AND t.name ILIKE $1)
         LIMIT 1
       ) OR
       EXISTS (
         SELECT 1 FROM public.gd_contracts c
         WHERE c.tenant_id::text = $1
-           OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id = c.tenant_id AND t.name ILIKE $1)
+           OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id::text = c.tenant_id::text AND t.name ILIKE $1)
         LIMIT 1
       )
     ) AS has_gd;
   `;
-  // Tabela de GD ausente = tenant que não usa Geração Digital: caso esperado, os dois números
-  // ficam escondidos (regra 5) e o painel segue. Qualquer outro erro: não dá para saber se o
-  // tenant usa GD, então os dois ficam indisponíveis (e não zerados nem sumidos sem aviso).
+  // Tabela de GD inexistente (42P01) = tenant que não usa Geração Digital: caso esperado, os dois
+  // números ficam escondidos (regra 5) e o painel segue. Qualquer outro erro — inclusive tipo
+  // incompatível — significa que não dá para saber se o tenant usa GD: os dois ficam indisponíveis
+  // (nem zerados, nem sumidos sem aviso).
   let hasProposalsAndContracts = false;
   try {
     const { rows: gdUsageRows } = await pool.query(gdUsageQuery, [clientId]);
     hasProposalsAndContracts = Boolean(gdUsageRows[0]?.has_gd);
   } catch (err) {
     logBlockFailure("summary.gdUsage", clientId, normalizedPeriod, err);
-    if (!isMissingSchemaError(err)) {
+    if (!isExpectedMissingTable(err)) {
       unavailableBlocks.push("summary.proposals", "summary.contracts");
     }
   }
@@ -438,7 +462,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
         COUNT(*) FILTER (WHERE p.created_at >= $2 AND p.created_at < $3)::int AS current_proposals,
         COUNT(*) FILTER (WHERE p.created_at >= $4 AND p.created_at < $5)::int AS previous_proposals
       FROM public.gd_proposals p
-      WHERE (p.tenant_id::text = $1 OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id = p.tenant_id AND t.name ILIKE $1));
+      WHERE (p.tenant_id::text = $1 OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id::text = p.tenant_id::text AND t.name ILIKE $1));
     `;
     const proposalsBlock = await runBlock("summary.proposals", async () => {
       const { rows } = await pool.query(proposalsQuery, [
@@ -471,7 +495,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
             )
         )::int AS previous_contracts
       FROM public.gd_contracts c
-      WHERE (c.tenant_id::text = $1 OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id = c.tenant_id AND t.name ILIKE $1));
+      WHERE (c.tenant_id::text = $1 OR EXISTS (SELECT 1 FROM public.tenants t WHERE t.id::text = c.tenant_id::text AND t.name ILIKE $1));
     `;
     const contractsBlock = await runBlock("summary.contracts", async () => {
       const { rows } = await pool.query(contractsQuery, [
@@ -555,6 +579,17 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   // evolution_instance_daily_usage.instance_id é criada como TEXT (chipQuota.js) e como UUID
   // (evolution.js); quem criou primeiro define o tipo em cada banco. Comparar com os DOIS lados
   // em ::text funciona nos dois casos — `uuid = text` estourava e derrubava o painel inteiro.
+  const unattributedSentQuery = `
+    SELECT COUNT(*)::int AS unattributed_sent
+    FROM public.campaign_dispatch_runs r
+    JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+    WHERE r.client_id = $1
+      AND r.status = 'sent'
+      AND r.phone <> ''
+      AND r.sent_at IS NOT NULL
+      AND r.sent_at >= $2 AND r.sent_at < $3
+      AND d.evolution_instance_id IS NULL;
+  `;
   const chipQuery = `
     SELECT
       i.id AS instance_id,
@@ -566,7 +601,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
         (
           SELECT sent_count
           FROM public.evolution_instance_daily_usage
-          WHERE instance_id::text = i.id::text AND date = CURRENT_DATE
+          WHERE instance_id::text = i.id::text AND date = $4::date
           LIMIT 1
         ), 0
       )::int AS sent_today
@@ -612,41 +647,53 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   `;
   // Envios por chip e respostas por chip são um número só na tela: se uma das consultas cair,
   // o ranking inteiro fica indisponível (respostas desconhecidas não viram "0 respostas").
+  //
+  // "Envios" do chip = envios de DISPARO atribuídos a ele (campaign_dispatches.evolution_instance_id).
+  // Disparo sem chip escolhido usa o chip principal/rodízio na hora do envio e a execução não grava
+  // qual chip foi — esses envios não são atribuíveis e aparecem à parte (unattributedSent), em vez de
+  // virar "0 envios" no chip. O contador da cota (evolution_instance_daily_usage) é do DIA, outra
+  // unidade, e vai separado (sentToday).
+  const periodStartKey = dateKeyInTimezone(currentStart, options.timezone);
+  const periodEndKey = dateKeyInTimezone(currentEnd, options.timezone);
+  const todayKey = dateKeyInTimezone(refDate, options.timezone);
   const chipsBlock = await runBlock("rankings.chips", async () => {
-    const { rows: chipRows } = await pool.query(chipQuery, [
-      clientId,
-      currentStart.toISOString().slice(0, 10),
-      currentEnd.toISOString().slice(0, 10),
-    ]);
+    const { rows: chipRows } = await pool.query(chipQuery, [clientId, periodStartKey, periodEndKey, todayKey]);
 
     const { rows: instReplyRows } = await pool.query(instanceRepliesQuery, [
       clientId,
       currentStart.toISOString(),
       currentEnd.toISOString(),
     ]);
+    const { rows: unattributedRows } = await pool.query(unattributedSentQuery, [
+      clientId,
+      currentStart.toISOString(),
+      currentEnd.toISOString(),
+    ]);
     const repliesByInstance = new Map(instReplyRows.map((r) => [String(r.instance_id), r]));
 
-    return chipRows.map((chip) => {
-      const quotaLimit = resolveChipDailyLimit(chip);
-      const instStats = repliesByInstance.get(String(chip.instance_id));
-      const enviados = instStats ? instStats.sent_count : chip.sent_period;
-      const respostas = instStats ? instStats.replied_count : 0;
-      const quotaPct = quotaLimit > 0 ? Math.round((chip.sent_today / quotaLimit) * 100) : 0;
+    const list = chipRows
+      .map((chip) => {
+        const quotaLimit = resolveChipDailyLimit(chip);
+        const instStats = repliesByInstance.get(String(chip.instance_id));
+        const quotaPct = quotaLimit > 0 ? Math.round((chip.sent_today / quotaLimit) * 100) : 0;
 
-      return {
-        instanceId: chip.instance_id,
-        name: chip.instance_name || String(chip.instance_id),
-        chipState: chip.chip_state || "cold",
-        sent: enviados,
-        replies: respostas,
-        sentToday: chip.sent_today,
-        quotaLimit,
-        quotaConsumedText: `${chip.sent_today} de ${quotaLimit} (${quotaPct}%)`,
-        quotaPercentage: quotaPct,
-      };
-    });
+        return {
+          instanceId: chip.instance_id,
+          name: chip.instance_name || String(chip.instance_id),
+          chipState: chip.chip_state || "cold",
+          sent: instStats ? instStats.sent_count : 0,
+          replies: instStats ? instStats.replied_count : 0,
+          sentToday: chip.sent_today,
+          quotaLimit,
+          quotaConsumedText: `${chip.sent_today} de ${quotaLimit} (${quotaPct}%)`,
+          quotaPercentage: quotaPct,
+        };
+      })
+      .sort((x, y) => y.sent - x.sent || y.sentToday - x.sentToday);
+
+    return { list, unattributedSent: unattributedRows[0]?.unattributed_sent || 0 };
   });
-  const chipList = chipsBlock.value;
+  const chipList = chipsBlock.ok ? chipsBlock.value.list : null;
 
   let rankingChips = chipsBlock.ok ? [] : null;
   if (chipList && chipList.length > 0) {
@@ -730,7 +777,8 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const failureQuery = `
     SELECT
       status,
-      error_message
+      error_message,
+      phone
     FROM public.campaign_dispatch_runs
     WHERE client_id = $1
       AND (
@@ -753,27 +801,63 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       "Variável sem valor": 0,
       Outros: 0,
     };
+    const numbersByCategory = {};
+    const allNumbers = new Set();
 
     for (const row of failedRows) {
       const cat = categorizeFailureReason(row.error_message, row.status);
       countsByCategory[cat] = (countsByCategory[cat] || 0) + 1;
+      if (row.phone) {
+        (numbersByCategory[cat] ||= new Set()).add(row.phone);
+        allNumbers.add(row.phone);
+      }
     }
 
     const rawFailureList = Object.entries(countsByCategory)
       .filter(([_, count]) => count > 0)
-      .map(([reason, count]) => ({ reason, count }))
+      .map(([reason, count]) => ({ reason, count, distinctNumbers: numbersByCategory[reason]?.size || 0 }))
       .sort((a, b) => b.count - a.count);
 
+    // Percentual sobre o TOTAL DE FALHAS (não sobre envios), somando exatamente 100%. Mais de 3
+    // motivos: os 2 maiores + "Demais motivos" — nunca cortar o resto e renormalizar só o top 3,
+    // que mostraria percentuais que não são os do total.
     const normalizedFailures = normalizePercentages(rawFailureList);
-    // Mantém no máximo 3 linhas
-    const rankingMotivoFalha = normalizedFailures.slice(0, 3);
-    // Re-normaliza se foram selecionadas <= 3 linhas de mais opções
-    const finalRankingMotivoFalha = normalizePercentages(rankingMotivoFalha);
-    return { failedRows, countsByCategory, ranking: finalRankingMotivoFalha };
+    let ranking = normalizedFailures;
+    if (normalizedFailures.length > 3) {
+      const [first, second, ...rest] = normalizedFailures;
+      const restNumbers = new Set();
+      for (const r of rest) numbersByCategory[r.reason]?.forEach((n) => restNumbers.add(n));
+      ranking = [
+        first,
+        second,
+        {
+          reason: "Demais motivos",
+          count: rest.reduce((acc, r) => acc + r.count, 0),
+          distinctNumbers: restNumbers.size,
+          percentage: rest.reduce((acc, r) => acc + r.percentage, 0),
+        },
+      ];
+    }
+    return {
+      failedRows,
+      countsByCategory,
+      ranking,
+      totals: { occurrences: failedRows.length, distinctNumbers: allNumbers.size },
+    };
   });
   const failedRows = failuresBlock.ok ? failuresBlock.value.failedRows : null;
   const countsByCategory = failuresBlock.ok ? failuresBlock.value.countsByCategory : null;
   const finalRankingMotivoFalha = failuresBlock.ok ? failuresBlock.value.ranking : null;
+  const failureTotals = failuresBlock.ok ? failuresBlock.value.totals : null;
+
+  // ── Fase 1.5: medidas com dado que já existe (cada uma isolada) ─────────
+  const analysisCtx = { clientId, currentStart, currentEnd, previousStart, previousEnd };
+  const closingsBlock = await runBlock("summary.closings", () => measureClosings(pool, analysisCtx));
+  const leadClassificationBlock = await runBlock("analysis.leadClassification", () => measureLeadClassification(pool, analysisCtx));
+  const firstReplyOnlyBlock = await runBlock("analysis.firstReplyOnly", () => measureFirstReplyOnly(pool, analysisCtx));
+  const topProfilesBlock = await runBlock("analysis.topProfiles", () => measureTopProfiles(pool, analysisCtx));
+  const baseHealthBlock = await runBlock("analysis.baseHealth", () => measureBaseHealth(pool, analysisCtx));
+  const firstHumanResponseBlock = await runBlock("analysis.firstHumanResponse", () => measureFirstHumanResponse(pool, analysisCtx));
 
   // ── Bloco 3: O que fazer agora (No máximo 3 frases com ação) ────────────
   // Cada aviso só é avaliado quando os números de que depende existem. Número indisponível
@@ -911,6 +995,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
           }
         : null,
       meetings: withDelta(meetingsBlock),
+      closings: withDelta(closingsBlock),
       proposals: proposalsData,
       contracts: contractsData,
     },
@@ -919,6 +1004,17 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       chips: rankingChips,
       regions: rankingRegiao,
       failureReasons: finalRankingMotivoFalha,
+      // Total de falhas (ocorrências e números distintos): é a base dos percentuais de falha.
+      failureTotals,
+      // Envios de disparo sem chip registrado (usaram o chip principal/rodízio): não atribuíveis a um chip.
+      chipsUnattributedSent: chipsBlock.ok ? chipsBlock.value.unattributedSent : null,
+    },
+    analysis: {
+      leadClassification: leadClassificationBlock.value,
+      firstReplyOnly: firstReplyOnlyBlock.value,
+      topProfiles: topProfilesBlock.value,
+      baseHealth: baseHealthBlock.value,
+      firstHumanResponse: firstHumanResponseBlock.value,
     },
     alerts: selectedAlerts,
   };

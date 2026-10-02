@@ -1,4 +1,4 @@
-import { Send, MessageSquareReply, CalendarCheck, FileSpreadsheet, CheckCircle2, TrendingUp, TrendingDown } from "lucide-react";
+import { Send, MessageSquareReply, CalendarCheck, FileSpreadsheet, CheckCircle2, Handshake, TrendingUp, TrendingDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -33,6 +33,9 @@ export function Block1WhatHappened({
   const meetingsDelta = formatDelta(summary.meetings?.delta);
   const proposalsDelta = formatDelta(summary.proposals?.delta);
   const contractsDelta = formatDelta(summary.contracts?.delta);
+  const closingsDelta = formatDelta(summary.closings?.delta);
+  // undefined = payload antigo (sem a medida): não mostra caixa. null = bloco indisponível.
+  const showClosings = summary.closings !== undefined;
   // Se não deu para saber se o tenant usa GD, as duas caixas aparecem como indisponíveis
   const proposalsUnavailable = unavailableBlocks.includes("summary.proposals");
   const contractsUnavailable = unavailableBlocks.includes("summary.contracts");
@@ -54,8 +57,8 @@ export function Block1WhatHappened({
       <div
         className={`grid gap-4 ${
           showGdCards
-            ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-5"
-            : "grid-cols-1 sm:grid-cols-3"
+            ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-6"
+            : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
         }`}
       >
         {/* 1. Enviados */}
@@ -166,6 +169,35 @@ export function Block1WhatHappened({
             </div>
           </CardContent>
         </Card>
+
+        {/* Fechamentos (lead_conversions ganhas) */}
+        {showClosings && (
+          <Card className="rounded-2xl border border-border/80 shadow-xs hover:border-border transition-all">
+            <CardContent className="p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
+                  <Handshake className="h-4 w-4" />
+                </span>
+                {summary.closings && <DeltaBadge delta={closingsDelta} previousValue={summary.closings.previous} />}
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">Fechamentos</p>
+                {summary.closings ? (
+                  <>
+                    <p className="text-2xl font-extrabold text-foreground tracking-tight mt-0.5">
+                      {formatMetricNumber(summary.closings.current)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      vs {formatMetricNumber(summary.closings.previous)} no anterior
+                    </p>
+                  </>
+                ) : (
+                  <UnavailableMetric />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* 4. Propostas Criadas (Somente se usa módulos GD) */}
         {((hasProposalsAndContracts && summary.proposals) || proposalsUnavailable) && (

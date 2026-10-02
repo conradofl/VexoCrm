@@ -34,6 +34,13 @@ const BLOCK_QUERIES = [
   ["rankings.regions", "regional_runs"],
   ["rankings.failureReasons", "status IN ('failed', 'invalid_number')"],
   ["alerts", "l.assigned_to IS NULL"],
+  // Fase 1.5
+  ["summary.closings", "current_closings"],
+  ["analysis.leadClassification", "TRIM(l.stage)"],
+  ["analysis.firstReplyOnly", "stopped_after_first"],
+  ["analysis.topProfiles", "WITH cohort AS"],
+  ["analysis.baseHealth", "no_reply_over_days"],
+  ["analysis.firstHumanResponse", "median_minutes"],
 ];
 
 const HEALTHY = {
@@ -63,6 +70,19 @@ const HEALTHY = {
     ],
   },
   alerts: { rows: [{ count: 0 }] },
+  "summary.closings": { rows: [{ current_closings: 3, previous_closings: 1 }] },
+  "analysis.leadClassification": {
+    rows: [
+      { temperature: "QUENTE", stage: "open_budget", leads: 4 },
+      { temperature: "SEM_CLASSIFICACAO", stage: "cold", leads: 20 },
+    ],
+  },
+  "analysis.firstReplyOnly": { rows: [{ replied_first: 12, received_follow_up: 10, stopped_after_first: 7 }] },
+  "analysis.topProfiles": { rows: [{ temperature: "QUENTE", origin: "meta_ads", leads: 40, replied: 20, scheduled: 8, closed: 4 }] },
+  "analysis.baseHealth": { rows: [{ total: 100, valid_phone: 90, never_approached: 30, no_reply_over_days: 25 }] },
+  "analysis.firstHumanResponse": {
+    rows: [{ conversations: 10, answered: 8, waiting: 2, waiting_over_threshold: 1, median_minutes: 12, p90_minutes: 95 }],
+  },
 };
 
 // Erro com a cara de um erro do `pg`.
@@ -144,11 +164,17 @@ describe("Dashboard — cada bloco falhando individualmente mantém os outros", 
     { block: "summary.proposals", path: "summary.proposals", alsoMarks: [], alsoChanges: [] },
     { block: "summary.contracts", path: "summary.contracts", alsoMarks: [], alsoChanges: [] },
     { block: "rankings.messages", path: "rankings.messages", alsoMarks: ["alerts"], alsoChanges: ["alerts"] },
-    { block: "rankings.chips", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts"] },
-    { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts"], marks: "rankings.chips" },
+    { block: "rankings.chips", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent"] },
+    { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent"], marks: "rankings.chips" },
     { block: "rankings.regions", path: "rankings.regions", alsoMarks: [], alsoChanges: [] },
-    { block: "rankings.failureReasons", path: "rankings.failureReasons", alsoMarks: ["alerts"], alsoChanges: ["alerts"] },
+    { block: "rankings.failureReasons", path: "rankings.failureReasons", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.failureTotals"] },
     { block: "alerts", path: null, alsoMarks: [], alsoChanges: [] },
+    { block: "summary.closings", path: "summary.closings", alsoMarks: [], alsoChanges: [] },
+    { block: "analysis.leadClassification", path: "analysis.leadClassification", alsoMarks: [], alsoChanges: [] },
+    { block: "analysis.firstReplyOnly", path: "analysis.firstReplyOnly", alsoMarks: [], alsoChanges: [] },
+    { block: "analysis.topProfiles", path: "analysis.topProfiles", alsoMarks: [], alsoChanges: [] },
+    { block: "analysis.baseHealth", path: "analysis.baseHealth", alsoMarks: [], alsoChanges: [] },
+    { block: "analysis.firstHumanResponse", path: "analysis.firstHumanResponse", alsoMarks: [], alsoChanges: [] },
   ];
 
   for (const c of CASES) {

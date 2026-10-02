@@ -8,6 +8,7 @@ import { DashboardHeader } from "./Dashboard/DashboardHeader";
 import { Block1WhatHappened } from "./Dashboard/Block1WhatHappened";
 import { Block2Rankings } from "./Dashboard/Block2Rankings";
 import { Block3ActionAlerts } from "./Dashboard/Block3ActionAlerts";
+import { Block4Analysis } from "./Dashboard/Block4Analysis";
 
 interface DashboardProps {
   fixedClientId?: string;
@@ -98,6 +99,9 @@ export default function Dashboard({
 
           {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}
           <Block2Rankings rankings={data.rankings} />
+
+          {/* Análise: leads por temperatura/estágio, perfil que converte, saúde da base, tempo de resposta */}
+          <Block4Analysis analysis={data.analysis} />
 
           {/* Terceiro bloco: o que fazer agora (no máximo 3 frases com ação direta) */}
           <Block3ActionAlerts alerts={data.alerts} incomplete={data.unavailableBlocks?.includes("alerts")} />

@@ -26,6 +26,8 @@ export interface DashboardSummary {
   meetings: MetricComparison | null;
   proposals: MetricComparison | null;
   contracts: MetricComparison | null;
+  // Fechamentos (lead_conversions ganhas). Ausente em payload gravado antes de existir.
+  closings?: MetricComparison | null;
 }
 
 export interface MessageRankingItem {
@@ -62,6 +64,70 @@ export interface FailureReasonItem {
   reason: string;
   count: number;
   percentage: number;
+  // Números de telefone distintos entre as ocorrências (o mesmo número pode falhar mais de uma vez)
+  distinctNumbers?: number;
+}
+
+export type TemperatureKey = "QUENTE" | "MORNO" | "FRIO" | "SEM_CLASSIFICACAO";
+
+export interface LeadClassification {
+  total: number;
+  byTemperature: Record<TemperatureKey, number>;
+  byStage: { stage: string; count: number }[];
+}
+
+export interface FirstReplyOnly {
+  repliedFirst: number;
+  receivedFollowUp: number;
+  stoppedAfterFirst: number;
+  // null = ninguém recebeu o passo seguinte: não há o que medir (não é 0%)
+  stoppedRate: number | null;
+}
+
+export interface LeadProfile {
+  temperature: TemperatureKey;
+  origin: string;
+  leads: number;
+  replied: number;
+  scheduled: number;
+  closed: number;
+  replyRate: number;
+  scheduleRate: number;
+  closeRate: number;
+}
+
+export interface TopProfiles {
+  minLeads: number;
+  eligibleGroups: number;
+  top: LeadProfile[];
+}
+
+export interface BaseHealth {
+  total: number;
+  validPhone: number;
+  invalidPhone: number;
+  neverApproached: number;
+  noReplyOverDays: number;
+  silenceDays: number;
+}
+
+export interface FirstHumanResponse {
+  conversations: number;
+  answered: number;
+  waiting: number;
+  waitingOverThreshold: number;
+  thresholdHours: number;
+  medianMinutes: number | null;
+  p90Minutes: number | null;
+}
+
+// Cada medida pode vir null (bloco indisponível). `analysis` ausente = payload antigo.
+export interface DashboardAnalysis {
+  leadClassification: LeadClassification | null;
+  firstReplyOnly: FirstReplyOnly | null;
+  topProfiles: TopProfiles | null;
+  baseHealth: BaseHealth | null;
+  firstHumanResponse: FirstHumanResponse | null;
 }
 
 export interface ActionAlert {
@@ -91,7 +157,12 @@ export interface DashboardPayload {
     chips: ChipRankingItem[] | null;
     regions: RegionRankingItem[] | null;
     failureReasons: FailureReasonItem[] | null;
+    // Base dos percentuais de falha: total de ocorrências e de números distintos
+    failureTotals?: { occurrences: number; distinctNumbers: number } | null;
+    // Envios de disparo sem chip registrado (usaram o chip principal/rodízio)
+    chipsUnattributedSent?: number | null;
   };
+  analysis?: DashboardAnalysis;
   alerts: ActionAlert[];
 }
 

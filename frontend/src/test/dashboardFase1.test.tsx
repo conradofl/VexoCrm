@@ -181,7 +181,7 @@ describe("Dashboard Fase 1 Frontend UI and Rules", () => {
 
     // Chips
     expect(screen.getByText("1. Chip Comercial 1")).toBeInTheDocument();
-    expect(screen.getByText(/cota: 45 de 200/)).toBeInTheDocument();
+    expect(screen.getByText(/cota de hoje: 45 de 200/)).toBeInTheDocument();
 
     // Regiões
     expect(screen.getByText(/São Paulo \(DDD 11\)/)).toBeInTheDocument();
