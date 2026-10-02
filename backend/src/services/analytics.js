@@ -526,8 +526,16 @@ export function leadMatchesCampaignSegmentation(lead, segmentation = {}) {
   return true;
 }
 
+// "Schema ausente" = tabela, coluna ou objeto inexistente (códigos do Postgres) e erros do PostgREST.
+// Operador e função inexistentes (42883, ex.: "operator does not exist: uuid = text") são bug nosso,
+// NÃO schema ausente: têm que estourar. A guarda abaixo vem antes das checagens por mensagem porque
+// uma mensagem de função/operador pode citar "table", "column" ou "relation" e casaria por engano.
 export function isMissingSchemaError(error) {
   const code = normalizeString(error?.code);
+  if (code === "42883") return false;
+  const rawMessage = String(error?.message || "").trim().toLowerCase();
+  if (rawMessage.startsWith("operator") || rawMessage.startsWith("function")) return false;
+
   const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
   return (
     code === "42P01" ||
@@ -539,7 +547,6 @@ export function isMissingSchemaError(error) {
     message.includes("schema cache") ||
     message.includes("could not find the") ||
     message.includes("relation") && message.includes("does not exist") ||
-    message.includes("does not exist") ||
     message.includes("column") && message.includes("does not exist") ||
     message.includes("table") && message.includes("does not exist")
   );
