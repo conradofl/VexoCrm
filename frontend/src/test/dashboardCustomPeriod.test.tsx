@@ -124,7 +124,7 @@ describe("Período em andamento", () => {
   it("[TESTE OBRIGATÓRIO] intervalo terminando hoje mostra a marca, junto da comparação", () => {
     renderWith({ ...customInfo, inProgress: true });
 
-    expect(screen.getByRole("note")).toHaveTextContent("Período em andamento — o dia de hoje está incompleto.");
+    expect(screen.getByRole("note")).toHaveTextContent("O período inclui hoje, que ainda não terminou. A comparação é com um período já completo.");
     // a marca fica junto da comparação, no mesmo cabeçalho
     const header = screen.getByText("Comparando 1 a 10 de outubro contra 21 a 30 de setembro").parentElement as HTMLElement;
     expect(header).toContainElement(screen.getByRole("note"));
@@ -134,7 +134,7 @@ describe("Período em andamento", () => {
     renderWith({ ...customInfo, inProgress: false });
 
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Período em andamento/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/O período inclui hoje/)).not.toBeInTheDocument();
   });
 
   it("[TESTE OBRIGATÓRIO] 'este mês' mostra a marca", () => {

@@ -129,7 +129,7 @@ export function describeComparison(info: DashboardPeriodInfo | null | undefined,
 }
 
 /** Aviso do período em andamento, ao lado da comparação. null quando o período já terminou. */
-export const IN_PROGRESS_NOTICE = "Período em andamento — o dia de hoje está incompleto.";
+export const IN_PROGRESS_NOTICE = "O período inclui hoje, que ainda não terminou. A comparação é com um período já completo.";
 
 export function describePeriodStatus(info: DashboardPeriodInfo | null | undefined): string | null {
   return info?.inProgress ? IN_PROGRESS_NOTICE : null;
