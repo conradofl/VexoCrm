@@ -35,10 +35,11 @@ export interface ColumnMappingStepProps {
   onMappingChange: (mappings: ColumnMappingItem[]) => void;
   knownCustomFields?: Array<{ key: string; label: string; type: CustomFieldType }>;
   isImporting?: boolean;
-  onConfirmImport: () => void;
+  onConfirmImport?: () => void;
   onCancel?: () => void;
   totalRowsCount?: number;
   fileName?: string;
+  hideActions?: boolean;
 }
 
 export function ColumnMappingStep({
@@ -52,6 +53,7 @@ export function ColumnMappingStep({
   onCancel,
   totalRowsCount,
   fileName,
+  hideActions = false,
 }: ColumnMappingStepProps) {
   // Amostras da primeira linha preenchida para cada coluna
   const samples = useMemo(
@@ -325,48 +327,50 @@ export function ColumnMappingStep({
       </div>
 
       {/* Botões de Ação */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-          <HelpCircle className="h-3.5 w-3.5" />
-          <span>Campos marcados como informação do lead ficam disponíveis no CRM em dados.campos</span>
-        </div>
+      {!hideActions && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+            <HelpCircle className="h-3.5 w-3.5" />
+            <span>Campos marcados como informação do lead ficam disponíveis no CRM em dados.campos</span>
+          </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          {onCancel && (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {onCancel && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onCancel}
+                className="h-9 px-4 rounded-xl text-xs"
+              >
+                Cancelar
+              </Button>
+            )}
+
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               size="sm"
-              onClick={onCancel}
-              className="h-9 px-4 rounded-xl text-xs"
+              onClick={onConfirmImport}
+              disabled={!validation.isValid || isImporting}
+              data-testid="confirm-import-btn"
+              className="h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors w-full sm:w-auto justify-center"
             >
-              Cancelar
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importando...
+                </>
+              ) : (
+                <>
+                  Confirmar e Importar Planilha
+                  <ArrowRight className="h-3.5 w-3.5 ml-0.5" />
+                </>
+              )}
             </Button>
-          )}
-
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            onClick={onConfirmImport}
-            disabled={!validation.isValid || isImporting}
-            data-testid="confirm-import-btn"
-            className="h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors w-full sm:w-auto justify-center"
-          >
-            {isImporting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Importando...
-              </>
-            ) : (
-              <>
-                Confirmar e Importar Planilha
-                <ArrowRight className="h-3.5 w-3.5 ml-0.5" />
-              </>
-            )}
-          </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

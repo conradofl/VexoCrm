@@ -103,7 +103,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { parseSpreadsheetFile, detectSpreadsheetColumns } from "@/lib/leadImports/spreadsheet";
+import {
+  parseSpreadsheetFile,
+  detectSpreadsheetColumns,
+  proposeColumnMappings,
+  validateColumnMappings,
+  findMatchingRememberedMapping,
+  applyColumnMappingsToRow,
+  type ColumnMappingItem,
+} from "@/lib/leadImports/spreadsheet";
+import { ColumnMappingStep } from "@/pages/LeadImports/ColumnMappingStep";
+import { useLeadCustomFields, useLeadImports } from "@/hooks/useLeadImports";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 export function toggleStageFilter(current: string[], stageToToggle: string): string[] {
@@ -388,6 +399,9 @@ export default function BancoDeDados() {
   // resolveu na lista, caindo no fallback "infinie" (cliente removido) — o que
   // fazia instâncias e leads virem vazios nesta página.
   const clientId = crmClient?.selectedClientId || crmClient?.selectedClient?.id || "geracao-digital";
+  const queryClient = useQueryClient();
+  const { data: knownCustomFields = [] } = useLeadCustomFields(clientId);
+  const { data: pastImports = [] } = useLeadImports(clientId);
 
   const adminUsersQuery = useAdminUsers();
   const operatorOptions = useMemo(() => {
@@ -532,7 +546,14 @@ export default function BancoDeDados() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importDefaultDdd, setImportDefaultDdd] = useState<string>("34");
   const [importRawRows, setImportRawRows] = useState<Record<string, unknown>[]>([]);
+  const [importColumns, setImportColumns] = useState<string[]>([]);
+  const [importColumnMappings, setImportColumnMappings] = useState<ColumnMappingItem[]>([]);
   const [importMapping, setImportMapping] = useState<{ telefone: string | null; nome: string | null }>({ telefone: null, nome: null });
+  const isImportMappingValid = useMemo(() => {
+    if (importColumns.length === 0) return true;
+    if (importColumnMappings.length === 0) return false;
+    return validateColumnMappings(importColumnMappings, importColumns, importRawRows).isValid;
+  }, [importColumns, importColumnMappings, importRawRows]);
   const [showImportAuditModal, setShowImportAuditModal] = useState(false);
   const [importTagInput, setImportTagInput] = useState<string>("");
   const [importAsClosedSales, setImportAsClosedSales] = useState<boolean>(false);
@@ -940,11 +961,101 @@ export default function BancoDeDados() {
     });
   };
 
+  const recalculateImportStatsWithMappings = (
+    rows: Record<string, unknown>[],
+    mappings: ColumnMappingItem[],
+    ddd: string
+  ) => {
+    const cleanDdd = ddd ? ddd.replace(/\D/g, "").slice(0, 2) : null;
+    let intactCount = 0;
+    let completedCount = 0;
+    let incompleteCount = 0;
+    const completedList: Array<{ original: string; result: string }> = [];
+    const incompleteList: Array<{ original: string; reason: string }> = [];
+
+    const phoneMapping = mappings.find((m) => m.target === "telefone");
+    const nameMapping = mappings.find((m) => m.target === "nome");
+    const phoneCol = phoneMapping?.column;
+    const nameCol = nameMapping?.column;
+
+    const normalizedRows = rows.map((row) => {
+      const rawPhone = phoneCol
+        ? String(row[phoneCol] ?? "").trim()
+        : String(row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "").trim();
+      const rawDigits = rawPhone.replace(/\D/g, "");
+      const sanitized = sanitizePhone(rawPhone, cleanDdd);
+
+      let finalPhone: string | null = null;
+      if (sanitized && !sanitized.replace(/^\+/, "").startsWith("5500")) {
+        finalPhone = sanitized.startsWith("+") ? sanitized : `+${sanitized}`;
+        const isAlreadyComplete =
+          (rawDigits.length === 12 && rawDigits.startsWith("55") && sanitized === rawDigits) ||
+          (rawDigits.length === 13 && rawDigits.startsWith("55") && sanitized === rawDigits) ||
+          (rawDigits.length >= 10 && rawDigits.length < 15 && !rawDigits.startsWith("55") && sanitized === rawDigits);
+
+        if (isAlreadyComplete) {
+          intactCount++;
+        } else {
+          completedCount++;
+          if (completedList.length < 500) {
+            completedList.push({ original: rawPhone, result: finalPhone });
+          }
+        }
+      } else {
+        incompleteCount++;
+        let reason = "Formato inválido";
+        if (rawDigits.length === 8 || rawDigits.length === 9) {
+          reason = cleanDdd ? "Telefone incompleto" : "Faltou informar o DDD padrão";
+        } else if (rawDigits.length >= 15 || rawPhone.includes("@g.us")) {
+          reason = "Identificador de grupo do WhatsApp bloqueado";
+        } else if (!rawDigits) {
+          reason = "Sem telefone";
+        } else if (rawDigits.startsWith("5500") || (sanitized && sanitized.startsWith("5500"))) {
+          reason = "Telefone inválido (5500)";
+        }
+        if (incompleteList.length < 500) {
+          incompleteList.push({ original: rawPhone || "(vazio)", reason });
+        }
+      }
+
+      const mapped = applyColumnMappingsToRow(row, mappings);
+      return {
+        ...row,
+        telefone: finalPhone,
+        nome: nameCol && row[nameCol] ? String(row[nameCol]).trim() : mapped.nome,
+        dados: mapped.dados,
+      };
+    });
+
+    setImportParsedRows(normalizedRows.filter((r) => !!r.telefone));
+    setImportSanitizePreview({ validCount: intactCount + completedCount, invalidCount: incompleteCount });
+    setImportAuditStats({
+      total: rows.length,
+      valid: intactCount + completedCount,
+      intactCount,
+      completedCount,
+      incompleteCount,
+      completedList,
+      incompleteList,
+    });
+  };
+
+  const handleMappingChange = (newMappings: ColumnMappingItem[]) => {
+    setImportColumnMappings(newMappings);
+    if (importRawRows.length > 0) {
+      recalculateImportStatsWithMappings(importRawRows, newMappings, importDefaultDdd);
+    }
+  };
+
   const handleDefaultDddChange = (newDdd: string) => {
     const clean = newDdd.replace(/\D/g, "").slice(0, 2);
     setImportDefaultDdd(clean);
     if (importRawRows.length > 0) {
-      recalculateImportStats(importRawRows, importMapping, clean);
+      if (importColumnMappings.length > 0) {
+        recalculateImportStatsWithMappings(importRawRows, importColumnMappings, clean);
+      } else {
+        recalculateImportStats(importRawRows, importMapping, clean);
+      }
     }
   };
 
@@ -960,10 +1071,24 @@ export default function BancoDeDados() {
 
     try {
       const rows = await parseSpreadsheetFile(file);
-      const mapping = detectSpreadsheetColumns(rows);
+      const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
       setImportRawRows(rows);
-      setImportMapping(mapping);
-      recalculateImportStats(rows, mapping, importDefaultDdd);
+      setImportColumns(cols);
+
+      const remembered = findMatchingRememberedMapping(cols, pastImports);
+      const initialMappings = proposeColumnMappings({
+        columns: cols,
+        sampleRows: rows.slice(0, 10),
+        rememberedMapping: remembered,
+        knownCustomFields,
+      });
+
+      setImportColumnMappings(initialMappings);
+
+      const legacyMapping = detectSpreadsheetColumns(rows);
+      setImportMapping(legacyMapping);
+
+      recalculateImportStatsWithMappings(rows, initialMappings, importDefaultDdd);
     } catch (err: any) {
       toast.error("Erro ao ler arquivo da planilha", { description: err.message || "Formato não suportado." });
     }
@@ -971,6 +1096,16 @@ export default function BancoDeDados() {
 
   // Submit Import (CSV / Excel)
   const handleImportSubmit = async () => {
+    if (importColumns.length > 0) {
+      const validation = validateColumnMappings(importColumnMappings, importColumns, importRawRows);
+      if (!validation.isValid) {
+        toast.error("Mapeamento inválido", {
+          description: validation.errorMessage || "Verifique as colunas mapeadas.",
+        });
+        return;
+      }
+    }
+
     if (!importParsedRows || importParsedRows.length === 0) {
       toast.error("Nenhum contato válido encontrado na planilha.");
       return;
@@ -984,19 +1119,27 @@ export default function BancoDeDados() {
         .map((t) => t.trim())
         .filter(Boolean);
 
+      const payload: Record<string, unknown> = {
+        clientId,
+        importTags,
+        defaultDdd: importDefaultDdd || undefined,
+        asClosedSales: importAsClosedSales,
+      };
+
+      if (importColumnMappings.length > 0) {
+        payload.rows = importRawRows;
+        payload.columnMapping = importColumnMappings;
+      } else {
+        payload.rows = importParsedRows;
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/leads/import-csv`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientId,
-          rows: importParsedRows,
-          importTags,
-          defaultDdd: importDefaultDdd || undefined,
-          asClosedSales: importAsClosedSales,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -1016,10 +1159,18 @@ export default function BancoDeDados() {
 
       setIsImportModalOpen(false);
       setImportFile(null);
+      setImportColumns([]);
+      setImportColumnMappings([]);
       setImportAsClosedSales(false);
       setImportParsedRows([]);
       setImportRawRows([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       fetchLeads();
+      queryClient.invalidateQueries({ queryKey: ["leads", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["lead-custom-fields", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["lead-imports", clientId] });
     } catch (err: any) {
       toast.error("Erro na importação da planilha", { description: err.message });
     } finally {
@@ -3599,8 +3750,23 @@ export default function BancoDeDados() {
       </Dialog>
 
       {/* Modal B) Importar Planilha (Excel .xlsx / .xls + CSV) */}
-      <Dialog open={isImportModalOpen} onOpenChange={setIsImportModalOpen}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={isImportModalOpen}
+        onOpenChange={(open) => {
+          setIsImportModalOpen(open);
+          if (!open) {
+            setImportFile(null);
+            setImportColumns([]);
+            setImportColumnMappings([]);
+            setImportRawRows([]);
+            setImportParsedRows([]);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = "";
+            }
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5 text-indigo-500" />
@@ -3629,6 +3795,20 @@ export default function BancoDeDados() {
                 onChange={handleImportFileSelect}
               />
             </div>
+
+            {importFile && importColumns.length > 0 && (
+              <ColumnMappingStep
+                columns={importColumns}
+                sampleRows={importRawRows}
+                mappings={importColumnMappings}
+                onMappingChange={handleMappingChange}
+                knownCustomFields={knownCustomFields}
+                isImporting={isUploadingImport}
+                hideActions={true}
+                totalRowsCount={importRawRows.length}
+                fileName={importFile.name}
+              />
+            )}
 
             {importFile && (
               <div className="space-y-3">
@@ -3717,12 +3897,25 @@ export default function BancoDeDados() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsImportModalOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsImportModalOpen(false);
+                setImportFile(null);
+                setImportColumns([]);
+                setImportColumnMappings([]);
+                setImportRawRows([]);
+                setImportParsedRows([]);
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = "";
+                }
+              }}
+            >
               Cancelar
             </Button>
             <Button
               onClick={handleImportSubmit}
-              disabled={!importFile || isUploadingImport || importSanitizePreview.validCount === 0}
+              disabled={!importFile || isUploadingImport || !isImportMappingValid || importSanitizePreview.validCount === 0}
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {isUploadingImport ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}

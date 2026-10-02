@@ -127,10 +127,20 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
       updates.tags = Array.from(new Set([...prevTags, ...updates.tags]));
     }
 
-    // Mesclagem de dados JSON
+    // Mesclagem de dados JSON (com preservação profunda de dados.campos)
     if (updates.dados && typeof updates.dados === "object") {
       const prevDados = typeof existing.dados === "object" && existing.dados ? existing.dados : {};
-      updates.dados = { ...prevDados, ...updates.dados };
+      const prevCampos = (typeof prevDados.campos === "object" && prevDados.campos) ? prevDados.campos : {};
+      const newCampos = (typeof updates.dados.campos === "object" && updates.dados.campos) ? updates.dados.campos : {};
+      const combinedCampos = (Object.keys(prevCampos).length > 0 || Object.keys(newCampos).length > 0)
+        ? { ...prevCampos, ...newCampos }
+        : undefined;
+
+      updates.dados = {
+        ...prevDados,
+        ...updates.dados,
+        ...(combinedCampos ? { campos: combinedCampos } : {}),
+      };
     }
 
     const cols = Object.keys(updates).filter(
@@ -229,9 +239,18 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         ...(Array.isArray(prev.tags) ? prev.tags : []),
         ...(Array.isArray(rawLead.tags) ? rawLead.tags : []),
       ]));
+      const prevDados = typeof prev.dados === "object" && prev.dados ? prev.dados : {};
+      const newLeadDados = typeof rawLead.dados === "object" && rawLead.dados ? rawLead.dados : {};
+      const prevCampos = (typeof prevDados.campos === "object" && prevDados.campos) ? prevDados.campos : {};
+      const leadCampos = (typeof newLeadDados.campos === "object" && newLeadDados.campos) ? newLeadDados.campos : {};
+      const combinedCampos = (Object.keys(prevCampos).length > 0 || Object.keys(leadCampos).length > 0)
+        ? { ...prevCampos, ...leadCampos }
+        : undefined;
+
       const combinedDados = {
-        ...(typeof prev.dados === "object" && prev.dados ? prev.dados : {}),
-        ...(typeof rawLead.dados === "object" && rawLead.dados ? rawLead.dados : {}),
+        ...prevDados,
+        ...newLeadDados,
+        ...(combinedCampos ? { campos: combinedCampos } : {}),
       };
 
       // Preserva o melhor nome disponível
@@ -370,9 +389,18 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         ...(Array.isArray(lead.tags) ? lead.tags : []),
       ]));
 
+      const existingDados = typeof existing.dados === "object" && existing.dados ? existing.dados : {};
+      const leadDados = typeof lead.dados === "object" && lead.dados ? lead.dados : {};
+      const existingCampos = (typeof existingDados.campos === "object" && existingDados.campos) ? existingDados.campos : {};
+      const leadCampos = (typeof leadDados.campos === "object" && leadDados.campos) ? leadDados.campos : {};
+      const mergedCampos = (Object.keys(existingCampos).length > 0 || Object.keys(leadCampos).length > 0)
+        ? { ...existingCampos, ...leadCampos }
+        : undefined;
+
       const mergedDados = {
-        ...(typeof existing.dados === "object" && existing.dados ? existing.dados : {}),
-        ...(typeof lead.dados === "object" && lead.dados ? lead.dados : {}),
+        ...existingDados,
+        ...leadDados,
+        ...(mergedCampos ? { campos: mergedCampos } : {}),
       };
 
       const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";

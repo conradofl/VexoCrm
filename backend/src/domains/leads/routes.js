@@ -2200,17 +2200,85 @@ export function registerLeadsRoutes(app, deps) {
       ? rawImportTags.split(",").map((t) => t.trim()).filter(Boolean)
       : [];
 
+    const rawMapping = req.body?.columnMapping || req.body?.mapping || null;
+    const mappingItems = Array.isArray(rawMapping)
+      ? rawMapping
+      : Array.isArray(rawMapping?.mapping)
+      ? rawMapping.mapping
+      : null;
+
+    if (mappingItems) {
+      const phoneMapping = mappingItems.find((m) => m && m.target === "telefone");
+      if (!phoneMapping) {
+        sendError(res, 400, "INVALID_MAPPING", "Nenhuma coluna mapeada para telefone. O telefone é obrigatório para importar.");
+        return;
+      }
+      // Registra novos campos customizados no cliente (lead_custom_fields)
+      const customItems = mappingItems.filter((m) => m && m.target === "custom");
+      if (customItems.length > 0) {
+        for (const item of customItems) {
+          const key = item.key || normalizeHeaderKey(item.label || item.column);
+          const label = item.label || item.column;
+          const detectedType = item.type || "text";
+          if (!key) continue;
+
+          const { data: existingField } = await supabase
+            .from("lead_custom_fields")
+            .select("id, client_id, key, label, type")
+            .eq("client_id", clientId)
+            .eq("key", key)
+            .maybeSingle();
+
+          if (!existingField) {
+            await supabase.from("lead_custom_fields").insert({
+              client_id: clientId,
+              key,
+              label,
+              type: detectedType,
+              import_id: null,
+            });
+          }
+        }
+      }
+    }
+
     try {
       let importedCount = 0;
       let skippedNoPhoneCount = 0;
       const parsedLeads = [];
+      const phoneMapping = mappingItems?.find((m) => m && m.target === "telefone");
 
       for (const row of rows) {
-        const rawPhone = row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "";
-        let formattedPhone = sanitizePhoneE164(rawPhone, defaultDdd);
-        const name = normalizeString(row.nome || row.name || row.cliente || row.contato || formattedPhone || "Lead Social");
+        let formattedPhone = null;
+        let name = null;
+        let rawPhone = "";
+        let customCampos = {};
 
-        if (!formattedPhone) {
+        if (mappingItems) {
+          const normalized = defaultNormalizeImportedLead(
+            row,
+            clientId,
+            defaultDdd,
+            mappingItems
+          );
+          if (normalized.telefone) {
+            formattedPhone = normalized.telefone.startsWith("+")
+              ? normalized.telefone
+              : `+${normalized.telefone}`;
+          }
+          name = normalized.nome;
+          rawPhone = normalized.dados?.telefone_bruto || (phoneMapping ? row[phoneMapping.column] : "") || "";
+          customCampos = normalized.dados?.campos || {};
+        } else {
+          rawPhone = row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "";
+          formattedPhone = sanitizePhoneE164(rawPhone, defaultDdd);
+          name = normalizeString(row.nome || row.name || row.cliente || row.contato || formattedPhone || "Lead Social");
+          if (row.dados && typeof row.dados.campos === "object" && row.dados.campos) {
+            customCampos = { ...row.dados.campos };
+          }
+        }
+
+        if (!formattedPhone || formattedPhone.replace(/^\+/, "").startsWith("5500")) {
           // Sem telefone válido: não inventa número sintético 5500.
           // Linha é pulada no cadastro de WhatsApp da planilha.
           skippedNoPhoneCount++;
@@ -2245,6 +2313,21 @@ export function registerLeadsRoutes(app, deps) {
 
         const valorVenda = Number(row.valor_venda || row.valor || row.valor_total) || null;
 
+        const dadosPayload = {
+          origem: originTag,
+          origem_marketing: isClosedSales ? "vendas_fechadas" : originTag,
+          lead_source: isClosedSales ? "vendas_fechadas" : originTag,
+          resumo_chat: row.interesse || row.resumo_chat || (isClosedSales ? "Cliente histórico importado como venda fechada" : "Interação no Direct"),
+          telefone_bruto: rawPhone ? String(rawPhone).trim() : null,
+          valor_venda: valorVenda || undefined,
+          data_fechamento: row.data_fechamento || undefined,
+          produto_comprado: row.produto_comprado || undefined,
+        };
+
+        if (Object.keys(customCampos).length > 0) {
+          dadosPayload.campos = customCampos;
+        }
+
         parsedLeads.push({
           client_id: clientId,
           telefone: formattedPhone,
@@ -2255,16 +2338,7 @@ export function registerLeadsRoutes(app, deps) {
           temperature: validTemp,
           potential_contract_value: valorVenda || undefined,
           tags: combinedTags,
-          dados: {
-            origem: originTag,
-            origem_marketing: isClosedSales ? "vendas_fechadas" : originTag,
-            lead_source: isClosedSales ? "vendas_fechadas" : originTag,
-            resumo_chat: row.interesse || row.resumo_chat || (isClosedSales ? "Cliente histórico importado como venda fechada" : "Interação no Direct"),
-            telefone_bruto: rawPhone ? String(rawPhone).trim() : null,
-            valor_venda: valorVenda || undefined,
-            data_fechamento: row.data_fechamento || undefined,
-            produto_comprado: row.produto_comprado || undefined,
-          },
+          dados: dadosPayload,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
