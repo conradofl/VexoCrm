@@ -7,14 +7,16 @@ import {
 } from "../pages/BancoDeDados";
 
 describe("Banco de Dados - Inteligência de Origem & Atribuição de Marketing", () => {
-  it("deve conter os 6 canais principais de marketing", () => {
+  it("deve conter os canais principais de marketing (e o WhatsApp separado da origem não identificada)", () => {
     const channelIds = MARKETING_CHANNELS.map((c) => c.id);
     expect(channelIds).toContain("instagram");
     expect(channelIds).toContain("google");
     expect(channelIds).toContain("facebook");
     expect(channelIds).toContain("tiktok");
     expect(channelIds).toContain("indicacao");
-    expect(channelIds).toContain("whatsapp_outros");
+    expect(channelIds).toContain("whatsapp");
+    expect(channelIds).toContain("nao_identificada");
+    expect(channelIds).not.toContain("whatsapp_outros"); // o cartão que misturava WhatsApp com o resto deixou de existir
   });
 
   it("deve extrair a origem do lead a partir de múltiplos campos com fallback seguro", () => {
@@ -78,9 +80,10 @@ describe("Banco de Dados - Inteligência de Origem & Atribuição de Marketing",
     expect(getLeadMarketingChannelId(makeLead("Indicação"))).toBe("indicacao");
     expect(getLeadMarketingChannelId(makeLead("amigo indicou"))).toBe("indicacao");
 
-    expect(getLeadMarketingChannelId(makeLead("WhatsApp"))).toBe("whatsapp_outros");
-    expect(getLeadMarketingChannelId(makeLead("Formulário"))).toBe("whatsapp_outros");
-    expect(getLeadMarketingChannelId(makeLead(""))).toBe("whatsapp_outros");
-    expect(getLeadMarketingChannelId(null)).toBe("whatsapp_outros");
+    // WhatsApp é WhatsApp; formulário é orgânico; o que não tem origem NÃO vai para o WhatsApp
+    expect(getLeadMarketingChannelId(makeLead("WhatsApp"))).toBe("whatsapp");
+    expect(getLeadMarketingChannelId(makeLead("Formulário"))).toBe("organico");
+    expect(getLeadMarketingChannelId(makeLead(""))).toBe("nao_identificada");
+    expect(getLeadMarketingChannelId(null)).toBe("nao_identificada");
   });
 });

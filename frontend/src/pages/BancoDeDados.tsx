@@ -74,6 +74,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { LeadBulkActions } from "@/components/leads/LeadBulkActions";
+import { MARKETING_CHANNELS, computeMarketingMetrics, getLeadMarketingChannelId, getLeadSource } from "@/lib/leadChannels";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import {
   Dialog,
@@ -251,51 +252,8 @@ export interface DynamicFilterRule {
   value: string;
 }
 
-// Definições de Canais de Marketing para Atribuição e Disparos
-export const MARKETING_CHANNELS = [
-  {
-    id: "instagram",
-    name: "Instagram",
-    icon: "📸",
-    activeBorder: "border-pink-500 ring-2 ring-pink-500/30 bg-pink-500/10 shadow-sm",
-    badgeClass: "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
-  },
-  {
-    id: "google",
-    name: "Google Ads",
-    icon: "🔍",
-    activeBorder: "border-blue-500 ring-2 ring-blue-500/30 bg-blue-500/10 shadow-sm",
-    badgeClass: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
-  },
-  {
-    id: "facebook",
-    name: "Facebook Ads",
-    icon: "📘",
-    activeBorder: "border-indigo-500 ring-2 ring-indigo-500/30 bg-indigo-500/10 shadow-sm",
-    badgeClass: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
-  },
-  {
-    id: "tiktok",
-    name: "TikTok",
-    icon: "🎵",
-    activeBorder: "border-zinc-500 ring-2 ring-zinc-500/30 bg-zinc-500/10 shadow-sm",
-    badgeClass: "bg-zinc-500/15 text-zinc-800 dark:text-zinc-200 border-zinc-500/30",
-  },
-  {
-    id: "indicacao",
-    name: "Indicação",
-    icon: "🤝",
-    activeBorder: "border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-500/10 shadow-sm",
-    badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
-  },
-  {
-    id: "whatsapp_outros",
-    name: "WhatsApp / Outros",
-    icon: "💬",
-    activeBorder: "border-purple-500 ring-2 ring-purple-500/30 bg-purple-500/10 shadow-sm",
-    badgeClass: "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
-  },
-];
+// Canais de atribuição (cartões "Atribuição & Origem de Marketing"): definição e regra em lib/leadChannels.ts.
+export { MARKETING_CHANNELS, getLeadSource, getLeadMarketingChannelId } from "@/lib/leadChannels";
 
 export const CANONICAL_LEAD_SOURCES: Record<string, { label: string; badgeClass: string; icon: string }> = {
   campanha: { label: "Campanha", badgeClass: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30", icon: "📢" },
@@ -304,33 +262,15 @@ export const CANONICAL_LEAD_SOURCES: Record<string, { label: string; badgeClass:
   whatsapp_ads: { label: "WhatsApp Ads", badgeClass: "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30", icon: "📱" },
   indicacao: { label: "Indicação", badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30", icon: "🤝" },
   extracao_whatsapp: { label: "Extração WhatsApp", badgeClass: "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30", icon: "💬" },
+  importacao_planilha: { label: "Importação de planilha", badgeClass: "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30", icon: "📥" },
+  vendas_fechadas: { label: "Vendas fechadas", badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30", icon: "🏆" },
+  inbound: { label: "WhatsApp (inbound)", badgeClass: "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30", icon: "💬" },
   outro: { label: "Outro", badgeClass: "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30", icon: "🌐" },
   instagram: { label: "Instagram", badgeClass: "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30", icon: "📸" },
   "google ads": { label: "Google Ads", badgeClass: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30", icon: "🔍" },
   "facebook ads": { label: "Facebook Ads", badgeClass: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30", icon: "📘" },
   tiktok: { label: "TikTok", badgeClass: "bg-zinc-500/15 text-zinc-900 dark:text-zinc-100 border-zinc-500/30", icon: "🎵" },
 };
-
-export function getLeadSource(lead?: LeadIntelligenceItem | null): string {
-  if (!lead) return "Não informado";
-  if (Array.isArray(lead.tags)) {
-    if (lead.tags.some((t) => /instagram/i.test(t))) return "Instagram Direct";
-    if (lead.tags.some((t) => /facebook|messenger/i.test(t))) return "Facebook Messenger";
-    if (lead.tags.some((t) => /tiktok/i.test(t))) return "TikTok";
-    if (lead.tags.some((t) => /linkedin/i.test(t))) return "LinkedIn";
-  }
-  return lead.lead_source || lead.dados?.origem_marketing || lead.dados?.origem || lead.origem || "Não informado";
-}
-
-export function getLeadMarketingChannelId(lead?: LeadIntelligenceItem | null): string {
-  const s = (getLeadSource(lead) || "").toLowerCase().trim();
-  if (s === "instagram" || s.startsWith("insta")) return "instagram";
-  if (s === "google ads" || s.includes("google") || s.includes("gads") || s.includes("pesquisa")) return "google";
-  if (s === "facebook ads" || s.includes("facebook") || s.includes("face") || s.includes("messenger")) return "facebook";
-  if (s === "tiktok" || s.includes("tiktok") || s.startsWith("tt")) return "tiktok";
-  if (s === "indicacao" || s.includes("indica") || s.includes("amigo") || s.includes("referral")) return "indicacao";
-  return "whatsapp_outros";
-}
 
 export interface WaExtractionSources {
   conversas: boolean;
@@ -2031,35 +1971,7 @@ export default function BancoDeDados() {
     }
   };
 
-  const marketingMetrics = useMemo(() => {
-    const total = leads.length;
-    const counts: Record<string, number> = {
-      instagram: 0,
-      google: 0,
-      facebook: 0,
-      tiktok: 0,
-      indicacao: 0,
-      whatsapp_outros: 0,
-    };
-
-    leads.forEach((lead) => {
-      const chId = getLeadMarketingChannelId(lead);
-      counts[chId] = (counts[chId] || 0) + 1;
-    });
-
-    return {
-      total,
-      counts,
-      percentages: {
-        instagram: total > 0 ? Math.round((counts.instagram / total) * 100) : 0,
-        google: total > 0 ? Math.round((counts.google / total) * 100) : 0,
-        facebook: total > 0 ? Math.round((counts.facebook / total) * 100) : 0,
-        tiktok: total > 0 ? Math.round((counts.tiktok / total) * 100) : 0,
-        indicacao: total > 0 ? Math.round((counts.indicacao / total) * 100) : 0,
-        whatsapp_outros: total > 0 ? Math.round((counts.whatsapp_outros / total) * 100) : 0,
-      },
-    };
-  }, [leads]);
+  const marketingMetrics = useMemo(() => computeMarketingMetrics(leads), [leads]);
 
   const handleOpenCampaignForChannel = (chDef: { id: string; name: string; icon: string }) => {
     const leadsForChannel = leads.filter((l) => getLeadMarketingChannelId(l) === chDef.id);
@@ -2547,10 +2459,10 @@ export default function BancoDeDados() {
             )}
           </div>
 
-          <div className={cn("grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5", !isAdvancedOriginsUnlocked && "opacity-40 blur-[0.5px] pointer-events-none")}>
+          <div className={cn("grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7 gap-2.5", !isAdvancedOriginsUnlocked && "opacity-40 blur-[0.5px] pointer-events-none")}>
             {MARKETING_CHANNELS.map((ch) => {
               const count = isAdvancedOriginsUnlocked ? (marketingMetrics.counts[ch.id] || 0) : 124;
-              const pct = isAdvancedOriginsUnlocked ? (marketingMetrics.percentages[ch.id as keyof typeof marketingMetrics.percentages] || 0) : 18;
+              const pct = isAdvancedOriginsUnlocked ? (marketingMetrics.percentages[ch.id] || 0) : 18;
               const isSelected = isAdvancedOriginsUnlocked && selectedChannel === ch.id;
 
               return (
@@ -2611,7 +2523,7 @@ export default function BancoDeDados() {
                       Filtro Ativo: {activeCh.name}
                     </span>
                     <span className="text-[11px] text-muted-foreground">
-                      {count} {count === 1 ? "lead encontrado" : "leads encontrados"} ({marketingMetrics.percentages[activeCh.id as keyof typeof marketingMetrics.percentages]}% da base total)
+                      {count} {count === 1 ? "lead encontrado" : "leads encontrados"} ({marketingMetrics.percentages[activeCh.id]}% da base total)
                     </span>
                   </div>
                 </div>

@@ -1,0 +1,245 @@
+{
+  "_comment": "Toda origem que o SISTEMA grava num lead hoje, na forma em que grava, e o cartão do painel 'Atribuição & Origem de Marketing' (Banco de Dados) em que cada uma tem que cair. O teste do backend confere que esta lista é o que o código realmente grava (e que nenhum valor novo apareceu sem estar aqui); o teste do frontend confere que o painel sabe ler cada uma. 'lead' é o recorte que o painel lê: tags, lead_source (coluna) e dados.origem / dados.origem_marketing.",
+  "cards": [
+    "instagram",
+    "google",
+    "facebook",
+    "tiktok",
+    "indicacao",
+    "whatsapp",
+    "campanha",
+    "organico",
+    "trafego_pago",
+    "importacao_planilha",
+    "vendas_fechadas",
+    "texto_avulso",
+    "nao_identificada"
+  ],
+  "origins": [
+    {
+      "id": "whatsapp_extracao_conversas",
+      "writer": "backend/src/domains/leads/routes.js — extract-wa-contacts (conversas)",
+      "lead": {
+        "tags": [],
+        "lead_source": "extracao_whatsapp",
+        "dados": {
+          "origem": "WhatsApp Extração",
+          "origem_marketing": "extracao_whatsapp"
+        }
+      },
+      "expectedCard": "whatsapp"
+    },
+    {
+      "id": "whatsapp_extracao_agenda",
+      "writer": "backend/src/domains/leads/routes.js — extract-wa-contacts (agenda)",
+      "lead": {
+        "tags": [
+          "agenda-whatsapp"
+        ],
+        "lead_source": "extracao_whatsapp",
+        "dados": {
+          "origem": "WhatsApp Agenda",
+          "origem_marketing": "extracao_whatsapp"
+        }
+      },
+      "expectedCard": "whatsapp"
+    },
+    {
+      "id": "whatsapp_extracao_grupo",
+      "writer": "backend/src/domains/leads/routes.js — extract-wa-contacts (grupos)",
+      "lead": {
+        "tags": [
+          "Grupo Clientes Zona Sul"
+        ],
+        "dados": {
+          "origem": "WhatsApp Grupo",
+          "origem_marketing": "extracao_whatsapp"
+        }
+      },
+      "expectedCard": "whatsapp"
+    },
+    {
+      "id": "whatsapp_inbound",
+      "writer": "backend/src/domains/chatbot/routes.js — lead cadastrado a partir do Inbox do WhatsApp",
+      "lead": {
+        "tags": [],
+        "lead_source": "inbound"
+      },
+      "expectedCard": "whatsapp"
+    },
+    {
+      "id": "instagram_importador",
+      "writer": "backend/src/domains/leads/routes.js — import-instagram",
+      "lead": {
+        "tags": [],
+        "lead_source": "instagram_export",
+        "dados": {
+          "origem": "Instagram Direct",
+          "origem_marketing": "instagram_export"
+        }
+      },
+      "expectedCard": "instagram"
+    },
+    {
+      "id": "campanha_resposta",
+      "writer": "backend/src/domains/chatbot/routes.js, leads/routes.js e campaigns/routes.js — lead que respondeu a uma campanha",
+      "lead": {
+        "tags": [],
+        "lead_source": "campanha"
+      },
+      "expectedCard": "campanha"
+    },
+    {
+      "id": "planilha_sem_canal",
+      "writer": "backend/src/domains/leads/routes.js — import-csv, sem canal informado (resolveImportOrigin)",
+      "lead": {
+        "tags": [
+          "Lista Out/26"
+        ],
+        "dados": {
+          "origem": "Importação de planilha",
+          "origem_marketing": "importacao_planilha",
+          "lead_source": "importacao_planilha"
+        }
+      },
+      "expectedCard": "importacao_planilha"
+    },
+    {
+      "id": "planilha_com_canal_facebook",
+      "writer": "backend/src/domains/leads/routes.js — import-csv, tag de canal informada na importação",
+      "lead": {
+        "tags": [
+          "Lista X",
+          "Facebook Ads"
+        ],
+        "dados": {
+          "origem": "Facebook Ads",
+          "origem_marketing": "Facebook Ads",
+          "lead_source": "Facebook Ads"
+        }
+      },
+      "expectedCard": "facebook"
+    },
+    {
+      "id": "planilha_coluna_origem_indicacao",
+      "writer": "backend/src/domains/leads/routes.js — import-csv, coluna de origem da planilha",
+      "lead": {
+        "tags": [
+          "Lista X",
+          "Indicação"
+        ],
+        "dados": {
+          "origem": "Indicação",
+          "origem_marketing": "Indicação",
+          "lead_source": "Indicação"
+        }
+      },
+      "expectedCard": "indicacao"
+    },
+    {
+      "id": "vendas_fechadas",
+      "writer": "backend/src/domains/leads/routes.js — import-csv, planilha de vendas fechadas",
+      "lead": {
+        "tags": [
+          "Clientes 2025",
+          "Venda Fechada",
+          "Cliente Histórico",
+          "Importação Vendas Fechadas"
+        ],
+        "dados": {
+          "origem": "Importação Vendas Fechadas",
+          "origem_marketing": "vendas_fechadas",
+          "lead_source": "vendas_fechadas"
+        }
+      },
+      "expectedCard": "vendas_fechadas"
+    },
+    {
+      "id": "texto_avulso",
+      "writer": "frontend BancoDeDados.tsx (Colar Texto Avulso) → backend import-csv com importTags ['IA Direct/Chat']",
+      "lead": {
+        "tags": [
+          "WhatsApp",
+          "IA Direct/Chat"
+        ],
+        "dados": {
+          "origem": "IA Direct/Chat",
+          "origem_marketing": "IA Direct/Chat",
+          "lead_source": "IA Direct/Chat"
+        }
+      },
+      "expectedCard": "texto_avulso"
+    },
+    {
+      "id": "texto_avulso_origem_escolhida_instagram",
+      "writer": "frontend BancoDeDados.tsx (Colar Texto Avulso) com a origem 'Instagram Direct' escolhida pela pessoa (vira tag do lead)",
+      "lead": {
+        "tags": [
+          "Instagram Direct",
+          "IA Direct/Chat"
+        ],
+        "dados": {
+          "origem": "IA Direct/Chat",
+          "origem_marketing": "IA Direct/Chat",
+          "lead_source": "IA Direct/Chat"
+        }
+      },
+      "expectedCard": "instagram"
+    },
+    {
+      "id": "chatbot_organico",
+      "writer": "backend/src/chatbot-ai-engine.js — normalizeLeadSource (whatsapp, instagram, site, formulário...)",
+      "lead": {
+        "tags": [],
+        "lead_source": "organico"
+      },
+      "expectedCard": "organico"
+    },
+    {
+      "id": "chatbot_trafego_pago",
+      "writer": "backend/src/chatbot-ai-engine.js — normalizeLeadSource (google ads, facebook ads, anúncio...)",
+      "lead": {
+        "tags": [],
+        "lead_source": "trafego_pago"
+      },
+      "expectedCard": "trafego_pago"
+    },
+    {
+      "id": "chatbot_whatsapp_ads",
+      "writer": "backend/src/chatbot-ai-engine.js — normalizeLeadSource (click to whatsapp, ctwa)",
+      "lead": {
+        "tags": [],
+        "lead_source": "whatsapp_ads"
+      },
+      "expectedCard": "trafego_pago"
+    },
+    {
+      "id": "chatbot_indicacao",
+      "writer": "backend/src/chatbot-ai-engine.js — normalizeLeadSource (indicação, amigo, referral)",
+      "lead": {
+        "tags": [],
+        "lead_source": "indicacao"
+      },
+      "expectedCard": "indicacao"
+    },
+    {
+      "id": "chatbot_outro",
+      "writer": "backend/src/chatbot-ai-engine.js — normalizeLeadSource: valor que o sistema não soube classificar vira 'outro'",
+      "lead": {
+        "tags": [],
+        "lead_source": "outro"
+      },
+      "expectedCard": "nao_identificada",
+      "reason": "o próprio sistema registrou que não identificou a origem (valor desconhecido normalizado para 'outro')"
+    },
+    {
+      "id": "sem_origem",
+      "writer": "lead sem nenhum campo de origem lido pelo painel (ex.: criado à mão, ou entrada por webhook, que só grava lead_origin)",
+      "lead": {
+        "tags": []
+      },
+      "expectedCard": "nao_identificada",
+      "reason": "não há origem registrada"
+    }
+  ]
+}
