@@ -185,3 +185,19 @@ outras rotas quebravam por schema). O sintoma sumiu do console, a causa continuo
 - [ ] Testei a rota/tela afetada de verdade e tenho o resultado.
 - [ ] `git add` só dos arquivos certos; branch e remote conferidos.
 - [ ] Avisei o usuário se precisa **Deploy** no Easypanel (backend não sobe no push).
+- [ ] Nenhum script meu emite token em nome de uma pessoa; nenhuma credencial ou identificador fixo de pessoa entrou no código (seção 10).
+
+---
+
+## 10. Identidade nas chamadas, medição em produção e identificadores fixos
+
+**Incidente:** `backend/src/scripts/measure5500Leads.js` emitia um token do Firebase no UID do Conrado, usando a credencial de administrador, e chamava a produção **como se fosse ele**. Era uma ferramenta de personificação versionada no repositório. Isso invalida a auditoria: a exclusão em massa e a correção de origem registram **quem executou**, e um script assim faz qualquer execução aparecer como sendo do dono. O arquivo foi removido (commit `4e9daa8`).
+
+**Regras permanentes, sem exceção:**
+
+1. **Nenhum script emite token no UID de uma pessoa.** Nem `createCustomToken`, nem ID token, nem cookie de sessão, nem JWT, na identidade do Conrado ou de qualquer ser humano — para a API de produção ou de qualquer ambiente. Precisando chamar a API com identidade, use uma **conta de serviço própria**, criada para isso, que apareça na auditoria como tal. Nunca a identidade de uma pessoa.
+2. **Medição em produção é SQL só de leitura, imprimindo o host a que se conectou.** Só `SELECT`: nenhuma transação de escrita, nenhum `UPDATE`/`DELETE`/`INSERT`. O script imprime host, porta e banco no começo, para ninguém medir o banco errado sem perceber (o IP legado da seção 7 segue proibido — se o host impresso for ele, pare). Modelo: `backend/src/scripts/originFixPreviewAllTenants.js`.
+3. **Credencial ou identificador fixo de pessoa não vai em código versionado.** Nem chave, nem senha, nem token, nem UID/e-mail de uma pessoa embutido para "agir como" ela. Tudo vem de `process.env` ou do corpo da requisição em runtime (seção 2 vale também para isso).
+
+**Nota sobre o histórico:** o histórico do git **não foi reescrito**. A chave de API do Firebase é pública por natureza e o UID não é segredo; o que dá poder é a credencial da conta de serviço, que nunca esteve no arquivo. Não reescreva o histórico por causa disso.
+
