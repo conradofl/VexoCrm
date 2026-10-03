@@ -9,6 +9,8 @@ export interface Campaign {
   name: string;
   client_id: string;
   client_name: string | null;
+  /** Chip do lote mais recente (a lista de campanhas devolve; nulo se a campanha ainda não tem lote). */
+  chip_name?: string | null;
   import_id: string | null;
   limit_per_run: number;
   webhook_url: string;

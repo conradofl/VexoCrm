@@ -266,6 +266,10 @@ export function buildStepOptionsContext(sequence) {
   ].join("\n");
 }
 
+// A aba Fila de Envios carrega todas as encerradas de uma vez (o filtro roda no navegador). Teto de segurança:
+// acima disso a tela volta a paginar e avisa que o filtro vale só para o carregado.
+export const DISPATCH_SUMMARY_MAX_PAGE_SIZE = 5000;
+
 export function registerCampaignsRoutes(app, deps) {
   const {
     CAMPAIGN_SCHEDULER_MAX_BATCH,
@@ -902,10 +906,37 @@ export function registerCampaignsRoutes(app, deps) {
         (clients || []).forEach((c) => { clientNameMap[c.id] = c.name; });
       }
 
+      // Nome do chip de cada campanha (o do lote mais recente — o mesmo que o resumo de disparos mostra).
+      // Só enriquece a lista: se falhar, a lista sai igual, com chip_name nulo.
+      const chipNameByCampaign = new Map();
+      const campaignIds = (data || []).map((r) => r.id).filter(Boolean);
+      if (clientId && campaignIds.length > 0) {
+        try {
+          const { rows: lastChips } = await pgDatabasePool.query(
+            `SELECT DISTINCT ON (campaign_id) campaign_id, evolution_instance_id
+             FROM public.campaign_dispatches
+             WHERE client_id = $1 AND campaign_id = ANY($2::uuid[]) AND evolution_instance_id IS NOT NULL
+             ORDER BY campaign_id, created_at DESC`,
+            [clientId, campaignIds]
+          );
+          if (lastChips.length > 0) {
+            const instances = await getLeadClientEvolutionInstances(clientId);
+            const nameById = new Map(instances.map((i) => [i.id, i.name]));
+            for (const row of lastChips) {
+              const name = nameById.get(row.evolution_instance_id);
+              if (name) chipNameByCampaign.set(row.campaign_id, name);
+            }
+          }
+        } catch (chipError) {
+          console.warn("campaigns chip names skipped:", chipError?.message || chipError);
+        }
+      }
+
       const items = (data || []).map((row) => ({
         ...row,
         analytics_meta: normalizeCampaignAnalyticsMeta(row.analytics_meta || {}),
         client_name: clientNameMap[row.client_id] ?? null,
+        chip_name: chipNameByCampaign.get(row.id) ?? null,
         webhook_token: row.webhook_token ? "***" : null,
       }));
 
@@ -2761,7 +2792,7 @@ export function registerCampaignsRoutes(app, deps) {
 
     const scope = req.query.scope === "ended" ? "ended" : "active";
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 20, 1), 100);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 20, 1), DISPATCH_SUMMARY_MAX_PAGE_SIZE);
 
     try {
       await ensureCampaignDispatchEvolutionInstanceColumn();

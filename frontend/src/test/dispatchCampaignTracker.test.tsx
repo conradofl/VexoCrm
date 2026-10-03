@@ -112,7 +112,8 @@ describe("DispatchCampaignTracker", () => {
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
     expandFirstCard();
 
-    expect(screen.getByText(/GD Gabriel/)).toBeTruthy();
+    // o nome do chip também aparece como opção do filtro por chip: a conferência é dentro do cartão
+    expect(within(screen.getByTestId(/^dispatch-card-/)).getByText(/GD Gabriel/)).toBeTruthy();
     expect(screen.getByText(/100 leads/)).toBeTruthy();
     expect(screen.getByText("70")).toBeTruthy(); // enviados
     expect(screen.getByText("15")).toBeTruthy(); // responderam
@@ -297,21 +298,38 @@ describe("DispatchCampaignTracker", () => {
     expect(DISPATCH_SQUARE_STYLES.cancelado).not.toBe(DISPATCH_SQUARE_STYLES.fila);
   });
 
-  it("[TESTE OBRIGATÓRIO] Encerradas com mais campanhas que o tamanho da página mostra paginação", async () => {
+  it("[TESTE OBRIGATÓRIO] Encerradas pede TODAS de uma vez e mostra todas, sem paginação", async () => {
     const endedCampaigns = Array.from({ length: 25 }, (_, i) => makeCampaign({ campaignId: `ended-${i}`, campaignName: `Encerrada ${i}` }));
-    summaryMockFn.mockImplementation((scope: string) => {
-      if (scope === "active") {
-        return { isLoading: false, data: { campaigns: [], counts: { active: 0, ended: 25 }, scope, page: 1, pageSize: 100, totalForScope: 0, kpis: { periodLabel: "últimos 30 dias", campaigns: 0, leads: 0, sent: 0, deliveryRate: null } } };
-      }
-      return {
-        isLoading: false,
-        data: { campaigns: endedCampaigns.slice(0, 20), counts: { active: 0, ended: 25 }, scope, page: 1, pageSize: 20, totalForScope: 25, kpis: { periodLabel: "últimos 30 dias", campaigns: 25, leads: 0, sent: 0, deliveryRate: null } },
-      };
+    summaryMockFn.mockImplementation((scope: string, page: number, pageSize: number) => {
+      const campaigns = scope === "active" ? [] : endedCampaigns.slice((page - 1) * pageSize, page * pageSize);
+      return { isLoading: false, data: { campaigns, counts: { active: 0, ended: 25 }, scope, page, pageSize, totalForScope: scope === "active" ? 0 : 25, kpis: { periodLabel: "últimos 30 dias", campaigns: 25, leads: 0, sent: 0, deliveryRate: null } } };
     });
     const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
     renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
 
     fireEvent.click(screen.getByText("Encerradas (25)"));
+
+    expect(screen.getAllByTestId(/^dispatch-card-/)).toHaveLength(25);
+    expect(screen.queryByText(/Página 1 de/)).toBeNull();
+    const endedCalls = summaryMockFn.mock.calls.filter((c) => c[0] === "ended");
+    expect(endedCalls.every((c) => c[1] === 1 && c[2] === 5000)).toBe(true); // uma página só, do tamanho do teto
+  });
+
+  it("acima do teto do servidor a paginação continua existindo (nenhuma campanha fica inalcançável)", async () => {
+    const endedCampaigns = Array.from({ length: 25 }, (_, i) => makeCampaign({ campaignId: `ended-${i}`, campaignName: `Encerrada ${i}` }));
+    summaryMockFn.mockImplementation((scope: string) => {
+      if (scope === "active") {
+        return { isLoading: false, data: { campaigns: [], counts: { active: 0, ended: 5025 }, scope, page: 1, pageSize: 5000, totalForScope: 0, kpis: { periodLabel: "últimos 30 dias", campaigns: 0, leads: 0, sent: 0, deliveryRate: null } } };
+      }
+      return {
+        isLoading: false,
+        data: { campaigns: endedCampaigns, counts: { active: 0, ended: 5025 }, scope, page: 1, pageSize: 5000, totalForScope: 5025, kpis: { periodLabel: "últimos 30 dias", campaigns: 25, leads: 0, sent: 0, deliveryRate: null } },
+      };
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("Encerradas (5025)"));
     expect(await screen.findByText(/Página 1 de 2/)).toBeTruthy();
   });
 });

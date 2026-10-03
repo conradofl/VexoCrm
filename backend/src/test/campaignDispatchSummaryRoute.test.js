@@ -7,7 +7,7 @@
 // lotes pendentes.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { registerCampaignsRoutes } from "../domains/campaigns/routes.js";
+import { registerCampaignsRoutes, DISPATCH_SUMMARY_MAX_PAGE_SIZE } from "../domains/campaigns/routes.js";
 
 function fakeRes() {
   return {
@@ -460,5 +460,58 @@ describe("POST /api/campaigns/:campaignId/dispatches/bulk-action", () => {
       expect(updateCall.sql).toContain("scheduled_at = CASE WHEN scheduled_at IS NULL OR scheduled_at < now()");
       expect(res.body.resumedAt).toBeNull();
     });
+  });
+});
+
+describe("GET /api/campaigns/dispatch-summary — carregar tudo de uma vez", () => {
+  const encerradas = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      campaign_id: `camp-${i}`,
+      campaign_name: `Encerrada ${i}`,
+      lote_count: 1,
+      sent_total: 10,
+      failed_total: 0,
+      leads_total: 10,
+      leads_pending: 0,
+      leads_pause_target: 0,
+      leads_resume_target: 0,
+      leads_cancel_target: 0,
+      statuses: ["done"],
+      evolution_instance_id: "chip-1",
+      next_scheduled_at: null,
+      last_updated_at: new Date(2026, 8, 1, 12, i % 60).toISOString(),
+    }));
+
+  const pedir = async (n, pageSize) => {
+    const deps = makeDeps({ pool: makePool({ groupedRows: encerradas(n) }) });
+    const handler = getRouteHandler(deps, "/api/campaigns/dispatch-summary");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1", scope: "ended", pageSize: String(pageSize) } }, res);
+    return res.body;
+  };
+
+  it("[TESTE OBRIGATÓRIO] a aba Encerradas pode pedir todas numa página só (150 de uma vez, bem além de 100)", async () => {
+    const body = await pedir(150, 5000);
+
+    expect(body.campaigns).toHaveLength(150);
+    expect(body.totalForScope).toBe(150);
+    expect(body.pageSize).toBe(5000);
+  });
+
+  it("o teto de página existe e é o que a tela conhece (acima dele a tela volta a paginar)", async () => {
+    const body = await pedir(30, 999999);
+
+    expect(DISPATCH_SUMMARY_MAX_PAGE_SIZE).toBe(5000);
+    expect(body.pageSize).toBe(DISPATCH_SUMMARY_MAX_PAGE_SIZE);
+  });
+
+  it("sem pageSize, continua paginando de 20 em 20 (quem chama sem pedir tudo não muda)", async () => {
+    const deps = makeDeps({ pool: makePool({ groupedRows: encerradas(45) }) });
+    const handler = getRouteHandler(deps, "/api/campaigns/dispatch-summary");
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1", scope: "ended" } }, res);
+
+    expect(res.body.campaigns).toHaveLength(20);
+    expect(res.body.totalForScope).toBe(45);
   });
 });

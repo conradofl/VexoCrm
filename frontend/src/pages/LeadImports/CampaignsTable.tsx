@@ -7,7 +7,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
-import type { Campaign } from "@/hooks/useCampanhas";
+import { CAMPAIGN_STATUS_LABELS, type Campaign } from "@/hooks/useCampanhas";
+import { ListFilterBar } from "@/components/ListFilterBar";
+import { useListFilter } from "@/hooks/useListFilter";
+import { CAMPAIGNS_FILTER } from "@/lib/leadImportsListFilters";
 import { DispatchKpiCards } from "./DispatchKpiCards";
 
 interface CampaignsTableProps {
@@ -28,11 +31,7 @@ export function CampaignsTable({
   onDeleteCampaign,
 }: CampaignsTableProps) {
   const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState<string>("");
-
-  const filteredCampaigns = campaigns.filter((c) =>
-    !searchTerm ? true : c.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const { filtered: filteredCampaigns, controls: filterControls } = useListFilter(campaigns, CAMPAIGNS_FILTER);
 
   return (
     <div className="space-y-4">
@@ -44,15 +43,14 @@ export function CampaignsTable({
             <CardTitle className="text-base font-bold">Campanhas Configuradas</CardTitle>
             <CardDescription>Clique para ver detalhes, editar as mensagens ou excluir as réguas</CardDescription>
           </div>
-          <input
-            className="h-9 w-44 rounded-xl border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            placeholder="Buscar campanha..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
         </CardHeader>
 
-        <CardContent className="p-4 sm:p-6 pt-0">
+        <CardContent className="p-4 sm:p-6 pt-0 space-y-4">
+          <ListFilterBar
+            controls={filterControls}
+            searchPlaceholder="Buscar por campanha ou último chip..."
+            testId="campaigns-filter"
+          />
           {loadingCampaigns ? (
             <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">
               Carregando dados das campanhas...
@@ -62,8 +60,8 @@ export function CampaignsTable({
               <EmptyState
                 title="Nenhuma campanha encontrada"
                 description={
-                  searchTerm
-                    ? "Nenhuma campanha corresponde ao termo buscado."
+                  filterControls.isFiltered
+                    ? "Nenhuma campanha corresponde à busca ou aos filtros. Use \"Limpar filtros\" para ver todas."
                     : "Use o Novo Disparo para registrar a primeira campanha por planilha."
                 }
               />
@@ -157,11 +155,7 @@ export function CampaignsTable({
                               : "border-slate-300/80 bg-slate-100/50 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
                           )}
                         >
-                          {c.status === "active"
-                            ? "Ativa"
-                            : c.status === "paused"
-                            ? "Pausada"
-                            : c.status || "Rascunho"}
+                          {CAMPAIGN_STATUS_LABELS[c.status] ?? c.status ?? "Rascunho"}
                         </Badge>
                         <span
                           data-testid={`campaign-mode-${c.id}`}
@@ -210,6 +204,10 @@ export function CampaignsTable({
                           <p>
                             <span className="font-semibold text-foreground">Base:</span>{" "}
                             {c.import_id ? "Base importada" : "Geral"}
+                          </p>
+                          <p data-testid={`campaign-last-chip-${c.id}`}>
+                            <span className="font-semibold text-foreground">Último chip:</span>{" "}
+                            {c.chip_name ?? "Nenhum lote enviado ainda"}
                           </p>
                         </div>
 

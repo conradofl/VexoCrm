@@ -46,9 +46,15 @@ import {
   DISPATCH_SQUARE_STYLES,
   type DispatchSummaryCampaign,
 } from "@/hooks/useCampanhas";
+import { ListFilterBar } from "@/components/ListFilterBar";
+import { useListFilter } from "@/hooks/useListFilter";
+import { DISPATCH_QUEUE_FILTER } from "@/lib/leadImportsListFilters";
 import { DispatchKpiCardsView } from "./DispatchKpiCards";
 
-const PAGE_SIZE_ENDED = 20;
+// A aba carrega TODAS as campanhas de uma vez (a busca e os filtros rodam no navegador e precisam ver tudo).
+// O servidor limita a 5000 por página; só acima disso a paginação volta a aparecer, com aviso no filtro.
+const PAGE_SIZE_ENDED = 5000;
+const EMPTY_CAMPAIGNS: DispatchSummaryCampaign[] = [];
 
 interface DispatchCampaignTrackerProps {
   clientId: string | null;
@@ -60,12 +66,21 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
   const [endedPage, setEndedPage] = useState(1);
   const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
 
-  const activeQuery = useDispatchSummary(clientId, "active", 1, 100);
+  const activeQuery = useDispatchSummary(clientId, "active", 1, PAGE_SIZE_ENDED);
   const endedQuery = useDispatchSummary(clientId, "ended", endedPage, PAGE_SIZE_ENDED);
   const current = tab === "active" ? activeQuery : endedQuery;
 
   const counts = current.data?.counts ?? activeQuery.data?.counts ?? endedQuery.data?.counts ?? { active: 0, ended: 0 };
   const kpis = current.data?.kpis;
+
+  // O filtro age sobre o que a aba carregou — que é tudo, exceto acima do teto do servidor (aviso abaixo).
+  const loadedCampaigns = current.data?.campaigns ?? EMPTY_CAMPAIGNS;
+  const { filtered: visibleCampaigns, controls: filterControls } = useListFilter(loadedCampaigns, DISPATCH_QUEUE_FILTER);
+  const totalInScope = current.data?.totalForScope ?? loadedCampaigns.length;
+  const partialNote =
+    totalInScope > loadedCampaigns.length
+      ? `O filtro vale só para as ${loadedCampaigns.length} carregadas${tab === "ended" ? " nesta página" : ""}; há ${totalInScope} no total.`
+      : null;
 
   return (
     <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
@@ -85,6 +100,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
             onClick={() => {
               setTab("active");
               setExpandedCampaignId(null);
+              filterControls.clear();
             }}
             className={cn(
               "px-3 py-2 text-xs font-bold border-b-2 -mb-px transition-colors",
@@ -98,6 +114,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
             onClick={() => {
               setTab("ended");
               setExpandedCampaignId(null);
+              filterControls.clear();
             }}
             className={cn(
               "px-3 py-2 text-xs font-bold border-b-2 -mb-px transition-colors",
@@ -107,17 +124,32 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
             Encerradas ({counts.ended})
           </button>
         </div>
+
+        <ListFilterBar
+          controls={filterControls}
+          searchPlaceholder="Buscar por campanha ou último chip..."
+          note={partialNote}
+          testId="queue-filter"
+        />
       </CardHeader>
 
       <CardContent className="space-y-4 p-4 sm:p-6 pt-0">
         {current.isLoading ? (
           <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Carregando campanhas...</div>
-        ) : (current.data?.campaigns.length ?? 0) === 0 ? (
+        ) : visibleCampaigns.length === 0 ? (
           <div className="p-8">
             <EmptyState
-              title={tab === "active" ? "Nenhuma campanha ativa" : "Nenhuma campanha encerrada"}
+              title={
+                filterControls.isFiltered
+                  ? "Nenhuma campanha encontrada"
+                  : tab === "active"
+                  ? "Nenhuma campanha ativa"
+                  : "Nenhuma campanha encerrada"
+              }
               description={
-                tab === "active"
+                filterControls.isFiltered
+                  ? "Nenhuma campanha corresponde à busca ou aos filtros. Use \"Limpar filtros\" para ver todas."
+                  : tab === "active"
                   ? "Campanhas agendadas, enviando ou pausadas aparecem aqui."
                   : "Campanhas concluídas ou canceladas aparecem aqui."
               }
@@ -127,7 +159,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
           <>
             {/* Grade responsiva: 3 em tela larga, 2 em média, 1 no celular */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {current.data!.campaigns.map((c) => (
+              {visibleCampaigns.map((c) => (
                 <CampaignCard
                   key={c.campaignId}
                   campaign={c}
