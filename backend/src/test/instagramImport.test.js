@@ -179,6 +179,24 @@ describe("Extração de contatos do Instagram", () => {
     expect(mockDb.leads.find((l) => l.nome === "Carla Fone Invalido")).toBeUndefined();
   });
 
+  it("[TESTE OBRIGATÓRIO] o importador de Instagram continua marcando Instagram — com a assinatura própria, que a correção de origem usa para não tocá-lo", async () => {
+    await fetch(`${baseUrl}/api/leads/import-instagram`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: "geracao-digital",
+        contacts: [{ name: "Fernanda", perfil: "fernanda.ig", phone: "5511988887777", resumo: "Oi" }],
+      }),
+    });
+
+    const lead = mockDb.leads.find((l) => l.telefone === "5511988887777" || l.phone === "5511988887777");
+    expect(lead.dados.origem).toBe("Instagram Direct");
+    expect(lead.dados.lead_source_bruto).toBe("Instagram Direct");
+    expect(lead.dados.origem_marketing).toBe("instagram_export");
+    expect(lead.lead_source).toBe("instagram_export");
+    expect(mockDb.leads).toHaveLength(1);
+  });
+
   it("[TESTE OBRIGATÓRIO] nenhum telefone gerado começa com 5500 — telefone inválido é descartado, não inventado", async () => {
     await fetch(`${baseUrl}/api/leads/import-instagram`, {
       method: "POST",

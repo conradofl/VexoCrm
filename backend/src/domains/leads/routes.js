@@ -38,6 +38,8 @@ import {
 import { isManagerOrAdmin } from "../../access/claims.js";
 import { randomUUID } from "crypto";
 import { registerLeadMassDeleteRoutes } from "./massDeleteRoutes.js";
+import { registerLeadOriginFixRoutes } from "./originFixRoutes.js";
+import { resolveImportOrigin } from "../../services/importOrigin.js";
 import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
 import {
   classifyLeadMessages,
@@ -2311,20 +2313,27 @@ export function registerLeadsRoutes(app, deps) {
           : [];
 
         const closedSalesTags = isClosedSales ? ["Venda Fechada", "Cliente Histórico"] : [];
-        const originTag =
-          importTagsArray.find((t) => /instagram|facebook|linkedin|tiktok|direct|messenger/i.test(t)) ||
-          parsedRowTags.find((t) => /instagram|facebook|linkedin|tiktok|direct|messenger/i.test(t)) ||
-          (isClosedSales ? "Importação Vendas Fechadas" : (row.origem || "Instagram Direct"));
+        // Origem: canal informado (tag da importação ou da linha, coluna de origem), vendas fechadas, ou —
+        // se ninguém informou nada — a própria importação. Nunca um canal inventado.
+        const resolvedOrigin = resolveImportOrigin({
+          importTags: importTagsArray,
+          rowTags: parsedRowTags,
+          rowOrigem: row.origem,
+          isClosedSales,
+        });
+        const originTag = resolvedOrigin.originTag;
 
-        const combinedTags = Array.from(new Set([...parsedRowTags, ...importTagsArray, ...closedSalesTags, originTag]));
+        const combinedTags = Array.from(
+          new Set([...parsedRowTags, ...importTagsArray, ...closedSalesTags, ...(originTag ? [originTag] : [])])
+        );
 
         const valorVenda = Number(row.valor_venda || row.valor || row.valor_total) || null;
 
         const dadosPayload = {
           import_ids: [importId],
-          origem: originTag,
-          origem_marketing: isClosedSales ? "vendas_fechadas" : originTag,
-          lead_source: isClosedSales ? "vendas_fechadas" : originTag,
+          origem: resolvedOrigin.origem,
+          origem_marketing: resolvedOrigin.origemMarketing,
+          lead_source: resolvedOrigin.leadSource,
           resumo_chat: row.interesse || row.resumo_chat || (isClosedSales ? "Cliente histórico importado como venda fechada" : "Interação no Direct"),
           telefone_bruto: rawPhone ? String(rawPhone).trim() : null,
           valor_venda: valorVenda || undefined,
@@ -3741,5 +3750,17 @@ export function registerLeadsRoutes(app, deps) {
     resolveAuthorizedClientId,
     sendError,
     massDeleteRepo: deps.massDeleteRepo,
+  });
+
+  // Correção dos leads marcados "Instagram Direct" pelo padrão fabricado do importador de planilha
+  registerLeadOriginFixRoutes(app, {
+    ensureDb,
+    normalizeString,
+    pgDatabasePool,
+    requireBancoDeDados,
+    requireFirebaseAuth,
+    resolveAuthorizedClientId,
+    sendError,
+    originFixRepo: deps.originFixRepo,
   });
 }

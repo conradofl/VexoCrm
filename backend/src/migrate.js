@@ -374,6 +374,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_mass_delete_audit')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_mass_delete_audit' AND column_name='kept_both')
     ) AS ok`,
+    "20261003090000_create_lead_origin_fix_audit.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_origin_fix_audit')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_origin_fix_audit' AND column_name='lead_ids')
+    ) AS ok`,
     "20261002090000_create_dashboard_metrics_cache.sql": `SELECT (
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='dashboard_metrics_cache')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='dashboard_metrics_cache' AND column_name='calculated_at')
