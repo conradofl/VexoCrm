@@ -117,6 +117,22 @@ export async function previewOriginFix(repo, db, { clientId }) {
 }
 
 /**
+ * Prévia em vários tenants de uma vez (SÓ LEITURA — nenhuma transação, nenhuma escrita). Devolve uma linha por
+ * tenant, com os mesmos números da prévia da tela, e os totais. Serve para medir onde a correção teria o que fazer.
+ */
+export async function previewOriginFixForTenants(repo, db, clientIds) {
+  const rows = [];
+  for (const clientId of [...new Set(clientIds)].sort()) {
+    rows.push({ clientId, ...(await previewOriginFix(repo, db, { clientId })) });
+  }
+  const sum = (key) => rows.reduce((s, r) => s + r[key], 0);
+  return {
+    tenants: rows,
+    totals: { total: sum("total"), withImportId: sum("withImportId"), onlyImportTag: sum("onlyImportTag"), undeterminable: sum("undeterminable"), correctable: sum("correctable"), instagramImporterUntouched: sum("instagramImporterUntouched") },
+  };
+}
+
+/**
  * Execução: UMA transação — seleção, conferência do número visto na prévia, correção, auditoria, commit.
  * `{ ok: true, report }` ou `{ ok: false, code, message, details }` (nada foi alterado).
  */
@@ -203,6 +219,12 @@ export async function executeOriginFix(repo, pool, { clientId, expectedCount, ty
 export function createPgOriginFixRepo() {
   let auditEnsured = false;
   return {
+    /** Tenants que têm ao menos um lead com origem "Instagram Direct" (só leitura). */
+    async listTenantsWithFabricatedOrigin(db) {
+      const { rows } = await db.query(`SELECT DISTINCT client_id FROM public.leads WHERE dados->>'origem' = $1 ORDER BY client_id`, [FABRICATED_ORIGIN]);
+      return rows.map((r) => r.client_id);
+    },
+
     async listCandidates(db, clientId) {
       const { rows } = await db.query(
         `SELECT id,

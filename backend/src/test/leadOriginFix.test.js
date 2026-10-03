@@ -13,6 +13,7 @@ import {
   hasImportTagBesideFabricated,
   isFromInstagramImporter,
   previewOriginFix,
+  previewOriginFixForTenants,
 } from "../services/leadOriginFix.js";
 import { createMemoryOriginFixRepo, fromInstagramImporter, onlyImportTag, undeterminable, withImportId } from "./helpers/memoryOriginFixRepo.js";
 
@@ -280,5 +281,50 @@ describe("execução", () => {
 
     const out = await run(repo, { expectedCount: 0 });
     expect(out.code).toBe(ORIGIN_FIX_ERRORS.NOTHING_TO_FIX);
+  });
+});
+
+describe("prévia em vários tenants (só leitura)", () => {
+  it("[TESTE OBRIGATÓRIO] uma linha por tenant com os mesmos números da prévia da tela, e os totais fecham", async () => {
+    const repo = seed();
+
+    const ids = await repo.listTenantsWithFabricatedOrigin(repo.store);
+    const { tenants, totals } = await previewOriginFixForTenants(repo, repo.store, ids);
+
+    expect(tenants.map((t) => t.clientId)).toEqual(["A", "B"]);
+    expect(tenants[0]).toMatchObject({ clientId: "A", withImportId: 3, onlyImportTag: 4, undeterminable: 2, correctable: 7, instagramImporterUntouched: 5 });
+    expect(tenants[1]).toMatchObject({ clientId: "B", withImportId: 2, onlyImportTag: 3, undeterminable: 0, correctable: 5 });
+    expect(totals).toMatchObject({ total: 14, withImportId: 5, onlyImportTag: 7, undeterminable: 2, correctable: 12, instagramImporterUntouched: 5 });
+    // cada linha é idêntica à prévia individual do mesmo tenant
+    expect(tenants[0]).toMatchObject(await previewOriginFix(repo, repo.store, { clientId: "A" }));
+  });
+
+  it("[TESTE OBRIGATÓRIO] é SÓ LEITURA: nenhuma transação, nenhuma correção, nenhuma auditoria — e nada muda nos leads", async () => {
+    const repo = seed();
+    const antes = JSON.stringify(repo.store.leads);
+
+    await previewOriginFixForTenants(repo, repo.store, ["A", "B"]);
+
+    expect(JSON.stringify(repo.store.leads)).toBe(antes);
+    expect(repo.store.audit).toHaveLength(0);
+    const ops = new Set(repo.calls.map((c) => c.op));
+    for (const proibida of ["begin", "commit", "fixLeads", "insertAudit", "ensureAuditTable"]) expect(ops.has(proibida), proibida).toBe(false);
+  });
+
+  it("cada tenant só enxerga os próprios leads, e tenant repetido na lista conta uma vez", async () => {
+    const repo = seed();
+    const { tenants, totals } = await previewOriginFixForTenants(repo, repo.store, ["B", "B", "A"]);
+
+    expect(tenants).toHaveLength(2);
+    expect(new Set(repo.calls.filter((c) => c.clientId).map((c) => c.clientId))).toEqual(new Set(["A", "B"]));
+    expect(totals.total).toBe(tenants[0].total + tenants[1].total);
+  });
+
+  it("tenant sem nenhum lead do tipo: zero em tudo (o caso que decide remover a tela)", async () => {
+    const repo = createMemoryOriginFixRepo({ leads: [] });
+    const { tenants, totals } = await previewOriginFixForTenants(repo, repo.store, ["GD"]);
+
+    expect(tenants[0]).toMatchObject({ clientId: "GD", total: 0, withImportId: 0, onlyImportTag: 0, undeterminable: 0, correctable: 0 });
+    expect(totals.correctable).toBe(0);
   });
 });

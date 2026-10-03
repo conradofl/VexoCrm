@@ -21,6 +21,11 @@ export function createMemoryOriginFixRepo({ leads = [] } = {}) {
       shortFixBy = n;
     },
 
+    async listTenantsWithFabricatedOrigin(db) {
+      calls.push({ op: "listTenantsWithFabricatedOrigin" });
+      return [...new Set(db.leads.filter((l) => l.dados?.origem === FAB).map((l) => l.client_id))].sort();
+    },
+
     async listCandidates(db, clientId) {
       calls.push({ op: "listCandidates", clientId });
       return db.leads
