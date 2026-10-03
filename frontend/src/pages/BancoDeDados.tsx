@@ -73,7 +73,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
+import { LeadBulkActions } from "@/components/leads/LeadBulkActions";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import {
   Dialog,
@@ -397,7 +397,6 @@ export default function BancoDeDados() {
   const canManageUsers = isAdminUser || canAccessInternalPage("usuarios");
   // Mesma regra do servidor (isManagerOrAdmin): excluir leads em massa é decisão de gestor/admin.
   const canMassDelete = canMassDeleteLeads({ isAdminUser, approvalLevel, canAccessUsersPage: canManageUsers });
-  const [isMassDeleteOpen, setIsMassDeleteOpen] = useState(false);
   const crmClient = useOptionalCrmClient();
   // Usa selectedClientId (string, sempre setado pelo seletor de tenant do topo).
   // Antes usava selectedClient?.id, que fica null quando o objeto ainda não
@@ -2433,18 +2432,7 @@ export default function BancoDeDados() {
               Ticket Médio
             </Button>
 
-            {canMassDelete && (
-              <Button
-                variant="outline"
-                size="sm"
-                data-testid="btn-mass-delete-by-tag"
-                onClick={() => setIsMassDeleteOpen(true)}
-                className="gap-2 text-xs border-rose-500/30 text-rose-700 dark:text-rose-300 hover:bg-rose-500/10"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Excluir por tag
-              </Button>
-            )}
+            <LeadBulkActions clientId={clientId} canManage={canMassDelete} />
 
             {/* Dropdown com opções de exportação XLSX e CSV */}
             <DropdownMenu>
@@ -3766,10 +3754,6 @@ export default function BancoDeDados() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {canMassDelete && (
-        <MassDeleteDialog open={isMassDeleteOpen} onOpenChange={setIsMassDeleteOpen} clientId={clientId} />
-      )}
 
       {/* Modal B) Importar Planilha (Excel .xlsx / .xls + CSV) */}
       <Dialog

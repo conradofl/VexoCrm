@@ -35,7 +35,7 @@ async function parseError(res: Response, fallback: string): Promise<Error> {
   return new Error(message);
 }
 
-function useAuthedPost() {
+export function useAuthedPost() {
   const { getIdToken } = useAuth();
   return async (path: string, body: unknown) => {
     const token = await getIdToken();

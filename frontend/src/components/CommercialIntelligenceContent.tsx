@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { API_BASE_URL } from "@/lib/api";
+import { computeAttributionByChannel } from "@/lib/attribution";
 import {
   type CampaignPerformanceItem,
   type CommercialIntelligenceFilters,
@@ -281,48 +282,7 @@ export function CommercialIntelligenceContent({ clientId }: { clientId: string }
   const distributionQueue = useMemo(() => data?.distribution?.queue ?? [], [data?.distribution?.queue]);
   const distributionHistory = useMemo(() => data?.distribution?.history ?? [], [data?.distribution?.history]);
 
-  const attributionByChannel = useMemo(() => {
-    const map: Record<string, { total: number; qualified: number; revenue: number }> = {
-      "📢 Campanha": { total: 0, qualified: 0, revenue: 0 },
-      "🌱 Orgânico": { total: 0, qualified: 0, revenue: 0 },
-      "🎯 Tráfego Pago": { total: 0, qualified: 0, revenue: 0 },
-      "📱 WhatsApp Ads": { total: 0, qualified: 0, revenue: 0 },
-      "🤝 Indicação": { total: 0, qualified: 0, revenue: 0 },
-      "💬 Extração WhatsApp": { total: 0, qualified: 0, revenue: 0 },
-      "🌐 Outro": { total: 0, qualified: 0, revenue: 0 },
-      "Origem desconhecida": { total: 0, qualified: 0, revenue: 0 },
-    };
-
-    realLeads.forEach((lead) => {
-      const src = String(lead.lead_source || lead.dados?.origem_marketing || lead.dados?.origem || lead.origem || "").trim().toLowerCase();
-      let key = "Origem desconhecida";
-      if (src === "campanha") key = "📢 Campanha";
-      else if (src === "organico") key = "🌱 Orgânico";
-      else if (src === "trafego_pago") key = "🎯 Tráfego Pago";
-      else if (src === "whatsapp_ads") key = "📱 WhatsApp Ads";
-      else if (src === "indicacao") key = "🤝 Indicação";
-      else if (src === "extracao_whatsapp") key = "💬 Extração WhatsApp";
-      else if (src === "outro") key = "🌐 Outro";
-
-      map[key].total += 1;
-      const isQual = lead.stage === "buyer" || lead.stage === "open_budget" || lead.temperature === "hot" || lead.temperature === "warm";
-      if (isQual) {
-        map[key].qualified += 1;
-        map[key].revenue += 2500;
-      }
-    });
-
-    const totalLeadsCount = realLeads.length || 1;
-
-    return Object.entries(map).map(([channel, stat]) => ({
-      channel,
-      total: stat.total,
-      qualified: stat.qualified,
-      rate: stat.total > 0 ? Math.round((stat.qualified / stat.total) * 100) : 0,
-      share: Math.round((stat.total / totalLeadsCount) * 100),
-      revenue: stat.revenue,
-    }));
-  }, [realLeads]);
+  const attributionByChannel = useMemo(() => computeAttributionByChannel(realLeads), [realLeads]);
 
   const sdrPerformanceRows = useMemo(() => {
     if (consultants.length > 0) {
