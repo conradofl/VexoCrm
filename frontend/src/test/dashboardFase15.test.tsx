@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { Block1WhatHappened } from "../pages/Dashboard/Block1WhatHappened";
 import { Block2Rankings } from "../pages/Dashboard/Block2Rankings";
-import { Block4Analysis, formatMinutes } from "../pages/Dashboard/Block4Analysis";
+import { Block4Analysis, formatMinutes, NO_CLOSINGS_NOTICE } from "../pages/Dashboard/Block4Analysis";
 import type { DashboardAnalysis, DashboardPayload, DashboardSummary } from "../hooks/useDashboard";
 
 const RULE = "conversou depois do envio (janela de 14 dias)";
@@ -85,11 +85,119 @@ describe("Fechamentos (caixa nova no topo)", () => {
     expect(screen.getAllByText("Indisponível").length).toBe(1);
   });
 
+  it("[TESTE OBRIGATÓRIO] três estados, três comportamentos: ausente esconde, erro diz 'Indisponível', zero mostra 0", () => {
+    // 1. cliente não usa o recurso (null e fora de unavailableBlocks): o cartão não aparece
+    const { unmount: u1 } = render(<Block1WhatHappened summary={{ ...summary, closings: null }} hasProposalsAndContracts periodLabel="30 dias" unavailableBlocks={[]} />);
+    expect(screen.queryByText("Fechamentos")).not.toBeInTheDocument();
+    expect(screen.queryByText("Indisponível")).not.toBeInTheDocument();
+    u1();
+
+    // 2. erro de verdade (null e listado): o cartão aparece dizendo indisponível
+    const { unmount: u2 } = render(<Block1WhatHappened summary={{ ...summary, closings: null }} hasProposalsAndContracts periodLabel="30 dias" unavailableBlocks={["summary.closings"]} />);
+    expect(screen.getByText("Fechamentos")).toBeInTheDocument();
+    expect(screen.getByText("Indisponível")).toBeInTheDocument();
+    u2();
+
+    // 3. tabela presente e vazia: o cartão aparece com ZERO
+    render(<Block1WhatHappened summary={{ ...summary, closings: { current: 0, previous: 0, delta: 0 } }} hasProposalsAndContracts periodLabel="30 dias" unavailableBlocks={[]} />);
+    expect(screen.getByText("Fechamentos")).toBeInTheDocument();
+    expect(screen.queryByText("Indisponível")).not.toBeInTheDocument();
+    const cartao = screen.getByText("Fechamentos").closest("div[class*='rounded-2xl']") as HTMLElement;
+    expect(within(cartao).getByText("0")).toBeInTheDocument();
+  });
+
   it("[TESTE OBRIGATÓRIO] tenant com GD mostra as caixas de propostas e contratos", () => {
     render(<Block1WhatHappened summary={summary} hasProposalsAndContracts periodLabel="30 dias" />);
 
     expect(screen.getByText("Propostas Criadas")).toBeInTheDocument();
     expect(screen.getByText("Contratos Fechados")).toBeInTheDocument();
+  });
+});
+
+describe("Conversões: Fechamentos e Perfil que mais converteu dependem da mesma tabela", () => {
+  const perfil = (over: any = {}) => ({
+    temperature: "QUENTE" as const,
+    origin: "meta_ads",
+    leads: 40,
+    replied: 24,
+    scheduled: 8,
+    closed: 4 as number | null,
+    replyRate: 60,
+    scheduleRate: 20,
+    closeRate: 10 as number | null,
+    ...over,
+  });
+
+  // os dois cartões lado a lado, como na página
+  const renderAmbos = (opts: { closings: any; unavailable: string[]; topProfiles: any }) =>
+    render(
+      <>
+        <Block1WhatHappened summary={{ ...summary, closings: opts.closings }} hasProposalsAndContracts={false} periodLabel="30 dias" unavailableBlocks={opts.unavailable} />
+        <Block4Analysis analysis={{ ...analysis, topProfiles: opts.topProfiles }} />
+      </>
+    );
+
+  it("[TESTE OBRIGATÓRIO] sem a tabela: o cartão de Fechamentos some e o de Perfil aparece sem a coluna, com o aviso", () => {
+    renderAmbos({
+      closings: null,
+      unavailable: [],
+      topProfiles: {
+        minLeads: 30,
+        eligibleGroups: 2,
+        closingsAvailable: false,
+        top: [perfil({ origin: "indicacao", scheduled: 12, scheduleRate: 30, closed: null, closeRate: null }), perfil({ origin: "meta_ads", scheduled: 4, scheduleRate: 10, closed: null, closeRate: null })],
+      },
+    });
+
+    expect(screen.queryByText("Fechamentos")).not.toBeInTheDocument();
+    expect(screen.queryByText("Indisponível")).not.toBeInTheDocument();
+    // o ranking continua, na ordem que veio (agendou → respondeu), sem "fecharam"
+    expect(screen.getByText(/1\. Quente · indicacao/)).toBeInTheDocument();
+    expect(screen.getByText(/2\. Quente · meta_ads/)).toBeInTheDocument();
+    expect(screen.getAllByText(/% agendaram/).length).toBe(2);
+    expect(screen.queryByText(/fecharam/)).not.toBeInTheDocument();
+    expect(screen.getByText("Temperatura × origem: responderam e agendaram")).toBeInTheDocument();
+    // e a UMA linha que diz por quê
+    expect(screen.getByText(NO_CLOSINGS_NOTICE)).toBeInTheDocument();
+    expect(NO_CLOSINGS_NOTICE).toBe("Fechamentos não entram neste cliente: ele não registra conversões.");
+  });
+
+  it("[TESTE OBRIGATÓRIO] com a tabela: os dois aparecem completos, sem aviso", () => {
+    renderAmbos({
+      closings: { current: 6, previous: 3, delta: 100 },
+      unavailable: [],
+      topProfiles: { minLeads: 30, eligibleGroups: 1, closingsAvailable: true, top: [perfil()] },
+    });
+
+    expect(screen.getByText("Fechamentos")).toBeInTheDocument();
+    expect(screen.getByText("6")).toBeInTheDocument();
+    expect(screen.getByText(/40 leads · 60% responderam · 20% agendaram · 10% fecharam/)).toBeInTheDocument();
+    expect(screen.getByText("Temperatura × origem: responderam, agendaram, fecharam")).toBeInTheDocument();
+    expect(screen.queryByText(NO_CLOSINGS_NOTICE)).not.toBeInTheDocument();
+  });
+
+  it("[TESTE OBRIGATÓRIO] com coluna faltando: os dois dizem indisponível", () => {
+    renderAmbos({ closings: null, unavailable: ["summary.closings", "analysis.topProfiles"], topProfiles: null });
+
+    const cartaoFechamentos = screen.getByText("Fechamentos").closest("div[class*='rounded-2xl']") as HTMLElement;
+    expect(within(cartaoFechamentos).getByText("Indisponível")).toBeInTheDocument();
+    const cartaoPerfil = screen.getByText("Perfil que mais converteu").closest("div[class*='rounded-2xl']") as HTMLElement;
+    expect(within(cartaoPerfil).getByText(/Indisponível — não foi possível calcular agora/)).toBeInTheDocument();
+    expect(screen.queryByText(NO_CLOSINGS_NOTICE)).not.toBeInTheDocument();
+  });
+
+  it("sem a tabela e nenhum perfil com volume: a linha do aviso aparece mesmo assim", () => {
+    renderAmbos({ closings: null, unavailable: [], topProfiles: { minLeads: 30, eligibleGroups: 0, top: [], closingsAvailable: false } });
+
+    expect(screen.getByText(/Nenhum perfil com 30\+ leads/)).toBeInTheDocument();
+    expect(screen.getByText(NO_CLOSINGS_NOTICE)).toBeInTheDocument();
+  });
+
+  it("payload antigo (sem closingsAvailable) segue mostrando 'fecharam', sem aviso", () => {
+    render(<Block4Analysis analysis={analysis} />);
+
+    expect(screen.getByText(/10% fecharam/)).toBeInTheDocument();
+    expect(screen.queryByText(NO_CLOSINGS_NOTICE)).not.toBeInTheDocument();
   });
 });
 

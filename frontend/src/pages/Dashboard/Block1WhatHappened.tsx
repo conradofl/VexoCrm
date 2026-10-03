@@ -48,8 +48,11 @@ export function Block1WhatHappened({
   const proposalsDelta = formatDelta(summary.proposals?.delta);
   const contractsDelta = formatDelta(summary.contracts?.delta);
   const closingsDelta = formatDelta(summary.closings?.delta);
-  // undefined = payload antigo (sem a medida): não mostra caixa. null = bloco indisponível.
-  const showClosings = summary.closings !== undefined;
+  // Três estados, três comportamentos:
+  //  - objeto (inclusive 0 e 0): mostra o número;
+  //  - null e listado em unavailableBlocks: erro de verdade → "Indisponível";
+  //  - null sem estar listado (ou ausente, em payload antigo): o cliente não usa o recurso → sem cartão.
+  const showClosings = !!summary.closings || unavailableBlocks.includes("summary.closings");
   // Se não deu para saber se o tenant usa GD, as duas caixas aparecem como indisponíveis
   const proposalsUnavailable = unavailableBlocks.includes("summary.proposals");
   const contractsUnavailable = unavailableBlocks.includes("summary.contracts");

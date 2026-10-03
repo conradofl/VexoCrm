@@ -27,6 +27,7 @@ import { toCanonicalPhone } from "../services/canonicalPhone.js";
 const REF = new Date("2026-10-16T01:30:00.000Z"); // 22:30 de 15/10 em São Paulo; no UTC já é dia 16
 
 const MARKERS = [
+  ["conversionsCheck", "to_regclass"],
   ["gd", "has_gd"],
   ["proposals", "current_proposals"],
   ["contracts", "current_contracts"],
@@ -178,6 +179,130 @@ describe("Fechamentos, propostas e contratos", () => {
     expect(isExpectedMissingTable(pgError("operator does not exist: uuid = text", "42883"))).toBe(false);
     expect(isExpectedMissingTable(pgError('column "x" does not exist', "42703"))).toBe(false);
     expect(isExpectedMissingTable(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("Conversões — UMA verificação para Fechamentos e Perfil que mais converteu", () => {
+  const SEM_TABELA = { conversionsCheck: { rows: [{ available: false }] } };
+  const PERFIS = {
+    rows: [
+      // 30+ leads cada. A: fecha mais, agenda menos. B: agenda mais, não fecha.
+      { temperature: "QUENTE", origin: "meta_ads", leads: 40, replied: 20, scheduled: 4, closed: 6 },
+      { temperature: "QUENTE", origin: "indicacao", leads: 40, replied: 30, scheduled: 12, closed: 0 },
+      { temperature: "FRIO", origin: "import", leads: 40, replied: 36, scheduled: 12, closed: 0 },
+    ],
+  };
+  const logs = () => ({
+    error: errorSpy.mock.calls.map((c) => c.join(" ")).join("\n"),
+    warn: warnSpy.mock.calls.map((c) => c.join(" ")).join("\n"),
+  });
+
+  it("[TESTE OBRIGATÓRIO] sem a tabela: Fechamentos some e o Perfil aparece SEM a coluna de fechamentos", async () => {
+    const pool = makePool({ ...SEM_TABELA, profiles: PERFIS });
+
+    const m = await compute(pool);
+
+    // Fechamentos: não se aplica (null, fora de indisponíveis)
+    expect(m.summary.closings).toBeNull();
+    expect(m.unavailableBlocks).not.toContain("summary.closings");
+    // Perfil: continua, sem fechamentos, ordenado por agendou → respondeu
+    expect(m.unavailableBlocks).not.toContain("analysis.topProfiles");
+    expect(m.analysis.topProfiles.closingsAvailable).toBe(false);
+    expect(m.analysis.topProfiles.top.map((p) => p.origin)).toEqual(["import", "indicacao", "meta_ads"]);
+    expect(m.analysis.topProfiles.top.every((p) => p.closed === null && p.closeRate === null)).toBe(true);
+    expect(m.analysis.topProfiles.top[0]).toMatchObject({ scheduleRate: 30, replyRate: 90 });
+    // nunca foi erro
+    expect(logs().error).toBe("");
+    expect(logs().warn).toContain("lead_conversions");
+    expect(logs().warn).toContain('"summary.closings"');
+    expect(logs().warn).toContain('"analysis.topProfiles"');
+  });
+
+  it("[TESTE OBRIGATÓRIO] a verificação é UMA só por cálculo e os dois blocos obedecem à mesma resposta", async () => {
+    const pool = makePool({ ...SEM_TABELA, profiles: PERFIS });
+
+    await compute(pool);
+
+    const sqls = pool.queries.map((q) => q.sql);
+    expect(sqls.filter((q) => q.includes("to_regclass"))).toHaveLength(1);
+    // sem a tabela, NENHUM dos dois blocos encosta nela
+    expect(sqls.some((q) => q.includes("current_closings"))).toBe(false); // consulta de Fechamentos nem roda
+    const sqlPerfil = sqls.find((q) => q.includes("WITH cohort AS"));
+    expect(sqlPerfil).toBeDefined();
+    expect(sqlPerfil).not.toContain("lead_conversions");
+  });
+
+  it("[TESTE OBRIGATÓRIO] com a tabela: os dois aparecem completos", async () => {
+    const pool = makePool({
+      conversionsCheck: { rows: [{ available: true }] },
+      closings: { rows: [{ current_closings: 6, previous_closings: 3 }] },
+      profiles: PERFIS,
+    });
+
+    const m = await compute(pool);
+
+    expect(m.summary.closings).toEqual({ current: 6, previous: 3, delta: 100 });
+    expect(m.analysis.topProfiles.closingsAvailable).toBe(true);
+    expect(m.analysis.topProfiles.top[0]).toMatchObject({ origin: "meta_ads", closed: 6, closeRate: 15 }); // fecha mais → primeiro
+    expect(m.unavailableBlocks).toEqual([]);
+    const sqls = pool.queries.map((q) => q.sql);
+    expect(sqls.filter((q) => q.includes("to_regclass"))).toHaveLength(1);
+    expect(sqls.find((q) => q.includes("WITH cohort AS"))).toContain("lead_conversions");
+    expect(logs().warn).toBe("");
+  });
+
+  it("[TESTE OBRIGATÓRIO] com coluna faltando: os dois dizem indisponível (e o erro vai ao log)", async () => {
+    const colunaFaltando = pgError('column "conversion_status" does not exist', "42703");
+    const m = await compute(makePool({ conversionsCheck: { rows: [{ available: true }] }, closings: colunaFaltando, profiles: colunaFaltando }));
+
+    expect(m.summary.closings).toBeNull();
+    expect(m.analysis.topProfiles).toBeNull();
+    expect(m.unavailableBlocks).toEqual(expect.arrayContaining(["summary.closings", "analysis.topProfiles"]));
+    expect(logs().error).toContain('bloco "summary.closings"');
+    expect(logs().error).toContain('bloco "analysis.topProfiles"');
+  });
+
+  it("tabela presente e vazia: Fechamentos mostra ZERO (um dado), nem some nem é indisponível", async () => {
+    const m = await compute(makePool({ conversionsCheck: { rows: [{ available: true }] }, closings: { rows: [{ current_closings: 0, previous_closings: 0 }] } }));
+
+    expect(m.summary.closings).toEqual({ current: 0, previous: 0, delta: 0 });
+    expect(m.unavailableBlocks).not.toContain("summary.closings");
+  });
+
+  it("[TESTE OBRIGATÓRIO] se a PRÓPRIA verificação falhar, não se presume 'não usa': os blocos rodam e falham à vista", async () => {
+    const m = await compute(
+      makePool({
+        conversionsCheck: pgError("connection terminated", "08006"),
+        closings: pgError("connection terminated", "08006"),
+      })
+    );
+
+    expect(m.unavailableBlocks).toContain("summary.closings"); // indisponível, não escondido
+  });
+
+  it("outros códigos e erro de TIPO continuam sendo indisponível (só 'tabela ausente' esconde)", async () => {
+    for (const code of ["08006", "57014", "42883", "42P01", undefined]) {
+      const m = await compute(makePool({ conversionsCheck: { rows: [{ available: true }] }, closings: pgError("falha", code) }));
+
+      expect(m.summary.closings, `código ${code}`).toBeNull();
+      expect(m.unavailableBlocks, `código ${code}`).toContain("summary.closings");
+    }
+  });
+
+  it("rankProfiles sem fechamentos: closed/closeRate null (não zero) e ordem agendou → respondeu", () => {
+    const r = rankProfiles(
+      [
+        { temperature: "QUENTE", origin: "A", leads: 40, replied: 10, scheduled: 4, closed: 0 },
+        { temperature: "QUENTE", origin: "B", leads: 40, replied: 30, scheduled: 4, closed: 0 },
+        { temperature: "QUENTE", origin: "C", leads: 40, replied: 5, scheduled: 12, closed: 0 },
+      ],
+      30,
+      { withClosings: false }
+    );
+
+    expect(r.top.map((p) => p.origin)).toEqual(["C", "B", "A"]); // agendou; empate em agendou desempata por respondeu
+    expect(r.closingsAvailable).toBe(false);
+    expect(r.top.every((p) => p.closed === null && p.closeRate === null)).toBe(true);
   });
 });
 

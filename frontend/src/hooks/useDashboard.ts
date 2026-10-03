@@ -94,16 +94,20 @@ export interface LeadProfile {
   leads: number;
   replied: number;
   scheduled: number;
-  closed: number;
+  // null quando o cliente não registra conversões (não é zero): ver TopProfiles.closingsAvailable
+  closed: number | null;
   replyRate: number;
   scheduleRate: number;
-  closeRate: number;
+  closeRate: number | null;
 }
 
 export interface TopProfiles {
   minLeads: number;
   eligibleGroups: number;
   top: LeadProfile[];
+  // false = o cliente não tem a tabela de conversões: o ranking sai sem fechamentos, ordenado por
+  // agendou → respondeu. Ausente em payload antigo = trata como true.
+  closingsAvailable?: boolean;
 }
 
 export interface BaseHealth {

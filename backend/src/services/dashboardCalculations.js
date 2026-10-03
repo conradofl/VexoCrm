@@ -18,6 +18,7 @@
 
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 import {
+  checkConversionsAvailable,
   measureLeadClassification,
   measureFirstReplyOnly,
   measureClosings,
@@ -815,7 +816,18 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const failureTotals = failuresBlock.ok ? failuresBlock.value.totals : null;
 
   // ── Fase 1.5: medidas com dado que já existe (cada uma isolada) ─────────
-  const analysisCtx = { clientId, currentStart, currentEnd, previousStart, previousEnd, asOf, now: refDate };
+  // Fechamentos e Perfil que mais converteu leem lead_conversions. A pergunta "este cliente usa
+  // conversões?" é feita UMA vez, aqui, e os dois blocos recebem a resposta: tabela inexistente = não
+  // usa (Fechamentos não se aplica — null fora de unavailableBlocks — e o Perfil sai sem a coluna de
+  // fechamentos). Coluna faltando, queda de conexão e qualquer outro erro seguem sendo indisponível.
+  const conversionsAvailable = await checkConversionsAvailable(pool);
+  if (!conversionsAvailable) {
+    console.warn(
+      `[dashboard] tabela lead_conversions inexistente (client=${clientId}, period=${normalizedPeriod}): ` +
+        `bloco "summary.closings" não se aplica e "analysis.topProfiles" segue sem fechamentos`
+    );
+  }
+  const analysisCtx = { clientId, currentStart, currentEnd, previousStart, previousEnd, asOf, now: refDate, conversionsAvailable };
   const closingsBlock = await runBlock("summary.closings", () => measureClosings(pool, analysisCtx));
   const leadClassificationBlock = await runBlock("analysis.leadClassification", () => measureLeadClassification(pool, analysisCtx));
   const firstReplyOnlyBlock = await runBlock("analysis.firstReplyOnly", () => measureFirstReplyOnly(pool, analysisCtx));
@@ -942,8 +954,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
 
   // ── Montagem do Payload Final ───────────────────────────────────────────
   // Bloco indisponível = `null` + nome em `unavailableBlocks`. Nunca zero.
+  // `block.value` null com o bloco ok = "não se aplica a este cliente" (ver fechamentos): sai null.
   const withDelta = (block) =>
-    block.ok ? { current: block.value.current, previous: block.value.previous, delta: calculateDelta(block.value.current, block.value.previous) } : null;
+    block.ok && block.value ? { current: block.value.current, previous: block.value.previous, delta: calculateDelta(block.value.current, block.value.previous) } : null;
 
   return {
     // Atalho ("7d", "30d", "this_month") ou "custom"; a chave completa e as datas ficam em periodInfo.

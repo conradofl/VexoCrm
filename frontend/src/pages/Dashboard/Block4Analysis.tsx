@@ -16,6 +16,9 @@ const TEMPERATURE_LABELS: Record<TemperatureKey, string> = {
   SEM_CLASSIFICACAO: "Sem classificação",
 };
 
+// Uma linha, na tela, quando o cliente não registra conversões: o ranking continua, sem a coluna.
+export const NO_CLOSINGS_NOTICE = "Fechamentos não entram neste cliente: ele não registra conversões.";
+
 const STAGE_LABELS: Record<string, string> = {
   buyer: "Compraram",
   open_budget: "Orçamento aberto",
@@ -150,14 +153,19 @@ export function Block4Analysis({ analysis }: Block4AnalysisProps) {
                 </Badge>
               )}
             </div>
-            <CardDescription className="text-[11px]">Temperatura × origem: responderam, agendaram, fecharam</CardDescription>
+            <CardDescription className="text-[11px]">
+              {topProfiles?.closingsAvailable === false
+                ? "Temperatura × origem: responderam e agendaram"
+                : "Temperatura × origem: responderam, agendaram, fecharam"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 pb-4">
             {topProfiles === null ? (
               <Unavailable />
             ) : topProfiles.top.length === 0 ? (
-              <div className="py-6 text-center text-xs text-muted-foreground">
-                Nenhum perfil com {topProfiles.minLeads}+ leads no período
+              <div className="py-6 text-center text-xs text-muted-foreground space-y-1">
+                <p>Nenhum perfil com {topProfiles.minLeads}+ leads no período</p>
+                {topProfiles.closingsAvailable === false && <p className="text-[10px]">{NO_CLOSINGS_NOTICE}</p>}
               </div>
             ) : (
               <div className="divide-y divide-border/50 text-xs">
@@ -168,11 +176,14 @@ export function Block4Analysis({ analysis }: Block4AnalysisProps) {
                       {p.origin === "sem_origem" ? "Sem origem" : p.origin}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {formatMetricNumber(p.leads)} leads · {p.replyRate}% responderam · {p.scheduleRate}% agendaram ·{" "}
-                      {p.closeRate}% fecharam
+                      {formatMetricNumber(p.leads)} leads · {p.replyRate}% responderam · {p.scheduleRate}% agendaram
+                      {topProfiles.closingsAvailable !== false && p.closeRate != null && <> · {p.closeRate}% fecharam</>}
                     </p>
                   </div>
                 ))}
+                {topProfiles.closingsAvailable === false && (
+                  <p className="py-2 text-[10px] text-muted-foreground">{NO_CLOSINGS_NOTICE}</p>
+                )}
               </div>
             )}
           </CardContent>

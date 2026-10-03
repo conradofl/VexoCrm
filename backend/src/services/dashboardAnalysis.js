@@ -136,8 +136,25 @@ export async function measureFirstReplyOnly(pool, { clientId, currentStart, curr
   return buildFirstReplyOnlyResult(rows[0]);
 }
 
+// ── Disponibilidade das conversões (UMA verificação, consultada pelos blocos que dependem dela) ──
+// Fechamentos e "Perfil que mais converteu" leem a mesma tabela, lead_conversions. Tabela inexistente
+// = "este cliente não usa o recurso" (não é erro): Fechamentos não se aplica e o Perfil segue sem a
+// coluna de fechamentos. A regra mora AQUI, uma vez; quem decide é `conversionsAvailable` no contexto.
+// Se a própria verificação falhar (conexão, permissão), devolve true: o dado é desconhecido, então
+// os blocos rodam e falham à vista em vez de esconder o problema como "não usa".
+export async function checkConversionsAvailable(pool) {
+  try {
+    const { rows } = await pool.query("SELECT to_regclass('public.lead_conversions') IS NOT NULL AS available");
+    return rows[0]?.available !== false;
+  } catch {
+    return true;
+  }
+}
+
 // ── 3. Fechamentos ───────────────────────────────────────────────────────
-export async function measureClosings(pool, { clientId, currentStart, currentEnd, previousStart, previousEnd }) {
+// Sem a tabela de conversões (cliente não usa): null = "não se aplica" (nem zero, nem indisponível).
+export async function measureClosings(pool, { clientId, currentStart, currentEnd, previousStart, previousEnd, conversionsAvailable = true }) {
+  if (!conversionsAvailable) return null;
   const { rows } = await pool.query(
     `
       SELECT
@@ -158,7 +175,9 @@ export async function measureClosings(pool, { clientId, currentStart, currentEnd
 // (lead_conversions ganha). Só grupos com volume mínimo; ordem: fechou, agendou, respondeu (taxas).
 const rate = (n, d) => (d > 0 ? Number(((n / d) * 100).toFixed(1)) : 0);
 
-export function rankProfiles(rows, minLeads = PROFILE_MIN_LEADS) {
+// `withClosings` = false quando o cliente não tem a tabela de conversões: `closed` e `closeRate` ficam
+// null (não zero) e a ordem passa a ser agendou → respondeu. O ranking não some por faltar uma coluna.
+export function rankProfiles(rows, minLeads = PROFILE_MIN_LEADS, { withClosings = true } = {}) {
   const eligible = rows
     .map((r) => {
       const leads = Number(r.leads) || 0;
@@ -171,24 +190,34 @@ export function rankProfiles(rows, minLeads = PROFILE_MIN_LEADS) {
         leads,
         replied,
         scheduled,
-        closed,
+        closed: withClosings ? closed : null,
         replyRate: rate(replied, leads),
         scheduleRate: rate(scheduled, leads),
-        closeRate: rate(closed, leads),
+        closeRate: withClosings ? rate(closed, leads) : null,
       };
     })
     .filter((p) => p.leads >= minLeads);
   eligible.sort(
     (a, b) =>
-      b.closeRate - a.closeRate ||
+      (withClosings ? b.closeRate - a.closeRate : 0) ||
       b.scheduleRate - a.scheduleRate ||
       b.replyRate - a.replyRate ||
       b.leads - a.leads
   );
-  return { minLeads, eligibleGroups: eligible.length, top: eligible.slice(0, 3) };
+  return { minLeads, eligibleGroups: eligible.length, top: eligible.slice(0, 3), closingsAvailable: withClosings };
 }
 
-export async function measureTopProfiles(pool, { clientId, currentStart, currentEnd }) {
+export async function measureTopProfiles(pool, { clientId, currentStart, currentEnd, conversionsAvailable = true }) {
+  // Sem lead_conversions a consulta nem referencia a tabela: a coluna de fechamentos vira 0 só no SQL
+  // e rankProfiles a trata como ausente (null).
+  const closedSql = conversionsAvailable
+    ? `COUNT(*) FILTER (WHERE EXISTS (
+          SELECT 1 FROM public.lead_conversions lc
+          WHERE lc.client_id = $1
+            AND lc.lead_id = c.id
+            AND lower(lc.conversion_status) IN (${WON_SQL_LIST})
+        ))::int AS closed`
+    : "0::int AS closed";
   const { rows } = await pool.query(
     `
       WITH cohort AS (
@@ -221,18 +250,13 @@ export async function measureTopProfiles(pool, { clientId, currentStart, current
             AND fs.phone IS NOT NULL AND fs.phone <> ''
             AND ${SQL_CANONICAL_PHONE("fs.phone")} = c.cphone
         ))::int AS scheduled,
-        COUNT(*) FILTER (WHERE EXISTS (
-          SELECT 1 FROM public.lead_conversions lc
-          WHERE lc.client_id = $1
-            AND lc.lead_id = c.id
-            AND lower(lc.conversion_status) IN (${WON_SQL_LIST})
-        ))::int AS closed
+        ${closedSql}
       FROM cohort c
       GROUP BY c.temperature, c.origin;
     `,
     [clientId, iso(currentStart), iso(currentEnd)]
   );
-  return rankProfiles(rows);
+  return rankProfiles(rows, PROFILE_MIN_LEADS, { withClosings: conversionsAvailable });
 }
 
 // ── 5. Saúde da base ─────────────────────────────────────────────────────
