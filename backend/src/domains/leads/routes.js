@@ -36,6 +36,8 @@ import {
   buildImportPreview as defaultBuildImportPreview,
 } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
+import { randomUUID } from "crypto";
+import { registerLeadMassDeleteRoutes } from "./massDeleteRoutes.js";
 import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
 import {
   classifyLeadMessages,
@@ -2193,6 +2195,11 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
 
+    // Identificador desta importação, gravado em dados.import_ids de cada lead. A tag continua sendo o
+    // vínculo para o que já existe, mas tag é editável e apagável pelo usuário: exclusão em massa não
+    // pode depender dela para sempre.
+    const importId = randomUUID();
+
     const rawImportTags = req.body?.importTags || req.body?.tags || [];
     const importTagsArray = Array.isArray(rawImportTags)
       ? rawImportTags.map((t) => String(t).trim()).filter(Boolean)
@@ -2314,6 +2321,7 @@ export function registerLeadsRoutes(app, deps) {
         const valorVenda = Number(row.valor_venda || row.valor || row.valor_total) || null;
 
         const dadosPayload = {
+          import_ids: [importId],
           origem: originTag,
           origem_marketing: isClosedSales ? "vendas_fechadas" : originTag,
           lead_source: isClosedSales ? "vendas_fechadas" : originTag,
@@ -2360,6 +2368,7 @@ export function registerLeadsRoutes(app, deps) {
 
       res.json({
         success: true,
+        importId,
         importedCount,
         skippedNoPhoneCount,
         totalRows: rows.length,
@@ -3720,5 +3729,17 @@ export function registerLeadsRoutes(app, deps) {
     } catch (err) {
       sendError(res, 500, "HYDRATE_FAILED", err instanceof Error ? err.message : "Failed to hydrate leads");
     }
+  });
+
+  // Exclusão em massa por tag / importação (prévia, exportação e execução com trava de contagem)
+  registerLeadMassDeleteRoutes(app, {
+    ensureDb,
+    normalizeString,
+    pgDatabasePool,
+    requireBancoDeDados,
+    requireFirebaseAuth,
+    resolveAuthorizedClientId,
+    sendError,
+    massDeleteRepo: deps.massDeleteRepo,
   });
 }

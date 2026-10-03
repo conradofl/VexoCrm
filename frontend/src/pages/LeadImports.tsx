@@ -17,6 +17,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
+import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import {
   ALL_IMPORTS_VALUE,
@@ -209,7 +211,10 @@ export default function LeadImports({
   subtitle = "Importe contatos, configure mensagens em massa e acompanhe a fila",
   headerRight,
 }: LeadImportsProps) {
-  const { clientId, getIdToken } = useAuth();
+  const { clientId, getIdToken, isAdminUser, canAccessInternalPage, approvalLevel } = useAuth();
+  // Mesma regra do servidor (isManagerOrAdmin) para excluir leads em massa.
+  const canMassDelete = canMassDeleteLeads({ isAdminUser, approvalLevel, canAccessUsersPage: canAccessInternalPage("usuarios") });
+  const [isMassDeleteOpen, setIsMassDeleteOpen] = useState(false);
   const crmClient = useOptionalCrmClient();
   const selectedClientId = crmClient?.selectedClientId;
   const activeClientId = fixedClientId || selectedClientId || "";
@@ -1761,12 +1766,12 @@ export default function LeadImports({
   // Exclui a planilha importada e as linhas dela (lead_import_items). Campanhas
   // antigas que apontavam para ela ficam sem base — por isso o aviso no confirm.
   const handleDeleteImport = async (importId: string, sourceName: string) => {
-    if (!confirm(`Excluir a planilha "${sourceName}" e todos os contatos importados dela?\n\nCampanhas que usam esta base ficarão sem leads. Esta ação não pode ser desfeita.`)) return;
+    if (!confirm(`Remover o registro da planilha "${sourceName}"?\n\nOs leads dela continuam no Banco de Dados — para apagá-los, use "Excluir os leads desta planilha".\nCampanhas que usam esta base ficarão sem leads. Esta ação não pode ser desfeita.`)) return;
     try {
       await deleteLeadImport.mutateAsync(importId);
       setSelectedImportIds((current) => current.filter((id) => id !== importId));
       if (selectedImportId === importId) setSelectedImportId(ALL_IMPORTS_VALUE);
-      toast({ title: "Planilha excluída", description: sourceName });
+      toast({ title: "Registro da planilha removido", description: `${sourceName} — os leads continuam no Banco.` });
     } catch (err) {
       toast({
         title: "Erro ao excluir",
@@ -2052,7 +2057,11 @@ export default function LeadImports({
             isDeleting={deleteLeadImport.isPending}
             onViewImport={(imp) => setViewingImport(imp)}
             onDeleteImport={(id, name) => handleDeleteImport(id, name)}
+            onDeleteLeads={canMassDelete ? () => setIsMassDeleteOpen(true) : undefined}
           />
+          {canMassDelete && (
+            <MassDeleteDialog open={isMassDeleteOpen} onOpenChange={setIsMassDeleteOpen} clientId={activeClientId} />
+          )}
         </div>
       )}
 

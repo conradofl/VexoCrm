@@ -11,7 +11,10 @@ interface SavedSheetsCardsProps {
   imports: LeadImportItem[];
   isDeleting?: boolean;
   onViewImport: (imp: LeadImportItem) => void;
+  /** Remove só o REGISTRO da planilha salva. Os leads no Banco não são tocados. */
   onDeleteImport: (id: string, name: string) => void;
+  /** Abre a exclusão em massa de leads (por tag). Ausente = usuário sem permissão. */
+  onDeleteLeads?: (imp: LeadImportItem) => void;
 }
 
 export function SavedSheetsCards({
@@ -19,6 +22,7 @@ export function SavedSheetsCards({
   isDeleting = false,
   onViewImport,
   onDeleteImport,
+  onDeleteLeads,
 }: SavedSheetsCardsProps) {
   const [expandedSheetId, setExpandedSheetId] = useState<string | null>(null);
 
@@ -125,7 +129,7 @@ export function SavedSheetsCards({
                   <div className="flex items-center gap-1.5 min-w-0 font-medium text-foreground">
                     <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     <span data-testid={`sheet-leads-${imp.id}`}>
-                      {imp.imported_rows} {imp.imported_rows === 1 ? "lead" : "leads"}
+                      {imp.imported_rows} {imp.imported_rows === 1 ? "linha importada" : "linhas importadas"}
                     </span>
                   </div>
 
@@ -177,12 +181,12 @@ export function SavedSheetsCards({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 pt-1">
+                    <div className="flex flex-col gap-2 pt-1">
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
-                        className="flex-1 text-xs h-8 font-medium gap-1.5"
+                        className="text-xs h-8 font-medium gap-1.5"
                         onClick={() => onViewImport(imp)}
                       >
                         <Eye className="h-3.5 w-3.5" />
@@ -194,12 +198,27 @@ export function SavedSheetsCards({
                         size="sm"
                         variant="ghost"
                         disabled={isDeleting}
-                        className="text-xs h-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 gap-1.5"
+                        title="Tira só esta planilha da lista. Os leads continuam no Banco."
+                        className="text-xs h-8 text-muted-foreground hover:text-foreground gap-1.5 justify-start"
                         onClick={() => onDeleteImport(imp.id, imp.source_name)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        Excluir
+                        Remover registro da planilha
                       </Button>
+
+                      {onDeleteLeads && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          title="Abre a exclusão de leads por tag, com prévia e confirmação."
+                          className="text-xs h-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 gap-1.5 justify-start"
+                          onClick={() => onDeleteLeads(imp)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Excluir os leads desta planilha…
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}

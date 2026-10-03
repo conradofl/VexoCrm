@@ -192,6 +192,20 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
 }
 
 /**
+ * União dos identificadores de importação do lead. O merge de `dados` é raso: sem isto, o lead que
+ * entra numa segunda planilha perderia o identificador da primeira — e a exclusão em massa deixaria
+ * de saber que ele pertence a mais de uma importação.
+ */
+export function unionImportIds(...lists) {
+  const ids = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const id of list) if (id && !ids.includes(String(id))) ids.push(String(id));
+  }
+  return ids.length > 0 ? ids : null;
+}
+
+/**
  * Upsert em lote de leads por (client_id, telefone) sem depender de constraint única.
  *
  * Alta performance:
@@ -247,10 +261,12 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         ? { ...prevCampos, ...leadCampos }
         : undefined;
 
+      const combinedImportIds = unionImportIds(prevDados.import_ids, newLeadDados.import_ids);
       const combinedDados = {
         ...prevDados,
         ...newLeadDados,
         ...(combinedCampos ? { campos: combinedCampos } : {}),
+        ...(combinedImportIds ? { import_ids: combinedImportIds } : {}),
       };
 
       // Preserva o melhor nome disponível
@@ -397,10 +413,12 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         ? { ...existingCampos, ...leadCampos }
         : undefined;
 
+      const mergedImportIds = unionImportIds(existingDados.import_ids, leadDados.import_ids);
       const mergedDados = {
         ...existingDados,
         ...leadDados,
         ...(mergedCampos ? { campos: mergedCampos } : {}),
+        ...(mergedImportIds ? { import_ids: mergedImportIds } : {}),
       };
 
       const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";

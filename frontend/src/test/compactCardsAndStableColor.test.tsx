@@ -771,7 +771,7 @@ describe("Planilhas Salvas — SavedSheetsCards.tsx", () => {
 
     // Linha 2: total de leads e data de upload
     const line2 = screen.getByTestId("sheet-line-2-sheet-3lines-test");
-    expect(within(line2).getByTestId("sheet-leads-sheet-3lines-test").textContent).toContain("250 leads");
+    expect(within(line2).getByTestId("sheet-leads-sheet-3lines-test").textContent).toContain("250 linhas importadas");
     expect(within(line2).getByTestId("sheet-date-sheet-3lines-test").textContent).toBe("01/10/2026");
 
     // Linha 3: quem subiu
@@ -842,8 +842,9 @@ describe("Planilhas Salvas — SavedSheetsCards.tsx", () => {
     fireEvent.click(within(card1).getByRole("button", { name: /Ver leads/i }));
     expect(onViewImport).toHaveBeenCalledWith(sheet1);
 
-    // Testa ação Excluir
-    fireEvent.click(within(card1).getByRole("button", { name: /Excluir/i }));
+    // Testa ação de remover o REGISTRO (o nome diz o que faz; não há botão "Excluir" solto)
+    expect(within(card1).queryByRole("button", { name: /^Excluir$/i })).toBeNull();
+    fireEvent.click(within(card1).getByRole("button", { name: /Remover registro da planilha/i }));
     expect(onDeleteImport).toHaveBeenCalledWith("sheet-a", "base_a.xlsx");
 
     // Abre o cartão 2: confirma que o cartão 1 fecha automaticamente (um por vez)
