@@ -34,8 +34,6 @@ import {
   Edit,
   ExternalLink,
   Search,
-  LayoutGrid,
-  List as ListIcon,
   Layers,
   RotateCcw,
   ChevronDown,
@@ -62,7 +60,9 @@ import { GenerateContractDialog } from "./GeracaoDigitalContracts/GenerateContra
 import { ShareProposalDialog } from "./GeracaoDigitalProposals/ShareProposalDialog";
 import { SlideEditorModal } from "@/components/presentation/SlideEditorModal";
 import { PitchBriefingModal } from "@/components/presentation/PitchBriefingModal";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
+import { useViewMode } from "@/hooks/useViewMode";
+import { ViewModeToggle } from "@/components/ViewModeToggle";
+import { RecordView, type RecordCardState, type RecordField } from "@/components/records/RecordView";
 import { useProposalEditor } from "@/hooks/useProposalEditor";
 import { ProposalEditor } from "@/components/geracaoDigital/ProposalEditor";
 import {
@@ -192,8 +192,11 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
   // A preferência de visualização persiste: antes voltava para cards toda vez
   // que se saía e voltava na aba.
   const [buscaProposta, setBuscaProposta] = useState<string>("");
-  const [viewProposta, setViewProposta] = useLocalStorage<"cards" | "list">("gd_propostas_view", "cards");
-  const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
+  // Modo cartão/lista: o mesmo alternador das outras abas, lembrado por aba (e herda a escolha antiga, se houver).
+  const view = useViewMode("propostas", {
+    key: "gd_propostas_view",
+    map: (raw) => (raw === "list" ? "list" : raw === "cards" ? "card" : null),
+  });
 
   // Catalog catalogs (shared between wizard and proposal editor)
   const [availablePackages, setAvailablePackages] = useState<any[]>([]);
@@ -600,6 +603,198 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
         .some((v) => String(v).toLowerCase().includes(q))
     );
   }, [proposals, showArchived, buscaProposta]);
+
+  // Campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes.
+  const proposalFields = useMemo<RecordField<any>[]>(
+    () => [
+      { key: "name", label: "Proposta", render: (prop) => prop.prospect_name },
+      { key: "status", label: "Estado", render: (prop) => (prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho") },
+      { key: "value", label: "Valor", render: (prop) => `R$ ${calculateProposalValues(prop, availablePackages).totalGeral.toLocaleString("pt-BR")}` },
+      { key: "date", label: "Criada em", render: (prop) => (prop.created_at ? new Date(prop.created_at).toLocaleDateString("pt-BR") : "—") },
+    ],
+    [availablePackages]
+  );
+  const proposalField = (key: string) => proposalFields.find((f) => f.key === key)!;
+
+  const renderProposalDetails = (prop: any, emLista = false) => (
+    <>
+      <div className="text-[11px] space-y-1 text-muted-foreground bg-muted/30 p-2 rounded-lg">
+        <div className="flex justify-between">
+          <span>Itens ofertados:</span>
+          <span className="font-semibold text-foreground">{prop.itens?.length || 0}</span>
+        </div>
+        {prop.periodo_plano && (
+          <div className="flex justify-between">
+            <span>Período:</span>
+            <span className="font-semibold text-foreground uppercase text-[10px]">{prop.periodo_plano}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Na lista, "Abrir Proposta" já está na própria linha (ação de uso diário): aqui só o resto. */}
+    {!emLista && prop.status !== "aceita" && (
+        <Button
+          size={"xs" as "sm"}
+          variant="outline"
+          className="w-full text-[10px] border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/proposta/${prop.id}`);
+          }}
+        >
+          <ExternalLink className="h-3 w-3 mr-1.5" />
+          Abrir Proposta
+        </Button>
+      )}
+
+    </>
+  );
+
+  const renderProposalCard = (prop: any, { expanded: isExpanded, toggle }: RecordCardState) => {
+    const color = getStableColor(prop.id);
+    const isSelected = selectedProposal?.id === prop.id;
+
+    const toggleExpand = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      toggle();
+  };
+
+  return (
+    <div
+      data-testid={`proposal-card-${prop.id}`}
+      className={cn(
+        "rounded-xl border transition-all overflow-hidden flex flex-col justify-between bg-card text-card-foreground shadow-sm",
+        isSelected
+          ? "border-purple-500/50 dark:border-purple-550/50 shadow-md shadow-purple-600/5 ring-1 ring-purple-500/20"
+          : "border-border/70 hover:border-border hover:shadow-xs",
+        isExpanded && "ring-1 ring-border shadow-md"
+      )}
+    >
+      <div className="flex items-stretch min-w-0 flex-1">
+        {/* Faixa lateral com cor estável */}
+        <div
+          data-testid={`proposal-card-stripe-${prop.id}`}
+          className={cn("w-1.5 self-stretch shrink-0 transition-opacity", color.stripe)}
+          aria-hidden="true"
+        />
+
+        <div className="p-3 flex flex-col justify-between flex-1 min-w-0 gap-1.5">
+          {/* Linha 1: ponto de cor, cliente ocupando espaço disponível, seta de abrir encostada à direita */}
+          <div
+            data-testid={`proposal-line-1-${prop.id}`}
+            className="flex items-center justify-between gap-2 min-w-0"
+          >
+            <div
+              className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+              onClick={() => handlePickProposal(prop)}
+            >
+              <span
+                data-testid={`proposal-color-dot-${prop.id}`}
+                className={cn("h-2.5 w-2.5 rounded-full shrink-0", color.dot)}
+                title={`Cor: ${color.name}`}
+                aria-hidden="true"
+              />
+              <span
+                data-field="name"
+                data-testid={`proposal-name-${prop.id}`}
+                className="truncate font-display font-semibold text-foreground text-xs min-w-0 flex-1 hover:text-purple-600 transition-colors"
+                title={prop.prospect_name}
+              >
+                {proposalField("name").render(prop)}
+              </span>
+            </div>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 ml-auto"
+              onClick={toggleExpand}
+              aria-expanded={isExpanded}
+              aria-label={
+                isExpanded
+                  ? `Recolher detalhes de ${prop.prospect_name}`
+                  : `Ver detalhes de ${prop.prospect_name}`
+              }
+              title={isExpanded ? "Recolher detalhes" : "Ver detalhes"}
+            >
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform duration-200",
+                  isExpanded && "rotate-180 text-foreground"
+                )}
+              />
+            </Button>
+          </div>
+
+          {/* Linha 2: selo de estado primeiro e valor lado a lado */}
+          <div
+            data-testid={`proposal-line-2-${prop.id}`}
+            className="flex items-center justify-between gap-2 min-w-0"
+          >
+            <Badge
+              data-field="status"
+              data-testid={`proposal-status-${prop.id}`}
+              className={cn(
+                "text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 border-none shrink-0",
+                prop.status === "aceita"
+                  ? "bg-emerald-500 text-white"
+                  : prop.status === "enviada"
+                  ? "bg-blue-600 text-white"
+                  : "bg-amber-600 text-white"
+              )}
+            >
+              {proposalField("status").render(prop)}
+            </Badge>
+
+            <span
+              data-field="value"
+              data-testid={`proposal-value-${prop.id}`}
+              className="text-xs font-mono font-bold text-foreground truncate"
+            >
+              {proposalField("value").render(prop)}
+            </span>
+          </div>
+
+          {/* Linha 3: data à esquerda/direita */}
+          <div
+            data-testid={`proposal-line-3-${prop.id}`}
+            className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground pt-0.5 min-w-0"
+          >
+            <div className="flex items-center gap-1 min-w-0">
+              <Calendar className="h-3 w-3 shrink-0" />
+              <span data-field="date" data-testid={`proposal-date-${prop.id}`}>{proposalField("date").render(prop)}</span>
+            </div>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 text-[10px] text-purple-650 hover:text-purple-700 dark:text-purple-400 font-semibold"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePickProposal(prop);
+              }}
+            >
+              {isSelected ? "Selecionada" : "Selecionar"}
+            </Button>
+          </div>
+
+          {/* O resto abre dentro do próprio cartão */}
+          {isExpanded && (
+            <div
+              data-testid={`proposal-expanded-content-${prop.id}`}
+              className="pt-2 mt-1 border-t border-border/60 space-y-2 animate-in fade-in-50 duration-150"
+            >
+              {renderProposalDetails(prop)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+  };
+
 
   const toggleOfferedTerm = (termId: string) => {
     setOfferedTermIds((prev) =>
@@ -1181,14 +1376,17 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                 Nova Proposta
               </Button>
               {/* Busca */}
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                <Input
-                  value={buscaProposta}
-                  onChange={(e) => setBuscaProposta(e.target.value)}
-                  placeholder="Buscar por empresa, status ou ID..."
-                  className="pl-8 h-8 text-xs"
-                />
+              <div className="flex items-center gap-1.5">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input
+                    value={buscaProposta}
+                    onChange={(e) => setBuscaProposta(e.target.value)}
+                    placeholder="Buscar por empresa, status ou ID..."
+                    className="pl-8 h-8 text-xs"
+                  />
+                </div>
+                <ViewModeToggle view={view} />
               </div>
 
               {/* Ativos / Arquivados + visualização */}
@@ -1207,22 +1405,6 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                     Arquivadas
                   </button>
                 </div>
-                <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
-                  <button
-                    onClick={() => setViewProposta("cards")}
-                    aria-label="Visualizar em cards"
-                    className={cn("px-2 py-1.5 transition-colors", viewProposta === "cards" ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
-                  >
-                    <LayoutGrid className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setViewProposta("list")}
-                    aria-label="Visualizar em lista"
-                    className={cn("px-2 py-1.5 transition-colors", viewProposta === "list" ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
-                  >
-                    <ListIcon className="h-3.5 w-3.5" />
-                  </button>
-                </div>
               </div>
 
               {propostasFiltradas.length === 0 && (
@@ -1233,210 +1415,46 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                 </p>
               )}
 
-              {/* Visualização compacta em lista */}
-              {viewProposta === "list" && propostasFiltradas.map((prop) => (
-                <button
-                  key={prop.id}
-                  onClick={() => handlePickProposal(prop)}
-                  className={cn(
-                    "w-full text-left px-3 py-2 rounded-lg border transition-all flex items-center justify-between gap-2",
-                    selectedProposal?.id === prop.id
-                      ? "bg-slate-50 dark:bg-slate-850 border-purple-500/50"
-                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 hover:border-slate-350 dark:hover:border-white/20"
-                  )}
-                >
-                  <div className="min-w-0">
-                    <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate block">{prop.prospect_name}</span>
-                    <span className="text-[9px] text-slate-500 font-mono dark:text-slate-400">
-                      R$ {calculateProposalValues(prop, availablePackages).totalGeral.toLocaleString("pt-BR")}
-                    </span>
-                  </div>
-                  <span
-                    className={cn(
-                      "text-[8px] uppercase font-bold px-1.5 py-0.5 rounded shrink-0 text-white",
-                      prop.status === "aceita" ? "bg-emerald-500" : prop.status === "enviada" ? "bg-blue-600" : "bg-amber-600"
+              <RecordView
+                mode={view.mode}
+                items={propostasFiltradas}
+                getId={(prop: any) => prop.id}
+                fields={proposalFields}
+                stripeClass={(id) => getStableColor(id).stripe}
+                testIdPrefix="proposal"
+                labelOf={(prop: any) => prop.prospect_name}
+                compact
+                cardsClassName="space-y-3"
+                isSelected={(prop: any) => selectedProposal?.id === prop.id}
+                renderRowActions={(prop: any) => (
+                  <>
+                    {prop.status !== "aceita" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label="Abrir Proposta"
+                        title="Abrir Proposta"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => navigate(`/proposta/${prop.id}`)}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </Button>
                     )}
-                  >
-                    {prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho"}
-                  </span>
-                </button>
-              ))}
-
-              {viewProposta === "cards" && propostasFiltradas.map((prop) => {
-                const color = getStableColor(prop.id);
-                const isExpanded = expandedProposalId === prop.id;
-                const isSelected = selectedProposal?.id === prop.id;
-
-                const toggleExpand = (e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  setExpandedProposalId((prev) => (prev === prop.id ? null : prop.id));
-                };
-
-                const formattedDate = prop.created_at
-                  ? new Date(prop.created_at).toLocaleDateString("pt-BR")
-                  : "—";
-
-                const totalGeral = calculateProposalValues(prop, availablePackages).totalGeral;
-
-                return (
-                  <div
-                    key={prop.id}
-                    data-testid={`proposal-card-${prop.id}`}
-                    className={cn(
-                      "rounded-xl border transition-all overflow-hidden flex flex-col justify-between bg-card text-card-foreground shadow-sm",
-                      isSelected
-                        ? "border-purple-500/50 dark:border-purple-550/50 shadow-md shadow-purple-600/5 ring-1 ring-purple-500/20"
-                        : "border-border/70 hover:border-border hover:shadow-xs",
-                      isExpanded && "ring-1 ring-border shadow-md"
-                    )}
-                  >
-                    <div className="flex items-stretch min-w-0 flex-1">
-                      {/* Faixa lateral com cor estável */}
-                      <div
-                        data-testid={`proposal-card-stripe-${prop.id}`}
-                        className={cn("w-1.5 self-stretch shrink-0 transition-opacity", color.stripe)}
-                        aria-hidden="true"
-                      />
-
-                      <div className="p-3 flex flex-col justify-between flex-1 min-w-0 gap-1.5">
-                        {/* Linha 1: ponto de cor, cliente ocupando espaço disponível, seta de abrir encostada à direita */}
-                        <div
-                          data-testid={`proposal-line-1-${prop.id}`}
-                          className="flex items-center justify-between gap-2 min-w-0"
-                        >
-                          <div
-                            className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
-                            onClick={() => handlePickProposal(prop)}
-                          >
-                            <span
-                              data-testid={`proposal-color-dot-${prop.id}`}
-                              className={cn("h-2.5 w-2.5 rounded-full shrink-0", color.dot)}
-                              title={`Cor: ${color.name}`}
-                              aria-hidden="true"
-                            />
-                            <span
-                              data-testid={`proposal-name-${prop.id}`}
-                              className="truncate font-display font-semibold text-foreground text-xs min-w-0 flex-1 hover:text-purple-600 transition-colors"
-                              title={prop.prospect_name}
-                            >
-                              {prop.prospect_name}
-                            </span>
-                          </div>
-
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 ml-auto"
-                            onClick={toggleExpand}
-                            aria-expanded={isExpanded}
-                            aria-label={
-                              isExpanded
-                                ? `Recolher detalhes de ${prop.prospect_name}`
-                                : `Ver detalhes de ${prop.prospect_name}`
-                            }
-                            title={isExpanded ? "Recolher detalhes" : "Ver detalhes"}
-                          >
-                            <ChevronDown
-                              className={cn(
-                                "h-3.5 w-3.5 transition-transform duration-200",
-                                isExpanded && "rotate-180 text-foreground"
-                              )}
-                            />
-                          </Button>
-                        </div>
-
-                        {/* Linha 2: selo de estado primeiro e valor lado a lado */}
-                        <div
-                          data-testid={`proposal-line-2-${prop.id}`}
-                          className="flex items-center justify-between gap-2 min-w-0"
-                        >
-                          <Badge
-                            data-testid={`proposal-status-${prop.id}`}
-                            className={cn(
-                              "text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 border-none shrink-0",
-                              prop.status === "aceita"
-                                ? "bg-emerald-500 text-white"
-                                : prop.status === "enviada"
-                                ? "bg-blue-600 text-white"
-                                : "bg-amber-600 text-white"
-                            )}
-                          >
-                            {prop.status === "aceita" ? "Fechado" : prop.status === "enviada" ? "Enviada" : "Rascunho"}
-                          </Badge>
-
-                          <span
-                            data-testid={`proposal-value-${prop.id}`}
-                            className="text-xs font-mono font-bold text-foreground truncate"
-                          >
-                            R$ {totalGeral.toLocaleString("pt-BR")}
-                          </span>
-                        </div>
-
-                        {/* Linha 3: data à esquerda/direita */}
-                        <div
-                          data-testid={`proposal-line-3-${prop.id}`}
-                          className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground pt-0.5 min-w-0"
-                        >
-                          <div className="flex items-center gap-1 min-w-0">
-                            <Calendar className="h-3 w-3 shrink-0" />
-                            <span data-testid={`proposal-date-${prop.id}`}>{formattedDate}</span>
-                          </div>
-
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 px-1.5 text-[10px] text-purple-650 hover:text-purple-700 dark:text-purple-400 font-semibold"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handlePickProposal(prop);
-                            }}
-                          >
-                            {isSelected ? "Selecionada" : "Selecionar"}
-                          </Button>
-                        </div>
-
-                        {/* O resto abre dentro do próprio cartão */}
-                        {isExpanded && (
-                          <div
-                            data-testid={`proposal-expanded-content-${prop.id}`}
-                            className="pt-2 mt-1 border-t border-border/60 space-y-2 animate-in fade-in-50 duration-150"
-                          >
-                            <div className="text-[11px] space-y-1 text-muted-foreground bg-muted/30 p-2 rounded-lg">
-                              <div className="flex justify-between">
-                                <span>Itens ofertados:</span>
-                                <span className="font-semibold text-foreground">{prop.itens?.length || 0}</span>
-                              </div>
-                              {prop.periodo_plano && (
-                                <div className="flex justify-between">
-                                  <span>Período:</span>
-                                  <span className="font-semibold text-foreground uppercase text-[10px]">{prop.periodo_plano}</span>
-                                </div>
-                              )}
-                            </div>
-
-                            {prop.status !== "aceita" && (
-                              <Button
-                                size={"xs" as "sm"}
-                                variant="outline"
-                                className="w-full text-[10px] border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 font-semibold"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigate(`/proposta/${prop.id}`);
-                                }}
-                              >
-                                <ExternalLink className="h-3 w-3 mr-1.5" />
-                                Abrir Proposta
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1.5 text-[10px] text-purple-650 hover:text-purple-700 dark:text-purple-400 font-semibold shrink-0"
+                      onClick={() => handlePickProposal(prop)}
+                    >
+                      {selectedProposal?.id === prop.id ? "Selecionada" : "Selecionar"}
+                    </Button>
+                  </>
+                )}
+                renderCard={renderProposalCard}
+                renderExpanded={(prop: any) => renderProposalDetails(prop, true)}
+              />
             </div>
 
             {/* Proposal Detail & Editor */}

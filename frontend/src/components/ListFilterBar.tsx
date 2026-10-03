@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,6 +9,8 @@ interface ListFilterBarProps {
   searchPlaceholder: string;
   /** Aviso mostrado enquanto há filtro (ex.: "o filtro vale só para esta página"). */
   note?: string | null;
+  /** Controle ao lado do campo de busca (ex.: o alternador cartão/lista). */
+  trailing?: ReactNode;
   testId?: string;
   className?: string;
 }
@@ -16,21 +19,24 @@ interface ListFilterBarProps {
  * Barra de busca e filtros das listas (Campanhas, Fila de Envios, Planilhas Salvas). Filtra enquanto
  * digita, sem botão. O contador e o "Limpar filtros" só aparecem quando há algo filtrado.
  */
-export function ListFilterBar({ controls, searchPlaceholder, note, testId = "list-filter", className }: ListFilterBarProps) {
+export function ListFilterBar({ controls, searchPlaceholder, note, trailing, testId = "list-filter", className }: ListFilterBarProps) {
   const { search, setSearch, facets, toggleFacetValue, ranges, setRange, isFiltered, shown, total, clear } = controls;
 
   return (
     <div data-testid={testId} className={cn("space-y-2.5", className)}>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="search"
-          aria-label={searchPlaceholder}
-          placeholder={searchPlaceholder}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-9 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-        />
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            aria-label={searchPlaceholder}
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+        </div>
+        {trailing}
       </div>
 
       {(facets.some((f) => f.options.length > 0) || ranges.length > 0) && (

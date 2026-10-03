@@ -49,11 +49,27 @@ import {
 import { ListFilterBar } from "@/components/ListFilterBar";
 import { useListFilter } from "@/hooks/useListFilter";
 import { DISPATCH_QUEUE_FILTER } from "@/lib/leadImportsListFilters";
+import { useViewMode } from "@/hooks/useViewMode";
+import { ViewModeToggle } from "@/components/ViewModeToggle";
+import { RecordView, type RecordField } from "@/components/records/RecordView";
 import { DispatchKpiCardsView } from "./DispatchKpiCards";
 
 // A aba carrega TODAS as campanhas de uma vez (a busca e os filtros rodam no navegador e precisam ver tudo).
 // O servidor limita a 5000 por página; só acima disso a paginação volta a aparecer, com aviso no filtro.
 const PAGE_SIZE_ENDED = 5000;
+
+const dispatchDateOrEta = (c: DispatchSummaryCampaign) =>
+  c.eta ? c.eta.label : c.status === "concluida" ? "Concluído" : "Sem agendamento";
+
+/** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
+export const DISPATCH_FIELDS: RecordField<DispatchSummaryCampaign>[] = [
+  { key: "name", label: "Campanha", render: (c) => c.campaignName },
+  { key: "status", label: "Estado", render: (c) => c.statusLabel },
+  { key: "chip", label: "Chip", render: (c) => c.chipName || "Sem chip" },
+  { key: "leads", label: "Leads", render: (c) => `${c.leadsTotal} leads · ${c.loteCount} ${c.loteCount === 1 ? "lote" : "lotes"}` },
+  { key: "date", label: "Próximo envio", render: dispatchDateOrEta },
+];
+const dispatchField = (key: string) => DISPATCH_FIELDS.find((f) => f.key === key)!;
 const EMPTY_CAMPAIGNS: DispatchSummaryCampaign[] = [];
 
 interface DispatchCampaignTrackerProps {
@@ -65,6 +81,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
   const [tab, setTab] = useState<"active" | "ended">("active");
   const [endedPage, setEndedPage] = useState(1);
   const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
+  const view = useViewMode("fila-de-envios");
 
   const activeQuery = useDispatchSummary(clientId, "active", 1, PAGE_SIZE_ENDED);
   const endedQuery = useDispatchSummary(clientId, "ended", endedPage, PAGE_SIZE_ENDED);
@@ -130,6 +147,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
           searchPlaceholder="Buscar por campanha ou último chip..."
           note={partialNote}
           testId="queue-filter"
+          trailing={<ViewModeToggle view={view} />}
         />
       </CardHeader>
 
@@ -158,19 +176,22 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
         ) : (
           <>
             {/* Grade responsiva: 3 em tela larga, 2 em média, 1 no celular */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {visibleCampaigns.map((c) => (
-                <CampaignCard
-                  key={c.campaignId}
-                  campaign={c}
-                  onOpenDispatch={onOpenDispatch}
-                  isExpanded={expandedCampaignId === c.campaignId}
-                  onToggleExpand={() =>
-                    setExpandedCampaignId((prev) => (prev === c.campaignId ? null : c.campaignId))
-                  }
-                />
-              ))}
-            </div>
+            <RecordView
+              mode={view.mode}
+              items={visibleCampaigns}
+              getId={(c) => c.campaignId}
+              fields={DISPATCH_FIELDS}
+              stripeClass={(id) => getStableColor(id).stripe}
+              testIdPrefix="dispatch"
+              labelOf={(c) => c.campaignName}
+              cardsClassName="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+              expandedId={expandedCampaignId}
+              onExpandedChange={setExpandedCampaignId}
+              renderCard={(c, { expanded, toggle }) => (
+                <CampaignCard campaign={c} onOpenDispatch={onOpenDispatch} isExpanded={expanded} onToggleExpand={toggle} />
+              )}
+              renderExpanded={(c) => <CampaignDetails campaign={c} onOpenDispatch={onOpenDispatch} />}
+            />
 
             {tab === "ended" && (current.data?.totalForScope ?? 0) > PAGE_SIZE_ENDED && (
               <div className="flex items-center justify-between pt-2">
@@ -217,42 +238,7 @@ function CampaignCard({
   isExpanded: boolean;
   onToggleExpand: () => void;
 }) {
-  const bulkAction = useCampaignDispatchBulkAction();
   const color = getStableColor(campaign.campaignId);
-
-  const total = campaign.leadsTotal || 1;
-  const sentPct = Math.round((campaign.sentTotal / total) * 100);
-  const failedPct = Math.round((campaign.failedTotal / total) * 100);
-
-  const dateOrEta = campaign.eta
-    ? campaign.eta.label
-    : campaign.status === "concluida"
-    ? "Concluído"
-    : "Sem agendamento";
-
-  const handleBulkAction = (action: "pause" | "resume" | "cancel", scheduledAt?: string) => {
-    bulkAction.mutate(
-      { campaignId: campaign.campaignId, action, scheduledAt },
-      {
-        onSuccess: (res) => {
-          if (res.resumedAt) {
-            toast({
-              title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} reagendados`,
-              description: `${res.affectedDispatches} ${res.affectedDispatches === 1 ? "lote" : "lotes"} — retomam ${formatDateTime(res.resumedAt)}.`,
-            });
-            return;
-          }
-          const verbo = action === "pause" ? "pausados" : action === "resume" ? "retomados" : "cancelados";
-          toast({
-            title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} ${verbo}`,
-            description: `${res.affectedDispatches} ${res.affectedDispatches === 1 ? "lote afetado" : "lotes afetados"}.`,
-          });
-        },
-        onError: (err: any) => toast({ title: "Erro ao executar ação", description: err.message, variant: "destructive" }),
-      }
-    );
-  };
-
   return (
     <div
       data-testid={`dispatch-card-${campaign.campaignId}`}
@@ -283,11 +269,12 @@ function CampaignCard({
               aria-hidden="true"
             />
             <p
+              data-field="name"
               data-testid={`dispatch-name-${campaign.campaignId}`}
               className="truncate font-display font-semibold text-foreground text-sm min-w-0 flex-1"
               title={campaign.campaignName}
             >
-              {campaign.campaignName}
+              {dispatchField("name").render(campaign)}
             </p>
           </div>
 
@@ -320,14 +307,15 @@ function CampaignCard({
           className="flex items-center gap-1.5 flex-wrap min-w-0"
         >
           <Badge
+            data-field="status"
             data-testid={`dispatch-status-${campaign.campaignId}`}
             variant="outline"
             className={cn("text-[10px] font-bold uppercase", DISPATCH_AGGREGATE_STATUS_COLORS[campaign.status])}
           >
-            {campaign.statusLabel}
+            {dispatchField("status").render(campaign)}
           </Badge>
-          <span className="text-xs text-muted-foreground truncate">
-            {campaign.chipName || "Sem chip"}
+          <span data-field="chip" className="text-xs text-muted-foreground truncate">
+            {dispatchField("chip").render(campaign)}
           </span>
         </div>
 
@@ -337,17 +325,19 @@ function CampaignCard({
           className="flex items-center justify-between gap-2 text-xs pt-1 border-t border-border/40 min-w-0"
         >
           <span
+            data-field="leads"
             data-testid={`dispatch-leads-${campaign.campaignId}`}
             className="font-semibold text-foreground truncate"
           >
-            {campaign.leadsTotal} leads · {campaign.loteCount} {campaign.loteCount === 1 ? "lote" : "lotes"}
+            {dispatchField("leads").render(campaign)}
           </span>
           <span
+            data-field="date"
             data-testid={`dispatch-date-${campaign.campaignId}`}
             className="text-[11px] text-muted-foreground shrink-0 truncate max-w-[140px]"
-            title={dateOrEta}
+            title={dispatchDateOrEta(campaign)}
           >
-            {dateOrEta}
+            {dispatchField("date").render(campaign)}
           </span>
         </div>
       </div>
@@ -360,99 +350,144 @@ function CampaignCard({
           data-testid={`dispatch-details-${campaign.campaignId}`}
           className="mt-3.5 pt-3.5 border-t border-border/80 space-y-3 animate-in fade-in duration-150"
         >
-          {/* Ações em massa */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {campaign.leadsActionable.pause > 0 && (
-              <BulkActionButton
-                action="pause"
-                icon={<Pause className="h-3.5 w-3.5 mr-1" />}
-                label="Pausar"
-                leadsCount={campaign.leadsActionable.pause}
-                campaignName={campaign.campaignName}
-                pending={bulkAction.isPending}
-                onConfirm={() => handleBulkAction("pause")}
-                className="border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400"
-              />
-            )}
-            {campaign.leadsActionable.resume > 0 && (
-              <ResumeActionButton
-                leadsCount={campaign.leadsActionable.resume}
-                campaignName={campaign.campaignName}
-                pending={bulkAction.isPending}
-                onConfirm={(scheduledAt) => handleBulkAction("resume", scheduledAt)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
-              />
-            )}
-            {campaign.leadsActionable.cancel > 0 && (
-              <BulkActionButton
-                action="cancel"
-                icon={<X className="h-3.5 w-3.5 mr-1" />}
-                label="Cancelar o que falta"
-                leadsCount={campaign.leadsActionable.cancel}
-                campaignName={campaign.campaignName}
-                pending={bulkAction.isPending}
-                onConfirm={() => handleBulkAction("cancel")}
-                className="border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-400"
-                destructive
-              />
-            )}
-          </div>
-
-          {/* Barra de progresso: enviado, falhou, restante */}
-          <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden flex">
-            <div className="h-full bg-emerald-500" style={{ width: `${sentPct}%` }} />
-            <div className="h-full bg-rose-500" style={{ width: `${failedPct}%` }} />
-          </div>
-
-          {/* Os quatro números */}
-          <div className="grid grid-cols-4 gap-2 text-center p-2 rounded-xl bg-muted/20 border border-border/40">
-            <NumberStat label="Enviados" value={campaign.sentTotal} className="text-emerald-600 dark:text-emerald-400" />
-            <NumberStat label="Responderam" value={campaign.repliedCount} className="text-indigo-600 dark:text-indigo-400" />
-            <NumberStat label="Falharam" value={campaign.failedTotal} className="text-rose-500" />
-            <NumberStat label="Na fila" value={campaign.leadsPending} className="text-slate-500" />
-          </div>
-
-          {/* Próximo envio com ícone de relógio */}
-          {campaign.eta && (
-            <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-              <Clock className="h-3 w-3 shrink-0" />
-              <span>Próximo lote: {campaign.eta.label}</span>
-            </p>
-          )}
-
-          {/* 
-            Faixa de quadrados numerados por lote — as cores dos quadrados
-            continuam exatamente as mesmas (verde, vermelho, azul, cinza) 
-          */}
-          {campaign.batches.length > 0 && (
-            <div className="pt-1">
-              <p className="text-[11px] text-muted-foreground mb-1.5">
-                {campaign.batches.length} {campaign.batches.length === 1 ? "lote" : "lotes"} — clique em um para ver os leads dele
-              </p>
-              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto overflow-x-hidden pr-1">
-                {campaign.batches.map((b, i) => {
-                  const state = DISPATCH_SQUARE_STATE_BY_STATUS[b.status];
-                  return (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => onOpenDispatch(b.id)}
-                      title={`Lote ${i + 1} — ${DISPATCH_SQUARE_STATE_LABELS[state]} · ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
-                      className={cn(
-                        "h-7 w-7 shrink-0 rounded-[4px] flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all",
-                        DISPATCH_SQUARE_STYLES[state]
-                      )}
-                    >
-                      {i + 1}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <CampaignDetails campaign={campaign} onOpenDispatch={onOpenDispatch} />
         </div>
       )}
     </div>
+  );
+}
+
+/** O que abre: ações em massa, progresso, números e lotes. É o MESMO conteúdo no cartão aberto e na linha aberta. */
+export function CampaignDetails({
+  campaign,
+  onOpenDispatch,
+}: {
+  campaign: DispatchSummaryCampaign;
+  onOpenDispatch: (dispatchId: string) => void;
+}) {
+  const bulkAction = useCampaignDispatchBulkAction();
+
+  const total = campaign.leadsTotal || 1;
+  const sentPct = Math.round((campaign.sentTotal / total) * 100);
+  const failedPct = Math.round((campaign.failedTotal / total) * 100);
+
+  const handleBulkAction = (action: "pause" | "resume" | "cancel", scheduledAt?: string) => {
+    bulkAction.mutate(
+      { campaignId: campaign.campaignId, action, scheduledAt },
+      {
+        onSuccess: (res) => {
+          if (res.resumedAt) {
+            toast({
+              title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} reagendados`,
+              description: `${res.affectedDispatches} ${res.affectedDispatches === 1 ? "lote" : "lotes"} — retomam ${formatDateTime(res.resumedAt)}.`,
+            });
+            return;
+          }
+          const verbo = action === "pause" ? "pausados" : action === "resume" ? "retomados" : "cancelados";
+          toast({
+            title: `${res.affectedLeads} ${res.affectedLeads === 1 ? "lead" : "leads"} ${verbo}`,
+            description: `${res.affectedDispatches} ${res.affectedDispatches === 1 ? "lote afetado" : "lotes afetados"}.`,
+          });
+        },
+        onError: (err: any) => toast({ title: "Erro ao executar ação", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  return (
+    <>
+      {/* Ações em massa */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {campaign.leadsActionable.pause > 0 && (
+          <BulkActionButton
+            action="pause"
+            icon={<Pause className="h-3.5 w-3.5 mr-1" />}
+            label="Pausar"
+            leadsCount={campaign.leadsActionable.pause}
+            campaignName={campaign.campaignName}
+            pending={bulkAction.isPending}
+            onConfirm={() => handleBulkAction("pause")}
+            className="border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400"
+          />
+        )}
+        {campaign.leadsActionable.resume > 0 && (
+          <ResumeActionButton
+            leadsCount={campaign.leadsActionable.resume}
+            campaignName={campaign.campaignName}
+            pending={bulkAction.isPending}
+            onConfirm={(scheduledAt) => handleBulkAction("resume", scheduledAt)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
+          />
+        )}
+        {campaign.leadsActionable.cancel > 0 && (
+          <BulkActionButton
+            action="cancel"
+            icon={<X className="h-3.5 w-3.5 mr-1" />}
+            label="Cancelar o que falta"
+            leadsCount={campaign.leadsActionable.cancel}
+            campaignName={campaign.campaignName}
+            pending={bulkAction.isPending}
+            onConfirm={() => handleBulkAction("cancel")}
+            className="border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-400"
+            destructive
+          />
+        )}
+      </div>
+
+      {/* Barra de progresso: enviado, falhou, restante */}
+      <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden flex">
+        <div className="h-full bg-emerald-500" style={{ width: `${sentPct}%` }} />
+        <div className="h-full bg-rose-500" style={{ width: `${failedPct}%` }} />
+      </div>
+
+      {/* Os quatro números */}
+      <div className="grid grid-cols-4 gap-2 text-center p-2 rounded-xl bg-muted/20 border border-border/40">
+        <NumberStat label="Enviados" value={campaign.sentTotal} className="text-emerald-600 dark:text-emerald-400" />
+        <NumberStat label="Responderam" value={campaign.repliedCount} className="text-indigo-600 dark:text-indigo-400" />
+        <NumberStat label="Falharam" value={campaign.failedTotal} className="text-rose-500" />
+        <NumberStat label="Na fila" value={campaign.leadsPending} className="text-slate-500" />
+      </div>
+
+      {/* Próximo envio com ícone de relógio */}
+      {campaign.eta && (
+        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <Clock className="h-3 w-3 shrink-0" />
+          <span>Próximo lote: {campaign.eta.label}</span>
+        </p>
+      )}
+
+      {/* 
+        Faixa de quadrados numerados por lote — as cores dos quadrados
+        continuam exatamente as mesmas (verde, vermelho, azul, cinza) 
+      */}
+      {campaign.batches.length > 0 && (
+        <div className="pt-1">
+          <p className="text-[11px] text-muted-foreground mb-1.5">
+            {campaign.batches.length} {campaign.batches.length === 1 ? "lote" : "lotes"} — clique em um para ver os leads dele
+          </p>
+          <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto overflow-x-hidden pr-1">
+            {campaign.batches.map((b, i) => {
+              const state = DISPATCH_SQUARE_STATE_BY_STATUS[b.status];
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => onOpenDispatch(b.id)}
+                  title={`Lote ${i + 1} — ${DISPATCH_SQUARE_STATE_LABELS[state]} · ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
+                  className={cn(
+                    "h-7 w-7 shrink-0 rounded-[4px] flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all",
+                    DISPATCH_SQUARE_STYLES[state]
+                  )}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+    </>
   );
 }
 

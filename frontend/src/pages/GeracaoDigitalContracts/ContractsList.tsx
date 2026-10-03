@@ -18,8 +18,6 @@ import {
   Archive,
   ArchiveRestore,
   Search,
-  LayoutGrid,
-  List as ListIcon,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -32,7 +30,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { GenerateContractDialog } from "./GenerateContractDialog";
 import { JuridicoSettingsCard } from "./JuridicoSettingsCard";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
+import { useViewMode } from "@/hooks/useViewMode";
+import { ViewModeToggle } from "@/components/ViewModeToggle";
+import { RecordView, type RecordCardState, type RecordField } from "@/components/records/RecordView";
 import { useSendContractToJuridico } from "@/hooks/useJuridico";
 
 const PAGE_SIZE = 20;
@@ -54,13 +54,24 @@ function getStatusConfig(status: string) {
   }
 }
 
+/** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
+export const CONTRACT_FIELDS: RecordField<any>[] = [
+  { key: "name", label: "Cliente", render: (c) => c.dados?.razao_social || "Sem Razão Social" },
+  { key: "status", label: "Estado", render: (c) => (c.signed_file_path ? "Assinado" : getStatusConfig(c.status).label) },
+  { key: "origin", label: "Origem", render: (c) => (c.proposal_id ? `Proposta #${c.proposal_id.slice(0, 8)}` : "Avulso") },
+  { key: "date", label: "Gerado em", render: (c) => `Gerado em ${format(new Date(c.created_at), "dd/MM/yyyy", { locale: ptBR })}` },
+];
+const contractField = (key: string) => CONTRACT_FIELDS.find((f) => f.key === key)!;
+
 export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?: boolean }) {
   const [showArquivados, setShowArquivados] = useState(false);
   const [busca, setBusca] = useState("");
   // Preferência de visualização persiste entre visitas à aba.
-  const [view, setView] = useLocalStorage<"grid" | "list">("gd_contratos_view", "grid");
+  const view = useViewMode("contratos", {
+    key: "gd_contratos_view",
+    map: (raw) => (raw === "list" ? "list" : raw === "grid" ? "card" : null),
+  });
   const [page, setPage] = useState(1);
-  const [expandedContractId, setExpandedContractId] = useState<string | null>(null);
 
   const { data: contracts, isLoading, error } = useGdContracts(undefined, showArquivados, isVexoCommercial);
   const updateContract = useUpdateGdContract();
@@ -204,6 +215,8 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
         />
       </div>
 
+      <ViewModeToggle view={view} />
+
       <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
         <button
           onClick={() => setShowArquivados(false)}
@@ -216,23 +229,6 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
           className={cn("px-3 py-2 text-xs font-bold transition-colors", showArquivados ? "bg-purple-650 text-white" : "bg-transparent text-slate-600 dark:text-slate-300")}
         >
           Arquivados
-        </button>
-      </div>
-
-      <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
-        <button
-          onClick={() => setView("grid")}
-          aria-label="Visualizar em cards"
-          className={cn("px-2.5 py-2 transition-colors", view === "grid" ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
-        >
-          <LayoutGrid className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => setView("list")}
-          aria-label="Visualizar em lista"
-          className={cn("px-2.5 py-2 transition-colors", view === "list" ? "bg-purple-650 text-white" : "text-slate-600 dark:text-slate-300")}
-        >
-          <ListIcon className="h-4 w-4" />
         </button>
       </div>
 
@@ -278,7 +274,9 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     });
   };
 
-  const acoes = (contract: any, compact = false) => (
+  // Cada botão do contrato, separado, para a MESMA ação aparecer onde fizer sentido: no cartão aberto (todos),
+  // na linha da lista (só as de uso diário) e na linha aberta (as demais).
+  const botoesAssinado = (contract: any, compact = false) => (
     <>
       {/* Botões do contrato assinado (upload, download, substituir) */}
       {contract.signed_file_path ? (
@@ -315,6 +313,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
         </Button>
       )}
 
+    </>
+  );
+
+  const botaoJuridico = (contract: any, compact = false) => (
+    <>
       <Button
         size="sm"
         className={cn("bg-indigo-600 hover:bg-indigo-500 text-white", compact ? "" : "w-full")}
@@ -324,6 +327,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
         <Send className="h-4 w-4 mr-2" />
         {enviarJuridico.isPending ? "Enviando..." : "Enviar ao Jurídico"}
       </Button>
+    </>
+  );
+
+  const botaoEditar = (contract: any, compact = false) => (
+    <>
       <Button
         variant="outline"
         size="sm"
@@ -333,6 +341,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
         <Pencil className="h-4 w-4 mr-2" />
         Editar
       </Button>
+    </>
+  );
+
+  const botaoPdf = (contract: any, compact = false) => (
+    <>
       <Button
         variant="outline"
         size="sm"
@@ -343,6 +356,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
         <Download className="h-4 w-4 mr-2" />
         {downloadingId === contract.id ? "Gerando..." : "Abrir / Baixar PDF"}
       </Button>
+    </>
+  );
+
+  const botaoArquivar = (contract: any, compact = false) => (
+    <>
       <Button
         variant="outline"
         size="sm"
@@ -354,6 +372,220 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
       </Button>
     </>
   );
+
+  /** Cartão aberto: todas as ações, na ordem de sempre. */
+  const acoes = (contract: any, compact = false) => (
+    <>
+      {botoesAssinado(contract, compact)}
+      {botaoJuridico(contract, compact)}
+      {botaoEditar(contract, compact)}
+      {botaoPdf(contract, compact)}
+      {botaoArquivar(contract, compact)}
+    </>
+  );
+
+  /** Ações de uso diário: ficam na própria linha da lista, sem expandir. */
+  const acoesPrincipais = (contract: any, compact = false) => (
+    <>
+      {botaoPdf(contract, compact)}
+      {botaoJuridico(contract, compact)}
+    </>
+  );
+
+  /** O resto (assinado, editar, arquivar): ao expandir a linha. */
+  const acoesSecundarias = (contract: any, compact = false) => (
+    <>
+      {botoesAssinado(contract, compact)}
+      {botaoEditar(contract, compact)}
+      {botaoArquivar(contract, compact)}
+    </>
+  );
+
+  const renderContractDetails = (contract: any, emLista = false) => (
+    <>
+      <div className="space-y-1.5 text-xs text-muted-foreground bg-muted/40 p-2.5 rounded-lg border border-border/40">
+        <p>
+          <span className="font-medium text-foreground">CNPJ:</span> {contract.dados?.cnpj || "-"}
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Representante:</span> {contract.dados?.representante || "-"}
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Origem:</span>{" "}
+          {contract.proposal_id ? (
+            <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400 font-bold">
+              Proposta #{contract.proposal_id.slice(0, 8)}
+            </span>
+          ) : (
+            <span className="italic text-muted-foreground">Avulso (sem proposta)</span>
+          )}
+        </p>
+
+        {contract.signed_file_path && (
+          <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-lg p-2 text-xs text-emerald-900 dark:text-emerald-300 space-y-1 mt-1">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <FileCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span className="truncate" title={contract.signed_file_name || "Contrato assinado"}>
+                {contract.signed_file_name || "Arquivo assinado"}
+              </span>
+            </div>
+            <div className="text-[10px] text-emerald-700 dark:text-emerald-400">
+              Upload: {contract.signed_uploaded_at ? format(new Date(contract.signed_uploaded_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : "-"}
+            </div>
+            <div className="text-[10px] text-emerald-700 dark:text-emerald-400 truncate">
+              Por: {contract.signed_uploaded_by || "-"}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 flex-col pt-1">
+        {emLista ? acoesSecundarias(contract) : acoes(contract)}
+      </div>
+
+    </>
+  );
+
+  const renderContractCard = (contract: any, { expanded: isExpanded, toggle }: RecordCardState) => {
+    const color = getStableColor(contract.id);
+    const statusConfig = getStatusConfig(contract.status);
+    const StatusIcon = statusConfig.icon;
+
+    const toggleExpand = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      toggle();
+    };
+
+    const clientName = contractField("name").render(contract) as string;
+
+    return (
+      <div
+        data-testid={`contract-card-${contract.id}`}
+        className={cn(
+          "rounded-xl border bg-card text-card-foreground shadow-sm transition-all overflow-hidden flex flex-col justify-between",
+          contract.signed_file_path
+            ? "border-emerald-300 dark:border-emerald-800/60 ring-1 ring-emerald-500/10"
+            : "border-border/70 hover:border-border hover:shadow-xs",
+          isExpanded && "ring-1 ring-border shadow-md"
+        )}
+      >
+        <div className="flex items-stretch min-w-0 flex-1">
+          {/* Faixa lateral com cor estável */}
+          <div
+            data-testid={`contract-card-stripe-${contract.id}`}
+            className={cn("w-1.5 self-stretch shrink-0 transition-opacity", color.stripe)}
+            aria-hidden="true"
+          />
+
+          <div className="p-3.5 flex flex-col justify-between flex-1 min-w-0 gap-2">
+            {/* Linha 1: ponto de cor, cliente ocupando espaço disponível, seta de abrir encostada à direita */}
+            <div
+              data-testid={`contract-line-1-${contract.id}`}
+              className="flex items-center justify-between gap-2 min-w-0"
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span
+                  data-testid={`contract-color-dot-${contract.id}`}
+                  className={cn("h-2.5 w-2.5 rounded-full shrink-0", color.dot)}
+                  title={`Cor: ${color.name}`}
+                  aria-hidden="true"
+                />
+                <p
+                  data-field="name"
+                  data-testid={`contract-name-${contract.id}`}
+                  className="truncate font-display font-semibold text-foreground text-sm min-w-0 flex-1"
+                  title={clientName}
+                >
+                  {clientName}
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 ml-auto"
+                onClick={toggleExpand}
+                aria-expanded={isExpanded}
+                aria-label={
+                  isExpanded
+                    ? `Recolher detalhes de ${clientName}`
+                    : `Ver detalhes de ${clientName}`
+                }
+                title={isExpanded ? "Recolher detalhes" : "Ver detalhes"}
+              >
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 transition-transform duration-200",
+                    isExpanded && "rotate-180 text-foreground"
+                  )}
+                />
+              </Button>
+            </div>
+
+            {/* Linha 2: selo de estado primeiro e equivalente de valor/origem lado a lado */}
+            <div
+              data-testid={`contract-line-2-${contract.id}`}
+              className="flex items-center justify-between gap-2 min-w-0"
+            >
+              <div className="shrink-0">
+                {contract.signed_file_path ? (
+                  <Badge
+                    data-field="status"
+                    data-testid={`contract-status-${contract.id}`}
+                    className="bg-emerald-600 hover:bg-emerald-600 text-white border-0 flex items-center gap-1 font-semibold text-[10px] shadow-sm"
+                  >
+                    <FileCheck className="h-3 w-3" />
+                    {contractField("status").render(contract)}
+                  </Badge>
+                ) : (
+                  <Badge
+                    data-field="status"
+                    data-testid={`contract-status-${contract.id}`}
+                    className={`${statusConfig.color} border-0 flex items-center gap-1 text-[10px]`}
+                  >
+                    <StatusIcon className="h-3 w-3" />
+                    {contractField("status").render(contract)}
+                  </Badge>
+                )}
+              </div>
+
+              <span
+                data-field="origin"
+                data-testid={`contract-value-or-origin-${contract.id}`}
+                className="text-xs font-mono font-medium text-muted-foreground truncate"
+                title={contractField("origin").render(contract) as string}
+              >
+                {contractField("origin").render(contract)}
+              </span>
+            </div>
+
+            {/* Linha 3: data de criação à esquerda */}
+            <div
+              data-testid={`contract-line-3-${contract.id}`}
+              className="flex items-center justify-between gap-2 text-xs text-muted-foreground pt-0.5 min-w-0"
+            >
+              <div className="flex items-center gap-1 min-w-0">
+                <span data-field="date" data-testid={`contract-date-${contract.id}`} className="text-[11px]">
+                  {contractField("date").render(contract)}
+                </span>
+              </div>
+            </div>
+
+            {/* O resto abre dentro do próprio cartão */}
+            {isExpanded && (
+              <div
+                data-testid={`contract-expanded-content-${contract.id}`}
+                className="pt-3 mt-1 border-t border-border/60 space-y-3 animate-in fade-in-50 duration-150"
+              >
+                {renderContractDetails(contract)}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -370,234 +602,22 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
             {busca ? "Tente outro termo de busca." : "Os contratos gerados aparecerão aqui."}
           </p>
         </div>
-      ) : view === "grid" ? (
-        <div className="grid gap-3.5 md:grid-cols-2 lg:grid-cols-3" data-testid="contracts-grid">
-          {pagina.map((contract) => {
-            const color = getStableColor(contract.id);
-            const isExpanded = expandedContractId === contract.id;
-            const statusConfig = getStatusConfig(contract.status);
-            const StatusIcon = statusConfig.icon;
-
-            const toggleExpand = (e: React.MouseEvent) => {
-              e.stopPropagation();
-              setExpandedContractId((prev) => (prev === contract.id ? null : contract.id));
-            };
-
-            const clientName = contract.dados?.razao_social || "Sem Razão Social";
-            const formattedDate = format(new Date(contract.created_at), "dd/MM/yyyy", { locale: ptBR });
-            const originLabel = contract.proposal_id
-              ? `Proposta #${contract.proposal_id.slice(0, 8)}`
-              : "Avulso";
-
-            return (
-              <div
-                key={contract.id}
-                data-testid={`contract-card-${contract.id}`}
-                className={cn(
-                  "rounded-xl border bg-card text-card-foreground shadow-sm transition-all overflow-hidden flex flex-col justify-between",
-                  contract.signed_file_path
-                    ? "border-emerald-300 dark:border-emerald-800/60 ring-1 ring-emerald-500/10"
-                    : "border-border/70 hover:border-border hover:shadow-xs",
-                  isExpanded && "ring-1 ring-border shadow-md"
-                )}
-              >
-                <div className="flex items-stretch min-w-0 flex-1">
-                  {/* Faixa lateral com cor estável */}
-                  <div
-                    data-testid={`contract-card-stripe-${contract.id}`}
-                    className={cn("w-1.5 self-stretch shrink-0 transition-opacity", color.stripe)}
-                    aria-hidden="true"
-                  />
-
-                  <div className="p-3.5 flex flex-col justify-between flex-1 min-w-0 gap-2">
-                    {/* Linha 1: ponto de cor, cliente ocupando espaço disponível, seta de abrir encostada à direita */}
-                    <div
-                      data-testid={`contract-line-1-${contract.id}`}
-                      className="flex items-center justify-between gap-2 min-w-0"
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span
-                          data-testid={`contract-color-dot-${contract.id}`}
-                          className={cn("h-2.5 w-2.5 rounded-full shrink-0", color.dot)}
-                          title={`Cor: ${color.name}`}
-                          aria-hidden="true"
-                        />
-                        <p
-                          data-testid={`contract-name-${contract.id}`}
-                          className="truncate font-display font-semibold text-foreground text-sm min-w-0 flex-1"
-                          title={clientName}
-                        >
-                          {clientName}
-                        </p>
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 ml-auto"
-                        onClick={toggleExpand}
-                        aria-expanded={isExpanded}
-                        aria-label={
-                          isExpanded
-                            ? `Recolher detalhes de ${clientName}`
-                            : `Ver detalhes de ${clientName}`
-                        }
-                        title={isExpanded ? "Recolher detalhes" : "Ver detalhes"}
-                      >
-                        <ChevronDown
-                          className={cn(
-                            "h-4 w-4 transition-transform duration-200",
-                            isExpanded && "rotate-180 text-foreground"
-                          )}
-                        />
-                      </Button>
-                    </div>
-
-                    {/* Linha 2: selo de estado primeiro e equivalente de valor/origem lado a lado */}
-                    <div
-                      data-testid={`contract-line-2-${contract.id}`}
-                      className="flex items-center justify-between gap-2 min-w-0"
-                    >
-                      <div className="shrink-0">
-                        {contract.signed_file_path ? (
-                          <Badge
-                            data-testid={`contract-status-${contract.id}`}
-                            className="bg-emerald-600 hover:bg-emerald-600 text-white border-0 flex items-center gap-1 font-semibold text-[10px] shadow-sm"
-                          >
-                            <FileCheck className="h-3 w-3" />
-                            Assinado
-                          </Badge>
-                        ) : (
-                          <Badge
-                            data-testid={`contract-status-${contract.id}`}
-                            className={`${statusConfig.color} border-0 flex items-center gap-1 text-[10px]`}
-                          >
-                            <StatusIcon className="h-3 w-3" />
-                            {statusConfig.label}
-                          </Badge>
-                        )}
-                      </div>
-
-                      <span
-                        data-testid={`contract-value-or-origin-${contract.id}`}
-                        className="text-xs font-mono font-medium text-muted-foreground truncate"
-                        title={originLabel}
-                      >
-                        {originLabel}
-                      </span>
-                    </div>
-
-                    {/* Linha 3: data de criação à esquerda */}
-                    <div
-                      data-testid={`contract-line-3-${contract.id}`}
-                      className="flex items-center justify-between gap-2 text-xs text-muted-foreground pt-0.5 min-w-0"
-                    >
-                      <div className="flex items-center gap-1 min-w-0">
-                        <span data-testid={`contract-date-${contract.id}`} className="text-[11px]">
-                          Gerado em {formattedDate}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* O resto abre dentro do próprio cartão */}
-                    {isExpanded && (
-                      <div
-                        data-testid={`contract-expanded-content-${contract.id}`}
-                        className="pt-3 mt-1 border-t border-border/60 space-y-3 animate-in fade-in-50 duration-150"
-                      >
-                        <div className="space-y-1.5 text-xs text-muted-foreground bg-muted/40 p-2.5 rounded-lg border border-border/40">
-                          <p>
-                            <span className="font-medium text-foreground">CNPJ:</span> {contract.dados?.cnpj || "-"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-foreground">Representante:</span> {contract.dados?.representante || "-"}
-                          </p>
-                          <p>
-                            <span className="font-medium text-foreground">Origem:</span>{" "}
-                            {contract.proposal_id ? (
-                              <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400 font-bold">
-                                Proposta #{contract.proposal_id.slice(0, 8)}
-                              </span>
-                            ) : (
-                              <span className="italic text-muted-foreground">Avulso (sem proposta)</span>
-                            )}
-                          </p>
-
-                          {contract.signed_file_path && (
-                            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-lg p-2 text-xs text-emerald-900 dark:text-emerald-300 space-y-1 mt-1">
-                              <div className="flex items-center gap-1.5 font-semibold">
-                                <FileCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                                <span className="truncate" title={contract.signed_file_name || "Contrato assinado"}>
-                                  {contract.signed_file_name || "Arquivo assinado"}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-emerald-700 dark:text-emerald-400">
-                                Upload: {contract.signed_uploaded_at ? format(new Date(contract.signed_uploaded_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : "-"}
-                              </div>
-                              <div className="text-[10px] text-emerald-700 dark:text-emerald-400 truncate">
-                                Por: {contract.signed_uploaded_by || "-"}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex gap-2 flex-col pt-1">
-                          {acoes(contract)}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       ) : (
-        <div className="rounded-xl border border-slate-200 dark:border-white/10 divide-y divide-slate-100 dark:divide-white/5 overflow-hidden">
-          {pagina.map((contract) => {
-            const statusConfig = getStatusConfig(contract.status);
-            const StatusIcon = statusConfig.icon;
-            return (
-              <div key={contract.id} className={cn("flex flex-wrap items-center gap-3 p-3 bg-white dark:bg-slate-900", contract.signed_file_path ? "bg-emerald-50/20 dark:bg-emerald-950/10" : "")}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn("h-2.5 w-2.5 rounded-full shrink-0", getStableColor(contract.id).dot)}
-                      title={`Cor: ${getStableColor(contract.id).name}`}
-                      aria-hidden="true"
-                    />
-                    <span className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
-                      {contract.dados?.razao_social || "Sem Razão Social"}
-                    </span>
-                    {contract.signed_file_path ? (
-                      <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white border-0 flex items-center gap-1 font-semibold text-[10px] shrink-0">
-                        <FileCheck className="h-3 w-3" />
-                        Assinado
-                      </Badge>
-                    ) : (
-                      <Badge className={`${statusConfig.color} border-0 flex items-center gap-1 shrink-0`}>
-                        <StatusIcon className="h-3 w-3" />
-                        {statusConfig.label}
-                      </Badge>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {contract.dados?.cnpj || "sem CNPJ"} · {contract.dados?.representante || "sem representante"} ·{" "}
-                    {contract.proposal_id ? `Proposta #${contract.proposal_id.slice(0, 8)}` : "Avulso (sem proposta)"} ·{" "}
-                    {format(new Date(contract.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                    {contract.signed_file_path && contract.signed_file_name && (
-                      <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-                        {" "}· 📎 {contract.signed_file_name} ({format(new Date(contract.signed_uploaded_at), "dd/MM HH:mm")})
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <div className="flex gap-2 shrink-0">{acoes(contract, true)}</div>
-              </div>
-            );
-          })}
-        </div>
+        <RecordView
+          mode={view.mode}
+          items={pagina}
+          getId={(c: any) => c.id}
+          fields={CONTRACT_FIELDS}
+          stripeClass={(id) => getStableColor(id).stripe}
+          testIdPrefix="contract"
+          labelOf={(c: any) => contractField("name").render(c) as string}
+          cardsTestId="contracts-grid"
+          cardsClassName="grid gap-3.5 md:grid-cols-2 lg:grid-cols-3"
+          renderCard={renderContractCard}
+          renderExpanded={(c: any) => renderContractDetails(c, true)}
+          renderRowActions={(c: any) => acoesPrincipais(c, true)}
+          rowActionsClassName="w-[20rem]"
+        />
       )}
 
       {/* Paginação — 20 por página */}
