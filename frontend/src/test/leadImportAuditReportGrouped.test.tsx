@@ -31,8 +31,20 @@ function renderWithProviders(ui: React.ReactElement) {
   };
 }
 
+// O servidor devolve delivery_state; aqui derivamos do que cada teste descreve (last_status / imported).
+const stateOf = (o: Partial<any>) =>
+  o.imported === false
+    ? "sem_telefone_valido"
+    : o.last_status === "sent"
+      ? "enviado_por_esta_planilha"
+      : o.last_status === "invalid_number" || o.last_status === "failed"
+        ? "falhou"
+        : "pendente";
+
 function makeItem(overrides: Partial<any> = {}) {
   return {
+    delivery_state: stateOf(overrides),
+    duplicate_of_row: null,
     lead_import_item_id: `item-${Math.random()}`,
     import_id: "import-1",
     telefone: "5534910000001",
@@ -94,14 +106,12 @@ describe("LeadImportAuditReport — Relatório & Auditoria redesenhado", () => {
     expect(screen.queryByText("Acompanhar Disparos")).toBeNull();
     expect(screen.queryByText(/Ativas \(/)).toBeNull();
 
-    await screen.findByText("Total de leads");
-    const totalCard = screen.getByText("Total de leads").closest("div")! as HTMLElement;
-    expect(within(totalCard).getByText("3")).toBeTruthy();
-    const sentCard = screen.getByText("Enviados").closest("div")! as HTMLElement;
-    expect(within(sentCard).getByText("2")).toBeTruthy();
+    await screen.findByTestId("stat-file-rows");
+    expect(screen.getByTestId("stat-file-rows-value").textContent).toBe("3");
+    expect(screen.getByTestId("stat-received-value").textContent).toBe("2");
   });
 
-  it("[TESTE OBRIGATÓRIO] os cartões seguem a planilha selecionada — trocar de planilha muda os cinco números", async () => {
+  it("[TESTE OBRIGATÓRIO] os cartões seguem a planilha selecionada — trocar de planilha muda os números", async () => {
     // Planilha A: 10 leads — 6 enviados (2 com retorno), 3 falhas, 1 pendente
     const itemsA = [
       ...Array.from({ length: 4 }, (_, i) => makeItem({ lead_import_item_id: `a-sent-${i}`, last_status: "sent" })),
@@ -135,30 +145,18 @@ describe("LeadImportAuditReport — Relatório & Auditoria redesenhado", () => {
       <LeadImportAuditReport activeClientId="sonhare" imports={[importA]} onSelectImportForFollowup={vi.fn()} />
     );
 
-    // "Falhas" também é o texto do botão de filtro — escopar a busca no
-    // grid dos cartões evita pegar o botão por engano.
-    await screen.findByText("Total de leads");
-    let statsGrid = screen.getByText("Total de leads").closest("div.grid")! as HTMLElement;
-    expect(within(statsGrid).getByText("10")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Enviados").closest("div")! as HTMLElement).getByText("6")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Falhas").closest("div")! as HTMLElement).getByText("3")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Com retorno (14d)").closest("div")! as HTMLElement).getByText("2")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Pendentes").closest("div")! as HTMLElement).getByText("1")).toBeTruthy();
+    const valor = (id: string) => screen.getByTestId(`${id}-value`).textContent;
+    await screen.findByTestId("stat-file-rows");
+    expect([valor("stat-file-rows"), valor("stat-valid-contacts"), valor("stat-discarded-rows")]).toEqual(["10", "10", "0"]);
+    expect([valor("stat-received"), valor("stat-failed"), valor("stat-pending"), valor("stat-replied")]).toEqual(["6", "3", "1", "2"]);
 
     rerenderWithProviders(
       <LeadImportAuditReport activeClientId="sonhare" imports={[importB]} onSelectImportForFollowup={vi.fn()} />
     );
 
-    await waitFor(() => {
-      statsGrid = screen.getByText("Total de leads").closest("div.grid")! as HTMLElement;
-      expect(within(statsGrid).getByText("4")).toBeTruthy();
-    });
-    expect(within(within(statsGrid).getByText("Enviados").closest("div")! as HTMLElement).getByText("1")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Falhas").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Com retorno (14d)").closest("div")! as HTMLElement).getByText("0")).toBeTruthy();
-    expect(within(within(statsGrid).getByText("Pendentes").closest("div")! as HTMLElement).getByText("3")).toBeTruthy();
-    // nada da planilha A sobra nos cartões
-    expect(within(statsGrid).queryByText("10")).toBeNull();
+    await waitFor(() => expect(valor("stat-file-rows")).toBe("4"));
+    expect([valor("stat-valid-contacts"), valor("stat-discarded-rows")]).toEqual(["4", "0"]);
+    expect([valor("stat-received"), valor("stat-failed"), valor("stat-pending"), valor("stat-replied")]).toEqual(["1", "0", "3", "0"]);
   });
 
   it("[TESTE OBRIGATÓRIO] uma fileira de filtro só — Todos/Falhas/Com Retorno aparece uma vez", async () => {
@@ -172,7 +170,7 @@ describe("LeadImportAuditReport — Relatório & Auditoria redesenhado", () => {
       />
     );
 
-    await screen.findByText("Total de leads");
+    await screen.findByTestId("stat-file-rows");
     expect(screen.getAllByRole("button", { name: "Todos" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Falhas" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Com Retorno" })).toHaveLength(1);

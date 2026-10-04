@@ -59,7 +59,7 @@ import {
   adjustDateToSendWindow,
 } from "../../services/sendWindow.js";
 import { getDateKey } from "../../services/analytics.js";
-import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../../services/canonicalPhone.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
@@ -100,80 +100,174 @@ export {
 };
 
 
-// GET /api/campaigns/reports/import-audit — constrói a query com janela de
-// 14 dias pós-disparo e matching canônico nos dois lados (SQL_CANONICAL_PHONE).
-// Exportada para testes estruturais e validação direta contra regressão.
+// GET /api/campaigns/reports/import-audit — uma linha por LINHA do arquivo importado, com o que o telefone dela
+// recebeu. Cruza por TELEFONE CANÔNICO dos dois lados (item da planilha × envio × resposta), como o relatório de
+// eficácia: telefone é o que o sistema de fato usou para enviar, então vale para campanha de planilha, campanha
+// do CRM e qualquer origem futura. O cruzamento antigo (runs.lead_id = item.id) só acertava campanha de planilha:
+// a de CRM grava o id do LEAD no mesmo campo, e o erro virava "Pendente" em silêncio.
+//
+// O que cada coluna significa (a tela precisa dizer isto, não "esta planilha disparou"):
+//   - sent_count / last_sent_at ......... ESTE TELEFONE recebeu mensagem (de qualquer campanha do tenant);
+//   - sent_by_import_count .............. dos envios acima, os feitos por uma campanha DESTA planilha;
+//   - sent_by_other_count ............... os feitos por OUTRA campanha (CRM, outra planilha...);
+//   - has_replied ....................... houve resposta em até 14 dias DEPOIS DE ALGUM envio (a janela é de cada
+//                                          envio, não do último — quem recebeu duas campanhas e respondeu à primeira conta);
+//   - delivery_state .................... sem_telefone_valido | enviado_por_esta_planilha | enviado_por_outra_campanha
+//                                          | falhou | pendente. Linha sem telefone válido NÃO é pendente: pendente é quem
+//                                          ainda vai receber.
+// "Esta planilha" = o envio aponta para um item dela (lead_import_item_id ou, no histórico, lead_id) OU veio de uma
+// campanha que tem esta planilha como origem (import_id / analytics_meta.importIds).
+// Exportada para testes e validação direta contra regressão (rodada em Postgres real).
 export function buildImportAuditSql() {
+  const CP = SQL_CANONICAL_PHONE_JID;
+  const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
   return `
-        SELECT
-          lii.id AS lead_import_item_id,
-          lii.import_id,
-          lii.telefone,
-          lii.normalized_data,
-          lii.created_at AS imported_at,
-          lii.row_number,
-          lii.imported,
-          lii.skip_reason,
-          (
-            SELECT count(*)::int
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-          ) AS dispatch_count,
-          (
-            SELECT max(sent_at)
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-          ) AS last_sent_at,
-          (
-            SELECT max(created_at)
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-          ) AS last_attempt_at,
-          (
-            SELECT status
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-            ORDER BY created_at DESC
-            LIMIT 1
-          ) AS last_status,
-          (
-            SELECT error_message
-            FROM public.campaign_dispatch_runs
-            WHERE lead_id = lii.id
-            ORDER BY created_at DESC
-            LIMIT 1
-          ) AS last_error_message,
-          CASE
-            WHEN (
-              SELECT max(sent_at)
-              FROM public.campaign_dispatch_runs
-              WHERE lead_id = lii.id
-            ) IS NULL THEN false
-            ELSE EXISTS (
-              SELECT 1
-              FROM public.lead_messages lm
-              WHERE (
-                lm.phone = lii.telefone
-                OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("lii.telefone")}
-              )
-              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-              AND lm.client_id = $1
-              AND COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at) > (
-                SELECT max(sent_at)
-                FROM public.campaign_dispatch_runs
-                WHERE lead_id = lii.id
-              )
-              AND COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at) <= (
-                SELECT max(sent_at)
-                FROM public.campaign_dispatch_runs
-                WHERE lead_id = lii.id
-              ) + interval '14 days'
+        WITH items AS (
+          SELECT
+            lii.id,
+            lii.import_id,
+            lii.telefone,
+            lii.normalized_data,
+            lii.created_at,
+            lii.row_number,
+            lii.imported,
+            lii.skip_reason,
+            CASE
+              WHEN lii.imported AND COALESCE(btrim(lii.telefone), '') <> '' THEN ${CP("lii.telefone")}
+            END AS cp
+          FROM public.lead_import_items lii
+          WHERE lii.client_id = $1
+            AND lii.import_id::text = $2::text
+        ),
+        first_row AS (
+          SELECT cp, min(row_number) AS first_row_number
+          FROM items
+          WHERE cp IS NOT NULL
+          GROUP BY cp
+        ),
+        import_campaigns AS (
+          SELECT c.id::text AS id
+          FROM public.campaigns c
+          WHERE c.client_id = $1
+            AND (
+              c.import_id::text = $2::text
+              OR COALESCE(c.analytics_meta -> 'importIds', '[]'::jsonb) @> to_jsonb($2::text)
             )
-          END AS has_replied
-        FROM public.lead_import_items lii
-        WHERE lii.client_id = $1
-          AND lii.import_id = $2
-        ORDER BY lii.row_number ASC
+        ),
+        runs AS (
+          SELECT
+            r.campaign_id::text AS campaign_id,
+            r.status,
+            r.sent_at,
+            r.created_at,
+            r.error_message,
+            r.lead_id::text AS lead_id,
+            r.lead_import_item_id::text AS lead_import_item_id,
+            ${CP("r.phone")} AS cp
+          FROM public.campaign_dispatch_runs r
+          WHERE r.client_id = $1
+            AND COALESCE(btrim(r.phone), '') <> ''
+            AND r.status IN ('sent', 'failed', 'invalid_number')
+            AND ${CP("r.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
+        ),
+        tagged AS (
+          SELECT
+            runs.*,
+            COALESCE(
+              (
+                runs.lead_import_item_id IN (SELECT id::text FROM items)
+                OR runs.lead_id IN (SELECT id::text FROM items)
+                OR runs.campaign_id IN (SELECT id FROM import_campaigns)
+              ),
+              false
+            ) AS from_this_import
+          FROM runs
+        ),
+        per_phone AS (
+          SELECT
+            cp,
+            count(*)::int AS dispatch_count,
+            count(*) FILTER (WHERE status = 'sent')::int AS sent_count,
+            count(*) FILTER (WHERE status = 'sent' AND from_this_import)::int AS sent_by_import_count,
+            count(*) FILTER (WHERE status = 'sent' AND NOT from_this_import)::int AS sent_by_other_count,
+            max(sent_at) FILTER (WHERE status = 'sent') AS last_sent_at,
+            max(created_at) AS last_attempt_at
+          FROM tagged
+          GROUP BY cp
+        ),
+        last_attempt AS (
+          SELECT DISTINCT ON (cp) cp, status AS last_status, error_message AS last_error_message
+          FROM tagged
+          ORDER BY cp, created_at DESC
+        ),
+        replied AS (
+          SELECT DISTINCT t.cp
+          FROM tagged t
+          JOIN public.lead_messages lm
+            ON lm.client_id = $1
+           AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+           AND ${CP("lm.phone")} = t.cp
+           AND ${lmTimestamp} > t.sent_at
+           AND ${lmTimestamp} <= t.sent_at + interval '14 days'
+          WHERE t.status = 'sent' AND t.sent_at IS NOT NULL
+        )
+        SELECT
+          i.id AS lead_import_item_id,
+          i.import_id,
+          i.telefone,
+          i.normalized_data,
+          i.created_at AS imported_at,
+          i.row_number,
+          i.imported,
+          i.skip_reason,
+          i.cp AS canonical_phone,
+          CASE WHEN i.cp IS NOT NULL AND f.first_row_number < i.row_number THEN f.first_row_number END AS duplicate_of_row,
+          COALESCE(p.dispatch_count, 0) AS dispatch_count,
+          COALESCE(p.sent_count, 0) AS sent_count,
+          COALESCE(p.sent_by_import_count, 0) AS sent_by_import_count,
+          COALESCE(p.sent_by_other_count, 0) AS sent_by_other_count,
+          p.last_sent_at,
+          p.last_attempt_at,
+          la.last_status,
+          la.last_error_message,
+          CASE
+            WHEN i.cp IS NULL THEN 'sem_telefone_valido'
+            WHEN COALESCE(p.sent_by_import_count, 0) > 0 THEN 'enviado_por_esta_planilha'
+            WHEN COALESCE(p.sent_by_other_count, 0) > 0 THEN 'enviado_por_outra_campanha'
+            WHEN la.last_status IN ('failed', 'invalid_number') THEN 'falhou'
+            ELSE 'pendente'
+          END AS delivery_state,
+          (rp.cp IS NOT NULL) AS has_replied
+        FROM items i
+        LEFT JOIN first_row f ON f.cp = i.cp
+        LEFT JOIN per_phone p ON p.cp = i.cp
+        LEFT JOIN last_attempt la ON la.cp = i.cp
+        LEFT JOIN replied rp ON rp.cp = i.cp
+        ORDER BY i.row_number ASC
+  `;
+}
+
+// Campanhas desta planilha disparadas pelo caminho LEGADO (executeCampaignDispatch): ele NÃO grava
+// campaign_dispatch_runs, então a auditoria não enxerga os envios dele e nenhum cruzamento resolve isso. O traço que
+// ele deixa: analytics_meta.dispatch.triggerSource (ou last_triggered_at) numa campanha SEM nenhum campaign_dispatches.
+// A tela avisa que o acompanhamento não está disponível para elas — em vez de parecer que ninguém recebeu.
+export function buildLegacyDispatchCampaignsSql() {
+  return `
+        SELECT c.id, c.name, c.status, c.last_triggered_at
+        FROM public.campaigns c
+        WHERE c.client_id = $1
+          AND (
+            c.import_id::text = $2::text
+            OR COALESCE(c.analytics_meta -> 'importIds', '[]'::jsonb) @> to_jsonb($2::text)
+          )
+          AND (
+            (c.analytics_meta -> 'dispatch' ->> 'triggerSource') IS NOT NULL
+            OR c.last_triggered_at IS NOT NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM public.campaign_dispatches d WHERE d.campaign_id = c.id
+          )
+        ORDER BY c.created_at ASC
   `;
 }
 
@@ -213,6 +307,14 @@ export function stopDueDispatchScheduler() {
     _dueDispatchTimerStarted = false;
     console.log("[campaign-dispatch-scheduler] scheduler de disparos avulsos parado.");
   }
+}
+
+// O id do ITEM da planilha de onde o destinatário saiu — ou null quando saiu de um lead do CRM (import_id "__crm__").
+// buildDispatchLeads devolve lead.id = item.id nas campanhas de planilha e lead.id = leads.id nas do CRM; só o
+// primeiro caso é id de item. Vai para campaign_dispatch_runs.lead_import_item_id, daqui para frente.
+export function importItemIdOf(lead) {
+  if (!lead?.id || !lead.import_id || lead.import_id === "__crm__") return null;
+  return lead.id;
 }
 
 // Origem dos leads de uma campanha. Uma campanha pode apontar para varias
@@ -1762,9 +1864,22 @@ export function registerCampaignsRoutes(app, deps) {
   // Estende campaign_dispatch_runs (tabela equivalente já existente) com claim por
   // lead. Memoizado: ALTER/CREATE rodam UMA vez por processo, nunca no caminho
   // quente (lição da Fatia 3a: ALTER TABLE pega ACCESS EXCLUSIVE mesmo em no-op).
+  // lead_import_item_id: o id do ITEM da planilha que originou o envio (nulo quando o envio veio de lead do CRM).
+  // lead_id é polimórfico (item numa campanha de planilha, lead numa do CRM); esta coluna não é: separa "esta
+  // planilha" de "mesmo telefone em outra". Só ADD COLUMN IF NOT EXISTS, barato o bastante para a rota de leitura.
+  let _dispatchRunsItemIdColumnEnsured = false;
+  async function ensureDispatchRunsItemIdColumn() {
+    if (!pgDatabasePool) return false;
+    if (_dispatchRunsItemIdColumnEnsured) return true;
+    await pgDatabasePool.query(`ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS lead_import_item_id UUID`);
+    _dispatchRunsItemIdColumnEnsured = true;
+    return true;
+  }
+
   async function ensureDispatchRunsClaimSchema() {
     if (!pgDatabasePool) return false;
     if (_dispatchRunsClaimSchemaEnsured) return true;
+    await ensureDispatchRunsItemIdColumn();
     await pgDatabasePool.query(
       `ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS lead_id UUID`
     );
@@ -1961,12 +2076,12 @@ export function registerCampaignsRoutes(app, deps) {
               if (invLead.id) {
                 await pgDatabasePool.query(
                   `INSERT INTO public.campaign_dispatch_runs
-                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at)
-                   VALUES ($1, $2, $3, $4, $5, 'invalid_number', 'Número não existe no WhatsApp', now())
+                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
+                   VALUES ($1, $2, $3, $4, $5, 'invalid_number', 'Número não existe no WhatsApp', now(), $6)
                    ON CONFLICT (dispatch_id, lead_id) DO UPDATE
                      SET status = 'invalid_number',
                          error_message = 'Número não existe no WhatsApp'`,
-                  [dispatchId, campaign.id, clientId, invLead.id, cleanPhone]
+                  [dispatchId, campaign.id, clientId, invLead.id, cleanPhone, importItemIdOf(invLead)]
                 ).catch((err) => {
                   console.warn("[campaign-dispatch] falha ao registrar lead inválido:", err?.message || err);
                 });
@@ -2336,12 +2451,12 @@ export function registerCampaignsRoutes(app, deps) {
       const { rows } = await pgDatabasePool.query(
         `
           INSERT INTO public.campaign_dispatch_runs
-            (dispatch_id, campaign_id, client_id, lead_id, phone, status, claimed_at, created_at)
-          VALUES ($1, $2, $3, $4, $5, 'claimed', now(), now())
+            (dispatch_id, campaign_id, client_id, lead_id, phone, status, claimed_at, created_at, lead_import_item_id)
+          VALUES ($1, $2, $3, $4, $5, 'claimed', now(), now(), $6)
           ON CONFLICT (dispatch_id, lead_id) DO NOTHING
           RETURNING id
         `,
-        [dispatchId, campaign.id, clientId, lead.id, phone || ""]
+        [dispatchId, campaign.id, clientId, lead.id, phone || "", importItemIdOf(lead)]
       );
       if (rows.length === 0) {
         console.warn("[campaign-dispatch] reenvio bloqueado: lead ja tocado neste disparo", {
@@ -3601,7 +3716,7 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       const { data: importRec, error: importErr } = await supabase
         .from("lead_imports")
-        .select("id, client_id, source_name, created_at")
+        .select("id, client_id, source_name, created_at, total_rows, imported_rows, skipped_rows")
         .eq("id", importId)
         .eq("client_id", clientId)
         .maybeSingle();
@@ -3610,27 +3725,33 @@ export function registerCampaignsRoutes(app, deps) {
         return sendError(res, 404, "IMPORT_NOT_FOUND", "Import not found or unauthorized");
       }
 
-      const sql = buildImportAuditSql();
+      // a coluna lead_import_item_id dos envios é lida pelo cruzamento: garante que existe
+      await ensureDispatchRunsItemIdColumn();
 
-      const result = await pgDatabasePool.query(sql, [clientId, importId]);
-      // failure_reason — um motivo só, pronto pra agrupar na tela: quem nunca
-      // foi importado usa o skip_reason da planilha; quem foi disparado e
-      // falhou usa o mesmo tradutor de erro dos outros relatórios (não
-      // duplica a lógica de invalid_number/timeout/etc em dois lugares).
+      const result = await pgDatabasePool.query(buildImportAuditSql(), [clientId, importId]);
+      // failure_reason — um motivo só, pronto pra agrupar na tela: linha descartada usa o skip_reason da planilha;
+      // quem foi disparado e falhou usa o mesmo tradutor de erro dos outros relatórios (não duplica a lógica de
+      // invalid_number/timeout/etc em dois lugares). Telefone repetido não é falha.
       const items = (result.rows || []).map((item) => {
         let failureReason = null;
         if (!item.imported) {
           failureReason = item.skip_reason || "Motivo não registrado";
-        } else if (item.last_status === "invalid_number") {
-          failureReason = "Número inválido";
-        } else if (item.last_status === "failed") {
-          failureReason = translateDispatchErrorMessage(item.last_error_message) || "Erro desconhecido";
+        } else if (item.delivery_state === "sem_telefone_valido") {
+          failureReason = "Telefone ausente ou inválido";
+        } else if (item.delivery_state === "falhou") {
+          failureReason =
+            item.last_status === "invalid_number"
+              ? "Número inválido"
+              : translateDispatchErrorMessage(item.last_error_message) || "Erro desconhecido";
         }
         return { ...item, failure_reason: failureReason };
       });
+
+      const legacy = await pgDatabasePool.query(buildLegacyDispatchCampaignsSql(), [clientId, importId]);
       res.json({
         import: importRec,
         items,
+        legacy_dispatch_campaigns: legacy.rows || [],
       });
     } catch (err) {
       console.error("[import-audit] error:", err);

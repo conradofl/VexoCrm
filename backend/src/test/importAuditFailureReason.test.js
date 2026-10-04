@@ -36,7 +36,13 @@ function getRouteHandler(deps, path, method = "get") {
 }
 
 function makeDeps({ rows = [], clientId = "tenant-1", overrides = {} } = {}) {
-  const query = vi.fn(async () => ({ rows }));
+  // a rota faz 3 consultas: garantir a coluna, a auditoria (linhas) e as campanhas legadas (nenhuma aqui)
+  const query = vi.fn(async (sql) => {
+    const text = String(sql);
+    if (text.includes("ADD COLUMN IF NOT EXISTS")) return { rows: [] };
+    if (text.includes("NOT EXISTS (") && text.includes("campaign_dispatches")) return { rows: [] };
+    return { rows };
+  });
   return {
     CAMPAIGN_SCHEDULER_MAX_BATCH: 10,
     buildDispatchLeads: async () => [],
@@ -92,58 +98,45 @@ function makeDeps({ rows = [], clientId = "tenant-1", overrides = {} } = {}) {
   };
 }
 
+async function motivos(rows) {
+  const handler = getRouteHandler(makeDeps({ rows }), "/api/campaigns/reports/import-audit");
+  const res = fakeRes();
+  await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+  return res.body.items.map((i) => i.failure_reason);
+}
+
 describe("GET /api/campaigns/reports/import-audit — failure_reason", () => {
   it("[TESTE OBRIGATÓRIO] nunca importado: usa o skip_reason da planilha, não o erro de disparo", async () => {
-    const deps = makeDeps({
-      rows: [
-        { lead_import_item_id: "i1", imported: false, skip_reason: "Telefone ausente ou invalido", last_status: null, last_error_message: null },
-      ],
-    });
-    const handler = getRouteHandler(deps, "/api/campaigns/reports/import-audit");
-    const res = fakeRes();
-    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+    expect(await motivos([{ lead_import_item_id: "i1", imported: false, skip_reason: "Telefone ausente ou invalido", delivery_state: "sem_telefone_valido", last_status: null }])).toEqual(["Telefone ausente ou invalido"]);
+  });
 
-    expect(res.body.items[0].failure_reason).toBe("Telefone ausente ou invalido");
+  it("linha descartada sem skip_reason registrado: diz 'Motivo não registrado' (nunca fica sem explicação)", async () => {
+    expect(await motivos([{ lead_import_item_id: "i1", imported: false, skip_reason: null, delivery_state: "sem_telefone_valido", last_status: null }])).toEqual(["Motivo não registrado"]);
   });
 
   it("[TESTE OBRIGATÓRIO] invalid_number vira 'Número inválido', não o enum cru", async () => {
-    const deps = makeDeps({
-      rows: [
-        { lead_import_item_id: "i1", imported: true, skip_reason: null, last_status: "invalid_number", last_error_message: "Número não existe no WhatsApp" },
-      ],
-    });
-    const handler = getRouteHandler(deps, "/api/campaigns/reports/import-audit");
-    const res = fakeRes();
-    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
-
-    expect(res.body.items[0].failure_reason).toBe("Número inválido");
+    expect(await motivos([{ lead_import_item_id: "i1", imported: true, delivery_state: "falhou", last_status: "invalid_number", last_error_message: "Número não existe no WhatsApp" }])).toEqual(["Número inválido"]);
   });
 
   it("[TESTE OBRIGATÓRIO] failed genérico passa pelo MESMO tradutor de erro dos outros relatórios", async () => {
-    const deps = makeDeps({
-      rows: [
-        { lead_import_item_id: "i1", imported: true, skip_reason: null, last_status: "failed", last_error_message: "AbortError: timeout ao chamar a Evolution" },
-      ],
-    });
-    const handler = getRouteHandler(deps, "/api/campaigns/reports/import-audit");
-    const res = fakeRes();
-    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
-
-    expect(res.body.items[0].failure_reason).toBe("Tempo limite excedido ao chamar a Evolution");
+    expect(await motivos([{ lead_import_item_id: "i1", imported: true, delivery_state: "falhou", last_status: "failed", last_error_message: "AbortError: timeout ao chamar a Evolution" }])).toEqual(["Tempo limite excedido ao chamar a Evolution"]);
   });
 
-  it("enviado ou pendente: sem motivo nenhum — não é falha", async () => {
-    const deps = makeDeps({
-      rows: [
-        { lead_import_item_id: "i1", imported: true, skip_reason: null, last_status: "sent", last_error_message: null },
-        { lead_import_item_id: "i2", imported: true, skip_reason: null, last_status: "pending", last_error_message: null },
-        { lead_import_item_id: "i3", imported: true, skip_reason: null, last_status: null, last_error_message: null },
-      ],
-    });
-    const handler = getRouteHandler(deps, "/api/campaigns/reports/import-audit");
-    const res = fakeRes();
-    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+  it("[TESTE OBRIGATÓRIO] enviado (por esta planilha ou por outra campanha) e pendente: sem motivo — não é falha", async () => {
+    expect(
+      await motivos([
+        { lead_import_item_id: "i1", imported: true, delivery_state: "enviado_por_esta_planilha", last_status: "sent" },
+        { lead_import_item_id: "i2", imported: true, delivery_state: "enviado_por_outra_campanha", last_status: "sent" },
+        { lead_import_item_id: "i3", imported: true, delivery_state: "pendente", last_status: null },
+      ])
+    ).toEqual([null, null, null]);
+  });
 
-    expect(res.body.items.map((i) => i.failure_reason)).toEqual([null, null, null]);
+  it("telefone repetido na planilha não é falha: a linha repetida segue o estado do telefone, sem motivo", async () => {
+    expect(await motivos([{ lead_import_item_id: "i1", imported: true, delivery_state: "enviado_por_esta_planilha", last_status: "sent", duplicate_of_row: 1 }])).toEqual([null]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] linha importada mas sem telefone utilizável tem motivo próprio — nunca fica como 'pendente' sem explicação", async () => {
+    expect(await motivos([{ lead_import_item_id: "i1", imported: true, skip_reason: null, delivery_state: "sem_telefone_valido", last_status: null }])).toEqual(["Telefone ausente ou inválido"]);
   });
 });

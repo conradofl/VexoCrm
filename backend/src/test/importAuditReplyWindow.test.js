@@ -1,13 +1,14 @@
 // backend/src/test/importAuditReplyWindow.test.js
 //
-// Testes para a métrica has_replied em GET /api/campaigns/reports/import-audit:
-// 1. Invariante do disparo: quem nunca recebeu mensagem (sent_at IS NULL) NUNCA conta como respondido.
-// 2. Janela temporal: resposta só conta se posterior ao disparo e dentro do limite de 14 dias.
-// 3. Canonicalização: casamento via SQL_CANONICAL_PHONE nos dois lados (lm.phone e lii.telefone).
+// Relatório & Auditoria de planilha (GET /api/campaigns/reports/import-audit): o cruzamento é por TELEFONE
+// CANÔNICO dos dois lados (item × envio × resposta), a janela de 14 dias é de CADA envio (não do último) e o
+// JID é normalizado antes de comparar. Aqui: a forma da SQL (defesa contra regressão) e a rota. O comportamento
+// da SQL contra Postgres REAL (pglite) — formatos de telefone, JID, janela, tenant, repetidos, CRM — roda fora do
+// repositório e está descrito no relatório da mudança; estes testes travam que a SQL continue com a forma que ele provou.
 
 import { describe, expect, it, vi } from "vitest";
-import { registerCampaignsRoutes, buildImportAuditSql } from "../domains/campaigns/routes.js";
-import { toCanonicalPhone, SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
+import { registerCampaignsRoutes, buildImportAuditSql, buildLegacyDispatchCampaignsSql } from "../domains/campaigns/routes.js";
+import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../services/canonicalPhone.js";
 
 function fakeRes() {
   return {
@@ -88,224 +89,154 @@ function makeDeps({ rows = [], queryFn, clientId = "tenant-1" } = {}) {
   };
 }
 
-/**
- * Modelo comportamental da expressão SQL has_replied.
- * Espelha fielmente a lógica SQL do CASE/EXISTS para testes lógicos e determinísticos.
- */
-function evaluateSqlReplyLogic({ last_sent_at, telefone, messages = [], clientId = "tenant-1" }) {
-  // Regra de ouro: se nunca foi disparado, NUNCA é true
-  if (!last_sent_at) return false;
 
-  const sentTimestamp = new Date(last_sent_at).getTime();
-  const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-  const maxWindowTimestamp = sentTimestamp + fourteenDaysMs;
+describe("SQL_CANONICAL_PHONE_JID", () => {
+  it("[TESTE OBRIGATÓRIO] tira o sufixo de JID de telefone ANTES de canonicalizar; '@lid' não é telefone", () => {
+    const sql = SQL_CANONICAL_PHONE_JID("x.phone");
 
-  const leadCanonical = toCanonicalPhone(telefone);
-
-  return messages.some((lm) => {
-    // lm.client_id = $1
-    if (lm.client_id && lm.client_id !== clientId) return false;
-
-    // (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-    const isReplySignal = lm.direction === "inbound" || lm.engagement_signal === "reply";
-    if (!isReplySignal) return false;
-
-    // (lm.phone = lii.telefone OR SQL_CANONICAL_PHONE(lm.phone) = SQL_CANONICAL_PHONE(lii.telefone))
-    const rawMatches = lm.phone === telefone;
-    const msgCanonical = toCanonicalPhone(lm.phone);
-    const canonicalMatches = Boolean(leadCanonical && msgCanonical && leadCanonical === msgCanonical);
-    if (!rawMatches && !canonicalMatches) return false;
-
-    // COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)
-    const msgDate = lm.message_timestamp || lm.delivered_at || lm.created_at;
-    if (!msgDate) return false;
-    const msgTimestamp = new Date(msgDate).getTime();
-
-    // > last_sent_at AND <= last_sent_at + interval '14 days'
-    return msgTimestamp > sentTimestamp && msgTimestamp <= maxWindowTimestamp;
+    expect(sql).toContain("regexp_replace(x.phone, '@(s\\.whatsapp\\.net|c\\.us)$', '')");
+    expect(sql).toContain(SQL_CANONICAL_PHONE("regexp_replace(x.phone, '@(s\\.whatsapp\\.net|c\\.us)$', '')")); // a mesma canonicalização de sempre
+    expect(sql).not.toMatch(/lid/); // '@lid' continua com o '@' e nunca vira telefone
   });
-}
+});
 
-describe("GET /api/campaigns/reports/import-audit — has_replied (Recorte de 14 dias e Canonicalização)", () => {
-  describe("1. Testes Estruturais da Query SQL (Defesa contra Regressão)", () => {
-    it("[TESTE OBRIGATÓRIO] a query SQL aplica a janela de 14 dias vinculada ao max(sent_at)", () => {
-      const sql = buildImportAuditSql();
-      expect(sql).toContain("interval '14 days'");
-      expect(sql).toMatch(/>\s*\(\s*SELECT max\(sent_at\)\s*FROM public\.campaign_dispatch_runs\s*WHERE lead_id = lii\.id\s*\)/);
-      expect(sql).toMatch(/<=\s*\(\s*SELECT max\(sent_at\)\s*FROM public\.campaign_dispatch_runs\s*WHERE lead_id = lii\.id\s*\)\s*\+\s*interval '14 days'/);
-    });
+describe("buildImportAuditSql — forma da consulta", () => {
+  const sql = buildImportAuditSql();
 
-    it("[TESTE OBRIGATÓRIO] a query SQL zera has_replied se max(sent_at) IS NULL", () => {
-      const sql = buildImportAuditSql();
-      expect(sql).toMatch(/CASE\s*WHEN\s*\(\s*SELECT max\(sent_at\)\s*FROM public\.campaign_dispatch_runs\s*WHERE lead_id = lii\.id\s*\)\s*IS NULL THEN false/i);
-    });
-
-    it("[TESTE OBRIGATÓRIO] a query SQL usa SQL_CANONICAL_PHONE nos dois lados do cruzamento de telefone", () => {
-      const sql = buildImportAuditSql();
-      // Deve conter lm.phone = lii.telefone OR canonical(lm.phone) = canonical(lii.telefone)
-      expect(sql).toContain("lm.phone = lii.telefone");
-      expect(sql).toContain(SQL_CANONICAL_PHONE("lm.phone"));
-      expect(sql).toContain(SQL_CANONICAL_PHONE("lii.telefone"));
-    });
-
-    it("[TESTE OBRIGATÓRIO] a query SQL filtra por tenant (lm.client_id = $1) e direção inbound/reply", () => {
-      const sql = buildImportAuditSql();
-      expect(sql).toContain("lm.client_id = $1");
-      expect(sql).toContain("(lm.direction = 'inbound' OR lm.engagement_signal = 'reply')");
-    });
+  it("[TESTE OBRIGATÓRIO] cruza por telefone canônico (com JID) nos TRÊS lados: item da planilha, envio e resposta", () => {
+    expect(sql).toContain(SQL_CANONICAL_PHONE_JID("lii.telefone"));
+    expect(sql).toContain(SQL_CANONICAL_PHONE_JID("r.phone"));
+    expect(sql).toContain(SQL_CANONICAL_PHONE_JID("lm.phone"));
+    expect(sql).toMatch(/END\s*=\s*t\.cp/); // a resposta casa com o telefone canônico do ENVIO
   });
 
-  describe("2. Testes Comportamentais das Regras de Negócio", () => {
-    const DISPATCH_DATE = "2026-09-10T12:00:00.000Z";
-
-    it("[TESTE OBRIGATÓRIO] Lead com mensagem inbound antiga (antes do disparo) NÃO conta como respondido (has_replied === false)", () => {
-      const leadPhone = "5534991093607";
-      // Mensagem inbound recebida 5 dias ANTES do disparo
-      const messages = [
-        {
-          phone: "5534991093607",
-          direction: "inbound",
-          engagement_signal: null,
-          created_at: "2026-09-05T10:00:00.000Z",
-          client_id: "tenant-1",
-        },
-      ];
-
-      const hasReplied = evaluateSqlReplyLogic({
-        last_sent_at: DISPATCH_DATE,
-        telefone: leadPhone,
-        messages,
-      });
-
-      expect(hasReplied).toBe(false);
-    });
-
-    it("[TESTE OBRIGATÓRIO] Lead nunca disparado (last_sent_at === null) NUNCA conta como respondido, mesmo com mensagens inbound históricas", () => {
-      const leadPhone = "5534991093607";
-      // Contato com várias mensagens inbound no histórico, mas a planilha nunca foi disparada
-      const messages = [
-        {
-          phone: "5534991093607",
-          direction: "inbound",
-          created_at: "2026-09-01T12:00:00.000Z",
-          client_id: "tenant-1",
-        },
-        {
-          phone: "5534991093607",
-          direction: "inbound",
-          created_at: "2026-09-15T12:00:00.000Z",
-          client_id: "tenant-1",
-        },
-      ];
-
-      const hasReplied = evaluateSqlReplyLogic({
-        last_sent_at: null,
-        telefone: leadPhone,
-        messages,
-      });
-
-      expect(hasReplied).toBe(false);
-    });
-
-    it("[TESTE OBRIGATÓRIO] Lead com resposta 20 dias após o disparo (fora da janela de 14 dias) NÃO conta como respondido", () => {
-      const leadPhone = "5534991093607";
-      // Resposta no dia 30/09 (20 dias após o disparo do dia 10/09)
-      const messages = [
-        {
-          phone: "5534991093607",
-          direction: "inbound",
-          engagement_signal: "reply",
-          created_at: "2026-09-30T12:00:00.000Z",
-          client_id: "tenant-1",
-        },
-      ];
-
-      const hasReplied = evaluateSqlReplyLogic({
-        last_sent_at: DISPATCH_DATE,
-        telefone: leadPhone,
-        messages,
-      });
-
-      expect(hasReplied).toBe(false);
-    });
-
-    it("[TESTE OBRIGATÓRIO] Lead com resposta no 3º dia após o disparo e telefone sem DDI casando via SQL_CANONICAL_PHONE é marcado com has_replied === true", () => {
-      // Na planilha: telefone sem DDI 55 e com DDD 34: "34991093607"
-      const planilhaTelefone = "34991093607";
-      // No WhatsApp/lead_messages: telefone completo vindo da Evolution com 55: "5534991093607"
-      // Resposta 3 dias após o disparo (13/09, dentro da janela <= 14 dias)
-      const messages = [
-        {
-          phone: "5534991093607",
-          direction: "inbound",
-          engagement_signal: "reply",
-          created_at: "2026-09-13T15:30:00.000Z",
-          client_id: "tenant-1",
-        },
-      ];
-
-      const hasReplied = evaluateSqlReplyLogic({
-        last_sent_at: DISPATCH_DATE,
-        telefone: planilhaTelefone,
-        messages,
-      });
-
-      expect(hasReplied).toBe(true);
-    });
+  it("[TESTE OBRIGATÓRIO] NÃO cruza mais por identificador: nada de runs.lead_id = item.id como forma de achar o envio", () => {
+    expect(sql).not.toMatch(/WHERE\s+lead_id\s*=\s*lii\.id/);
+    expect(sql).not.toMatch(/lead_id\s*=\s*lii\.id/);
+    // o identificador só serve para dizer "desta planilha" (tagged), nunca para achar o envio (runs)
+    expect(sql).toMatch(/runs\.lead_import_item_id IN \(SELECT id::text FROM items\)/);
   });
 
-  describe("3. Integração com a Rota Express do Endpoint", () => {
-    it("chama a query exata com buildImportAuditSql() e repassa has_replied na resposta", async () => {
-      let executedSql = "";
-      const queryFn = vi.fn(async (sql) => {
-        executedSql = sql;
-        return {
-          rows: [
-            {
-              lead_import_item_id: "item-1",
-              import_id: "import-1",
-              telefone: "34991093607",
-              row_number: 1,
-              imported: true,
-              skip_reason: null,
-              dispatch_count: 1,
-              last_sent_at: "2026-09-10T12:00:00.000Z",
-              last_attempt_at: "2026-09-10T12:00:00.000Z",
-              last_status: "sent",
-              last_error_message: null,
-              has_replied: true,
-            },
-            {
-              lead_import_item_id: "item-2",
-              import_id: "import-1",
-              telefone: "34999990000",
-              row_number: 2,
-              imported: true,
-              skip_reason: null,
-              dispatch_count: 0,
-              last_sent_at: null,
-              last_attempt_at: null,
-              last_status: null,
-              last_error_message: null,
-              has_replied: false,
-            },
-          ],
-        };
-      });
+  it("[TESTE OBRIGATÓRIO] a janela de 14 dias é de CADA envio: ancora em t.sent_at, nunca em max(sent_at)", () => {
+    expect(sql).toContain("interval '14 days'");
+    expect(sql).toMatch(/> t\.sent_at/);
+    expect(sql).toMatch(/<= t\.sent_at \+ interval '14 days'/);
+    expect(sql).not.toMatch(/max\(sent_at\)\s*\n?\s*FROM public\.campaign_dispatch_runs\s*WHERE lead_id/);
+    expect(sql).not.toMatch(/\+ interval '14 days'\s*\)\s*\n?\s*\)/); // sem o modelo antigo "(SELECT max(sent_at)...) + 14d"
+  });
 
-      const deps = makeDeps({ queryFn });
-      const handler = getRouteHandler(deps, "/api/campaigns/reports/import-audit");
-      const res = fakeRes();
+  it("[TESTE OBRIGATÓRIO] só envio efetivamente 'sent' (com sent_at) pode gerar retorno", () => {
+    expect(sql).toContain("WHERE t.status = 'sent' AND t.sent_at IS NOT NULL");
+  });
 
-      await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+  it("[TESTE OBRIGATÓRIO] todo cruzamento filtra pelo tenant: itens, campanhas, envios e mensagens", () => {
+    expect(sql).toContain("lii.client_id = $1");
+    expect(sql).toContain("c.client_id = $1");
+    expect(sql).toContain("r.client_id = $1");
+    expect(sql).toContain("lm.client_id = $1");
+    expect(sql).toContain("(lm.direction = 'inbound' OR lm.engagement_signal = 'reply')");
+  });
 
-      expect(res.statusCode).toBe(200);
-      expect(executedSql).toContain("interval '14 days'");
-      expect(executedSql).toContain(SQL_CANONICAL_PHONE("lm.phone"));
-      expect(executedSql).toContain(SQL_CANONICAL_PHONE("lii.telefone"));
-      expect(res.body.items).toHaveLength(2);
-      expect(res.body.items[0].has_replied).toBe(true);
-      expect(res.body.items[1].has_replied).toBe(false);
+  it("telefone vazio nunca casa com telefone vazio: envio sem telefone e item sem telefone são ignorados", () => {
+    expect(sql).toContain("COALESCE(btrim(r.phone), '') <> ''");
+    expect(sql).toContain("COALESCE(btrim(lii.telefone), '') <> ''");
+    expect(sql).toMatch(/WHEN lii\.imported AND/);
+  });
+
+  it("[TESTE OBRIGATÓRIO] 'desta planilha' nunca vira NULL (NULL IN (...) deixaria o envio de CRM sem categoria e o item cairia em pendente)", () => {
+    expect(sql).toMatch(/COALESCE\(\s*\(\s*runs\.lead_import_item_id IN/);
+    expect(sql).toMatch(/\),\s*false\s*\) AS from_this_import/);
+  });
+
+  it("[TESTE OBRIGATÓRIO] o estado da linha: sem telefone válido primeiro, depois desta planilha, outra campanha, falhou, e só então pendente", () => {
+    const ordem = ["'sem_telefone_valido'", "'enviado_por_esta_planilha'", "'enviado_por_outra_campanha'", "'falhou'", "'pendente'"].map((s) => sql.indexOf(`THEN ${s}`) >= 0 ? sql.indexOf(`THEN ${s}`) : sql.indexOf(`ELSE ${s}`));
+    expect(ordem.every((i) => i >= 0)).toBe(true);
+    expect([...ordem].sort((a, b) => a - b)).toEqual(ordem);
+  });
+
+  it("repetidos: cada linha diz de qual linha repete (duplicate_of_row), sem tratar a repetida como falha", () => {
+    expect(sql).toContain("AS duplicate_of_row");
+    expect(sql).toContain("min(row_number) AS first_row_number");
+  });
+
+  it("uma planilha de outro tenant ou de outro cliente nunca entra: os itens são filtrados por tenant E pela importação", () => {
+    expect(sql).toContain("lii.import_id::text = $2::text");
+  });
+});
+
+describe("buildLegacyDispatchCampaignsSql — caminho legado", () => {
+  const sql = buildLegacyDispatchCampaignsSql();
+
+  it("[TESTE OBRIGATÓRIO] campanha disparada pelo legado = tem rastro de disparo e NENHUM campaign_dispatches", () => {
+    expect(sql).toContain("(c.analytics_meta -> 'dispatch' ->> 'triggerSource') IS NOT NULL");
+    expect(sql).toContain("c.last_triggered_at IS NOT NULL");
+    expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM public\.campaign_dispatches d WHERE d\.campaign_id = c\.id\s*\)/);
+  });
+
+  it("só campanhas deste tenant e que têm ESTA planilha como origem (import_id ou importIds)", () => {
+    expect(sql).toContain("c.client_id = $1");
+    expect(sql).toContain("c.import_id::text = $2::text");
+    expect(sql).toContain("@> to_jsonb($2::text)");
+  });
+});
+
+describe("GET /api/campaigns/reports/import-audit — a rota", () => {
+  const ITEM = { lead_import_item_id: "item-1", import_id: "import-1", telefone: "34991093607", row_number: 1, imported: true, skip_reason: null, delivery_state: "enviado_por_esta_planilha", sent_count: 1, sent_by_import_count: 1, sent_by_other_count: 0, last_status: "sent", has_replied: true, duplicate_of_row: null };
+
+  function setup(rows, legacyRows = []) {
+    const calls = [];
+    const queryFn = vi.fn(async (sql, params) => {
+      calls.push({ sql: String(sql), params });
+      if (String(sql).includes("ADD COLUMN IF NOT EXISTS lead_import_item_id")) return { rows: [] };
+      if (String(sql).includes("NOT EXISTS (") && String(sql).includes("campaign_dispatches")) return { rows: legacyRows };
+      return { rows };
     });
+    return { calls, handler: getRouteHandler(makeDeps({ queryFn }), "/api/campaigns/reports/import-audit") };
+  }
+
+  it("[TESTE OBRIGATÓRIO] roda a consulta nova com [tenant, planilha], garante a coluna do envio antes e devolve as campanhas legadas", async () => {
+    const { calls, handler } = setup([ITEM], [{ id: "camp-1", name: "Black Friday", status: "sent", last_triggered_at: "2026-10-02T10:00:00Z" }]);
+    const res = fakeRes();
+
+    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(calls[0].sql).toContain("ADD COLUMN IF NOT EXISTS lead_import_item_id");
+    const auditCall = calls.find((c) => c.sql.includes("WITH items AS"));
+    expect(auditCall.params).toEqual(["tenant-1", "import-1"]);
+    expect(calls.find((c) => c.sql.includes("campaign_dispatches")).params).toEqual(["tenant-1", "import-1"]);
+    expect(res.body.items[0].has_replied).toBe(true);
+    expect(res.body.items[0].delivery_state).toBe("enviado_por_esta_planilha");
+    expect(res.body.legacy_dispatch_campaigns).toEqual([{ id: "camp-1", name: "Black Friday", status: "sent", last_triggered_at: "2026-10-02T10:00:00Z" }]);
+  });
+
+  it("sem campanha legada, a lista vem vazia (a tela não mostra aviso)", async () => {
+    const { handler } = setup([ITEM], []);
+    const res = fakeRes();
+    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+    expect(res.body.legacy_dispatch_campaigns).toEqual([]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] pede à importação os três totais que a tela rotula (linhas do arquivo, contatos válidos, descartadas)", async () => {
+    let selecionado = "";
+    const queryFn = vi.fn(async (sql) => (String(sql).includes("ADD COLUMN") ? { rows: [] } : { rows: [ITEM] }));
+    const deps = makeDeps({ queryFn });
+    deps.supabase = {
+      from: () => ({
+        select: (cols) => {
+          selecionado = cols;
+          return { eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "import-1", client_id: "tenant-1", source_name: "P", created_at: "2026-09-01T00:00:00Z", total_rows: 32, imported_rows: 30, skipped_rows: 2 }, error: null }) }) }) };
+        },
+      }),
+    };
+    const handler = getRouteHandler(deps, "/api/campaigns/reports/import-audit");
+    const res = fakeRes();
+
+    await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
+
+    expect(selecionado).toContain("total_rows");
+    expect(selecionado).toContain("imported_rows");
+    expect(selecionado).toContain("skipped_rows");
+    expect(res.body.import).toMatchObject({ total_rows: 32, imported_rows: 30, skipped_rows: 2 });
   });
 });

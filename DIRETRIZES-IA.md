@@ -186,6 +186,7 @@ outras rotas quebravam por schema). O sintoma sumiu do console, a causa continuo
 - [ ] `git add` só dos arquivos certos; branch e remote conferidos.
 - [ ] Avisei o usuário se precisa **Deploy** no Easypanel (backend não sobe no push).
 - [ ] Nenhum script meu emite token em nome de uma pessoa; nenhuma credencial ou identificador fixo de pessoa entrou no código (seção 10).
+- [ ] Se escrevi ou alterei SQL: rodei a consulta num Postgres real (pglite, seção 11), não só contra mock; se ela não rodou lá por limitação da ferramenta, disse qual e por quê, sem mudar a consulta.
 
 ---
 
@@ -201,4 +202,17 @@ outras rotas quebravam por schema). O sintoma sumiu do console, a causa continuo
 4. **A regra não é sobre leitura ou escrita: é sobre quem executa.** O agente **nunca conecta na produção** nem recebe a credencial dela; ferramenta de medição é entregue pronta para o **dono do sistema** rodar, no ambiente dele, com um `DATABASE_URL` que ele mesmo fornece. O script de medição **não é exceção à seção 7.4** (acesso do agente à produção só pela API do backend; IP legado desativado): a 7.4 continua valendo inteira para o agente.
 
 **Nota sobre o histórico:** o histórico do git **não foi reescrito**. A chave de API do Firebase é pública por natureza e o UID não é segredo; o que dá poder é a credencial da conta de serviço, que nunca esteve no arquivo. Não reescreva o histórico por causa disso.
+
+---
+
+## 11. SQL escrita à mão se testa num Postgres real, não num mock
+
+**Incidente:** três defeitos de SQL chegaram à produção aprovados por teste simulado, e os três foram pegos depois por Postgres de verdade: (1) a comparação `uuid = text` que derrubou o dashboard; (2) o erro de tipo mascarado como "tabela ausente" (`isMissingSchemaError`); (3) `NULL IN (...)` no Relatório & Auditoria, que dá NULL em vez de falso e jogava o envio do CRM em "pendente". Mock responde o que o autor da consulta espera; o banco responde o que a consulta de fato faz. Com tanta SQL escrita à mão e com a deriva de schema já mapeada, testar consulta sem banco é testar a si mesmo.
+
+**Regra:** consulta nova ou alterada tem teste contra Postgres real. O projeto tem `@electric-sql/pglite` (Postgres compilado para WASM, em memória) como dependência de desenvolvimento do backend; o helper é `backend/src/test/helpers/pgliteDb.js` e o exemplo de referência é `backend/src/test/importAuditPostgres.test.js`, que importa a SQL do produto em vez de copiá-la. Use os tipos de produção no esquema do teste (uuid, text, jsonb, timestamptz) — um tipo mais frouxo no teste esconde justamente o `uuid = text`.
+
+**Duas regras de uso, para o pglite não virar falsa segurança:**
+
+1. **Passar no pglite é necessário, não é garantia.** O pglite diverge do Postgres do servidor em extensões, funções e alguns tipos. Ele prova que a consulta faz o que se espera num Postgres; não prova que roda em produção. Consulta que toca extensão, função específica da versão ou comportamento de tipo exótico ainda precisa de conferência no banco de verdade — feita pelo dono do sistema (seção 10), nunca pelo agente.
+2. **Consulta que não roda no pglite por limitação dele: diga qual e por quê — nunca mude a consulta para caber na ferramenta.** A consulta é a do produto; a ferramenta é que tem limites. Registre no próprio teste qual recurso falta e por que, e cubra o resto. Adaptar a SQL à ferramenta é o jeito de a ferramenta começar a mentir.
 

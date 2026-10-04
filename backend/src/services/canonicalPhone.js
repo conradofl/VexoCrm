@@ -17,6 +17,15 @@ export const SQL_CANONICAL_PHONE = (col) => `
 `;
 
 /**
+ * Canônico + JID: tira o sufixo de um JID de telefone do WhatsApp ("5534...@s.whatsapp.net", "...@c.us")
+ * ANTES de canonicalizar, para o JID casar com o telefone puro equivalente. "@lid" NÃO é telefone (é um
+ * identificador interno do WhatsApp, sem número por trás): continua com o "@" e nunca casa com telefone.
+ * Usado nos cruzamentos por telefone do relatório de auditoria, dos dois lados.
+ */
+export const SQL_CANONICAL_PHONE_JID = (col) =>
+  SQL_CANONICAL_PHONE(`regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '')`);
+
+/**
  * Normaliza um telefone bruto para o formato canônico brasileiro no JavaScript.
  * Espelha fielmente a expressão SQL_CANONICAL_PHONE para garantir paridade exata
  * na escrita, permitindo indexação e busca direta por igualdade (=).

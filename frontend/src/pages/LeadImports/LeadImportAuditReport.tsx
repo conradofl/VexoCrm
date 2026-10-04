@@ -26,6 +26,14 @@ const PAGE_SIZE = 50;
 
 type SortKey = "nome" | "telefone" | "status" | "tentativas" | "retorno" | "tempo";
 
+import {
+  DELIVERY_STATE_LABELS,
+  computeImportAuditStats,
+  legacyTrackingNotice,
+  type DeliveryState,
+  type LegacyDispatchCampaign,
+} from "@/lib/importAudit";
+
 // Vocabulário de status de UMA tentativa de envio (campaign_dispatch_runs),
 // diferente do status da CAMPANHA (CampaignStatus, em useCampanhas.ts) —
 // misturar os dois é o motivo do enum cru (ex.: "invalid_number") vazar na
@@ -50,6 +58,14 @@ const RUN_STATUS_COLORS: Record<RunStatus, string> = {
   invalid_number: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
 };
 
+const DELIVERY_STATE_COLORS: Record<DeliveryState, string> = {
+  sem_telefone_valido: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+  enviado_por_esta_planilha: "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400",
+  enviado_por_outra_campanha: "border-sky-300 bg-sky-50 text-sky-600 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-400",
+  falhou: "border-rose-300 bg-rose-50 text-rose-600 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+  pendente: "border-slate-300 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400",
+};
+
 // Sub-component for auditing lead imports and creating follow-up cohorts
 interface AuditItem {
   lead_import_item_id: string;
@@ -60,7 +76,15 @@ interface AuditItem {
   row_number: number;
   imported: boolean;
   skip_reason: string | null;
+  /** quantas tentativas de envio ESTE TELEFONE teve (de qualquer campanha do tenant) */
   dispatch_count: number;
+  /** estado da linha, calculado pelo servidor por telefone canônico */
+  delivery_state: DeliveryState;
+  /** se o telefone repete o de uma linha anterior da planilha, o número dessa linha */
+  duplicate_of_row?: number | null;
+  sent_count?: number;
+  sent_by_import_count?: number;
+  sent_by_other_count?: number;
   last_sent_at: string | null;
   last_attempt_at: string | null;
   last_status: string | null;
@@ -82,6 +106,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
   const { getIdToken } = useAuth();
   const [selectedImportId, setSelectedImportId] = useState<string>("");
   const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
+  const [legacyCampaigns, setLegacyCampaigns] = useState<LegacyDispatchCampaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState<"all" | "failed" | "replied">("all");
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
@@ -95,6 +120,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
   useEffect(() => {
     setSelectedImportId("");
     setAuditItems([]);
+    setLegacyCampaigns([]);
     setSelectedItemIds(new Set());
     setSearchTerm("");
     setActiveFilter("all");
@@ -189,6 +215,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
         const data = await res.json();
         if (isMounted) {
           setAuditItems(data.items || []);
+          setLegacyCampaigns(Array.isArray(data.legacy_dispatch_campaigns) ? data.legacy_dispatch_campaigns : []);
           setSelectedItemIds(new Set());
         }
       } catch (err) {
@@ -251,14 +278,14 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
       .sort((a, b) => b.count - a.count);
   }, [auditItems]);
 
+  // Os números, cada um rotulado pelo que conta (ver lib/importAudit.ts). `problems` = linhas com algum motivo
+  // (descartada ou falha de envio), para o painel "Por que falhou".
   const stats = useMemo(() => {
-    const total = auditItems.length;
-    const failed = reasonGroups.reduce((sum, g) => sum + g.count, 0);
-    const replied = auditItems.filter((i) => i.has_replied).length;
-    const sent = auditItems.filter((i) => i.last_status === "sent").length;
-    const pending = auditItems.filter((i) => !i.last_status || i.last_status === "pending" || i.last_status === "claimed").length;
-    return { total, failed, replied, sent, pending };
+    const base = computeImportAuditStats(auditItems);
+    const problems = reasonGroups.reduce((sum, g) => sum + g.count, 0);
+    return { ...base, problems };
   }, [auditItems, reasonGroups]);
+  const legacyNotice = legacyTrackingNotice(legacyCampaigns);
 
   // Ordenação — cliente, sobre a lista já filtrada/já carregada. Sem
   // endpoint novo: os dados já estão todos na memória.
@@ -281,7 +308,7 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
       case "telefone":
         return item.telefone || "";
       case "status":
-        return item.last_status && item.last_status in RUN_STATUS_LABELS ? RUN_STATUS_LABELS[item.last_status as RunStatus] : "Pendente";
+        return DELIVERY_STATE_LABELS[item.delivery_state] ?? "Ainda vai receber";
       case "tentativas":
         return item.dispatch_count || 0;
       case "retorno":
@@ -466,14 +493,52 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
             </div>
           ) : (
             <>
-              {/* ── Os cinco números DESTA planilha — não do tenant/período.
-                  Troca de planilha, troca o número. ────────────────────── */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 bg-slate-50/50 dark:bg-black/20 p-3 rounded-2xl border border-slate-200/60 dark:border-white/5">
-                <PlanilhaStatCard label="Total de leads" value={stats.total} className="text-slate-800 dark:text-slate-100" />
-                <PlanilhaStatCard label="Enviados" value={stats.sent} className="text-emerald-600 dark:text-emerald-400" />
-                <PlanilhaStatCard label="Falhas" value={stats.failed} className="text-rose-600 dark:text-rose-400" />
-                <PlanilhaStatCard label="Com retorno (14d)" value={stats.replied} className="text-indigo-600 dark:text-indigo-400" />
-                <PlanilhaStatCard label="Pendentes" value={stats.pending} className="text-slate-700 dark:text-slate-200" />
+              {/* ── Aviso: campanha desta planilha disparada pelo caminho antigo (não registra envios) ── */}
+              {legacyNotice && (
+                <div
+                  role="alert"
+                  data-testid="audit-legacy-notice"
+                  className="flex items-start gap-2 rounded-2xl border border-amber-300/60 bg-amber-50 p-3.5 text-xs text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/20 dark:text-amber-200"
+                >
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <span>{legacyNotice}</span>
+                </div>
+              )}
+
+              {/* ── O ARQUIVO: linhas, contatos válidos, descartadas. Cada número diz o que conta, e a soma fecha. ── */}
+              <div data-testid="audit-file-numbers" className="space-y-2 bg-slate-50/50 dark:bg-black/20 p-3 rounded-2xl border border-slate-200/60 dark:border-white/5">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <PlanilhaStatCard label="Linhas do arquivo" value={stats.fileRows} className="text-slate-800 dark:text-slate-100" testId="stat-file-rows" />
+                  <PlanilhaStatCard label="Contatos válidos (telefones únicos)" value={stats.validContacts} className="text-slate-800 dark:text-slate-100" testId="stat-valid-contacts" />
+                  <PlanilhaStatCard label="Linhas descartadas" value={stats.discardedRows} className="text-rose-600 dark:text-rose-400" testId="stat-discarded-rows" />
+                </div>
+                <p data-testid="audit-file-sum" className="text-[11px] text-muted-foreground">
+                  {stats.fileRows} {stats.fileRows === 1 ? "linha" : "linhas"} = {stats.validContacts} {stats.validContacts === 1 ? "contato válido" : "contatos válidos"} +{" "}
+                  {stats.repeatedRows} {stats.repeatedRows === 1 ? "repetida (mesmo telefone de outra linha)" : "repetidas (mesmo telefone de outra linha)"} + {stats.discardedRows}{" "}
+                  {stats.discardedRows === 1 ? "descartada" : "descartadas"}
+                  {stats.discardedByReason.length > 0 && (
+                    <span data-testid="audit-discard-reasons"> — {stats.discardedByReason.map((d) => `${d.count} × ${d.reason}`).join("; ")}</span>
+                  )}
+                  .
+                </p>
+              </div>
+
+              {/* ── Os CONTATOS: o que cada telefone válido recebeu. "Receberam" = o TELEFONE recebeu mensagem. ── */}
+              <div data-testid="audit-contact-numbers" className="space-y-2 bg-slate-50/50 dark:bg-black/20 p-3 rounded-2xl border border-slate-200/60 dark:border-white/5">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <PlanilhaStatCard label="Receberam mensagem" value={stats.received} className="text-emerald-600 dark:text-emerald-400" testId="stat-received" />
+                  <PlanilhaStatCard label="Falharam" value={stats.failed} className="text-rose-600 dark:text-rose-400" testId="stat-failed" />
+                  <PlanilhaStatCard label="Ainda vão receber" value={stats.pending} className="text-slate-700 dark:text-slate-200" testId="stat-pending" />
+                  <PlanilhaStatCard label="Com retorno (14d após um envio)" value={stats.replied} className="text-indigo-600 dark:text-indigo-400" testId="stat-replied" />
+                </div>
+                <p data-testid="audit-contact-sum" className="text-[11px] text-muted-foreground">
+                  {stats.validContacts} {stats.validContacts === 1 ? "contato" : "contatos"} = {stats.received} receberam ({stats.receivedByThisImport} por campanha desta planilha +{" "}
+                  {stats.receivedByOther} por outra campanha) + {stats.failed} falharam + {stats.pending} ainda vão receber.
+                </p>
+                <p data-testid="audit-meaning-note" className="text-[11px] text-muted-foreground">
+                  "Receberam" conta telefones que receberam mensagem de qualquer campanha — não quer dizer que esta planilha disparou para eles. Um contato que está em duas planilhas
+                  aparece como recebido nas duas, porque recebeu.
+                </p>
               </div>
 
               {/* ── Por que falhou — o motivo desta tela existir. Cada linha é
@@ -483,10 +548,10 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
                       <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
-                      Por que falhou
+                      Linhas com problema (descartadas e falhas de envio)
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {stats.failed} de {stats.total} {stats.total === 1 ? "lead" : "leads"} falharam
+                      {stats.problems} de {stats.fileRows} {stats.fileRows === 1 ? "linha" : "linhas"} do arquivo com problema
                     </p>
                   </div>
                   <div className="space-y-1">
@@ -596,8 +661,8 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                         <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Linha</TableHead>
                         <SortableTableHead sortKey="nome" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Nome</SortableTableHead>
                         <SortableTableHead sortKey="telefone" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Telefone</SortableTableHead>
-                        <SortableTableHead sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Último Status</SortableTableHead>
-                        <SortableTableHead sortKey="tentativas" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Tentativas</SortableTableHead>
+                        <SortableTableHead sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} center title="O que ESTE TELEFONE recebeu (de qualquer campanha), não só desta planilha">Situação do telefone</SortableTableHead>
+                        <SortableTableHead sortKey="tentativas" activeKey={sortKey} dir={sortDir} onSort={handleSort} center title="Tentativas de envio para este telefone, de qualquer campanha">Tentativas (telefone)</SortableTableHead>
                         <SortableTableHead
                           sortKey="retorno"
                           activeKey={sortKey}
@@ -654,12 +719,16 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
                               {item.telefone}
                             </TableCell>
                             <TableCell className="py-2 text-center">
-                              {item.last_status && item.last_status in RUN_STATUS_LABELS ? (
-                                <Badge className={cn("border text-[9px] font-bold rounded-lg px-2 py-0.25", RUN_STATUS_COLORS[item.last_status as RunStatus])}>
-                                  {RUN_STATUS_LABELS[item.last_status as RunStatus]}
-                                </Badge>
-                              ) : (
-                                <span className="text-[10px] text-slate-400">Pendente</span>
+                              <Badge
+                                data-testid={`row-state-${item.row_number}`}
+                                className={cn("border text-[9px] font-bold rounded-lg px-2 py-0.25", DELIVERY_STATE_COLORS[item.delivery_state] ?? DELIVERY_STATE_COLORS.pendente)}
+                              >
+                                {DELIVERY_STATE_LABELS[item.delivery_state] ?? DELIVERY_STATE_LABELS.pendente}
+                              </Badge>
+                              {item.duplicate_of_row != null && (
+                                <span data-testid={`row-repeated-${item.row_number}`} className="mt-0.5 block text-[9px] text-muted-foreground">
+                                  Repete a linha {item.duplicate_of_row}
+                                </span>
                               )}
                             </TableCell>
                             <TableCell className="py-2 text-center font-bold">
@@ -730,11 +799,11 @@ export function LeadImportAuditReport({ activeClientId, imports, onSelectImportF
   );
 }
 
-function PlanilhaStatCard({ label, value, className }: { label: string; value: number; className?: string }) {
+function PlanilhaStatCard({ label, value, className, testId }: { label: string; value: number; className?: string; testId?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center p-2 rounded-xl border border-transparent text-center">
+    <div className="flex flex-col items-center justify-center p-2 rounded-xl border border-transparent text-center" data-testid={testId}>
       <span className="text-[10px] font-bold text-slate-400 uppercase">{label}</span>
-      <span className={cn("text-base font-bold", className)}>{value}</span>
+      <span data-testid={testId ? `${testId}-value` : undefined} className={cn("text-base font-bold", className)}>{value}</span>
     </div>
   );
 }
