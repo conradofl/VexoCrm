@@ -179,10 +179,8 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
   const [availableTerms, setAvailableTerms] = useState<PaymentTerm[]>([]);
   const [offeredTermIds, setOfferedTermIds] = useState<string[]>([]);
   // Formas fixas de pagamento (Pix/cartão) marcadas nesta proposta.
-  // Corpo do card: preview por padrão, formulário só quando pedido.
+  // O formulário de edição só aparece quando pedido.
   const [showConfig, setShowConfig] = useState<boolean>(false);
-  // Muda para forçar o iframe do preview a recarregar depois de salvar.
-  const [previewNonce, setPreviewNonce] = useState<number>(0);
 
   // Mesa de negociação
 
@@ -998,8 +996,7 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
           setSelectedProposal(prev => prev ? { ...prev, presentation_slides: built.slides } : prev);
         }
         loadProposals(proposalId);
-        // Recarrega o preview e volta para ele: salvar é o fim da edição.
-        setPreviewNonce((n) => n + 1);
+        // Salvar é o fim da edição: fecha o formulário.
         setShowConfig(false);
       }
     } catch (err: any) {
@@ -1570,10 +1567,22 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                       Resumo da Proposta Comercial
                     </CardTitle>
                     <CardDescription className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Exatamente o que o cliente vê. Use "Editar Proposta" para ajustar valores, escopo e condições.
+                      Para conferir como o cliente vê, use "Abrir Proposta". Use "Editar Proposta" para ajustar valores, escopo e condições.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-6">
+                    {/* Resumo: os mesmos quatro campos do cartão da lateral (cliente, estado, valor, data) */}
+                    <dl data-testid="proposal-summary" className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                      {proposalFields.map((f) => (
+                        <div key={f.key} className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{f.label}</dt>
+                          <dd data-field={f.key} className="truncate text-sm font-bold text-slate-800 dark:text-slate-100">
+                            {f.render(selectedProposal)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+
                     {/* Ações contextuais internas da Proposta */}
                     <div className="flex flex-wrap items-center gap-2 pb-4 border-b border-slate-150 dark:border-white/5">
                       <Button
@@ -1627,20 +1636,6 @@ export default function GeracaoDigitalProposals({ isVexoCommercial = false }: Ge
                         Enviar ao Cliente
                       </Button>
                     </div>
-
-                    {/* Preview: a MESMA página que o cliente recebe, embutida.
-                        Evita um segundo render da proposta que divergiria com o
-                        tempo — o preview não pode virar outra fonte de verdade. */}
-                    {!showConfig && (
-                      <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-white/10 bg-slate-950">
-                        <iframe
-                          key={`${selectedProposal.id}-${previewNonce}`}
-                          src={`/proposta/${selectedProposal.id}?embed=1`}
-                          title="Pré-visualização da proposta"
-                          className="w-full h-[70vh] block"
-                        />
-                      </div>
-                    )}
 
                     {/* Configuração da Proposta — o MESMO formulário de "Nova Proposta" */}
                     {showConfig && selectedProposal.status !== "aceita" && (

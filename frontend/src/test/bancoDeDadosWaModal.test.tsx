@@ -85,6 +85,12 @@ function renderPage() {
   );
 }
 
+// "Extrair" é um menu com as três formas de trazer contato de fora; aqui abrimos a do WhatsApp
+async function openExtractOption(testId: string) {
+  fireEvent.keyDown(await screen.findByTestId("btn-extract-menu"), { key: "Enter" });
+  fireEvent.click(await screen.findByTestId(testId));
+}
+
 describe("BancoDeDados WhatsApp Modal (Limite e Paywall)", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -120,8 +126,7 @@ describe("BancoDeDados WhatsApp Modal (Limite e Paywall)", () => {
     renderPage();
 
     // Abre o modal de mineração WA
-    const openBtn = await screen.findByRole("button", { name: /Extrair do WhatsApp/i });
-    fireEvent.click(openBtn);
+    await openExtractOption("extract-whatsapp");
 
     // Modal está aberto
     await screen.findByText("Mineração Semântica via WhatsApp");
@@ -138,8 +143,7 @@ describe("BancoDeDados WhatsApp Modal (Limite e Paywall)", () => {
     currentPlanTier = "essencial";
     renderPage();
 
-    const openBtn = await screen.findByRole("button", { name: /Extrair do WhatsApp/i });
-    fireEvent.click(openBtn);
+    await openExtractOption("extract-whatsapp");
 
     // Texto explícito informando o limite do plano essencial
     const notice = await screen.findByTestId("wa-plan-limit-notice");
@@ -151,8 +155,7 @@ describe("BancoDeDados WhatsApp Modal (Limite e Paywall)", () => {
     currentPlanTier = "avancado";
     renderPage();
 
-    const openBtn = await screen.findByRole("button", { name: /Extrair do WhatsApp/i });
-    fireEvent.click(openBtn);
+    await openExtractOption("extract-whatsapp");
 
     await screen.findByText("Mineração Semântica via WhatsApp");
     // Trava do essencial NÃO aparece para plano avançado

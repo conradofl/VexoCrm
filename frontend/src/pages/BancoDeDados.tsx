@@ -19,7 +19,6 @@ import {
   Snowflake,
   Settings,
   Rocket,
-  CalendarClock,
   Trash2,
   Tag as TagIcon,
   X,
@@ -73,7 +72,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { LeadBulkActions } from "@/components/leads/LeadBulkActions";
+import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
 import { MARKETING_CHANNELS, computeMarketingMetrics, getLeadMarketingChannelId, getLeadSource } from "@/lib/leadChannels";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import {
@@ -2278,137 +2277,26 @@ export default function BancoDeDados() {
           title="Banco de Dados Inteligente"
           subtitle="Vexo Lead Intelligence & Extrator de Contatos com Inteligência Semântica via WhatsApp"
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fetchLeads()}
-              disabled={loading}
-              className="gap-2 text-xs"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              Atualizar
-            </Button>
-
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setIsWAModalOpen(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs"
-            >
-              <MessageCircle className="w-3.5 h-3.5" />
-              Extrair do WhatsApp (QR Code)
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setAiStep(1);
-                setIsAIImportModalOpen(true);
-              }}
-              className="gap-1.5 text-xs rounded-xl border-purple-500/30 bg-purple-500/5 text-purple-700 dark:text-purple-300 hover:bg-purple-500/15 font-semibold"
-            >
-              <Bot className="w-3.5 h-3.5 text-purple-500" />
-              Colar Texto Avulso (Chat / E-mail)
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsImportModalOpen(true)}
-              className="gap-2 text-xs"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Importar Planilha (.xlsx/.csv)
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="btn-import-instagram"
-              onClick={() => setIsInstagramImportModalOpen(true)}
-              className="gap-2 text-xs border-pink-500/30 bg-pink-500/5 text-pink-700 dark:text-pink-300 hover:bg-pink-500/15 font-semibold"
-            >
-              <Instagram className="w-3.5 h-3.5 text-pink-500" />
-              Importar do Instagram
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsTicketModalOpen(true)}
-              className="gap-2 text-xs"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              Ticket Médio
-            </Button>
-
-            <LeadBulkActions clientId={clientId} canManage={canMassDelete} />
-
-            {/* Dropdown com opções de exportação XLSX e CSV */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 text-xs">
-                  <Download className="w-3.5 h-3.5" />
-                  Exportar Leads
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleExportXLSX} className="cursor-pointer text-xs gap-2">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  Exportar Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleExportCSV} className="cursor-pointer text-xs gap-2">
-                  <FileText className="w-4 h-4 text-blue-600" />
-                  Exportar CSV (.csv)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleOpenCampaignWizard}
-              className="bg-amber-600 hover:bg-amber-700 text-white gap-2 text-xs"
-            >
-              <Rocket className="w-3.5 h-3.5" />
-              Criar Campanha
-            </Button>
-
-            {selectedLeadIds.length > 0 && (
-              <>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => setIsFollowupModalOpen(true)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs"
-                >
-                  <CalendarClock className="w-3.5 h-3.5" />
-                  Aplicar Follow-up ({selectedLeadIds.length})
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsSingleReminderModalOpen(true)}
-                  className="border-emerald-600/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 gap-1.5 text-xs font-semibold"
-                >
-                  <Clock className="w-3.5 h-3.5 text-emerald-500" />
-                  Lembrete avulso
-                </Button>
-              </>
-            )}
-
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setIsCreateModalOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 text-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Novo Lead
-            </Button>
-          </div>
+          <BancoActionsBar
+            loading={loading}
+            onRefresh={() => fetchLeads()}
+            onExtractWhatsApp={() => setIsWAModalOpen(true)}
+            onImportInstagram={() => setIsInstagramImportModalOpen(true)}
+            onPasteText={() => {
+              setAiStep(1);
+              setIsAIImportModalOpen(true);
+            }}
+            onImportSpreadsheet={() => setIsImportModalOpen(true)}
+            onExportXLSX={handleExportXLSX}
+            onExportCSV={handleExportCSV}
+            onCreateCampaign={handleOpenCampaignWizard}
+            onNewLead={() => setIsCreateModalOpen(true)}
+            selectedCount={selectedLeadIds.length}
+            onApplyFollowup={() => setIsFollowupModalOpen(true)}
+            onSingleReminder={() => setIsSingleReminderModalOpen(true)}
+            clientId={clientId}
+            canManageBulk={canMassDelete}
+          />
         </SectionHeader>
 
         {/* Painel de Atribuição & Origem de Marketing */}
