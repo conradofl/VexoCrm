@@ -32,6 +32,7 @@ import {
   resolveInstanceIdentifier,
 } from "../../services/evolution.js";
 import {
+  countBurstSteps,
   dispatchCampaignSequence,
   getCampaignStepPlan,
   normalizeCampaignAnalyticsMeta,
@@ -61,6 +62,7 @@ import {
 import { getDateKey } from "../../services/analytics.js";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../../services/canonicalPhone.js";
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
+import { QUOTA_PAUSE_MARKER, createChipQuotaGate, findInstanceByWebhookUrl } from "../../services/campaignQuotaGate.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
@@ -489,9 +491,11 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       const clientName = await getClientName(clientId);
+      const quotaGate = await buildQuotaGateForWebhook(clientId, webhookUrl);
       const { summary } = await dispatchCampaignSequence({
         webhookUrl,
         webhookToken,
+        quotaGate,
         leads,
         analyticsMeta: validation.analyticsMeta,
         context: {
@@ -512,6 +516,32 @@ export function registerCampaignsRoutes(app, deps) {
           },
         },
       });
+
+      if (quotaGate.unidentifiedMessages > 0) {
+        console.warn("[campaign-quota] mensagens enviadas sem cota (chip não identificado):", {
+          clientId,
+          mode: "legacy_manual_dispatch",
+          mensagens: quotaGate.unidentifiedMessages,
+          origemDoWebhook: dispatchSettings.source || null,
+        });
+      }
+
+      if (summary.allChipsExhausted) {
+        sendError(
+          res,
+          429,
+          "CHIP_QUOTA_EXHAUSTED",
+          summary.exhaustedQuotaMessage || "Cota diária do chip atingida. Retoma amanhã.",
+          {
+            total: leads.length,
+            successCount: summary.successCount,
+            failureCount: summary.failureCount,
+            successPhones: summary.successPhones,
+            failures: summary.failures,
+          }
+        );
+        return;
+      }
 
       res.json({
         success: true,
@@ -840,9 +870,11 @@ export function registerCampaignsRoutes(app, deps) {
         settingsSource: dispatchSettings.source,
       });
 
+      const quotaGate = await buildQuotaGateForWebhook(clientId, webhookUrl);
       const { summary } = await dispatchCampaignSequence({
         webhookUrl,
         webhookToken,
+        quotaGate,
         leads: [{ telefone: phone }],
         analyticsMeta: {
           sequence,
@@ -881,6 +913,26 @@ export function registerCampaignsRoutes(app, deps) {
           }
           : null,
       });
+
+      if (quotaGate.unidentifiedMessages > 0) {
+        logDirectDispatch("warn", "quota_unidentified_chip", {
+          requestId,
+          clientId,
+          mensagens: quotaGate.unidentifiedMessages,
+          origemDoWebhook: dispatchSettings.source || null,
+        });
+      }
+
+      if (summary.allChipsExhausted) {
+        sendError(
+          res,
+          429,
+          "CHIP_QUOTA_EXHAUSTED",
+          summary.exhaustedQuotaMessage || "Cota diária do chip atingida. Retoma amanhã.",
+          { requestId, settingsSource: dispatchSettings.source }
+        );
+        return;
+      }
 
       if (summary.successCount <= 0) {
         const firstReason = summary.failures[0]?.reason;
@@ -1659,10 +1711,11 @@ export function registerCampaignsRoutes(app, deps) {
       const results = [];
       for (const dispatch of dispatches) {
         try {
+          let resumingFromQuota = false;
           if (dispatch.status === "paused") {
             const errMsg = String(dispatch.error_message || "");
             const isSendWindowPause = errMsg.includes("fora da janela de envio");
-            const isQuotaPause = errMsg.includes("cota diária do chip atingida");
+            const isQuotaPause = errMsg.includes(QUOTA_PAUSE_MARKER);
 
             if (!isSendWindowPause && !isQuotaPause) {
               continue;
@@ -1676,21 +1729,7 @@ export function registerCampaignsRoutes(app, deps) {
               continue;
             }
 
-            // Se estava pausado por cota, verifica se o chip já tem cota disponível hoje no timezone do tenant
-            if (isQuotaPause) {
-              const tenantTimezone = sendWindowConfig.timezone || "America/Sao_Paulo";
-              const todayDateKey = getDateKey(new Date(), tenantTimezone);
-              const tenantInstances = await getLeadClientEvolutionInstances(dispatch.client_id);
-              const targetInst = (tenantInstances || []).find((i) => i.id === dispatch.evolution_instance_id) || tenantInstances?.[0];
-              if (targetInst) {
-                const limit = resolveEvolutionInstanceDailyLimit(targetInst);
-                const currentUsage = await getEvolutionInstanceDailyUsage(targetInst.id, todayDateKey);
-                if (currentUsage >= limit) {
-                  // Cota de hoje ainda está esgotada, continua aguardando o dia seguinte
-                  continue;
-                }
-              }
-            }
+            resumingFromQuota = isQuotaPause;
           } else {
             const tenantSettings = await getLeadClientN8nSettings(dispatch.client_id);
             const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
@@ -1710,6 +1749,31 @@ export function registerCampaignsRoutes(app, deps) {
 
           if (campErr || !campaign) {
             throw new Error(campErr?.message || "Campaign not found");
+          }
+
+          // Lote pausado por cota: só retoma quando o chip que ENVIA (o dono do webhook deste lote, o mesmo que o
+          // runCampaignDispatch usa) tem cota hoje para o próximo lead inteiro (todas as mensagens dele). Sem isso o
+          // lote voltaria a rodar e pausaria de novo no mesmo dia, a cada tick de 30s.
+          if (resumingFromQuota) {
+            const sendingInstance = await resolveSendingInstance({ clientId: dispatch.client_id, campaign, dispatch });
+            if (sendingInstance) {
+              const tenantSettings = await getLeadClientN8nSettings(dispatch.client_id);
+              const tenantTimezone = resolveSendWindowConfig(tenantSettings).timezone || "America/Sao_Paulo";
+              const limit = resolveEvolutionInstanceDailyLimit(sendingInstance);
+              const currentUsage = await getEvolutionInstanceDailyUsage(sendingInstance.id, getDateKey(new Date(), tenantTimezone));
+              // as mesmas mensagens que o runCampaignDispatch enviaria por lead (mesma regra de plano de passos)
+              const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+              const plan = getCampaignStepPlan({
+                ...campaignMeta,
+                sequence: Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : campaignMeta.sequence,
+              });
+              const passos = plan.shouldUseReplyFlow && plan.immediateSteps.length > 0 ? plan.immediateSteps : plan.enabledSteps;
+              const needed = Math.max(countBurstSteps(passos), 1);
+              if (currentUsage + needed > limit) {
+                // a cota de hoje ainda não comporta o próximo lead: continua pausado até o dia seguinte
+                continue;
+              }
+            }
           }
 
           // CLAIM ATOMICO DO DISPARO
@@ -1861,6 +1925,45 @@ export function registerCampaignsRoutes(app, deps) {
 
 
 
+  // Meta de campanha com o chip do LOTE por cima (o do lote vence o da campanha). É o que resolveCampaignDispatchSettings
+  // lê para decidir o webhook de envio — runCampaignDispatch e o agendador usam a mesma função, para olharem o MESMO chip.
+  function buildDispatchCampaignMeta(campaign, dispatch) {
+    const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+    const dispatchEvolutionInstanceId = normalizeString(dispatch.evolution_instance_id);
+    return dispatchEvolutionInstanceId
+      ? {
+          ...campaignMeta,
+          dispatchOptions: { ...campaignMeta.dispatchOptions, evolutionInstanceId: dispatchEvolutionInstanceId },
+        }
+      : campaignMeta;
+  }
+
+  // A linha da instância dona do webhook com que este lote envia (ou null se o webhook não é de instância cadastrada).
+  async function resolveSendingInstance({ clientId, campaign, dispatch }) {
+    const dispatchSettings = await resolveCampaignDispatchSettings(clientId, {
+      ...campaign,
+      analytics_meta: buildDispatchCampaignMeta(campaign, dispatch),
+    });
+    const chipId = chipIdFromDispatchSettings(dispatchSettings);
+    if (!chipId) return null;
+    const instances = await getLeadClientEvolutionInstances(clientId);
+    return (instances || []).find((i) => String(i.id).toLowerCase() === chipId) || null;
+  }
+
+  // Portão de cota para os disparos que só têm a URL do webhook (envio manual e direto): o chip é a instância
+  // cadastrada cujo webhook é EXATAMENTE essa URL; sem correspondência, não identificado (segue sem cota, registrado).
+  async function buildQuotaGateForWebhook(clientId, webhookUrl) {
+    let chip = null;
+    let timezone = "America/Sao_Paulo";
+    try {
+      chip = findInstanceByWebhookUrl(await getLeadClientEvolutionInstances(clientId), webhookUrl);
+      timezone = resolveSendWindowConfig((await getLeadClientN8nSettings(clientId)) || {}).timezone || timezone;
+    } catch (err) {
+      console.warn("[campaign-quota] não foi possível resolver o chip do webhook:", err?.message || err);
+    }
+    return createChipQuotaGate({ chip, timezone, pool: pgDatabasePool });
+  }
+
   // ── Defeito A: elegibilidade idempotente por disparo ────────────────────────
   // Estende campaign_dispatch_runs (tabela equivalente já existente) com claim por
   // lead. Memoizado: ALTER/CREATE rodam UMA vez por processo, nunca no caminho
@@ -1922,15 +2025,7 @@ export function registerCampaignsRoutes(app, deps) {
     const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
     const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
     const dispatchEvolutionInstanceId = normalizeString(dispatch.evolution_instance_id);
-    const dispatchCampaignMeta = dispatchEvolutionInstanceId
-      ? {
-          ...campaignMeta,
-          dispatchOptions: {
-            ...campaignMeta.dispatchOptions,
-            evolutionInstanceId: dispatchEvolutionInstanceId,
-          },
-        }
-      : campaignMeta;
+    const dispatchCampaignMeta = buildDispatchCampaignMeta(campaign, dispatch);
     const steps = dispatchSteps ?? campaignMeta.sequence;
 
     // Este e o caminho de envio REALMENTE em uso (fila de campaign_dispatches, acionada
@@ -2339,6 +2434,11 @@ export function registerCampaignsRoutes(app, deps) {
     const tenantTimezone = sendWindowConfig.timezone || "America/Sao_Paulo";
     const todayDateKey = getDateKey(new Date(), tenantTimezone);
 
+    // ⚠️ CÓDIGO MORTO (verificado em 04/10/2026): este chipProvider NUNCA é passado ao dispatchCampaignSequence — o
+    // rodízio está desligado e as mensagens de cota daqui (incluindo "cota diária do chip atingida" abaixo) não são a
+    // origem da pausa por cota. A cota que vale é a do portão `quotaGate` (services/campaignQuotaGate.js), aplicado
+    // no chip que de fato envia. Ligar este rodízio é outra decisão (muda quem envia, a variação de texto e pausa o
+    // lote com chip caído no pool). Preservado de propósito; não leia como a origem da cota.
     let rotationCursor = 0;
     const chipProvider =
       rotationPool.length > 0
@@ -2609,9 +2709,16 @@ export function registerCampaignsRoutes(app, deps) {
       return true;
     };
 
+    // Cota diária no chip que de fato envia (o dono do webhook de envio). Reserva 1 unidade por mensagem, antes de enviar.
+    // Webhook que não é de instância cadastrada → chip desconhecido: segue sem cota e o fato é registrado abaixo.
+    const sendingChipId = chipIdFromDispatchSettings(dispatchSettings);
+    const sendingChip = sendingChipId ? tenantInstances.find((i) => String(i.id).toLowerCase() === sendingChipId) || null : null;
+    const quotaGate = createChipQuotaGate({ chip: sendingChip, timezone: tenantTimezone, pool: pgDatabasePool });
+
     const result = await dispatchCampaignSequence({
       webhookUrl,
       webhookToken,
+      quotaGate,
       leads: validLeads,
       analyticsMeta: usaFluxoDeResposta
         ? {
@@ -2739,6 +2846,15 @@ export function registerCampaignsRoutes(app, deps) {
     }
     const totalProcessed = totalSent + totalFailed + totalInvalid + totalSkipped;
     const targetCount = Number(dispatch.target_count || 0) || (leads.length + totalProcessed);
+
+    if (quotaGate.unidentifiedMessages > 0) {
+      console.warn("[campaign-quota] mensagens enviadas sem cota (chip não identificado):", {
+        dispatchId,
+        clientId,
+        mensagens: quotaGate.unidentifiedMessages,
+        origemDoWebhook: dispatchSettings.source || null,
+      });
+    }
 
     if (result?.summary?.chipDisconnected) {
       const chipDesc = result.summary.disconnectedChipName || "WhatsApp";
@@ -4737,6 +4853,7 @@ export function registerCampaignsRoutes(app, deps) {
 
   return {
     runCampaignDispatch,
+    runDueIndependentDispatches,
     buildStepOptionsContext,
   };
 }

@@ -800,6 +800,28 @@ export function evaluateLeadSequenceRetention(sequence, lead, phone = "", option
   };
 }
 
+/**
+ * A regra única da rajada: este passo NÃO sai agora? Um passo 'after_reply' (que só sai depois da resposta do lead) encerra
+ * a rajada inicial, exceto o primeiro passo e exceto num disparo pós-resposta (isReplyTrigger). O laço de envio e a conta
+ * da cota diária leem ESTA função — uma só condição, para a reserva nunca divergir do que realmente sai.
+ */
+export function endsBurst(stepIndex, step, isReplyTrigger = false) {
+  return stepIndex > 0 && step?.triggerMode === "after_reply" && !isReplyTrigger;
+}
+
+/**
+ * Quantas mensagens o envio deste lead vai tentar agora (os passos até a rajada terminar). É a quantidade que a cota
+ * diária reserva ANTES de enviar (1 por mensagem).
+ */
+export function countBurstSteps(enabledSteps, isReplyTrigger = false) {
+  let count = 0;
+  for (let i = 0; i < enabledSteps.length; i += 1) {
+    if (endsBurst(i, enabledSteps[i], isReplyTrigger)) break;
+    count += 1;
+  }
+  return count;
+}
+
 export async function dispatchCampaignSequence({
   webhookUrl,
   webhookToken = null,
@@ -815,6 +837,7 @@ export async function dispatchCampaignSequence({
   onLeadClaimRollback = null,
   onLeadFailed = null,
   onLeadCheckOptout = null,
+  quotaGate = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -917,11 +940,47 @@ export async function dispatchCampaignSequence({
       leadWebhookToken = activeChip.webhookToken ?? null;
     }
 
+    // Cota diária do chip que envia: reserva 1 unidade por MENSAGEM deste lead antes de reivindicar/enviar. Esgotada, o
+    // lote pausa AQUI (antes do claim, então nenhum lead fica meio enviado); chip não identificado segue sem cota.
+    let quotaReservation = null;
+    let quotaReservedCount = 0;
+    let quotaSentCount = 0;
+    const releaseUnusedQuota = async () => {
+      const reservation = quotaReservation;
+      quotaReservation = null;
+      const unused = quotaReservedCount - quotaSentCount;
+      if (reservation && unused > 0) {
+        try {
+          await reservation.release(unused);
+        } catch {
+          /* devolução de cota é best-effort */
+        }
+      }
+    };
+    if (quotaGate && typeof quotaGate.reserve === "function") {
+      const burst = countBurstSteps(enabledSteps, Boolean(context?.isReplyTrigger));
+      const reservation = await quotaGate.reserve(burst);
+      if (reservation.status === "exhausted") {
+        summary.allChipsExhausted = true;
+        summary.exhaustedChipName = reservation.chipName || null;
+        summary.limitQuota = reservation.limitQuota ?? null;
+        summary.usedQuota = reservation.usedQuota ?? null;
+        summary.exhaustedQuotaMessage = reservation.message || null;
+        summary.paused = true;
+        break;
+      }
+      if (reservation.status === "reserved") {
+        quotaReservation = reservation;
+        quotaReservedCount = burst;
+      }
+    }
+
     // Defeito A: claim idempotente imediatamente ANTES do envio (chip já reservado).
     // Se o lead já foi tocado neste disparo, pula — e devolve a cota reservada do chip.
     if (typeof onLeadClaim === "function") {
       const claimed = await onLeadClaim({ lead, phone, leadIndex });
       if (!claimed) {
+        await releaseUnusedQuota();
         if (activeChip && typeof activeChip.release === "function") {
           try {
             await activeChip.release();
@@ -944,7 +1003,8 @@ export async function dispatchCampaignSequence({
       const step = enabledSteps[stepIndex];
 
       // Se for um passo 'after_reply' e NÃO estiver em disparo pós-resposta ativo, interrompe a rajada inicial neste lead!
-      if (stepIndex > 0 && step.triggerMode === "after_reply" && !context?.isReplyTrigger) {
+      // (a mesma regra que a cota usa para saber quantas mensagens reservar: endsBurst)
+      if (endsBurst(stepIndex, step, Boolean(context?.isReplyTrigger))) {
         break;
       }
 
@@ -985,6 +1045,7 @@ export async function dispatchCampaignSequence({
       try {
         const sentAt = new Date().toISOString();
         await postEvolutionPayload(leadWebhookUrl, leadWebhookToken, payload);
+        quotaSentCount += 1;
         leadSentAnything = true;
         lastSuccessfulStep = step;
         lastSuccessfulStepIndex = stepIndex;
@@ -1095,6 +1156,9 @@ export async function dispatchCampaignSequence({
         await sleep(stepDelaySeconds * 1000);
       }
     }
+
+    // devolve a cota das mensagens que NÃO saíram (falha de envio, passo cortado, lote pausado no meio do lead)
+    await releaseUnusedQuota();
 
     if (summary.paused) break;
 

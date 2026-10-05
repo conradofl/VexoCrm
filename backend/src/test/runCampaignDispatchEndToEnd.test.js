@@ -164,6 +164,7 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
     const claimedLeads = [];
     const finalizedSent = [];
     const finalizedChips = [];
+    const quotaReserved = [];
 
     const mockPool = {
       query: vi.fn().mockImplementation(async (sql, params) => {
@@ -202,6 +203,10 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
               { id: "lead-2", nome: "Bruno", telefone: "5511999990002", client_id: "tenant-e2e" },
             ],
           };
+        }
+        if (sqlStr.includes("INSERT INTO public.evolution_instance_daily_usage")) {
+          quotaReserved.push(params[2]); // mensagens reservadas (cota por mensagem)
+          return { rows: [{ sent_count: quotaReserved.reduce((a, b) => a + b, 0) }] };
         }
         if (sqlStr.includes("INSERT INTO public.campaign_dispatch_runs")) {
           claimedLeads.push(params[3]);
@@ -246,7 +251,7 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
       supabase: mockSupabase,
     });
 
-    return { finalizedSent, finalizedChips, dispatchesTable, dispatchId };
+    return { finalizedSent, finalizedChips, quotaReserved, dispatchesTable, dispatchId };
   }
 
 
