@@ -25,14 +25,15 @@ import { parseDashboardPeriodRequest } from "../../services/dashboardPeriod.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
-// Envios por dia e por chip (aba Saúde dos chips, card do Dashboard). instance_id do uso é TEXT (chipQuota.js).
+// Envios por dia e por chip (aba Saúde dos chips, card do Dashboard). Cast dos dois lados: funciona com instance_id do
+// uso em uuid (schema antigo) ou em text (convertido).
 export const EVOLUTION_USAGE_REPORT_SQL = `
   SELECT u.date::text                         AS dia,
          u.instance_id::text                  AS chip_id,
          COALESCE(i.name, u.instance_id::text) AS chip_label,
          SUM(u.sent_count)::int               AS enviados
   FROM public.evolution_instance_daily_usage u
-  JOIN public.lead_client_evolution_instances i ON i.id::text = u.instance_id
+  JOIN public.lead_client_evolution_instances i ON i.id::text = u.instance_id::text
   WHERE i.client_id = $1
     AND u.date >= (CURRENT_DATE - ($2::int - 1))
   GROUP BY u.date, u.instance_id, i.name

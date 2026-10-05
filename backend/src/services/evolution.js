@@ -226,7 +226,8 @@ export const SQL_TENANT_TODAY = `(now() AT TIME ZONE COALESCE(
     LIMIT 1),
   'America/Sao_Paulo'))::date`;
 
-// scope: "one" ($1 = clientId) ou "many" ($1 = clientIds[]). instance_id do uso é TEXT: compara com i.id::text.
+// scope: "one" ($1 = clientId) ou "many" ($1 = clientIds[]). Cast dos DOIS lados: a consulta funciona com instance_id do uso
+// em uuid (schema antigo) ou em text (convertido). Código que depende de migration não pode quebrar no estado antigo.
 export function buildEvolutionInstancesSql(scope) {
   const where = scope === "many" ? "i.client_id = ANY($1::text[])" : "i.client_id = $1";
   return `
@@ -237,7 +238,7 @@ export function buildEvolutionInstancesSql(scope) {
                COALESCE(u.sent_count, 0) AS sent_count_today
         FROM public.lead_client_evolution_instances i
         LEFT JOIN public.evolution_instance_daily_usage u
-          ON u.instance_id = i.id::text AND u.date = ${SQL_TENANT_TODAY}
+          ON u.instance_id::text = i.id::text AND u.date = ${SQL_TENANT_TODAY}
         WHERE ${where}
         ORDER BY i.active DESC, i.is_default DESC, i.created_at ASC
       `;

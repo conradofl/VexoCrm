@@ -959,7 +959,18 @@ export async function dispatchCampaignSequence({
     };
     if (quotaGate && typeof quotaGate.reserve === "function") {
       const burst = countBurstSteps(enabledSteps, Boolean(context?.isReplyTrigger));
-      const reservation = await quotaGate.reserve(burst);
+      let reservation;
+      try {
+        reservation = await quotaGate.reserve(burst);
+      } catch (quotaError) {
+        // Nada vindo do contador de cota pode derrubar o disparo do cliente: erro de infraestrutura = segue sem cota.
+        // ("esgotada" NÃO é erro: é um resultado do portão, tratado abaixo.)
+        console.error("[campaign-outbound] falha inesperada no portão de cota; o envio segue sem cota:", {
+          phone: maskOutboundPhone(phone),
+          error: quotaError instanceof Error ? quotaError.message : String(quotaError),
+        });
+        reservation = { status: "unavailable" };
+      }
       if (reservation.status === "exhausted") {
         summary.allChipsExhausted = true;
         summary.exhaustedChipName = reservation.chipName || null;

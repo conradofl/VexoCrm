@@ -526,6 +526,14 @@ export function registerCampaignsRoutes(app, deps) {
         });
       }
 
+      if (quotaGate.unavailableMessages > 0) {
+        console.error("[campaign-quota] mensagens enviadas sem cota (cota indisponível — erro de infraestrutura):", {
+          clientId,
+          mode: "legacy_manual_dispatch",
+          mensagens: quotaGate.unavailableMessages,
+        });
+      }
+
       if (summary.allChipsExhausted) {
         sendError(
           res,
@@ -921,6 +929,10 @@ export function registerCampaignsRoutes(app, deps) {
           mensagens: quotaGate.unidentifiedMessages,
           origemDoWebhook: dispatchSettings.source || null,
         });
+      }
+
+      if (quotaGate.unavailableMessages > 0) {
+        logDirectDispatch("error", "quota_unavailable", { requestId, clientId, mensagens: quotaGate.unavailableMessages });
       }
 
       if (summary.allChipsExhausted) {
@@ -2853,6 +2865,14 @@ export function registerCampaignsRoutes(app, deps) {
         clientId,
         mensagens: quotaGate.unidentifiedMessages,
         origemDoWebhook: dispatchSettings.source || null,
+      });
+    }
+
+    if (quotaGate.unavailableMessages > 0) {
+      console.error("[campaign-quota] mensagens enviadas sem cota (cota indisponível — erro de infraestrutura):", {
+        dispatchId,
+        clientId,
+        mensagens: quotaGate.unavailableMessages,
       });
     }
 

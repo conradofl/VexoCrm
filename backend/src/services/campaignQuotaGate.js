@@ -9,6 +9,11 @@
 // e o fato é registrado (log + contagem em `unidentifiedMessages`; o envio também fica com evolution_instance_id NULL
 // em campaign_dispatch_runs, que o dashboard mostra como "sem chip registrado").
 //
+// Cota que NÃO PODE SER LIDA (banco indisponível, schema fora do esperado, DDL recusado): o envio SEGUE sem cota, com
+// erro registrado e contagem em `unavailableMessages`. Derrubar o disparo do cliente por causa do contador é pior que a
+// falta do contador (a cota não protegeu nada até 04/10/2026; o primeiro deploy dela derrubou a campanha inteira porque
+// o erro de infraestrutura subia sem tratamento). "Esgotada" é outra coisa e continua pausando o lote.
+//
 // Fora de escopo de propósito (04/10/2026): resposta do chatbot, mensagem manual do inbox e envio do módulo GD
 // continuam sem reservar cota. O número da cota, portanto, NÃO é o total de mensagens que o chip manda.
 
@@ -38,13 +43,21 @@ export function findInstanceByWebhookUrl(instances, webhookUrl) {
  *                  ou null quando o chip não é identificado.
  * @param timezone  fuso do tenant (dia da cota = dia do tenant, como no follow-up)
  */
+const UNAVAILABLE_BACKOFF_MS = 60_000;
+
 export function createChipQuotaGate({ chip = null, timezone = "America/Sao_Paulo", pool = null, clock = () => new Date(), logger = console } = {}) {
   let unidentifiedMessages = 0;
+  let unavailableMessages = 0;
   let warned = false;
+  let unavailableUntil = 0; // depois de uma falha de infraestrutura, não insiste a cada lead durante o backoff
 
   return {
     get unidentifiedMessages() {
       return unidentifiedMessages;
+    },
+
+    get unavailableMessages() {
+      return unavailableMessages;
     },
 
     /**
@@ -52,6 +65,7 @@ export function createChipQuotaGate({ chip = null, timezone = "America/Sao_Paulo
      *  - { status: "reserved", release(n) }  → pode enviar; release(n) devolve as n não enviadas
      *  - { status: "exhausted", ... }        → não cabe no dia: não envia, o lote pausa
      *  - { status: "unidentified" }          → chip desconhecido: segue sem cota, registrado
+     *  - { status: "unavailable" }           → a cota não pôde ser lida/gravada: segue sem cota, erro registrado
      */
     async reserve(count) {
       const n = Number.isInteger(count) && count > 0 ? count : 1;
@@ -67,10 +81,25 @@ export function createChipQuotaGate({ chip = null, timezone = "America/Sao_Paulo
 
       const limit = resolveChipDailyLimit(chip);
       const dateKey = getDateKey(clock(), timezone);
-      const reserved = await reserveChipDailyQuota(chip.id, dateKey, pool, n);
-      if (reserved === null) {
-        // contador indisponível: como no follow-up, não envia às cegas
-        throw new Error(`[campaign-quota] falha ao reservar cota para a instância ${chip.id}`);
+
+      if (clock().getTime() < unavailableUntil) {
+        unavailableMessages += n;
+        return { status: "unavailable" };
+      }
+
+      let reserved;
+      try {
+        reserved = await reserveChipDailyQuota(chip.id, dateKey, pool, n);
+        if (reserved === null) throw new Error("contador de cota indisponível (sem banco)");
+      } catch (err) {
+        unavailableUntil = clock().getTime() + UNAVAILABLE_BACKOFF_MS;
+        unavailableMessages += n;
+        logger.error("[campaign-quota] cota indisponível: o envio SEGUE sem cota.", {
+          instanceId: String(chip.id),
+          mensagens: n,
+          error: err?.message || err,
+        });
+        return { status: "unavailable" };
       }
 
       if (reserved > limit) {

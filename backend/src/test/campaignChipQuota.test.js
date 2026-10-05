@@ -113,7 +113,7 @@ const outroChip = () => chipRow({ id: OUTRO_CHIP, name: "Outro Chip", dispatch_w
 const passos = (n) => Array.from({ length: n }, (_, i) => ({ id: `step-${i + 1}`, type: "text", text: `Mensagem ${i + 1} para {{nome}}`, order: i + 1, enabled: true, delayAfterSeconds: 0 }));
 
 /** Monta a rota real de campanhas com o contador de cota em Postgres real. */
-async function mundoDeDisparo({ qdb, nLeads = 2, nPassos = 2, chip: chipInicial = chipRow(), instancias = null, settings = null } = {}) {
+async function mundoDeDisparo({ qdb, nLeads = 2, nPassos = 2, chip: chipInicial = chipRow(), instancias = null, settings = null, falhaNaCota = null } = {}) {
   const atual = { chip: chipInicial }; // o dono pode mudar o chip (ex.: subir o limite) com o lote já pausado
   const estado = { claimed: [], sent: [], sentLeadIds: new Set(), usageQueries: 0, claimBloqueado: new Set() };
   const leads = Array.from({ length: nLeads }, (_, i) => ({ id: `lead-${i + 1}`, nome: `Lead ${i + 1}`, telefone: `551199999${String(1000 + i)}`, client_id: TENANT }));
@@ -132,6 +132,7 @@ async function mundoDeDisparo({ qdb, nLeads = 2, nPassos = 2, chip: chipInicial 
       const t = String(sql);
       if (t.includes("evolution_instance_daily_usage")) {
         estado.usageQueries += 1;
+        if (falhaNaCota) throw new Error(falhaNaCota); // o contador não responde (ex.: a coluna uuid antes da migration)
         return qdb.query(sql, params);
       }
       if (t.includes("INSERT INTO public.campaign_dispatch_runs")) {
@@ -734,4 +735,66 @@ describe("[TESTE OBRIGATÓRIO] a regra de rajada: a cota reserva só o que sai a
     expect(endsBurst(1, passo(2, "after_reply"))).toBe(true);
     expect(endsBurst(1, passo(2, "after_reply"), true)).toBe(false);
   });
+});
+
+describe("[TESTE OBRIGATÓRIO] cota que NÃO PODE SER LIDA não derruba o disparo (o incidente de 05/10/2026)", () => {
+  it("o contador estoura (ex.: 'operator does not exist: uuid = text'): o lote ENVIA tudo, sem cota, com o erro registrado", async () => {
+    const qdb = await bancoDeCota();
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const w = await mundoDeDisparo({ qdb, nLeads: 2, nPassos: 2, falhaNaCota: "operator does not exist: uuid = text" });
+
+    await w.routes.runCampaignDispatch({ dispatch: w.dispatch, campaign: w.campaign, supabase: w.supabase });
+
+    expect(mensagensEnviadas()).toBe(4); // enviou tudo
+    expect(w.estado.sent.map((s) => s.leadId)).toEqual(["lead-1", "lead-2"]);
+    expect(w.dispatch.status).toBe("done"); // não pausou, não falhou
+    const aviso = erro.mock.calls.find((c) => String(c[0]).includes("cota indisponível: o envio SEGUE sem cota"));
+    expect(aviso?.[1]).toMatchObject({ instanceId: CHIP, error: "operator does not exist: uuid = text" });
+    const resumo = erro.mock.calls.find((c) => String(c[0]).includes("mensagens enviadas sem cota (cota indisponível"));
+    expect(resumo?.[1]).toMatchObject({ dispatchId: "disp-1", mensagens: 4 });
+  }, SLOW);
+
+  it("depois de uma falha o portão não insiste a cada lead (backoff) e volta a tentar depois", async () => {
+    const calls = [];
+    const pool = { query: vi.fn(async (sql) => { calls.push(String(sql).slice(0, 20)); throw new Error("banco fora"); }) };
+    let agora = HOJE.getTime();
+    const gate = createChipQuotaGate({ chip: chipRow(), pool, clock: () => new Date(agora), logger: { warn() {}, error() {} } });
+
+    await gate.reserve(2);
+    const tentativasNaPrimeira = pool.query.mock.calls.length;
+    await gate.reserve(2);
+    await gate.reserve(2);
+    expect(pool.query.mock.calls.length).toBe(tentativasNaPrimeira); // dentro do backoff: nenhuma consulta nova
+    expect(gate.unavailableMessages).toBe(6);
+
+    agora += 61_000; // passou o backoff
+    await gate.reserve(2);
+    expect(pool.query.mock.calls.length).toBeGreaterThan(tentativasNaPrimeira);
+  }, SLOW);
+
+  it("mesmo um portão que LANÇA (defeito inesperado) não derruba o laço de envio", async () => {
+    const aviso = vi.spyOn(console, "error").mockImplementation(() => {});
+    const gateQuebrado = { reserve: async () => { throw new Error("defeito inesperado no portão"); }, unidentifiedMessages: 0, unavailableMessages: 0 };
+
+    const { summary } = await dispatchCampaignSequence({
+      webhookUrl: "https://evolution.teste/message/sendText/chip-1", webhookToken: "t", quotaGate: gateQuebrado, leadDelayProvider: () => 0,
+      leads: [{ id: "lead-1", nome: "Ana", telefone: "5511999990001" }, { id: "lead-2", nome: "Bia", telefone: "5511999990002" }],
+      analyticsMeta: { sequence: [{ id: "s1", type: "text", text: "Oi", order: 1, enabled: true, triggerMode: "immediate", delayAfterSeconds: 0 }] },
+    });
+
+    expect(summary.successCount).toBe(2);
+    expect(summary.allChipsExhausted).toBe(false);
+    expect(mensagensEnviadas()).toBe(2);
+    expect(aviso).toHaveBeenCalledWith(expect.stringContaining("falha inesperada no portão de cota"), expect.objectContaining({ error: "defeito inesperado no portão" }));
+  }, SLOW);
+
+  it("'esgotada' continua pausando o lote (erro de infraestrutura e esgotada são tratados à parte)", async () => {
+    const qdb = await bancoDeCota();
+    const w = await mundoDeDisparo({ qdb, nLeads: 2, nPassos: 2, chip: chipRow({ daily_limit_override: 3 }) });
+
+    await w.routes.runCampaignDispatch({ dispatch: w.dispatch, campaign: w.campaign, supabase: w.supabase });
+
+    expect(w.dispatch.status).toBe("paused");
+    expect(w.dispatch.error_message).toBe("Pausado — cota diária do chip atingida (3/3). Retoma amanhã.");
+  }, SLOW);
 });

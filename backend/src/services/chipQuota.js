@@ -25,8 +25,12 @@ export function setChipQuotaDbPool(pool) {
   _customPool = pool;
 }
 
+let _ensureRetryAfter = 0;
+const ENSURE_RETRY_BACKOFF_MS = 60_000;
+
 export function resetChipQuotaStateForTest() {
   _evolutionDailyUsageSchemaEnsured = false;
+  _ensureRetryAfter = 0;
   _customPool = null;
 }
 
@@ -81,6 +85,22 @@ export async function ensureEvolutionInstanceDailyUsageTable(pool = null) {
   return true;
 }
 
+// Quem LÊ ou ESCREVE a cota não pode depender de a conversão de schema ter dado certo: ela é DDL (precisa de permissão
+// e de lock) e pode falhar (foi o que aconteceu: FK). Tenta garantir a tabela, registra a falha e SEGUE — as consultas
+// abaixo funcionam com a coluna em uuid ou em text. Depois de uma falha só tenta de novo após o backoff, para não
+// disparar DDL com lock exclusivo a cada mensagem.
+async function ensureTolerant(db) {
+  if (_evolutionDailyUsageSchemaEnsured) return true;
+  if (Date.now() < _ensureRetryAfter) return false;
+  try {
+    return await ensureEvolutionInstanceDailyUsageTable(db);
+  } catch (err) {
+    _ensureRetryAfter = Date.now() + ENSURE_RETRY_BACKOFF_MS;
+    console.error("[chip-quota] não foi possível garantir/converter a tabela de uso diário; seguindo com o schema atual:", err?.message || err);
+    return false;
+  }
+}
+
 export function resolveChipDailyLimit(instance) {
   const override = Number.parseInt(String(instance?.daily_limit_override ?? ""), 10);
   if (Number.isInteger(override) && override > 0) return override;
@@ -88,16 +108,20 @@ export function resolveChipDailyLimit(instance) {
   return EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS[state];
 }
 
+// Tolerante ao tipo da coluna: `$1` SEM cast no INSERT (o Postgres infere uuid ou text pela própria coluna), e
+// `instance_id::text = $1::text` nas consultas. Com `$1::text` o INSERT em coluna uuid estoura ("is of type uuid but
+// expression is of type text") — foi o que quebrou toda reserva depois de 01/09.
 // `count` mensagens de uma vez (um lead com 3 passos reserva 3). Devolve o total do dia DEPOIS da reserva.
 export async function reserveChipDailyQuota(instanceId, dateStr = null, pool = null, count = 1) {
   const db = getDb(pool);
-  if (!instanceId || !db || !(await ensureEvolutionInstanceDailyUsageTable(db))) return null;
+  if (!instanceId || !db) return null;
+  await ensureTolerant(db);
   const n = Number.isInteger(count) && count > 0 ? count : 1;
   const targetDate = dateStr || new Date().toISOString().slice(0, 10);
   const { rows } = await db.query(
     `
       INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count)
-      VALUES ($1::text, $2::date, $3::int)
+      VALUES ($1, $2::date, $3::int)
       ON CONFLICT (instance_id, date)
       DO UPDATE SET sent_count = public.evolution_instance_daily_usage.sent_count + $3::int
       RETURNING sent_count
@@ -109,10 +133,11 @@ export async function reserveChipDailyQuota(instanceId, dateStr = null, pool = n
 
 export async function getChipDailyUsage(instanceId, dateStr = null, pool = null) {
   const db = getDb(pool);
-  if (!instanceId || !db || !(await ensureEvolutionInstanceDailyUsageTable(db))) return 0;
+  if (!instanceId || !db) return 0;
+  await ensureTolerant(db);
   const targetDate = dateStr || new Date().toISOString().slice(0, 10);
   const { rows } = await db.query(
-    `SELECT sent_count FROM public.evolution_instance_daily_usage WHERE instance_id = $1::text AND date = $2::date`,
+    `SELECT sent_count FROM public.evolution_instance_daily_usage WHERE instance_id::text = $1::text AND date = $2::date`,
     [String(instanceId), targetDate]
   );
   return Number(rows[0]?.sent_count ?? 0);
@@ -128,7 +153,7 @@ export async function releaseChipDailyQuota(instanceId, dateStr = null, pool = n
       `
         UPDATE public.evolution_instance_daily_usage
         SET sent_count = GREATEST(sent_count - $3::int, 0)
-        WHERE instance_id = $1::text AND date = $2::date
+        WHERE instance_id::text = $1::text AND date = $2::date
       `,
       [String(instanceId), targetDate, n]
     )
