@@ -34,6 +34,10 @@ const CHIP_B = "bbbbbbbb-0000-4000-8000-00000000000b";
 const LEGACY_UUID = `CREATE TABLE public.evolution_instance_daily_usage (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(), instance_id UUID NOT NULL, date DATE NOT NULL DEFAULT CURRENT_DATE,
   sent_count INTEGER NOT NULL DEFAULT 0, UNIQUE(instance_id, date))`;
+// a tabela como o routes.js a criava em junho — a que existe em produção: UUID com FK para as instâncias
+const LEGACY_FK = `CREATE TABLE public.evolution_instance_daily_usage (
+  instance_id UUID NOT NULL REFERENCES public.lead_client_evolution_instances(id) ON DELETE CASCADE,
+  date DATE NOT NULL, sent_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (instance_id, date))`;
 const LEGACY_TEXT = `CREATE TABLE public.evolution_instance_daily_usage (
   instance_id TEXT NOT NULL, date DATE NOT NULL, sent_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (instance_id, date))`;
 
@@ -54,6 +58,7 @@ async function mundo(estadoInicial) {
   if (estadoInicial === "uuid") await db.exec(LEGACY_UUID);
   if (estadoInicial === "text") await db.exec(LEGACY_TEXT);
   await db.query("INSERT INTO lead_client_evolution_instances (id, client_id, name, chip_state) VALUES ($1,$2,'Chip A','warm'), ($3,$2,'Chip B','cold')", [CHIP, T, CHIP_B]);
+  if (estadoInicial === "fk") await db.exec(LEGACY_FK);
   return db;
 }
 afterAll(async () => {
@@ -65,7 +70,7 @@ const tipo = async (db) => (await db.query("SELECT data_type FROM information_sc
 const hojeSP = async (db) => (await db.query("SELECT to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date, 'YYYY-MM-DD') AS d")).rows[0].d;
 
 describe("a coluna converge para TEXT a partir de qualquer estado", () => {
-  for (const inicio of ["uuid", "text", "nenhum"]) {
+  for (const inicio of ["fk", "uuid", "text", "nenhum"]) {
     it(`[TESTE OBRIGATÓRIO] começando de '${inicio}': vira TEXT, preserva as linhas e reserva/lê/devolve funcionam`, async () => {
       const db = await mundo(inicio);
       const dia = await hojeSP(db);
@@ -116,15 +121,16 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
 
   it("a migration leva o que existe para TEXT, nos dois formatos, e rodar de novo não muda nada", async () => {
     const sql = readFileSync(resolve("supabase/migrations/20261004130000_converge_evolution_instance_daily_usage_instance_id.sql"), "utf8");
-    for (const inicio of ["uuid", "text", "nenhum"]) {
+    for (const inicio of ["fk", "uuid", "text", "nenhum"]) {
       const db = await mundo(inicio);
-      if (inicio === "uuid") await db.query("INSERT INTO evolution_instance_daily_usage (instance_id, date, sent_count) VALUES ($1,'2026-01-01',9)", [CHIP]);
+      if (inicio === "uuid" || inicio === "fk") await db.query("INSERT INTO evolution_instance_daily_usage (instance_id, date, sent_count) VALUES ($1,'2026-01-01',9)", [CHIP]);
 
       await db.exec(sql);
       await db.exec(sql);
 
       expect(await tipo(db), inicio).toBe("text");
-      if (inicio === "uuid") {
+      expect((await db.query("SELECT count(*)::int AS n FROM pg_constraint WHERE conrelid = 'public.evolution_instance_daily_usage'::regclass AND contype = 'f'")).rows[0].n, inicio).toBe(0);
+      if (inicio === "uuid" || inicio === "fk") {
         expect((await db.query("SELECT instance_id, sent_count FROM evolution_instance_daily_usage")).rows).toEqual([{ instance_id: CHIP, sent_count: 9 }]);
       }
     }
@@ -142,6 +148,19 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
     expect(CREATE_USAGE_TABLE_SQL).toMatch(/instance_id TEXT NOT NULL/);
     expect(CREATE_USAGE_TABLE_SQL).not.toMatch(/UUID/i);
   });
+
+  it("[TESTE OBRIGATÓRIO] por que o ALTER antigo nunca converteu: com a FK de junho o Postgres RECUSA a troca de tipo (o .catch escondia)", async () => {
+    const db = await mundo("fk");
+
+    // o ALTER antigo e o da migration anterior (sem derrubar a FK) falham no formato que existe em produção
+    await expect(db.exec("ALTER TABLE public.evolution_instance_daily_usage ALTER COLUMN instance_id TYPE TEXT")).rejects.toThrow(/foreign key constraint .* cannot be implemented/);
+    await expect(db.exec("ALTER TABLE public.evolution_instance_daily_usage ALTER COLUMN instance_id TYPE TEXT USING instance_id::text")).rejects.toThrow(/cannot be implemented/);
+    expect(await tipo(db)).toBe("uuid");
+
+    // e o bloco novo (que derruba a FK antes) converte
+    await db.exec(CONVERGE_USAGE_INSTANCE_ID_SQL);
+    expect(await tipo(db)).toBe("text");
+  }, SLOW);
 
   it("há UM criador só: evolution.js não cria mais a tabela, delega ao chipQuota.js", () => {
     const evolution = readFileSync(resolve("src/services/evolution.js"), "utf8");

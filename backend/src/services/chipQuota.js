@@ -37,14 +37,26 @@ function getDb(customPool = null) {
   return null;
 }
 
-// Só roda o ALTER se a coluna AINDA não é TEXT (ALTER TABLE pega ACCESS EXCLUSIVE mesmo em no-op).
+// Só roda se a coluna AINDA não é TEXT (ALTER TABLE pega ACCESS EXCLUSIVE mesmo em no-op).
+// ANTES do ALTER derruba as FKs da tabela: a tabela criada em junho (routes.js) nasceu com
+// `instance_id UUID REFERENCES lead_client_evolution_instances(id) ON DELETE CASCADE`, e o Postgres recusa trocar o tipo
+// de uma coluna com FK para um tipo incompatível ("foreign key constraint ... cannot be implemented") — foi exatamente
+// por isso que o ALTER antigo (com .catch engolindo) nunca converteu a coluna em produção. Sem a FK a linha de uso de
+// uma instância apagada fica órfã (inofensivo: os leitores fazem JOIN com as instâncias).
 export const CONVERGE_USAGE_INSTANCE_ID_SQL = `DO $$
+DECLARE fk record;
 BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = 'evolution_instance_daily_usage'
        AND column_name = 'instance_id' AND data_type <> 'text'
   ) THEN
+    FOR fk IN
+      SELECT conname FROM pg_constraint
+       WHERE conrelid = 'public.evolution_instance_daily_usage'::regclass AND contype = 'f'
+    LOOP
+      EXECUTE format('ALTER TABLE public.evolution_instance_daily_usage DROP CONSTRAINT %I', fk.conname);
+    END LOOP;
     ALTER TABLE public.evolution_instance_daily_usage ALTER COLUMN instance_id TYPE TEXT USING instance_id::text;
   END IF;
 END $$;`;
