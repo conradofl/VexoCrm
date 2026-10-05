@@ -221,7 +221,7 @@ describe("Correção 3 — envios sem chip registrado", () => {
     render(<Block2Rankings rankings={rankings({ chips: [chip({ sent: 0 })], chipsUnattributedSent: 5 })} />);
 
     expect(screen.getByText(/5 envios sem chip registrado/)).toBeInTheDocument();
-    expect(screen.getByText(/chip principal ou o rodízio/)).toBeInTheDocument();
+    expect(screen.getByText(/anteriores ao registro do chip/)).toBeInTheDocument();
   });
 
   it("sem envios órfãos, a nota não aparece", () => {

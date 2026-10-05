@@ -67,8 +67,9 @@ describe("Dashboard — ranking de chips com instance_id UUID ou TEXT", () => {
 
       const causa = errorSpy.mock.calls.concat(warnSpy.mock.calls).map((c) => c.join(" ")).join(" | ");
       expect(metrics.rankings.chips, `ranking de chips indisponível: ${causa}`).not.toBeNull();
-      // a regra do operador foi de fato exercida sobre as comparações reais do SQL (2: subconsulta + JOIN)
-      expect(seen.comparisons).toBe(2);
+      // a regra do operador foi de fato exercida sobre a comparação real do SQL (1: subconsulta da cota de hoje;
+      // o JOIN que somava a cota do período saiu — a cota não atribui envio)
+      expect(seen.comparisons).toBe(1);
       expect(metrics.rankings.chips).toHaveLength(1);
       expect(metrics.rankings.chips[0]).toMatchObject({ name: "Chip 1", sent: 80, replies: 20, sentToday: 10 });
       expect(metrics.unavailableBlocks).not.toContain("rankings.chips");

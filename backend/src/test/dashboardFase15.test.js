@@ -381,8 +381,7 @@ describe("Correção 1 — cota do chip é do DIA, envios são do PERÍODO", () 
 
     // 16/10 01:30 UTC = 15/10 22:30 em São Paulo: a cota de hoje é a do dia 15
     expect(dateKeyInTimezone(REF, "America/Sao_Paulo")).toBe("2026-10-15");
-    expect(chipParams[3]).toBe("2026-10-15");
-    expect(chipParams[2]).toBe("2026-10-15"); // fim do período, no mesmo fuso
+    expect(chipParams).toEqual(["tenant-a", "2026-10-15"]); // a cota é só de hoje: sem intervalo de período
   });
 
   it("chip traz envios do período e uso da cota de hoje em campos separados", async () => {

@@ -263,8 +263,11 @@ describe("Período personalizado — vale para todos os blocos", () => {
 
     await compute(pool);
 
-    // ledger de cota: dias do intervalo no fuso do tenant (último dia INCLUSIVE) e HOJE à parte
-    expect(pool.calls.chips).toEqual(["tenant-a", "2026-10-01", "2026-10-10", "2026-10-15"]);
+    // cota: só HOJE no fuso do tenant (a cota é do dia e não atribui envio); envios por chip e "sem chip
+    // registrado" respeitam o intervalo
+    expect(pool.calls.chips).toEqual(["tenant-a", "2026-10-15"]);
+    expect(pool.calls.chipReplies).toEqual(["tenant-a", START, END]);
+    expect(pool.calls.unattributed).toEqual(["tenant-a", START, END]);
     // saúde da base: a base até o fim do intervalo, não a de hoje
     expect(pool.calls.baseHealth[1]).toBe(END);
     // espera humana: "agora" real, porque a resposta é buscada sem limite de data

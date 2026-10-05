@@ -129,7 +129,8 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
     };
   }
 
-  it("1. Executa disparo com sucesso de ponta a ponta sem ReferenceError ou falha de contagem", async () => {
+  // roda o disparo completo com um chip de id `chipId` e devolve o que o laço gravou no UPDATE de 'sent'
+  async function runSuccessScenario(chipId) {
     const dispatchId = "disp-e2e-success";
     const dispatchesTable = {
       [dispatchId]: {
@@ -162,6 +163,7 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
 
     const claimedLeads = [];
     const finalizedSent = [];
+    const finalizedChips = [];
 
     const mockPool = {
       query: vi.fn().mockImplementation(async (sql, params) => {
@@ -170,7 +172,7 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
           return {
             rows: [
               {
-                id: "chip-1",
+                id: chipId,
                 client_id: "tenant-e2e",
                 name: "GD Gabriel",
                 dispatch_webhook_url: "https://evolution.teste/message/sendText/chip-1",
@@ -184,7 +186,7 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
           return {
             rows: [
               {
-                id: "chip-1",
+                id: chipId,
                 client_id: "tenant-e2e",
                 name: "GD Gabriel",
                 active: true,
@@ -207,6 +209,7 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
         }
         if (sqlStr.includes("UPDATE public.campaign_dispatch_runs SET status = 'sent'")) {
           finalizedSent.push(params[1]);
+          finalizedChips.push(params[3]);
           return { rowCount: 1, rows: [] };
         }
         if (sqlStr.includes("COUNT(*) FILTER")) {
@@ -218,16 +221,51 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
       }),
     };
 
-    const routes = createTestContext(mockPool);
+    const routes = createTestContext(mockPool, {
+      // o webhook de envio é o da instância cadastrada (é assim que resolveCampaignDispatchSettings devolve)
+      resolveCampaignDispatchSettings: async () => ({
+        webhookUrl: "https://evolution.teste/message/sendText/chip-1",
+        webhookToken: "secret-token",
+        source: "campaign_evolution_instance",
+        selectedEvolutionInstanceId: chipId,
+      }),
+      getLeadClientEvolutionInstances: async () => [
+        {
+          id: chipId,
+          client_id: "tenant-e2e",
+          name: "GD Gabriel",
+          dispatch_webhook_url: "https://evolution.teste/message/sendText/chip-1",
+          dispatch_webhook_token: "secret-token",
+          active: true,
+        },
+      ],
+    });
     await routes.runCampaignDispatch({
       dispatch: dispatchesTable[dispatchId],
       campaign: mockCampaign,
       supabase: mockSupabase,
     });
 
+    return { finalizedSent, finalizedChips, dispatchesTable, dispatchId };
+  }
+
+
+  it("1. Executa disparo com sucesso de ponta a ponta sem ReferenceError ou falha de contagem", async () => {
+    const { finalizedSent, finalizedChips, dispatchesTable, dispatchId } = await runSuccessScenario("chip-1");
+
     expect(finalizedSent.length).toBe(2);
     expect(dispatchesTable[dispatchId].sent_count).toBe(2);
     expect(dispatchesTable[dispatchId].status).toBe("done");
+    // id que não é uuid não é "o chip": o UPDATE grava NULL (nunca o nome, nunca um chute)
+    expect(finalizedChips).toEqual([null, null]);
+  });
+
+  it("1b. O UPDATE de 'sent' grava o ID do chip dono do webhook com que a rota enviou", async () => {
+    const CHIP = "11111111-2222-4333-8444-555555555555";
+
+    const { finalizedChips } = await runSuccessScenario(CHIP);
+
+    expect(finalizedChips).toEqual([CHIP, CHIP]);
   });
 
   it("2. Executa disparo com falha individual e atualiza failedCount e status sem travar o motor", async () => {

@@ -156,7 +156,7 @@ export function Block2Rankings({ rankings }: Block2RankingsProps) {
                 })}
                 {unattributedSent > 0 && (
                   <p className="py-2 text-[10px] text-muted-foreground">
-                    + {formatMetricNumber(unattributedSent)} envios sem chip registrado (usaram o chip principal ou o rodízio) —
+                    + {formatMetricNumber(unattributedSent)} envios sem chip registrado (anteriores ao registro do chip, ou em que o chip não foi identificado) —
                     não dá para atribuí-los a um chip.
                   </p>
                 )}

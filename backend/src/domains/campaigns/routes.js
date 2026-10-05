@@ -60,6 +60,7 @@ import {
 } from "../../services/sendWindow.js";
 import { getDateKey } from "../../services/analytics.js";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../../services/canonicalPhone.js";
+import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
@@ -1876,10 +1877,22 @@ export function registerCampaignsRoutes(app, deps) {
     return true;
   }
 
+  // evolution_instance_id: o chip que de fato enviou (id, nunca nome). Gravado no mesmo UPDATE que marca 'sent';
+  // NULL = o envio não soube qual chip usou (ou é anterior a esta coluna). Mesma regra da migration 20261004120000.
+  let _dispatchRunsChipColumnEnsured = false;
+  async function ensureDispatchRunsChipColumn() {
+    if (!pgDatabasePool) return false;
+    if (_dispatchRunsChipColumnEnsured) return true;
+    await pgDatabasePool.query(`ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS evolution_instance_id UUID`);
+    _dispatchRunsChipColumnEnsured = true;
+    return true;
+  }
+
   async function ensureDispatchRunsClaimSchema() {
     if (!pgDatabasePool) return false;
     if (_dispatchRunsClaimSchemaEnsured) return true;
     await ensureDispatchRunsItemIdColumn();
+    await ensureDispatchRunsChipColumn();
     await pgDatabasePool.query(
       `ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS lead_id UUID`
     );
@@ -2468,13 +2481,17 @@ export function registerCampaignsRoutes(app, deps) {
       return rows.length > 0;
     };
 
+    // Chip que de fato enviou cada lead, para gravar junto do 'sent': o do rodízio (activeChip) quando houver; senão o
+    // dono do webhook de envio (dispatchSettings). Desconhecido fica NULL — nunca o chip configurado da campanha.
+    const runChipTracker = createRunChipTracker({ settingsChipId: chipIdFromDispatchSettings(dispatchSettings) });
     const finalizeLeadSent = async ({ lead, sentAt }) => {
       if (!pgDatabasePool || !lead?.id) return;
-      await pgDatabasePool
-        .query(
-          `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1 WHERE dispatch_id = $2 AND lead_id = $3`,
-          [sentAt || new Date().toISOString(), dispatchId, lead.id]
-        )
+      await finalizeRunSent(pgDatabasePool, {
+        dispatchId,
+        leadId: lead.id,
+        sentAt,
+        chipId: runChipTracker.take(lead.id),
+      })
         .catch((err) => {
           console.warn("[campaign-dispatch] finalize_sent_failed:", err?.message || err);
         });
@@ -2616,6 +2633,7 @@ export function registerCampaignsRoutes(app, deps) {
       onLeadClaim: claimLead,
       onLeadClaimRollback: rollbackClaimLead,
       onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
+        runChipTracker.record(lead?.id, activeChip);
         try {
           const rawChip = activeChip?.instanceId || activeChip?.instanceName || instanceName || null;
           const { canonicalName } = await resolveInstanceIdentifier({ clientId, identifier: rawChip });

@@ -377,6 +377,9 @@ async function isAlreadyApplied(pool, filename) {
     "20261003120000_add_lead_import_item_id_to_dispatch_runs.sql": `SELECT EXISTS (
       SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='campaign_dispatch_runs' AND column_name='lead_import_item_id'
     ) AS ok`,
+    "20261004120000_add_evolution_instance_id_to_dispatch_runs.sql": `SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='campaign_dispatch_runs' AND column_name='evolution_instance_id'
+    ) AS ok`,
     "20261003090000_create_lead_origin_fix_audit.sql": `SELECT (
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_origin_fix_audit')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_origin_fix_audit' AND column_name='lead_ids')

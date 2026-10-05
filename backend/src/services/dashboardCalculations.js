@@ -36,6 +36,84 @@ import {
   parseCustomPeriodKey,
 } from "./dashboardPeriod.js";
 
+const LM_TIMESTAMP_SQL = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
+const RAW_OR_CANONICAL_PHONE_SQL = `lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")}`;
+
+// Ranking de chips. "Envios" do chip = envios cujo UPDATE de 'sent' gravou ESTE chip em
+// campaign_dispatch_runs.evolution_instance_id (o chip que de fato enviou, rodízio ou padrão). O chip configurado
+// na campanha (campaign_dispatches.evolution_instance_id) NÃO entra: ele não diz quem enviou. Envio com a coluna
+// NULL (anterior à coluna, ou que não soube o chip) vai para a contagem à parte — nunca para um chip, nunca some.
+// A cota do dia (evolution_instance_daily_usage) é outra medida e não é lida aqui.
+export function buildChipSentByInstanceSql() {
+  return `
+    WITH runs_by_instance AS (
+      SELECT
+        r.evolution_instance_id,
+        r.phone,
+        r.sent_at,
+        EXISTS (
+          SELECT 1
+          FROM public.lead_messages lm
+          WHERE lm.client_id = r.client_id
+            AND (${RAW_OR_CANONICAL_PHONE_SQL})
+            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+            AND ${LM_TIMESTAMP_SQL} > r.sent_at
+            AND ${LM_TIMESTAMP_SQL} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+        ) AS replied
+      FROM public.campaign_dispatch_runs r
+      WHERE r.client_id = $1
+        AND r.status = 'sent'
+        AND r.phone <> ''
+        AND r.sent_at IS NOT NULL
+        AND r.sent_at >= $2 AND r.sent_at < $3
+        AND r.evolution_instance_id IS NOT NULL
+    )
+    SELECT
+      evolution_instance_id::text AS instance_id,
+      COUNT(*)::int AS sent_count,
+      COUNT(*) FILTER (WHERE replied)::int AS replied_count
+    FROM runs_by_instance
+    GROUP BY evolution_instance_id;
+  `;
+}
+
+export function buildChipSentWithoutChipSql() {
+  return `
+    SELECT COUNT(*)::int AS unattributed_sent
+    FROM public.campaign_dispatch_runs r
+    WHERE r.client_id = $1
+      AND r.status = 'sent'
+      AND r.phone <> ''
+      AND r.sent_at IS NOT NULL
+      AND r.sent_at >= $2 AND r.sent_at < $3
+      AND r.evolution_instance_id IS NULL;
+  `;
+}
+
+// Chips cadastrados + cota consumida HOJE. A cota é do DIA e serve só para a barra de cota: não alimenta "envios".
+// evolution_instance_daily_usage.instance_id é criada como TEXT (chipQuota.js) e como UUID (evolution.js); quem
+// criou primeiro define o tipo em cada banco. Comparar com os DOIS lados em ::text funciona nos dois casos —
+// `uuid = text` estourava e derrubava o painel inteiro.
+export function buildChipQuotaSql() {
+  return `
+    SELECT
+      i.id AS instance_id,
+      i.name AS instance_name,
+      i.chip_state,
+      i.daily_limit_override,
+      COALESCE(
+        (
+          SELECT sent_count
+          FROM public.evolution_instance_daily_usage
+          WHERE instance_id::text = i.id::text AND date = $2::date
+          LIMIT 1
+        ), 0
+      )::int AS sent_today
+    FROM public.lead_client_evolution_instances i
+    WHERE i.client_id = $1;
+  `;
+}
+
 // Período (atalhos e intervalo personalizado) mora em dashboardPeriod.js; reexportado aqui porque
 // é daqui que o resto do backend e os testes sempre importaram.
 export { DASHBOARD_DEFAULT_TIMEZONE, dateKeyInTimezone, calculatePeriodDates };
@@ -253,8 +331,8 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     periodKey: normalizedPeriod,
   } = calculatePeriodDates(periodKey, refDate, options.timezone);
 
-  const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
-  const rawOrCanonicalPhone = `lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")}`;
+  const lmTimestamp = LM_TIMESTAMP_SQL;
+  const rawOrCanonicalPhone = RAW_OR_CANONICAL_PHONE_SQL;
 
   const unavailableBlocks = [];
   const blockFailures = [];
@@ -540,89 +618,20 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     }
   }
 
-  // 2. Chip — envios, respostas e cota consumida por instância
-  // evolution_instance_daily_usage.instance_id é criada como TEXT (chipQuota.js) e como UUID
-  // (evolution.js); quem criou primeiro define o tipo em cada banco. Comparar com os DOIS lados
-  // em ::text funciona nos dois casos — `uuid = text` estourava e derrubava o painel inteiro.
-  const unattributedSentQuery = `
-    SELECT COUNT(*)::int AS unattributed_sent
-    FROM public.campaign_dispatch_runs r
-    JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-    WHERE r.client_id = $1
-      AND r.status = 'sent'
-      AND r.phone <> ''
-      AND r.sent_at IS NOT NULL
-      AND r.sent_at >= $2 AND r.sent_at < $3
-      AND d.evolution_instance_id IS NULL;
-  `;
-  const chipQuery = `
-    SELECT
-      i.id AS instance_id,
-      i.name AS instance_name,
-      i.chip_state,
-      i.daily_limit_override,
-      COALESCE(SUM(u.sent_count), 0)::int AS sent_period,
-      COALESCE(
-        (
-          SELECT sent_count
-          FROM public.evolution_instance_daily_usage
-          WHERE instance_id::text = i.id::text AND date = $4::date
-          LIMIT 1
-        ), 0
-      )::int AS sent_today
-    FROM public.lead_client_evolution_instances i
-    LEFT JOIN public.evolution_instance_daily_usage u
-      ON u.instance_id::text = i.id::text
-      AND u.date >= $2::date AND u.date <= $3::date
-    WHERE i.client_id = $1
-    GROUP BY i.id, i.name, i.chip_state, i.daily_limit_override
-    ORDER BY sent_period DESC;
-  `;
-  // Respostas associadas a cada instância através de campaign_dispatches
-  const instanceRepliesQuery = `
-    WITH runs_by_instance AS (
-      SELECT
-        d.evolution_instance_id,
-        r.phone,
-        r.sent_at,
-        EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = r.client_id
-            AND (${rawOrCanonicalPhone})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${lmTimestamp} > r.sent_at
-            AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-        ) AS replied
-      FROM public.campaign_dispatch_runs r
-      JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-      WHERE r.client_id = $1
-        AND r.status = 'sent'
-        AND r.phone <> ''
-        AND r.sent_at IS NOT NULL
-        AND r.sent_at >= $2 AND r.sent_at < $3
-        AND d.evolution_instance_id IS NOT NULL
-    )
-    SELECT
-      evolution_instance_id::text AS instance_id,
-      COUNT(*)::int AS sent_count,
-      COUNT(*) FILTER (WHERE replied)::int AS replied_count
-    FROM runs_by_instance
-    GROUP BY evolution_instance_id;
-  `;
+  // 2. Chip — envios e respostas (pelo chip gravado no envio) e cota consumida hoje (separada)
+  const unattributedSentQuery = buildChipSentWithoutChipSql();
+  const chipQuery = buildChipQuotaSql();
+  const instanceRepliesQuery = buildChipSentByInstanceSql();
   // Envios por chip e respostas por chip são um número só na tela: se uma das consultas cair,
   // o ranking inteiro fica indisponível (respostas desconhecidas não viram "0 respostas").
   //
-  // "Envios" do chip = envios de DISPARO atribuídos a ele (campaign_dispatches.evolution_instance_id).
-  // Disparo sem chip escolhido usa o chip principal/rodízio na hora do envio e a execução não grava
-  // qual chip foi — esses envios não são atribuíveis e aparecem à parte (unattributedSent), em vez de
-  // virar "0 envios" no chip. O contador da cota (evolution_instance_daily_usage) é do DIA, outra
-  // unidade, e vai separado (sentToday).
-  const periodStartKey = dateKeyInTimezone(currentStart, options.timezone);
-  const periodEndKey = dateKeyInTimezone(new Date(currentEnd.getTime() - 1), options.timezone);
+  // "Envios" do chip = envios cujo registro gravou ESTE chip (campaign_dispatch_runs.evolution_instance_id).
+  // Envio sem chip gravado aparece à parte (unattributedSent = "sem chip registrado"), em vez de virar "0 envios"
+  // num chip ou ser empurrado para o chip da campanha. A cota do dia (evolution_instance_daily_usage) é outra
+  // unidade e vai separada (sentToday); nunca atribui envio.
   const todayKey = dateKeyInTimezone(refDate, options.timezone);
   const chipsBlock = await runBlock("rankings.chips", async () => {
-    const { rows: chipRows } = await pool.query(chipQuery, [clientId, periodStartKey, periodEndKey, todayKey]);
+    const { rows: chipRows } = await pool.query(chipQuery, [clientId, todayKey]);
 
     const { rows: instReplyRows } = await pool.query(instanceRepliesQuery, [
       clientId,
