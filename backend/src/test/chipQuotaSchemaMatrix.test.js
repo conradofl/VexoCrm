@@ -83,7 +83,7 @@ describe("[TESTE OBRIGATÓRIO] LEITORES reais contra cada estado do schema, sem 
 
       const instancias = await getLeadClientEvolutionInstances(T, pool);
       expect(Object.fromEntries(instancias.map((i) => [i.name, Number(i.sent_count_today)]))).toEqual({ "Chip A": 4, "Chip B": 0 });
-      const mapa = (await pool.query(buildEvolutionInstancesSql("many"), [[T]])).rows;
+      const mapa = (await pool.query(buildEvolutionInstancesSql("many"), [[T], [dia]])).rows;
       expect(Number(mapa.find((i) => i.name === "Chip A").sent_count_today)).toBe(4);
       const relatorio = (await pool.query(EVOLUTION_USAGE_REPORT_SQL, [T, 14])).rows;
       expect(relatorio).toEqual([{ dia, chip_id: CHIP, chip_label: "Chip A", enviados: 4 }]);
@@ -164,7 +164,7 @@ describe("o cast dos DOIS lados é necessário: as formas erradas quebram em um 
         const consulta = sql(buildEvolutionInstancesSql("one"));
         expect(consulta).not.toBe(buildEvolutionInstancesSql("one")); // a forma foi de fato trocada
 
-        const rodar = pool.query(consulta, [T]);
+        const rodar = pool.query(consulta, [T, "2026-10-05"]);
 
         if (quebraEm.includes(estado)) await expect(rodar).rejects.toThrow(/operator does not exist/);
         else await expect(rodar).resolves.toBeDefined();

@@ -25,6 +25,8 @@ import { normalizeTenantKey, normalizeHttpUrl } from "./tenant.js";
 import { isMaskedSecretPlaceholder } from "./httpInfra.js";
 import { upsertLeadByPhone } from "./leadUpsert.js";
 import { ensureEvolutionInstanceDailyUsageTable } from "./chipQuota.js";
+import { getDateKey } from "./analytics.js";
+import { resolveSendWindowConfig } from "./sendWindow.js";
 
 /** Timeout padrão para chamadas HTTP de saída (Evolution health-check e webhooks de campanha). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -218,28 +220,60 @@ export function selectDefaultEvolutionInstance(instances = []) {
 
 // "Hoje" do contador "enviados hoje" é o dia do TENANT (send_window_timezone; padrão America/Sao_Paulo), o mesmo
 // que reserveChipDailyQuota usa para gravar. Antes era CURRENT_DATE do banco: entre 21h e 24h em Brasília a tela
-// lia o dia seguinte e mostrava 0. Fuso inválido nas configurações cai no padrão em vez de derrubar a consulta.
-export const SQL_TENANT_TODAY = `(now() AT TIME ZONE COALESCE(
-  (SELECT s.send_window_timezone FROM public.lead_client_n8n_settings s
-    WHERE s.client_id = i.client_id
-      AND EXISTS (SELECT 1 FROM pg_timezone_names z WHERE z.name = s.send_window_timezone)
-    LIMIT 1),
-  'America/Sao_Paulo'))::date`;
+// lia o dia seguinte e mostrava 0.
+//
+// O dia é calculado AQUI, em JavaScript, e entra na consulta como parâmetro (constante para o planejador, índice
+// usado inteiro). Uma versão anterior calculava o dia no SQL, validando o fuso com
+// `EXISTS (SELECT 1 FROM pg_timezone_names ...)`: correto, mas ~170× mais lento (cada avaliação varre ~600 linhas da
+// função de fusos). O fuso inválido já gravado cai no padrão pela mesma validação de Intl do resolveSendWindowConfig,
+// sem o banco participar — e falha ao ler as configurações também cai no padrão (a tela de chips não depende disso).
+const DEFAULT_TENANT_TIMEZONE = "America/Sao_Paulo";
 
-// scope: "one" ($1 = clientId) ou "many" ($1 = clientIds[]). Cast dos DOIS lados: a consulta funciona com instance_id do uso
-// em uuid (schema antigo) ou em text (convertido). Código que depende de migration não pode quebrar no estado antigo.
+export async function resolveTenantDayKeys(db, clientIds, now = new Date()) {
+  const ids = [...new Set((clientIds || []).filter(Boolean))];
+  const timezoneByClient = new Map();
+  if (ids.length > 0) {
+    try {
+      const { rows } = await db.query(
+        "SELECT client_id, send_window_timezone FROM public.lead_client_n8n_settings WHERE client_id = ANY($1::text[])",
+        [ids]
+      );
+      for (const row of rows || []) timezoneByClient.set(row.client_id, row.send_window_timezone);
+    } catch (err) {
+      console.warn("[evolution-instances] não foi possível ler o fuso do tenant; usando o padrão:", err?.message || err);
+    }
+  }
+  return ids.map((clientId) => {
+    const timezone = resolveSendWindowConfig({ send_window_timezone: timezoneByClient.get(clientId) }).timezone || DEFAULT_TENANT_TIMEZONE;
+    return { clientId, dayKey: getDateKey(now, timezone) };
+  });
+}
+
+// scope "one":  $1 = clientId,   $2 = dia do tenant (date)
+// scope "many": $1 = clientIds[], $2 = dias dos tenants (date[]) na MESMA ordem
+// Cast dos DOIS lados em instance_id: a consulta funciona com a coluna do uso em uuid (schema antigo) ou em text
+// (convertido). Código que depende de migration não pode quebrar no estado antigo.
 export function buildEvolutionInstancesSql(scope) {
-  const where = scope === "many" ? "i.client_id = ANY($1::text[])" : "i.client_id = $1";
-  return `
+  const select = `
         SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
                i.inbound_bearer_token, i.owner_uid, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
                i.webhook_enabled,
                i.created_at, i.updated_at, i.updated_by_email,
-               COALESCE(u.sent_count, 0) AS sent_count_today
+               COALESCE(u.sent_count, 0) AS sent_count_today`;
+  if (scope === "many") {
+    return `${select}
+        FROM public.lead_client_evolution_instances i
+        JOIN unnest($1::text[], $2::date[]) AS d(client_id, day) ON d.client_id = i.client_id
+        LEFT JOIN public.evolution_instance_daily_usage u
+          ON u.instance_id::text = i.id::text AND u.date = d.day
+        ORDER BY i.active DESC, i.is_default DESC, i.created_at ASC
+      `;
+  }
+  return `${select}
         FROM public.lead_client_evolution_instances i
         LEFT JOIN public.evolution_instance_daily_usage u
-          ON u.instance_id::text = i.id::text AND u.date = ${SQL_TENANT_TODAY}
-        WHERE ${where}
+          ON u.instance_id::text = i.id::text AND u.date = $2::date
+        WHERE i.client_id = $1
         ORDER BY i.active DESC, i.is_default DESC, i.created_at ASC
       `;
 }
@@ -252,7 +286,8 @@ export async function getLeadClientEvolutionInstances(clientId, pool = null) {
     if (db === pgDatabasePool) {
       await ensureLeadClientEvolutionInstancesTable();
     }
-    const { rows } = await db.query(buildEvolutionInstancesSql("one"), [clientId]);
+    const [{ dayKey }] = await resolveTenantDayKeys(db, [clientId]);
+    const { rows } = await db.query(buildEvolutionInstancesSql("one"), [clientId, dayKey]);
 
     return rows;
   } catch (err) {
@@ -270,7 +305,8 @@ export async function getLeadClientEvolutionInstancesMap(clientIds) {
   try {
     await ensureLeadClientEvolutionInstancesTable();
 
-    const { rows } = await pgDatabasePool.query(buildEvolutionInstancesSql("many"), [clientIds]);
+    const days = await resolveTenantDayKeys(pgDatabasePool, clientIds);
+    const { rows } = await pgDatabasePool.query(buildEvolutionInstancesSql("many"), [days.map((d) => d.clientId), days.map((d) => d.dayKey)]);
 
     return rows.reduce((acc, row) => {
       if (!acc[row.client_id]) acc[row.client_id] = [];

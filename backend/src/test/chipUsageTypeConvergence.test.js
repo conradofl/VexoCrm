@@ -8,7 +8,7 @@
 // possíveis: tabela criada como UUID (o DDL antigo do evolution.js), como TEXT (o do chipQuota.js) e inexistente.
 // Limites do pglite (helpers/pgliteDb.js): não prova que roda em produção; todas as consultas rodam sem adaptação.
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import {
@@ -108,7 +108,7 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
       const instancias = await getLeadClientEvolutionInstances(T, db);
       expect(Object.fromEntries(instancias.map((i) => [i.name, Number(i.sent_count_today)]))).toEqual({ "Chip A": 4, "Chip B": 0 });
       // mapa por tenants (mesma consulta, escopo "many")
-      const mapa = (await db.query(buildEvolutionInstancesSql("many"), [[T]])).rows;
+      const mapa = (await db.query(buildEvolutionInstancesSql("many"), [[T], [dia]])).rows;
       expect(mapa.find((i) => i.name === "Chip A").sent_count_today).toBe(4);
       // relatório de uso por chip
       const relatorio = (await db.query(EVOLUTION_USAGE_REPORT_SQL, [T, 14])).rows;
@@ -232,6 +232,45 @@ describe("'enviados hoje' é o dia do TENANT, o mesmo em que a cota é gravada",
     const instancias = await getLeadClientEvolutionInstances(T, db);
 
     expect(Number(instancias.find((i) => i.name === "Chip A").sent_count_today)).toBe(await contagem(sp));
+  }, SLOW);
+
+  it("o dia é calculado em JavaScript e a SQL não depende do fuso: sem pg_timezone_names, sem subconsulta nas configurações", () => {
+    for (const escopo of ["one", "many"]) {
+      const sql = buildEvolutionInstancesSql(escopo);
+      expect(sql).not.toMatch(/pg_timezone_names/);
+      expect(sql).not.toMatch(/lead_client_n8n_settings/);
+      expect(sql).not.toMatch(/now\(\)/i); // o dia vem como parâmetro (constante para o planejador)
+    }
+  });
+
+  it("falha ao ler as configurações do tenant cai no padrão (a tela de chips não depende das configurações)", async () => {
+    const db = await mundo("nenhum");
+    const contagem = await semear(db);
+    const sp = await dia(db, "America/Sao_Paulo");
+    const poolQueNaoLeConfig = { query: (sql, params) => (/lead_client_n8n_settings/.test(String(sql)) ? Promise.reject(new Error("relation does not exist")) : db.query(sql, params)) };
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const instancias = await getLeadClientEvolutionInstances(T, poolQueNaoLeConfig);
+
+    expect(Number(instancias.find((i) => i.name === "Chip A").sent_count_today)).toBe(await contagem(sp));
+  }, SLOW);
+
+  it("vários tenants no mapa: cada um com o dia do SEU fuso", async () => {
+    const db = await mundo("nenhum");
+    await ensureEvolutionInstanceDailyUsageTable(db);
+    await db.query("INSERT INTO lead_client_evolution_instances (id, client_id, name) VALUES ('cccccccc-0000-4000-8000-00000000000c', 'tenant-b', 'Chip C')");
+    const utc = await dia(db, "UTC");
+    const { fuso, dia: diaDoFuso } = await fusoQueNaoE(db, utc);
+    await db.query("INSERT INTO lead_client_n8n_settings (client_id, send_window_timezone) VALUES ('tenant-b', $1)", [fuso]);
+    await reserveChipDailyQuota("cccccccc-0000-4000-8000-00000000000c", diaDoFuso, db, 7);
+    await reserveChipDailyQuota(CHIP, await dia(db, "America/Sao_Paulo"), db, 3);
+    const { resolveTenantDayKeys } = await import("../services/evolution.js");
+
+    const dias = await resolveTenantDayKeys(db, [T, "tenant-b", T]);
+    const { rows } = await db.query(buildEvolutionInstancesSql("many"), [dias.map((d) => d.clientId), dias.map((d) => d.dayKey)]);
+
+    expect(dias.map((d) => d.clientId)).toEqual([T, "tenant-b"]); // sem duplicata
+    expect(Object.fromEntries(rows.map((r) => [r.name, Number(r.sent_count_today)]))).toEqual({ "Chip A": 3, "Chip B": 0, "Chip C": 7 });
   }, SLOW);
 
   it("fuso inválido nas configurações cai no padrão em vez de derrubar a consulta", async () => {

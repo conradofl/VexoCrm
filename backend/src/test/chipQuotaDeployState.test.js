@@ -106,3 +106,28 @@ describe("[TESTE OBRIGATÓRIO] leitor real com o pool de produção, tabela UUID
     }
   }, 60_000);
 });
+
+describe("mapa por tenants (função real, pool de produção): cada tenant lê o dia do SEU fuso", () => {
+  it("dois tenants com fusos que dão dias diferentes: cada um enxerga a própria contagem", async () => {
+    const { getLeadClientEvolutionInstancesMap } = await import("../services/evolution.js");
+    const db = await bancoNoEstadoDeProducao(); // tenant-a (padrão Brasília), 6 mensagens hoje em Brasília
+    const diaEm = async (tz) => (await db.query("SELECT to_char((now() AT TIME ZONE $1)::date, 'YYYY-MM-DD') AS d", [tz])).rows[0].d;
+    const sp = await diaEm("America/Sao_Paulo");
+    let fusoB = null;
+    let diaB = null;
+    for (const c of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+      const d = await diaEm(c);
+      if (d !== sp) { fusoB = c; diaB = d; break; }
+    }
+    const CHIP_B = "bbbbbbbb-0000-4000-8000-00000000000b";
+    await db.query("INSERT INTO public.lead_client_evolution_instances (id, client_id, name) VALUES ($1,'tenant-b','Chip B')", [CHIP_B]);
+    await db.query("INSERT INTO public.lead_client_n8n_settings (client_id, send_window_timezone) VALUES ('tenant-b', $1)", [fusoB]);
+    await db.query("INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count) VALUES ($1, $2::date, 11)", [CHIP_B, diaB]);
+    await db.query("INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count) VALUES ($1, $2::date, 99)", [CHIP_B, sp]); // o dia ERRADO para o tenant-b
+
+    const mapa = await getLeadClientEvolutionInstancesMap([T, "tenant-b"]);
+
+    expect(Number(mapa[T][0].sent_count_today)).toBe(6);
+    expect(Number(mapa["tenant-b"][0].sent_count_today)).toBe(11); // o dia do fuso dele, não os 99 do dia de Brasília
+  }, 60_000);
+});

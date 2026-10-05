@@ -25,6 +25,7 @@ import { ensureModuleTabs } from "../access/permissionsRegistry.js";
 import { normalizeHttpUrl } from "./tenant.js";
 import { buildDefaultSegmentationConfig, sanitizeSegmentationConfig } from "../segmentation.js";
 import { isMissingSchemaError } from "./analytics.js";
+import { resolveSendWindowConfig } from "./sendWindow.js";
 import {
   getDefaultLeadClientEvolutionInstance,
   getLeadClientEvolutionInstances,
@@ -52,6 +53,10 @@ export function resolveSingleLeadClientSettings(rawRow, instances = []) {
     ...(merged || masked || {}),
     evolution_instances: (instances || []).map(maskEvolutionInstance),
   };
+}
+
+export function normalizeSendWindowTimezone(raw) {
+  return resolveSendWindowConfig({ send_window_timezone: typeof raw === "string" ? raw : undefined }).timezone;
 }
 
 function parseSendWindowDays(raw) {
@@ -324,11 +329,12 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
     send_window_days: sendWindowDaysProvided
       ? parseSendWindowDays(body.sendWindowDays ?? body.send_window_days)
       : parseSendWindowDays(existing?.send_window_days),
-    send_window_timezone: sendWindowTimezoneProvided
-      ? (typeof (body.sendWindowTimezone ?? body.send_window_timezone) === "string" && (body.sendWindowTimezone ?? body.send_window_timezone).trim()
-          ? (body.sendWindowTimezone ?? body.send_window_timezone).trim()
-          : "America/Sao_Paulo")
-      : existing?.send_window_timezone ?? "America/Sao_Paulo",
+    // Fuso validado ao salvar (a mesma validação de Intl de resolveSendWindowConfig): a coluna não guarda mais lixo.
+    // Inválido ou vazio cai em America/Sao_Paulo — como os demais campos desta janela. O valor já gravado (e não
+    // reenviado) também é saneado, então um fuso ruim antigo some no próximo salvar. Quem lê já tolera fuso inválido.
+    send_window_timezone: normalizeSendWindowTimezone(
+      sendWindowTimezoneProvided ? (body.sendWindowTimezone ?? body.send_window_timezone) : existing?.send_window_timezone
+    ),
     send_window_enabled: sendWindowEnabledProvided
       ? (body.sendWindowEnabled ?? body.send_window_enabled) !== false && (body.sendWindowEnabled ?? body.send_window_enabled) !== "false"
       : existing?.send_window_enabled ?? true,
