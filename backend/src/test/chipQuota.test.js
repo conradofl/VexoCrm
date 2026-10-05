@@ -82,7 +82,7 @@ describe("chipQuota service", () => {
       expect(count).toBe(7);
       expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO public.evolution_instance_daily_usage"),
-        ["inst-123", "2026-09-14"]
+        ["inst-123", "2026-09-14", 1] // 1 = uma mensagem (default)
       );
     });
 
@@ -100,7 +100,7 @@ describe("chipQuota service", () => {
       expect(usage).toBe(15);
     });
 
-    it("releaseChipDailyQuota executa decremento com GREATEST(sent_count - 1, 0)", async () => {
+    it("releaseChipDailyQuota executa decremento com GREATEST(sent_count - n, 0)", async () => {
       let executedSql = "";
       let executedParams = [];
       const mockPool = {
@@ -112,8 +112,21 @@ describe("chipQuota service", () => {
       };
 
       await releaseChipDailyQuota("inst-123", "2026-09-14", mockPool);
-      expect(executedSql).toContain("GREATEST(sent_count - 1, 0)");
-      expect(executedParams).toEqual(["inst-123", "2026-09-14"]);
+      expect(executedSql).toContain("GREATEST(sent_count - $3::int, 0)");
+      expect(executedParams).toEqual(["inst-123", "2026-09-14", 1]);
+    });
+
+    it("devolução que FALHA é registrada (não some em silêncio) e não relança, para não mascarar a causa do chamador", async () => {
+      const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mockPool = { query: vi.fn(async () => { throw new Error("conexão caiu"); }) };
+
+      await expect(releaseChipDailyQuota("inst-123", "2026-09-14", mockPool, 2)).resolves.toBeUndefined();
+
+      expect(erro).toHaveBeenCalledWith(
+        expect.stringContaining("falha ao devolver cota"),
+        expect.objectContaining({ instanceId: "inst-123", date: "2026-09-14", count: 2, error: "conexão caiu" })
+      );
+      erro.mockRestore();
     });
 
     it("usa pool configurado via setChipQuotaDbPool quando nao passado explicitamente", async () => {

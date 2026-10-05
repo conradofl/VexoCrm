@@ -91,9 +91,9 @@ export function buildChipSentWithoutChipSql() {
 }
 
 // Chips cadastrados + cota consumida HOJE. A cota é do DIA e serve só para a barra de cota: não alimenta "envios".
-// evolution_instance_daily_usage.instance_id é criada como TEXT (chipQuota.js) e como UUID (evolution.js); quem
-// criou primeiro define o tipo em cada banco. Comparar com os DOIS lados em ::text funciona nos dois casos —
-// `uuid = text` estourava e derrubava o painel inteiro.
+// evolution_instance_daily_usage.instance_id é TEXT (único criador: chipQuota.js; convergência em
+// CONVERGE_USAGE_INSTANCE_ID_SQL). Comparamos com os DOIS lados em ::text mesmo assim: protege o painel no
+// intervalo entre o deploy e a migration, quando a tabela ainda pode estar em UUID (`uuid = text` derrubava tudo).
 export function buildChipQuotaSql() {
   return `
     SELECT

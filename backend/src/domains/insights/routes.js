@@ -25,6 +25,20 @@ import { parseDashboardPeriodRequest } from "../../services/dashboardPeriod.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
+// Envios por dia e por chip (aba Saúde dos chips, card do Dashboard). instance_id do uso é TEXT (chipQuota.js).
+export const EVOLUTION_USAGE_REPORT_SQL = `
+  SELECT u.date::text                         AS dia,
+         u.instance_id::text                  AS chip_id,
+         COALESCE(i.name, u.instance_id::text) AS chip_label,
+         SUM(u.sent_count)::int               AS enviados
+  FROM public.evolution_instance_daily_usage u
+  JOIN public.lead_client_evolution_instances i ON i.id::text = u.instance_id
+  WHERE i.client_id = $1
+    AND u.date >= (CURRENT_DATE - ($2::int - 1))
+  GROUP BY u.date, u.instance_id, i.name
+  ORDER BY u.date ASC, chip_label ASC
+`;
+
 export function registerInsightsRoutes(app, deps) {
   const {
     buildDashboardPayload,
@@ -1174,21 +1188,7 @@ export function registerInsightsRoutes(app, deps) {
     if (days > 31) days = 31;
 
     try {
-      const { rows } = await pgDatabasePool.query(
-        `
-          SELECT u.date::text                         AS dia,
-                 u.instance_id::text                  AS chip_id,
-                 COALESCE(i.name, u.instance_id::text) AS chip_label,
-                 SUM(u.sent_count)::int               AS enviados
-          FROM public.evolution_instance_daily_usage u
-          JOIN public.lead_client_evolution_instances i ON i.id = u.instance_id
-          WHERE i.client_id = $1
-            AND u.date >= (CURRENT_DATE - ($2::int - 1))
-          GROUP BY u.date, u.instance_id, i.name
-          ORDER BY u.date ASC, chip_label ASC
-        `,
-        [authorizedClientId, days]
-      );
+      const { rows } = await pgDatabasePool.query(EVOLUTION_USAGE_REPORT_SQL, [authorizedClientId, days]);
       res.json({ days, items: rows });
     } catch (err) {
       sendError(res, 500, "EVOLUTION_USAGE_REPORT_FAILED", err instanceof Error ? err.message : "Failed");

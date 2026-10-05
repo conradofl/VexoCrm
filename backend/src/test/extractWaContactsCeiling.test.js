@@ -100,7 +100,8 @@ describe("POST /api/leads/extract-wa-contacts — Teto no Servidor para Todas as
       query: vi.fn(async (sql, params = []) => {
         const text = sql.trim();
 
-        if (text.includes("FROM public.lead_client_n8n_settings")) {
+        // a consulta de instâncias também lê lead_client_n8n_settings (fuso do tenant): só é "settings" a que não é de instâncias
+        if (text.includes("FROM public.lead_client_n8n_settings") && !text.includes("FROM public.lead_client_evolution_instances")) {
           return {
             rows: [
               {

@@ -24,6 +24,7 @@ import { normalizeString } from "../textNormalize.js";
 import { normalizeTenantKey, normalizeHttpUrl } from "./tenant.js";
 import { isMaskedSecretPlaceholder } from "./httpInfra.js";
 import { upsertLeadByPhone } from "./leadUpsert.js";
+import { ensureEvolutionInstanceDailyUsageTable } from "./chipQuota.js";
 
 /** Timeout padrão para chamadas HTTP de saída (Evolution health-check e webhooks de campanha). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -146,15 +147,11 @@ export async function ensureLeadClientEvolutionInstancesTable(pool = null) {
         ON public.lead_client_evolution_instances (client_id, owner_uid)
     `).catch(() => {});
 
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_usage (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        instance_id UUID NOT NULL,
-        date DATE NOT NULL DEFAULT CURRENT_DATE,
-        sent_count INTEGER NOT NULL DEFAULT 0,
-        UNIQUE(instance_id, date)
-      )
-    `).catch(() => {});
+    // A tabela de uso diário tem UM criador só (services/chipQuota.js), com instance_id TEXT. Antes era criada
+    // aqui como UUID e lá como TEXT — cada leitor assumia um tipo e um dos dois quebrava.
+    await ensureEvolutionInstanceDailyUsageTable(db).catch((err) => {
+      console.warn("[evolution-instances] tabela de uso diário não pôde ser garantida:", err?.message || err);
+    });
 
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_limit_audit (
@@ -219,6 +216,33 @@ export function selectDefaultEvolutionInstance(instances = []) {
   return active.find((i) => i.is_default === true) || active[0] || null;
 }
 
+// "Hoje" do contador "enviados hoje" é o dia do TENANT (send_window_timezone; padrão America/Sao_Paulo), o mesmo
+// que reserveChipDailyQuota usa para gravar. Antes era CURRENT_DATE do banco: entre 21h e 24h em Brasília a tela
+// lia o dia seguinte e mostrava 0. Fuso inválido nas configurações cai no padrão em vez de derrubar a consulta.
+export const SQL_TENANT_TODAY = `(now() AT TIME ZONE COALESCE(
+  (SELECT s.send_window_timezone FROM public.lead_client_n8n_settings s
+    WHERE s.client_id = i.client_id
+      AND EXISTS (SELECT 1 FROM pg_timezone_names z WHERE z.name = s.send_window_timezone)
+    LIMIT 1),
+  'America/Sao_Paulo'))::date`;
+
+// scope: "one" ($1 = clientId) ou "many" ($1 = clientIds[]). instance_id do uso é TEXT: compara com i.id::text.
+export function buildEvolutionInstancesSql(scope) {
+  const where = scope === "many" ? "i.client_id = ANY($1::text[])" : "i.client_id = $1";
+  return `
+        SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
+               i.inbound_bearer_token, i.owner_uid, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
+               i.webhook_enabled,
+               i.created_at, i.updated_at, i.updated_by_email,
+               COALESCE(u.sent_count, 0) AS sent_count_today
+        FROM public.lead_client_evolution_instances i
+        LEFT JOIN public.evolution_instance_daily_usage u
+          ON u.instance_id = i.id::text AND u.date = ${SQL_TENANT_TODAY}
+        WHERE ${where}
+        ORDER BY i.active DESC, i.is_default DESC, i.created_at ASC
+      `;
+}
+
 export async function getLeadClientEvolutionInstances(clientId, pool = null) {
   if (!clientId) return [];
   const db = pool || pgDatabasePool;
@@ -227,21 +251,7 @@ export async function getLeadClientEvolutionInstances(clientId, pool = null) {
     if (db === pgDatabasePool) {
       await ensureLeadClientEvolutionInstancesTable();
     }
-    const { rows } = await db.query(
-      `
-        SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
-               i.inbound_bearer_token, i.owner_uid, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
-               i.webhook_enabled,
-               i.created_at, i.updated_at, i.updated_by_email,
-               COALESCE(u.sent_count, 0) AS sent_count_today
-        FROM public.lead_client_evolution_instances i
-        LEFT JOIN public.evolution_instance_daily_usage u
-          ON u.instance_id = i.id AND u.date = CURRENT_DATE
-        WHERE i.client_id = $1
-        ORDER BY i.active DESC, i.is_default DESC, i.created_at ASC
-      `,
-      [clientId]
-    );
+    const { rows } = await db.query(buildEvolutionInstancesSql("one"), [clientId]);
 
     return rows;
   } catch (err) {
@@ -259,21 +269,7 @@ export async function getLeadClientEvolutionInstancesMap(clientIds) {
   try {
     await ensureLeadClientEvolutionInstancesTable();
 
-    const { rows } = await pgDatabasePool.query(
-      `
-        SELECT i.id, i.client_id, i.name, i.dispatch_webhook_url, i.dispatch_webhook_token,
-               i.inbound_bearer_token, i.owner_uid, i.active, i.is_default, i.chip_state, i.connection_state, i.daily_limit_override,
-               i.webhook_enabled,
-               i.created_at, i.updated_at, i.updated_by_email,
-               COALESCE(u.sent_count, 0) AS sent_count_today
-        FROM public.lead_client_evolution_instances i
-        LEFT JOIN public.evolution_instance_daily_usage u
-          ON u.instance_id = i.id AND u.date = CURRENT_DATE
-        WHERE i.client_id = ANY($1::text[])
-        ORDER BY i.active DESC, i.is_default DESC, i.created_at ASC
-      `,
-      [clientIds]
-    );
+    const { rows } = await pgDatabasePool.query(buildEvolutionInstancesSql("many"), [clientIds]);
 
     return rows.reduce((acc, row) => {
       if (!acc[row.client_id]) acc[row.client_id] = [];
