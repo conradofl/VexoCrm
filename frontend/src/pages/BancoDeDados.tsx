@@ -51,6 +51,8 @@ import { calculateBasePotential, type BasePotentialSegmentId } from "@/lib/leads
 import {
   AudienceRulesError,
   fetchAllLeadsForExport,
+  fetchImportOrigin,
+  fetchImportSources,
   fetchCampaignAudience,
   fetchLeadFacets,
   fetchLeadIds,
@@ -60,6 +62,9 @@ import {
   type LeadContact,
   type LeadFacetsResponse,
   type LeadListFilters,
+  type ImportOrigin,
+  type ImportSource,
+  type ImportScope,
   type LeadRequest,
   type LeadTabCounts,
 } from "@/lib/leads/leadListApi";
@@ -88,6 +93,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
+import { TagSelect } from "@/components/leads/TagSelect";
 import { MARKETING_CHANNELS, computeMarketingMetricsFromCounts, getLeadSource } from "@/lib/leadChannels";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import {
@@ -152,7 +158,7 @@ export function toggleStageFilter(current: string[], stageToToggle: string): str
   return next;
 }
 
-export function buildCampaignTitle(stageFilters: string[], tagFilter?: string, count: number = 0): string {
+export function buildCampaignTitle(stageFilters: string[], tagFilter?: string, count: number = 0, importLabel?: string): string {
   const isAllStages = stageFilters.length === 0 || stageFilters.includes("all");
   const stageLabel = isAllStages
     ? "TODOS OS ESTÁGIOS"
@@ -163,6 +169,10 @@ export function buildCampaignTitle(stageFilters: string[], tagFilter?: string, c
     descriptor = isAllStages
       ? `Tag: ${tagFilter.trim()}`
       : `${stageLabel} | Tag: ${tagFilter.trim()}`;
+  }
+
+  if (importLabel && importLabel.trim()) {
+    descriptor = isAllStages && !(tagFilter && tagFilter.trim()) ? `Planilha: ${importLabel.trim()}` : `${descriptor} | Planilha: ${importLabel.trim()}`;
   }
 
   return `Campanha Funil [${descriptor}] (${count} leads)`;
@@ -179,9 +189,11 @@ export function calculateEffectiveSelectedCount(
 export function serializeCampaignFiltersKey(
   stageFilters: string[],
   tagFilter?: string,
-  filterRules?: any[]
+  filterRules?: any[],
+  importFilter?: { importId: string; scope: string } | null
 ): string {
   return JSON.stringify({
+    ...(importFilter ? { import: importFilter } : {}),
     stages: stageFilters,
     tag: tagFilter || "",
     rules: filterRules || [],
@@ -619,6 +631,12 @@ export default function BancoDeDados() {
   const [campaignTagFilter, setCampaignTagFilter] = useState<string>("");
   const [campaignSelectedLeadIds, setCampaignSelectedLeadIds] = useState<string[]>([]);
   const [campaignFunnelFilterRules, setCampaignFunnelFilterRules] = useState<DynamicFilterRule[]>([]);
+  // Campanha por PLANILHA registrada (lead_imports), não por rótulo: o público sai de dados.import_ids (procedência verdadeira)
+  const [campaignImportId, setCampaignImportId] = useState<string>("");
+  const [campaignImportScope, setCampaignImportScope] = useState<ImportScope>("all");
+  const [campaignImportSources, setCampaignImportSources] = useState<ImportSource[]>([]);
+  const [campaignImportOrigin, setCampaignImportOrigin] = useState<ImportOrigin | null>(null);
+  const [campaignImportOriginError, setCampaignImportOriginError] = useState<string | null>(null);
 
   // Spreadsheet Audience Selection State
   const [campaignFile, setCampaignFile] = useState<File | null>(null);
@@ -1429,6 +1447,8 @@ export default function BancoDeDados() {
     setCampaignTagFilter(initialTag);
     const initialStages = activeTab && activeTab !== "all" ? [activeTab] : ["all"];
     setCampaignStageFilters(initialStages);
+    setCampaignImportId("");
+    setCampaignImportScope("all");
     prevFiltersKeyRef.current = serializeCampaignFiltersKey(
       initialStages,
       initialTag,
@@ -1498,7 +1518,32 @@ export default function BancoDeDados() {
 
   // Público da campanha: o servidor filtra no banco (estágios, tag e regras de campos simples) e devolve linhas enxutas + o total.
   // Regra num campo que não é simples (tags, dados…) é recusada pelo servidor e a tela MOSTRA o motivo, em vez de um "0 leads".
-  const campaignFiltersKey = serializeCampaignFiltersKey(campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules);
+  const campaignImportFilter = campaignImportId ? { importId: campaignImportId, scope: campaignImportScope } : null;
+  const campaignFiltersKey = serializeCampaignFiltersKey(campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules, campaignImportFilter);
+
+  // As planilhas registradas para o seletor (rota do Banco: não depende de acesso à tela de Planilhas)
+  useEffect(() => {
+    if (!isCampaignWizardOpen || !isAuthenticated) return;
+    let cancelled = false;
+    fetchImportSources(leadRequest, clientId)
+      .then((items) => { if (!cancelled) setCampaignImportSources(items); })
+      .catch((err) => { if (!cancelled) { setCampaignImportSources([]); console.warn("[BancoDeDados] planilhas não carregadas:", err); } });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCampaignWizardOpen, clientId, isAuthenticated]);
+
+  // Os dois números da planilha escolhida, ANTES de confirmar: quantos leads nasceram nela e quantos já existiam e foram tocados por ela
+  useEffect(() => {
+    setCampaignImportOrigin(null);
+    setCampaignImportOriginError(null);
+    if (!isCampaignWizardOpen || !campaignImportId || !isAuthenticated) return;
+    let cancelled = false;
+    fetchImportOrigin(leadRequest, { clientId, importId: campaignImportId })
+      .then((o) => { if (!cancelled) setCampaignImportOrigin(o); })
+      .catch((err) => { if (!cancelled) setCampaignImportOriginError(err?.message || "Falha ao contar os leads da planilha."); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCampaignWizardOpen, campaignImportId, clientId, isAuthenticated]);
   const [campaignAudience, setCampaignAudience] = useState<{ key: string; items: AudienceLead[]; total: number; truncated: boolean } | null>(null);
   const [campaignAudienceLoading, setCampaignAudienceLoading] = useState(false);
   const [campaignAudienceError, setCampaignAudienceError] = useState<string | null>(null);
@@ -1514,6 +1559,8 @@ export default function BancoDeDados() {
           stages: campaignStageFilters,
           tag: campaignTagFilter,
           rules: campaignFunnelFilterRules as any,
+          importId: campaignImportId || null,
+          importScope: campaignImportScope,
         });
         if (cancelled) return;
         setCampaignAudience({ key: campaignFiltersKey, items: res.items, total: res.total, truncated: res.truncated });
@@ -1602,7 +1649,7 @@ export default function BancoDeDados() {
         tags: Array.isArray(l.tags) ? l.tags.join(", ") : "",
         resumo_ia: l.raw_chat_summary || "",
       }));
-      campaignTitleName = buildCampaignTitle(campaignStageFilters, campaignTagFilter, selected.length);
+      campaignTitleName = buildCampaignTitle(campaignStageFilters, campaignTagFilter, selected.length, campaignImportOrigin?.sourceName);
     } else {
       if (campaignSpreadsheetFilteredRows.length === 0) {
         toast.error("Nenhum contato encontrado na planilha com os filtros aplicados.");
@@ -2303,6 +2350,12 @@ export default function BancoDeDados() {
     if (selectedTag) set.add(selectedTag);
     return Array.from(set).sort();
   }, [knownTags, selectedTag]);
+  // as mesmas tags, com o tipo (planilha, origem, IA, minhas) para o seletor agrupado; a tag selecionada que não está na lista entra como "minhas"
+  const availableTagItems = useMemo(() => {
+    const items = (facets?.tags ?? []).map((t) => ({ tag: t.tag, kind: t.kind }));
+    if (selectedTag && !items.some((i) => i.tag === selectedTag)) items.push({ tag: selectedTag, kind: "minhas" as const });
+    return items;
+  }, [facets, selectedTag]);
 
   // Checagem de filtros ativos e limpador global
   const hasActiveFilters = Boolean(
@@ -2869,18 +2922,13 @@ export default function BancoDeDados() {
             </div>
 
             {(availableTags.length > 0 || selectedTag) && (
-              <select
+              <TagSelect
                 value={selectedTag}
-                onChange={(e) => setSelectedTag(e.target.value)}
+                onChange={setSelectedTag}
+                tags={availableTagItems}
+                data-testid="tag-select"
                 className="h-9 px-3 rounded-md border border-input bg-background text-xs text-foreground focus:ring-1 focus:ring-ring"
-              >
-                <option value="">Todas as Tags</option>
-                {availableTags.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              />
             )}
 
             {hasActiveFilters && (
@@ -4349,18 +4397,69 @@ export default function BancoDeDados() {
 
                   <div>
                     <label className="text-xs font-semibold text-foreground">Filtrar por Tag</label>
-                    <select
+                    <TagSelect
                       value={campaignTagFilter}
-                      onChange={(e) => setCampaignTagFilter(e.target.value)}
+                      onChange={setCampaignTagFilter}
+                      tags={availableTagItems}
+                      data-testid="campaign-tag-select"
+                      className="w-full h-9 px-3 mt-1 rounded-md border border-input bg-background text-xs"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2" data-testid="campaign-import-picker">
+                    <label className="text-xs font-semibold text-foreground">Filtrar por Planilha importada</label>
+                    <select
+                      value={campaignImportId}
+                      onChange={(e) => { setCampaignImportId(e.target.value); setCampaignImportScope("all"); }}
+                      data-testid="campaign-import-select"
                       className="w-full h-9 px-3 mt-1 rounded-md border border-input bg-background text-xs"
                     >
-                      <option value="">Todas as Tags</option>
-                      {availableTags.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
+                      <option value="">Qualquer origem (sem filtrar por planilha)</option>
+                      {campaignImportSources.map((imp) => (
+                        <option key={imp.id} value={imp.id}>
+                          {imp.reconstructed
+                            ? `${imp.source_name} — no mínimo ${Number(imp.total_rows).toLocaleString("pt-BR")} leads (total é piso, data aproximada)`
+                            : `${imp.source_name} — ${new Date(imp.created_at).toLocaleDateString("pt-BR")} — ${Number(imp.total_rows).toLocaleString("pt-BR")} linhas${imp.status === "incomplete" ? " (incompleta)" : ""}`}
                         </option>
                       ))}
                     </select>
+                    {campaignImportId && (
+                      <div className="mt-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs space-y-1.5">
+                        {campaignImportOriginError ? (
+                          <p data-testid="campaign-import-error" className="text-rose-600">{campaignImportOriginError}</p>
+                        ) : !campaignImportOrigin ? (
+                          <p className="text-muted-foreground">Contando os leads da planilha…</p>
+                        ) : (
+                          <>
+                            {campaignImportOrigin.reconstructed ? (
+                              <p data-testid="campaign-import-numbers" className="text-foreground">
+                                <strong>No mínimo {campaignImportOrigin.total.toLocaleString("pt-BR")}</strong> leads encontrados nesta importação (reconstruída: o total é piso e a data é
+                                aproximada). <span data-testid="campaign-import-reason" className="text-muted-foreground">{campaignImportOrigin.reason}</span>
+                              </p>
+                            ) : (
+                              <p data-testid="campaign-import-numbers" className="text-foreground">
+                                <strong>{(campaignImportOrigin.born ?? 0).toLocaleString("pt-BR")}</strong> leads nasceram nesta importação ·{" "}
+                                <strong>{(campaignImportOrigin.existed ?? 0).toLocaleString("pt-BR")}</strong> já existiam e foram atualizados por ela
+                              </p>
+                            )}
+                            {([
+                              ["all", `Todos (${campaignImportOrigin.total.toLocaleString("pt-BR")})`],
+                              ...(campaignImportOrigin.reconstructed
+                                ? []
+                                : [
+                                    ["born", `Só os que nasceram (${(campaignImportOrigin.born ?? 0).toLocaleString("pt-BR")})`],
+                                    ["existed", `Só os que já existiam (${(campaignImportOrigin.existed ?? 0).toLocaleString("pt-BR")})`],
+                                  ]),
+                            ] as Array<[ImportScope, string]>).map(([value, label]) => (
+                              <label key={value} className="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="campaign-import-scope" checked={campaignImportScope === value} onChange={() => setCampaignImportScope(value)} data-testid={`campaign-import-scope-${value}`} />
+                                <span>{label}</span>
+                              </label>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 

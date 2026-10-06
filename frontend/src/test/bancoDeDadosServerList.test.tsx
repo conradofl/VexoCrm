@@ -77,21 +77,28 @@ const leadRow = (id: string, nome: string, extra: Record<string, unknown> = {}) 
   raw_chat_summary: null, created_at: "2026-01-01T00:00:00.000Z", dados: {}, ...extra,
 });
 
-interface FakeServer { pageUrls: string[]; otherUrls: string[]; behavior: { degraded: boolean; lookupHit: boolean; audienceRulesError: boolean; failedPart: string | null } }
-const server: FakeServer = { pageUrls: [], otherUrls: [], behavior: { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null } };
+interface FakeServer { pageUrls: string[]; otherUrls: string[]; audienceBodies: any[]; behavior: { degraded: boolean; lookupHit: boolean; audienceRulesError: boolean; failedPart: string | null } }
+const server: FakeServer = { pageUrls: [], otherUrls: [], audienceBodies: [], behavior: { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null } };
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as any;
 
 function installFakeServer() {
   server.pageUrls = [];
   server.otherUrls = [];
-  global.fetch = vi.fn(async (url: string | URL | Request) => {
+  server.audienceBodies = [];
+  global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const u = new URL(String(url), "http://x");
     if (u.pathname === "/api/leads/facets") {
       const full: Record<string, unknown> = {
         summary: { totalLeads: TOTAL, buyersCount: 100, lostCount: 50, openBudgetsCount: 200, inNegotiationCount: 200, inConversationCount: 5000, neverContactedCount: 19650, activeLeadsCount: 24850, estimatedRevenue: 0 },
         channels: { google: 12000, instagram: 8000, nao_identificada: 5000 },
         sources: [{ source: "Google Ads", count: 12000 }, { source: "Instagram Direct", count: 8000 }, { source: "Não informado", count: 5000 }],
-        tags: [{ tag: "vip", count: 4000 }],
+        tags: [
+          { tag: "vip", count: 4000, kind: "minhas" },
+          { tag: "#Imp-feira_abril", count: 900, kind: "planilha" },
+          { tag: "VP Ofertas", count: 1011, kind: "origem" },
+          { tag: "agenda-whatsapp", count: 5050, kind: "origem" },
+          { tag: "Follow-up", count: 152, kind: "ia" },
+        ],
       };
       const out: Record<string, unknown> = {
         ...full,
@@ -116,8 +123,24 @@ function installFakeServer() {
       const n = 1234;
       return json({ ids: Array.from({ length: n }, (_, i) => `id-${i}`), total: n, truncated: false, contacts: Array.from({ length: n }, (_, i) => ({ id: `id-${i}`, nome: `N${i}`, telefone: `5511${i}` })) });
     }
+    if (u.pathname === "/api/leads/import-sources") {
+      return json({
+        items: [
+          { id: "11111111-1111-1111-1111-111111111111", source_name: "clientes-junho.xlsx", created_at: "2026-06-01T12:00:00.000Z", total_rows: 1530, status: "completed" },
+          { id: "22222222-2222-2222-2222-222222222222", source_name: "Importação reconstruída — #Imp-clientes_2026 (≈ 31/12/2025)", created_at: "2025-12-31T00:00:00.000Z", total_rows: 17843, status: "completed", reconstructed: true },
+        ],
+      });
+    }
+    if (u.pathname === "/api/leads/import-origin") {
+      server.otherUrls.push(String(url));
+      if (u.searchParams.get("importId") === "22222222-2222-2222-2222-222222222222") {
+        return json({ found: true, importId: "22222222-2222-2222-2222-222222222222", sourceName: "Importação reconstruída — #Imp-clientes_2026 (≈ 31/12/2025)", reconstructed: true, totalIsFloor: true, approximateDate: true, totalRows: 17843, createdAt: "2025-12-31T00:00:00.000Z", born: null, existed: null, total: 17843, reason: "Importação reconstruída depois do fato: não existe a hora de abertura para separar quem nasceu nela de quem já existia." });
+      }
+      return json({ found: true, importId: u.searchParams.get("importId"), sourceName: "clientes-junho.xlsx", totalRows: 1530, createdAt: "2026-06-01T12:00:00.000Z", born: 1200, existed: 300, total: 1500 });
+    }
     if (u.pathname === "/api/leads/audience") {
       server.otherUrls.push(String(url));
+      server.audienceBodies.push(init?.body ? JSON.parse(String(init.body)) : null);
       if (server.behavior.audienceRulesError) {
         return json({ error: { code: "UNSUPPORTED_RULES", message: 'A coluna "dados" não pode ser usada como regra' }, problems: [] }, 400);
       }
@@ -326,6 +349,65 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
       renderWithProviders(<BancoDeDados />);
       await screen.findByText("Lead P1 L1");
       expect(screen.queryByTestId("leads-facets-partial")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("tags agrupadas por tipo e campanha por planilha", () => {
+    it("o seletor de tags vem agrupado (Planilhas, Grupos e origem, Rótulos da IA, Minhas), sem perder nenhuma tag", async () => {
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      const select = await screen.findByTestId("tag-select");
+      await waitFor(() => expect(select.querySelectorAll("optgroup").length).toBe(4));
+      expect(Array.from(select.querySelectorAll("optgroup")).map((g) => g.getAttribute("label"))).toEqual(["Planilhas", "Grupos e origem", "Rótulos da IA", "Minhas"]);
+      const opcoes = Array.from(select.querySelectorAll("option")).map((o) => o.textContent).filter((t) => t && t !== "Todas as Tags").sort();
+      expect(opcoes).toEqual(["#Imp-feira_abril", "Follow-up", "VP Ofertas", "agenda-whatsapp", "vip"].sort());
+      expect(select.querySelector('optgroup[label="Planilhas"] option')?.textContent).toBe("#Imp-feira_abril");
+    });
+
+    it("campanha por planilha: escolhe a planilha registrada, vê os dois números, e o público pedido leva a planilha e o recorte", async () => {
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      fireEvent.click(await screen.findByTestId("btn-create-campaign"));
+      const picker = await screen.findByTestId("campaign-import-select");
+      await waitFor(() => expect(picker.querySelectorAll("option").length).toBe(3)); // "qualquer origem" + a planilha + a reconstruída
+      // antes de escolher: sem planilha no pedido (a escolha por tag continua existindo)
+      await waitFor(() => expect(server.audienceBodies.length).toBeGreaterThan(0));
+      expect(server.audienceBodies[server.audienceBodies.length - 1].importId).toBeUndefined();
+      fireEvent.change(picker, { target: { value: "11111111-1111-1111-1111-111111111111" } });
+      const numeros = await screen.findByTestId("campaign-import-numbers");
+      expect(numeros).toHaveTextContent(/1\.?200.*nasceram nesta importação/);
+      expect(numeros).toHaveTextContent(/300.*já existiam e foram atualizados por ela/);
+      // padrão = todos
+      await waitFor(() => {
+        const b = server.audienceBodies[server.audienceBodies.length - 1];
+        expect(b).toMatchObject({ importId: "11111111-1111-1111-1111-111111111111", importScope: "all" });
+      });
+      fireEvent.click(screen.getByTestId("campaign-import-scope-born"));
+      await waitFor(() => expect(server.audienceBodies[server.audienceBodies.length - 1].importScope).toBe("born"));
+      fireEvent.click(screen.getByTestId("campaign-import-scope-existed"));
+      await waitFor(() => expect(server.audienceBodies[server.audienceBodies.length - 1].importScope).toBe("existed"));
+      // voltar a "qualquer origem" tira a planilha do pedido
+      fireEvent.change(picker, { target: { value: "" } });
+      await waitFor(() => expect(server.audienceBodies[server.audienceBodies.length - 1].importId).toBeUndefined());
+    });
+
+    it("importação RECONSTRUÍDA: só o total (no mínimo) e o porquê; sem 'nasceram / já existiam' e sem os recortes; o rótulo da lista diz que o total é piso", async () => {
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      fireEvent.click(await screen.findByTestId("btn-create-campaign"));
+      const picker = await screen.findByTestId("campaign-import-select");
+      await waitFor(() => expect(picker.querySelectorAll("option").length).toBe(3));
+      const rotulo = Array.from(picker.querySelectorAll("option")).map((o) => o.textContent).find((t) => t?.includes("reconstruída"));
+      expect(rotulo).toMatch(/no mínimo 17\.?843 leads \(total é piso, data aproximada\)/);
+      fireEvent.change(picker, { target: { value: "22222222-2222-2222-2222-222222222222" } });
+      const numeros = await screen.findByTestId("campaign-import-numbers");
+      expect(numeros).toHaveTextContent(/No mínimo 17\.?843 leads encontrados/);
+      expect(numeros).not.toHaveTextContent(/nasceram nesta importação ·/);
+      expect(await screen.findByTestId("campaign-import-reason")).toHaveTextContent(/não existe a hora de abertura/);
+      expect(screen.getByTestId("campaign-import-scope-all")).toBeInTheDocument();
+      expect(screen.queryByTestId("campaign-import-scope-born")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("campaign-import-scope-existed")).not.toBeInTheDocument();
+      await waitFor(() => expect(server.audienceBodies[server.audienceBodies.length - 1]).toMatchObject({ importId: "22222222-2222-2222-2222-222222222222", importScope: "all" }));
     });
   });
 });

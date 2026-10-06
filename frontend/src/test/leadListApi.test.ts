@@ -8,8 +8,11 @@ import {
   fetchLeadFacets,
   fetchLeadIds,
   fetchLeadLookup,
+  fetchImportOrigin,
+  fetchImportSources,
   fetchLeadPage,
   filterParams,
+  groupTagsByKind,
   type LeadRequest,
 } from "@/lib/leads/leadListApi";
 
@@ -132,5 +135,43 @@ describe("fetchAllLeadsForExport", () => {
     expect(new Set(all.map((l: any) => l.id)).size).toBe(total);
     expect(request).toHaveBeenCalledTimes(4);
     expect(progress).toEqual([500, 1000, 1500, 1507]);
+  });
+});
+
+describe("groupTagsByKind (seletor de tags por tipo)", () => {
+  it("ordem fixa Planilhas → Grupos e origem → Rótulos da IA → Minhas; grupos vazios não aparecem", () => {
+    const g = groupTagsByKind([
+      { tag: "vip", kind: "minhas" }, { tag: "#Imp-a", kind: "planilha" }, { tag: "VP Ofertas", kind: "origem" }, { tag: "Follow-up", kind: "ia" }, { tag: "#Imp-b", kind: "planilha" },
+    ]);
+    expect(g.map((x) => x.label)).toEqual(["Planilhas", "Grupos e origem", "Rótulos da IA", "Minhas"]);
+    expect(g[0].tags).toEqual(["#Imp-a", "#Imp-b"]);
+    expect(groupTagsByKind([{ tag: "x", kind: "minhas" }]).map((x) => x.kind)).toEqual(["minhas"]);
+    expect(groupTagsByKind([])).toEqual([]);
+  });
+  it("[TESTE OBRIGATÓRIO] nenhuma tag se perde: tipo ausente ou desconhecido cai em Minhas e a união dos grupos é a lista recebida", () => {
+    const entrada = [{ tag: "a" }, { tag: "b", kind: "inventado" }, { tag: "#Imp-x", kind: "planilha" }, { tag: "c", kind: "ia" }];
+    const g = groupTagsByKind(entrada);
+    expect(g.flatMap((x) => x.tags).sort()).toEqual(entrada.map((t) => t.tag).sort());
+    expect(g.find((x) => x.kind === "minhas")?.tags).toEqual(["a", "b"]);
+  });
+});
+
+describe("campanha por planilha (API)", () => {
+  it("fetchImportOrigin devolve os dois números; fetchImportSources lista as planilhas", async () => {
+    const request = vi.fn<LeadRequest>(async () => ok({ found: true, importId: "i1", sourceName: "x.xlsx", born: 1200, existed: 300, total: 1500 }));
+    const o = await fetchImportOrigin(request, { clientId: "c1", importId: "i1" });
+    expect(new URL(request.mock.calls[0][0], "http://x").searchParams.get("importId")).toBe("i1");
+    expect([o.born, o.existed, o.total]).toEqual([1200, 300, 1500]);
+    expect(await fetchImportSources(async () => ok({ items: [{ id: "i1", source_name: "x.xlsx" }] }), "c1")).toHaveLength(1);
+    expect(await fetchImportSources(async () => ok({}), "c1")).toEqual([]);
+  });
+  it("audience leva importId e importScope só quando há planilha (sem planilha o corpo é o de sempre)", async () => {
+    const request = vi.fn<LeadRequest>(async () => ok({ items: [], total: 0, truncated: false }));
+    await fetchCampaignAudience(request, { clientId: "c1", stages: ["all"], tag: "", rules: [] });
+    expect(JSON.parse(String(request.mock.calls[0][1]?.body))).toEqual({ clientId: "c1", stages: ["all"], tag: "", rules: [] });
+    await fetchCampaignAudience(request, { clientId: "c1", stages: ["all"], tag: "", rules: [], importId: "i1", importScope: "born" });
+    expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toMatchObject({ importId: "i1", importScope: "born" });
+    await fetchCampaignAudience(request, { clientId: "c1", stages: ["all"], tag: "", rules: [], importId: "i1" });
+    expect(JSON.parse(String(request.mock.calls[2][1]?.body)).importScope).toBe("all");
   });
 });

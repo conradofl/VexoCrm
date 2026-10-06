@@ -16,6 +16,8 @@
 //    - Se não existe: insere novo lead.
 // Funciona 100% com ou sem o índice.
 
+import { mergeProcedencia } from "./leadProcedencia.js";
+
 /**
  * Valida se uma string é um nome humano real (e não telefone, placeholder ou vazio).
  * @param {unknown} n
@@ -136,10 +138,14 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
         ? { ...prevCampos, ...newCampos }
         : undefined;
 
+      // procedência acumula (grupos, agenda, conversa); o merge raso a sobrescreveria
+      const combinedProcedencia = mergeProcedencia(prevDados.procedencia, updates.dados.procedencia);
+
       updates.dados = {
         ...prevDados,
         ...updates.dados,
         ...(combinedCampos ? { campos: combinedCampos } : {}),
+        ...(combinedProcedencia ? { procedencia: combinedProcedencia } : {}),
       };
     }
 
@@ -262,11 +268,13 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         : undefined;
 
       const combinedImportIds = unionImportIds(prevDados.import_ids, newLeadDados.import_ids);
+      const combinedProcedencia = mergeProcedencia(prevDados.procedencia, newLeadDados.procedencia);
       const combinedDados = {
         ...prevDados,
         ...newLeadDados,
         ...(combinedCampos ? { campos: combinedCampos } : {}),
         ...(combinedImportIds ? { import_ids: combinedImportIds } : {}),
+        ...(combinedProcedencia ? { procedencia: combinedProcedencia } : {}),
       };
 
       // Preserva o melhor nome disponível
@@ -414,11 +422,13 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
         : undefined;
 
       const mergedImportIds = unionImportIds(existingDados.import_ids, leadDados.import_ids);
+      const mergedProcedencia = mergeProcedencia(existingDados.procedencia, leadDados.procedencia);
       const mergedDados = {
         ...existingDados,
         ...leadDados,
         ...(mergedCampos ? { campos: mergedCampos } : {}),
         ...(mergedImportIds ? { import_ids: mergedImportIds } : {}),
+        ...(mergedProcedencia ? { procedencia: mergedProcedencia } : {}),
       };
 
       const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";

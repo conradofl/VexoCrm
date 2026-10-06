@@ -27,6 +27,9 @@ const SCHEMA = `
     dados jsonb NOT NULL DEFAULT '{}'::jsonb, lead_source text, created_at timestamptz NOT NULL DEFAULT now(),
     stage text DEFAULT 'cold', temperature text DEFAULT 'warm', tags text[] DEFAULT ARRAY[]::text[], last_interaction_at timestamptz,
     raw_chat_summary text, assigned_to text, UNIQUE (client_id, telefone));
+  CREATE TABLE lead_imports (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL REFERENCES leads_clients(id) ON DELETE CASCADE,
+    source_name text NOT NULL, source_type text NOT NULL DEFAULT 'spreadsheet', total_rows integer NOT NULL DEFAULT 0, imported_rows integer NOT NULL DEFAULT 0,
+    skipped_rows integer NOT NULL DEFAULT 0, uploaded_by_uid text, uploaded_by_email text, created_at timestamptz NOT NULL DEFAULT now(), column_mapping jsonb);
 `;
 
 describe("rotas da lista de leads (base de 25.000)", () => {
@@ -323,6 +326,98 @@ describe("rotas da lista de leads (base de 25.000)", () => {
       const filtros = await json(`/api/leads?clientId=${T}&tag=vip`);
       expect(filtros.degradedReason).toBe("FILTERS_UNAVAILABLE");
       expect(filtros.degradedCause.message).toMatch(/contains indisponível/);
+    }, SLOW);
+  });
+
+  describe("campanha por planilha e tipo das tags (rotas)", () => {
+    let impId;
+    let alheia;
+    beforeAll(async () => {
+      impId = (await db.query(`INSERT INTO lead_imports (client_id, source_name, total_rows, created_at) VALUES ($1, 'vendas-set.xlsx', 12, '2026-09-01T10:00:00Z') RETURNING id::text AS id`, [T])).rows[0].id;
+      alheia = (await db.query(`INSERT INTO lead_imports (client_id, source_name) VALUES ($1, 'de-outro.xlsx') RETURNING id::text AS id`, [OUTRO])).rows[0].id;
+      await db.query(
+        `INSERT INTO leads (client_id, telefone, nome, tags, dados, created_at)
+         SELECT $1, '5588' || lpad(g::text, 9, '0'), 'Planilha ' || g, ARRAY['#Imp-vendas_set'], jsonb_build_object('import_ids', jsonb_build_array($2::text)),
+                CASE WHEN g <= 9 THEN timestamptz '2026-09-01T10:00:00Z' + (g || ' seconds')::interval ELSE timestamptz '2026-05-01' END
+           FROM generate_series(1, 12) g`,
+        [T, impId]
+      );
+    }, SLOW);
+
+    afterAll(async () => {
+      await db.query(`DELETE FROM leads WHERE client_id = $1 AND nome LIKE 'Planilha %'`, [T]); // devolve a base ao tamanho de 25.000 para os outros testes
+    });
+
+    it("import-origin devolve os dois números (nasceram 9, já existiam 3) e o nome da planilha", async () => {
+      const o = await json(`/api/leads/import-origin?clientId=${T}&importId=${impId}`);
+      expect(o).toMatchObject({ found: true, importId: impId, sourceName: "vendas-set.xlsx", born: 9, existed: 3, total: 12 });
+    }, SLOW);
+
+    it("import-origin: id inválido é 400; planilha de outra empresa e inexistente são 404", async () => {
+      expect((await get(`/api/leads/import-origin?clientId=${T}&importId=abc`)).status).toBe(400);
+      expect((await get(`/api/leads/import-origin?clientId=${T}`)).status).toBe(400);
+      expect((await get(`/api/leads/import-origin?clientId=${T}&importId=${alheia}`)).status).toBe(404);
+      expect((await get(`/api/leads/import-origin?clientId=${T}&importId=00000000-0000-0000-0000-000000000000`)).status).toBe(404);
+    }, SLOW);
+
+    const audiencia = (body) => fetch(`${baseUrl}/api/leads/audience`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: T, ...body }) });
+
+    it("audience por planilha: padrão = todos; 'born' e 'existed' são os recortes; bate com os números do seletor", async () => {
+      const todos = await (await audiencia({ importId: impId })).json();
+      const born = await (await audiencia({ importId: impId, importScope: "born" })).json();
+      const existed = await (await audiencia({ importId: impId, importScope: "existed" })).json();
+      expect([todos.total, born.total, existed.total]).toEqual([12, 9, 3]);
+    }, SLOW);
+
+    it("audience: escopo inválido e id inválido são 400; planilha de outra empresa é 404 (nunca o público dela)", async () => {
+      expect((await audiencia({ importId: impId, importScope: "metade" })).status).toBe(400);
+      expect((await audiencia({ importId: "xyz" })).status).toBe(400);
+      const r = await audiencia({ importId: alheia });
+      expect(r.status).toBe(404);
+      expect((await r.json()).error.code).toBe("IMPORT_NOT_FOUND");
+    }, SLOW);
+
+    it("import-sources lista as planilhas da empresa (e só dela), com nome, data, linhas e status", async () => {
+      const r = await json(`/api/leads/import-sources?clientId=${T}`);
+      const ids = r.items.map((i) => i.id);
+      expect(ids).toContain(impId);
+      expect(ids).not.toContain(alheia);
+      expect(r.items.find((i) => i.id === impId)).toMatchObject({ source_name: "vendas-set.xlsx", total_rows: 12, status: "completed" });
+    }, SLOW);
+
+    it("importação RECONSTRUÍDA: import-origin mostra só o total (piso) e o porquê; 'nasceram'/'já existiam' é 400; o seletor a marca; a tela de Planilhas não a lista", async () => {
+      const recId = (await db.query(`INSERT INTO lead_imports (client_id, source_name, source_type, total_rows, created_at) VALUES ($1, 'Importação reconstruída — #Imp-x (≈ 01/01/2026)', 'reconstruida', 7, '2026-01-01T00:00:00Z') RETURNING id::text AS id`, [T])).rows[0].id;
+      await db.query(
+        `INSERT INTO leads (client_id, telefone, nome, tags, dados) SELECT $1, '5577' || lpad(g::text, 9, '0'), 'Reconstruida ' || g, ARRAY['#Imp-x'], jsonb_build_object('import_ids', jsonb_build_array($2::text)) FROM generate_series(1, 7) g`,
+        [T, recId]
+      );
+      const o = await json(`/api/leads/import-origin?clientId=${T}&importId=${recId}`);
+      expect(o).toMatchObject({ found: true, reconstructed: true, totalIsFloor: true, approximateDate: true, born: null, existed: null, total: 7 });
+      expect(o.reason).toMatch(/não existe a hora de abertura/);
+      const todos = await (await audiencia({ importId: recId })).json();
+      expect(todos.total).toBe(7);
+      for (const importScope of ["born", "existed"]) {
+        const r = await audiencia({ importId: recId, importScope });
+        expect(r.status).toBe(400);
+        expect((await r.json()).error.code).toBe("IMPORT_SCOPE_UNAVAILABLE");
+      }
+      const src = await json(`/api/leads/import-sources?clientId=${T}`);
+      expect(src.items.find((i) => i.id === recId)).toMatchObject({ reconstructed: true, total_rows: 7 });
+      expect(src.items.find((i) => i.id === impId).reconstructed).toBe(false);
+      const planilhas = await json(`/api/lead-imports?clientId=${T}`);
+      expect(planilhas.items.map((i) => i.id)).not.toContain(recId);
+      expect(planilhas.items.map((i) => i.id)).toContain(impId);
+      await db.query(`DELETE FROM leads WHERE client_id = $1 AND nome LIKE 'Reconstruida %'`, [T]);
+    }, SLOW);
+
+    it("facets: cada tag traz o tipo (planilha, origem, ia, minhas) e nenhuma tag some", async () => {
+      const f = await json(`/api/leads/facets?clientId=${T}`);
+      const kind = Object.fromEntries(f.tags.map((t) => [t.tag, t.kind]));
+      expect(kind["#Imp-vendas_set"]).toBe("planilha");
+      expect(kind["vip"]).toBe("minhas");
+      expect(f.tags.every((t) => ["planilha", "origem", "ia", "minhas"].includes(t.kind))).toBe(true);
+      const doBanco = (await db.query(`SELECT count(DISTINCT t)::int AS n FROM leads l CROSS JOIN LATERAL unnest(l.tags) t WHERE l.client_id = $1`, [T])).rows[0].n;
+      expect(f.tags).toHaveLength(doBanco);
     }, SLOW);
   });
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeAll, afterAll } from "vitest";
+import { AI_LABELS } from "../services/leadProcedencia.js";
 import express from "express";
 import http from "http";
 import {
@@ -605,6 +606,15 @@ describe("Bloco 3 — Atribuição Real de Lead por Chip", () => {
       const agendaLead = mockDb.leads.find((l) => l.telefone === "5511999990021");
       expect(agendaLead).toBeDefined();
       expect(agendaLead.assigned_to).toBe("uid-priscila-123");
+
+      // Procedência em campo próprio: a agenda é agenda; a conversa só é "conversa extraída" quando o classificador caiu no rótulo-padrão.
+      // O palpite da IA vai para dados.rotulos_ia (lista fechada) e as tags continuam sendo gravadas.
+      expect(agendaLead.dados.procedencia).toEqual({ grupos: [], agenda_whatsapp: true, conversa_whatsapp: false });
+      expect(agendaLead.tags).toContain("agenda-whatsapp");
+      expect(Array.isArray(chatLead.dados.rotulos_ia)).toBe(true);
+      for (const rotulo of chatLead.dados.rotulos_ia) expect(AI_LABELS).toContain(rotulo);
+      for (const tag of chatLead.tags) expect(tag === "WhatsApp WA" || AI_LABELS.includes(tag)).toBe(true); // nada inventado nas tags
+      expect(chatLead.dados.procedencia?.conversa_whatsapp === true).toBe(chatLead.tags.includes("WhatsApp WA"));
     });
 
     it("extração de chip sem dono mantém assigned_to = NULL para novos leads", async () => {

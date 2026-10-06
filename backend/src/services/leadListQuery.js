@@ -51,6 +51,8 @@ export const activeCollation = () => ICU;
 /** Espaços que o String.prototype.trim() do JavaScript remove (o btrim padrão só remove o espaço). */
 const WS = "E' \\t\\n\\r\\f\\v\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff'";
 
+import { classifyTagKind } from "./leadProcedencia.js";
+
 export const MARKETING_CHANNEL_IDS = [
   "instagram", "google", "facebook", "tiktok", "indicacao", "whatsapp", "campanha", "organico", "trafego_pago",
   "importacao_planilha", "vendas_fechadas", "texto_avulso", "nao_identificada",
@@ -282,12 +284,28 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
          FROM e`),
     channels: () => pool.query(channelsSql(scopeSql), p.values),
     sources: () => pool.query(`${sourceOnly} SELECT s0._source AS source, count(*)::int AS n FROM s0 GROUP BY 1 ORDER BY n DESC, source`, p.values),
-    tags: () =>
-      pool.query(
+    tags: async () => {
+      const res = await pool.query(
         `SELECT tg.tag AS tag, count(*)::int AS n FROM public.leads s CROSS JOIN LATERAL unnest(COALESCE(s.tags, ARRAY[]::text[])) AS tg(tag)
           WHERE ${scopeSql} GROUP BY 1 ORDER BY 1`,
         p.values
-      ),
+      );
+      // Nomes de grupo extraído (dados.grupo_nome): é o que permite separar "grupo" de "marcação da pessoa". Consulta à parte, DENTRO desta parte
+      // mas isolada: se ela falhar a lista de tags continua saindo (os grupos só caem em "minhas") e o motivo vai em `tagKindsCause`.
+      let groupNames = new Set();
+      let groupsCause = null;
+      try {
+        const g = await pool.query(
+          `SELECT DISTINCT s.dados->>'grupo_nome' AS g FROM public.leads s WHERE ${scopeSql} AND s.dados ? 'grupo_nome'`,
+          p.values
+        );
+        groupNames = new Set(g.rows.map((r) => r.g).filter(Boolean));
+      } catch (err) {
+        groupsCause = partCause(err);
+        console.error("[leads-facets] nomes de grupo falharam (tags seguem, sem separar grupos):", err?.message || err);
+      }
+      return { rows: res.rows, groupNames, groupsCause };
+    },
   };
 
   const asked = FACET_PARTS.filter(want);
@@ -331,7 +349,9 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
     } else if (name === "sources") {
       out.sources = res.rows.map((x) => ({ source: x.source, count: x.n }));
     } else if (name === "tags") {
-      out.tags = res.rows.map((x) => ({ tag: x.tag, count: x.n }));
+      // `kind` separa procedência, rótulo da IA e marcação da pessoa NA TELA; nenhum dado muda e nenhuma tag some
+      out.tags = res.rows.map((x) => ({ tag: x.tag, count: x.n, kind: classifyTagKind(x.tag, res.groupNames) }));
+      if (res.groupsCause) out.tagKindsCause = res.groupsCause;
     }
   });
   return out;
@@ -448,8 +468,59 @@ export function ruleCondition(params, rule) {
   return `(${num} ${rule.operator === "gt" ? ">" : "<"} ${ruleNumSql})`;
 }
 
-/** O público do assistente de campanha: estágios (igualdade EXATA, como sempre), tag e regras; linhas enxutas + o total. */
-export async function queryCampaignAudience(pool, { scope, stages = [], tag = "", rules = [] }) {
+// ── campanha por planilha: a procedência verdadeira é dados.import_ids ───────────────────────────────────────────────────
+/**
+ * "Nasceu na importação" × "já existia e foi tocado por ela". O lead guarda o id de TODA importação que o tocou (união em dados.import_ids);
+ * o que distingue os dois é a data de criação do lead contra a da abertura da importação (lead_imports.created_at). Os leads de uma importação
+ * são gravados depois da abertura; um lead criado antes já existia. A tolerância cobre a diferença entre o relógio do app (que carimba o lead)
+ * e o do banco (que carimba a abertura): sem ela, importação de 1 linha (abre e grava no mesmo instante) cairia do lado errado.
+ */
+export const IMPORT_BORN_TOLERANCE_SECONDS = 10;
+const IMPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const IMPORT_SCOPES = ["all", "born", "existed"];
+/** source_type das importações RECONSTRUÍDAS depois do fato (ops/sql/2026-10-06-reconstruir-importacoes.sql): sem hora de abertura, total é piso, data aproximada. */
+export const RECONSTRUCTED_SOURCE_TYPE = "reconstruida";
+export const RECONSTRUCTED_SCOPE_REASON =
+  "Importação reconstruída depois do fato: não existe a hora de abertura para separar quem nasceu nela de quem já existia. Só o total é conhecido (e é no mínimo esse).";
+const importIdCond = (params, importId, alias = "s") => `${alias}.dados @> jsonb_build_object('import_ids', jsonb_build_array(${params.add(importId)}::text))`;
+
+async function loadImportRow(pool, clientId, importId) {
+  if (!IMPORT_ID_RE.test(String(importId))) return null;
+  const { rows } = await pool.query(`SELECT id::text AS id, source_name, source_type, total_rows, created_at FROM public.lead_imports WHERE id::text = $1 AND client_id = $2`, [importId, clientId]);
+  return rows[0] || null;
+}
+
+/** Os dois números que o dono vê antes de confirmar a campanha por planilha. `found: false` = importação inexistente ou de outra empresa. */
+export async function queryImportOrigin(pool, { scope, importId }) {
+  const imp = await loadImportRow(pool, scope.clientId, importId);
+  if (!imp) return { found: false, importId };
+  const p = new Params();
+  const scopeSql = buildScope(p, scope);
+  const ts = p.add(new Date(imp.created_at).toISOString());
+  const cond = importIdCond(p, imp.id);
+  const { rows } = await pool.query(
+    `SELECT count(*) FILTER (WHERE s.created_at >= ${ts}::timestamptz - interval '${IMPORT_BORN_TOLERANCE_SECONDS} seconds')::int AS born,
+            count(*) FILTER (WHERE s.created_at <  ${ts}::timestamptz - interval '${IMPORT_BORN_TOLERANCE_SECONDS} seconds')::int AS existed
+       FROM public.leads s WHERE ${scopeSql} AND ${cond}`,
+    p.values
+  );
+  const { born, existed } = rows[0];
+  if (imp.source_type === RECONSTRUCTED_SOURCE_TYPE) {
+    // Número que não dá para saber não vira número: sem "nasceram / já existiam"; só o total (piso) e o porquê.
+    return {
+      found: true, importId: imp.id, sourceName: imp.source_name, reconstructed: true, totalIsFloor: true, approximateDate: true,
+      totalRows: Number(imp.total_rows) || 0, createdAt: new Date(imp.created_at).toISOString(),
+      born: null, existed: null, total: born + existed, reason: RECONSTRUCTED_SCOPE_REASON,
+    };
+  }
+  return { found: true, importId: imp.id, sourceName: imp.source_name, totalRows: Number(imp.total_rows) || 0, createdAt: new Date(imp.created_at).toISOString(), born, existed, total: born + existed };
+}
+
+/**
+ * O público do assistente de campanha: estágios (igualdade EXATA, como sempre), tag, regras e — novo — uma PLANILHA registrada (importId) com o
+ * recorte `importScope` ("all" padrão, "born", "existed"). Linhas enxutas + o total.
+ */
+export async function queryCampaignAudience(pool, { scope, stages = [], tag = "", rules = [], importId = null, importScope = "all" }) {
   await useCollation(pool);
   const p = new Params();
   const scopeSql = buildScope(p, scope);
@@ -457,6 +528,18 @@ export async function queryCampaignAudience(pool, { scope, stages = [], tag = ""
   const wanted = (Array.isArray(stages) ? stages : []).filter(Boolean);
   if (wanted.length > 0 && !wanted.includes("all")) where.push(`e.stage = ANY(${p.add(wanted)}::text[])`);
   if (tag) where.push(`e.tags @> ARRAY[${p.add(tag)}]::text[]`);
+  if (importId) {
+    const imp = await loadImportRow(pool, scope.clientId, importId);
+    if (!imp) return { items: [], total: 0, truncated: false, importNotFound: true };
+    if (imp.source_type === RECONSTRUCTED_SOURCE_TYPE && (importScope === "born" || importScope === "existed")) {
+      return { items: [], total: 0, truncated: false, scopeUnavailable: true, reason: RECONSTRUCTED_SCOPE_REASON };
+    }
+    where.push(importIdCond(p, imp.id, "e"));
+    if (importScope === "born" || importScope === "existed") {
+      const ts = p.add(new Date(imp.created_at).toISOString()); // só entra como parâmetro quando a SQL o usa
+      where.push(`e.created_at ${importScope === "born" ? ">=" : "<"} ${ts}::timestamptz - interval '${IMPORT_BORN_TOLERANCE_SECONDS} seconds'`);
+    }
+  }
   for (const rule of Array.isArray(rules) ? rules : []) {
     if (!rule || !rule.column) continue;
     where.push(ruleCondition(p, rule));

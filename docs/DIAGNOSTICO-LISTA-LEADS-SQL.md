@@ -109,11 +109,57 @@ SELECT DISTINCT lead_source AS v FROM public.leads WHERE client_id = 'geracao-di
  AND lower(lead_source) <> lower(lead_source COLLATE "pt-BR-x-icu");
 ```
 
-**Registro (sem ação agora):** `\v` dentro do `E'…'` — se o Postgres de produção não o reconhece como tabulação vertical, o `btrim` tira a letra `v`
-das pontas e `vendas_fechadas` vira `endas_fechadas`. Medir: `SELECT ascii(E'\v');` (11 certo, 118 bug). Não causa o timeout, mas erraria canal.
+**`\v` dentro do `E'…'` — medido e descartado (06/10/2026).** A dúvida era se o Postgres de produção entendia `\v` (tabulação vertical) no
+literal `E' \t\n\r\f\v…'` do `btrim`; se tratasse como a letra `v`, `vendas_fechadas` viraria `endas_fechadas` na classificação de canal.
+O dono mediu em produção: `SELECT ascii(E'\v');` → **11**. O escape é entendido corretamente e o `btrim` não come a letra "v". **Sem correção.**
 
 **A saída definitiva é outra leva:** a classificação de canal é calculada **por linha, em toda leitura**. Mesmo com o custo caído de 30 s para centenas de
 milissegundos, é trabalho que cresce com a base. O certo é gravar o canal no lead quando a origem muda, e ler a coluna.
+
+## Procedência × rótulo da IA × marcação da pessoa; campanha por planilha (06/10/2026)
+
+**O defeito:** o campo `tags` guardava três coisas: procedência (nome do grupo extraído, `agenda-whatsapp`, `WhatsApp WA`, `#Imp-…`), palpite da IA/heurística
+(`Orçamento`, `Follow-up`, `Energia Solar`…) e marcação da pessoa. Medido em produção (`geracao-digital`, 24.655 leads): 6 tags de planilha (18.279 marcações,
+73 leads com mais de uma), `agenda-whatsapp` 5.050, grupos (`VP Ofertas` 1.011, `Via Permuta 🇧🇷` 437…), 8 rótulos da IA.
+
+**Aditivo, nada removido.** Nenhuma tag foi alterada ou removida (o dono tem filtros e campanhas em cima delas; `VP Ofertas` tem 1.011 leads).
+
+- **Bloco 1 — campanha por planilha.** O assistente de campanha ganhou "Filtrar por Planilha importada" (`lead_imports`, rota do Banco `GET /api/leads/import-sources`). O público sai de
+  `dados.import_ids` (procedência verdadeira: não editável, não acumula por engano). Antes de confirmar, a tela mostra os dois números: quantos leads **nasceram** na importação e quantos
+  **já existiam** e foram atualizados por ela (`GET /api/leads/import-origin`); padrão = todos, com recorte "só os que nasceram" / "só os que já existiam". Combina em E com estágio e tag.
+  **Como se distingue:** `dados.import_ids` guarda toda importação que tocou o lead; o que separa os dois grupos é `leads.created_at` contra `lead_imports.created_at` (lead criado depois da
+  abertura = nasceu; antes = já existia), com tolerância de 10 s entre o relógio do app (que carimba o lead) e o do banco (que carimba a abertura) — sem ela, importação de 1 linha cairia do lado errado.
+  Limite conhecido: lead criado por outro caminho nos 10 s anteriores à abertura conta como "nasceu". Importações anteriores à correção de 05/10 não têm registro em `lead_imports` e não aparecem no seletor.
+- **Bloco 2 — seletor de tags agrupado.** Planilhas (prefixo `#Imp-`), Grupos e origem (`agenda-whatsapp`, `WhatsApp WA`, nomes que batem com `dados.grupo_nome` de algum lead da MESMA empresa),
+  Rótulos da IA (lista fechada), Minhas (o resto). O servidor classifica (`kind` em cada tag do facets); nenhum dado muda e nenhuma tag some (teste: a lista agrupada é uma partição da lista original).
+  Uma marcação da pessoa idêntica a um rótulo da IA (`Follow-up`) não é distinguível e aparece como rótulo da IA. Se a consulta dos nomes de grupo falhar, as tags continuam saindo (grupos caem em "Minhas") e a causa vai em `tagKindsCause`.
+- **Bloco 3 — campo próprio.** `dados.procedencia = { grupos, agenda_whatsapp, conversa_whatsapp }` e `dados.rotulos_ia`, gravados daqui para frente pelos três pontos de extração (grupo, agenda, conversa) **além** das
+  tags. Em `dados` (jsonb): sem migration de schema, os leitores continuam funcionando com ou sem o campo (DIRETRIZES §12). `procedencia` **acumula** nos três caminhos de upsert (o merge raso a sobrescreveria).
+  Histórico: migration `20261006120000_backfill_lead_procedencia.sql` (idempotente, só acrescenta chaves em `dados`, não toca tags nem `updated_at`).
+  **IA com lista fechada** (`AI_LABELS` em `services/leadProcedencia.js`): os 8 medidos em produção — Fechamento, Orçamento, Dúvida, Não Convertido, Óculos de Sol, Energia Solar,
+  Prioridade alta, Follow-up. Ficaram de fora, por decisão do dono: `Campanha` (colide com o canal de marketing de mesmo nome) e `Prótese` (não existe em produção; a lista não nasce com
+  vocabulário de um cliente só). Rótulo fora da lista não é gravado (nem tag, nem campo); `WhatsApp WA` (rótulo-padrão quando nada se aplica) é procedência (`conversa_whatsapp`), não palpite.
+  **Pendência declarada (não é para fazer agora): a lista é GLOBAL e deveria ser POR EMPRESA** — `Energia Solar` e `Óculos de Sol` só fazem sentido para quem vende isso.
+
+### Importações antigas: reconstrução (06/10/2026)
+
+**O que a medição de produção mostrou:** em `dados.import_ids` existem só **4 ids distintos** na base inteira (2 com registro em `lead_imports`, 2 sem, com 58 leads nas 2 sem registro). As planilhas
+que o dono usa (17.843, 351, 58, 21, 4 e 2 leads — 18.279 marcações) **não têm id**: a única prova de que vieram de uma planilha é a tag `#Imp-…`. Por isso a reconstrução parte das TAGS,
+além dos 2 ids órfãos. Script: `ops/sql/2026-10-06-reconstruir-importacoes.sql` (idempotente, aditivo, **fora do boot**, rodado pelo dono no console psql).
+
+- **Fontes (as únicas sem palpite):** (1) id em `dados.import_ids` sem registro → o registro nasce com o MESMO id; (2) grupo de leads com a mesma tag `#Imp-…` → uma importação por (empresa, tag),
+  só se algum lead do grupo não estiver em nenhuma importação com registro (grupo todo coberto já está representado: não duplica); (3) cada lead com a tag recebe o id da reconstruída em `dados.import_ids` (união).
+- **Regras:** nome sintético e marcado ("Importação reconstruída — <tag em comum> (≈ dd/mm/aaaa)"), nunca nome de arquivo inventado; `source_type = 'reconstruida'`; total = leads encontrados e **é piso**;
+  data = menor `created_at` do grupo e **é aproximada**; nada por palpite (sem quem importou, sem mapeamento, sem linhas puladas conhecidas, sem dados brutos, nenhum `lead_import_items`).
+- **Na aplicação:** "nasceram / já existiam" **não vale** para elas (não existe hora de abertura): a tela mostra só "no mínimo N leads", diz por quê, e oferece só "todos"; o recorte é recusado
+  pelo servidor (400 `IMPORT_SCOPE_UNAVAILABLE`). A tela de Planilhas **não** as lista (sem itens nem dados brutos não são fonte de campanha); o seletor da campanha do Banco sim.
+- **Limite conhecido:** a tag é editável. A ligação é exata para quem TEM a tag, e só isso.
+
+### Backfill de procedência/rótulos: fora do boot
+
+`ops/sql/2026-10-06-backfill-procedencia.sql` (antes era uma migration que rodaria no boot) foi movido para `ops/sql/`: o tempo em Postgres real sobre ~26 mil leads ainda não foi medido, e uma migration lenta atrasa a
+subida do servidor. Rodar no console psql, **medindo sem gravar**: `BEGIN; \timing on; <arquivo>; ROLLBACK;`. Só vira migration de boot se passar na medição (poucos segundos). Medido em pglite (WASM, limite superior): ver o resultado do
+teste de custo. Os dois scripts são idempotentes e o código funciona com ou sem eles (os leitores não dependem do campo novo).
 
 ## Pendências registradas
 
@@ -124,9 +170,9 @@ milissegundos, é trabalho que cresce com a base. O certo é gravar o canal no l
    estoura: a tela tenta sem o resumo da IA e, se ainda não couber, avisa e não segue. O correto é o servidor guardar o público.
 3. **Retomar importação do Banco interrompida**: a importação fica `incomplete` e visível em Planilhas, mas a retomada é reenviar a planilha
    pela tela do Banco (cria um segundo registro). Falta o "Retomar" do Banco.
-4. **Reconstrução das importações antigas** (as feitas antes de hoje não têm registro): leva separada, só com dado recuperável, nome
-   marcado como "reconstruída", sem inventar nome de arquivo nem data; espera o número que o dono trouxer.
-5. **Verificação em produção** (somente leitura, pelo dono): a query de collation abaixo e a linha de log `[leads] Advanced query failed`.
+4. ~~Reconstrução das importações antigas~~ — feita (ver "Importações antigas: reconstrução"); falta só o dono rodar `ops/sql/2026-10-06-reconstruir-importacoes.sql` e conferir as contagens.
+5. **Lista de rótulos da IA por empresa** (hoje global): ver `AI_LABELS`.
+6. **Verificação em produção** (somente leitura, pelo dono): a query de collation abaixo e a linha de log `[leads] Advanced query failed`.
 
 ## Verificação em produção (somente leitura, quem roda é o dono)
 

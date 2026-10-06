@@ -505,7 +505,7 @@ function previewRowToPreview(r) {
 }
 
 // ── leitura da lista (tolerante ao schema antigo) ────────────────────────────────────────────────────────────────────────
-export async function listLeadImports(pool, clientId, limit = 20) {
+export async function listLeadImports(pool, clientId, limit = 20, { includeReconstructed = false } = {}) {
   const base = "id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at, column_mapping";
   const extended = `${base}, status, expected_rows, received_offset`;
   try {
@@ -514,11 +514,14 @@ export async function listLeadImports(pool, clientId, limit = 20) {
     console.warn("[lead-imports] não foi possível garantir as colunas de importação em lotes; listando com o schema atual:", err?.message || err);
   }
   try {
-    const { rows } = await pool.query(`SELECT ${extended} FROM public.lead_imports WHERE client_id = $1 ORDER BY created_at DESC LIMIT $2`, [clientId, limit]);
+    // As importações RECONSTRUÍDAS (sem itens nem dados brutos) não são fonte de campanha na tela de Planilhas: só o seletor do Banco as lista.
+    const where = includeReconstructed ? "" : " AND source_type <> 'reconstruida'";
+    const { rows } = await pool.query(`SELECT ${extended} FROM public.lead_imports WHERE client_id = $1${where} ORDER BY created_at DESC LIMIT $2`, [clientId, limit]);
     return rows;
   } catch (err) {
     if (err?.code !== "42703") throw err; // coluna inexistente: schema antigo — lista como sempre foi (tudo 'completed')
-    const { rows } = await pool.query(`SELECT ${base} FROM public.lead_imports WHERE client_id = $1 ORDER BY created_at DESC LIMIT $2`, [clientId, limit]);
+    const where = includeReconstructed ? "" : " AND source_type <> 'reconstruida'";
+    const { rows } = await pool.query(`SELECT ${base} FROM public.lead_imports WHERE client_id = $1${where} ORDER BY created_at DESC LIMIT $2`, [clientId, limit]);
     return rows.map((r) => ({ ...r, status: IMPORT_STATUS_COMPLETED, expected_rows: null, received_offset: 0 }));
   }
 }

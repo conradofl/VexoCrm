@@ -21,6 +21,7 @@ import { summarizeChatWithAI } from "./chatInsight.js";
 import {
   BASE_POTENTIAL_SEGMENTS,
   FACET_PARTS,
+  IMPORT_SCOPES,
   MARKETING_CHANNEL_IDS,
   MAX_PAGE_SIZE,
   iterateLeadsForExport,
@@ -29,6 +30,7 @@ import {
   queryCampaignAudience,
   queryCustomKeys,
   queryLeadIds,
+  queryImportOrigin,
   queryLeadsPage,
   validateAudienceRules,
 } from "../../services/leadListQuery.js";
@@ -64,6 +66,13 @@ import {
   openLeadImport,
   parseImportRows,
 } from "../../services/leadImportBatches.js";
+import {
+  CONVERSA_WHATSAPP_TAG,
+  procedenciaDaAgenda,
+  procedenciaDaConversa,
+  procedenciaDoGrupo,
+  sanitizeAiLabels,
+} from "../../services/leadProcedencia.js";
 import {
   BANCO_IMPORT_MODE,
   appendBancoImportBatch,
@@ -1277,17 +1286,84 @@ export function registerLeadsRoutes(app, deps) {
       res.status(400).json({ error: { code: "UNSUPPORTED_RULES", message: problems[0].message }, problems });
       return;
     }
+    const importId = normalizeString(req.body?.importId) || null;
+    const importScope = normalizeString(req.body?.importScope) || "all";
+    if (!IMPORT_SCOPES.includes(importScope)) {
+      sendError(res, 400, "INVALID_IMPORT_SCOPE", `importScope inválido: ${importScope} (use ${IMPORT_SCOPES.join(", ")}).`);
+      return;
+    }
+    if (importId && !/^[0-9a-f-]{36}$/i.test(importId)) {
+      sendError(res, 400, "INVALID_IMPORT_ID", "importId inválido");
+      return;
+    }
     try {
       const result = await queryCampaignAudience(pgDatabasePool, {
         scope: resolveLeadListScope(req, clientId),
         stages: Array.isArray(req.body?.stages) ? req.body.stages.map(String) : [],
         tag: normalizeString(req.body?.tag) || "",
         rules,
+        importId,
+        importScope,
       });
+      if (result.importNotFound) {
+        sendError(res, 404, "IMPORT_NOT_FOUND", "Planilha não encontrada para esta empresa.");
+        return;
+      }
+      if (result.scopeUnavailable) {
+        sendError(res, 400, "IMPORT_SCOPE_UNAVAILABLE", result.reason);
+        return;
+      }
       res.json(result);
     } catch (error) {
       console.error("[leads-audience] falhou:", error?.message || error);
       sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.", { cause: errorCause(error) });
+    }
+  });
+
+  // As planilhas registradas (lead_imports) que o seletor da campanha oferece. Gate do BANCO (a tela de Planilhas tem outro): quem monta campanha
+  // pelo Banco não precisa de acesso à tela de Planilhas para escolher a origem.
+  app.get("/api/leads/import-sources", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    try {
+      const rows = await listLeadImports(pgDatabasePool, clientId, 200, { includeReconstructed: true });
+      res.json({
+        items: rows.map((r) => ({
+          id: r.id,
+          source_name: r.source_name,
+          created_at: r.created_at,
+          total_rows: Number(r.total_rows) || 0,
+          status: r.status || "completed",
+          // reconstruída depois do fato: o total é piso e a data é aproximada (a tela marca assim)
+          reconstructed: r.source_type === "reconstruida",
+        })),
+      });
+    } catch (error) {
+      console.error("[leads-import-sources] falhou:", error?.message || error);
+      sendError(res, 500, "LEADS_IMPORT_SOURCES_FAILED", "Falha ao listar as planilhas.", { cause: errorCause(error) });
+    }
+  });
+
+  // Campanha por planilha: os dois números que o dono vê antes de confirmar — quantos leads NASCERAM naquela importação e quantos JÁ EXISTIAM e
+  // foram tocados por ela. A procedência verdadeira é dados.import_ids (não editável, registrada em lead_imports).
+  app.get("/api/leads/import-origin", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    const importId = normalizeString(req.query.importId);
+    if (!importId || !/^[0-9a-f-]{36}$/i.test(importId)) {
+      sendError(res, 400, "INVALID_IMPORT_ID", "importId inválido");
+      return;
+    }
+    try {
+      const out = await queryImportOrigin(pgDatabasePool, { scope: resolveLeadListScope(req, clientId), importId });
+      if (!out.found) {
+        sendError(res, 404, "IMPORT_NOT_FOUND", "Planilha não encontrada para esta empresa.");
+        return;
+      }
+      res.json(out);
+    } catch (error) {
+      console.error("[leads-import-origin] falhou:", error?.message || error);
+      sendError(res, 500, "LEADS_IMPORT_ORIGIN_FAILED", "Falha ao contar os leads da planilha.", { cause: errorCause(error) });
     }
   });
 
@@ -1637,6 +1713,7 @@ export function registerLeadsRoutes(app, deps) {
                       lead_source_bruto: "WhatsApp Grupo",
                       origem_marketing: "extracao_whatsapp",
                       grupo_nome: groupName,
+                      procedencia: procedenciaDoGrupo(groupName), // campo próprio (a tag com o nome do grupo continua sendo gravada)
                     },
                   });
                   seenPhones.add(telefoneKey);
@@ -1716,6 +1793,7 @@ export function registerLeadsRoutes(app, deps) {
                 origem: "WhatsApp Agenda",
                 lead_source_bruto: "WhatsApp Agenda",
                 origem_marketing: "extracao_whatsapp",
+                procedencia: procedenciaDaAgenda(), // campo próprio (a tag agenda-whatsapp continua sendo gravada)
               },
             });
             addressBookCount++;
@@ -1875,13 +1953,17 @@ export function registerLeadsRoutes(app, deps) {
             } catch {}
           }
 
+          // A IA escolhe de uma lista FECHADA (AI_LABELS): rótulo fora dela não é gravado, nem como tag nem no campo. O rótulo "WhatsApp WA"
+          // (conversa extraída) é procedência, não palpite. As tags continuam sendo gravadas; o palpite ganha campo próprio (dados.rotulos_ia).
+          const aiLabels = sanitizeAiLabels(classification.tags);
+          if (aiLabels.descartados.length > 0) console.warn(`[wa-extract] rótulo(s) fora da lista fechada descartado(s): ${aiLabels.descartados.join(", ")}`);
           await upsertLeadByPhone(pgDatabasePool, clientId, telefoneKey, {
             phone: telefoneKey,
             nome: name,
             stage: classification.stage,
             stage_source: "auto",
             temperature: classification.temperature,
-            tags: Array.isArray(classification.tags) ? classification.tags : [],
+            tags: [...aiLabels.rotulos, ...(aiLabels.conversaWhatsapp ? [CONVERSA_WHATSAPP_TAG] : [])],
             extracted_from_wa: true,
             lead_source: "extracao_whatsapp",
             assigned_to: chatOwnerUid || null,
@@ -1889,6 +1971,8 @@ export function registerLeadsRoutes(app, deps) {
               origem: "WhatsApp Extração",
               lead_source_bruto: "WhatsApp Extração",
               origem_marketing: "extracao_whatsapp",
+              rotulos_ia: aiLabels.rotulos,
+              ...(aiLabels.conversaWhatsapp ? { procedencia: procedenciaDaConversa() } : {}),
             },
             raw_chat_summary: classification.summary,
             last_interaction_at: lastInteractionAt || new Date().toISOString(),

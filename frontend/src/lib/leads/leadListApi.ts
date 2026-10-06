@@ -40,6 +40,36 @@ export interface LeadPageResponse<TLead = Record<string, unknown>> {
   degradedCause?: { message: string; code?: string } | null;
 }
 
+/** Tipo de uma tag: o servidor separa procedência, rótulo da IA e marcação da pessoa NA TELA (nenhum dado muda). */
+export type TagKind = "planilha" | "origem" | "ia" | "minhas";
+export interface FacetTag {
+  tag: string;
+  count: number;
+  /** ausente (servidor antigo) = "minhas" */
+  kind?: TagKind;
+}
+
+export const TAG_KIND_ORDER: TagKind[] = ["planilha", "origem", "ia", "minhas"];
+export const TAG_KIND_LABELS: Record<TagKind, string> = {
+  planilha: "Planilhas",
+  origem: "Grupos e origem",
+  ia: "Rótulos da IA",
+  minhas: "Minhas",
+};
+
+/**
+ * Agrupa as tags por tipo, na ordem fixa Planilhas → Grupos e origem → Rótulos da IA → Minhas. Nenhuma tag some: tipo desconhecido ou ausente
+ * cai em "Minhas", e a união dos grupos é exatamente a lista recebida.
+ */
+export function groupTagsByKind(tags: ReadonlyArray<{ tag: string; kind?: string }>): Array<{ kind: TagKind; label: string; tags: string[] }> {
+  const buckets: Record<TagKind, string[]> = { planilha: [], origem: [], ia: [], minhas: [] };
+  for (const t of tags) {
+    const kind = (TAG_KIND_ORDER as string[]).includes(t.kind ?? "") ? (t.kind as TagKind) : "minhas";
+    buckets[kind].push(t.tag);
+  }
+  return TAG_KIND_ORDER.filter((k) => buckets[k].length > 0).map((k) => ({ kind: k, label: TAG_KIND_LABELS[k], tags: buckets[k] }));
+}
+
 export type FacetPartName = "summary" | "channels" | "sources" | "tags";
 
 /**
@@ -53,7 +83,7 @@ export interface LeadFacetsResponse {
   /** contagem por cartão de origem — SEMPRE a base inteira */
   channels: Record<string, number> | null;
   sources: Array<{ source: string; count: number }> | null;
-  tags: Array<{ tag: string; count: number }> | null;
+  tags: FacetTag[] | null;
   /** contagem EXATA por estágio (cada estágio é o seu); `other` = nulo ou desconhecido */
   stagesExact: { buyer: number; open_budget: number; inquiry: number; cold: number; lost: number; other: number } | null;
   failedParts: Partial<Record<FacetPartName, { message: string; code?: string }>>;
@@ -89,6 +119,24 @@ export interface AudienceLead {
   tags?: string[] | null;
   raw_chat_summary?: string | null;
 }
+
+/** Os dois números da campanha por planilha: nasceram na importação × já existiam e foram tocados por ela. */
+export interface ImportOrigin {
+  found: boolean;
+  importId: string;
+  sourceName: string;
+  totalRows: number;
+  createdAt: string;
+  /** null nas reconstruídas: não existe hora de abertura para separar os dois grupos */
+  born: number | null;
+  existed: number | null;
+  total: number;
+  reconstructed?: boolean;
+  totalIsFloor?: boolean;
+  approximateDate?: boolean;
+  reason?: string;
+}
+export type ImportScope = "all" | "born" | "existed";
 
 export interface AudienceResponse {
   items: AudienceLead[];
@@ -203,12 +251,18 @@ export async function fetchLeadIds(
 
 export async function fetchCampaignAudience(
   request: LeadRequest,
-  args: { clientId: string; stages: string[]; tag: string; rules: AudienceRule[] }
+  args: { clientId: string; stages: string[]; tag: string; rules: AudienceRule[]; importId?: string | null; importScope?: ImportScope }
 ): Promise<AudienceResponse> {
   const res = await request("/api/leads/audience", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: args.clientId, stages: args.stages, tag: args.tag, rules: args.rules }),
+    body: JSON.stringify({
+      clientId: args.clientId,
+      stages: args.stages,
+      tag: args.tag,
+      rules: args.rules,
+      ...(args.importId ? { importId: args.importId, importScope: args.importScope ?? "all" } : {}),
+    }),
   });
   if (res.status === 400) {
     const body = await res.json().catch(() => null);
@@ -219,6 +273,28 @@ export async function fetchCampaignAudience(
   }
   const data = await readJson<Partial<AudienceResponse>>(res, "Falha ao montar o público da campanha");
   return { items: data.items ?? [], total: data.total ?? data.items?.length ?? 0, truncated: Boolean(data.truncated) };
+}
+
+export interface ImportSource {
+  id: string;
+  source_name: string;
+  created_at: string;
+  total_rows: number;
+  status: "completed" | "incomplete";
+  /** Reconstruída depois do fato: o total é PISO e a data é aproximada; não há "nasceram / já existiam". */
+  reconstructed?: boolean;
+}
+
+/** As planilhas registradas, para o seletor da campanha (rota do Banco: não exige acesso à tela de Planilhas). */
+export async function fetchImportSources(request: LeadRequest, clientId: string): Promise<ImportSource[]> {
+  const data = await readJson<{ items?: ImportSource[] }>(await request(`/api/leads/import-sources?clientId=${encodeURIComponent(clientId)}`), "Falha ao listar as planilhas");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+/** Os dois números da planilha (nasceram / já existiam), para o dono ver ANTES de confirmar a campanha. */
+export async function fetchImportOrigin(request: LeadRequest, args: { clientId: string; importId: string }): Promise<ImportOrigin> {
+  const p = new URLSearchParams({ clientId: args.clientId, importId: args.importId });
+  return readJson<ImportOrigin>(await request(`/api/leads/import-origin?${p.toString()}`), "Falha ao contar os leads da planilha");
 }
 
 /** Um lead pelo id ou telefone (abrir pela URL, mesmo fora da página carregada). */

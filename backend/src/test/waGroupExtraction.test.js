@@ -356,6 +356,8 @@ describe("Extração de membros de grupo do WhatsApp", () => {
       expect(lead.dados.origem).toBe("WhatsApp Grupo");
       expect(lead.dados.grupo_nome).toBe("Clientes VIP");
       expect(lead.tags).toContain("Clientes VIP");
+      // procedência em campo PRÓPRIO (e a tag com o nome do grupo continua sendo gravada, acima)
+      expect(lead.dados.procedencia).toEqual({ grupos: ["Clientes VIP"], agenda_whatsapp: false, conversa_whatsapp: false });
       // nome veio do pushName do participante no grupo
       expect(lead.nome).toBe("Fernanda VIP");
     });
