@@ -3,6 +3,7 @@
 // transação trabalha num retrato (commit aplica, rollback descarta). Uma importação rodando entre a
 // prévia e a confirmação se simula alterando `repo.store.leads` entre as duas chamadas.
 import { toCanonicalPhone } from "../../services/canonicalPhone.js";
+import { getCriterionTags } from "../../services/leadMassDelete.js";
 
 export function createMemoryMassDeleteRepo({ leads = [], messages = [] } = {}) {
   const store = {
@@ -30,12 +31,13 @@ export function createMemoryMassDeleteRepo({ leads = [], messages = [] } = {}) {
     async listCandidates(db, clientId, criterion) {
       calls.push({ op: "listCandidates", clientId, criterion });
       const src = db.leads;
+      const targetTags = criterion.type === "import" ? [] : getCriterionTags(criterion);
       return src
         .filter((l) => l.client_id === clientId)
         .filter((l) =>
-          criterion.type === "tag"
-            ? tagsOf(l).includes(criterion.value)
-            : Array.isArray(l.import_ids) && l.import_ids.includes(criterion.value)
+          criterion.type === "import"
+            ? Array.isArray(l.import_ids) && l.import_ids.includes(criterion.value)
+            : targetTags.some((t) => tagsOf(l).includes(t))
         )
         .map((l) => ({ ...l }));
     },

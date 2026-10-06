@@ -336,6 +336,7 @@ export function registerLeadsRoutes(app, deps) {
   // passam a exigir o modulo contratado. GET /api/leads fica de fora: e a mesma
   // rota que serve a tela Leads, que continua na base universal.
   const requireBancoDeDados = requireContractedModulePage("banco-de-dados");
+  const requireBancoDeDadosOrCampanhas = requireContractedModulePage(["banco-de-dados", "campanhas"]);
 
   const {
     buildDispatchLeads,
@@ -1074,6 +1075,7 @@ export function registerLeadsRoutes(app, deps) {
       source: normalizeString(query.source) || "",
       channel: normalizeString(query.channel) || "",
       segment: normalizeString(query.segment) || "",
+      importId: normalizeString(query.importId) || "",
     };
     if (filters.channel && filters.channel !== "all" && !MARKETING_CHANNEL_IDS.includes(filters.channel)) {
       return { problem: `Canal inválido: ${filters.channel}` };
@@ -1261,7 +1263,7 @@ export function registerLeadsRoutes(app, deps) {
   });
 
   // Todos os ids da combinação de filtros (selecionar todos, disparo por canal).
-  app.get("/api/leads/ids", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+  app.get("/api/leads/ids", requireFirebaseAuth, requireBancoDeDadosOrCampanhas, async (req, res) => {
     const clientId = authorizeLeadList(req, res);
     if (!clientId) return;
     const parsed = parseLeadListFilters(req.query);
@@ -1270,7 +1272,7 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
     try {
-      res.json(await queryLeadIds(pgDatabasePool, { scope: resolveLeadListScope(req, clientId), filters: parsed.filters, contacts: req.query.contacts === "1" }));
+      res.json(await queryLeadIds(pgDatabasePool, { scope: resolveLeadListScope(req, clientId), filters: parsed.filters, contacts: req.query.contacts === "1" || req.query.contacts === "true" }));
     } catch (error) {
       console.error("[leads-ids] falhou:", error?.message || error);
       sendError(res, 500, "LEADS_IDS_FAILED", "Falha ao listar os leads do filtro.", { cause: errorCause(error) });
@@ -2992,7 +2994,7 @@ export function registerLeadsRoutes(app, deps) {
   });
 
 
-  app.get("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+  app.get("/api/lead-imports", requireFirebaseAuth, requireBancoDeDadosOrCampanhas, async (req, res) => {
     if (!ensureDb(res)) return;
 
     const requestedClientId = normalizeString(req.query.clientId);
@@ -3023,7 +3025,7 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
-  app.get("/api/lead-custom-fields", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+  app.get("/api/lead-custom-fields", requireFirebaseAuth, requireBancoDeDadosOrCampanhas, async (req, res) => {
     if (!ensureDb(res)) return;
 
     const requestedClientId = normalizeString(req.query.clientId);
@@ -3048,7 +3050,7 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
-  app.delete("/api/lead-imports/:importId", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+  app.delete("/api/lead-imports/:importId", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
     if (!ensureDb(res)) return;
 
     const importId = normalizeString(req.params.importId);

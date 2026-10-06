@@ -17,6 +17,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchApi } from "@/lib/api";
+import { fetchLeadIds, type LeadRequest } from "@/lib/leads/leadListApi";
 import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -24,9 +26,7 @@ import {
   ALL_IMPORTS_VALUE,
   CRM_BASE_VALUE,
   useCreateLeadImport,
-  useDeleteLeadImport,
   useLeadImports,
-  useResumeLeadImport,
   useLeadImportItems,
   useLeadCustomFields,
   type LeadImportItem,
@@ -109,7 +109,7 @@ import { LeadImportAuditReport } from "./LeadImports/LeadImportAuditReport";
 import { ImportViewerDialog } from "./LeadImports/ImportViewerDialog";
 import { DispatchPromptDialog } from "./LeadImports/DispatchPromptDialog";
 
-type SheetTab = "campanha" | "enviadas" | "agendamentos" | "planilhas" | "relatorios";
+type SheetTab = "campanha" | "enviadas" | "agendamentos" | "relatorios";
 type CampaignTemplateStrategy = "single" | "ai_variations";
 
 export interface BancoAudienceInfo {
@@ -208,6 +208,17 @@ const defaultDispatchOptions: CampaignDispatchOptions = {
 const darkFieldClass =
   "border-slate-200/90 bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all placeholder:text-slate-400 focus-visible:border-primary/35 focus-visible:ring-2 focus-visible:ring-primary/15 focus-visible:ring-offset-0 dark:border-white/12 dark:bg-black/45 dark:text-white dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.18)] dark:placeholder:text-white/30 dark:focus-visible:bg-black/60 dark:focus-visible:ring-1 dark:focus-visible:ring-primary/20";
 
+export function normalizeSheetTab(rawTab: string | null | undefined): SheetTab {
+  if (!rawTab) return "campanha";
+  const t = rawTab.toLowerCase().trim();
+  if (["relatorios", "relatorio", "auditoria"].includes(t)) return "relatorios";
+  if (["campanha", "novo-disparo", "disparo"].includes(t)) return "campanha";
+  if (["enviadas", "campanhas", "historico"].includes(t)) return "enviadas";
+  if (["agendamentos", "fila", "fila-de-envios"].includes(t)) return "agendamentos";
+  if (["planilhas", "salvas", "planilhas-salvas"].includes(t)) return "campanha";
+  return "campanha";
+}
+
 export default function LeadImports({
   fixedClientId,
   fixedClientName,
@@ -229,29 +240,20 @@ export default function LeadImports({
 
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const normalizeSheetTab = (rawTab: string | null): SheetTab | null => {
-    if (!rawTab) return null;
-    const t = rawTab.toLowerCase().trim();
-    if (["relatorios", "relatorio", "auditoria"].includes(t)) return "relatorios";
-    if (["campanha", "novo-disparo", "disparo"].includes(t)) return "campanha";
-    if (["enviadas", "campanhas", "historico"].includes(t)) return "enviadas";
-    if (["agendamentos", "fila", "fila-de-envios"].includes(t)) return "agendamentos";
-    if (["planilhas", "salvas", "planilhas-salvas"].includes(t)) return "planilhas";
-    return null;
-  };
-
-  const [activeTab, setActiveTab] = useLocalStorage<SheetTab>(
+  const [storedTab, setStoredTab] = useLocalStorage<string>(
     `vexo_activeTab_${activeClientId}`,
-    normalizeSheetTab(searchParams.get("tab")) || "campanha"
+    normalizeSheetTab(searchParams.get("tab"))
   );
+  const activeTab: SheetTab = normalizeSheetTab(storedTab);
+  const setActiveTab = (tab: SheetTab) => setStoredTab(tab);
 
   useEffect(() => {
     const urlTab = searchParams.get("tab");
-    const matched = normalizeSheetTab(urlTab);
-    if (matched) {
+    if (urlTab) {
+      const matched = normalizeSheetTab(urlTab);
       setActiveTab(matched);
     }
-  }, [searchParams, setActiveTab]);
+  }, [searchParams]);
 
   // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -277,9 +279,20 @@ export default function LeadImports({
   // Hooks queries
   const { data: allImports = [], refetch: refetchImports } = useLeadImports(activeClientId);
   // Planilha INCOMPLETA (importação em lotes interrompida) nunca entra nos seletores de campanha, na auditoria nem na
-  // lembrança de mapeamento: só aparece em "Planilhas Salvas", com o que entrou e o botão de retomar.
+  // lembrança de mapeamento: só aparece em "Planilhas salvas" no Banco de Dados, com o que entrou e o botão de retomar.
   const imports = useMemo(() => allImports.filter((imp) => !isImportIncomplete(imp)), [allImports]);
   const { data: knownCustomFields = [] } = useLeadCustomFields(activeClientId);
+
+  const leadRequest: LeadRequest = useMemo(() => async (path, init = {}) => {
+    const token = await getIdToken();
+    return fetchApi(path, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }, [getIdToken]);
 
   // Parâmetro de importação ativo resolvido pela função única de verdade
   const activeImportIdParam = useMemo(() => {
@@ -655,10 +668,7 @@ export default function LeadImports({
 
   // Mutations
   const createLeadImport = useCreateLeadImport();
-  const resumeLeadImport = useResumeLeadImport();
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
-  const [resumingImportId, setResumingImportId] = useState<string | null>(null);
-  const deleteLeadImport = useDeleteLeadImport();
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
   const deleteCampaign = useDeleteCampaign();
@@ -762,7 +772,42 @@ export default function LeadImports({
       const raw = localStorage.getItem("vexo_pending_campaign_audience");
       if (raw) {
         const data = JSON.parse(raw);
-        if (Array.isArray(data.rows) && data.rows.length > 0) {
+        if (data.criteria) {
+          const desc = data.description || `Público vindo do Banco de Dados (${data.totalCount || 0} leads)`;
+          setBancoAudience({
+            description: desc,
+            count: data.totalCount ?? 0,
+          });
+          if (data.campaignName) {
+            setCampaignName(data.campaignName);
+          }
+          setSelectedImportId("");
+          setSelectedImportIds([]);
+          setSelectedFile(null);
+          setActiveTab("campanha");
+
+          fetchLeadIds(leadRequest, { clientId: activeClientId, filters: data.criteria, contacts: true })
+            .then((res) => {
+              const contacts = (res.contacts || []).map((c) => ({
+                id: c.id,
+                telefone: c.phone || c.telefone || "",
+                nome: c.nome || "",
+              }));
+              setParsedRows(contacts);
+              toast({
+                title: "Público-Alvo Carregado! 🎯",
+                description: desc,
+              });
+            })
+            .catch((err) => {
+              console.error("[LeadImports] Erro ao carregar contatos do público:", err);
+              toast({
+                variant: "destructive",
+                title: "Erro ao carregar público da campanha",
+                description: err?.message || "Falha ao conectar com o banco de dados.",
+              });
+            });
+        } else if (Array.isArray(data.rows) && data.rows.length > 0) {
           setParsedRows(data.rows);
           if (Array.isArray(data.filterRules)) {
             setFilterRules(data.filterRules);
@@ -791,7 +836,7 @@ export default function LeadImports({
     } catch (e) {
       console.warn("Failed to load pending campaign audience:", e);
     }
-  }, []);
+  }, [leadRequest, activeClientId]);
 
   // Handle excel/csv parsed rows
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -864,93 +909,9 @@ export default function LeadImports({
     if (err instanceof ImportFileMismatchError) return err.message;
     if (err instanceof ImportBatchError && err.importId) {
       const entered = err.receivedOffset ?? 0;
-      return `${err.message} A planilha ficou INCOMPLETA: entraram ${entered.toLocaleString("pt-BR")} de ${err.totalRows.toLocaleString("pt-BR")} linhas. Abra "Planilhas Salvas" e use "Retomar" com o mesmo arquivo — o envio continua de onde parou, sem duplicar.`;
+      return `${err.message} A planilha ficou INCOMPLETA: entraram ${entered.toLocaleString("pt-BR")} de ${err.totalRows.toLocaleString("pt-BR")} linhas. Abra "Banco de Dados" → "Planilhas salvas" e use "Retomar" com o mesmo arquivo — o envio continua de onde parou, sem duplicar.`;
     }
     return err instanceof Error ? err.message : "Erro desconhecido.";
-  }
-
-  async function handleResumeImport(imp: LeadImportItem, file: File) {
-    setResumingImportId(imp.id);
-    setImportProgress({ phase: "opening", sentRows: imp.received_offset ?? 0, totalRows: imp.expected_rows ?? 0, batch: 0, batches: 0 });
-    try {
-      const rows = await parseSpreadsheetFile(file);
-      const result = await resumeLeadImport.mutateAsync({ clientId: activeClientId, importId: imp.id, rows, onProgress: setImportProgress });
-      toast({
-        title: "Importação concluída",
-        description: `"${imp.source_name}" foi completada: ${result.totals.total.toLocaleString("pt-BR")} linhas, ${result.totals.valid.toLocaleString("pt-BR")} com telefone válido.`,
-      });
-      await refetchImports();
-    } catch (err) {
-      toast({ title: "Não foi possível retomar a importação", description: explainImportError(err), variant: "destructive" });
-      await refetchImports();
-    } finally {
-      setImportProgress(null);
-      setResumingImportId(null);
-    }
-  }
-
-  async function handleImportSpreadsheetOnly() {
-    if (!selectedFile || rawUploadedRows.length === 0) return;
-
-    const validation = validateColumnMappings(columnMappings, uploadedColumns, rawUploadedRows);
-    if (!validation.isValid) {
-      toast({
-        title: "Mapeamento inválido",
-        description: validation.errorMessage || "Verifique o mapeamento das colunas.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsImportingFile(true);
-    try {
-      const importRes = await createLeadImport.mutateAsync({
-        clientId: activeClientId,
-        sourceName: selectedFile.name,
-        sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
-        rows: rawUploadedRows,
-        columnMapping: {
-          columns: uploadedColumns,
-          mapping: columnMappings,
-        },
-        defaultDdd: defaultDdd || undefined,
-        onProgress: setImportProgress,
-      });
-
-      if (importRes.warnings && importRes.warnings.length > 0) {
-        for (const w of importRes.warnings) {
-          toast({
-            title: "Aviso de tipo de campo",
-            description: w.message,
-          });
-        }
-      }
-
-      toast({
-        title: "Planilha importada",
-        description: `A base "${selectedFile.name}" foi importada com sucesso com ${importRes.item.imported_rows} contatos.`,
-      });
-
-      await refetchImports();
-      setSelectedImportId(importRes.item.id);
-
-      setSelectedFile(null);
-      setParsedRows([]);
-      setRawUploadedRows([]);
-      setUploadedColumns([]);
-      setColumnMappings([]);
-      setFilterRules([]);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (err) {
-      toast({
-        title: "Erro ao importar planilha",
-        description: explainImportError(err),
-        variant: "destructive",
-      });
-    } finally {
-      setIsImportingFile(false);
-      setImportProgress(null);
-    }
   }
 
   // Handle sequence step modifications
@@ -1790,23 +1751,6 @@ export default function LeadImports({
     });
   };
 
-  // Exclui a planilha importada e as linhas dela (lead_import_items). Campanhas
-  // antigas que apontavam para ela ficam sem base — por isso o aviso no confirm.
-  const handleDeleteImport = async (importId: string, sourceName: string) => {
-    if (!confirm(`Remover o registro da planilha "${sourceName}"?\n\nOs leads dela continuam no Banco de Dados — para apagá-los, use "Excluir os leads desta planilha".\nCampanhas que usam esta base ficarão sem leads. Esta ação não pode ser desfeita.`)) return;
-    try {
-      await deleteLeadImport.mutateAsync(importId);
-      setSelectedImportIds((current) => current.filter((id) => id !== importId));
-      if (selectedImportId === importId) setSelectedImportId(ALL_IMPORTS_VALUE);
-      toast({ title: "Registro da planilha removido", description: `${sourceName} — os leads continuam no Banco.` });
-    } catch (err) {
-      toast({
-        title: "Erro ao excluir",
-        description: err instanceof Error ? err.message : "Não foi possível excluir a planilha.",
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleDeleteCampaign = async (c: Campaign) => {
     if (!confirm(`Excluir a campanha "${c.name}" e todas as configurações permanentemente?`)) return;
@@ -1896,16 +1840,6 @@ export default function LeadImports({
           Fila de Envios
         </button>
         <button
-          onClick={() => setActiveTab("planilhas")}
-          className={cn(
-            "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
-            activeTab === "planilhas" ? "bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          )}
-        >
-          <Database className="h-3.5 w-3.5" />
-          Planilhas Salvas
-        </button>
-        <button
           onClick={() => setActiveTab("relatorios")}
           className={cn(
             "rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all",
@@ -1930,7 +1864,6 @@ export default function LeadImports({
               selectedFile={selectedFile}
               isImportingFile={isImportingFile}
               onFileChange={handleFileChange}
-              onImportSpreadsheetOnly={handleImportSpreadsheetOnly}
               showNumbersModal={showNumbersModal}
               onCloseNumbersModal={() => setShowNumbersModal(false)}
               defaultDdd={defaultDdd}
@@ -2070,31 +2003,6 @@ export default function LeadImports({
         />
       )}
 
-      {/* 📊 TAB 4: AUDITORIA & RECAMPANHAS */}
-      {activeTab === "planilhas" && (
-        <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
-          <div>
-            <h3 className="text-sm font-black text-slate-800 dark:text-white">Planilhas Salvas</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Bases importadas deste cliente. Use a aba "Novo Disparo" para selecionar uma ou mais na campanha.
-            </p>
-          </div>
-
-          <ImportProgressBanner progress={importProgress} />
-          <SavedSheetsCards
-            imports={allImports}
-            onResumeImport={handleResumeImport}
-            resumingImportId={resumingImportId}
-            isDeleting={deleteLeadImport.isPending}
-            onViewImport={(imp) => setViewingImport(imp)}
-            onDeleteImport={(id, name) => handleDeleteImport(id, name)}
-            onDeleteLeads={canMassDelete ? () => setIsMassDeleteOpen(true) : undefined}
-          />
-          {canMassDelete && (
-            <MassDeleteDialog open={isMassDeleteOpen} onOpenChange={setIsMassDeleteOpen} clientId={activeClientId} />
-          )}
-        </div>
-      )}
 
       <DispatchPromptDialog
         dispatchId={promptDispatchId}

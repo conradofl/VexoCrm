@@ -56,6 +56,19 @@ describe("Critério e opções", () => {
     expect(normalizeCriterion({ type: "tag", value: "x".repeat(201) }).ok).toBe(false);
   });
 
+  it("[TESTE OBRIGATÓRIO] normalização e deduplicação de múltiplas tags: remove vazios, espaços e duplicadas insensíveis a maiúsculas", () => {
+    const res = normalizeCriterion({
+      type: "tags",
+      values: ["  vip  ", "novos", "VIP", "  ", null, "novos", "urgente"],
+    });
+    expect(res.ok).toBe(true);
+    expect(res.criterion).toEqual({
+      type: "tag",
+      value: "vip, novos, urgente",
+      values: ["vip", "novos", "urgente"],
+    });
+  });
+
   it("[TESTE OBRIGATÓRIO] as exceções são opt-in: só `true` de verdade liga (texto, número e ausência ficam desligados)", () => {
     expect(normalizeOptions({})).toEqual({ includeMultiImport: false, includeWithMessages: false });
     expect(normalizeOptions(undefined)).toEqual({ includeMultiImport: false, includeWithMessages: false });

@@ -193,6 +193,8 @@ export function buildScope(params, { clientId, operatorIdentifiers = null, assig
   return parts.join(" AND ");
 }
 
+export const importIdCond = (params, importId, alias = "s") => `${alias}.dados @> jsonb_build_object('import_ids', jsonb_build_array(${params.add(importId)}::text))`;
+
 const foldSql = (expr) => `lower(${expr} COLLATE ${ICU})`;
 
 /** Condições de filtro sobre `e` (a base enriquecida). Cada chave é opcional. */
@@ -217,6 +219,7 @@ export function buildFilterConditions(params, f = {}) {
   if (f.source) c.source = `e._source = ${params.add(f.source)}`;
   if (f.channel && f.channel !== "all") c.channel = `e._channel = ${params.add(f.channel)}`;
   if (f.segment) c.segment = `e._segment = ${params.add(f.segment)}`;
+  if (f.importId) c.importId = importIdCond(params, f.importId, "e");
   return c;
 }
 
@@ -375,8 +378,8 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
     const where = whereOf(buildFilterConditions(p, only), keys);
     return { p, cte: enrichedCte(scopeSql, needsOf(only)), where };
   };
-  const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment"];
-  const TAB_KEYS = ["temperature", "tag", "search"]; // as abas ignoram estágio, origem, canal e faixa
+  const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"];
+  const TAB_KEYS = ["temperature", "tag", "search", "importId"]; // as abas ignoram estágio, origem, canal e faixa
 
   const total = prepare(ALL_KEYS);
   const pageQ = prepare(ALL_KEYS);
@@ -421,7 +424,7 @@ export async function queryLeadIds(pool, { scope, filters = {}, contacts = false
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const conds = buildFilterConditions(p, filters);
-  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment"]);
+  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"]);
   const { rows } = await pool.query(
     `${enrichedCte(scopeSql, needsOf(filters))} SELECT e.id${contacts ? ", e.nome, e.telefone, e.phone" : ""} FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
     p.values
@@ -482,7 +485,6 @@ export const IMPORT_SCOPES = ["all", "born", "existed"];
 export const RECONSTRUCTED_SOURCE_TYPE = "reconstruida";
 export const RECONSTRUCTED_SCOPE_REASON =
   "Importação reconstruída depois do fato: não existe a hora de abertura para separar quem nasceu nela de quem já existia. Só o total é conhecido (e é no mínimo esse).";
-const importIdCond = (params, importId, alias = "s") => `${alias}.dados @> jsonb_build_object('import_ids', jsonb_build_array(${params.add(importId)}::text))`;
 
 async function loadImportRow(pool, clientId, importId) {
   if (!IMPORT_ID_RE.test(String(importId))) return null;
@@ -578,7 +580,7 @@ export async function queryCustomKeys(pool, { scope, filters = {} }) {
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const conds = buildFilterConditions(p, filters);
-  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment"]);
+  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"]);
   const { rows } = await pool.query(
     `${enrichedCte(scopeSql, needsOf(filters))}
      SELECT DISTINCT k.key AS key FROM e
@@ -598,7 +600,7 @@ export async function* iterateLeadsForExport(pool, { scope, filters = {}, blockS
     const p = new Params();
     const scopeSql = buildScope(p, scope);
     const conds = buildFilterConditions(p, filters);
-    const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment"]);
+    const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"]);
     const limitSql = p.add(blockSize);
     const offsetSql = p.add(offset);
     const { rows } = await pool.query(

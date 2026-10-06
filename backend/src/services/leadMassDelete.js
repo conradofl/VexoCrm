@@ -52,24 +52,77 @@ export const SYSTEM_TAGS = new Set(
 );
 const ORIGIN_TAG_RE = /instagram|facebook|linkedin|tiktok|direct|messenger/i;
 
-export const CRITERION_TYPES = ["tag", "import"];
+export const CRITERION_TYPES = ["tag", "tags", "import"];
+
+export function getCriterionTags(criterion) {
+  if (Array.isArray(criterion?.values) && criterion.values.length > 0) {
+    return criterion.values;
+  }
+  return criterion?.value ? [criterion.value] : [];
+}
 
 const norm = (v) => (v === null || v === undefined ? "" : String(v).trim());
 
-/** Valida e normaliza o critério. `{type: "tag"|"import", value}`. */
+/** Valida e normaliza o critério. `{type: "tag"|"tags"|"import", value, values?}`. */
 export function normalizeCriterion(raw) {
   const type = norm(raw?.type);
-  const value = norm(raw?.value);
   if (!CRITERION_TYPES.includes(type)) {
     return { ok: false, message: "Critério inválido: informe type 'tag' ou 'import'." };
   }
-  if (!value) {
+  if (type === "import") {
+    const value = norm(raw?.value);
+    if (!value) {
+      return { ok: false, message: "Critério inválido: informe a tag ou o identificador da importação." };
+    }
+    if (value.length > MAX_CRITERION_VALUE_LENGTH) {
+      return { ok: false, message: "Critério inválido: valor longo demais." };
+    }
+    return { ok: true, criterion: { type: "import", value } };
+  }
+
+  // type === "tag" ou "tags"
+  let rawTags = [];
+  if (Array.isArray(raw?.values)) {
+    rawTags = raw.values;
+  } else if (Array.isArray(raw?.value)) {
+    rawTags = raw.value;
+  } else if (typeof raw?.values === "string" && raw.values.trim()) {
+    rawTags = raw.values.split(",");
+  } else if (typeof raw?.value === "string" && raw.value.trim()) {
+    rawTags = [raw.value];
+  }
+
+  const seen = new Set();
+  const uniqueTags = [];
+  for (const t of rawTags.map(norm).filter(Boolean)) {
+    const lower = t.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      uniqueTags.push(t);
+    }
+  }
+
+  if (uniqueTags.length === 0) {
     return { ok: false, message: "Critério inválido: informe a tag ou o identificador da importação." };
   }
-  if (value.length > MAX_CRITERION_VALUE_LENGTH) {
-    return { ok: false, message: "Critério inválido: valor longo demais." };
+  for (const t of uniqueTags) {
+    if (t.length > MAX_CRITERION_VALUE_LENGTH) {
+      return { ok: false, message: "Critério inválido: valor longo demais." };
+    }
   }
-  return { ok: true, criterion: { type, value } };
+
+  if (uniqueTags.length === 1 && !Array.isArray(raw?.values)) {
+    return { ok: true, criterion: { type: "tag", value: uniqueTags[0] } };
+  }
+
+  return {
+    ok: true,
+    criterion: {
+      type: "tag",
+      value: uniqueTags.join(", "),
+      values: uniqueTags,
+    },
+  };
 }
 
 /** As exceções são opt-in: só `true` liga. Qualquer outra coisa (ausente, "true", 1) fica desligada. */
@@ -104,7 +157,7 @@ function normalizeImportIds(value) {
 /**
  * O lead também pertence a OUTRA importação?
  *  - critério por importação: exato — o lead lista outro identificador em import_ids;
- *  - critério por tag: o lead tem alguma tag que não é a do critério nem do sistema, OU lista mais de
+ *  - critério por tag: o lead tem alguma tag que não é nenhuma das do critério nem do sistema, OU lista mais de
  *    um identificador de importação.
  */
 export function hasOtherImport(lead, criterion) {
@@ -113,10 +166,11 @@ export function hasOtherImport(lead, criterion) {
     return importIds.some((id) => id !== criterion.value);
   }
   if (importIds.length > 1) return true;
-  const target = criterion.value.toLowerCase();
+  const targetTags = getCriterionTags(criterion).map((t) => t.toLowerCase());
+  const targetSet = new Set(targetTags);
   return normalizeTags(lead.tags).some((t) => {
     const lower = t.toLowerCase();
-    return lower !== target && !SYSTEM_TAGS.has(lower) && !ORIGIN_TAG_RE.test(t);
+    return !targetSet.has(lower) && !SYSTEM_TAGS.has(lower) && !ORIGIN_TAG_RE.test(t);
   });
 }
 
@@ -138,7 +192,11 @@ export function classifyTargets({ candidates, messageKeys, criterion, options })
   let keptOnlyMulti = 0;
   let keptOnlyMessages = 0;
   let keptBoth = 0;
+  let multiSelectedTags = 0;
   const deletable = [];
+
+  const targetTags = (criterion.type === "tag" || criterion.type === "tags") ? getCriterionTags(criterion) : [];
+  const targetTagSet = new Set(targetTags.map((t) => t.toLowerCase()));
 
   for (const lead of candidates) {
     const multi = hasOtherImport(lead, criterion);
@@ -146,6 +204,14 @@ export function classifyTargets({ candidates, messageKeys, criterion, options })
     if (multi) multiImport += 1;
     if (msgs) withMessages += 1;
     if (multi && msgs) both += 1;
+
+    if (targetTagSet.size > 1) {
+      const leadTags = normalizeTags(lead.tags).map((t) => t.toLowerCase());
+      const matchedSelectedCount = leadTags.filter((t) => targetTagSet.has(t)).length;
+      if (matchedSelectedCount > 1) {
+        multiSelectedTags += 1;
+      }
+    }
 
     const keepMulti = multi && !options.includeMultiImport;
     const keepMsgs = msgs && !options.includeWithMessages;
@@ -161,6 +227,7 @@ export function classifyTargets({ candidates, messageKeys, criterion, options })
     multiImport,
     withMessages,
     both,
+    multiSelectedTags,
     willDelete: deletable.length,
     kept: matched - deletable.length,
     // grupos de quem fica, EXCLUSIVOS: somam `kept`
@@ -181,12 +248,13 @@ export async function selectMassDeleteTargets(repo, db, { clientId, criterion, o
 
 /** O que a tela vê: números, sem os leads. */
 export function toPreview(selection) {
-  const { matched, multiImport, withMessages, both, willDelete, kept, keptReasons } = selection;
+  const { matched, multiImport, withMessages, both, willDelete, kept, keptReasons, multiSelectedTags = 0 } = selection;
   return {
     matched,
     multiImport,
     withMessages,
     both,
+    multiSelectedTags,
     willDelete,
     kept,
     keptReasons,
@@ -329,15 +397,21 @@ export function createPgMassDeleteRepo() {
   let auditEnsured = false;
   return {
     async listCandidates(db, clientId, criterion) {
-      const where =
-        criterion.type === "tag"
-          ? `tags @> ARRAY[$2]::text[]`
-          : `dados @> jsonb_build_object('import_ids', jsonb_build_array($2::text))`;
+      let where;
+      let param2;
+      if (criterion.type === "import") {
+        where = `dados @> jsonb_build_object('import_ids', jsonb_build_array($2::text))`;
+        param2 = criterion.value;
+      } else {
+        const tags = getCriterionTags(criterion);
+        where = `tags && $2::text[]`;
+        param2 = tags;
+      }
       const { rows } = await db.query(
         `SELECT id, nome, telefone, phone, tags, stage, temperature, created_at, dados->'import_ids' AS import_ids
          FROM public.leads
          WHERE client_id = $1 AND ${where}`,
-        [clientId, criterion.value]
+        [clientId, param2]
       );
       return rows;
     },

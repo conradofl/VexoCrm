@@ -8,6 +8,7 @@ export interface MassDeletePreview {
   multiImport: number;
   withMessages: number;
   both: number;
+  multiSelectedTags?: number;
   willDelete: number;
   kept: number;
   keptReasons: { multiImport: number; withMessages: number; both: number };
@@ -25,7 +26,7 @@ export interface MassDeleteReport {
   kept: number;
   keptReasons: { multiImport: number; withMessages: number; both: number };
   options: MassDeleteOptions;
-  criterion: { type: string; value: string };
+  criterion: { type: string; value: string; values?: string[] };
 }
 
 export const DEFAULT_MASS_DELETE_OPTIONS: MassDeleteOptions = {
@@ -47,9 +48,16 @@ export function canConfirmMassDelete(willDelete: number, typed: string): boolean
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** "Você vai apagar 12 leads com a tag "X"." — o número sempre dentro da frase de confirmação. */
-export function confirmationSentence(willDelete: number, tag: string): string {
-  return `Você vai apagar ${plural(willDelete, "lead", "leads")} com a tag "${tag}". Isso não pode ser desfeito.`;
+/** "Você vai apagar 12 leads com a tag 'X'." — o número sempre dentro da frase de confirmação. */
+export function confirmationSentence(willDelete: number, tagOrTags: string | string[]): string {
+  const pluralLeads = plural(willDelete, "lead", "leads");
+  if (Array.isArray(tagOrTags)) {
+    if (tagOrTags.length === 1) {
+      return `Você vai apagar ${pluralLeads} com a tag "${tagOrTags[0]}". Isso não pode ser desfeito.`;
+    }
+    return `Você vai apagar ${pluralLeads} com as ${tagOrTags.length} tags selecionadas (${tagOrTags.join(", ")}). Isso não pode ser desfeito.`;
+  }
+  return `Você vai apagar ${pluralLeads} com a tag "${tagOrTags}". Isso não pode ser desfeito.`;
 }
 
 /** Relatório depois de apagar: quantos saíram, quantos ficaram e por qual motivo cada grupo. */

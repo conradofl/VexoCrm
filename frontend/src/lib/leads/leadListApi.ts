@@ -14,6 +14,7 @@ export interface LeadListFilters {
   channel?: string;
   /** "never_contacted" | "in_conversation" | "in_negotiation" */
   segment?: string | null;
+  importId?: string;
 }
 
 export type LeadSortColumn = "contato" | "ultima_conversa";
@@ -172,6 +173,8 @@ export function filterParams(filters: LeadListFilters): URLSearchParams {
   const channel = (filters.channel || "").trim();
   if (channel && channel !== "all") p.set("channel", channel);
   if (filters.segment && SEGMENTS.includes(filters.segment)) p.set("segment", filters.segment);
+  const importId = (filters.importId || "").trim();
+  if (importId) p.set("importId", importId);
   return p;
 }
 

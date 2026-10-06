@@ -13,6 +13,7 @@ import {
   ScanSearch,
   Upload,
   ChevronDown,
+  Database,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -26,6 +27,7 @@ interface BancoActionsBarProps {
   onImportInstagram: () => void;
   onPasteText: () => void;
   onImportSpreadsheet: () => void;
+  onManageSpreadsheets?: () => void;
   // 2) o que LEVA dado
   onExportXLSX: () => void;
   onExportCSV: () => void;
@@ -54,6 +56,7 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
     onImportInstagram,
     onPasteText,
     onImportSpreadsheet,
+    onManageSpreadsheets,
     onExportXLSX,
     onExportCSV,
     onCreateCampaign,
@@ -102,6 +105,13 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
           <Upload className="w-3.5 h-3.5" />
           Importar planilha
         </Button>
+
+        {onManageSpreadsheets && (
+          <Button variant="outline" size="sm" data-testid="btn-manage-spreadsheets" onClick={onManageSpreadsheets} className="gap-2 text-xs">
+            <Database className="w-3.5 h-3.5" />
+            Planilhas salvas
+          </Button>
+        )}
       </div>
 
       {/* 2) Leva dado */}

@@ -29,7 +29,9 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
     expect(routesContent).not.toContain("||2500");
   });
 
-  describe("Cálculo das 3 Faixas no Summary (GET /api/leads)", () => {
+  // Timeout de 15s necessário pela disputa de CPU/IO quando os 209 arquivos de teste do backend
+  // rodam concorrentemente com instâncias reais de PGlite (isolado, este bloco roda em ~4s).
+  describe("Cálculo das 3 Faixas no Summary (GET /api/leads)", { timeout: 15000 }, () => {
     // O resumo da base agora é calculado NO BANCO (services/leadListQuery.js): estes casos rodam contra Postgres real (pglite),
     // não mais contra uma lista simulada que o Node contava.
     const SCHEMA = `

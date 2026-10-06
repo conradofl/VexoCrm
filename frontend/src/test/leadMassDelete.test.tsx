@@ -25,7 +25,14 @@ vi.mock("@/lib/api", () => ({
   fetchApi: vi.fn(async (path: string, init: RequestInit = {}) => {
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ path, body });
-    if (path.startsWith("/api/leads/mass-delete/tags")) return json(200, { tags: [{ tag: "Lista Out/26", leads: 40 }] });
+    if (path.startsWith("/api/leads/mass-delete/tags"))
+      return json(200, {
+        tags: [
+          { tag: "Lista Out/26", leads: 40 },
+          { tag: "VIP", leads: 25 },
+          { tag: "Proposta", leads: 15 },
+        ],
+      });
     if (path === "/api/leads/mass-delete/preview") return json(200, { preview: previews.length > 1 ? previews.shift() : previews[0] });
     if (path === "/api/leads/mass-delete/export")
       return {
@@ -270,6 +277,63 @@ describe("MassDeleteDialog", () => {
 
     expect((screen.getByRole("button", { name: "Apagar" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByTestId("mass-delete-sentence")).toBeNull();
+  });
+
+  it("[TESTE OBRIGATÓRIO] seleção de múltiplas tags com busca e aviso de leads sobrepostos", async () => {
+    previews = [
+      preview({
+        matched: 55,
+        willDelete: 45,
+        kept: 10,
+        multiSelectedTags: 10,
+      }),
+    ];
+    executeResponse = () => ({
+      status: 200,
+      body: {
+        success: true,
+        report: report({
+          deleted: 45,
+          matched: 55,
+          criterion: { type: "tag", value: "VIP, Proposta", values: ["VIP", "Proposta"] },
+        }),
+      },
+    });
+    renderDialog();
+
+    // Aguarda carregar as tags da API
+    await waitFor(() => expect(screen.getByText("Lista Out/26")).toBeTruthy());
+
+    // Busca pela tag VIP
+    fireEvent.change(screen.getByLabelText("Buscar tags"), { target: { value: "VIP" } });
+    expect(screen.getByText("VIP")).toBeTruthy();
+    expect(screen.queryByText("Lista Out/26")).toBeNull();
+
+    // Seleciona a tag VIP
+    fireEvent.click(screen.getByText("VIP"));
+
+    // Limpa busca para ver Proposta
+    fireEvent.change(screen.getByLabelText("Buscar tags"), { target: { value: "" } });
+    fireEvent.click(screen.getByText("Proposta"));
+
+    await screen.findByTestId("mass-delete-preview");
+
+    // Mostra o número de sobrepostos nomeado
+    const overNotice = screen.getByTestId("num-multi-selected-tags");
+    expect(overNotice.textContent).toContain("10 leads têm mais de uma das tags selecionadas");
+
+    // A frase de confirmação lista as tags
+    expect(screen.getByTestId("mass-delete-sentence").textContent).toContain("2 tags selecionadas (VIP, Proposta)");
+
+    // Execução envia o critério com values
+    fireEvent.click(screen.getByRole("button", { name: "Apagar 45 leads" }));
+    await screen.findByTestId("mass-delete-report");
+
+    expect(executes()).toHaveLength(1);
+    expect(executes()[0].body.criterion).toMatchObject({
+      type: "tag",
+      values: ["VIP", "Proposta"],
+    });
   });
 });
 

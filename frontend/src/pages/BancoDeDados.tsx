@@ -139,7 +139,19 @@ import {
   type ColumnMappingItem,
 } from "@/lib/leadImports/spreadsheet";
 import { ColumnMappingStep } from "@/pages/LeadImports/ColumnMappingStep";
-import { useCreateBancoImport, useLeadCustomFields, useLeadImports } from "@/hooks/useLeadImports";
+import {
+  useCreateBancoImport,
+  useLeadCustomFields,
+  useLeadImports,
+  useDeleteLeadImport,
+  useResumeLeadImport,
+  type LeadImportItem,
+} from "@/hooks/useLeadImports";
+import { SavedSheetsCards } from "@/pages/LeadImports/SavedSheetsCards";
+import { ImportViewerDialog } from "@/pages/LeadImports/ImportViewerDialog";
+import { ImportProgressBanner } from "@/pages/LeadImports/ImportProgressBanner";
+import { buildFilterAudienceDescription } from "@/lib/leads/audienceDescription";
+import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
 import { ImportBatchError, type ImportProgress } from "@/lib/leadImports/batchedImport";
 import { resolveRowPhones, summarizePhonePreview, type PhonePreviewSummary } from "@/lib/leadImports/multiPhone";
 import { useQueryClient } from "@tanstack/react-query";
@@ -376,9 +388,16 @@ export default function BancoDeDados() {
   const clientId = crmClient?.selectedClientId || crmClient?.selectedClient?.id || "geracao-digital";
   const queryClient = useQueryClient();
   const { data: knownCustomFields = [] } = useLeadCustomFields(clientId);
-  const { data: pastImports = [] } = useLeadImports(clientId);
+  const { data: pastImports = [], refetch: refetchImports } = useLeadImports(clientId);
   const createBancoImport = useCreateBancoImport();
+  const deleteLeadImport = useDeleteLeadImport();
+  const resumeLeadImport = useResumeLeadImport();
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [resumingImportId, setResumingImportId] = useState<string | null>(null);
+  const [isSavedSheetsOpen, setIsSavedSheetsOpen] = useState(false);
+  const [viewingImport, setViewingImport] = useState<LeadImportItem | null>(null);
+  const [isMassDeleteOpen, setIsMassDeleteOpen] = useState(false);
+  const [selectedImportId, setSelectedImportId] = useState<string>("");
 
   const adminUsersQuery = useAdminUsers();
   const operatorOptions = useMemo(() => {
@@ -671,7 +690,16 @@ export default function BancoDeDados() {
     source: selectedSource,
     channel: selectedChannel,
     segment: selectedSegment,
+    importId: selectedImportId || undefined,
   };
+
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Uma página: linhas + total da combinação de filtros + contagem das abas. Respostas fora de ordem são descartadas.
   const listRequestSeq = useRef(0);
@@ -689,7 +717,7 @@ export default function BancoDeDados() {
         page: currentPage,
         limit: pageSize,
       });
-      if (seq !== listRequestSeq.current) return;
+      if (!isMountedRef.current || seq !== listRequestSeq.current) return;
       setLeads(page.items);
       setListTotal(page.total);
       setServerTotalPages(page.totalPages);
@@ -697,11 +725,11 @@ export default function BancoDeDados() {
       setListDegraded(page.degraded);
       setListDegradedCause(page.degradedCause?.message ? `${page.degradedCause.message}${page.degradedCause.code ? ` [${page.degradedCause.code}]` : ""}` : null);
     } catch (err: any) {
-      if (seq !== listRequestSeq.current) return;
+      if (!isMountedRef.current || seq !== listRequestSeq.current) return;
       console.error("[BancoDeDados] Erro ao carregar base:", err);
       setError(err.message || "Falha ao carregar leads.");
     } finally {
-      if (seq === listRequestSeq.current) setLoading(false);
+      if (isMountedRef.current && seq === listRequestSeq.current) setLoading(false);
     }
   };
 
@@ -712,12 +740,12 @@ export default function BancoDeDados() {
     const seq = ++facetsRequestSeq.current;
     try {
       const data = await fetchLeadFacets(leadRequest, clientId);
-      if (seq !== facetsRequestSeq.current) return;
+      if (!isMountedRef.current || seq !== facetsRequestSeq.current) return;
       setFacets(data);
       setFacetsError(null);
       if (data.summary && Object.keys(data.summary).length > 0) setSummary(data.summary as unknown as SummaryStats);
     } catch (err: any) {
-      if (seq !== facetsRequestSeq.current) return;
+      if (!isMountedRef.current || seq !== facetsRequestSeq.current) return;
       console.error("[BancoDeDados] Erro ao carregar totais da base:", err);
       setFacetsError(err.message || "Falha ao calcular os totais da base.");
     }
@@ -752,7 +780,7 @@ export default function BancoDeDados() {
   };
 
   // Mudou filtro, busca, ordem ou tamanho de página → volta à página 1 e pede ao servidor (uma só chamada, sem a página velha)
-  const listFilterKey = JSON.stringify([clientId, activeTab, selectedTag, debouncedSearch, selectedSource, selectedChannel, selectedSegment, sortColumn, sortDirection, pageSize]);
+  const listFilterKey = JSON.stringify([clientId, activeTab, selectedTag, debouncedSearch, selectedSource, selectedChannel, selectedSegment, selectedImportId, sortColumn, sortDirection, pageSize]);
   const prevListFilterKeyRef = useRef(listFilterKey);
   useEffect(() => {
     if (prevListFilterKeyRef.current !== listFilterKey) {
@@ -1429,7 +1457,7 @@ export default function BancoDeDados() {
   const handleExportCSV = async () => {
     try {
       const params = new URLSearchParams();
-      for (const [k, v] of Object.entries({ stage: activeTab, tag: selectedTag, search: debouncedSearch, source: selectedSource, channel: selectedChannel, segment: selectedSegment })) {
+      for (const [k, v] of Object.entries({ stage: activeTab, tag: selectedTag, search: debouncedSearch, source: selectedSource, channel: selectedChannel, segment: selectedSegment, importId: selectedImportId })) {
         if (v && v !== "all" && v !== "contacts_without_channel") params.append(k, String(v));
       }
       params.append("clientId", clientId);
@@ -1475,6 +1503,97 @@ export default function BancoDeDados() {
     } catch (err: any) {
       setCampaignSelectedLeadIds([]);
       toast.error("Não foi possível carregar os leads do filtro", { description: err.message });
+    }
+  };
+
+  // Bloco 3: "Criar campanha" leva a seleção junto por critérios (não por lista de linhas)
+  const handleCreateCampaignFromBanco = () => {
+    if (listTotal === 0) {
+      toast.error("Nenhum lead encontrado com os filtros aplicados.");
+      return;
+    }
+    const sheetName = pastImports.find((i) => i.id === selectedImportId)?.source_name;
+    const channelDef = MARKETING_CHANNELS.find((c) => c.id === selectedChannel);
+    const description = buildFilterAudienceDescription(listFilters, listTotal, {
+      sheetName,
+      channelName: channelDef?.name,
+    });
+    const campaignName = `Campanha ${description}`;
+
+    try {
+      localStorage.setItem(
+        "vexo_pending_campaign_audience",
+        JSON.stringify({
+          criteria: listFilters,
+          description,
+          totalCount: listTotal,
+          campaignName,
+        })
+      );
+      toast.success("Público-Alvo Configurado! 🎯", {
+        description,
+      });
+      navigate("/crm/planilhas");
+    } catch (err: any) {
+      toast.error("Não foi possível transferir os critérios da campanha", { description: err.message });
+    }
+  };
+
+  // Bloco 2: Gestão de planilhas salvas no Banco
+  const handleDeleteImport = async (importId: string, sourceName: string) => {
+    if (
+      !confirm(
+        `Remover o registro da planilha "${sourceName}"?\n\nOs leads dela continuam no Banco de Dados — para apagá-los, use "Excluir leads por tag".\nCampanhas que usam esta base ficarão sem leads. Esta ação não pode ser desfeita.`
+      )
+    )
+      return;
+    try {
+      await deleteLeadImport.mutateAsync(importId);
+      if (selectedImportId === importId) setSelectedImportId("");
+      toast.success("Registro da planilha removido", {
+        description: `${sourceName} — os leads continuam no Banco.`,
+      });
+      refetchImports();
+      loadPage();
+      loadFacets();
+    } catch (err: any) {
+      toast.error("Erro ao excluir", {
+        description: err?.message || "Não foi possível excluir a planilha.",
+      });
+    }
+  };
+
+  const handleResumeImport = async (imp: LeadImportItem, file: File) => {
+    setResumingImportId(imp.id);
+    setImportProgress({
+      phase: "opening",
+      sentRows: imp.received_offset ?? 0,
+      totalRows: imp.expected_rows ?? 0,
+      batch: 0,
+      batches: 0,
+    });
+    try {
+      const rows = await parseSpreadsheetFile(file);
+      const result = await resumeLeadImport.mutateAsync({
+        clientId,
+        importId: imp.id,
+        rows,
+        onProgress: setImportProgress,
+      });
+      toast.success("Importação concluída", {
+        description: `"${imp.source_name}" foi completada: ${result.totals.total.toLocaleString("pt-BR")} linhas, ${result.totals.valid.toLocaleString("pt-BR")} com telefone válido.`,
+      });
+      refetchImports();
+      loadPage();
+      loadFacets();
+    } catch (err: any) {
+      toast.error("Não foi possível retomar a importação", {
+        description: err?.message || "Erro desconhecido.",
+      });
+      refetchImports();
+    } finally {
+      setImportProgress(null);
+      setResumingImportId(null);
     }
   };
 
@@ -1655,15 +1774,36 @@ export default function BancoDeDados() {
         toast.error("Nenhum lead selecionado para a campanha.");
         return;
       }
-      finalRows = selected.map((l) => ({
-        telefone: l.phone || l.telefone,
-        nome: l.nome || "",
-        stage: l.stage || "cold",
-        temperature: l.temperature || "warm",
-        tags: Array.isArray(l.tags) ? l.tags.join(", ") : "",
-        resumo_ia: l.raw_chat_summary || "",
-      }));
       campaignTitleName = buildCampaignTitle(campaignStageFilters, campaignTagFilter, selected.length, campaignImportOrigin?.sourceName);
+
+      // Bloco 3: "Criar campanha" passa o OBJETO DE CRITÉRIOS do filtro (< 500 bytes), nunca a lista bruta (> 15 MB)
+      const stageCriteria = campaignStageFilters.includes("all") ? [] : campaignStageFilters;
+      const tagCriteria = campaignTagFilter ? [campaignTagFilter] : [];
+      const criteria: Record<string, any> = {
+        clientId,
+        stages: stageCriteria,
+        tags: tagCriteria,
+        importId: campaignImportId || undefined,
+        importScope: campaignImportScope || "all",
+      };
+      const description = buildFilterAudienceDescription(criteria, selected.length, {
+        sheetName: campaignImportOrigin?.sourceName,
+      });
+
+      try {
+        localStorage.setItem(
+          "vexo_pending_campaign_audience",
+          JSON.stringify({
+            criteria,
+            description,
+            totalCount: selected.length,
+            campaignName: campaignTitleName,
+          })
+        );
+      } catch (err: any) {
+        toast.error("Não foi possível transferir os critérios da campanha", { description: err.message });
+        return;
+      }
     } else if (campaignSourceType === "second_number") {
       const aud = secondNumberSelection?.audience;
       if (!secondNumberSelection?.campaignId || !aud) {
@@ -1686,30 +1826,30 @@ export default function BancoDeDados() {
       campaignTitleName = `Campanha Planilha ${campaignFile?.name || "Importada"} (${finalRows.length} contatos)`;
     }
 
-    // A passagem para a central de campanhas é pelo localStorage (~5 MB). Um público grande pode estourar: tenta com tudo, depois
-    // sem o resumo da IA (o campo mais pesado), e se ainda não couber DIZ — nunca segue para a tela de campanhas com público vazio.
-    const buildPending = (rows: Record<string, any>[]) =>
-      JSON.stringify({
-        campaignName: campaignTitleName,
-        rows,
-        sourceDescription: campaignTagFilter
-          ? `${rows.length} contatos vindos do Banco de Dados, filtrados por tag "${campaignTagFilter}"`
-          : `${rows.length} contatos vindos do Banco de Dados`,
-      });
-    try {
-      localStorage.setItem("vexo_pending_campaign_audience", buildPending(finalRows));
-    } catch {
-      try {
-        localStorage.setItem(
-          "vexo_pending_campaign_audience",
-          buildPending(finalRows.map(({ resumo_ia: _omit, ...rest }) => rest))
-        );
-        toast.warning("Público grande: o resumo da IA não acompanhou os contatos para a campanha.");
-      } catch {
-        toast.error(`Público grande demais para enviar à central de campanhas (${finalRows.length.toLocaleString("pt-BR")} contatos).`, {
-          description: "Restrinja o filtro (estágio, tag) e tente de novo.",
+    if (campaignSourceType !== "funnel") {
+      const buildPending = (rows: Record<string, any>[]) =>
+        JSON.stringify({
+          campaignName: campaignTitleName,
+          rows,
+          sourceDescription: campaignTagFilter
+            ? `${rows.length} contatos vindos do Banco de Dados, filtrados por tag "${campaignTagFilter}"`
+            : `${rows.length} contatos vindos do Banco de Dados`,
         });
-        return;
+      try {
+        localStorage.setItem("vexo_pending_campaign_audience", buildPending(finalRows));
+      } catch {
+        try {
+          localStorage.setItem(
+            "vexo_pending_campaign_audience",
+            buildPending(finalRows.map(({ resumo_ia: _omit, ...rest }) => rest))
+          );
+          toast.warning("Público grande: o resumo da IA não acompanhou os contatos para a campanha.");
+        } catch {
+          toast.error(`Público grande demais para enviar à central de campanhas (${finalRows.length.toLocaleString("pt-BR")} contatos).`, {
+            description: "Restrinja o filtro (estágio, tag) e tente de novo.",
+          });
+          return;
+        }
       }
     }
 
@@ -2391,7 +2531,8 @@ export default function BancoDeDados() {
     selectedChannel !== "all" ||
     searchQuery.trim() ||
     activeTab !== "all" ||
-    selectedSegment !== null
+    selectedSegment !== null ||
+    selectedImportId
   );
 
   const handleClearAllFilters = () => {
@@ -2401,6 +2542,7 @@ export default function BancoDeDados() {
     setSearchQuery("");
     setActiveTab("all");
     setSelectedSegment(null);
+    setSelectedImportId("");
   };
 
   const activeSegmentTitle = useMemo(() => {
@@ -2496,6 +2638,7 @@ export default function BancoDeDados() {
               setIsAIImportModalOpen(true);
             }}
             onImportSpreadsheet={() => setIsImportModalOpen(true)}
+            onManageSpreadsheets={() => setIsSavedSheetsOpen(true)}
             onExportXLSX={handleExportXLSX}
             onExportCSV={handleExportCSV}
             onCreateCampaign={handleOpenCampaignWizard}
@@ -2958,6 +3101,23 @@ export default function BancoDeDados() {
               />
             )}
 
+            {pastImports.length > 0 && (
+              <select
+                value={selectedImportId}
+                onChange={(e) => setSelectedImportId(e.target.value)}
+                data-testid="spreadsheet-filter-select"
+                aria-label="Filtrar por planilha"
+                className="h-9 px-3 rounded-md border border-input bg-background text-xs text-foreground focus:ring-1 focus:ring-ring max-w-[200px] truncate"
+              >
+                <option value="">Todas as planilhas</option>
+                {pastImports.map((imp) => (
+                  <option key={imp.id} value={imp.id}>
+                    {imp.source_name} ({imp.imported_rows})
+                  </option>
+                ))}
+              </select>
+            )}
+
             {hasActiveFilters && (
               <Button
                 variant="outline"
@@ -3001,6 +3161,19 @@ export default function BancoDeDados() {
                   onClick={() => setSelectedTag("")}
                   className="hover:text-rose-500 p-0.5 rounded"
                   title="Remover filtro de tag"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
+            {selectedImportId && (
+              <Badge variant="secondary" className="gap-1 text-[11px] pr-1 bg-muted/80">
+                Planilha: {pastImports.find((i) => i.id === selectedImportId)?.source_name || "Selecionada"}
+                <button
+                  type="button"
+                  onClick={() => setSelectedImportId("")}
+                  className="hover:text-rose-500 p-0.5 rounded"
+                  title="Remover filtro de planilha"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -5425,6 +5598,44 @@ export default function BancoDeDados() {
           fetchLeads();
         }}
       />
+
+      {/* Modal Gerenciar Planilhas Salvas (Bloco 2) */}
+      <Dialog open={isSavedSheetsOpen} onOpenChange={setIsSavedSheetsOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="w-5 h-5 text-indigo-500" />
+              Planilhas Salvas & Bases de Importação
+            </DialogTitle>
+            <DialogDescription>
+              Gerencie as planilhas importadas deste cliente, exclua registros ou apague leads vinculados por tag.
+            </DialogDescription>
+          </DialogHeader>
+
+          <ImportProgressBanner progress={importProgress} />
+
+          <SavedSheetsCards
+            imports={pastImports}
+            onResumeImport={handleResumeImport}
+            resumingImportId={resumingImportId}
+            isDeleting={deleteLeadImport.isPending}
+            onViewImport={(imp) => setViewingImport(imp)}
+            onDeleteImport={(id, name) => handleDeleteImport(id, name)}
+            onDeleteLeads={canMassDelete ? () => setIsMassDeleteOpen(true) : undefined}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <ImportViewerDialog
+        open={Boolean(viewingImport)}
+        onOpenChange={(open) => !open && setViewingImport(null)}
+        clientId={clientId}
+        importRecord={viewingImport}
+      />
+
+      {canMassDelete && (
+        <MassDeleteDialog open={isMassDeleteOpen} onOpenChange={setIsMassDeleteOpen} clientId={clientId} />
+      )}
     </PageShell>
   );
 }

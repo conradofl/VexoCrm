@@ -4,8 +4,9 @@ import { fetchApi } from "@/lib/api";
 import type { MassDeleteOptions, MassDeletePreview, MassDeleteReport } from "@/lib/leadMassDelete";
 
 export interface MassDeleteCriterion {
-  type: "tag" | "import";
-  value: string;
+  type: "tag" | "tags" | "import";
+  value?: string;
+  values?: string[];
 }
 
 export interface MassDeleteTag {

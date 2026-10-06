@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { Filter, Info, Trash2, Plus, Check, ChevronDown, Loader2, AlertTriangle, AlertCircle, CheckCircle2, FileSpreadsheet, Database } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Filter, Info, Trash2, Plus, Check, ChevronDown, Loader2, AlertTriangle, AlertCircle, CheckCircle2, FileSpreadsheet, Database, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,8 +15,6 @@ import { cn } from "@/lib/utils";
 import { ALL_IMPORTS_VALUE, CRM_BASE_VALUE, type LeadImportItem } from "@/hooks/useLeadImports";
 import { getLeadField, type FilterRule, type ColumnMappingItem, type CustomFieldType, type CustomFieldDefinition } from "@/lib/leadImports/spreadsheet";
 import { darkSelectContentClass, darkSelectItemClass } from "./styles";
-import { SpreadsheetUploader } from "./SpreadsheetUploader";
-import { ColumnMappingStep } from "./ColumnMappingStep";
 
 export interface PhoneAuditStats {
   total: number;
@@ -40,7 +39,6 @@ interface LeadSourceStepProps {
   selectedFile: File | null;
   isImportingFile: boolean;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  onImportSpreadsheetOnly: () => void;
   showNumbersModal: boolean;
   onCloseNumbersModal: () => void;
 
@@ -119,7 +117,6 @@ export function LeadSourceStep({
   selectedFile,
   isImportingFile,
   onFileChange,
-  onImportSpreadsheetOnly,
   showNumbersModal,
   onCloseNumbersModal,
   defaultDdd = "34",
@@ -197,7 +194,7 @@ export function LeadSourceStep({
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] text-white">1</span>
           Base de Leads
         </CardTitle>
-        <CardDescription>Carregue a planilha XLSX/CSV com contatos ou selecione uma existente</CardDescription>
+        <CardDescription>Selecione uma base salva ou use o público segmentado do Banco de Dados</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
@@ -236,25 +233,18 @@ export function LeadSourceStep({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-500">Selecionar Planilha</label>
-            <SpreadsheetUploader
-              fileInputRef={fileInputRef}
-              selectedFile={selectedFile}
-              isImportingFile={isImportingFile}
-              onFileChange={onFileChange}
-              onImport={onImportSpreadsheetOnly}
-              onClear={() => {
-                setSelectedFile(null);
-                setParsedRows([]);
-                setFilterRules([]);
-                setCampaignName("");
-                if (fileInputRef.current) fileInputRef.current.value = "";
-              }}
-              showNumbersModal={showNumbersModal}
-              onCloseNumbersModal={onCloseNumbersModal}
-              defaultDdd={defaultDdd}
-              onDefaultDddChange={onDefaultDddChange}
-            />
+            <label className="text-xs font-semibold text-slate-500">Importação de Arquivos</label>
+            <div className="flex h-12 w-full items-center justify-between rounded-xl border border-dashed border-border bg-muted/20 px-3 text-sm">
+              <span className="text-xs text-muted-foreground">Quer subir um novo arquivo?</span>
+              <Link
+                to="/crm/banco-de-dados"
+                data-testid="link-importar-banco"
+                className="text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-4 flex items-center gap-1"
+              >
+                Importar planilha no Banco de Dados
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -354,21 +344,6 @@ export function LeadSourceStep({
           </div>
         </div>
 
-        {/* Etapa de Mapeamento de Colunas da Planilha Carregada */}
-        {selectedFile && uploadedColumns.length > 0 && setColumnMappings && (
-          <ColumnMappingStep
-            columns={uploadedColumns}
-            sampleRows={rawUploadedRows}
-            mappings={columnMappings}
-            onMappingChange={setColumnMappings}
-            knownCustomFields={knownCustomFields}
-            isImporting={isImportingFile}
-            onConfirmImport={onImportSpreadsheetOnly}
-            onCancel={clearUpload}
-            totalRowsCount={rawUploadedRows.length}
-            fileName={selectedFile.name}
-          />
-        )}
 
         {/* Loading state for imported spreadsheets */}
         {isLoadingSourceRows && (

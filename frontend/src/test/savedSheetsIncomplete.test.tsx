@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import pageSource from "../pages/LeadImports.tsx?raw";
+import bancoSource from "../pages/BancoDeDados.tsx?raw";
 import { SavedSheetsCards } from "@/pages/LeadImports/SavedSheetsCards";
 import { describeIncompleteImport, isImportIncomplete } from "@/lib/leadImports/importStatus";
 import type { LeadImportItem } from "@/hooks/useLeadImports";
@@ -86,17 +87,15 @@ describe("[TESTE OBRIGATÓRIO] a planilha incompleta aparece como incompleta, co
 });
 
 describe("a página não oferece planilha incompleta em campanha, auditoria nem mapeamento lembrado", () => {
-  it("`imports` (o que alimenta seletores, relatório e mapeamento) exclui as incompletas; só Planilhas Salvas recebe a lista inteira", () => {
+  it("`imports` (o que alimenta seletores, relatório e mapeamento) exclui as incompletas; Planilhas Salvas vive no Banco", () => {
     expect(pageSource).toMatch(/const imports = useMemo\(\(\) => allImports\.filter\(\(imp\) => !isImportIncomplete\(imp\)\), \[allImports\]\);/);
-    expect(pageSource).toMatch(/<SavedSheetsCards\s+imports=\{allImports\}/);
+    expect(pageSource).not.toMatch(/<SavedSheetsCards/); // Bloco 1: saiu de Campanhas
+    expect(bancoSource).toMatch(/<SavedSheetsCards\s+imports=\{pastImports\}/); // Bloco 2: vive no Banco
     expect(pageSource).toMatch(/imports=\{imports\}\s+filterRules/); // LeadSourceStep (seletor de campanha) recebe só as completas
     expect(pageSource).toMatch(/<LeadImportAuditReport\s+activeClientId=\{activeClientId\}\s+imports=\{imports\}/);
   });
 
-  it("os dois pontos de importação mostram o progresso e explicam a falha (incompleta, quanto entrou, como retomar)", () => {
-    expect(pageSource).toMatch(/onProgress: setImportProgress/);
-    expect(pageSource.match(/onProgress: \(p\) => setSubmittingStatus\(describeImportProgress\(p\)\)/g)).toHaveLength(2); // upload e público do Banco
-    expect(pageSource).toMatch(/Abra "Planilhas Salvas" e use "Retomar"/);
-    expect(pageSource).toMatch(/description: explainImportError\(err\)/);
+  it("o ponto de importação por público mostra o progresso", () => {
+    expect(pageSource).toMatch(/onProgress: \(p\) => setSubmittingStatus\(describeImportProgress\(p\)\)/);
   });
 });

@@ -10,6 +10,7 @@ import {
 } from "@/lib/leadImports/spreadsheet";
 import { SchedulingStep } from "@/pages/LeadImports/SchedulingStep";
 import { LeadSourceStep } from "@/pages/LeadImports/LeadSourceStep";
+import { MemoryRouter } from "react-router-dom";
 
 describe("Testes Automatizados de Campos Customizados e Integrações no Frontend", () => {
   describe("Regra 9: Auditoria pré-disparo de variáveis contabiliza leads retidos vs enviáveis", () => {
@@ -197,34 +198,35 @@ describe("Testes Automatizados de Campos Customizados e Integrações no Fronten
   describe("Regra 13: O bloco de filtros de segmentação fica oculto quando não há campos customizados", () => {
     it("não renderiza o bloco de filtros da planilha se availableCustomFields for vazio e não houver colunas", () => {
       const { container } = render(
-        <LeadSourceStep
-          campaignName="Campanha Teste"
-          setCampaignName={vi.fn()}
-          selectedFile={null}
-          isImportingFile={false}
-          onFileChange={vi.fn()}
-          onImportSpreadsheetOnly={vi.fn()}
-          showNumbersModal={false}
-          onCloseNumbersModal={vi.fn()}
-          setSelectedFile={vi.fn()}
-          setParsedRows={vi.fn()}
-          selectedImportId=""
-          setSelectedImportId={vi.fn()}
-          selectedImportIds={[]}
-          setSelectedImportIds={vi.fn()}
-          imports={[]}
-          filterRules={[]}
-          setFilterRules={vi.fn()}
-          spreadsheetColumns={[]}
-          parsedRows={[]}
-          parsedLeadsStats={{ total: 0, valid: 0, invalid: 0 }}
-          previewOpen={false}
-          setPreviewOpen={vi.fn()}
-          previewRows={[]}
-          hasSourceRows={false}
-          availableCustomFields={[]}
-          fileInputRef={{ current: null }}
-        />
+        <MemoryRouter>
+          <LeadSourceStep
+            campaignName="Campanha Teste"
+            setCampaignName={vi.fn()}
+            selectedFile={null}
+            isImportingFile={false}
+            onFileChange={vi.fn()}
+            showNumbersModal={false}
+            onCloseNumbersModal={vi.fn()}
+            setSelectedFile={vi.fn()}
+            setParsedRows={vi.fn()}
+            selectedImportId=""
+            setSelectedImportId={vi.fn()}
+            selectedImportIds={[]}
+            setSelectedImportIds={vi.fn()}
+            imports={[]}
+            filterRules={[]}
+            setFilterRules={vi.fn()}
+            spreadsheetColumns={[]}
+            parsedRows={[]}
+            parsedLeadsStats={{ total: 0, valid: 0, invalid: 0 }}
+            previewOpen={false}
+            setPreviewOpen={vi.fn()}
+            previewRows={[]}
+            hasSourceRows={false}
+            availableCustomFields={[]}
+            fileInputRef={{ current: null }}
+          />
+        </MemoryRouter>
       );
 
       // Bloco de filtros de segmentação NÃO deve existir no DOM
@@ -233,34 +235,35 @@ describe("Testes Automatizados de Campos Customizados e Integrações no Fronten
 
     it("renderiza o bloco de filtros quando há campos customizados disponíveis e linhas carregadas", () => {
       render(
-        <LeadSourceStep
-          campaignName="Campanha Teste"
-          setCampaignName={vi.fn()}
-          selectedFile={null}
-          isImportingFile={false}
-          onFileChange={vi.fn()}
-          onImportSpreadsheetOnly={vi.fn()}
-          showNumbersModal={false}
-          onCloseNumbersModal={vi.fn()}
-          setSelectedFile={vi.fn()}
-          setParsedRows={vi.fn()}
-          selectedImportId="imp-1"
-          setSelectedImportId={vi.fn()}
-          selectedImportIds={["imp-1"]}
-          setSelectedImportIds={vi.fn()}
-          imports={[{ id: "imp-1", name: "Base 1", imported_rows: 50 } as any]}
-          filterRules={[]}
-          setFilterRules={vi.fn()}
-          spreadsheetColumns={[]}
-          parsedRows={[{ id: "1" }]}
-          parsedLeadsStats={{ total: 1, valid: 1, invalid: 0 }}
-          previewOpen={false}
-          setPreviewOpen={vi.fn()}
-          previewRows={[]}
-          hasSourceRows={true}
-          availableCustomFields={[{ key: "setor", label: "Setor", type: "text" }]}
-          fileInputRef={{ current: null }}
-        />
+        <MemoryRouter>
+          <LeadSourceStep
+            campaignName="Campanha Teste"
+            setCampaignName={vi.fn()}
+            selectedFile={null}
+            isImportingFile={false}
+            onFileChange={vi.fn()}
+            showNumbersModal={false}
+            onCloseNumbersModal={vi.fn()}
+            setSelectedFile={vi.fn()}
+            setParsedRows={vi.fn()}
+            selectedImportId="imp-1"
+            setSelectedImportId={vi.fn()}
+            selectedImportIds={["imp-1"]}
+            setSelectedImportIds={vi.fn()}
+            imports={[{ id: "imp-1", name: "Base 1", imported_rows: 50 } as any]}
+            filterRules={[]}
+            setFilterRules={vi.fn()}
+            spreadsheetColumns={[]}
+            parsedRows={[{ id: "1" }]}
+            parsedLeadsStats={{ total: 1, valid: 1, invalid: 0 }}
+            previewOpen={false}
+            setPreviewOpen={vi.fn()}
+            previewRows={[]}
+            hasSourceRows={true}
+            availableCustomFields={[{ key: "setor", label: "Setor", type: "text" }]}
+            fileInputRef={{ current: null }}
+          />
+        </MemoryRouter>
       );
 
       expect(screen.getByText(/Filtros de Segmentação da Planilha/i)).toBeInTheDocument();

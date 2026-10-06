@@ -162,6 +162,7 @@ export async function applyModularPlanGate(accessProfile) {
  * governou esses planos.
  */
 export function requireContractedModulePage(page) {
+  const pages = Array.isArray(page) ? page : [page];
   return (req, res, next) => {
     const access = req.authAccess;
 
@@ -186,15 +187,15 @@ export function requireContractedModulePage(page) {
       return;
     }
 
-    if (Array.isArray(access.internalPages) && access.internalPages.includes(page)) {
+    if (Array.isArray(access.internalPages) && pages.some((p) => access.internalPages.includes(p))) {
       next();
       return;
     }
 
     console.warn("[modular-gate] modulo nao contratado", {
-      page,
+      page: pages.join(", "),
       clientId: access?.clientId,
     });
-    sendError(res, 403, "FORBIDDEN", `Módulo não contratado no plano modular: ${page}`);
+    sendError(res, 403, "FORBIDDEN", `Módulo não contratado no plano modular: ${pages.join(", ")}`);
   };
 }
