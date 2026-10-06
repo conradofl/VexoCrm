@@ -69,6 +69,52 @@ O JavaScript antigo aplicava `String(valor)` a qualquer campo. Em `dados` (jsonb
 - Importação aberta pelo Banco é recusada pelas rotas da tela de Planilhas (409 `IMPORT_MODE_MISMATCH`), porque essas só registram itens e
   não criariam os leads. Reenviar a planilha pelo Banco não duplica leads.
 
+## Custo da classificação de canal (06/10/2026)
+
+**Sintoma em produção:** `GET /api/leads/facets` → parte `channels` com `Query read timeout` (30 s, `pgSupabaseCompat.js:70-71`), base de 24.655 leads.
+As outras três partes (resumo, origens, tags) respondiam. O diagnóstico só foi possível porque o facets passou a degradar por parte e a devolver a causa.
+
+**Causa (reproduzida e medida, pglite, 25 mil leads):** `_s = btrim(lower(_source COLLATE …), …)` ficava num CTE que o planejador do Postgres
+"achata": o `lower()+btrim()` era **substituído em cada uma das ~30 referências** da cadeia de canais (`position(...)`, `LIKE`), ou seja,
+~30 vezes por linha. **A collation ICU não é o custo**: com `lower()` comum o tempo era o mesmo.
+
+| Consulta (25 mil leads) | Antes | Depois |
+|---|---|---|
+| `channels` (cartões de origem) | 3.270 ms | 145 ms |
+| `summary` | 46 ms | 48 ms |
+| `sources` | 147 ms | 146 ms |
+| `tags` | 18 ms | 18 ms |
+| as 4 em paralelo (uma conexão) | 3.393 ms | 364 ms |
+| `lower()` ICU × comum, nos cartões | — | 144 ms × 142 ms (2 ms, 1,4%) |
+
+(pglite não é o Postgres de produção: valem os tempos relativos, não os absolutos. EXPLAIN ANALYZE em produção, quem roda é o dono — abaixo.)
+
+**O que mudou:** (1) os cartões classificam cada ORIGEM DISTINTA uma vez (agrupa antes: poucas centenas de origens em vez de 25 mil linhas) e somam as
+contagens — o canal é função só da origem; (2) `_s` fica atrás de uma cerca `OFFSET 0`, calculado uma vez; (3) cada consulta monta só as
+colunas derivadas que usa (resumo não monta origem nem canal; lista sem filtro de origem/canal/faixa não monta nenhuma). O piso agora é o `EXISTS … ~*`
+sobre as tags (a consulta de origens, 146 ms). Timeout NÃO foi aumentado.
+
+**Collation em `_s` — mantida, de propósito.** Pedido: trocar por `lower()` comum se o resultado não mudar. Medido: o ganho é de 2 ms (nada), e o resultado
+**diverge em 2 de 65 valores** do corpus (fixture `shared/leadOrigins.json` + acentos/caixa variada): `İstanbul` (i com ponto turco) e `ΣΊΣΥΦΟΣ` (sigma final).
+Nenhum é origem real, mas a ICU bate com o `toLowerCase()` do JavaScript nos 65, e o `lower()` comum não. Sem ganho e com divergência, não troquei.
+(No pglite `datctype` é `C.UTF-8`, que dobra acento; em produção é `en_US.utf8`, medido pelo dono.)
+
+**Medição em produção (somente leitura, dono):**
+```sql
+EXPLAIN (ANALYZE, BUFFERS) <bloco 2, channels>;   -- o SQL novo, com 'geracao-digital'
+```
+e, se quiser conferir que `lower()` comum e ICU coincidem nas origens REAIS:
+```sql
+SELECT DISTINCT lead_source AS v FROM public.leads WHERE client_id = 'geracao-digital' AND lead_source IS NOT NULL
+ AND lower(lead_source) <> lower(lead_source COLLATE "pt-BR-x-icu");
+```
+
+**Registro (sem ação agora):** `\v` dentro do `E'…'` — se o Postgres de produção não o reconhece como tabulação vertical, o `btrim` tira a letra `v`
+das pontas e `vendas_fechadas` vira `endas_fechadas`. Medir: `SELECT ascii(E'\v');` (11 certo, 118 bug). Não causa o timeout, mas erraria canal.
+
+**A saída definitiva é outra leva:** a classificação de canal é calculada **por linha, em toda leitura**. Mesmo com o custo caído de 30 s para centenas de
+milissegundos, é trabalho que cresce com a base. O certo é gravar o canal no lead quando a origem muda, e ler a coluna.
+
 ## Pendências registradas
 
 1. **Dois chamadores ainda carregam a lista inteira** (sem `page`/`limit`): `frontend/src/components/CommercialIntelligenceContent.tsx:246` e

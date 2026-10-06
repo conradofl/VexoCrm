@@ -30,6 +30,8 @@ import { temConversaComercial } from "../services/conversationInsightHelper.js";
 import { getLeadMarketingChannelId, getLeadSource } from "../../../frontend/src/lib/leadChannels.ts";
 import { getLeadSegment } from "../../../frontend/src/lib/leads/basePotential.ts";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 
 const SLOW = 180_000;
 const T = "tenant-a";
@@ -553,4 +555,86 @@ describe("collation de texto (nome, busca, origem)", () => {
     await queryLeadsPage(pool, { scope, page: 1, limit: 10, withTabs: false });
     expect(pool.sqls.filter((q) => /FROM pg_collation/.test(q))).toHaveLength(1);
   });
+});
+
+// ── cartões de origem: custo e paridade ───────────────────────────────────────────────────────────────────────────────────
+describe("cartões de origem (channels): rápidos e iguais à regra da tela", () => {
+  it("[TESTE DE CUSTO] 25 mil leads: os cartões saem em bem menos de 2 s (o planejador repetia o lower()+btrim 30x por linha: 3,2 s e, em produção, estouro de 30 s)", async () => {
+    const t0 = performance.now();
+    const f = await queryBaseFacets(pool, scope, { parts: ["channels"] });
+    const ms = performance.now() - t0;
+    expect(Object.values(f.channels).reduce((a, b) => a + b, 0)).toBe(BASE);
+    expect(ms).toBeLessThan(2000);
+  }, SLOW);
+
+  it("a consulta dos cartões classifica a origem DISTINTA (agrupa antes) e protege `_s` da repetição com a cerca OFFSET 0", async () => {
+    const sqls = [];
+    const spy = { query: (sql, values) => { sqls.push(String(sql)); return pool.query(sql, values); } };
+    await queryBaseFacets(spy, scope, { parts: ["channels"] });
+    const sql = sqls.find((q) => /sum\(t\.n\)/.test(q));
+    expect(sql).toMatch(/GROUP BY 1\s*\), t AS \(/); // agrupa por origem antes de classificar
+    expect(sql).toContain("OFFSET 0");
+    expect(sql).not.toMatch(/FROM e\b/);
+  }, SLOW);
+
+  it("cada consulta monta só as colunas derivadas que usa (sem filtro de origem/canal/faixa, nada disso é calculado)", async () => {
+    const sqls = [];
+    const spy = { query: (sql, values) => { sqls.push(String(sql)); return pool.query(sql, values); } };
+    await queryLeadsPage(spy, { scope, filters: { tag: "vip" }, page: 1, limit: 10 });
+    const lista = sqls.filter((q) => /WITH s0 AS/.test(q));
+    expect(lista.length).toBeGreaterThan(0);
+    for (const q of lista) {
+      expect(q).not.toContain("AS _channel");
+      expect(q).not.toContain("AS _segment");
+      expect(q).not.toContain("AS _source");
+    }
+    sqls.length = 0;
+    await queryLeadsPage(spy, { scope, filters: { channel: "google" }, page: 1, limit: 10, withTabs: false });
+    expect(sqls.some((q) => q.includes("AS _channel") && q.includes("OFFSET 0"))).toBe(true);
+    expect(sqls.every((q) => !q.includes("AS _segment"))).toBe(true);
+  }, SLOW);
+
+  it("a fixture compartilhada de origens (shared/leadOrigins.json): cada origem que o sistema grava cai no cartão esperado, nos cartões e no filtro", async () => {
+    const fx = JSON.parse(readFileSync(resolve("../shared/leadOrigins.json"), "utf8"));
+    const odb = await createPgliteDb(SCHEMA);
+    openDbs.push(odb);
+    const opool = { query: (sql, values) => odb.query(sql, values) };
+    await odb.exec(`INSERT INTO leads_clients (id, name) VALUES ('${T}', 'A')`);
+    const esperado = {};
+    for (const [i, o] of fx.origins.entries()) {
+      const l = o.lead;
+      await odb.query(`INSERT INTO leads (client_id, telefone, nome, tags, lead_source, dados) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, [T, `55${i}`, o.id, l.tags || [], l.lead_source ?? null, JSON.stringify(l.dados || {})]);
+      esperado[o.expectedCard] = (esperado[o.expectedCard] || 0) + 1;
+      // a regra da tela dá o mesmo cartão (o oráculo)
+      expect(getLeadMarketingChannelId({ tags: l.tags || [], lead_source: l.lead_source ?? null, dados: l.dados || {} })).toBe(o.expectedCard);
+    }
+    const f = await queryBaseFacets(opool, scope, { parts: ["channels"] });
+    for (const card of fx.cards) expect(f.channels[card]).toBe(esperado[card] || 0);
+    for (const o of fx.origins) {
+      const ids = await queryLeadIds(opool, { scope, filters: { channel: o.expectedCard } });
+      expect(ids.total).toBe(esperado[o.expectedCard]);
+    }
+  }, SLOW);
+
+  it("cartões = contagem por lead da regra JS (getLeadMarketingChannelId) num corpus com acento e caixa variada", async () => {
+    const corpus = ["Instagram", "Google Ads", "facebook ads", "TikTok", "Indicação", "INDICAÇÃO", "ÍNDICA", "Orgânico", "ORGÂNICO", "Tráfego Pago", "TRÁFEGO PAGO", "Campanha de Natal", "CAMPANHA", "Importação de planilha", "IMPORTAÇÃO DE PLANILHA", "Importação Vendas Fechadas", "IA Direct/Chat", "WhatsApp (agenda)", "WHATSAPP", "formulário", "FORMULÁRIO", "  site  ", "\u00a0google\u00a0", "outro", ""];
+    const odb = await createPgliteDb(SCHEMA);
+    openDbs.push(odb);
+    const opool = { query: (sql, values) => odb.query(sql, values) };
+    await odb.exec(`INSERT INTO leads_clients (id, name) VALUES ('${T}', 'A')`);
+    const esperado = {};
+    let i = 0;
+    for (const origem of corpus) {
+      for (const copias of [1, 2, 3]) {
+        i += 1;
+        await odb.query(`INSERT INTO leads (client_id, telefone, nome, lead_source) VALUES ($1,$2,$3,$4)`, [T, `55${i}`, `L${i}`, origem === "" ? null : origem]);
+        const c = getLeadMarketingChannelId({ lead_source: origem === "" ? null : origem, tags: [], dados: {} });
+        esperado[c] = (esperado[c] || 0) + 1;
+        void copias;
+      }
+    }
+    const f = await queryBaseFacets(opool, scope, { parts: ["channels"] });
+    for (const [card, n] of Object.entries(esperado)) expect(f.channels[card]).toBe(n);
+    expect(Object.values(f.channels).reduce((a, b) => a + b, 0)).toBe(i);
+  }, SLOW);
 });

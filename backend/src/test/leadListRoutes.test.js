@@ -37,7 +37,7 @@ describe("rotas da lista de leads (base de 25.000)", () => {
   // o SQL de cada parte do facets tem uma assinatura própria (summary, channels, sources, tags): dá para derrubar UMA de cada vez
   const ASSINATURA_PARTE = {
     summary: /count\(\*\) FILTER \(WHERE e\.stage = 'buyer'\)/,
-    channels: /e\._channel AS id/,
+    channels: /sum\(t\.n\)::int AS n/,
     sources: /s0\._source AS source/,
     tags: /tg\.tag AS tag/,
   };
@@ -62,8 +62,8 @@ describe("rotas da lista de leads (base de 25.000)", () => {
     `);
     const pool = {
       query: (sql, params) => {
-        // o CTE de classificação (collation, canal, faixa) quebrado: derruba toda consulta que o usa — summary e channels —, não tags nem origens
-        if (estado.falharClassificacao && /\bt AS \(\s*SELECT s0\.\*, btrim\(lower\(/.test(sql)) {
+        // a parte de classificação de canal (lower com collation + btrim) quebrada: derruba só o que a usa — os cartões de origem —, não resumo, tags nem origens
+        if (estado.falharClassificacao && /btrim\(lower\(/.test(sql)) {
           return Promise.reject(Object.assign(new Error('collation "pt-BR-x-icu" for encoding "UTF8" does not exist'), { code: "42704" }));
         }
         for (const parte of estado.falharPartes) {
@@ -260,11 +260,12 @@ describe("rotas da lista de leads (base de 25.000)", () => {
       expect(f.tags.find((t) => t.tag === "vip").count).toBe(await contar(`'vip' = ANY(tags)`));
     }, SLOW);
 
-    it("o CTE de classificação quebra (ex.: collation ausente): só resumo e canais caem; tags e origens seguem — a campanha não para", async () => {
+    it("a classificação de canal quebra (ex.: collation ausente): só os cartões de origem caem; resumo, tags e origens seguem — a campanha não para", async () => {
       estado.falharClassificacao = true;
       const f = await json(`/api/leads/facets?clientId=${T}`);
-      expect(f.degradedParts.sort()).toEqual(["channels", "summary"]);
-      expect(f.failedParts.summary.code).toBe("42704");
+      expect(f.degradedParts).toEqual(["channels"]);
+      expect(f.failedParts.channels.code).toBe("42704");
+      expect(f.summary.totalLeads).toBe(BASE);
       expect(f.tags.find((t) => t.tag === "vip").count).toBe(await contar(`'vip' = ANY(tags)`));
       expect(f.sources.reduce((a, x) => a + x.count, 0)).toBe(BASE);
     }, SLOW);

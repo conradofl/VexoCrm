@@ -103,17 +103,55 @@ const SQL_SEGMENT = `(CASE
     ELSE 'never_contacted'
   END)`;
 
-/** Base enriquecida: leads do tenant (no escopo do usuário) + origem, canal e faixa derivados. Alias final: e. */
-function enrichedCte(scopeSql) {
+/** Quais colunas derivadas uma consulta realmente usa, a partir dos filtros: só estas são montadas (cada uma custa por linha). */
+const needsOf = (filters = {}) => [filters.source ? "source" : null, filters.channel && filters.channel !== "all" ? "channel" : null, filters.segment ? "segment" : null].filter(Boolean);
+
+/**
+ * Base enriquecida: leads do tenant (no escopo do usuário) + as colunas derivadas PEDIDAS em `needs` ("source", "channel", "segment").
+ * Cada consulta paga só pelo que usa. Alias final: e.
+ *
+ * `OFFSET 0` na camada `t` é uma cerca de propósito: sem ela o planejador do Postgres "achata" a subconsulta e SUBSTITUI `_s`
+ * (lower + btrim) em cada uma das ~30 referências da cadeia de canais — 30 vezes por linha. Medido em 25 mil leads: 3,2 s sem a cerca,
+ * 0,18 s com ela (o ICU não é o custo: sem collation o tempo era o mesmo, 3,2 s).
+ */
+function enrichedCte(scopeSql, needs = ["source", "channel", "segment"]) {
+  const need = new Set(needs);
+  if (need.has("channel")) need.add("source");
+  const s0Cols = [need.has("source") ? `${SQL_SOURCE} AS _source` : null, need.has("segment") ? `${SQL_SUMMARY} AS _summary` : null].filter(Boolean);
+  const t = need.has("channel")
+    ? `SELECT s0.*, btrim(lower(s0._source COLLATE ${ICU}), ${WS}) AS _s FROM s0 OFFSET 0 /* cerca anti-achatamento: NAO REMOVER (3,2 s -> 0,18 s) */`
+    : `SELECT s0.* FROM s0`;
+  const eCols = [need.has("channel") ? `${SQL_CHANNEL} AS _channel` : null, need.has("segment") ? `${SQL_SEGMENT} AS _segment` : null].filter(Boolean);
   return `WITH s0 AS (
-      SELECT s.*, ${SQL_SOURCE} AS _source, ${SQL_SUMMARY} AS _summary
+      SELECT s.*${s0Cols.length ? `, ${s0Cols.join(", ")}` : ""}
         FROM public.leads s
        WHERE ${scopeSql}
     ), t AS (
-      SELECT s0.*, btrim(lower(s0._source COLLATE ${ICU}), ${WS}) AS _s FROM s0
+      ${t}
     ), e AS (
-      SELECT t.*, ${SQL_CHANNEL} AS _channel, ${SQL_SEGMENT} AS _segment FROM t
+      SELECT t.*${eCols.length ? `, ${eCols.join(", ")}` : ""} FROM t
     )`;
+}
+
+/**
+ * ⚠️ NÃO REMOVA o `OFFSET 0` desta consulta nem o da camada `t` de enrichedCte: não é enfeite, é a CORREÇÃO do timeout de produção.
+ * Sem a cerca o planejador do Postgres achata o CTE e copia `btrim(lower(...))` para dentro de cada uma das ~30 comparações da cadeia de
+ * canais (30x por linha). Medido em 25 mil leads: 3,2 s sem a cerca, 0,18 s com ela. Em produção (24.655 leads) a parte `channels`
+ * estourava os 30 s do pool ("Query read timeout") e o painel ficava sem os cartões de origem.
+ * Travado por teste (leadListQueryPostgres.test.js: custo e estrutura) e por mutação. A collation ICU NÃO é o custo (mesmo tempo sem ela);
+ * fica porque `lower()` comum diverge do `toLowerCase()` do JavaScript em 2 de 65 valores do corpus.
+ *
+ * Cartões de origem: classifica cada ORIGEM DISTINTA uma vez (poucas centenas, não 25 mil linhas) e soma as contagens.
+ * Mesmo resultado de classificar linha a linha: o canal é função só da origem.
+ */
+function channelsSql(scopeSql) {
+  return `WITH s0 AS (
+      SELECT ${SQL_SOURCE} AS _source FROM public.leads s WHERE ${scopeSql}
+    ), g AS (
+      SELECT _source, count(*)::int AS n FROM s0 GROUP BY 1
+    ), t AS (
+      SELECT g._source, g.n, btrim(lower(g._source COLLATE ${ICU}), ${WS}) AS _s FROM g OFFSET 0 /* cerca anti-achatamento: NAO REMOVER (3,2 s -> 0,18 s) */
+    ) SELECT ${SQL_CHANNEL} AS id, sum(t.n)::int AS n FROM t GROUP BY 1`;
 }
 
 /** Só a origem derivada (sem collation, canal nem faixa): é o que a lista de origens precisa, e não herda falha do resto da classificação. */
@@ -225,7 +263,7 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
   const want = (name) => parts.includes(name);
   const p = new Params();
   const scopeSql = buildScope(p, scope);
-  const enriched = enrichedCte(scopeSql);
+  const enriched = enrichedCte(scopeSql, ["segment"]); // o resumo não usa origem nem canal
   const sourceOnly = sourceCte(scopeSql);
   const runEnriched = (sql) => pool.query(`${enriched} ${sql}`, p.values);
 
@@ -242,7 +280,7 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
               count(*) FILTER (WHERE e.stage = 'inquiry')::int AS st_inquiry,
               count(*) FILTER (WHERE e.stage = 'cold')::int AS st_cold
          FROM e`),
-    channels: () => runEnriched(`SELECT e._channel AS id, count(*)::int AS n FROM e GROUP BY 1`),
+    channels: () => pool.query(channelsSql(scopeSql), p.values),
     sources: () => pool.query(`${sourceOnly} SELECT s0._source AS source, count(*)::int AS n FROM s0 GROUP BY 1 ORDER BY n DESC, source`, p.values),
     tags: () =>
       pool.query(
@@ -315,7 +353,7 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
     const scopeSql = buildScope(p, scope);
     const only = Object.fromEntries(keys.map((k) => [k, filters[k]]));
     const where = whereOf(buildFilterConditions(p, only), keys);
-    return { p, cte: enrichedCte(scopeSql), where };
+    return { p, cte: enrichedCte(scopeSql, needsOf(only)), where };
   };
   const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment"];
   const TAB_KEYS = ["temperature", "tag", "search"]; // as abas ignoram estágio, origem, canal e faixa
@@ -365,7 +403,7 @@ export async function queryLeadIds(pool, { scope, filters = {}, contacts = false
   const conds = buildFilterConditions(p, filters);
   const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment"]);
   const { rows } = await pool.query(
-    `${enrichedCte(scopeSql)} SELECT e.id${contacts ? ", e.nome, e.telefone, e.phone" : ""} FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
+    `${enrichedCte(scopeSql, needsOf(filters))} SELECT e.id${contacts ? ", e.nome, e.telefone, e.phone" : ""} FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
     p.values
   );
   const truncated = rows.length > MAX_IDS;
@@ -424,7 +462,7 @@ export async function queryCampaignAudience(pool, { scope, stages = [], tag = ""
     where.push(ruleCondition(p, rule));
   }
   const { rows } = await pool.query(
-    `${enrichedCte(scopeSql)}
+    `${enrichedCte(scopeSql, [])}
      SELECT e.id, e.telefone, e.phone, e.nome, e.stage, e.temperature, e.tags, e.raw_chat_summary
        FROM e ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
@@ -447,7 +485,7 @@ export async function lookupLead(pool, { scope, leadId = null, phoneVariants = [
     conds.push(`(e.telefone = ANY(${v}::text[]) OR e.phone = ANY(${v}::text[]))`);
   }
   if (conds.length === 0) return null;
-  const { rows } = await pool.query(`${enrichedCte(scopeSql)} SELECT e.* FROM e WHERE ${conds.join(" OR ")} ORDER BY e.created_at DESC LIMIT 1`, p.values);
+  const { rows } = await pool.query(`${enrichedCte(scopeSql, [])} SELECT e.* FROM e WHERE ${conds.join(" OR ")} ORDER BY e.created_at DESC LIMIT 1`, p.values);
   return rows[0] ? stripHelpers(rows[0]) : null;
 }
 
@@ -459,7 +497,7 @@ export async function queryCustomKeys(pool, { scope, filters = {} }) {
   const conds = buildFilterConditions(p, filters);
   const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment"]);
   const { rows } = await pool.query(
-    `${enrichedCte(scopeSql)}
+    `${enrichedCte(scopeSql, needsOf(filters))}
      SELECT DISTINCT k.key AS key FROM e
        CROSS JOIN LATERAL jsonb_object_keys(CASE WHEN jsonb_typeof(e.dados->'campos') = 'object' THEN e.dados->'campos' ELSE '{}'::jsonb END) AS k(key)
       ${where} ORDER BY 1`,
@@ -481,7 +519,7 @@ export async function* iterateLeadsForExport(pool, { scope, filters = {}, blockS
     const limitSql = p.add(blockSize);
     const offsetSql = p.add(offset);
     const { rows } = await pool.query(
-      `${enrichedCte(scopeSql)}
+      `${enrichedCte(scopeSql, needsOf(filters))}
        SELECT e.id, e.nome, e.telefone, e.stage, e.temperature, e.tags, e.raw_chat_summary, e.created_at, e.last_interaction_at, e.dados
          FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${limitSql} OFFSET ${offsetSql}`,
       p.values
