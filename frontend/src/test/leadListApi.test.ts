@@ -56,6 +56,15 @@ describe("fetchLeadPage", () => {
     expect(r.degradedReason).toBe("FILTERS_UNAVAILABLE");
     expect(r.tabs).toBeNull();
   });
+  it("500 com causa: a mensagem do erro inclui a causa do banco e o código", async () => {
+    await expect(
+      fetchLeadFacets(async () => ok({ error: { code: "LEADS_FACETS_FAILED", message: "Falha ao calcular os totais da base.", details: { cause: { message: 'column "x" does not exist', code: "42703" } } } }, 500), "c1")
+    ).rejects.toThrow('Falha ao calcular os totais da base. — column "x" does not exist [42703]');
+  });
+  it("resposta degradada leva a causa", async () => {
+    const r = await fetchLeadPage(async () => ok({ items: [], total: 0, degraded: true, degradedCause: { message: "boom", code: "XX" } }), { clientId: "c1", filters: {}, sort: null, dir: "asc", page: 1, limit: 50 });
+    expect(r.degradedCause).toEqual({ message: "boom", code: "XX" });
+  });
   it("erro HTTP vira exceção com a mensagem do servidor", async () => {
     await expect(
       fetchLeadPage(async () => ok({ error: { code: "X", message: "Canal inválido: zz" } }, 400), { clientId: "c1", filters: {}, sort: null, dir: "asc", page: 1, limit: 50 })
@@ -64,12 +73,18 @@ describe("fetchLeadPage", () => {
 });
 
 describe("facets, ids, lookup", () => {
-  it("facets: preenche o que faltar com vazio (nunca undefined na tela)", async () => {
-    const f = await fetchLeadFacets(async () => ok({ baseTotal: 7 }), "c1");
+  it("facets: parte que o servidor não calculou continua NULL (não vira 0 nem lista vazia) e a causa vem em failedParts", async () => {
+    const f = await fetchLeadFacets(async () => ok({ baseTotal: 7, summary: { totalLeads: 7 }, channels: null, sources: [], tags: null, stagesExact: null, failedParts: { channels: { message: "boom", code: "42703" }, tags: { message: "x" } } }), "c1");
     expect(f.baseTotal).toBe(7);
-    expect(f.channels).toEqual({});
-    expect(f.tags).toEqual([]);
-    expect(f.stagesExact.other).toBe(0);
+    expect(f.channels).toBeNull();
+    expect(f.tags).toBeNull();
+    expect(f.sources).toEqual([]); // vazio de verdade (calculou e não há nada) é diferente de falha
+    expect(f.stagesExact).toBeNull();
+    expect(Object.keys(f.failedParts)).toEqual(["channels", "tags"]);
+  });
+  it("facets sem failedParts (resposta antiga): nenhuma parte falhou", async () => {
+    const f = await fetchLeadFacets(async () => ok({ baseTotal: 7 }), "c1");
+    expect(f.failedParts).toEqual({});
   });
   it("ids: contacts só quando pedido", async () => {
     const request = vi.fn<LeadRequest>(async () => ok({ ids: ["a", "b"], total: 2, truncated: false, contacts: [{ id: "a" }, { id: "b" }] }));

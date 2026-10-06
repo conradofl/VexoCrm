@@ -20,6 +20,7 @@ import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadU
 import { summarizeChatWithAI } from "./chatInsight.js";
 import {
   BASE_POTENTIAL_SEGMENTS,
+  FACET_PARTS,
   MARKETING_CHANNEL_IDS,
   MAX_PAGE_SIZE,
   iterateLeadsForExport,
@@ -80,6 +81,21 @@ import {
   importClosedSalesBatch,
   DEFAULT_FUNNEL_VOCABULARY,
 } from "./funnelService.js";
+
+/**
+ * A CAUSA de um erro, para o corpo das respostas 500 das rotas de lista e de importação do Banco. Sem isso o 500 só diz "falhou" e o erro
+ * real (coluna inexistente, collation ausente, tipo errado…) fica em log que o painel apaga em minutos. Só campos que o Postgres/Node
+ * já classificam como mensagem de erro — nunca o texto do SQL, a pilha ou valores de parâmetros.
+ */
+export function errorCause(error) {
+  if (!error) return { message: "erro desconhecido" };
+  const cause = { message: String(error.message ?? error) };
+  for (const key of ["code", "detail", "hint", "position", "routine", "schema", "table", "column", "constraint", "severity"]) {
+    if (error[key] !== undefined && error[key] !== null && error[key] !== "") cause[key] = String(error[key]);
+  }
+  if (error.name && error.name !== "Error") cause.name = String(error.name);
+  return cause;
+}
 
 function sanitizePhoneE164(phoneInput, defaultDdd = null) {
   const s = sanitizePhone(phoneInput, defaultDdd);
@@ -1103,11 +1119,13 @@ export function registerLeadsRoutes(app, deps) {
       const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.limit || "50", 10) || 50));
       const sort = LEAD_LIST_SORTS.includes(req.query.sort) ? req.query.sort : null;
       const dir = req.query.dir === "desc" ? "desc" : "asc";
+      let pagedCause = null;
       try {
         const result = await queryLeadsPage(pgDatabasePool, { scope, filters: parsed.filters, sort, dir, page, limit });
         res.json({ ...result, degraded: false });
         return;
       } catch (error) {
+        pagedCause = errorCause(error);
         console.error("[leads] Consulta paginada falhou; devolvendo a página SEM filtros (degradado):", error?.message || error);
       }
       try {
@@ -1118,11 +1136,11 @@ export function registerLeadsRoutes(app, deps) {
         const { rows: [c] } = await pgDatabasePool.query(`SELECT count(*)::int AS n FROM public.leads WHERE client_id = $1`, [clientId]);
         res.json({
           items: rows, total: c.n, page, limit, totalPages: Math.max(1, Math.ceil(c.n / limit)), tabs: null,
-          degraded: true, degradedReason: "FILTERS_UNAVAILABLE",
+          degraded: true, degradedReason: "FILTERS_UNAVAILABLE", degradedCause: pagedCause,
         });
       } catch (error) {
         console.error("[leads] Fallback da lista paginada também falhou:", error?.message || error);
-        sendError(res, 500, "LEADS_QUERY_FAILED", "Falha ao carregar a lista de leads.");
+        sendError(res, 500, "LEADS_QUERY_FAILED", "Falha ao carregar a lista de leads.", { cause: errorCause(error), firstCause: pagedCause });
       }
       return;
     }
@@ -1139,6 +1157,7 @@ export function registerLeadsRoutes(app, deps) {
       let data = [];
       let degraded = false;
       let degradedReason = null;
+      let degradedCause = null;
 
       try {
         let query = supabase.from("leads").select("*").eq("client_id", clientId);
@@ -1163,6 +1182,7 @@ export function registerLeadsRoutes(app, deps) {
         console.error("[leads] Advanced query failed, using base query fallback:", advancedErr?.message || advancedErr);
         degraded = true;
         degradedReason = "FILTERS_UNAVAILABLE";
+        degradedCause = errorCause(advancedErr);
         let fallbackQ = supabase.from("leads").select("*").eq("client_id", clientId);
         if (operatorIdentifiers && operatorIdentifiers.length > 0) {
           const orClauses = operatorIdentifiers.map((id) => `assigned_to.eq.${id}`).concat("assigned_to.is.null").join(",");
@@ -1178,11 +1198,18 @@ export function registerLeadsRoutes(app, deps) {
       // Totais da base: agregados no banco (antes: `select("*")` da tabela inteira contada no Node).
       let summary = null;
       try {
-        ({ summary } = await queryBaseFacets(pgDatabasePool, scope, { parts: ["summary"] }));
+        const base = await queryBaseFacets(pgDatabasePool, scope, { parts: ["summary"] });
+        summary = base.summary;
+        if (base.failedParts.summary) {
+          degraded = true;
+          degradedReason = degradedReason || "SUMMARY_UNAVAILABLE";
+          degradedCause = degradedCause || { part: "summary", ...base.failedParts.summary };
+        }
       } catch (summaryErr) {
         console.error("[leads] Resumo da base falhou:", summaryErr?.message || summaryErr);
         degraded = true;
         degradedReason = degradedReason || "SUMMARY_UNAVAILABLE";
+        degradedCause = degradedCause || errorCause(summaryErr);
       }
 
       res.json({
@@ -1192,11 +1219,11 @@ export function registerLeadsRoutes(app, deps) {
         limit: 2000,
         summary,
         degraded,
-        ...(degraded ? { degradedReason, filtersIgnored: degradedReason === "FILTERS_UNAVAILABLE" } : {}),
+        ...(degraded ? { degradedReason, degradedCause, filtersIgnored: degradedReason === "FILTERS_UNAVAILABLE" } : {}),
       });
     } catch (error) {
       console.error("leads query error:", error);
-      sendError(res, 500, "LEADS_QUERY_FAILED", "Falha ao carregar a lista de leads.");
+      sendError(res, 500, "LEADS_QUERY_FAILED", "Falha ao carregar a lista de leads.", { cause: errorCause(error) });
     }
   });
 
@@ -1206,10 +1233,20 @@ export function registerLeadsRoutes(app, deps) {
     if (!clientId) return;
     try {
       const facets = await queryBaseFacets(pgDatabasePool, resolveLeadListScope(req, clientId));
-      res.json({ ...facets, degraded: false });
+      const failed = Object.keys(facets.failedParts);
+      if (failed.length === FACET_PARTS.length) {
+        // nenhuma parte respondeu: aí sim é erro, e o corpo diz QUAL parte falhou e por quê
+        sendError(res, 500, "LEADS_FACETS_FAILED", "Falha ao calcular os totais da base: nenhuma parte respondeu.", {
+          failedParts: facets.failedParts,
+          cause: { part: failed[0], ...facets.failedParts[failed[0]] },
+        });
+        return;
+      }
+      // degrada POR PARTE: o que respondeu vai na resposta; o que falhou vem null e listado em failedParts
+      res.json({ ...facets, degraded: failed.length > 0, degradedParts: failed });
     } catch (error) {
       console.error("[leads-facets] falhou:", error?.message || error);
-      sendError(res, 500, "LEADS_FACETS_FAILED", "Falha ao calcular os totais da base.");
+      sendError(res, 500, "LEADS_FACETS_FAILED", "Falha ao calcular os totais da base.", { cause: errorCause(error) });
     }
   });
 
@@ -1226,7 +1263,7 @@ export function registerLeadsRoutes(app, deps) {
       res.json(await queryLeadIds(pgDatabasePool, { scope: resolveLeadListScope(req, clientId), filters: parsed.filters, contacts: req.query.contacts === "1" }));
     } catch (error) {
       console.error("[leads-ids] falhou:", error?.message || error);
-      sendError(res, 500, "LEADS_IDS_FAILED", "Falha ao listar os leads do filtro.");
+      sendError(res, 500, "LEADS_IDS_FAILED", "Falha ao listar os leads do filtro.", { cause: errorCause(error) });
     }
   });
 
@@ -1250,7 +1287,7 @@ export function registerLeadsRoutes(app, deps) {
       res.json(result);
     } catch (error) {
       console.error("[leads-audience] falhou:", error?.message || error);
-      sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.");
+      sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.", { cause: errorCause(error) });
     }
   });
 
@@ -1273,7 +1310,7 @@ export function registerLeadsRoutes(app, deps) {
       res.json({ item });
     } catch (error) {
       console.error("[leads-lookup] falhou:", error?.message || error);
-      sendError(res, 500, "LEADS_LOOKUP_FAILED", "Falha ao localizar o lead.");
+      sendError(res, 500, "LEADS_LOOKUP_FAILED", "Falha ao localizar o lead.", { cause: errorCause(error) });
     }
   });
 
@@ -2174,7 +2211,7 @@ export function registerLeadsRoutes(app, deps) {
       }
       console.error("[leads-csv-import] Erro ao importar CSV:", err);
       res.status(500).json({
-        error: { code: "CSV_IMPORT_FAILED", message: err.message || "Falha ao importar planilha", details: { importId: err.importId || null, receivedOffset: err.receivedOffset ?? null } },
+        error: { code: "CSV_IMPORT_FAILED", message: err.message || "Falha ao importar planilha", details: { importId: err.importId || null, receivedOffset: err.receivedOffset ?? null, cause: errorCause(err) } },
         message: err.message || "Falha ao importar planilha",
       });
     }
@@ -2207,7 +2244,7 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
     console.error(label, error);
-    sendError(res, 500, "LEAD_IMPORT_FAILED", error instanceof Error ? error.message : "Falha na importação");
+    sendError(res, 500, "LEAD_IMPORT_FAILED", error instanceof Error ? error.message : "Falha na importação", { cause: errorCause(error) });
   };
 
   app.post("/api/leads/import-batches/open", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
@@ -2548,7 +2585,7 @@ export function registerLeadsRoutes(app, deps) {
         res.destroy(err); // arquivo já começou: derruba a conexão para o navegador NÃO tratar o CSV pela metade como completo
         return;
       }
-      sendError(res, 500, "EXPORT_FAILED", "Falha ao exportar base de leads");
+      sendError(res, 500, "EXPORT_FAILED", "Falha ao exportar base de leads", { cause: errorCause(err) });
     }
   });
 

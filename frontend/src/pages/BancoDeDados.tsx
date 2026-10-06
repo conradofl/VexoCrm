@@ -403,6 +403,7 @@ export default function BancoDeDados() {
   const [facetsError, setFacetsError] = useState<string | null>(null);
   // O servidor avisa quando não conseguiu aplicar os filtros (lista simples, sem filtro): a tela diz, em vez de fingir que filtrou.
   const [listDegraded, setListDegraded] = useState(false);
+  const [listDegradedCause, setListDegradedCause] = useState<string | null>(null);
   // Quem foi selecionado em outra página não está em `leads`: guardamos nome/telefone para os modais que precisam deles.
   const [selectedContacts, setSelectedContacts] = useState<Record<string, LeadContact>>({});
 
@@ -463,6 +464,15 @@ export default function BancoDeDados() {
   }, [searchParams]);
 
   // Tags e origens do seletor: vêm do banco, da base inteira (não somem ao filtrar e não dependem da página carregada)
+  // Partes dos totais que o servidor não conseguiu calcular (cada uma degrada sozinha): a tela usa o que chegou e avisa só sobre estas
+  const FACET_PART_LABELS: Record<string, string> = {
+    summary: "faixas do Potencial e totais por estágio",
+    channels: "cartões de origem",
+    sources: "lista de origens",
+    tags: "lista de tags",
+  };
+  const facetsFailedParts = useMemo(() => Object.entries(facets?.failedParts ?? {}), [facets]);
+  const channelsUnavailable = Boolean(facets?.failedParts?.channels);
   const knownTags = useMemo(() => (facets?.tags ?? []).map((t) => t.tag), [facets]);
   const knownSources = useMemo(
     () => (facets?.sources ?? []).map((x) => x.source).filter((src) => src && src !== "Não informado").sort(),
@@ -659,6 +669,7 @@ export default function BancoDeDados() {
       setServerTotalPages(page.totalPages);
       setTabCounts(page.tabs);
       setListDegraded(page.degraded);
+      setListDegradedCause(page.degradedCause?.message ? `${page.degradedCause.message}${page.degradedCause.code ? ` [${page.degradedCause.code}]` : ""}` : null);
     } catch (err: any) {
       if (seq !== listRequestSeq.current) return;
       console.error("[BancoDeDados] Erro ao carregar base:", err);
@@ -2476,7 +2487,7 @@ export default function BancoDeDados() {
                   key={ch.id}
                   type="button"
                   onClick={() => isAdvancedOriginsUnlocked && setSelectedChannel((prev) => (prev === ch.id ? "all" : ch.id))}
-                  title={isAdvancedOriginsUnlocked ? `${ch.name}: ${count} leads (${pct}%)` : ch.name}
+                  title={isAdvancedOriginsUnlocked && !channelsUnavailable ? `${ch.name}: ${count} leads (${pct}%)` : ch.name}
                   className={cn(
                     "p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer group bg-card min-w-0 h-[88px]",
                     isSelected
@@ -2496,10 +2507,10 @@ export default function BancoDeDados() {
                   
                   <div className="flex items-baseline justify-between pt-1">
                     <span className="text-lg font-black text-foreground">
-                      {count.toLocaleString("pt-BR")}
+                      {isAdvancedOriginsUnlocked && channelsUnavailable ? "—" : count.toLocaleString("pt-BR")}
                     </span>
                     <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 font-bold shrink-0", ch.badgeClass)}>
-                      {pct}%
+                      {isAdvancedOriginsUnlocked && channelsUnavailable ? "—" : `${pct}%`}
                     </Badge>
                   </div>
 
@@ -3000,7 +3011,31 @@ export default function BancoDeDados() {
                 <span>
                   Os filtros não puderam ser aplicados agora: esta é a lista simples da base, sem busca, aba, origem nem ordenação. Os números das abas
                   ficam indisponíveis até o servidor responder normalmente.
+                  {listDegradedCause && (
+                    <span data-testid="leads-degraded-cause" className="block mt-1 font-mono text-[11px] opacity-80">
+                      Causa: {listDegradedCause}
+                    </span>
+                  )}
                   <Button variant="link" size="sm" onClick={fetchLeads} className="h-auto p-0 ml-2 text-xs underline">
+                    Tentar novamente
+                  </Button>
+                </span>
+              </div>
+            )}
+            {facetsFailedParts.length > 0 && (
+              <div
+                role="alert"
+                data-testid="leads-facets-partial"
+                className="flex items-start gap-2 px-4 py-3 border-b border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200 text-xs"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Não foi possível calcular agora: {facetsFailedParts.map(([part]) => FACET_PART_LABELS[part] || part).join("; ")}. O restante da tela
+                  funciona normalmente.
+                  <span className="block mt-1 font-mono text-[11px] opacity-80">
+                    {facetsFailedParts.map(([part, cause]) => `${part}: ${cause.message}${cause.code ? ` [${cause.code}]` : ""}`).join(" | ")}
+                  </span>
+                  <Button variant="link" size="sm" onClick={loadFacets} className="h-auto p-0 mt-1 text-xs underline">
                     Tentar novamente
                   </Button>
                 </span>
@@ -4278,11 +4313,11 @@ export default function BancoDeDados() {
                         <div className="h-px bg-border my-1" />
 
                         {[
-                          { id: "buyer", label: "Compradores 🟢", count: facets?.stagesExact.buyer ?? 0 },
-                          { id: "open_budget", label: "Orçamentos Abertos 🟡", count: facets?.stagesExact.open_budget ?? 0 },
-                          { id: "inquiry", label: "Em Dúvida 🔵", count: facets?.stagesExact.inquiry ?? 0 },
-                          { id: "cold", label: "Leads Frios ⚪", count: facets?.stagesExact.cold ?? 0 },
-                          { id: "lost", label: "Perdidos 🔴", count: facets?.stagesExact.lost ?? 0 },
+                          { id: "buyer", label: "Compradores 🟢", count: facets?.stagesExact?.buyer ?? 0 },
+                          { id: "open_budget", label: "Orçamentos Abertos 🟡", count: facets?.stagesExact?.open_budget ?? 0 },
+                          { id: "inquiry", label: "Em Dúvida 🔵", count: facets?.stagesExact?.inquiry ?? 0 },
+                          { id: "cold", label: "Leads Frios ⚪", count: facets?.stagesExact?.cold ?? 0 },
+                          { id: "lost", label: "Perdidos 🔴", count: facets?.stagesExact?.lost ?? 0 },
                         ].map((stageItem) => {
                           const isChecked = !campaignStageFilters.includes("all") && campaignStageFilters.includes(stageItem.id);
                           return (

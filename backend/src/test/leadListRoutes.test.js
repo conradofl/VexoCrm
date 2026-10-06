@@ -11,6 +11,7 @@ import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { sanitizePhone } from "../services/leadImport.js";
+import { errorCause } from "../domains/leads/routes.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
 
 const SLOW = 180_000;
@@ -32,7 +33,14 @@ describe("rotas da lista de leads (base de 25.000)", () => {
   let server;
   let baseUrl;
   let db;
-  const estado = { falharConsultaDoServico: false, falharCompatContains: false };
+  const estado = { falharConsultaDoServico: false, falharCompatContains: false, falharPartes: new Set(), falharClassificacao: false };
+  // o SQL de cada parte do facets tem uma assinatura própria (summary, channels, sources, tags): dá para derrubar UMA de cada vez
+  const ASSINATURA_PARTE = {
+    summary: /count\(\*\) FILTER \(WHERE e\.stage = 'buyer'\)/,
+    channels: /e\._channel AS id/,
+    sources: /s0\._source AS source/,
+    tags: /tg\.tag AS tag/,
+  };
 
   const sendError = (res, status, code, message, details) => res.status(status).json({ error: { code, message, details } });
 
@@ -54,7 +62,14 @@ describe("rotas da lista de leads (base de 25.000)", () => {
     `);
     const pool = {
       query: (sql, params) => {
-        if (estado.falharConsultaDoServico && /WITH s0 AS/.test(sql)) return Promise.reject(new Error("falha simulada do serviço"));
+        // o CTE de classificação (collation, canal, faixa) quebrado: derruba toda consulta que o usa — summary e channels —, não tags nem origens
+        if (estado.falharClassificacao && /\bt AS \(\s*SELECT s0\.\*, btrim\(lower\(/.test(sql)) {
+          return Promise.reject(Object.assign(new Error('collation "pt-BR-x-icu" for encoding "UTF8" does not exist'), { code: "42704" }));
+        }
+        for (const parte of estado.falharPartes) {
+          if (ASSINATURA_PARTE[parte].test(sql)) return Promise.reject(Object.assign(new Error(`falha simulada na parte ${parte}`), { code: "42703", position: "10" }));
+        }
+        if (estado.falharConsultaDoServico && /WITH s0 AS/.test(sql)) return Promise.reject(Object.assign(new Error("column s.nao_existe does not exist"), { code: "42703", position: "88", hint: "Perhaps you meant s.nome.", stack: "STACK-SECRETA", query: "SELECT SEGREDO" }));
         return db.query(sql, params);
       },
     };
@@ -109,6 +124,8 @@ describe("rotas da lista de leads (base de 25.000)", () => {
   beforeEach(() => {
     estado.falharConsultaDoServico = false;
     estado.falharCompatContains = false;
+    estado.falharPartes = new Set();
+    estado.falharClassificacao = false;
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -216,6 +233,98 @@ describe("rotas da lista de leads (base de 25.000)", () => {
     }, SLOW);
   });
 
+  describe("facets degrada POR PARTE (uma conta quebrada não apaga o painel nem a lista de tags)", () => {
+    it.each(["summary", "channels", "sources", "tags"])("parte '%s' falha: as outras três chegam, a falha vem nula e nomeada com a causa", async (parte) => {
+      estado.falharPartes = new Set([parte]);
+      const res = await get(`/api/leads/facets?clientId=${T}`);
+      expect(res.status).toBe(200);
+      const f = await res.json();
+      expect(f.degraded).toBe(true);
+      expect(f.degradedParts).toEqual([parte]);
+      expect(Object.keys(f.failedParts)).toEqual([parte]);
+      expect(f.failedParts[parte]).toMatchObject({ message: `falha simulada na parte ${parte}`, code: "42703" });
+      const campos = { summary: f.summary, channels: f.channels, sources: f.sources, tags: f.tags };
+      expect(campos[parte]).toBeNull();
+      for (const [nome, valor] of Object.entries(campos)) if (nome !== parte) expect(valor).not.toBeNull();
+      // e o que chegou está CERTO (não é só "não nulo")
+      if (parte !== "tags") expect(f.tags.find((t) => t.tag === "vip").count).toBe(await contar(`'vip' = ANY(tags)`));
+      if (parte !== "channels") expect(Object.values(f.channels).reduce((a, b) => a + b, 0)).toBe(BASE);
+      if (parte !== "summary") expect(f.summary.totalLeads).toBe(BASE);
+      if (parte !== "sources") expect(f.sources.reduce((a, x) => a + x.count, 0)).toBe(BASE);
+    }, SLOW);
+
+    it("a lista de tags responde mesmo com TODO o SQL de classificação (resumo, canais, origens) quebrado", async () => {
+      estado.falharPartes = new Set(["summary", "channels", "sources"]);
+      const f = await json(`/api/leads/facets?clientId=${T}`);
+      expect(f.degradedParts.sort()).toEqual(["channels", "sources", "summary"]);
+      expect(f.tags.find((t) => t.tag === "vip").count).toBe(await contar(`'vip' = ANY(tags)`));
+    }, SLOW);
+
+    it("o CTE de classificação quebra (ex.: collation ausente): só resumo e canais caem; tags e origens seguem — a campanha não para", async () => {
+      estado.falharClassificacao = true;
+      const f = await json(`/api/leads/facets?clientId=${T}`);
+      expect(f.degradedParts.sort()).toEqual(["channels", "summary"]);
+      expect(f.failedParts.summary.code).toBe("42704");
+      expect(f.tags.find((t) => t.tag === "vip").count).toBe(await contar(`'vip' = ANY(tags)`));
+      expect(f.sources.reduce((a, x) => a + x.count, 0)).toBe(BASE);
+    }, SLOW);
+
+    it("sem falha: nada degradado", async () => {
+      const f = await json(`/api/leads/facets?clientId=${T}`);
+      expect(f.degraded).toBe(false);
+      expect(f.degradedParts).toEqual([]);
+      expect(f.failedParts).toEqual({});
+    }, SLOW);
+  });
+
+  describe("a CAUSA do erro vai no corpo (sem isso o 500 só diz 'falhou')", () => {
+    it("facets com NENHUMA parte respondendo: 500 que nomeia cada parte que falhou, com mensagem e código; nada de pilha nem SQL", async () => {
+      estado.falharPartes = new Set(["summary", "channels", "sources", "tags"]);
+      const res = await get(`/api/leads/facets?clientId=${T}`);
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error.code).toBe("LEADS_FACETS_FAILED");
+      expect(Object.keys(body.error.details.failedParts).sort()).toEqual(["channels", "sources", "summary", "tags"]);
+      expect(body.error.details.failedParts.tags).toMatchObject({ message: "falha simulada na parte tags", code: "42703", position: "10" });
+      expect(body.error.details.cause.part).toBeDefined();
+      const texto = JSON.stringify(body);
+      expect(texto).not.toContain("STACK-SECRETA");
+      expect(texto).not.toContain("SEGREDO");
+    }, SLOW);
+
+    it("ids, audience e lookup: 500 com a causa", async () => {
+      estado.falharConsultaDoServico = true;
+      const ids = await (await get(`/api/leads/ids?clientId=${T}&tag=vip`)).json();
+      expect(ids.error.code).toBe("LEADS_IDS_FAILED");
+      expect(ids.error.details.cause.code).toBe("42703");
+      const aud = await (await fetch(`${baseUrl}/api/leads/audience`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: T, stages: ["buyer"] }) })).json();
+      expect(aud.error.code).toBe("LEADS_AUDIENCE_FAILED");
+      expect(aud.error.details.cause.message).toMatch(/nao_existe/);
+      const look = await (await get(`/api/leads/lookup?clientId=${T}&leadId=00000000-0000-0000-0000-000000000000`)).json();
+      expect(look.error.code).toBe("LEADS_LOOKUP_FAILED");
+      expect(look.error.details.cause.code).toBe("42703");
+    }, SLOW);
+
+    it("lista paginada degradada: a causa do erro vem junto (degradedCause)", async () => {
+      estado.falharConsultaDoServico = true;
+      const r = await json(`/api/leads?clientId=${T}&page=1&limit=10&tag=vip`);
+      expect(r.degraded).toBe(true);
+      expect(r.degradedCause).toMatchObject({ message: "column s.nao_existe does not exist", code: "42703" });
+    }, SLOW);
+
+    it("lista legada: falha no resumo e falha nos filtros trazem a causa", async () => {
+      estado.falharConsultaDoServico = true;
+      const resumo = await json(`/api/leads?clientId=${T}`);
+      expect(resumo.degradedReason).toBe("SUMMARY_UNAVAILABLE");
+      expect(resumo.degradedCause).toMatchObject({ code: "42703" });
+      estado.falharConsultaDoServico = false;
+      estado.falharCompatContains = true;
+      const filtros = await json(`/api/leads?clientId=${T}&tag=vip`);
+      expect(filtros.degradedReason).toBe("FILTERS_UNAVAILABLE");
+      expect(filtros.degradedCause.message).toMatch(/contains indisponível/);
+    }, SLOW);
+  });
+
   describe("/facets, /ids, /audience, /lookup, /export", () => {
     it("facets: os cartões de origem somam a base e batem com o resumo", async () => {
       const f = await json(`/api/leads/facets?clientId=${T}`);
@@ -282,5 +391,14 @@ describe("rotas da lista de leads (base de 25.000)", () => {
       const op = await (await get(`/api/leads/export?clientId=${T}`, { "x-test-papel": "operador" })).text();
       expect(op.trim().split("\n").length - 1).toBe(await contar(`assigned_to = 'gabriel' OR assigned_to IS NULL`));
     }, SLOW);
+  });
+});
+
+describe("errorCause", () => {
+  it("só campos de mensagem de erro; nunca pilha, SQL nem parâmetros", () => {
+    const c = errorCause(Object.assign(new Error("boom"), { code: "23505", detail: "Key exists", stack: "S", query: "Q", parameters: ["p"] }));
+    expect(c).toEqual({ message: "boom", code: "23505", detail: "Key exists" });
+    expect(errorCause(null)).toEqual({ message: "erro desconhecido" });
+    expect(errorCause("texto")).toEqual({ message: "texto" });
   });
 });

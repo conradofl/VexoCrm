@@ -116,6 +116,15 @@ function enrichedCte(scopeSql) {
     )`;
 }
 
+/** Só a origem derivada (sem collation, canal nem faixa): é o que a lista de origens precisa, e não herda falha do resto da classificação. */
+function sourceCte(scopeSql) {
+  return `WITH s0 AS (
+      SELECT s.*, ${SQL_SOURCE} AS _source
+        FROM public.leads s
+       WHERE ${scopeSql}
+    )`;
+}
+
 class Params {
   constructor() {
     this.values = [];
@@ -193,20 +202,36 @@ const stripHelpers = (row) => {
 
 const emptyChannelCounts = () => Object.fromEntries(MARKETING_CHANNEL_IDS.map((id) => [id, 0]));
 
+/** A causa de um erro de banco, para dizer QUAL parte falhou e por quê (sem pilha, SQL nem parâmetros). */
+function partCause(error) {
+  const cause = { message: String(error?.message ?? error) };
+  for (const key of ["code", "detail", "hint", "position", "routine", "schema", "table", "column"]) {
+    if (error?.[key] !== undefined && error[key] !== null && error[key] !== "") cause[key] = String(error[key]);
+  }
+  return cause;
+}
+
+export const FACET_PARTS = ["summary", "channels", "sources", "tags"];
+
 /**
- * Totais da BASE (escopo do usuário), todos agregados no banco. `parts` escolhe o que calcular (o legado só quer o resumo).
- * Mesmo formato de `summary` de sempre.
+ * Totais da BASE (escopo do usuário), agregados no banco. As quatro partes — summary, channels, sources, tags — são INDEPENDENTES e
+ * degradam por parte: cada uma que responder vai no resultado, cada uma que falhar vem `null` e entra em `failedParts` com a causa.
+ * Uma conta quebrada não apaga as outras (a lista de tags, por exemplo, é o que permite montar o público de uma campanha).
+ * `tags` e `sources` NÃO dependem do CTE de classificação (canal/faixa): se esse SQL falhar, as duas continuam respondendo.
+ * `parts` escolhe o que calcular (o legado só quer o resumo).
  */
-export async function queryBaseFacets(pool, scope, { parts = ["summary", "channels", "sources", "tags"] } = {}) {
+export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {}) {
   await useCollation(pool);
   const want = (name) => parts.includes(name);
   const p = new Params();
   const scopeSql = buildScope(p, scope);
-  const cte = enrichedCte(scopeSql);
-  const run = (sql) => pool.query(`${cte} ${sql}`, p.values);
-  const [summaryRes, channelRes, sourceRes, tagRes] = await Promise.all([
-    want("summary")
-      ? run(`SELECT count(*)::int AS total,
+  const enriched = enrichedCte(scopeSql);
+  const sourceOnly = sourceCte(scopeSql);
+  const runEnriched = (sql) => pool.query(`${enriched} ${sql}`, p.values);
+
+  const jobs = {
+    summary: () =>
+      runEnriched(`SELECT count(*)::int AS total,
               count(*) FILTER (WHERE e.stage = 'buyer')::int AS buyers,
               count(*) FILTER (WHERE e.stage = 'lost')::int AS lost,
               count(*) FILTER (WHERE e._segment = 'in_negotiation')::int AS in_negotiation,
@@ -216,45 +241,61 @@ export async function queryBaseFacets(pool, scope, { parts = ["summary", "channe
               count(*) FILTER (WHERE e.stage = 'open_budget')::int AS st_open_budget,
               count(*) FILTER (WHERE e.stage = 'inquiry')::int AS st_inquiry,
               count(*) FILTER (WHERE e.stage = 'cold')::int AS st_cold
-         FROM e`)
-      : null,
-    want("channels") ? run(`SELECT e._channel AS id, count(*)::int AS n FROM e GROUP BY 1`) : null,
-    want("sources") ? run(`SELECT e._source AS source, count(*)::int AS n FROM e GROUP BY 1 ORDER BY n DESC, source`) : null,
-    want("tags")
-      ? run(`SELECT tg.tag AS tag, count(*)::int AS n FROM e CROSS JOIN LATERAL unnest(COALESCE(e.tags, ARRAY[]::text[])) AS tg(tag) GROUP BY 1 ORDER BY 1`)
-      : null,
-  ]);
-  const out = {};
-  if (summaryRes) {
-    const r = summaryRes.rows[0];
-    out.summary = {
-      totalLeads: r.total,
-      buyersCount: r.buyers,
-      lostCount: r.lost,
-      openBudgetsCount: r.in_negotiation,
-      inNegotiationCount: r.in_negotiation,
-      inConversationCount: r.in_conversation,
-      neverContactedCount: r.never_contacted,
-      activeLeadsCount: r.in_negotiation + r.in_conversation + r.never_contacted,
-      estimatedRevenue: r.estimated_revenue,
-    };
-    out.baseTotal = r.total;
-    // contagem por estágio EXATA (cada estágio é o seu), para o assistente de campanha; `other` = nulo ou desconhecido
-    out.stagesExact = {
-      buyer: r.buyers,
-      open_budget: r.st_open_budget,
-      inquiry: r.st_inquiry,
-      cold: r.st_cold,
-      lost: r.lost,
-      other: r.total - r.buyers - r.st_open_budget - r.st_inquiry - r.st_cold - r.lost,
-    };
-  }
-  if (channelRes) {
-    out.channels = emptyChannelCounts();
-    for (const row of channelRes.rows) out.channels[row.id] = row.n;
-  }
-  if (sourceRes) out.sources = sourceRes.rows.map((x) => ({ source: x.source, count: x.n }));
-  if (tagRes) out.tags = tagRes.rows.map((x) => ({ tag: x.tag, count: x.n }));
+         FROM e`),
+    channels: () => runEnriched(`SELECT e._channel AS id, count(*)::int AS n FROM e GROUP BY 1`),
+    sources: () => pool.query(`${sourceOnly} SELECT s0._source AS source, count(*)::int AS n FROM s0 GROUP BY 1 ORDER BY n DESC, source`, p.values),
+    tags: () =>
+      pool.query(
+        `SELECT tg.tag AS tag, count(*)::int AS n FROM public.leads s CROSS JOIN LATERAL unnest(COALESCE(s.tags, ARRAY[]::text[])) AS tg(tag)
+          WHERE ${scopeSql} GROUP BY 1 ORDER BY 1`,
+        p.values
+      ),
+  };
+
+  const asked = FACET_PARTS.filter(want);
+  const settled = await Promise.allSettled(asked.map((name) => jobs[name]()));
+
+  const out = { summary: null, baseTotal: null, stagesExact: null, channels: null, sources: null, tags: null, failedParts: {} };
+  settled.forEach((result, i) => {
+    const name = asked[i];
+    if (result.status === "rejected") {
+      out.failedParts[name] = partCause(result.reason);
+      console.error(`[leads-facets] parte "${name}" falhou:`, result.reason?.message || result.reason);
+      return;
+    }
+    const res = result.value;
+    if (name === "summary") {
+      const r = res.rows[0];
+      out.summary = {
+        totalLeads: r.total,
+        buyersCount: r.buyers,
+        lostCount: r.lost,
+        openBudgetsCount: r.in_negotiation,
+        inNegotiationCount: r.in_negotiation,
+        inConversationCount: r.in_conversation,
+        neverContactedCount: r.never_contacted,
+        activeLeadsCount: r.in_negotiation + r.in_conversation + r.never_contacted,
+        estimatedRevenue: r.estimated_revenue,
+      };
+      out.baseTotal = r.total;
+      // contagem por estágio EXATA (cada estágio é o seu), para o assistente de campanha; `other` = nulo ou desconhecido
+      out.stagesExact = {
+        buyer: r.buyers,
+        open_budget: r.st_open_budget,
+        inquiry: r.st_inquiry,
+        cold: r.st_cold,
+        lost: r.lost,
+        other: r.total - r.buyers - r.st_open_budget - r.st_inquiry - r.st_cold - r.lost,
+      };
+    } else if (name === "channels") {
+      out.channels = emptyChannelCounts();
+      for (const row of res.rows) out.channels[row.id] = row.n;
+    } else if (name === "sources") {
+      out.sources = res.rows.map((x) => ({ source: x.source, count: x.n }));
+    } else if (name === "tags") {
+      out.tags = res.rows.map((x) => ({ tag: x.tag, count: x.n }));
+    }
+  });
   return out;
 }
 

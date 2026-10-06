@@ -77,8 +77,8 @@ const leadRow = (id: string, nome: string, extra: Record<string, unknown> = {}) 
   raw_chat_summary: null, created_at: "2026-01-01T00:00:00.000Z", dados: {}, ...extra,
 });
 
-interface FakeServer { pageUrls: string[]; otherUrls: string[]; behavior: { degraded: boolean; lookupHit: boolean; audienceRulesError: boolean } }
-const server: FakeServer = { pageUrls: [], otherUrls: [], behavior: { degraded: false, lookupHit: true, audienceRulesError: false } };
+interface FakeServer { pageUrls: string[]; otherUrls: string[]; behavior: { degraded: boolean; lookupHit: boolean; audienceRulesError: boolean; failedPart: string | null } }
+const server: FakeServer = { pageUrls: [], otherUrls: [], behavior: { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null } };
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as any;
 
 function installFakeServer() {
@@ -87,14 +87,25 @@ function installFakeServer() {
   global.fetch = vi.fn(async (url: string | URL | Request) => {
     const u = new URL(String(url), "http://x");
     if (u.pathname === "/api/leads/facets") {
-      return json({
+      const full: Record<string, unknown> = {
         summary: { totalLeads: TOTAL, buyersCount: 100, lostCount: 50, openBudgetsCount: 200, inNegotiationCount: 200, inConversationCount: 5000, neverContactedCount: 19650, activeLeadsCount: 24850, estimatedRevenue: 0 },
-        baseTotal: TOTAL,
         channels: { google: 12000, instagram: 8000, nao_identificada: 5000 },
         sources: [{ source: "Google Ads", count: 12000 }, { source: "Instagram Direct", count: 8000 }, { source: "Não informado", count: 5000 }],
         tags: [{ tag: "vip", count: 4000 }],
+      };
+      const out: Record<string, unknown> = {
+        ...full,
+        baseTotal: TOTAL,
         stagesExact: { buyer: 100, open_budget: 200, inquiry: 300, cold: 24000, lost: 50, other: 350 },
-      });
+        failedParts: {},
+      };
+      const bad = server.behavior.failedPart;
+      if (bad) {
+        out[bad] = null;
+        if (bad === "summary") { out.baseTotal = null; out.stagesExact = null; }
+        out.failedParts = { [bad]: { message: `falha simulada em ${bad}`, code: "42703" } };
+      }
+      return json(out);
     }
     if (u.pathname === "/api/leads/lookup") {
       server.otherUrls.push(String(url));
@@ -125,7 +136,7 @@ function installFakeServer() {
         // abas do servidor (dentro do filtro): propositalmente diferentes dos totais da base (facets) para provar de onde vêm
         tabs: server.behavior.degraded ? null : { all: TOTAL, buyer: 101, open_budget: 199, cold: 24650, lost: 50 },
         degraded: server.behavior.degraded,
-        ...(server.behavior.degraded ? { degradedReason: "FILTERS_UNAVAILABLE" } : {}),
+        ...(server.behavior.degraded ? { degradedReason: "FILTERS_UNAVAILABLE", degradedCause: { message: 'column "x" does not exist', code: "42703" } } : {}),
       });
     }
     if (u.pathname.includes("/evolution-instances")) return json({ items: [] });
@@ -150,7 +161,7 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
   beforeEach(() => {
     vi.restoreAllMocks();
     window.history.pushState({}, "", "/crm/banco-de-dados");
-    server.behavior = { degraded: false, lookupHit: true, audienceRulesError: false };
+    server.behavior = { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null };
     installFakeServer();
   });
 
@@ -222,6 +233,7 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
     server.behavior.degraded = true;
     renderWithProviders(<BancoDeDados />);
     expect(await screen.findByTestId("leads-degraded-banner")).toHaveTextContent(/filtros não puderam ser aplicados/i);
+    expect(await screen.findByTestId("leads-degraded-cause")).toHaveTextContent(/column "x" does not exist \[42703\]/);
   });
 
   it("sem degradação não há aviso", async () => {
@@ -273,5 +285,47 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
     await screen.findByText("Lead P1 L1");
     fireEvent.click(await screen.findByTestId("btn-create-campaign"));
     expect(await screen.findByTestId("campaign-audience-error")).toHaveTextContent(/coluna "dados" não pode ser usada como regra/);
+  });
+
+  describe("totais da base degradam POR PARTE (a lista de tags não pode sumir por causa de outra conta)", () => {
+    const checks = {
+      summary: () => expect(screen.getByText(/faixas do Potencial e totais por estágio/)).toBeInTheDocument(),
+      channels: () => expect(screen.getByText(/cartões de origem/)).toBeInTheDocument(),
+      sources: () => expect(screen.getByText(/lista de origens/)).toBeInTheDocument(),
+      tags: () => expect(screen.getByText(/lista de tags/)).toBeInTheDocument(),
+    };
+
+    it.each(["summary", "channels", "sources", "tags"] as const)("parte '%s' falha: as outras três chegam à tela e o aviso fala só dela", async (parte) => {
+      server.behavior.failedPart = parte;
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      const aviso = await screen.findByTestId("leads-facets-partial");
+      checks[parte]();
+      expect(aviso).toHaveTextContent(new RegExp(`${parte}: falha simulada em ${parte} \\[42703\\]`));
+      for (const outra of ["summary", "channels", "sources", "tags"].filter((p) => p !== parte)) {
+        expect(aviso).not.toHaveTextContent(new RegExp(`${outra}: falha simulada`));
+      }
+      // a lista de tags (escolher tag para montar a campanha) continua funcionando quando a falha NÃO é a das tags
+      if (parte !== "tags") expect(await screen.findByRole("option", { name: "vip" })).toBeInTheDocument();
+      else expect(screen.queryByRole("option", { name: "vip" })).not.toBeInTheDocument();
+      // cartões de origem: valor real quando chegaram; "—" (e não 0) quando falharam
+      if (parte === "channels") expect(screen.queryByTitle(/Google Ads: \d+ leads/)).not.toBeInTheDocument();
+      else expect(await screen.findByTitle(/Google Ads: 12000 leads/)).toBeInTheDocument();
+      // a lista de leads, a paginação e as abas seguem normais
+      expect(screen.getAllByText(/^Lead P1 L\d+$/)).toHaveLength(PAGE);
+    });
+
+    it("com channels falhando os cartões mostram '—', nunca 0", async () => {
+      server.behavior.failedPart = "channels";
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByTestId("leads-facets-partial");
+      expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    });
+
+    it("sem falha não há aviso de parte", async () => {
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      expect(screen.queryByTestId("leads-facets-partial")).not.toBeInTheDocument();
+    });
   });
 });

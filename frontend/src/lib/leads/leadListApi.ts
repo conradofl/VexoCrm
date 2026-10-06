@@ -36,17 +36,27 @@ export interface LeadPageResponse<TLead = Record<string, unknown>> {
   tabs: LeadTabCounts | null;
   degraded: boolean;
   degradedReason?: string;
+  /** Por que o servidor degradou (erro do banco): a tela mostra no aviso. */
+  degradedCause?: { message: string; code?: string } | null;
 }
 
+export type FacetPartName = "summary" | "channels" | "sources" | "tags";
+
+/**
+ * Totais da base, em quatro partes INDEPENDENTES. Cada parte que o servidor não conseguiu calcular vem `null` e aparece em
+ * `failedParts` com a causa: a tela usa o que chegou e avisa só sobre o que falhou (a lista de tags, por exemplo, é o que permite
+ * montar o público de uma campanha e não pode sumir por causa de outra conta).
+ */
 export interface LeadFacetsResponse {
-  summary: Record<string, number>;
-  baseTotal: number;
+  summary: Record<string, number> | null;
+  baseTotal: number | null;
   /** contagem por cartão de origem — SEMPRE a base inteira */
-  channels: Record<string, number>;
-  sources: Array<{ source: string; count: number }>;
-  tags: Array<{ tag: string; count: number }>;
+  channels: Record<string, number> | null;
+  sources: Array<{ source: string; count: number }> | null;
+  tags: Array<{ tag: string; count: number }> | null;
   /** contagem EXATA por estágio (cada estágio é o seu); `other` = nulo ou desconhecido */
-  stagesExact: { buyer: number; open_budget: number; inquiry: number; cold: number; lost: number; other: number };
+  stagesExact: { buyer: number; open_budget: number; inquiry: number; cold: number; lost: number; other: number } | null;
+  failedParts: Partial<Record<FacetPartName, { message: string; code?: string }>>;
 }
 
 export interface LeadContact {
@@ -123,6 +133,9 @@ async function readJson<T>(res: Response, fallbackMessage: string): Promise<T> {
     try {
       const body = await res.json();
       message = body?.error?.message || body?.message || `${fallbackMessage} (${res.status})`;
+      // o servidor devolve a CAUSA do 500 (ex.: coluna inexistente): a tela mostra, em vez de só "falhou"
+      const cause = body?.error?.details?.cause;
+      if (cause?.message) message += ` — ${cause.message}${cause.code ? ` [${cause.code}]` : ""}`;
     } catch {
       message = `${fallbackMessage} (${res.status})`;
     }
@@ -155,6 +168,7 @@ export async function fetchLeadPage<TLead = Record<string, unknown>>(
     tabs: data.tabs ?? null,
     degraded: Boolean(data.degraded),
     degradedReason: data.degradedReason,
+    degradedCause: data.degradedCause ?? null,
   };
 }
 
@@ -163,13 +177,15 @@ export async function fetchLeadFacets(request: LeadRequest, clientId: string): P
     await request(`/api/leads/facets?clientId=${encodeURIComponent(clientId)}`),
     "Falha ao calcular os totais da base"
   );
+  // null continua null: "não calculou" é diferente de "zero" (o cartão mostra "—", não 0)
   return {
-    summary: data.summary ?? {},
-    baseTotal: data.baseTotal ?? 0,
-    channels: data.channels ?? {},
-    sources: data.sources ?? [],
-    tags: data.tags ?? [],
-    stagesExact: data.stagesExact ?? { buyer: 0, open_budget: 0, inquiry: 0, cold: 0, lost: 0, other: 0 },
+    summary: data.summary ?? null,
+    baseTotal: data.baseTotal ?? null,
+    channels: data.channels ?? null,
+    sources: data.sources ?? null,
+    tags: data.tags ?? null,
+    stagesExact: data.stagesExact ?? null,
+    failedParts: data.failedParts ?? {},
   };
 }
 
