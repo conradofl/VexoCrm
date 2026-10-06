@@ -14,7 +14,7 @@
 // novas); o fluxo em lotes precisa das colunas e as garante em runtime (ADD COLUMN IF NOT EXISTS, espelho da migration
 // 20261005120000). O caminho de um POST só (compatibilidade) NÃO usa as colunas novas: roda numa transação única.
 
-import { normalizeHeaderKey, normalizeImportedLead as defaultNormalizeImportedLead, isImportedLeadEmpty as defaultIsImportedLeadEmpty } from "./leadImport.js";
+import { EXTRA_PHONE_TARGET, normalizeHeaderKey, normalizeImportedLead as defaultNormalizeImportedLead, isImportedLeadEmpty as defaultIsImportedLeadEmpty } from "./leadImport.js";
 import { normalizeString } from "../textNormalize.js";
 
 /** Máximo de linhas por requisição de lote E tamanho da fatia de gravação (9 colunas × 500 = 4.500 parâmetros). */
@@ -164,7 +164,11 @@ export function parseImportRows(rows, ctx) {
     const normalized = normalizeImportedLead(enrichedRow, clientId, defaultDdd, mappingItems || null);
     const imported = !!normalized.telefone;
     const phoneMapping = mappingItems?.find((m) => m.target === "telefone");
-    const rawPhone = phoneMapping ? String(row[phoneMapping.column] ?? "").trim() : String(enrichedRow.telefone ?? "").trim();
+    // com colunas de "Telefone adicional" o texto de referência é o da coluna que virou principal (ou, sem nenhum válido, o da primeira preenchida)
+    const multiPhone = mappingItems?.some((m) => m && m.target === EXTRA_PHONE_TARGET);
+    const rawPhone = multiPhone
+      ? String(normalized.dados?.telefone_bruto ?? "").trim()
+      : phoneMapping ? String(row[phoneMapping.column] ?? "").trim() : String(enrichedRow.telefone ?? "").trim();
     const rawDigits = rawPhone.replace(/\D/g, "");
     const skipReason = imported
       ? null

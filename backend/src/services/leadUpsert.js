@@ -140,12 +140,14 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
 
       // procedência acumula (grupos, agenda, conversa); o merge raso a sobrescreveria
       const combinedProcedencia = mergeProcedencia(prevDados.procedencia, updates.dados.procedencia);
+      const combinedExtras = mergeTelefonesExtras(prevDados.telefones_extras, updates.dados.telefones_extras);
 
       updates.dados = {
         ...prevDados,
         ...updates.dados,
         ...(combinedCampos ? { campos: combinedCampos } : {}),
         ...(combinedProcedencia ? { procedencia: combinedProcedencia } : {}),
+        ...(combinedExtras ? { telefones_extras: combinedExtras } : {}),
       };
     }
 
@@ -202,6 +204,24 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
  * entra numa segunda planilha perderia o identificador da primeira — e a exclusão em massa deixaria
  * de saber que ele pertence a mais de uma importação.
  */
+/**
+ * União dos telefones adicionais do lead (dados.telefones_extras), por telefone. O merge de `dados` é raso: sem isto, reimportar o lead com outra
+ * lista de adicionais apagaria os que já estavam. O primeiro registro de cada telefone manda (coluna de origem), e `ja_existe_como_lead` nunca se perde.
+ */
+export function mergeTelefonesExtras(...lists) {
+  const out = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const e of list) {
+      if (!e || !e.telefone) continue;
+      const found = out.find((x) => x.telefone === e.telefone);
+      if (!found) out.push({ ...e });
+      else if (e.ja_existe_como_lead && !found.ja_existe_como_lead) found.ja_existe_como_lead = e.ja_existe_como_lead;
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
 export function unionImportIds(...lists) {
   const ids = [];
   for (const list of lists) {
@@ -269,12 +289,14 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
 
       const combinedImportIds = unionImportIds(prevDados.import_ids, newLeadDados.import_ids);
       const combinedProcedencia = mergeProcedencia(prevDados.procedencia, newLeadDados.procedencia);
+      const combinedExtras = mergeTelefonesExtras(prevDados.telefones_extras, newLeadDados.telefones_extras);
       const combinedDados = {
         ...prevDados,
         ...newLeadDados,
         ...(combinedCampos ? { campos: combinedCampos } : {}),
         ...(combinedImportIds ? { import_ids: combinedImportIds } : {}),
         ...(combinedProcedencia ? { procedencia: combinedProcedencia } : {}),
+        ...(combinedExtras ? { telefones_extras: combinedExtras } : {}),
       };
 
       // Preserva o melhor nome disponível
@@ -423,12 +445,14 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
 
       const mergedImportIds = unionImportIds(existingDados.import_ids, leadDados.import_ids);
       const mergedProcedencia = mergeProcedencia(existingDados.procedencia, leadDados.procedencia);
+      const mergedExtras = mergeTelefonesExtras(existingDados.telefones_extras, leadDados.telefones_extras);
       const mergedDados = {
         ...existingDados,
         ...leadDados,
         ...(mergedCampos ? { campos: mergedCampos } : {}),
         ...(mergedImportIds ? { import_ids: mergedImportIds } : {}),
         ...(mergedProcedencia ? { procedencia: mergedProcedencia } : {}),
+        ...(mergedExtras ? { telefones_extras: mergedExtras } : {}),
       };
 
       const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";

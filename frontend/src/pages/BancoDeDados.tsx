@@ -138,6 +138,7 @@ import {
 import { ColumnMappingStep } from "@/pages/LeadImports/ColumnMappingStep";
 import { useCreateBancoImport, useLeadCustomFields, useLeadImports } from "@/hooks/useLeadImports";
 import { ImportBatchError, type ImportProgress } from "@/lib/leadImports/batchedImport";
+import { resolveRowPhones, summarizePhonePreview, type PhonePreviewSummary } from "@/lib/leadImports/multiPhone";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -546,6 +547,8 @@ export default function BancoDeDados() {
   const [importTagInput, setImportTagInput] = useState<string>("");
   const [importAsClosedSales, setImportAsClosedSales] = useState<boolean>(false);
   const [importParsedRows, setImportParsedRows] = useState<Record<string, unknown>[]>([]);
+  // Prévia antes de confirmar (planilha com mais de uma coluna de telefone): só principal / com adicional / puladas (nenhum telefone válido)
+  const [importPhonePreview, setImportPhonePreview] = useState<PhonePreviewSummary | null>(null);
   const [importSanitizePreview, setImportSanitizePreview] = useState<{ validCount: number; invalidCount: number }>({
     validCount: 0,
     invalidCount: 0,
@@ -1042,11 +1045,17 @@ export default function BancoDeDados() {
     const nameMapping = mappings.find((m) => m.target === "nome");
     const phoneCol = phoneMapping?.column;
     const nameCol = nameMapping?.column;
+    const hasExtraPhones = mappings.some((m) => m.target === "telefone_adicional");
+    setImportPhonePreview(summarizePhonePreview(rows, mappings, cleanDdd));
 
     const normalizedRows = rows.map((row) => {
-      const rawPhone = phoneCol
-        ? String(row[phoneCol] ?? "").trim()
-        : String(row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "").trim();
+      // com colunas de "Telefone adicional": o telefone que identifica o lead é o primeiro válido na ordem mapeada (a mesma regra do servidor)
+      const resolved = hasExtraPhones ? resolveRowPhones(row, mappings, cleanDdd) : null;
+      const rawPhone = resolved
+        ? String(resolved.brutoPrincipal ?? "").trim()
+        : phoneCol
+          ? String(row[phoneCol] ?? "").trim()
+          : String(row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "").trim();
       const rawDigits = rawPhone.replace(/\D/g, "");
       const sanitized = sanitizePhone(rawPhone, cleanDdd);
 
@@ -1083,7 +1092,7 @@ export default function BancoDeDados() {
         }
       }
 
-      const mapped = applyColumnMappingsToRow(row, mappings);
+      const mapped = applyColumnMappingsToRow(row, mappings, cleanDdd);
       return {
         ...row,
         telefone: finalPhone,
@@ -3896,6 +3905,20 @@ export default function BancoDeDados() {
                 </div>
 
                 <div className="bg-muted/40 border border-border rounded-md p-3 text-xs space-y-2">
+                  {importPhonePreview && importColumnMappings.length > 0 && (
+                    <div data-testid="import-phone-preview" className="rounded border border-border bg-background/60 p-2 space-y-0.5">
+                      <p className="font-semibold text-foreground">Prévia — {importPhonePreview.total.toLocaleString("pt-BR")} linhas:</p>
+                      <p data-testid="import-preview-only-principal">
+                        <strong>{importPhonePreview.onlyPrincipal.toLocaleString("pt-BR")}</strong> só com telefone principal
+                      </p>
+                      <p data-testid="import-preview-with-extras">
+                        <strong>{importPhonePreview.withExtras.toLocaleString("pt-BR")}</strong> com telefone adicional (um lead só; o adicional fica guardado no lead)
+                      </p>
+                      <p data-testid="import-preview-skipped" className={importPhonePreview.skipped > 0 ? "text-amber-600 dark:text-amber-400" : ""}>
+                        <strong>{importPhonePreview.skipped.toLocaleString("pt-BR")}</strong> serão puladas por não ter nenhum telefone válido
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-1">
                     {importAuditStats.completedCount > 0 ? (
                       <p className="font-medium text-emerald-600 dark:text-emerald-400">
@@ -4419,10 +4442,20 @@ export default function BancoDeDados() {
                         <option key={imp.id} value={imp.id}>
                           {imp.reconstructed
                             ? `${imp.source_name} — no mínimo ${Number(imp.total_rows).toLocaleString("pt-BR")} leads (total é piso, data aproximada)`
-                            : `${imp.source_name} — ${new Date(imp.created_at).toLocaleDateString("pt-BR")} — ${Number(imp.total_rows).toLocaleString("pt-BR")} linhas${imp.status === "incomplete" ? " (incompleta)" : ""}`}
+                            : `${imp.source_name} — ${new Date(imp.created_at).toLocaleDateString("pt-BR")} — ${Number(imp.total_rows).toLocaleString("pt-BR")} linhas${imp.status === "incomplete" ? " (incompleta)" : ""}${(imp.same_name_count ?? 1) > 1 ? ` — importada ${imp.same_name_count} vezes` : ""}`}
                         </option>
                       ))}
                     </select>
+                    {campaignImportId && (campaignImportSources.find((i) => i.id === campaignImportId)?.same_name_count ?? 1) > 1 && (
+                      <p
+                        role="alert"
+                        data-testid="campaign-import-duplicate-warning"
+                        className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-200"
+                      >
+                        ⚠ Esta planilha foi importada mais de uma vez ({campaignImportSources.find((i) => i.id === campaignImportId)?.same_name_count} importações com o mesmo nome).
+                        Disparar em todas pode mandar mais de uma mensagem para a mesma empresa.
+                      </p>
+                    )}
                     {campaignImportId && (
                       <div className="mt-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs space-y-1.5">
                         {campaignImportOriginError ? (

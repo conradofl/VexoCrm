@@ -1,3 +1,4 @@
+import { resolveRowPhones } from "./multiPhone";
 import * as XLSX from "xlsx";
 import type { Campaign, CampaignSequenceStep } from "@/hooks/useCampanhas";
 
@@ -694,7 +695,7 @@ export function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): Ar
 // Mapeamento dinâmico de colunas na importação de planilhas
 // ---------------------------------------------------------------------------
 
-export type ColumnMappingTarget = "ignore" | "telefone" | "nome" | "custom";
+export type ColumnMappingTarget = "ignore" | "telefone" | "telefone_adicional" | "nome" | "custom";
 export type CustomFieldType = "text" | "number" | "date";
 
 export interface ColumnMappingItem {
@@ -957,6 +958,17 @@ export function findMatchingRememberedMapping(
   return null;
 }
 
+/** Cabeçalho com cara de coluna de telefone: começa por telefone, fone, celular, whatsapp ou phone ("Telefone 2", "Celular comercial"…). */
+export function looksLikePhoneHeader(header: string): boolean {
+  const key = String(header ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return /^(telefone|telefones|fone|fones|celular|celulares|whatsapp|whatsapps|phone|phones)( |$)/.test(key);
+}
+
 /**
  * Propõe a configuração de mapeamento de colunas para uma planilha recém-carregada.
  */
@@ -1007,6 +1019,9 @@ export function proposeColumnMappings(params: {
       target = "telefone";
     } else if (detected.nome && col === detected.nome) {
       target = "nome";
+    } else if (detected.telefone && looksLikePhoneHeader(col)) {
+      // outra coluna com cara de telefone (Telefone 2, Celular, WhatsApp…): sugere como adicional; quem decide é o usuário
+      target = "telefone_adicional";
     }
 
     const colValues = sampleRows.map((r) => r[col]);
@@ -1059,7 +1074,7 @@ export function validateColumnMappings(
   if (phoneMappings.length > 1) {
     return {
       isValid: false,
-      errorMessage: "Mais de uma coluna foi mapeada como Telefone. O destino Telefone é único.",
+      errorMessage: "Mais de uma coluna foi mapeada como Telefone. O destino Telefone é único — as outras colunas de telefone podem ser marcadas como 'Telefone adicional'.",
       candidatePhoneColumn: phoneMappings[0].column,
     };
   }
@@ -1148,7 +1163,8 @@ export function detectTypeDivergences(
  */
 export function applyColumnMappingsToRow(
   row: Record<string, unknown>,
-  mappings: ColumnMappingItem[]
+  mappings: ColumnMappingItem[],
+  defaultDdd: string | null = null
 ): {
   telefone: string;
   nome: string;
@@ -1160,8 +1176,10 @@ export function applyColumnMappingsToRow(
   const phoneMapping = mappings.find((m) => m.target === "telefone");
   const nameMapping = mappings.find((m) => m.target === "nome");
   const customMappings = mappings.filter((m) => m.target === "custom");
+  const hasExtraPhones = mappings.some((m) => m.target === "telefone_adicional");
 
-  const rawPhone = phoneMapping ? row[phoneMapping.column] : "";
+  // com colunas de "Telefone adicional": o texto de referência é o da coluna que vira o principal (o primeiro telefone válido, na ordem mapeada)
+  const rawPhone = hasExtraPhones ? resolveRowPhones(row, mappings, defaultDdd).brutoPrincipal : phoneMapping ? row[phoneMapping.column] : "";
   const phoneStr = rawPhone !== undefined && rawPhone !== null ? String(rawPhone).trim() : "";
 
   const rawName = nameMapping ? row[nameMapping.column] : "";

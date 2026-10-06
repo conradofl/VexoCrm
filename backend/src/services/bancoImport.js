@@ -12,6 +12,7 @@ import { normalizeImportedLead as defaultNormalizeImportedLead, sanitizePhone } 
 import { resolveImportOrigin } from "./importOrigin.js";
 import { normalizeString } from "../textNormalize.js";
 import { upsertLeadsBatchByPhone } from "./leadUpsert.js";
+import { markExtraPhoneCollisions } from "./leadExtraPhones.js";
 import { IMPORT_BATCH_SIZE, appendLeadImportBatch, closeLeadImport, extractMappingItems, openLeadImport, ImportError } from "./leadImportBatches.js";
 
 export const BANCO_IMPORT_MODE = "banco";
@@ -61,6 +62,7 @@ export function buildBancoLeads(rows, { clientId, defaultDdd = null, mappingItem
     let name = null;
     let rawPhone = "";
     let customCampos = {};
+    let extrasDaLinha = [];
 
     if (mappingItems) {
       const normalized = normalizeImportedLead(row, clientId, defaultDdd, mappingItems);
@@ -70,6 +72,7 @@ export function buildBancoLeads(rows, { clientId, defaultDdd = null, mappingItem
       name = normalized.nome;
       rawPhone = normalized.dados?.telefone_bruto || (phoneMapping ? row[phoneMapping.column] : "") || "";
       customCampos = normalized.dados?.campos || {};
+      extrasDaLinha = Array.isArray(normalized.dados?.telefones_extras) ? normalized.dados.telefones_extras : [];
     } else {
       rawPhone = row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "";
       formattedPhone = sanitizePhoneE164(rawPhone, defaultDdd);
@@ -115,6 +118,8 @@ export function buildBancoLeads(rows, { clientId, defaultDdd = null, mappingItem
       produto_comprado: row.produto_comprado || undefined,
     };
     if (Object.keys(customCampos).length > 0) dadosPayload.campos = customCampos;
+    // mais de uma coluna de telefone: o principal identifica o lead; os demais ficam aqui, com a coluna de origem (nenhum lead por telefone extra)
+    if (extrasDaLinha.length > 0) dadosPayload.telefones_extras = extrasDaLinha;
 
     parsedLeads.push({
       client_id: clientId,
@@ -181,6 +186,7 @@ export async function appendBancoImportBatch(pool, ctx, { startIndex, rows, fing
   if (leads.length > 0) {
     const result = await upsert(pool, ctx.clientId, leads);
     leadsTouched = result?.totalCount ?? leads.length;
+    await markExtraPhoneCollisions(pool, ctx.clientId, leads);
   }
   const registered = await appendLeadImportBatch(pool, {
     importId: ctx.importId,

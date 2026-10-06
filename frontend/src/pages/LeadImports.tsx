@@ -827,7 +827,7 @@ export default function LeadImports({
       setColumnMappings(initialMappings);
 
       const mappedRows = rows.map((row) => {
-        const mapped = applyColumnMappingsToRow(row, initialMappings);
+        const mapped = applyColumnMappingsToRow(row, initialMappings, defaultDdd || null);
         return {
           ...row,
           telefone: mapped.telefone,
@@ -847,7 +847,7 @@ export default function LeadImports({
     setColumnMappings(newMappings);
     if (rawUploadedRows.length > 0) {
       const updatedMappedRows = rawUploadedRows.map((row) => {
-        const mapped = applyColumnMappingsToRow(row, newMappings);
+        const mapped = applyColumnMappingsToRow(row, newMappings, defaultDdd || null);
         return {
           ...row,
           telefone: mapped.telefone,

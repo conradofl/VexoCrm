@@ -283,6 +283,8 @@ export interface ImportSource {
   status: "completed" | "incomplete";
   /** Reconstruída depois do fato: o total é PISO e a data é aproximada; não há "nasceram / já existiam". */
   reconstructed?: boolean;
+  /** Quantas importações da empresa têm exatamente este nome de arquivo (>1 = o mesmo arquivo importado mais de uma vez). */
+  same_name_count?: number;
 }
 
 /** As planilhas registradas, para o seletor da campanha (rota do Banco: não exige acesso à tela de Planilhas). */

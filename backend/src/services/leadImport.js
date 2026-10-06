@@ -636,10 +636,60 @@ export function pickRowValue(row, aliases) {
   return null;
 }
 
+export const PHONE_TARGET = "telefone";
+export const EXTRA_PHONE_TARGET = "telefone_adicional";
+
+/** Telefone da importação: sanitizado e NUNCA o 5500… que este sistema já fabricou. Devolve só os dígitos (sem "+"), ou null. */
+function validImportPhone(raw, defaultDdd) {
+  const sanitized = sanitizePhone(raw, defaultDdd);
+  if (!sanitized) return null;
+  const digits = String(sanitized).replace(/^\+/, "");
+  return digits.startsWith("5500") ? null : digits;
+}
+
+/**
+ * Os telefones de UMA linha quando a planilha tem mais de uma coluna de telefone. Regra (a mesma que a prévia da tela aplica; fixture
+ * compartilhada shared/multiPhoneCases.json confere as duas pontas):
+ *  - candidatas, na ordem em que foram mapeadas: a coluna Telefone (principal) primeiro, depois as de "Telefone adicional" na ordem do arquivo;
+ *  - vazia ou inválida é descartada (nenhum número fabricado, nunca 5500…);
+ *  - o PRIMEIRO telefone válido identifica o lead: principal vazio com adicional preenchido → o adicional vira o principal (a linha não se perde pela ordem);
+ *  - dois telefones da mesma linha iguais depois de normalizar → guarda um só (o primeiro);
+ *  - os demais válidos são os extras, cada um com a coluna de origem.
+ * `brutoPrincipal` é o texto original da coluna que virou principal (ou, sem nenhum válido, o da primeira coluna preenchida: serve ao motivo da linha pulada).
+ */
+export function resolveRowPhones(row, mappingItems, defaultDdd = null) {
+  const items = Array.isArray(mappingItems) ? mappingItems : [];
+  const principal = items.find((m) => m && m.target === PHONE_TARGET);
+  const adicionais = items.filter((m) => m && m.target === EXTRA_PHONE_TARGET);
+  const colunas = [principal, ...adicionais].filter(Boolean);
+  const candidatas = colunas.map((m) => ({
+    coluna: m.column,
+    bruto: row?.[m.column] !== undefined && row?.[m.column] !== null ? String(row[m.column]).trim() : "",
+  }));
+  const validos = [];
+  const vistos = new Set();
+  for (const c of candidatas) {
+    if (!c.bruto) continue;
+    const telefone = validImportPhone(c.bruto, defaultDdd);
+    if (!telefone || vistos.has(telefone)) continue;
+    vistos.add(telefone);
+    validos.push({ telefone, coluna: c.coluna, bruto: c.bruto });
+  }
+  const [primeiro, ...resto] = validos;
+  return {
+    telefone: primeiro ? primeiro.telefone : null,
+    colunaPrincipal: primeiro ? primeiro.coluna : null,
+    brutoPrincipal: primeiro ? primeiro.bruto : (candidatas.find((c) => c.bruto)?.bruto ?? null),
+    extras: resto.map((v) => ({ telefone: v.telefone, coluna: v.coluna, bruto: v.bruto })),
+    candidatas,
+  };
+}
+
 export function normalizeImportedLead(row, clientId, defaultDdd = null, customMapping = null) {
   let rawTelefone = null;
   let telefone = null;
   let nome = null;
+  let telefonesExtras = [];
   const customCampos = {};
 
   const mappingItems = Array.isArray(customMapping)
@@ -653,8 +703,16 @@ export function normalizeImportedLead(row, clientId, defaultDdd = null, customMa
     const nameMapping = mappingItems.find((m) => m.target === "nome");
     const customItems = mappingItems.filter((m) => m.target === "custom");
 
-    rawTelefone = phoneMapping ? row[phoneMapping.column] : null;
-    telefone = sanitizePhone(rawTelefone, defaultDdd);
+    if (mappingItems.some((m) => m && m.target === EXTRA_PHONE_TARGET)) {
+      // mais de uma coluna de telefone: UMA linha = UM lead; o primeiro válido identifica, os demais ficam em dados.telefones_extras
+      const resolved = resolveRowPhones(row, mappingItems, defaultDdd);
+      rawTelefone = resolved.brutoPrincipal;
+      telefone = resolved.telefone;
+      telefonesExtras = resolved.extras;
+    } else {
+      rawTelefone = phoneMapping ? row[phoneMapping.column] : null;
+      telefone = sanitizePhone(rawTelefone, defaultDdd);
+    }
 
     const rawNome = nameMapping ? row[nameMapping.column] : null;
     const cleanNome = normalizeString(rawNome);
@@ -752,6 +810,9 @@ export function normalizeImportedLead(row, clientId, defaultDdd = null, customMa
   };
   if (Object.keys(customCampos).length > 0) {
     dadosObj.campos = customCampos;
+  }
+  if (telefonesExtras.length > 0) {
+    dadosObj.telefones_extras = telefonesExtras;
   }
 
   return {

@@ -353,6 +353,20 @@ describe("rotas da lista de leads (base de 25.000)", () => {
       expect(o).toMatchObject({ found: true, importId: impId, sourceName: "vendas-set.xlsx", born: 9, existed: 3, total: 12 });
     }, SLOW);
 
+    it("[TESTE OBRIGATÓRIO] o mesmo arquivo importado mais de uma vez: o seletor traz same_name_count > 1 para avisar (só aviso, nada é bloqueado)", async () => {
+      const a = (await db.query(`INSERT INTO lead_imports (client_id, source_name, total_rows) VALUES ($1, 'LEADS - Empresas UDIA.xlsx', 19998) RETURNING id::text AS id`, [T])).rows[0].id;
+      const b = (await db.query(`INSERT INTO lead_imports (client_id, source_name, total_rows) VALUES ($1, 'LEADS - Empresas UDIA.xlsx', 19998) RETURNING id::text AS id`, [T])).rows[0].id;
+      const src = await json(`/api/leads/import-sources?clientId=${T}`);
+      expect(src.items.find((i) => i.id === a).same_name_count).toBe(2);
+      expect(src.items.find((i) => i.id === b).same_name_count).toBe(2);
+      expect(src.items.find((i) => i.id === impId).same_name_count).toBe(1); // nome único: sem aviso
+      // a outra empresa com o mesmo nome não conta (a contagem é por empresa)
+      await db.query(`INSERT INTO lead_imports (client_id, source_name) VALUES ($1, 'LEADS - Empresas UDIA.xlsx')`, [OUTRO]);
+      const src2 = await json(`/api/leads/import-sources?clientId=${T}`);
+      expect(src2.items.find((i) => i.id === a).same_name_count).toBe(2);
+      await db.query(`DELETE FROM lead_imports WHERE source_name = 'LEADS - Empresas UDIA.xlsx'`);
+    }, SLOW);
+
     it("import-origin: id inválido é 400; planilha de outra empresa e inexistente são 404", async () => {
       expect((await get(`/api/leads/import-origin?clientId=${T}&importId=abc`)).status).toBe(400);
       expect((await get(`/api/leads/import-origin?clientId=${T}`)).status).toBe(400);

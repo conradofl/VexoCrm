@@ -1327,6 +1327,10 @@ export function registerLeadsRoutes(app, deps) {
     if (!clientId) return;
     try {
       const rows = await listLeadImports(pgDatabasePool, clientId, 200, { includeReconstructed: true });
+      // O mesmo arquivo importado mais de uma vez (mesmo source_name na empresa): disparar em todas pode mandar mais de uma mensagem para a mesma
+      // empresa. A tela AVISA (sem bloquear): este número diz quantas importações têm esse nome.
+      const importadasComEsteNome = new Map();
+      for (const r of rows) importadasComEsteNome.set(r.source_name, (importadasComEsteNome.get(r.source_name) || 0) + 1);
       res.json({
         items: rows.map((r) => ({
           id: r.id,
@@ -1336,6 +1340,7 @@ export function registerLeadsRoutes(app, deps) {
           status: r.status || "completed",
           // reconstruída depois do fato: o total é piso e a data é aproximada (a tela marca assim)
           reconstructed: r.source_type === "reconstruida",
+          same_name_count: importadasComEsteNome.get(r.source_name) || 1,
         })),
       });
     } catch (error) {

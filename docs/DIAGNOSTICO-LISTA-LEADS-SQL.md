@@ -143,9 +143,16 @@ milissegundos, é trabalho que cresce com a base. O certo é gravar o canal no l
 
 ### Importações antigas: reconstrução (06/10/2026)
 
-**O que a medição de produção mostrou:** em `dados.import_ids` existem só **4 ids distintos** na base inteira (2 com registro em `lead_imports`, 2 sem, com 58 leads nas 2 sem registro). As planilhas
-que o dono usa (17.843, 351, 58, 21, 4 e 2 leads — 18.279 marcações) **não têm id**: a única prova de que vieram de uma planilha é a tag `#Imp-…`. Por isso a reconstrução parte das TAGS,
-além dos 2 ids órfãos. Script: `ops/sql/2026-10-06-reconstruir-importacoes.sql` (idempotente, aditivo, **fora do boot**, rodado pelo dono no console psql).
+**Premissa corrigida pela medição de produção (06/10/2026).** Eu havia lido a captura do dono ("4 ids distintos em `dados.import_ids`") como "as planilhas só existem como tag". **Errado:** `lead_imports` já tinha
+**23 linhas, com os nomes de arquivo reais** — a tela de Planilhas sempre registrou; quem não registrava era só a importação feita pelo Banco (corrigida em 05/10). Por isso a reconstrução criou apenas 3 linhas
+(`INSERT 0 2`, `INSERT 0 1`, `UPDATE 4`: uma só precisou ligar leads, as 4 de `#Imp-LEAD_-_DESENVOLVIMENTO_PESSOAS`): faltava pouco, não era defeito. Executada em produção em 06/10 pelo dono, medindo antes com `ROLLBACK`
+e gravando com `COMMIT`: **151 ms, 294 ms e 134 ms** (Postgres real). O script continua útil e idempotente; o seletor mostra as planilhas com os nomes de arquivo verdadeiros.
+
+**Achado da mesma medição:** `3e2b960b…` (17.843 leads ligados) e `61417058…` (351) têm as mesmas 19.998 linhas e 19.998 itens: o MESMO arquivo importado duas vezes. A planilha tem duas colunas de telefone e o sistema só aceita uma;
+o dono gerou dois arquivos. Só 351 empresas têm segundo número — as outras 19.647 linhas da segunda importação não viraram nada. Próxima leva: importação com mais de uma coluna de telefone
+(uma linha = um lead; o primeiro telefone válido identifica; os demais ficam em `dados.telefones_extras`).
+
+**Como o script foi desenhado (continua valendo):**
 
 - **Fontes (as únicas sem palpite):** (1) id em `dados.import_ids` sem registro → o registro nasce com o MESMO id; (2) grupo de leads com a mesma tag `#Imp-…` → uma importação por (empresa, tag),
   só se algum lead do grupo não estiver em nenhuma importação com registro (grupo todo coberto já está representado: não duplica); (3) cada lead com a tag recebe o id da reconstruída em `dados.import_ids` (união).
@@ -157,8 +164,8 @@ além dos 2 ids órfãos. Script: `ops/sql/2026-10-06-reconstruir-importacoes.sq
 
 ### Backfill de procedência/rótulos: fora do boot
 
-`ops/sql/2026-10-06-backfill-procedencia.sql` (antes era uma migration que rodaria no boot) foi movido para `ops/sql/`: o tempo em Postgres real sobre ~26 mil leads ainda não foi medido, e uma migration lenta atrasa a
-subida do servidor. Rodar no console psql, **medindo sem gravar**: `BEGIN; \timing on; <arquivo>; ROLLBACK;`. Só vira migration de boot se passar na medição (poucos segundos). Medido em pglite (WASM, limite superior): ver o resultado do
+`ops/sql/2026-10-06-backfill-procedencia.sql` (antes era uma migration que rodaria no boot) foi movido para `ops/sql/`: uma migration lenta atrasa a subida do servidor. **Ainda NÃO executado em produção** (aditivo; não bloqueia nada;
+fica para quando o dono tiver tempo). A reconstrução, já executada, levou 134–294 ms em Postgres real — o que indica que o backfill também será rápido, mas isso não foi medido. Rodar no console psql, **medindo sem gravar**: `BEGIN; \timing on; <arquivo>; ROLLBACK;`. Só vira migration de boot se passar na medição (poucos segundos). Medido em pglite (WASM, limite superior): ver o resultado do
 teste de custo. Os dois scripts são idempotentes e o código funciona com ou sem eles (os leitores não dependem do campo novo).
 
 ## Pendências registradas

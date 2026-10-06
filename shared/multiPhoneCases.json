@@ -1,0 +1,96 @@
+{
+  "description": "Telefones de UMA linha quando a planilha tem mais de uma coluna de telefone (principal + 'Telefone adicional'). Fonte da verdade: backend/src/services/leadImport.js (resolveRowPhones); a prévia da tela (frontend/src/lib/leadImports/multiPhone.ts) tem que concordar caso a caso. Regras: candidatas na ordem mapeada (principal primeiro, depois os adicionais na ordem do mapeamento); vazio/inválido (e 5500…) descartado; o PRIMEIRO válido identifica; iguais depois de normalizar → um só; os demais viram extras com a coluna de origem.",
+  "cases": [
+    {
+      "name": "principal e adicional válidos e diferentes: o principal identifica, o adicional vira extra com a coluna de origem",
+      "row": { "Telefone 1": "(34) 99810-0001", "Telefone 2": "(34) 99810-0002" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Telefone 1", "brutoPrincipal": "(34) 99810-0001", "extras": [ { "telefone": "5534998100002", "coluna": "Telefone 2" } ] }
+    },
+    {
+      "name": "principal vazio e adicional preenchido: o adicional vira o principal (a linha não se perde pela ordem das colunas)",
+      "row": { "Telefone 1": "", "Telefone 2": "(34) 99810-0002" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100002", "colunaPrincipal": "Telefone 2", "brutoPrincipal": "(34) 99810-0002", "extras": [] }
+    },
+    {
+      "name": "principal inválido e adicional válido: o adicional identifica",
+      "row": { "Telefone 1": "12345", "Telefone 2": "(34) 99810-0002" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100002", "colunaPrincipal": "Telefone 2", "brutoPrincipal": "(34) 99810-0002", "extras": [] }
+    },
+    {
+      "name": "os dois iguais depois de normalizar: guarda um só",
+      "row": { "Telefone 1": "(34) 99810-0001", "Telefone 2": "+55 34 99810-0001" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Telefone 1", "brutoPrincipal": "(34) 99810-0001", "extras": [] }
+    },
+    {
+      "name": "três colunas válidas: os extras seguem a ordem do mapeamento",
+      "row": { "Tel A": "(34) 99810-0001", "Tel B": "(34) 99810-0002", "Tel C": "(34) 99810-0003" },
+      "mapping": [ { "column": "Tel A", "target": "telefone" }, { "column": "Tel B", "target": "telefone_adicional" }, { "column": "Tel C", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Tel A", "brutoPrincipal": "(34) 99810-0001", "extras": [ { "telefone": "5534998100002", "coluna": "Tel B" }, { "telefone": "5534998100003", "coluna": "Tel C" } ] }
+    },
+    {
+      "name": "o primeiro adicional repete o principal e o segundo é diferente: só o segundo vira extra",
+      "row": { "Tel A": "(34) 99810-0001", "Tel B": "34998100001", "Tel C": "(34) 99810-0003" },
+      "mapping": [ { "column": "Tel A", "target": "telefone" }, { "column": "Tel B", "target": "telefone_adicional" }, { "column": "Tel C", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Tel A", "brutoPrincipal": "(34) 99810-0001", "extras": [ { "telefone": "5534998100003", "coluna": "Tel C" } ] }
+    },
+    {
+      "name": "nenhum telefone válido: sem telefone, sem número fabricado; o texto de referência é o da primeira coluna preenchida",
+      "row": { "Telefone 1": "abc", "Telefone 2": "12" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": null, "colunaPrincipal": null, "brutoPrincipal": "abc", "extras": [] }
+    },
+    {
+      "name": "tudo vazio: sem telefone",
+      "row": { "Telefone 1": "", "Telefone 2": "   " },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": null, "colunaPrincipal": null, "brutoPrincipal": null, "extras": [] }
+    },
+    {
+      "name": "telefone 5500… nunca é aceito (este sistema já fabricou número assim): o adicional válido identifica",
+      "row": { "Telefone 1": "5500123456789", "Telefone 2": "(34) 99810-0002" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100002", "colunaPrincipal": "Telefone 2", "brutoPrincipal": "(34) 99810-0002", "extras": [] }
+    },
+    {
+      "name": "DDD padrão completa o número de 9 dígitos, no principal e no adicional",
+      "row": { "Telefone 1": "998100001", "Telefone 2": "998100002" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": "34",
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Telefone 1", "brutoPrincipal": "998100001", "extras": [ { "telefone": "5534998100002", "coluna": "Telefone 2" } ] }
+    },
+    {
+      "name": "sem DDD padrão o número de 9 dígitos é inválido: o adicional completo identifica",
+      "row": { "Telefone 1": "998100001", "Telefone 2": "(34) 99810-0002" },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100002", "colunaPrincipal": "Telefone 2", "brutoPrincipal": "(34) 99810-0002", "extras": [] }
+    },
+    {
+      "name": "a ordem dos adicionais é a do MAPEAMENTO, não a do arquivo",
+      "row": { "Tel A": "(34) 99810-0001", "Tel B": "(34) 99810-0002", "Tel C": "(34) 99810-0003" },
+      "mapping": [ { "column": "Tel A", "target": "telefone" }, { "column": "Tel C", "target": "telefone_adicional" }, { "column": "Tel B", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Tel A", "brutoPrincipal": "(34) 99810-0001", "extras": [ { "telefone": "5534998100003", "coluna": "Tel C" }, { "telefone": "5534998100002", "coluna": "Tel B" } ] }
+    },
+    {
+      "name": "o Excel entrega o telefone como NÚMERO: vale do mesmo jeito",
+      "row": { "Telefone 1": 5534998100001, "Telefone 2": 5534998100002 },
+      "mapping": [ { "column": "Telefone 1", "target": "telefone" }, { "column": "Telefone 2", "target": "telefone_adicional" } ],
+      "ddd": null,
+      "expected": { "telefone": "5534998100001", "colunaPrincipal": "Telefone 1", "brutoPrincipal": "5534998100001", "extras": [ { "telefone": "5534998100002", "coluna": "Telefone 2" } ] }
+    }
+  ]
+}

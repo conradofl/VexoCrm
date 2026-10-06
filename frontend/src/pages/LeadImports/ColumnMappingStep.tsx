@@ -138,7 +138,7 @@ export function ColumnMappingStep({
             ) : null}
             {columns.length} colunas encontradas
             {totalRowsCount !== undefined ? ` • ${totalRowsCount} linhas` : ""}.
-            Confira o destino dos dados antes de importar. Apenas o telefone é obrigatório.
+            Confira o destino dos dados antes de importar. Apenas o telefone é obrigatório; outras colunas de telefone podem ser marcadas como "Telefone adicional" (uma linha continua sendo um lead só).
           </p>
         </div>
 
@@ -259,6 +259,7 @@ export function ColumnMappingStep({
                       <SelectContent>
                         <SelectItem value="ignore">Ignorar</SelectItem>
                         <SelectItem value="telefone">Telefone (Obrigatório)</SelectItem>
+                        <SelectItem value="telefone_adicional">Telefone adicional</SelectItem>
                         <SelectItem value="nome">Nome do Contato</SelectItem>
                         <SelectItem value="custom">Guardar como informação do lead</SelectItem>
                       </SelectContent>
@@ -308,6 +309,10 @@ export function ColumnMappingStep({
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         Identificador principal
+                      </span>
+                    ) : mapping.target === "telefone_adicional" ? (
+                      <span data-testid={`extra-phone-hint-${colName}`} className="text-[11px] text-slate-600 dark:text-slate-300">
+                        Guardado no mesmo lead (dados.telefones_extras). Se o telefone principal estiver vazio ou inválido, o primeiro adicional válido identifica o lead.
                       </span>
                     ) : mapping.target === "nome" ? (
                       <span className="text-[11px] text-slate-500 dark:text-slate-400">

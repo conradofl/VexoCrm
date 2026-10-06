@@ -47,7 +47,7 @@ export interface LeadImportItem {
     columns: string[];
     mapping: Array<{
       column: string;
-      target: "ignore" | "telefone" | "nome" | "custom";
+      target: "ignore" | "telefone" | "telefone_adicional" | "nome" | "custom";
       label?: string;
       type?: "text" | "number" | "date";
       key?: string;
@@ -75,7 +75,7 @@ interface CreateLeadImportPayload {
   onProgress?: (progress: ImportProgress) => void;
   columnMapping?: Array<{
     column: string;
-    target: "ignore" | "telefone" | "nome" | "custom";
+    target: "ignore" | "telefone" | "telefone_adicional" | "nome" | "custom";
     label?: string;
     type?: "text" | "number" | "date";
     key?: string;
@@ -83,7 +83,7 @@ interface CreateLeadImportPayload {
     columns: string[];
     mapping: Array<{
       column: string;
-      target: "ignore" | "telefone" | "nome" | "custom";
+      target: "ignore" | "telefone" | "telefone_adicional" | "nome" | "custom";
       label?: string;
       type?: "text" | "number" | "date";
       key?: string;

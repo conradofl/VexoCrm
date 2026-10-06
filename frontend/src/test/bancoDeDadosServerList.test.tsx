@@ -77,8 +77,8 @@ const leadRow = (id: string, nome: string, extra: Record<string, unknown> = {}) 
   raw_chat_summary: null, created_at: "2026-01-01T00:00:00.000Z", dados: {}, ...extra,
 });
 
-interface FakeServer { pageUrls: string[]; otherUrls: string[]; audienceBodies: any[]; behavior: { degraded: boolean; lookupHit: boolean; audienceRulesError: boolean; failedPart: string | null } }
-const server: FakeServer = { pageUrls: [], otherUrls: [], audienceBodies: [], behavior: { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null } };
+interface FakeServer { pageUrls: string[]; otherUrls: string[]; audienceBodies: any[]; behavior: { degraded: boolean; lookupHit: boolean; audienceRulesError: boolean; failedPart: string | null; duplicateName: boolean } }
+const server: FakeServer = { pageUrls: [], otherUrls: [], audienceBodies: [], behavior: { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null, duplicateName: false } };
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as any;
 
 function installFakeServer() {
@@ -126,7 +126,7 @@ function installFakeServer() {
     if (u.pathname === "/api/leads/import-sources") {
       return json({
         items: [
-          { id: "11111111-1111-1111-1111-111111111111", source_name: "clientes-junho.xlsx", created_at: "2026-06-01T12:00:00.000Z", total_rows: 1530, status: "completed" },
+          { id: "11111111-1111-1111-1111-111111111111", source_name: "clientes-junho.xlsx", created_at: "2026-06-01T12:00:00.000Z", total_rows: 1530, status: "completed", same_name_count: server.behavior.duplicateName ? 2 : 1 },
           { id: "22222222-2222-2222-2222-222222222222", source_name: "Importação reconstruída — #Imp-clientes_2026 (≈ 31/12/2025)", created_at: "2025-12-31T00:00:00.000Z", total_rows: 17843, status: "completed", reconstructed: true },
         ],
       });
@@ -184,7 +184,7 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
   beforeEach(() => {
     vi.restoreAllMocks();
     window.history.pushState({}, "", "/crm/banco-de-dados");
-    server.behavior = { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null };
+    server.behavior = { degraded: false, lookupHit: true, audienceRulesError: false, failedPart: null, duplicateName: false };
     installFakeServer();
   });
 
@@ -408,6 +408,59 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
       expect(screen.queryByTestId("campaign-import-scope-born")).not.toBeInTheDocument();
       expect(screen.queryByTestId("campaign-import-scope-existed")).not.toBeInTheDocument();
       await waitFor(() => expect(server.audienceBodies[server.audienceBodies.length - 1]).toMatchObject({ importId: "22222222-2222-2222-2222-222222222222", importScope: "all" }));
+    });
+
+    it("[TESTE OBRIGATÓRIO] planilha importada mais de uma vez: o seletor AVISA (no rótulo e abaixo), sem bloquear a escolha", async () => {
+      server.behavior.duplicateName = true;
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      fireEvent.click(await screen.findByTestId("btn-create-campaign"));
+      const picker = await screen.findByTestId("campaign-import-select");
+      await waitFor(() => expect(picker.querySelectorAll("option").length).toBe(3));
+      const rotulo = Array.from(picker.querySelectorAll("option")).map((o) => o.textContent).find((t) => t?.includes("clientes-junho.xlsx"));
+      expect(rotulo).toMatch(/importada 2 vezes/);
+      expect(screen.queryByTestId("campaign-import-duplicate-warning")).not.toBeInTheDocument(); // só aparece ao escolher
+      fireEvent.change(picker, { target: { value: "11111111-1111-1111-1111-111111111111" } });
+      expect(await screen.findByTestId("campaign-import-duplicate-warning")).toHaveTextContent(/importada mais de uma vez.*mais de uma mensagem para a mesma empresa/);
+      // não bloqueia: os números e os recortes seguem disponíveis
+      expect(await screen.findByTestId("campaign-import-numbers")).toBeInTheDocument();
+      expect(screen.getByTestId("campaign-import-scope-all")).toBeEnabled();
+    });
+
+    it("planilha com nome único: sem aviso", async () => {
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      fireEvent.click(await screen.findByTestId("btn-create-campaign"));
+      const picker = await screen.findByTestId("campaign-import-select");
+      await waitFor(() => expect(picker.querySelectorAll("option").length).toBe(3));
+      fireEvent.change(picker, { target: { value: "11111111-1111-1111-1111-111111111111" } });
+      await screen.findByTestId("campaign-import-numbers");
+      expect(screen.queryByTestId("campaign-import-duplicate-warning")).not.toBeInTheDocument();
+    });
+
+    it("[TESTE OBRIGATÓRIO] importar planilha com duas colunas de telefone: a PRÉVIA mostra só principal / com adicional / puladas antes de confirmar", async () => {
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      fireEvent.click(await screen.findByTestId("btn-import-spreadsheet"));
+      const csv = [
+        "Empresa,Telefone 1,Telefone 2",
+        "Padaria Sol,(34) 99810-0001,(34) 99810-0002", // com adicional
+        "Mercado Lua,,(34) 99810-0003", // adicional vira principal
+        "Oficina Mar,(34) 99810-0004,34998100004", // iguais → só principal
+        "Loja Vento,lixo,", // pulada
+        "Bar Rio,(34) 99810-0005,", // só principal
+      ].join("\n");
+      const file = new File([csv], "LEADS - Empresas UDIA.csv", { type: "text/csv" });
+      const input = document.querySelector('input[type="file"][accept*="csv"]') as HTMLInputElement;
+      expect(input).toBeTruthy();
+      fireEvent.change(input, { target: { files: [file] } });
+      const previa = await screen.findByTestId("import-phone-preview", undefined, { timeout: 8000 });
+      expect(previa).toHaveTextContent(/5 linhas/);
+      expect(screen.getByTestId("import-preview-only-principal")).toHaveTextContent(/^3 só com telefone principal/);
+      expect(screen.getByTestId("import-preview-with-extras")).toHaveTextContent(/^1 com telefone adicional/);
+      expect(screen.getByTestId("import-preview-skipped")).toHaveTextContent(/^1 serão puladas por não ter nenhum telefone válido/);
+      // a coluna "Telefone 2" foi sugerida como adicional (e o usuário pode mudar)
+      expect(await screen.findByTestId("extra-phone-hint-Telefone 2")).toBeInTheDocument();
     });
   });
 });
