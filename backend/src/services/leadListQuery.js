@@ -165,7 +165,7 @@ function sourceCte(scopeSql) {
     )`;
 }
 
-class Params {
+export class Params {
   constructor() {
     this.values = [];
   }

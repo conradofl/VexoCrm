@@ -13,16 +13,24 @@ import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 export const MESSAGE_EFFECTIVENESS_MIN_SENT = 30;
 export const MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS = 14;
 
+/**
+ * A definição de "respondeu" do sistema, em DOIS pedaços que todo cruzamento reutiliza (relatório de efetividade, público da segunda tentativa
+ * por outro número): o que conta como mensagem de resposta e o instante efetivo dela. Ter outra cópia é o que faz o dono ver dois números
+ * diferentes para a mesma pergunta. O telefone é sempre comparado pelo canônico (SQL_CANONICAL_PHONE, ou a variante JID) nos DOIS lados.
+ */
+export const REPLY_MESSAGE_FILTER_SQL = "(lm.direction = 'inbound' OR lm.engagement_signal = 'reply')";
+export const MESSAGE_TIMESTAMP_SQL = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
+
 export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIsGroupColumn) {
   const canonicalLeadPhone = SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)");
-  const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
+  const lmTimestamp = MESSAGE_TIMESTAMP_SQL;
 
   const repliedExists = ({ phoneCondition, extra = "" }) => `EXISTS (
             SELECT 1
             FROM public.lead_messages lm
             WHERE lm.client_id = r.client_id
               AND (${phoneCondition})
-              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              AND ${REPLY_MESSAGE_FILTER_SQL}
               AND ${lmTimestamp} > r.sent_at
               AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
               ${extra}

@@ -34,6 +34,7 @@ import {
   queryLeadsPage,
   validateAudienceRules,
 } from "../../services/leadListQuery.js";
+import { SecondNumberInputError, listSecondNumberCampaigns, querySecondNumberAudience } from "../../services/secondNumberAudience.js";
 import { confirmLeadAgreement, saveLeadAgreement } from "../../services/leadAgreement.js";
 import {
   getDefaultLeadClientEvolutionInstance,
@@ -1317,6 +1318,39 @@ export function registerLeadsRoutes(app, deps) {
     } catch (error) {
       console.error("[leads-audience] falhou:", error?.message || error);
       sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.", { cause: errorCause(error) });
+    }
+  });
+
+  // Segunda tentativa por OUTRO número: as campanhas que já enviaram (só as que gravaram campaign_dispatch_runs) e o público de quem não respondeu.
+  // Mesmo gate do Banco; só leitura. O disparo em si segue pelo fluxo de campanha existente (handoff de linhas), não por aqui.
+  app.get("/api/leads/second-number/campaigns", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    try {
+      res.json({ items: await listSecondNumberCampaigns(pgDatabasePool, { clientId }) });
+    } catch (error) {
+      console.error("[leads-second-number] campanhas falhou:", error?.message || error);
+      sendError(res, 500, "SECOND_NUMBER_CAMPAIGNS_FAILED", "Falha ao listar as campanhas.", { cause: errorCause(error) });
+    }
+  });
+
+  app.post("/api/leads/second-number/audience", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    try {
+      const result = await querySecondNumberAudience(pgDatabasePool, {
+        scope: resolveLeadListScope(req, clientId),
+        campaignId: normalizeString(req.body?.campaignId),
+        waitDays: req.body?.waitDays === undefined ? undefined : Number(req.body.waitDays),
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof SecondNumberInputError) {
+        sendError(res, 400, error.code, error.message);
+        return;
+      }
+      console.error("[leads-second-number] público falhou:", error?.message || error);
+      sendError(res, 500, "SECOND_NUMBER_AUDIENCE_FAILED", "Falha ao montar o público da segunda tentativa.", { cause: errorCause(error) });
     }
   });
 

@@ -168,6 +168,64 @@ o dono gerou dois arquivos. Só 351 empresas têm segundo número — as outras 
 fica para quando o dono tiver tempo). A reconstrução, já executada, levou 134–294 ms em Postgres real — o que indica que o backfill também será rápido, mas isso não foi medido. Rodar no console psql, **medindo sem gravar**: `BEGIN; \timing on; <arquivo>; ROLLBACK;`. Só vira migration de boot se passar na medição (poucos segundos). Medido em pglite (WASM, limite superior): ver o resultado do
 teste de custo. Os dois scripts são idempotentes e o código funciona com ou sem eles (os leitores não dependem do campo novo).
 
+## Segunda tentativa por outro número — Bloco B (06/10/2026)
+
+"Tentar o número adicional de quem não respondeu." A unidade é a **empresa** (o lead), não a linha telefônica. Código:
+`backend/src/services/secondNumberAudience.js`, rotas `GET /api/leads/second-number/campaigns` e `POST /api/leads/second-number/audience`
+(gate do Banco, escopo do operador), painel `frontend/src/components/leads/SecondNumberPanel.tsx` (terceira origem do assistente de campanha).
+
+**O público:** recebeu a campanha escolhida (run `sent`), **não respondeu em nenhum número**, tem um telefone adicional que ainda não recebeu
+essa campanha, e passou do prazo (dias depois do **último** envio). O disparo vai **só para o adicional** (o primeiro, na ordem da planilha). Os
+dois números ao mesmo tempo só com a caixa marcada de propósito, com o aviso "é a mesma empresa recebendo duas vezes" (padrão: desmarcada).
+
+**Resposta, no nível do lead e por qualquer número dele:** o principal, qualquer `dados.telefones_extras` e os números do lead referenciado em
+`ja_existe_como_lead`. O cruzamento é **por telefone, nunca por `lead_id`**: a mensagem que chega de um número adicional entra com `lead_id` nulo
+(o webhook só liga o lead quando `telefone` casa exato). Nada no webhook/roteamento mudou. Janela da resposta: **"até agora"** (qualquer momento
+depois do envio daquela empresa); `replyWindowDays` existe só para provar a paridade com o relatório (14 dias) em teste.
+
+**Definição única de "respondeu":** `REPLY_MESSAGE_FILTER_SQL` e `MESSAGE_TIMESTAMP_SQL` saíram de `buildMessageEffectivenessSql` (mesma saída) e o serviço
+as importa; teste de código-fonte trava que o serviço não tem cópia (`direction = 'inbound'`, `engagement_signal`, `message_timestamp` não aparecem nele).
+Telefone: `SQL_CANONICAL_PHONE_JID` nos dois lados.
+
+**O que a prévia mostra, sempre, na tela (não em tooltip), com número real da empresa:**
+1. "N excluídos por já terem respondido em outro número";
+2. "N respostas deste período não puderam ser ligadas a um envio" — resposta de `@lid` não tem telefone recuperável (Evolution API, irreversível):
+   **"não respondeu" aqui quer dizer "não achamos resposta", não "ignorou"**. Medido pelo dono em produção (geracao-digital): 511 das 5.085 entradas são `@lid`;
+3. "N campanhas disparadas pelo caminho antigo não aparecem aqui: elas não gravam o registro de envio e o cruzamento não as enxerga." O caminho legado
+   (`executeCampaignDispatch`) não escreve em `campaign_dispatch_runs`. Medido pelo dono: 286 envios registrados nessa tabela = **todo o universo do B** nessa empresa.
+
+**Tempo em 25 mil** (pglite, mundo de 24.655 leads, 24.655 envios, 20.000 adicionais, ~7.000 respostas): **0,67 s**. A primeira versão tinha um `LATERAL` que
+varria a lista de números inteira por lead (24 mil × 44 mil linhas): **100 s** medidos, mesmo resultado. Trocado por CTE agregada (`DISTINCT ON`) com join por hash.
+Lição repetida: junção correlacionada contra uma CTE grande é quadrática; agregue e junte.
+
+**Achado do JID (registrado como medido):** o webhook pode gravar `phone` com sufixo `@s.whatsapp.net`/`@c.us` — **real no código, zero ocorrências medidas
+em 06/10/2026** (nenhuma entrada de entrada com esses sufixos em produção). Mesmo assim o B mantém a variante JID nos dois lados: custo nulo, e o dia em que
+aparecer não vira exclusão silenciosa.
+
+**PENDÊNCIA: as definições de "respondeu" ainda divergem — elas dão respostas diferentes para a mesma pergunta.** Pergunta: "esta empresa respondeu?". Cada tela
+responde com uma regra própria, e os números não são comparáveis entre telas. Arquivo e linha de cada uma (estado de 06/10/2026):
+
+| # | Onde | Mensagem que conta | Telefone | Janela | Unidade |
+|---|------|--------------------|----------|--------|---------|
+| 1 | `backend/src/services/messageEffectiveness.js:21-22` (constantes), `:28-39` (EXISTS) — relatório de efetividade; **o B usa as mesmas constantes** (`secondNumberAudience.js`) | inbound **ou** `engagement_signal='reply'` | cru **ou** canônico (sem variante JID) | 14 dias depois do envio (B: "até agora") | cada envio |
+| 2 | `backend/src/domains/campaigns/routes.js:206-216` (`buildImportAuditSql`, definido em `:124`) — auditoria da importação | inbound ou `reply` | canônico **com** variante JID | 14 dias depois do envio | cada envio |
+| 3 | `backend/src/domains/campaigns/routes.js:3114-3123` — contagem de respondidos na lista de campanhas | inbound ou `reply` | **só cru** (`lm.phone = r.phone`) | **nenhuma** (qualquer mensagem, antes ou depois do envio) | telefones distintos |
+| 4 | `backend/src/services/dashboardAnalysis.js:236-243` — "respondeu" por perfil de lead | inbound ou `reply` | canônico | **nenhuma**, e sem relação com envio nenhum | lead criado no período |
+| 5 | `backend/src/services/dashboardAnalysis.js:92-133` — funil do primeiro disparo | **só** `direction='inbound'` (ignora `reply`), sem grupos | canônico | depois do 1º/2º envio, sem teto | telefone |
+
+São **cinco** formas, não três (o levantamento anterior parou nas três da camada de campanha; as duas do dashboard também são definições próprias). A #3 é a mais
+distante: sem janela e sem o canônico, ela conta como "respondeu" quem mandou mensagem **antes** do envio e perde quem respondeu de um telefone formatado diferente.
+Consequência prática: a mesma campanha pode mostrar uma taxa na lista (#3), outra no relatório (#1) e outra na auditoria da importação (#2). Unificar é leva própria;
+o caminho é cada uma importar `REPLY_MESSAGE_FILTER_SQL`/`MESSAGE_TIMESTAMP_SQL` e escolher a janela de forma explícita (a unidade e a janela são decisões de produto, não detalhe).
+
+**PENDÊNCIA (a próxima leva): resposta do número adicional entra sem `lead_id`.** Onde: `backend/src/domains/shared/leadMessaging.js:76-93`, `appendLeadMessage` resolve o
+lead só por `telefone IN (variantes)` (`:82`) e, se não acha, **segue sem erro com `lead_id` nulo** (a mensagem é gravada normalmente). `:206-208` faz o mesmo `IN` para
+marcar `ultima_interacao_usuario`: se não acha lead, o `UPDATE` casa 0 linhas e ninguém é avisado. Ninguém consulta `dados.telefones_extras` nesse caminho. O B contorna
+isso no público (cruza por telefone), então a resposta **conta** para a empresa na segunda tentativa; mas a mensagem fica fora da conversa do lead e `ultima_interacao_usuario` não anda.
+
+**Limites que a tela não esconde:** o disparo segue pelo handoff de linhas (`vexo_pending_campaign_audience`, ~5 MB de `localStorage`; as linhas viram uma
+importação de itens, não leads novos). Resposta que chegar do número adicional continua entrando com `lead_id` nulo (o B não mexe nisso).
+
 ## Pendências registradas
 
 1. **Dois chamadores ainda carregam a lista inteira** (sem `page`/`limit`): `frontend/src/components/CommercialIntelligenceContent.tsx:246` e
@@ -179,7 +237,8 @@ teste de custo. Os dois scripts são idempotentes e o código funciona com ou se
    pela tela do Banco (cria um segundo registro). Falta o "Retomar" do Banco.
 4. ~~Reconstrução das importações antigas~~ — feita (ver "Importações antigas: reconstrução"); falta só o dono rodar `ops/sql/2026-10-06-reconstruir-importacoes.sql` e conferir as contagens.
 5. **Lista de rótulos da IA por empresa** (hoje global): ver `AI_LABELS`.
-6. **Verificação em produção** (somente leitura, pelo dono): a query de collation abaixo e a linha de log `[leads] Advanced query failed`.
+6. **Cinco definições de "respondeu" divergentes** e **resposta do número adicional sem `lead_id`**: ver "Segunda tentativa por outro número".
+7. **Verificação em produção** (somente leitura, pelo dono): a query de collation abaixo e a linha de log `[leads] Advanced query failed`.
 
 ## Verificação em produção (somente leitura, quem roda é o dono)
 

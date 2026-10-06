@@ -329,3 +329,95 @@ export async function fetchAllLeadsForExport<TLead = Record<string, unknown>>(
   }
   return all;
 }
+
+// ── Segunda tentativa por OUTRO número (Bloco B) ───────────────────────────────────────────────────────────────────────────────────────
+export interface SecondNumberCampaign {
+  id: string;
+  name: string;
+  sentCount: number;
+  lastSentAt: string | null;
+}
+
+export interface SecondNumberCounts {
+  received: number;
+  semAdicional: number;
+  respondeuMesmoNumero: number;
+  respondeuOutroNumero: number;
+  dentroDoPrazo: number;
+  elegiveis: number;
+  /** respostas @lid do período: sem telefone recuperável, não ligam a nenhum envio */
+  lidNaoLigadas: number;
+  /** campanhas disparadas pelo caminho antigo (não gravam envio): o cruzamento não as enxerga. null = não deu para medir */
+  campanhasCaminhoAntigo: number | null;
+  periodoDesde: string | null;
+  waitDays: number;
+}
+
+export interface SecondNumberItem {
+  leadId: string;
+  nome: string;
+  principal: string;
+  alvo: string;
+  alvoColuna: string | null;
+}
+
+export interface SecondNumberAudienceResponse {
+  counts: SecondNumberCounts;
+  items: SecondNumberItem[];
+}
+
+export async function fetchSecondNumberCampaigns(request: LeadRequest, clientId: string): Promise<SecondNumberCampaign[]> {
+  const data = await readJson<{ items?: SecondNumberCampaign[] }>(
+    await request(`/api/leads/second-number/campaigns?clientId=${encodeURIComponent(clientId)}`),
+    "Falha ao listar as campanhas"
+  );
+  return data.items ?? [];
+}
+
+export async function fetchSecondNumberAudience(
+  request: LeadRequest,
+  args: { clientId: string; campaignId: string; waitDays: number }
+): Promise<SecondNumberAudienceResponse> {
+  const data = await readJson<Partial<SecondNumberAudienceResponse>>(
+    await request("/api/leads/second-number/audience", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    }),
+    "Falha ao montar o público da segunda tentativa"
+  );
+  if (!data.counts) throw new Error("Resposta inválida do servidor (sem os números do público).");
+  return { counts: data.counts, items: data.items ?? [] };
+}
+
+const nf = (n: number) => n.toLocaleString("pt-BR");
+
+/**
+ * Os avisos que a prévia mostra SEMPRE, com os números reais da empresa, na tela (não em tooltip): quem foi excluído, o que "não respondeu"
+ * quer dizer de verdade e o ponto cego do caminho antigo. Texto numa função só para o teste travar a frase.
+ */
+export function secondNumberNotices(c: SecondNumberCounts): { excluded: string; unlinked: string; legacy: string } {
+  return {
+    excluded: `${nf(c.respondeuOutroNumero)} ${c.respondeuOutroNumero === 1 ? "excluído" : "excluídos"} por já ${c.respondeuOutroNumero === 1 ? "ter respondido" : "terem respondido"} em outro número`,
+    unlinked: `${nf(c.lidNaoLigadas)} ${c.lidNaoLigadas === 1 ? "resposta deste período não pôde" : "respostas deste período não puderam"} ser ${c.lidNaoLigadas === 1 ? "ligada" : "ligadas"} a um envio (o WhatsApp não informa o telefone delas). "Não respondeu" aqui quer dizer "não achamos resposta", não "ignorou".`,
+    legacy:
+      c.campanhasCaminhoAntigo === null
+        ? "Não foi possível conferir as campanhas do caminho antigo de disparo. Elas não gravam o registro de envio e não aparecem nesta lista."
+        : `${nf(c.campanhasCaminhoAntigo)} ${c.campanhasCaminhoAntigo === 1 ? "campanha disparada" : "campanhas disparadas"} pelo caminho antigo não ${c.campanhasCaminhoAntigo === 1 ? "aparece" : "aparecem"} aqui: elas não gravam o registro de envio e o cruzamento não as enxerga.`,
+  };
+}
+
+/**
+ * As linhas que seguem para a central de campanhas. O telefone da linha é o NÚMERO ADICIONAL; o principal só vai junto, como segunda linha da
+ * mesma empresa, quando a pessoa marcou de propósito "mandar também para o número que já recebeu".
+ */
+export function secondNumberHandoffRows(
+  items: ReadonlyArray<SecondNumberItem>,
+  campaignName: string,
+  includePrincipal: boolean
+): Array<Record<string, string>> {
+  return items.flatMap((i) => {
+    const base = { nome: i.nome, telefone_principal: i.principal, segunda_tentativa_de: campaignName };
+    return includePrincipal ? [{ telefone: i.alvo, ...base }, { telefone: i.principal, ...base }] : [{ telefone: i.alvo, ...base }];
+  });
+}

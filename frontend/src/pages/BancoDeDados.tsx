@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
   Database,
+  Phone,
   Upload,
   Download,
   RefreshCw,
@@ -67,6 +68,7 @@ import {
   type ImportScope,
   type LeadRequest,
   type LeadTabCounts,
+  secondNumberHandoffRows,
 } from "@/lib/leads/leadListApi";
 import { API_BASE_URL, fetchApi, readApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -94,6 +96,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
 import { TagSelect } from "@/components/leads/TagSelect";
+import { SecondNumberPanel, type SecondNumberSelection } from "@/components/leads/SecondNumberPanel";
 import { MARKETING_CHANNELS, computeMarketingMetricsFromCounts, getLeadSource } from "@/lib/leadChannels";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import {
@@ -627,7 +630,9 @@ export default function BancoDeDados() {
 
   // Campaign Creation Wizard Modal State
   const [isCampaignWizardOpen, setIsCampaignWizardOpen] = useState(false);
-  const [campaignSourceType, setCampaignSourceType] = useState<"funnel" | "spreadsheet">("funnel");
+  const [campaignSourceType, setCampaignSourceType] = useState<"funnel" | "spreadsheet" | "second_number">("funnel");
+  // Segunda tentativa por outro número: a seleção vive no painel; aqui só o que o botão "Avançar" precisa
+  const [secondNumberSelection, setSecondNumberSelection] = useState<SecondNumberSelection | null>(null);
   
   // Funnel Audience Selection State
   const [campaignStageFilters, setCampaignStageFilters] = useState<string[]>(["all"]);
@@ -1659,6 +1664,19 @@ export default function BancoDeDados() {
         resumo_ia: l.raw_chat_summary || "",
       }));
       campaignTitleName = buildCampaignTitle(campaignStageFilters, campaignTagFilter, selected.length, campaignImportOrigin?.sourceName);
+    } else if (campaignSourceType === "second_number") {
+      const aud = secondNumberSelection?.audience;
+      if (!secondNumberSelection?.campaignId || !aud) {
+        toast.error("Escolha a campanha e aguarde o público ser calculado.");
+        return;
+      }
+      if (aud.items.length === 0) {
+        toast.error("Nenhuma empresa elegível para a segunda tentativa.");
+        return;
+      }
+      // O disparo vai para o NÚMERO ADICIONAL (telefone da linha). Os dois números só com a opção marcada de propósito.
+      finalRows = secondNumberHandoffRows(aud.items, secondNumberSelection.campaignName, secondNumberSelection.includePrincipal);
+      campaignTitleName = `Segunda tentativa: ${secondNumberSelection.campaignName} (${aud.items.length} empresas)`;
     } else {
       if (campaignSpreadsheetFilteredRows.length === 0) {
         toast.error("Nenhum contato encontrado na planilha com os filtros aplicados.");
@@ -4295,7 +4313,7 @@ export default function BancoDeDados() {
               <label className="text-xs font-bold text-foreground uppercase tracking-wider block mb-2">
                 1. Origem dos Leads
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div
                   onClick={() => setCampaignSourceType("funnel")}
                   className={`border rounded-lg p-3.5 cursor-pointer transition-all flex items-start gap-3 ${
@@ -4326,6 +4344,24 @@ export default function BancoDeDados() {
                     <h4 className="text-xs font-bold text-foreground">Planilha Externa (.xlsx / .csv)</h4>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
                       Carregar ou importar planilha com mapeamento de colunas dinâmicas.
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setCampaignSourceType("second_number")}
+                  data-testid="campaign-source-second-number"
+                  className={`border rounded-lg p-3.5 cursor-pointer transition-all flex items-start gap-3 ${
+                    campaignSourceType === "second_number"
+                      ? "border-amber-500 bg-amber-500/10 dark:bg-amber-500/20"
+                      : "border-border hover:border-amber-500/40"
+                  }`}
+                >
+                  <Phone className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                  <div>
+                    <h4 className="text-xs font-bold text-foreground">Tentar outro número</h4>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Quem não respondeu a uma campanha e tem um telefone adicional ainda não usado.
                     </p>
                   </div>
                 </div>
@@ -4561,7 +4597,7 @@ export default function BancoDeDados() {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : campaignSourceType === "spreadsheet" ? (
               /* Opção B: Upload e Filtro por Variáveis da Planilha */
               <div className="space-y-4 border-t border-border pt-4">
                 <div
@@ -4670,6 +4706,9 @@ export default function BancoDeDados() {
                   </div>
                 )}
               </div>
+            ) : (
+              /* Opção C: segunda tentativa por OUTRO número da mesma empresa */
+              <SecondNumberPanel request={leadRequest} clientId={clientId} onChange={setSecondNumberSelection} />
             )}
           </div>
 
