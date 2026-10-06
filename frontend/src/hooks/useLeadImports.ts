@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
+import {
+  BANCO_IMPORT_BASE_PATH,
+  resumeBatchedImport,
+  runBatchedImport,
+  type BatchedImportResult,
+  type ImportProgress,
+  type ImportTotals,
+  type ImportTransport,
+} from "@/lib/leadImports/batchedImport";
 
 const LEAD_IMPORT_REQUEST_TIMEOUT_MS = 15000;
 
@@ -29,6 +38,11 @@ export interface LeadImportItem {
   uploaded_by_uid: string | null;
   uploaded_by_email: string | null;
   created_at: string;
+  /** Importação em lotes: "incomplete" até o fechamento. Ausente (servidor antigo) = planilha completa. */
+  status?: "incomplete" | "completed";
+  expected_rows?: number | null;
+  /** Linhas do arquivo já recebidas pelo servidor (ponto de retomada). */
+  received_offset?: number;
   column_mapping?: {
     columns: string[];
     mapping: Array<{
@@ -57,6 +71,8 @@ interface CreateLeadImportPayload {
   sourceType: string;
   rows: Record<string, unknown>[];
   defaultDdd?: string;
+  /** Progresso do envio em lotes (lote N de M, linhas aceitas). */
+  onProgress?: (progress: ImportProgress) => void;
   columnMapping?: Array<{
     column: string;
     target: "ignore" | "telefone" | "nome" | "custom";
@@ -77,6 +93,7 @@ interface CreateLeadImportPayload {
 
 interface CreateLeadImportResponse {
   item: LeadImportItem;
+  totals?: ImportTotals;
   preview: LeadImportPreviewItem[];
   warnings?: Array<{
     column: string;
@@ -323,39 +340,131 @@ export function useLeadImportItems(
   });
 }
 
-export function useCreateLeadImport() {
+/** Erro da API com status e código, para o fluxo em lotes decidir se repete o lote. */
+class LeadImportsApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "LeadImportsApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function throwApiError(res: Response): Promise<never> {
+  const text = await res.text();
+  let message = text.length > 240 ? `${text.slice(0, 240)}...` : text;
+  let code: string | undefined;
+  try {
+    const payload = JSON.parse(text);
+    message = payload?.error?.message || payload?.message || message;
+    code = typeof payload?.error?.code === "string" ? payload.error.code : undefined;
+  } catch {
+    if (text.trim().startsWith("<")) message = "Resposta HTML inesperada da API.";
+  }
+  throw new LeadImportsApiError(message || `Falha ${res.status}`, res.status, code);
+}
+
+function useImportTransport(): () => Promise<ImportTransport> {
   const { getIdToken } = useAuth();
+  return async () => {
+    const token = await getIdToken();
+    if (!token) throw new Error("Usuario nao autenticado.");
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    return {
+      async postJson<T>(path: string, body: unknown): Promise<T> {
+        const res = await fetchLeadImports(path, { method: "POST", headers, body: JSON.stringify(body) });
+        if (!res.ok) await throwApiError(res);
+        return readLeadImportsJson<T>(res, `post_${path}`);
+      },
+      async getJson<T>(path: string): Promise<T> {
+        const res = await fetchLeadImports(path, { headers });
+        if (!res.ok) await throwApiError(res);
+        return readLeadImportsJson<T>(res, `get_${path}`);
+      },
+    };
+  };
+}
+
+function invalidateImportQueries(queryClient: ReturnType<typeof useQueryClient>, clientId: string) {
+  queryClient.invalidateQueries({ queryKey: ["lead-imports", clientId] });
+  queryClient.invalidateQueries({ queryKey: ["lead-import-items", clientId] });
+  queryClient.invalidateQueries({ queryKey: ["leads", clientId] });
+  queryClient.invalidateQueries({ queryKey: ["lead-custom-fields", clientId] });
+}
+
+/**
+ * Importa a planilha em LOTES (abrir → lotes de 500 → fechar), sem teto de linhas. A assinatura é a de sempre
+ * (mutateAsync(payload) → { item, preview, warnings }), com `onProgress` opcional e `totals` a mais. Se cair no meio, a
+ * importação fica INCOMPLETA no servidor (aparece assim em Planilhas Salvas) e o erro carrega o ponto: ver ImportBatchError.
+ */
+export function useCreateLeadImport() {
+  const getTransport = useImportTransport();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (payload: CreateLeadImportPayload): Promise<CreateLeadImportResponse> => {
-      const token = await getIdToken();
-      if (!token) {
-        throw new Error("Usuario nao autenticado.");
-      }
-
-      const res = await fetchLeadImports("/api/lead-imports", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errText = await readApiError(res);
-        throw new Error(`Lead import failed: ${res.status} ${errText}`);
-      }
-
-      return readLeadImportsJson<CreateLeadImportResponse>(res, "create_import");
+      const transport = await getTransport();
+      const { onProgress, ...rest } = payload;
+      const result: BatchedImportResult = await runBatchedImport(rest, { transport, onProgress });
+      return result as unknown as CreateLeadImportResponse;
     },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["lead-imports", variables.clientId] });
-      queryClient.invalidateQueries({ queryKey: ["lead-import-items", variables.clientId] });
-      queryClient.invalidateQueries({ queryKey: ["leads", variables.clientId] });
-      queryClient.invalidateQueries({ queryKey: ["lead-custom-fields", variables.clientId] });
+    // sucesso OU falha no meio: a lista precisa refletir o que ficou (completa, ou incompleta com o progresso)
+    onSettled: (_data, _error, variables) => invalidateImportQueries(queryClient, variables.clientId),
+  });
+}
+
+export interface CreateBancoImportPayload {
+  clientId: string;
+  /** Nome do arquivo escolhido: é o nome do registro (aparece em Planilhas e Campanhas). */
+  sourceName: string;
+  sourceType: string;
+  rows: Record<string, unknown>[];
+  defaultDdd?: string;
+  columnMapping?: unknown;
+  importTags?: string[];
+  asClosedSales?: boolean;
+  onProgress?: (progress: ImportProgress) => void;
+}
+
+/**
+ * Importação do Banco de Dados em LOTES (abrir → lotes de 500 → fechar): cada lote cria os leads e registra a importação no mesmo
+ * lugar da tela de Planilhas. Sem o corpo único que estourava o limite do servidor com milhares de linhas.
+ */
+export function useCreateBancoImport() {
+  const getTransport = useImportTransport();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: CreateBancoImportPayload): Promise<BatchedImportResult> => {
+      const transport = await getTransport();
+      const { onProgress, ...rest } = payload;
+      return runBatchedImport(rest, { transport, onProgress, basePath: BANCO_IMPORT_BASE_PATH });
     },
+    onSettled: (_data, _error, variables) => invalidateImportQueries(queryClient, variables.clientId),
+  });
+}
+
+export interface ResumeLeadImportPayload {
+  clientId: string;
+  importId: string;
+  /** As linhas do MESMO arquivo, lidas de novo (o servidor confere pela impressão digital). */
+  rows: Record<string, unknown>[];
+  onProgress?: (progress: ImportProgress) => void;
+}
+
+/** Retoma uma importação incompleta de onde o servidor parou. */
+export function useResumeLeadImport() {
+  const getTransport = useImportTransport();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ importId, rows, onProgress }: ResumeLeadImportPayload) => {
+      const transport = await getTransport();
+      return resumeBatchedImport(importId, rows, { transport, onProgress });
+    },
+    onSettled: (_data, _error, variables) => invalidateImportQueries(queryClient, variables.clientId),
   });
 }
 

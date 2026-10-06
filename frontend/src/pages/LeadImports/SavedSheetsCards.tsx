@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronDown, Eye, Trash2, FileSpreadsheet, Users, Calendar, User } from "lucide-react";
+import { ChevronDown, Eye, Trash2, FileSpreadsheet, Users, Calendar, User, RotateCcw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getStableColor } from "@/lib/stableColor";
 import { cn } from "@/lib/utils";
 import type { LeadImportItem } from "@/hooks/useLeadImports";
+import { describeIncompleteImport, isImportIncomplete } from "@/lib/leadImports/importStatus";
 import { ListFilterBar } from "@/components/ListFilterBar";
 import { useListFilter } from "@/hooks/useListFilter";
 import { SAVED_SHEETS_FILTER } from "@/lib/leadImportsListFilters";
@@ -18,7 +19,15 @@ const formatSheetDate = (imp: LeadImportItem) => (imp.created_at ? format(new Da
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
 export const SHEET_FIELDS: RecordField<LeadImportItem>[] = [
   { key: "name", label: "Arquivo", render: (imp) => imp.source_name },
-  { key: "rows", label: "Linhas importadas", render: (imp) => `${imp.imported_rows} ${imp.imported_rows === 1 ? "linha importada" : "linhas importadas"}` },
+  {
+    key: "rows",
+    label: "Linhas importadas",
+    // planilha incompleta NUNCA aparece como completa: o campo mostra o que entrou e quanto falta
+    render: (imp) =>
+      isImportIncomplete(imp)
+        ? describeIncompleteImport(imp)
+        : `${imp.imported_rows} ${imp.imported_rows === 1 ? "linha importada" : "linhas importadas"}`,
+  },
   { key: "date", label: "Importada em", render: formatSheetDate },
   { key: "uploader", label: "Importada por", render: (imp) => imp.uploaded_by_email || "Não informado" },
 ];
@@ -32,6 +41,10 @@ interface SavedSheetsCardsProps {
   onDeleteImport: (id: string, name: string) => void;
   /** Abre a exclusão em massa de leads (por tag). Ausente = usuário sem permissão. */
   onDeleteLeads?: (imp: LeadImportItem) => void;
+  /** Retoma uma importação incompleta com o MESMO arquivo, de onde o servidor parou. */
+  onResumeImport?: (imp: LeadImportItem, file: File) => void;
+  /** Importação em retomada agora (desabilita o botão). */
+  resumingImportId?: string | null;
 }
 
 export function SavedSheetsCards({
@@ -40,8 +53,37 @@ export function SavedSheetsCards({
   onViewImport,
   onDeleteImport,
   onDeleteLeads,
+  onResumeImport,
+  resumingImportId = null,
 }: SavedSheetsCardsProps) {
   const view = useViewMode("planilhas-salvas");
+  // um seletor de arquivo para todas as planilhas incompletas: guarda qual está sendo retomada
+  const resumeInputRef = useRef<HTMLInputElement | null>(null);
+  const resumeTargetRef = useRef<LeadImportItem | null>(null);
+  const openResumePicker = (imp: LeadImportItem) => {
+    resumeTargetRef.current = imp;
+    resumeInputRef.current?.click();
+  };
+
+  const renderResumeButton = (imp: LeadImportItem, compact = false) =>
+    isImportIncomplete(imp) && onResumeImport ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        data-testid={`sheet-resume-${imp.id}`}
+        disabled={resumingImportId === imp.id}
+        title="Selecione o mesmo arquivo: o envio continua de onde parou, sem duplicar."
+        className={cn("text-xs gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-50 dark:border-amber-700/60 dark:text-amber-300 dark:hover:bg-amber-950/30", compact ? "h-7 px-2" : "h-8")}
+        onClick={(e) => {
+          e.stopPropagation();
+          openResumePicker(imp);
+        }}
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
+        Retomar
+      </Button>
+    ) : null;
   const { filtered: visibleImports, controls: filterControls } = useListFilter(imports, SAVED_SHEETS_FILTER);
 
   const renderDetails = (imp: LeadImportItem) => {
@@ -219,7 +261,14 @@ export function SavedSheetsCards({
                   {sheetField("uploader").render(imp)}
                 </span>
               </div>
+              {renderResumeButton(imp, true)}
             </div>
+            {isImportIncomplete(imp) && (
+              <p data-testid={`sheet-incomplete-${imp.id}`} className="flex items-center gap-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Não use esta planilha em campanhas até concluir a importação.
+              </p>
+            )}
 
             {isExpanded && (
               <div
@@ -269,8 +318,22 @@ export function SavedSheetsCards({
             cardsClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5"
             renderCard={renderCard}
             renderExpanded={renderDetails}
+            renderRowActions={(imp) => renderResumeButton(imp)}
           />
       )}
+      <input
+        ref={resumeInputRef}
+        type="file"
+        accept=".xlsx,.xls,.csv,.ods,.txt"
+        className="hidden"
+        data-testid="sheet-resume-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          const target = resumeTargetRef.current;
+          e.target.value = "";
+          if (file && target && onResumeImport) onResumeImport(target, file);
+        }}
+      />
     </div>
   );
 }

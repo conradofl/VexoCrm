@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vites
 import express from "express";
 import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
+import { attachImportRegistry } from "./helpers/importRegistryStub.js";
 import { unionImportIds, upsertLeadsBatchByPhone } from "../services/leadUpsert.js";
 import { sanitizePhone } from "../services/leadImport.js";
 
@@ -185,6 +186,7 @@ describe("import-csv grava o identificador da importação em dados.import_ids",
     const app = express();
     app.use(express.json());
     mockDb = createMockDb();
+    await attachImportRegistry(mockDb);
     registerLeadsRoutes(app, {
       ensureDb: () => true,
       pgDatabasePool: mockDb,
@@ -206,6 +208,7 @@ describe("import-csv grava o identificador da importação em dados.import_ids",
   });
 
   afterAll(async () => {
+    await mockDb?.registry?.close();
     if (server) await new Promise((resolve) => server.close(resolve));
   });
 

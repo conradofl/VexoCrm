@@ -8,6 +8,7 @@ import { describe, expect, it, beforeAll, afterAll, beforeEach } from "vitest";
 import express from "express";
 import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
+import { attachImportRegistry } from "./helpers/importRegistryStub.js";
 import { sanitizePhone } from "../services/leadImport.js";
 import { IMPORT_CHANNEL_RE, IMPORT_ORIGIN_KEY, IMPORT_ORIGIN_LABEL, resolveImportOrigin } from "../services/importOrigin.js";
 import { createMockDb, createMockSupabase } from "./helpers/importCsvHarness.js";
@@ -65,6 +66,7 @@ describe("POST /api/leads/import-csv — a origem que o lead recebe", () => {
     const app = express();
     app.use(express.json());
     mockDb = createMockDb();
+    await attachImportRegistry(mockDb);
     registerLeadsRoutes(app, {
       ensureDb: () => true,
       pgDatabasePool: mockDb,
@@ -86,6 +88,7 @@ describe("POST /api/leads/import-csv — a origem que o lead recebe", () => {
   });
 
   afterAll(async () => {
+    await mockDb?.registry?.close();
     if (server) await new Promise((resolve) => server.close(resolve));
   });
 

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
+import { attachImportRegistry } from "./helpers/importRegistryStub.js";
 import { sanitizePhone } from "../services/leadImport.js";
 import { normalizeLeadSource } from "../chatbot-ai-engine.js";
 import { createMockDb, createMockSupabase } from "./helpers/importCsvHarness.js";
@@ -32,6 +33,7 @@ describe("a lista compartilhada é o que o import-csv realmente grava", () => {
     const app = express();
     app.use(express.json());
     mockDb = createMockDb();
+    await attachImportRegistry(mockDb);
     registerLeadsRoutes(app, {
       ensureDb: () => true,
       pgDatabasePool: mockDb,
@@ -53,6 +55,7 @@ describe("a lista compartilhada é o que o import-csv realmente grava", () => {
   });
 
   afterAll(async () => {
+    await mockDb?.registry?.close();
     if (server) await new Promise((resolve) => server.close(resolve));
   });
 

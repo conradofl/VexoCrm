@@ -170,3 +170,16 @@ export function computeMarketingMetrics(leads: readonly ChannelLead[]): Marketin
   for (const id of Object.keys(counts)) percentages[id] = total > 0 ? Math.round((counts[id] / total) * 100) : 0;
   return { total, counts, percentages };
 }
+
+/**
+ * O mesmo cálculo a partir das contagens que o servidor já agregou no banco (a base inteira, não a página carregada).
+ * Todo cartão aparece (com 0) e `total` é o total da base.
+ */
+export function computeMarketingMetricsFromCounts(serverCounts: Record<string, number> | null | undefined, total: number): MarketingMetrics {
+  const counts: Record<string, number> = {};
+  for (const c of MARKETING_CHANNELS) counts[c.id] = 0;
+  for (const [id, n] of Object.entries(serverCounts || {})) counts[id] = n;
+  const percentages: Record<string, number> = {};
+  for (const id of Object.keys(counts)) percentages[id] = total > 0 ? Math.round((counts[id] / total) * 100) : 0;
+  return { total, counts, percentages };
+}

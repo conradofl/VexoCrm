@@ -129,20 +129,61 @@ function renderWithProviders(ui: React.ReactElement) {
   );
 }
 
+const leadListUrls: string[] = [];
+
 describe("Banco de Dados — Filtro de Faixas do Potencial da Base", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    leadListUrls.length = 0;
 
     global.fetch = vi.fn(async (url: string | URL | Request) => {
       const urlStr = String(url);
-      if (urlStr.includes("/api/leads")) {
+      // O servidor é quem filtra (SQL): o mock devolve o que o servidor devolveria para cada pedido e registra as URLs
+      if (urlStr.includes("/api/leads/facets")) {
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            items: mockLeads,
             summary: mockSummary,
-            total: 3,
+            baseTotal: 3,
+            channels: { nao_identificada: 3 },
+            sources: [{ source: "Não informado", count: 3 }],
+            tags: [],
+            stagesExact: { buyer: 0, open_budget: 1, inquiry: 0, cold: 0, lost: 0, other: 2 },
+          }),
+          text: async () => "",
+        } as any;
+      }
+      if (urlStr.includes("/api/leads/ids")) {
+        const onlyNever = new URL(urlStr, "http://x").searchParams.get("segment") === "never_contacted";
+        const picked = onlyNever ? [mockLeads[0]] : mockLeads;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ids: picked.map((l) => l.id),
+            total: picked.length,
+            truncated: false,
+            contacts: picked.map((l) => ({ id: l.id, nome: l.nome, telefone: l.telefone, phone: l.phone })),
+          }),
+          text: async () => "",
+        } as any;
+      }
+      if (urlStr.includes("/api/leads?")) {
+        leadListUrls.push(urlStr);
+        const onlyNever = new URL(urlStr, "http://x").searchParams.get("segment") === "never_contacted";
+        const picked = onlyNever ? [mockLeads[0]] : mockLeads;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: picked,
+            total: picked.length,
+            page: 1,
+            limit: 50,
+            totalPages: 1,
+            tabs: { all: picked.length, buyer: 0, open_budget: 1, cold: 2, lost: 0 },
+            degraded: false,
           }),
           text: async () => "",
         } as any;
@@ -210,9 +251,14 @@ describe("Banco de Dados — Filtro de Faixas do Potencial da Base", () => {
       expect(screen.getByText("Ativo")).toBeInTheDocument();
     });
 
-    // Valida que a tabela filtrou e exibe APENAS 'Lead Nunca Abordado'
+    // A faixa é filtro do SERVIDOR: a tela pediu a página com segment=never_contacted e mostra só o que veio
+    await waitFor(() => {
+      expect(leadListUrls.some((u) => u.includes("segment=never_contacted"))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Lead Em Conversa")).not.toBeInTheDocument();
+    });
     expect(screen.getByText("Lead Nunca Abordado")).toBeInTheDocument();
-    expect(screen.queryByText("Lead Em Conversa")).not.toBeInTheDocument();
     expect(screen.queryByText("Lead Em Negociacao")).not.toBeInTheDocument();
 
     // Valida o chip de filtro ativo com o nome da faixa

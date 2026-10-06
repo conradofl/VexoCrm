@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vites
 import express from "express";
 import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
+import { attachImportRegistry } from "./helpers/importRegistryStub.js";
 import { sanitizePhone } from "../services/leadImport.js";
 
 function createMockDb() {
@@ -102,6 +103,7 @@ describe("Desativação da Fábrica 5500 e Sanitização do CSV Import (POST /ap
     const app = express();
     app.use(express.json());
     mockDb = createMockDb();
+    await attachImportRegistry(mockDb);
 
     const deps = {
       ensureDb: () => true,
@@ -128,6 +130,7 @@ describe("Desativação da Fábrica 5500 e Sanitização do CSV Import (POST /ap
   });
 
   afterAll(async () => {
+    await mockDb?.registry?.close();
     if (server) await new Promise((resolve) => server.close(resolve));
   });
 

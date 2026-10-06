@@ -1,0 +1,201 @@
+{
+  "description": "Classificação de telefone nos totais da importação (intact | completed | missing). Fonte da verdade: a regra phoneAuditStats da tela (frontend/src/lib/leadImports/phoneAudit.ts); o servidor (backend/src/services/leadImportBatches.js, classifyImportedPhone) tem que concordar caso a caso.",
+  "cases": [
+    {
+      "raw": "5534998100001",
+      "defaultDdd": null,
+      "expected": "intact",
+      "sanitized": "5534998100001",
+      "frontReason": null
+    },
+    {
+      "raw": "+55 (34) 99810-0002",
+      "defaultDdd": null,
+      "expected": "intact",
+      "sanitized": "5534998100002",
+      "frontReason": null
+    },
+    {
+      "raw": "553498100003",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "5534998100003",
+      "frontReason": null
+    },
+    {
+      "raw": "(34) 99810-0004",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "5534998100004",
+      "frontReason": null
+    },
+    {
+      "raw": "34998100005",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "5534998100005",
+      "frontReason": null
+    },
+    {
+      "raw": "3498100006",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "5534998100006",
+      "frontReason": null
+    },
+    {
+      "raw": "034 99810-0007",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "5534998100007",
+      "frontReason": null
+    },
+    {
+      "raw": "99810-0008",
+      "defaultDdd": "34",
+      "expected": "completed",
+      "sanitized": "5534998100008",
+      "frontReason": null
+    },
+    {
+      "raw": "99810-0009",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Faltou informar o DDD padrão"
+    },
+    {
+      "raw": "98100010",
+      "defaultDdd": "34",
+      "expected": "completed",
+      "sanitized": "5534998100010",
+      "frontReason": null
+    },
+    {
+      "raw": "3298100011",
+      "defaultDdd": "11",
+      "expected": "completed",
+      "sanitized": "5532998100011",
+      "frontReason": null
+    },
+    {
+      "raw": "32 3333-4444",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "553233334444",
+      "frontReason": null
+    },
+    {
+      "raw": "553233334455",
+      "defaultDdd": null,
+      "expected": "intact",
+      "sanitized": "553233334455",
+      "frontReason": null
+    },
+    {
+      "raw": "",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Sem telefone"
+    },
+    {
+      "raw": "   ",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Sem telefone"
+    },
+    {
+      "raw": "abc",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Sem telefone"
+    },
+    {
+      "raw": "120363049633060243",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Identificador de grupo do WhatsApp bloqueado"
+    },
+    {
+      "raw": "120363049633060243@g.us",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Identificador de grupo do WhatsApp bloqueado"
+    },
+    {
+      "raw": "12345",
+      "defaultDdd": "34",
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Formato inválido"
+    },
+    {
+      "raw": "(34) 9 9810 0012",
+      "defaultDdd": "34",
+      "expected": "completed",
+      "sanitized": "5534998100012",
+      "frontReason": null
+    },
+    {
+      "raw": "5511998100013",
+      "defaultDdd": "34",
+      "expected": "intact",
+      "sanitized": "5511998100013",
+      "frontReason": null
+    },
+    {
+      "raw": "11998100014",
+      "defaultDdd": "34",
+      "expected": "completed",
+      "sanitized": "5511998100014",
+      "frontReason": null
+    },
+    {
+      "raw": "+1 305 555 0101",
+      "defaultDdd": null,
+      "expected": "intact",
+      "sanitized": "13055550101",
+      "frontReason": null
+    },
+    {
+      "raw": "0800 123 4567",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "558001234567",
+      "frontReason": null
+    },
+    {
+      "raw": "34 99810-0015 / 34 99810-0016",
+      "defaultDdd": null,
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Identificador de grupo do WhatsApp bloqueado"
+    },
+    {
+      "raw": "99810 0017",
+      "defaultDdd": "3",
+      "expected": "missing",
+      "sanitized": null,
+      "frontReason": "Telefone incompleto"
+    },
+    {
+      "raw": "99810-0018",
+      "defaultDdd": "034",
+      "expected": "completed",
+      "sanitized": "5503998100018",
+      "frontReason": null
+    },
+    {
+      "raw": "5534 98100019",
+      "defaultDdd": null,
+      "expected": "completed",
+      "sanitized": "5534998100019",
+      "frontReason": null
+    }
+  ]
+}

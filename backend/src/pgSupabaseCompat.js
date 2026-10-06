@@ -150,6 +150,39 @@ function prepareRowValues(row) {
   return out;
 }
 
+/** Divide por vírgula fora de aspas duplas e parênteses. */
+function splitOrExpression(text) {
+  const out = [];
+  let depth = 0;
+  let quoted = false;
+  let current = "";
+  for (let k = 0; k < text.length; k += 1) {
+    const ch = text[k];
+    if (ch === "\\" && quoted && k + 1 < text.length) {
+      current += ch + text[k + 1];
+      k += 1;
+      continue;
+    }
+    if (ch === '"') quoted = !quoted;
+    else if (!quoted && ch === "(") depth += 1;
+    else if (!quoted && ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === "," && !quoted && depth === 0) {
+      if (current.trim()) out.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+}
+
+function unquoteOrValue(value) {
+  const v = String(value);
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1).replace(/\\(["\\])/g, "$1");
+  return v;
+}
+
 class PgQueryBuilder {
   constructor(pool, table) {
     this.pool = pool;
@@ -246,6 +279,36 @@ class PgQueryBuilder {
 
   gte(column, value) {
     this.filters.push({ type: "gte", column, value });
+    return this;
+  }
+
+  gt(column, value) {
+    this.filters.push({ type: "gt", column, value });
+    return this;
+  }
+
+  lt(column, value) {
+    this.filters.push({ type: "lt", column, value });
+    return this;
+  }
+
+  like(column, pattern) {
+    this.filters.push({ type: "like", column, value: pattern });
+    return this;
+  }
+
+  ilike(column, pattern) {
+    this.filters.push({ type: "ilike", column, value: pattern });
+    return this;
+  }
+
+  /**
+   * `.contains(coluna, valor)` como no supabase-js: array → coluna de array contém todos os elementos (`@>`);
+   * objeto → coluna jsonb contém o objeto. Antes NÃO existia: `query.contains is not a function` derrubava a consulta
+   * principal da lista de leads, que caía num fallback sem filtro (a causa dos "2.000 leads").
+   */
+  contains(column, value) {
+    this.filters.push({ type: "contains", column, value });
     return this;
   }
 
@@ -348,6 +411,27 @@ class PgQueryBuilder {
         else parts.push(`${col} IS NOT NULL`);
       } else if (f.type === "not" && f.op === "is" && f.value === null) {
         parts.push(`${col} IS NOT NULL`);
+      } else if (f.type === "gt") {
+        i += 1;
+        parts.push(`${col} > $${i}`);
+        params.push(f.value);
+      } else if (f.type === "lt") {
+        i += 1;
+        parts.push(`${col} < $${i}`);
+        params.push(f.value);
+      } else if (f.type === "like" || f.type === "ilike") {
+        i += 1;
+        parts.push(`${col} ${f.type === "like" ? "LIKE" : "ILIKE"} $${i}`);
+        params.push(f.value);
+      } else if (f.type === "contains") {
+        i += 1;
+        if (Array.isArray(f.value)) {
+          parts.push(`${col} @> $${i}`);
+          params.push(f.value);
+        } else {
+          parts.push(`${col} @> $${i}::jsonb`);
+          params.push(JSON.stringify(f.value));
+        }
       } else if (f.type === "gte") {
         i += 1;
         parts.push(`${col} >= $${i}`);
@@ -364,31 +448,47 @@ class PgQueryBuilder {
     return { sql, params, nextIndex: i };
   }
 
+  /**
+   * `or("a.eq.1,b.ilike.%x%,c.is.null")`. Operadores: eq, neq, gt, gte, lt, lte, like, ilike, is (null/true/false), in.
+   * A vírgula separa as condições, EXCETO dentro de aspas duplas ("Silva, João") ou de parênteses (`in.(a,b)`): antes a
+   * divisão ingênua por vírgula quebrava qualquer valor com vírgula. Operador desconhecido lança erro — nunca é ignorado.
+   */
   buildOrFilter(expression, startIndex) {
     let i = startIndex;
     const params = [];
-    const parts = String(expression || "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-      .map((entry) => {
-        const pieces = entry.split(".");
-        if (pieces.length < 3) {
-          throw new Error(`Unsupported or filter: ${entry}`);
-        }
-        const [column, op, ...valueParts] = pieces;
-        const col = quoteIdent(column);
-        const rawValue = valueParts.join(".");
-        if (op === "is" && rawValue === "null") {
-          return `${col} IS NULL`;
-        }
-        if (op === "eq") {
-          i += 1;
-          params.push(rawValue);
-          return `${col} = $${i}`;
-        }
+    const OPS = { eq: "=", neq: "<>", gt: ">", gte: ">=", lt: "<", lte: "<=", like: "LIKE", ilike: "ILIKE" };
+    const parts = splitOrExpression(String(expression || "")).map((entry) => {
+      const first = entry.indexOf(".");
+      const second = first < 0 ? -1 : entry.indexOf(".", first + 1);
+      if (first < 0 || second < 0) {
         throw new Error(`Unsupported or filter: ${entry}`);
-      });
+      }
+      const column = entry.slice(0, first);
+      const op = entry.slice(first + 1, second);
+      let rawValue = entry.slice(second + 1);
+      const col = quoteIdent(column);
+      if (op === "is") {
+        if (rawValue === "null") return `${col} IS NULL`;
+        if (rawValue === "true") return `${col} IS TRUE`;
+        if (rawValue === "false") return `${col} IS FALSE`;
+        throw new Error(`Unsupported or filter: ${entry}`);
+      }
+      if (op === "in") {
+        const m = rawValue.match(/^\((.*)\)$/s);
+        if (!m) throw new Error(`Unsupported or filter: ${entry}`);
+        const values = splitOrExpression(m[1]).map(unquoteOrValue);
+        i += 1;
+        params.push(values);
+        return `${col}::text = ANY($${i}::text[])`;
+      }
+      if (OPS[op]) {
+        rawValue = unquoteOrValue(rawValue);
+        i += 1;
+        params.push(rawValue);
+        return `${col} ${OPS[op]} $${i}`;
+      }
+      throw new Error(`Unsupported or filter: ${entry}`);
+    });
     if (!parts.length) {
       throw new Error("or() requires at least one filter");
     }

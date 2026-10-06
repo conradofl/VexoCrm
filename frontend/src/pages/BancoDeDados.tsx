@@ -47,7 +47,22 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useUpdateLeadClientTicketMedio } from "@/hooks/useLeadClients";
-import { calculateBasePotential, getLeadSegment, type BasePotentialSegmentId } from "@/lib/leads/basePotential";
+import { calculateBasePotential, type BasePotentialSegmentId } from "@/lib/leads/basePotential";
+import {
+  AudienceRulesError,
+  fetchAllLeadsForExport,
+  fetchCampaignAudience,
+  fetchLeadFacets,
+  fetchLeadIds,
+  fetchLeadLookup,
+  fetchLeadPage,
+  type AudienceLead,
+  type LeadContact,
+  type LeadFacetsResponse,
+  type LeadListFilters,
+  type LeadRequest,
+  type LeadTabCounts,
+} from "@/lib/leads/leadListApi";
 import { API_BASE_URL, fetchApi, readApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
@@ -73,7 +88,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
-import { MARKETING_CHANNELS, computeMarketingMetrics, getLeadMarketingChannelId, getLeadSource } from "@/lib/leadChannels";
+import { MARKETING_CHANNELS, computeMarketingMetricsFromCounts, getLeadSource } from "@/lib/leadChannels";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import {
   Dialog,
@@ -115,7 +130,8 @@ import {
   type ColumnMappingItem,
 } from "@/lib/leadImports/spreadsheet";
 import { ColumnMappingStep } from "@/pages/LeadImports/ColumnMappingStep";
-import { useLeadCustomFields, useLeadImports } from "@/hooks/useLeadImports";
+import { useCreateBancoImport, useLeadCustomFields, useLeadImports } from "@/hooks/useLeadImports";
+import { ImportBatchError, type ImportProgress } from "@/lib/leadImports/batchedImport";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -345,6 +361,8 @@ export default function BancoDeDados() {
   const queryClient = useQueryClient();
   const { data: knownCustomFields = [] } = useLeadCustomFields(clientId);
   const { data: pastImports = [] } = useLeadImports(clientId);
+  const createBancoImport = useCreateBancoImport();
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
 
   const adminUsersQuery = useAdminUsers();
   const operatorOptions = useMemo(() => {
@@ -377,6 +395,16 @@ export default function BancoDeDados() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A lista é paginada no SERVIDOR: `leads` são as linhas da PÁGINA atual; os totais vêm do banco (nunca contados aqui).
+  const [listTotal, setListTotal] = useState(0);
+  const [serverTotalPages, setServerTotalPages] = useState(1);
+  const [tabCounts, setTabCounts] = useState<LeadTabCounts | null>(null);
+  const [facets, setFacets] = useState<LeadFacetsResponse | null>(null);
+  const [facetsError, setFacetsError] = useState<string | null>(null);
+  // O servidor avisa quando não conseguiu aplicar os filtros (lista simples, sem filtro): a tela diz, em vez de fingir que filtrou.
+  const [listDegraded, setListDegraded] = useState(false);
+  // Quem foi selecionado em outra página não está em `leads`: guardamos nome/telefone para os modais que precisam deles.
+  const [selectedContacts, setSelectedContacts] = useState<Record<string, LeadContact>>({});
 
   // Ticket Médio Config (fonte de verdade: banco de dados via selectedClient)
   const selectedClient = crmClient?.selectedClient;
@@ -422,8 +450,6 @@ export default function BancoDeDados() {
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedChannel, setSelectedChannel] = useState<string>("all");
   const [selectedSegment, setSelectedSegment] = useState<BasePotentialSegmentId | null>(null);
-  const [knownTags, setKnownTags] = useState<string[]>([]);
-  const [knownSources, setKnownSources] = useState<string[]>([]);
   const [isInstagramImportModalOpen, setIsInstagramImportModalOpen] = useState(false);
   const { data: contactsWithoutChannel = [] } = useContactsWithoutChannel(clientId);
 
@@ -436,30 +462,27 @@ export default function BancoDeDados() {
     }
   }, [searchParams]);
 
-  // Acumula tags e origens conhecidas da base para não sumirem ao filtrar
-  useEffect(() => {
-    if (leads.length > 0) {
-      setKnownTags((prev) => {
-        const set = new Set(prev);
-        leads.forEach((l) => {
-          if (Array.isArray(l.tags)) l.tags.forEach((t) => set.add(t));
-        });
-        return Array.from(set).sort();
-      });
-      setKnownSources((prev) => {
-        const set = new Set(prev);
-        leads.forEach((l) => {
-          const src = getLeadSource(l);
-          if (src && src !== "Não informado") set.add(src);
-        });
-        return Array.from(set).sort();
-      });
-    }
-  }, [leads]);
+  // Tags e origens do seletor: vêm do banco, da base inteira (não somem ao filtrar e não dependem da página carregada)
+  const knownTags = useMemo(() => (facets?.tags ?? []).map((t) => t.tag), [facets]);
+  const knownSources = useMemo(
+    () => (facets?.sources ?? []).map((x) => x.source).filter((src) => src && src !== "Não informado").sort(),
+    [facets]
+  );
 
   // Pagination State
   const [pageSize, setPageSize] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
+
+  // Sorting State (a ordem é do banco: o servidor ordena a base inteira e devolve a página pedida)
+  const [sortColumn, setSortColumn] = useState<"contato" | "ultima_conversa" | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  // A busca vai ao servidor: espera o usuário parar de digitar
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // WhatsApp Extraction Modal State
   const [isWAModalOpen, setIsWAModalOpen] = useState(false);
@@ -594,41 +617,79 @@ export default function BancoDeDados() {
   const [campaignSpreadsheetRules, setCampaignSpreadsheetRules] = useState<DynamicFilterRule[]>([]);
   const campaignFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch Leads List & Aggregations
-  const fetchLeads = async () => {
+  // Chamada autenticada à API (mesmo token do restante da tela)
+  const leadRequest: LeadRequest = async (path, init = {}) => {
+    const token = await getIdToken();
+    if (!token) throw new Error("Usuário não autenticado.");
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` },
+    });
+  };
+
+  // Filtros da lista, exatamente como a tela os mostra (o servidor aplica todos no SQL)
+  const listFilters: LeadListFilters = {
+    stage: activeTab,
+    tag: selectedTag,
+    search: debouncedSearch,
+    source: selectedSource,
+    channel: selectedChannel,
+    segment: selectedSegment,
+  };
+
+  // Uma página: linhas + total da combinação de filtros + contagem das abas. Respostas fora de ordem são descartadas.
+  const listRequestSeq = useRef(0);
+  const loadPage = async () => {
     if (!isAuthenticated) return;
+    const seq = ++listRequestSeq.current;
     setLoading(true);
     setError(null);
     try {
-      const token = await getIdToken();
-      if (!token) throw new Error("Usuário não autenticado.");
-
-      const params = new URLSearchParams({ clientId });
-      if (activeTab !== "all" && activeTab !== "contacts_without_channel") params.append("stage", activeTab);
-      if (searchQuery.trim()) params.append("search", searchQuery.trim());
-      if (selectedTag) params.append("tag", selectedTag);
-
-      const res = await fetch(`${API_BASE_URL}/api/leads?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const page = await fetchLeadPage<LeadIntelligenceItem>(leadRequest, {
+        clientId,
+        filters: listFilters,
+        sort: sortColumn,
+        dir: sortDirection,
+        page: currentPage,
+        limit: pageSize,
       });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Erro na API (${res.status}): ${text}`);
-      }
-
-      const data = await res.json();
-      const fetchedItems = Array.isArray(data.items) ? data.items : [];
-      setLeads(fetchedItems);
-      if (data.summary) {
-        setSummary(data.summary);
-      }
+      if (seq !== listRequestSeq.current) return;
+      setLeads(page.items);
+      setListTotal(page.total);
+      setServerTotalPages(page.totalPages);
+      setTabCounts(page.tabs);
+      setListDegraded(page.degraded);
     } catch (err: any) {
+      if (seq !== listRequestSeq.current) return;
       console.error("[BancoDeDados] Erro ao carregar base:", err);
       setError(err.message || "Falha ao carregar leads.");
     } finally {
-      setLoading(false);
+      if (seq === listRequestSeq.current) setLoading(false);
     }
+  };
+
+  // Totais da BASE inteira (cartões de origem, faixas do Potencial, tags, origens): agregados no banco
+  const facetsRequestSeq = useRef(0);
+  const loadFacets = async () => {
+    if (!isAuthenticated) return;
+    const seq = ++facetsRequestSeq.current;
+    try {
+      const data = await fetchLeadFacets(leadRequest, clientId);
+      if (seq !== facetsRequestSeq.current) return;
+      setFacets(data);
+      setFacetsError(null);
+      if (data.summary && Object.keys(data.summary).length > 0) setSummary(data.summary as unknown as SummaryStats);
+    } catch (err: any) {
+      if (seq !== facetsRequestSeq.current) return;
+      console.error("[BancoDeDados] Erro ao carregar totais da base:", err);
+      setFacetsError(err.message || "Falha ao calcular os totais da base.");
+    }
+  };
+
+  // Recarrega tudo (depois de importar, editar, excluir…)
+  const fetchLeads = () => {
+    loadPage();
+    loadFacets();
   };
 
   // Fetch Available Evolution Instances for Tenant
@@ -653,11 +714,29 @@ export default function BancoDeDados() {
     }
   };
 
+  // Mudou filtro, busca, ordem ou tamanho de página → volta à página 1 e pede ao servidor (uma só chamada, sem a página velha)
+  const listFilterKey = JSON.stringify([clientId, activeTab, selectedTag, debouncedSearch, selectedSource, selectedChannel, selectedSegment, sortColumn, sortDirection, pageSize]);
+  const prevListFilterKeyRef = useRef(listFilterKey);
   useEffect(() => {
-    fetchLeads();
-  }, [clientId, activeTab, selectedTag]);
+    if (prevListFilterKeyRef.current !== listFilterKey) {
+      prevListFilterKeyRef.current = listFilterKey;
+      if (currentPage !== 1) {
+        setCurrentPage(1);
+        return;
+      }
+    }
+    loadPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listFilterKey, currentPage, isAuthenticated]);
 
-  // Auto-localiza e abre o Drawer do lead quando navegado a partir de Ações Rápidas (Conversas)
+  useEffect(() => {
+    loadFacets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, isAuthenticated]);
+
+  // Auto-localiza e abre o Drawer do lead quando navegado a partir de Ações Rápidas (Conversas).
+  // O lead pode estar em QUALQUER página da base: se não está na página carregada, o servidor o localiza pelo id ou telefone.
+  const lookedUpKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const targetLeadId = params.get("leadId");
@@ -674,22 +753,36 @@ export default function BancoDeDados() {
       return;
     }
 
-    if (leads.length > 0) {
-      const match = leads.find((l) => {
-        if (targetLeadId && l.id === targetLeadId) return true;
-        if (targetCanonical) {
-          const lCanonical = sanitizePhone(l.telefone || l.phone);
-          return Boolean(lCanonical && lCanonical === targetCanonical);
-        }
-        return false;
-      });
-
-      if (match) {
-        setSelectedLead(match);
-        setIsDetailSheetOpen(true);
+    const match = leads.find((l) => {
+      if (targetLeadId && l.id === targetLeadId) return true;
+      if (targetCanonical) {
+        const lCanonical = sanitizePhone(l.telefone || l.phone);
+        return Boolean(lCanonical && lCanonical === targetCanonical);
       }
+      return false;
+    });
+
+    if (match) {
+      setSelectedLead(match);
+      setIsDetailSheetOpen(true);
+      return;
     }
-  }, [leads, selectedLead]);
+
+    // Não está na página carregada: pergunta ao servidor (uma vez por link, depois que a primeira página chegou)
+    if (loading || !isAuthenticated) return;
+    const lookupKey = `${clientId}|${targetLeadId || ""}|${targetCanonical || ""}`;
+    if (lookedUpKeyRef.current === lookupKey) return;
+    lookedUpKeyRef.current = lookupKey;
+    fetchLeadLookup<LeadIntelligenceItem>(leadRequest, { clientId, leadId: targetLeadId, phone: targetPhone })
+      .then((found) => {
+        if (found) {
+          setSelectedLead(found);
+          setIsDetailSheetOpen(true);
+        }
+      })
+      .catch((err) => console.warn("[BancoDeDados] Lead da URL não localizado:", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, selectedLead, loading, isAuthenticated, clientId]);
 
   // Reseta seleções, drawer de detalhes e modais ao alternar de empresa (tenant)
   useEffect(() => {
@@ -1055,48 +1148,33 @@ export default function BancoDeDados() {
     }
 
     setIsUploadingImport(true);
+    setImportProgress(null);
     try {
-      const token = await getIdToken();
       const importTags = importTagInput
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean);
 
-      const payload: Record<string, unknown> = {
+      // Em LOTES de 500 linhas (sem o corpo único que estourava o limite do servidor com milhares de linhas). O registro da importação
+      // nasce com o NOME do arquivo e fica no mesmo lugar da tela de Planilhas; os leads são criados a cada lote.
+      const rows = importColumnMappings.length > 0 ? importRawRows : importParsedRows;
+      const result = await createBancoImport.mutateAsync({
         clientId,
-        importTags,
+        sourceName: importFile?.name || "",
+        sourceType: (importFile?.name.split(".").pop() || "spreadsheet").toLowerCase(),
+        rows,
         defaultDdd: importDefaultDdd || undefined,
+        columnMapping: importColumnMappings.length > 0 ? importColumnMappings : undefined,
+        importTags,
         asClosedSales: importAsClosedSales,
-      };
-
-      if (importColumnMappings.length > 0) {
-        payload.rows = importRawRows;
-        payload.columnMapping = importColumnMappings;
-      } else {
-        payload.rows = importParsedRows;
-      }
-
-      const res = await fetch(`${API_BASE_URL}/api/leads/import-csv`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+        onProgress: setImportProgress,
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || "Falha ao importar planilha.");
-      }
-
-      const data = await res.json();
       toast.success(
         importAsClosedSales
           ? "Vendas fechadas importadas com sucesso como Compradores! 🏆"
           : "Planilha higienizada e importada com sucesso! 🎉",
         {
-          description: `${data.importedCount || 0} leads inseridos com a tag "${importTagInput}".`,
+          description: `${result.totals.uniquePhones.toLocaleString("pt-BR")} leads com telefone válido de ${result.totals.total.toLocaleString("pt-BR")} linhas${importTags.length ? `, com a tag "${importTagInput}"` : ""}.`,
         }
       );
 
@@ -1115,9 +1193,18 @@ export default function BancoDeDados() {
       queryClient.invalidateQueries({ queryKey: ["lead-custom-fields", clientId] });
       queryClient.invalidateQueries({ queryKey: ["lead-imports", clientId] });
     } catch (err: any) {
-      toast.error("Erro na importação da planilha", { description: err.message });
+      if (err instanceof ImportBatchError && err.importId) {
+        // ficou registrada como INCOMPLETA no servidor, com o que já entrou; reenviar o mesmo arquivo não duplica leads
+        fetchLeads();
+        toast.error("Importação incompleta", {
+          description: `Entraram ${(err.receivedOffset ?? 0).toLocaleString("pt-BR")} de ${err.totalRows.toLocaleString("pt-BR")} linhas (${err.message}). Envie a mesma planilha de novo: os leads já criados não são duplicados.`,
+        });
+      } else {
+        toast.error("Erro na importação da planilha", { description: err.message });
+      }
     } finally {
       setIsUploadingImport(false);
+      setImportProgress(null);
     }
   };
 
@@ -1246,12 +1333,18 @@ export default function BancoDeDados() {
     }
   };
 
-  // Export Leads (Excel .xlsx)
-  const handleExportXLSX = () => {
+  // Export Leads (Excel .xlsx): a combinação de filtros INTEIRA, buscada do servidor página a página (sem teto)
+  const handleExportXLSX = async () => {
+    const progressToast = toast.loading("Preparando planilha Excel…");
     try {
+      const allLeads = await fetchAllLeadsForExport<LeadIntelligenceItem>(leadRequest, {
+        clientId,
+        filters: listFilters,
+        onProgress: (done, total) => toast.loading(`Preparando planilha Excel… ${done.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")}`, { id: progressToast }),
+      });
       // Coleta todas as chaves customizadas presentes nos leads filtrados
       const allCustomKeys = new Set<string>();
-      filteredLeads.forEach((l) => {
+      allLeads.forEach((l) => {
         const campos = (l.dados as any)?.campos;
         if (campos && typeof campos === "object") {
           Object.keys(campos).forEach((k) => allCustomKeys.add(k));
@@ -1259,7 +1352,7 @@ export default function BancoDeDados() {
       });
       const customKeyList = Array.from(allCustomKeys).sort();
 
-      const exportData = filteredLeads.map((l) => {
+      const exportData = allLeads.map((l) => {
         const row: Record<string, unknown> = {
           "ID": l.id,
           "Nome": l.nome || "",
@@ -1283,22 +1376,22 @@ export default function BancoDeDados() {
       XLSX.utils.book_append_sheet(wb, ws, "Leads");
       XLSX.writeFile(wb, `leads_${clientId}_${Date.now()}.xlsx`);
 
-      toast.success("Planilha Excel (.xlsx) baixada com sucesso!");
+      toast.success(`Planilha Excel (.xlsx) baixada com ${allLeads.length.toLocaleString("pt-BR")} leads!`, { id: progressToast });
     } catch (err: any) {
-      toast.error("Erro ao exportar arquivo Excel", { description: err.message });
+      toast.error("Erro ao exportar arquivo Excel", { id: progressToast, description: err.message });
     }
   };
 
-  // Export Leads (CSV)
+  // Export Leads (CSV): o servidor monta o arquivo da combinação de filtros da tela (sem teto de linhas)
   const handleExportCSV = async () => {
     try {
-      const token = await getIdToken();
-      const params = new URLSearchParams({ clientId });
-      if (activeTab !== "all") params.append("stage", activeTab);
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries({ stage: activeTab, tag: selectedTag, search: debouncedSearch, source: selectedSource, channel: selectedChannel, segment: selectedSegment })) {
+        if (v && v !== "all" && v !== "contacts_without_channel") params.append(k, String(v));
+      }
+      params.append("clientId", clientId);
 
-      const res = await fetch(`${API_BASE_URL}/api/leads/export?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await leadRequest(`/api/leads/export?${params.toString()}`);
 
       if (!res.ok) throw new Error("Falha ao gerar arquivo de exportação.");
 
@@ -1319,18 +1412,25 @@ export default function BancoDeDados() {
   };
 
   // Open Campaign Wizard
-  const handleOpenCampaignWizard = () => {
+  const handleOpenCampaignWizard = async () => {
     setIsCampaignWizardOpen(true);
     const initialTag = selectedTag || "";
     setCampaignTagFilter(initialTag);
     const initialStages = activeTab && activeTab !== "all" ? [activeTab] : ["all"];
     setCampaignStageFilters(initialStages);
-    setCampaignSelectedLeadIds(filteredLeads.map((l) => l.id));
     prevFiltersKeyRef.current = serializeCampaignFiltersKey(
       initialStages,
       initialTag,
       campaignFunnelFilterRules
     );
+    // A seleção inicial é a lista filtrada da tela (a base inteira da combinação, não só a página carregada)
+    try {
+      const found = await fetchLeadIds(leadRequest, { clientId, filters: listFilters });
+      setCampaignSelectedLeadIds(found.ids);
+    } catch (err: any) {
+      setCampaignSelectedLeadIds([]);
+      toast.error("Não foi possível carregar os leads do filtro", { description: err.message });
+    }
   };
 
   // Handle Campaign Wizard File Select
@@ -1385,27 +1485,55 @@ export default function BancoDeDados() {
     });
   };
 
-  // Computed Target Audience for Campaign Wizard
-  const campaignFunnelFilteredLeads = useMemo(() => {
-    const base = leads.filter((l) => {
-      const isAll = campaignStageFilters.length === 0 || campaignStageFilters.includes("all");
-      const stageOk = isAll || (l.stage && campaignStageFilters.includes(l.stage));
-      const tagOk = !campaignTagFilter || (Array.isArray(l.tags) && l.tags.includes(campaignTagFilter));
-      return stageOk && tagOk;
-    });
-    return applyDynamicRules(base, campaignFunnelFilterRules);
-  }, [leads, campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules]);
+  // Público da campanha: o servidor filtra no banco (estágios, tag e regras de campos simples) e devolve linhas enxutas + o total.
+  // Regra num campo que não é simples (tags, dados…) é recusada pelo servidor e a tela MOSTRA o motivo, em vez de um "0 leads".
+  const campaignFiltersKey = serializeCampaignFiltersKey(campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules);
+  const [campaignAudience, setCampaignAudience] = useState<{ key: string; items: AudienceLead[]; total: number; truncated: boolean } | null>(null);
+  const [campaignAudienceLoading, setCampaignAudienceLoading] = useState(false);
+  const [campaignAudienceError, setCampaignAudienceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCampaignWizardOpen || campaignSourceType !== "funnel" || !isAuthenticated) return;
+    let cancelled = false;
+    setCampaignAudienceLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetchCampaignAudience(leadRequest, {
+          clientId,
+          stages: campaignStageFilters,
+          tag: campaignTagFilter,
+          rules: campaignFunnelFilterRules as any,
+        });
+        if (cancelled) return;
+        setCampaignAudience({ key: campaignFiltersKey, items: res.items, total: res.total, truncated: res.truncated });
+        setCampaignAudienceError(null);
+      } catch (err: any) {
+        if (cancelled) return;
+        setCampaignAudience(null);
+        setCampaignAudienceError(err instanceof AudienceRulesError ? err.message : err?.message || "Falha ao montar o público da campanha.");
+      } finally {
+        if (!cancelled) setCampaignAudienceLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCampaignWizardOpen, campaignSourceType, campaignFiltersKey, clientId, isAuthenticated]);
+
+  const campaignFunnelFilteredLeads = useMemo<AudienceLead[]>(() => campaignAudience?.items ?? [], [campaignAudience]);
 
   // Atualiza seleção automaticamente APENAS quando os filtros da campanha mudam (tag, estágios, regras).
   // Recarga da lista de leads não altera os filtros e preserva a seleção manual do usuário.
   const prevFiltersKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const currentKey = serializeCampaignFiltersKey(
-      campaignStageFilters,
-      campaignTagFilter,
-      campaignFunnelFilterRules
-    );
+    const currentKey = campaignFiltersKey;
+
+    // O público só vale para a chave com que foi carregado: enquanto o servidor responde, não reconcilia com lista velha
+    if (campaignAudience && campaignAudience.key !== currentKey) return;
+    if (!campaignAudience) return;
 
     if (prevFiltersKeyRef.current === null) {
       prevFiltersKeyRef.current = currentKey;
@@ -1424,7 +1552,7 @@ export default function BancoDeDados() {
       setCampaignSelectedLeadIds(newSelection);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules, campaignFunnelFilteredLeads]);
+  }, [campaignFiltersKey, campaignAudience]);
 
   const effectiveSelectedCount = useMemo(() => {
     return calculateEffectiveSelectedCount(
@@ -1443,6 +1571,10 @@ export default function BancoDeDados() {
     let campaignTitleName = "";
 
     if (campaignSourceType === "funnel") {
+      if (!campaignAudience || campaignAudience.key !== campaignFiltersKey) {
+        toast.error("Aguarde: o público da campanha ainda está sendo calculado.");
+        return;
+      }
       const validFilteredIds = new Set(campaignFunnelFilteredLeads.map((l) => l.id));
       const selected = campaignFunnelFilteredLeads.filter(
         (l) => campaignSelectedLeadIds.includes(l.id) && validFilteredIds.has(l.id)
@@ -1469,16 +1601,32 @@ export default function BancoDeDados() {
       campaignTitleName = `Campanha Planilha ${campaignFile?.name || "Importada"} (${finalRows.length} contatos)`;
     }
 
-    localStorage.setItem(
-      "vexo_pending_campaign_audience",
+    // A passagem para a central de campanhas é pelo localStorage (~5 MB). Um público grande pode estourar: tenta com tudo, depois
+    // sem o resumo da IA (o campo mais pesado), e se ainda não couber DIZ — nunca segue para a tela de campanhas com público vazio.
+    const buildPending = (rows: Record<string, any>[]) =>
       JSON.stringify({
         campaignName: campaignTitleName,
-        rows: finalRows,
+        rows,
         sourceDescription: campaignTagFilter
-          ? `${finalRows.length} contatos vindos do Banco de Dados, filtrados por tag "${campaignTagFilter}"`
-          : `${finalRows.length} contatos vindos do Banco de Dados`,
-      })
-    );
+          ? `${rows.length} contatos vindos do Banco de Dados, filtrados por tag "${campaignTagFilter}"`
+          : `${rows.length} contatos vindos do Banco de Dados`,
+      });
+    try {
+      localStorage.setItem("vexo_pending_campaign_audience", buildPending(finalRows));
+    } catch {
+      try {
+        localStorage.setItem(
+          "vexo_pending_campaign_audience",
+          buildPending(finalRows.map(({ resumo_ia: _omit, ...rest }) => rest))
+        );
+        toast.warning("Público grande: o resumo da IA não acompanhou os contatos para a campanha.");
+      } catch {
+        toast.error(`Público grande demais para enviar à central de campanhas (${finalRows.length.toLocaleString("pt-BR")} contatos).`, {
+          description: "Restrinja o filtro (estágio, tag) e tente de novo.",
+        });
+        return;
+      }
+    }
 
     setIsCampaignWizardOpen(false);
     toast.success("Público-Alvo Configurado! 🎯", {
@@ -1605,7 +1753,6 @@ export default function BancoDeDados() {
       }
 
       setSelectedLead({ ...selectedLead, tags: updatedTags });
-      setKnownTags((prev) => Array.from(new Set([...prev, tagToAdd])).sort());
       setNewTagInput("");
       await fetchLeads();
       toast.success(`Tag "${tagToAdd}" adicionada!`);
@@ -1686,6 +1833,35 @@ export default function BancoDeDados() {
       fetchLeads();
     } catch (err: any) {
       toast.error("Erro ao reatribuir responsável", { description: err.message });
+    }
+  };
+
+  // Guarda nome e telefone de quem foi selecionado (inclusive em outra página, ou por "selecionar todos"): os modais de follow-up precisam
+  const rememberSelectedContacts = (contacts?: LeadContact[]) => {
+    if (!contacts || contacts.length === 0) return;
+    setSelectedContacts((prev) => {
+      const next = { ...prev };
+      for (const c of contacts) next[c.id] = c;
+      return next;
+    });
+  };
+  useEffect(() => {
+    const missing = leads.filter((l) => selectedLeadIds.includes(l.id) && !selectedContacts[l.id]);
+    if (missing.length > 0) {
+      rememberSelectedContacts(missing.map((l) => ({ id: l.id, nome: l.nome, telefone: l.telefone, phone: l.phone })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, selectedLeadIds]);
+
+  // "Selecionar todos desta faixa": TODOS os leads da combinação de filtros (o servidor lista os ids), não só a página carregada
+  const handleSelectAllFiltered = async () => {
+    try {
+      const found = await fetchLeadIds(leadRequest, { clientId, filters: listFilters, contacts: true });
+      rememberSelectedContacts(found.contacts);
+      setSelectedLeadIds(found.ids);
+      if (found.truncated) toast.warning(`Seleção limitada a ${found.ids.length.toLocaleString("pt-BR")} leads.`);
+    } catch (err: any) {
+      toast.error("Não foi possível selecionar os leads do filtro", { description: err.message });
     }
   };
 
@@ -1970,49 +2146,48 @@ export default function BancoDeDados() {
     }
   };
 
-  const marketingMetrics = useMemo(() => computeMarketingMetrics(leads), [leads]);
+  // Cartões de origem: SEMPRE a base inteira (painel de atribuição), agregada no banco — não dependem da página, da aba nem dos filtros
+  const marketingMetrics = useMemo(
+    () => computeMarketingMetricsFromCounts(facets?.channels, facets?.baseTotal ?? 0),
+    [facets]
+  );
 
-  const handleOpenCampaignForChannel = (chDef: { id: string; name: string; icon: string }) => {
-    const leadsForChannel = leads.filter((l) => getLeadMarketingChannelId(l) === chDef.id);
-    if (leadsForChannel.length === 0) {
-      toast.error(`Nenhum lead encontrado para a origem ${chDef.name}.`);
-      return;
+  const handleOpenCampaignForChannel = async (chDef: { id: string; name: string; icon: string }) => {
+    try {
+      // Todos os leads da origem (a base inteira, não só os da página carregada), com nome e telefone para os modais
+      const found = await fetchLeadIds(leadRequest, { clientId, filters: { channel: chDef.id }, contacts: true });
+      if (found.ids.length === 0) {
+        toast.error(`Nenhum lead encontrado para a origem ${chDef.name}.`);
+        return;
+      }
+      rememberSelectedContacts(found.contacts);
+      setCampaignSourceType("funnel");
+      setCampaignSelectedLeadIds(found.ids);
+      prevFiltersKeyRef.current = serializeCampaignFiltersKey(
+        campaignStageFilters,
+        campaignTagFilter,
+        campaignFunnelFilterRules
+      );
+      setIsCampaignWizardOpen(true);
+      toast.success(`Disparo Segmentado: ${chDef.icon} ${chDef.name}`, {
+        description: `${found.ids.length.toLocaleString("pt-BR")} contatos selecionados para a campanha.`,
+      });
+    } catch (err: any) {
+      toast.error("Não foi possível carregar os leads da origem", { description: err.message });
     }
-    setCampaignSourceType("funnel");
-    setCampaignSelectedLeadIds(leadsForChannel.map((l) => l.id));
-    prevFiltersKeyRef.current = serializeCampaignFiltersKey(
-      campaignStageFilters,
-      campaignTagFilter,
-      campaignFunnelFilterRules
-    );
-    setIsCampaignWizardOpen(true);
-    toast.success(`Disparo Segmentado: ${chDef.icon} ${chDef.name}`, {
-      description: `${leadsForChannel.length} contatos selecionados para a campanha.`,
-    });
   };
 
   const availableSources = useMemo(() => {
     const set = new Set<string>(knownSources);
-    leads.forEach((l) => {
-      const src = getLeadSource(l);
-      if (src && src !== "Não informado") set.add(src);
-    });
     if (selectedSource) set.add(selectedSource);
     return Array.from(set).sort();
-  }, [leads, knownSources, selectedSource]);
+  }, [knownSources, selectedSource]);
 
-  const topSourceRanking = useMemo(() => {
-    const map = new Map<string, number>();
-    leads.forEach((l) => {
-      const src = getLeadSource(l);
-      map.set(src, (map.get(src) || 0) + 1);
-    });
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  }, [leads]);
-
-  // Sorting State
-  const [sortColumn, setSortColumn] = useState<"contato" | "ultima_conversa" | null>(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  // Origens mais frequentes da base inteira (o servidor já devolve ordenado por contagem)
+  const topSourceRanking = useMemo<Array<[string, number]>>(
+    () => (facets?.sources ?? []).slice(0, 3).map((x) => [x.source, x.count]),
+    [facets]
+  );
 
   const handleToggleSort = (column: "contato" | "ultima_conversa") => {
     if (sortColumn === column) {
@@ -2028,65 +2203,22 @@ export default function BancoDeDados() {
     }
   };
 
-  // Local filtered search list
-  const filteredLeads = useMemo(() => {
-    return leads.filter((item) => {
-      const phoneMatch = (item.telefone || item.phone || "").toLowerCase().includes(searchQuery.toLowerCase());
-      const nameMatch = (item.nome || "").toLowerCase().includes(searchQuery.toLowerCase());
-      const summaryMatch = (item.raw_chat_summary || "").toLowerCase().includes(searchQuery.toLowerCase());
-      const searchOk = !searchQuery.trim() || phoneMatch || nameMatch || summaryMatch;
+  // As linhas da página já vêm filtradas e ordenadas pelo servidor (SQL); a tela não refaz nenhuma conta.
+  const paginatedLeads = leads;
 
-      const stageOk = activeTab === "all" || item.stage === activeTab;
-      const tagOk = !selectedTag || (Array.isArray(item.tags) && item.tags.includes(selectedTag));
-      const sourceStr = getLeadSource(item);
-      const sourceOk = !selectedSource || sourceStr === selectedSource;
-      const channelOk = selectedChannel === "all" || getLeadMarketingChannelId(item) === selectedChannel;
-      const segmentOk = !selectedSegment || getLeadSegment(item) === selectedSegment;
-
-      return searchOk && stageOk && tagOk && sourceOk && channelOk && segmentOk;
-    });
-  }, [leads, searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, selectedSegment]);
-
-  // Sorted list based on column header clicks
-  const sortedLeads = useMemo(() => {
-    if (!sortColumn) return filteredLeads;
-    return [...filteredLeads].sort((a, b) => {
-      if (sortColumn === "contato") {
-        const nameA = (a.nome || "").toLowerCase();
-        const nameB = (b.nome || "").toLowerCase();
-        const cmp = nameA.localeCompare(nameB);
-        return sortDirection === "asc" ? cmp : -cmp;
-      }
-      if (sortColumn === "ultima_conversa") {
-        const timeA = new Date(a.last_interaction_at || a.created_at || 0).getTime();
-        const timeB = new Date(b.last_interaction_at || b.created_at || 0).getTime();
-        return sortDirection === "asc" ? timeA - timeB : timeB - timeA;
-      }
-      return 0;
-    });
-  }, [filteredLeads, sortColumn, sortDirection]);
-
-  // Contagens por estágio sincronizadas para abas e filtros.
-  // cold é contado sobre a lista carregada (limit=2500), então passa a divergir do real quando a base ultrapassar esse teto.
-  const stageCounts = useMemo(() => {
-    let buyers = 0;
-    let openBudgets = 0;
-    let cold = 0;
-    let lost = 0;
-    for (const l of leads) {
-      if (l.stage === "buyer") buyers++;
-      else if (l.stage === "open_budget") openBudgets++;
-      else if (l.stage === "lost") lost++;
-      else cold++;
-    }
+  // Abas: contagem do banco DENTRO do filtro ativo de tag e busca (sem filtro coincide com a base inteira).
+  // Se o servidor degradou (sem abas), mostra o que sabe da base em vez de inventar.
+  const stageCounts = useMemo<LeadTabCounts>(() => {
+    if (tabCounts) return tabCounts;
+    const base = facets?.stagesExact;
     return {
-      all: leads.length,
-      buyer: summary.buyersCount ?? buyers,
-      open_budget: summary.openBudgetsCount ?? openBudgets,
-      cold: cold,
-      lost: summary.lostCount ?? lost,
+      all: facets?.baseTotal ?? listTotal,
+      buyer: base?.buyer ?? 0,
+      open_budget: base?.open_budget ?? 0,
+      cold: base ? base.inquiry + base.cold + base.other : 0,
+      lost: base?.lost ?? 0,
     };
-  }, [leads, summary]);
+  }, [tabCounts, facets, listTotal]);
 
   const getTemperatureDot = (temp?: string | null) => {
     switch (temp) {
@@ -2109,18 +2241,9 @@ export default function BancoDeDados() {
     return `${day}/${month}`;
   };
 
-  // Reset pagination when filters, search or sort change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, activeTab, selectedTag, selectedSource, selectedChannel, selectedSegment, pageSize, sortColumn, sortDirection]);
-
-  const totalFilteredLeads = filteredLeads.length;
-  const totalPages = Math.max(1, Math.ceil(totalFilteredLeads / pageSize));
-
-  const paginatedLeads = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return sortedLeads.slice(start, start + pageSize);
-  }, [sortedLeads, currentPage, pageSize]);
+  // Total e páginas vêm do servidor (a página volta a 1 quando muda filtro, busca, ordem ou tamanho: ver o efeito de carga)
+  const totalFilteredLeads = listTotal;
+  const totalPages = serverTotalPages;
 
   // Dynamic calculation for Potencial da Base (funil de 3 faixas)
   const basePotential = useMemo(() => {
@@ -2163,17 +2286,12 @@ export default function BancoDeDados() {
     [basePotential]
   );
 
-  // Unique tags across base (preserva tags conhecidas para o dropdown nunca sumir)
+  // Tags da base inteira (vêm do banco; o seletor nunca perde uma tag por causa do filtro ou da página)
   const availableTags = useMemo(() => {
     const set = new Set<string>(knownTags);
-    leads.forEach((l) => {
-      if (Array.isArray(l.tags)) {
-        l.tags.forEach((t) => set.add(t));
-      }
-    });
     if (selectedTag) set.add(selectedTag);
     return Array.from(set).sort();
-  }, [leads, knownTags, selectedTag]);
+  }, [knownTags, selectedTag]);
 
   // Checagem de filtros ativos e limpador global
   const hasActiveFilters = Boolean(
@@ -2844,11 +2962,11 @@ export default function BancoDeDados() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setSelectedLeadIds(filteredLeads.map((l) => l.id))}
+                  onClick={handleSelectAllFiltered}
                   className="text-xs h-7 gap-1.5"
                 >
                   <CheckSquare className="w-3.5 h-3.5" />
-                  Selecionar todos desta faixa ({filteredLeads.length})
+                  Selecionar todos desta faixa ({listTotal.toLocaleString("pt-BR")})
                 </Button>
               </>
             )}
@@ -2872,7 +2990,33 @@ export default function BancoDeDados() {
         ) : (
           <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800">
           <CardContent className="p-0">
-            {loading ? (
+            {listDegraded && (
+              <div
+                role="alert"
+                data-testid="leads-degraded-banner"
+                className="flex items-start gap-2 px-4 py-3 border-b border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200 text-xs"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Os filtros não puderam ser aplicados agora: esta é a lista simples da base, sem busca, aba, origem nem ordenação. Os números das abas
+                  ficam indisponíveis até o servidor responder normalmente.
+                  <Button variant="link" size="sm" onClick={fetchLeads} className="h-auto p-0 ml-2 text-xs underline">
+                    Tentar novamente
+                  </Button>
+                </span>
+              </div>
+            )}
+            {facetsError && (
+              <div
+                role="alert"
+                data-testid="leads-facets-error"
+                className="flex items-start gap-2 px-4 py-3 border-b border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 text-xs"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>Não foi possível calcular os totais da base ({facetsError}). Cartões de origem e faixas podem estar desatualizados.</span>
+              </div>
+            )}
+            {loading && leads.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
                 <RefreshCw className="w-5 h-5 animate-spin" />
                 <span>Carregando inteligência de base...</span>
@@ -2885,7 +3029,7 @@ export default function BancoDeDados() {
                   Tentar Novamente
                 </Button>
               </div>
-            ) : filteredLeads.length === 0 ? (
+            ) : leads.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground gap-3">
                 <Database className="w-8 h-8 opacity-40" />
                 <p className="font-medium text-sm">Nenhum lead encontrado com os filtros atuais.</p>
@@ -3215,11 +3359,11 @@ export default function BancoDeDados() {
             )}
 
             {/* Rodapé de Paginação */}
-            {filteredLeads.length > 0 && (
+            {listTotal > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border dark:border-zinc-800 bg-muted/20 text-xs">
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="text-muted-foreground">
-                    Exibindo <span className="font-semibold text-foreground">{Math.min(filteredLeads.length, (currentPage - 1) * pageSize + 1)}</span>–<span className="font-semibold text-foreground">{Math.min(currentPage * pageSize, filteredLeads.length)}</span> de <span className="font-semibold text-foreground">{filteredLeads.length.toLocaleString("pt-BR")}</span> leads
+                    Exibindo <span className="font-semibold text-foreground">{Math.min(listTotal, (currentPage - 1) * pageSize + 1)}</span>–<span className="font-semibold text-foreground">{Math.min(currentPage * pageSize, listTotal)}</span> de <span className="font-semibold text-foreground">{listTotal.toLocaleString("pt-BR")}</span> leads
                   </span>
 
                   <div className="flex items-center gap-1.5">
@@ -3725,7 +3869,11 @@ export default function BancoDeDados() {
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {isUploadingImport ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
-              Processar e Importar
+              {isUploadingImport && importProgress && importProgress.phase === "sending"
+                ? `Enviando ${importProgress.sentRows.toLocaleString("pt-BR")} de ${importProgress.totalRows.toLocaleString("pt-BR")}…`
+                : isUploadingImport && importProgress?.phase === "closing"
+                  ? "Concluindo…"
+                  : "Processar e Importar"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4093,7 +4241,7 @@ export default function BancoDeDados() {
                         >
                           <span className="truncate">
                             {campaignStageFilters.includes("all") || campaignStageFilters.length === 0
-                              ? `Todos os Estágios (${leads.length})`
+                              ? `Todos os Estágios (${(facets?.baseTotal ?? 0).toLocaleString("pt-BR")})`
                               : `${campaignStageFilters.length} Estágios: ${campaignStageFilters
                                   .map((s) =>
                                     s === "buyer"
@@ -4124,17 +4272,17 @@ export default function BancoDeDados() {
                             onChange={() => {}}
                             className="rounded text-amber-600 cursor-pointer"
                           />
-                          <span>Todos os Estágios ({leads.length})</span>
+                          <span>Todos os Estágios ({(facets?.baseTotal ?? 0).toLocaleString("pt-BR")})</span>
                         </div>
 
                         <div className="h-px bg-border my-1" />
 
                         {[
-                          { id: "buyer", label: "Compradores 🟢", count: summary.buyersCount },
-                          { id: "open_budget", label: "Orçamentos Abertos 🟡", count: summary.openBudgetsCount },
-                          { id: "inquiry", label: "Em Dúvida 🔵", count: leads.filter((l) => l.stage === "inquiry").length },
-                          { id: "cold", label: "Leads Frios ⚪", count: leads.filter((l) => l.stage === "cold").length },
-                          { id: "lost", label: "Perdidos 🔴", count: leads.filter((l) => l.stage === "lost").length },
+                          { id: "buyer", label: "Compradores 🟢", count: facets?.stagesExact.buyer ?? 0 },
+                          { id: "open_budget", label: "Orçamentos Abertos 🟡", count: facets?.stagesExact.open_budget ?? 0 },
+                          { id: "inquiry", label: "Em Dúvida 🔵", count: facets?.stagesExact.inquiry ?? 0 },
+                          { id: "cold", label: "Leads Frios ⚪", count: facets?.stagesExact.cold ?? 0 },
+                          { id: "lost", label: "Perdidos 🔴", count: facets?.stagesExact.lost ?? 0 },
                         ].map((stageItem) => {
                           const isChecked = !campaignStageFilters.includes("all") && campaignStageFilters.includes(stageItem.id);
                           return (
@@ -4201,10 +4349,20 @@ export default function BancoDeDados() {
                     </Button>
                   </div>
 
+                  {campaignAudienceError && (
+                    <div role="alert" data-testid="campaign-audience-error" className="px-3 py-2 text-xs text-rose-600 border-b border-border bg-rose-500/5">
+                      {campaignAudienceError}
+                    </div>
+                  )}
+                  {campaignAudience?.truncated && (
+                    <div className="px-3 py-2 text-xs text-amber-700 border-b border-border bg-amber-500/5">
+                      O público passou do limite de {campaignFunnelFilteredLeads.length.toLocaleString("pt-BR")} leads: restrinja o filtro.
+                    </div>
+                  )}
                   <div className="max-h-48 overflow-y-auto">
                     <Table>
                       <TableBody>
-                        {campaignFunnelFilteredLeads.map((l) => {
+                        {campaignFunnelFilteredLeads.slice(0, 200).map((l) => {
                           const isSel = campaignSelectedLeadIds.includes(l.id);
                           return (
                             <TableRow
@@ -4227,6 +4385,12 @@ export default function BancoDeDados() {
                         })}
                       </TableBody>
                     </Table>
+                    {campaignFunnelFilteredLeads.length > 200 && (
+                      <p className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border">
+                        Mostrando 200 de {campaignFunnelFilteredLeads.length.toLocaleString("pt-BR")}. "Selecionar Todos" vale para os{" "}
+                        {campaignFunnelFilteredLeads.length.toLocaleString("pt-BR")} leads do filtro.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -4401,9 +4565,10 @@ export default function BancoDeDados() {
         clientId={clientId}
         apiBase={API_BASE_URL}
         getToken={getIdToken}
-        leads={leads
-          .filter((l) => selectedLeadIds.includes(l.id))
-          .map((l) => ({ id: l.id, nome: l.nome, phone: l.phone, telefone: l.telefone }))}
+        leads={selectedLeadIds.map((id) => {
+          const c = selectedContacts[id];
+          return { id, nome: c?.nome ?? null, phone: c?.phone, telefone: c?.telefone };
+        })}
       />
 
       {/* Modal Lembrete Avulso para Lead */}
@@ -4412,7 +4577,7 @@ export default function BancoDeDados() {
         onOpenChange={setIsSingleReminderModalOpen}
         lead={
           selectedLeadIds.length > 0
-            ? leads.find((l) => l.id === selectedLeadIds[0]) || null
+            ? leads.find((l) => l.id === selectedLeadIds[0]) || (selectedContacts[selectedLeadIds[0]] as any) || null
             : null
         }
         tenantId={clientId}

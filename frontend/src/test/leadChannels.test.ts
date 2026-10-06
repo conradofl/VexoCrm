@@ -134,8 +134,10 @@ describe("o que já funcionava continua", () => {
 });
 
 describe("o Banco de Dados usa esta regra (e não uma cópia)", () => {
-  it("[TESTE OBRIGATÓRIO] a tela calcula os cartões com computeMarketingMetrics e não conhece mais o cartão misto", () => {
-    expect(bancoSrc).toContain("computeMarketingMetrics(leads)");
+  it("[TESTE OBRIGATÓRIO] a tela monta os cartões com as contagens do banco (computeMarketingMetricsFromCounts) e não conhece mais o cartão misto", () => {
+    // os cartões são a base INTEIRA, agregada no banco (facets), não a página carregada
+    expect(bancoSrc).toContain("computeMarketingMetricsFromCounts(facets?.channels");
+    expect(bancoSrc).not.toContain("computeMarketingMetrics(leads)");
     expect(bancoSrc).toContain('from "@/lib/leadChannels"');
     expect(bancoSrc).not.toContain("whatsapp_outros");
     expect(bancoSrc).not.toContain("WhatsApp / Outros");

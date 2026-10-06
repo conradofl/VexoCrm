@@ -26,6 +26,7 @@ import {
   useCreateLeadImport,
   useDeleteLeadImport,
   useLeadImports,
+  useResumeLeadImport,
   useLeadImportItems,
   useLeadCustomFields,
   type LeadImportItem,
@@ -94,8 +95,11 @@ import {
   type StepActionButton,
 } from "@/lib/leadImports/spreadsheet";
 
-import { sanitizePhone } from "@/lib/phone";
 import { LeadSourceStep, type PhoneAuditStats } from "./LeadImports/LeadSourceStep";
+import { classifyPhoneAudit } from "@/lib/leadImports/phoneAudit";
+import { ImportBatchError, ImportFileMismatchError, type ImportProgress } from "@/lib/leadImports/batchedImport";
+import { describeImportProgress, isImportIncomplete } from "@/lib/leadImports/importStatus";
+import { ImportProgressBanner } from "./LeadImports/ImportProgressBanner";
 import { MessageSequenceStep } from "./LeadImports/MessageSequenceStep";
 import { SchedulingStep } from "./LeadImports/SchedulingStep";
 import { WhatsAppPreviewPanel } from "./LeadImports/WhatsAppPreviewPanel";
@@ -271,7 +275,10 @@ export default function LeadImports({
   const [promptDispatchId, setPromptDispatchId] = useState<string | null>(null);
 
   // Hooks queries
-  const { data: imports = [], refetch: refetchImports } = useLeadImports(activeClientId);
+  const { data: allImports = [], refetch: refetchImports } = useLeadImports(activeClientId);
+  // Planilha INCOMPLETA (importação em lotes interrompida) nunca entra nos seletores de campanha, na auditoria nem na
+  // lembrança de mapeamento: só aparece em "Planilhas Salvas", com o que entrou e o botão de retomar.
+  const imports = useMemo(() => allImports.filter((imp) => !isImportIncomplete(imp)), [allImports]);
   const { data: knownCustomFields = [] } = useLeadCustomFields(activeClientId);
 
   // Parâmetro de importação ativo resolvido pela função única de verdade
@@ -502,36 +509,19 @@ export default function LeadImports({
       const rawPhone =
         getLeadField(row, ["telefone", "celular", "phone", "number", "whatsapp"]) ||
         String(row.telefone || "");
-      const rawTrimmed = String(rawPhone).trim();
-      const rawDigits = rawTrimmed.replace(/\D/g, "");
-      const sanitized = sanitizePhone(rawTrimmed, cleanDdd);
+      const result = classifyPhoneAudit(rawPhone, cleanDdd);
 
-      if (sanitized) {
-        const isAlreadyComplete =
-          (rawDigits.length === 12 && rawDigits.startsWith("55") && sanitized === rawDigits) ||
-          (rawDigits.length === 13 && rawDigits.startsWith("55") && sanitized === rawDigits) ||
-          (rawDigits.length >= 10 && rawDigits.length < 15 && !rawDigits.startsWith("55") && sanitized === rawDigits);
-
-        if (isAlreadyComplete) {
-          intactCount++;
-        } else {
-          completedCount++;
-          if (completedList.length < 500) {
-            completedList.push({ original: rawTrimmed, result: sanitized });
-          }
+      if (result.kind === "intact") {
+        intactCount++;
+      } else if (result.kind === "completed") {
+        completedCount++;
+        if (completedList.length < 500) {
+          completedList.push({ original: result.original, result: result.sanitized as string });
         }
       } else {
         incompleteCount++;
-        let reason = "Formato inválido";
-        if (rawDigits.length === 8 || rawDigits.length === 9) {
-          reason = cleanDdd ? "Telefone incompleto" : "Faltou informar o DDD padrão";
-        } else if (rawDigits.length >= 15 || rawTrimmed.includes("@g.us")) {
-          reason = "Identificador de grupo do WhatsApp bloqueado";
-        } else if (!rawDigits) {
-          reason = "Sem telefone";
-        }
         if (incompleteList.length < 500) {
-          incompleteList.push({ original: rawTrimmed || "(vazio)", reason });
+          incompleteList.push({ original: result.original || "(vazio)", reason: result.reason as string });
         }
       }
     });
@@ -665,6 +655,9 @@ export default function LeadImports({
 
   // Mutations
   const createLeadImport = useCreateLeadImport();
+  const resumeLeadImport = useResumeLeadImport();
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [resumingImportId, setResumingImportId] = useState<string | null>(null);
   const deleteLeadImport = useDeleteLeadImport();
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
@@ -866,6 +859,36 @@ export default function LeadImports({
     }
   }
 
+  /** Texto do erro de importação: se a planilha ficou incompleta, diz quanto entrou e onde retomar. */
+  function explainImportError(err: unknown): string {
+    if (err instanceof ImportFileMismatchError) return err.message;
+    if (err instanceof ImportBatchError && err.importId) {
+      const entered = err.receivedOffset ?? 0;
+      return `${err.message} A planilha ficou INCOMPLETA: entraram ${entered.toLocaleString("pt-BR")} de ${err.totalRows.toLocaleString("pt-BR")} linhas. Abra "Planilhas Salvas" e use "Retomar" com o mesmo arquivo — o envio continua de onde parou, sem duplicar.`;
+    }
+    return err instanceof Error ? err.message : "Erro desconhecido.";
+  }
+
+  async function handleResumeImport(imp: LeadImportItem, file: File) {
+    setResumingImportId(imp.id);
+    setImportProgress({ phase: "opening", sentRows: imp.received_offset ?? 0, totalRows: imp.expected_rows ?? 0, batch: 0, batches: 0 });
+    try {
+      const rows = await parseSpreadsheetFile(file);
+      const result = await resumeLeadImport.mutateAsync({ clientId: activeClientId, importId: imp.id, rows, onProgress: setImportProgress });
+      toast({
+        title: "Importação concluída",
+        description: `"${imp.source_name}" foi completada: ${result.totals.total.toLocaleString("pt-BR")} linhas, ${result.totals.valid.toLocaleString("pt-BR")} com telefone válido.`,
+      });
+      await refetchImports();
+    } catch (err) {
+      toast({ title: "Não foi possível retomar a importação", description: explainImportError(err), variant: "destructive" });
+      await refetchImports();
+    } finally {
+      setImportProgress(null);
+      setResumingImportId(null);
+    }
+  }
+
   async function handleImportSpreadsheetOnly() {
     if (!selectedFile || rawUploadedRows.length === 0) return;
 
@@ -891,6 +914,7 @@ export default function LeadImports({
           mapping: columnMappings,
         },
         defaultDdd: defaultDdd || undefined,
+        onProgress: setImportProgress,
       });
 
       if (importRes.warnings && importRes.warnings.length > 0) {
@@ -920,11 +944,12 @@ export default function LeadImports({
     } catch (err) {
       toast({
         title: "Erro ao importar planilha",
-        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        description: explainImportError(err),
         variant: "destructive",
       });
     } finally {
       setIsImportingFile(false);
+      setImportProgress(null);
     }
   }
 
@@ -1285,6 +1310,7 @@ export default function LeadImports({
           sourceName: selectedFile.name,
           sourceType: selectedFile.name.split(".").pop()?.toLowerCase() || "spreadsheet",
           rows: finalRows,
+          onProgress: (p) => setSubmittingStatus(describeImportProgress(p)),
         });
         finalImportId = importRes.item.id;
       } else if (bancoAudience && filteredRows.length > 0) {
@@ -1295,6 +1321,7 @@ export default function LeadImports({
           sourceName: bancoAudience.description || `Banco de Dados (${filteredRows.length} leads)`,
           sourceType: "banco",
           rows: filteredRows,
+          onProgress: (p) => setSubmittingStatus(describeImportProgress(p)),
         });
         finalImportId = importRes.item.id;
       }
@@ -1507,7 +1534,7 @@ export default function LeadImports({
     } catch (err) {
       toast({
         title: "Erro na operação",
-        description: err instanceof Error ? err.message : "Erro desconhecido ao processar lote.",
+        description: err instanceof ImportBatchError || err instanceof ImportFileMismatchError ? explainImportError(err) : err instanceof Error ? err.message : "Erro desconhecido ao processar lote.",
         variant: "destructive",
       });
     } finally {
@@ -1895,6 +1922,7 @@ export default function LeadImports({
         <div className="grid gap-6 lg:grid-cols-3 items-start">
           {/* Main Wizard Form */}
           <div className="lg:col-span-2 space-y-6">
+            <ImportProgressBanner progress={importProgress} fileName={selectedFile?.name ?? null} />
             <LeadSourceStep
               campaignName={campaignName}
               setCampaignName={setCampaignName}
@@ -2052,8 +2080,11 @@ export default function LeadImports({
             </p>
           </div>
 
+          <ImportProgressBanner progress={importProgress} />
           <SavedSheetsCards
-            imports={imports}
+            imports={allImports}
+            onResumeImport={handleResumeImport}
+            resumingImportId={resumingImportId}
             isDeleting={deleteLeadImport.isPending}
             onViewImport={(imp) => setViewingImport(imp)}
             onDeleteImport={(id, name) => handleDeleteImport(id, name)}

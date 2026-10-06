@@ -16,7 +16,10 @@ describe("Lead imports loading resilience", () => {
   });
 
   it("refreshes dependent campaign data after a successful spreadsheet import", () => {
-    expect(hookSource).toContain('queryClient.invalidateQueries({ queryKey: ["lead-import-items", variables.clientId] })');
+    // a invalidação mora em invalidateImportQueries e roda em onSettled: depois de sucesso E depois de falha no meio do envio em
+    // lotes (a lista precisa mostrar a planilha incompleta com o progresso)
+    expect(hookSource).toContain('queryClient.invalidateQueries({ queryKey: ["lead-import-items", clientId] })');
+    expect(hookSource).toContain("onSettled: (_data, _error, variables) => invalidateImportQueries(queryClient, variables.clientId)");
   });
 
   it("keeps campaign creation from staying pending forever", () => {

@@ -17,7 +17,20 @@ import {
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
 import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadUpsert.js";
-import { summarizeChatWithAI, temConversaComercial } from "./chatInsight.js";
+import { summarizeChatWithAI } from "./chatInsight.js";
+import {
+  BASE_POTENTIAL_SEGMENTS,
+  MARKETING_CHANNEL_IDS,
+  MAX_PAGE_SIZE,
+  iterateLeadsForExport,
+  lookupLead,
+  queryBaseFacets,
+  queryCampaignAudience,
+  queryCustomKeys,
+  queryLeadIds,
+  queryLeadsPage,
+  validateAudienceRules,
+} from "../../services/leadListQuery.js";
 import { confirmLeadAgreement, saveLeadAgreement } from "../../services/leadAgreement.js";
 import {
   getDefaultLeadClientEvolutionInstance,
@@ -36,10 +49,28 @@ import {
   buildImportPreview as defaultBuildImportPreview,
 } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
-import { randomUUID } from "crypto";
+import {
+  IMPORT_BATCH_SIZE,
+  ImportError,
+  appendLeadImportBatch,
+  closeLeadImport,
+  detectImportColumns,
+  findLeadImportOwner,
+  getLeadImportContext,
+  getLeadImportProgress,
+  isRowHeader,
+  listLeadImports,
+  openLeadImport,
+  parseImportRows,
+} from "../../services/leadImportBatches.js";
+import {
+  BANCO_IMPORT_MODE,
+  appendBancoImportBatch,
+  openBancoImport,
+  runBancoImportInOnePost,
+} from "../../services/bancoImport.js";
 import { registerLeadMassDeleteRoutes } from "./massDeleteRoutes.js";
 import { registerLeadOriginFixRoutes } from "./originFixRoutes.js";
-import { resolveImportOrigin } from "../../services/importOrigin.js";
 import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
 import {
   classifyLeadMessages,
@@ -271,115 +302,6 @@ async function resolveEvolutionInstanceForExtraction({
   }
 
   return { instance, baseUrl, instanceName, apiKey, ownerDigits };
-}
-
-// Fallback column auto-detection based on content and header aliases
-function detectImportColumns(rows) {
-  const mapping = {
-    telefone: null,
-    nome: null,
-    tipo_cliente: null,
-    faixa_consumo: null,
-    cidade: null,
-    estado: null,
-    status: null,
-    data_hora: null,
-    qualificacao: null,
-  };
-
-  if (!Array.isArray(rows) || rows.length === 0) return mapping;
-
-  const firstRow = rows[0];
-  if (!firstRow || typeof firstRow !== "object") return mapping;
-
-  const keys = Object.keys(firstRow);
-
-  const aliasesMap = {
-    telefone: ["telefone", "telefones", "fone", "fones", "celular", "celulares", "whatsapp", "whatsapps", "phone", "phones", "numero", "numeros", "numero_telefone", "numero_telefones", "telefone_whatsapp", "telefones_whatsapp"],
-    nome: ["nome", "name", "cliente", "contato", "lead", "responsavel"],
-    tipo_cliente: ["tipo_cliente", "tipo", "perfil", "segmento", "classificacao"],
-    faixa_consumo: ["faixa_consumo", "consumo", "consumo_mensal", "valor_conta", "conta_de_energia", "ticket"],
-    cidade: ["cidade", "city", "municipio"],
-    estado: ["estado", "uf", "state"],
-    status: ["status", "etapa", "situacao", "pipeline_status"],
-    data_hora: ["data_hora", "data", "created_at", "data_de_cadastro", "timestamp"],
-    qualificacao: ["qualificacao", "observacoes", "observacao", "resumo", "anotacoes", "notas", "descricao"],
-  };
-
-  // 1. Try mapping by alias matching first
-  for (const key of keys) {
-    const normalizedKey = key.toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-
-    for (const [field, aliases] of Object.entries(aliasesMap)) {
-      if (!mapping[field] && aliases.includes(normalizedKey)) {
-        mapping[field] = key;
-      }
-    }
-  }
-
-  // 2. Fallback scan by value content for phone and name
-  const sampleRows = rows.slice(0, 10);
-
-  if (!mapping.telefone) {
-    for (const key of keys) {
-      let matches = 0;
-      let total = 0;
-      for (const row of sampleRows) {
-        const val = String(row[key] ?? "").trim().replace(/\D/g, "");
-        if (val) {
-          total++;
-          if (val.length >= 8 && val.length <= 15) {
-            matches++;
-          }
-        }
-      }
-      if (total > 0 && matches / total >= 0.7) {
-        mapping.telefone = key;
-        break;
-      }
-    }
-  }
-
-  if (!mapping.nome) {
-    for (const key of keys) {
-      if (key === mapping.telefone) continue;
-      let matches = 0;
-      let total = 0;
-      for (const row of sampleRows) {
-        const val = String(row[key] ?? "").trim();
-        if (val) {
-          total++;
-          const digits = val.replace(/\D/g, "");
-          if (digits.length < val.length * 0.5) {
-            matches++;
-          }
-        }
-      }
-      if (total > 0 && matches / total >= 0.7) {
-        mapping.nome = key;
-        break;
-      }
-    }
-  }
-
-  // Last resort fallbacks if we still don't have phone/nome mapped
-  const unmappedKeys = keys.filter(k => k !== mapping.telefone && k !== mapping.nome);
-  if (!mapping.telefone && keys.length > 0) {
-    mapping.telefone = keys[0];
-  }
-  if (!mapping.nome) {
-    if (unmappedKeys.length > 0) {
-      mapping.nome = unmappedKeys[0];
-    } else if (keys.length > 1) {
-      mapping.nome = keys[1] === mapping.telefone ? keys[0] : keys[1];
-    }
-  }
-
-  return mapping;
 }
 
 export function registerLeadsRoutes(app, deps) {
@@ -1099,30 +1021,65 @@ export function registerLeadsRoutes(app, deps) {
     return ensureDynamicLeadClientTable(pgDatabasePool, tenantId, schemaType);
   }
 
-  app.get("/api/leads", requireFirebaseAuth, async (req, res) => {
-    if (!ensureDb(res)) return;
-    // "leads" saiu de INTERNAL_PAGE_KEYS no refactor fc4f49e (modulo Leads
-    // removido de proposito). Esta rota (GET /api/leads) e consumida por MAIS
-    // de uma tela:
-    //   BancoDeDados.tsx:444              -> pagina "banco-de-dados"
-    //   CommercialIntelligenceContent.tsx -> rota inteligencia-comercial,
-    //                                        gateada por "dashboard" no frontend
-    //   useLeads.ts (hooks) usado por:
-    //     WhatsAppInbox.tsx -> pagina "whatsapp"
-    //     SegmentacaoCatalog.tsx (via Relacionamento.tsx, que redireciona para
-    //       /crm/livpub?tab=relacionamento) -> pagina "livpub"
-    //   (pages/Leads.tsx tambem importa useLeads, mas nao esta roteado em
-    //   lugar nenhum — /crm/leads redireciona para banco-de-dados. Nao entra
-    //   na lista: adicionar chave para consumidor morto so esconderia o
-    //   proximo "cadeado que nao cadeia nada".)
-    // Gatear so por uma dessas quebraria as outras tres — mesma familia do bug
-    // que acabou de ser consertado, na ponta contraria (rota compartilhada,
-    // N consumidores legitimos). hasInternalPageAccess e array-aware, entao
-    // ensureSharedRoutePageAccess aceita a lista sem mudanca de assinatura.
-    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard", "whatsapp", "livpub"])) return;
+  // ── Lista do Banco de Dados: filtro, ordenação, contagem e paginação no SQL (services/leadListQuery.js) ──────────────
+  // O escopo do usuário é o mesmo em todas as rotas de lista: operador interno vê os seus e os sem dono; usuário interno pode
+  // filtrar por responsável; cliente vê tudo da própria empresa. Sempre por client_id.
+  function resolveLeadListScope(req, clientId) {
+    const isInternalOperator = req.authAccess?.role === "internal" && req.authAccess?.accessPreset === "operador";
+    if (isInternalOperator) {
+      const uid = req.authAccess?.uid || req.authUser?.uid;
+      const email = req.authAccess?.email || req.authUser?.email;
+      return { clientId, operatorIdentifiers: [uid, email].filter(Boolean) };
+    }
+    if (req.authAccess?.role !== "client") {
+      const assignedTo = normalizeString(req.query?.assigned_to || req.query?.assignedTo || req.query?.userId);
+      return { clientId, assignedTo: assignedTo || null };
+    }
+    return { clientId };
+  }
 
-    const requestedClientId = normalizeString(req.query.clientId);
-    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+  /** Filtros de lista vindos da URL. Devolve { filters } ou { problem } (valor fora da lista conhecida vira 400, nunca lista vazia calada). */
+  function parseLeadListFilters(query) {
+    const filters = {
+      stage: normalizeString(query.stage) || "",
+      temperature: normalizeString(query.temperature) || "",
+      tag: normalizeString(query.tag) || "",
+      search: normalizeString(query.search) || "",
+      source: normalizeString(query.source) || "",
+      channel: normalizeString(query.channel) || "",
+      segment: normalizeString(query.segment) || "",
+    };
+    if (filters.channel && filters.channel !== "all" && !MARKETING_CHANNEL_IDS.includes(filters.channel)) {
+      return { problem: `Canal inválido: ${filters.channel}` };
+    }
+    if (filters.segment && !BASE_POTENTIAL_SEGMENTS.includes(filters.segment)) {
+      return { problem: `Faixa inválida: ${filters.segment}` };
+    }
+    return { filters };
+  }
+
+  const LEAD_LIST_SORTS = ["contato", "ultima_conversa"];
+  const EMPTY_SUMMARY = {
+    totalLeads: 0, buyersCount: 0, lostCount: 0, openBudgetsCount: 0, inNegotiationCount: 0,
+    inConversationCount: 0, neverContactedCount: 0, activeLeadsCount: 0, estimatedRevenue: 0,
+  };
+
+  function authorizeLeadList(req, res) {
+    if (!ensureDb(res)) return null;
+    const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.query?.clientId ?? req.body?.clientId));
+    if (!clientId) return null;
+    return clientId;
+  }
+
+  app.get("/api/leads", requireFirebaseAuth, async (req, res) => {
+    // "leads" saiu de INTERNAL_PAGE_KEYS no refactor fc4f49e (modulo Leads removido de proposito). Esta rota e consumida por
+    // MAIS de uma tela: BancoDeDados.tsx (banco-de-dados), CommercialIntelligenceContent.tsx (inteligencia-comercial, gateada por
+    // "dashboard"), hooks/useLeads.ts (WhatsAppInbox -> "whatsapp"; SegmentacaoCatalog -> "livpub"). Gatear so por uma quebraria
+    // as outras tres, entao ensureSharedRoutePageAccess aceita a lista (array-aware).
+    // pages/Leads.tsx tambem importa useLeads mas nao esta roteado: nao entra na lista.
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard", "whatsapp", "livpub"])) return;
+    const clientId = authorizeLeadList(req, res);
     if (!clientId) return;
 
     try {
@@ -1131,209 +1088,192 @@ export function registerLeadsRoutes(app, deps) {
       console.warn("[leads-route] Column check warning:", e?.message || e);
     }
 
-    const stage = normalizeString(req.query.stage);
-    const temperature = normalizeString(req.query.temperature);
-    const tag = normalizeString(req.query.tag);
-    const search = normalizeString(req.query.search);
-    const page = Math.max(1, parseInt(req.query.page || "1", 10));
-    const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit || "2000", 10)));
-
-    const isInternalOperator =
-      req.authAccess?.role === "internal" &&
-      req.authAccess?.accessPreset === "operador";
-
-    let targetAssignedTo = null;
-    let operatorIdentifiers = null;
-
-    if (isInternalOperator) {
-      const uid = req.authAccess?.uid || req.authUser?.uid;
-      const email = req.authAccess?.email || req.authUser?.email;
-      operatorIdentifiers = [uid, email].filter(Boolean);
-    } else if (req.authAccess?.role !== "client") {
-      targetAssignedTo = normalizeString(req.query.assigned_to || req.query.assignedTo || req.query.userId);
+    const parsed = parseLeadListFilters(req.query);
+    if (parsed.problem) {
+      sendError(res, 400, "INVALID_LEAD_FILTER", parsed.problem);
+      return;
     }
+    const scope = resolveLeadListScope(req, clientId);
+
+    // Modo PAGINADO (opt-in): quem manda `page` ou `limit` recebe SÓ aquela página, filtrada e ordenada no banco, com o total real
+    // e as contagens das abas. Sem `page`/`limit` o contrato é o de sempre (a lista inteira), para os chamadores que carregam tudo.
+    const paged = req.query.page !== undefined || req.query.limit !== undefined;
+    if (paged) {
+      const page = Math.max(1, parseInt(req.query.page || "1", 10) || 1);
+      const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.limit || "50", 10) || 50));
+      const sort = LEAD_LIST_SORTS.includes(req.query.sort) ? req.query.sort : null;
+      const dir = req.query.dir === "desc" ? "desc" : "asc";
+      try {
+        const result = await queryLeadsPage(pgDatabasePool, { scope, filters: parsed.filters, sort, dir, page, limit });
+        res.json({ ...result, degraded: false });
+        return;
+      } catch (error) {
+        console.error("[leads] Consulta paginada falhou; devolvendo a página SEM filtros (degradado):", error?.message || error);
+      }
+      try {
+        const { rows } = await pgDatabasePool.query(
+          `SELECT * FROM public.leads WHERE client_id = $1 ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`,
+          [clientId, limit, (page - 1) * limit]
+        );
+        const { rows: [c] } = await pgDatabasePool.query(`SELECT count(*)::int AS n FROM public.leads WHERE client_id = $1`, [clientId]);
+        res.json({
+          items: rows, total: c.n, page, limit, totalPages: Math.max(1, Math.ceil(c.n / limit)), tabs: null,
+          degraded: true, degradedReason: "FILTERS_UNAVAILABLE",
+        });
+      } catch (error) {
+        console.error("[leads] Fallback da lista paginada também falhou:", error?.message || error);
+        sendError(res, 500, "LEADS_QUERY_FAILED", "Falha ao carregar a lista de leads.");
+      }
+      return;
+    }
+
+    // ── Modo legado: a lista inteira (contrato de sempre) ─────────────────────────────────────────────────────────────
+    const stage = parsed.filters.stage;
+    const temperature = parsed.filters.temperature;
+    const tag = parsed.filters.tag;
+    const search = parsed.filters.search;
+    const operatorIdentifiers = scope.operatorIdentifiers || null;
+    const targetAssignedTo = scope.assignedTo || null;
 
     try {
       let data = [];
-      let totalCount = 0;
+      let degraded = false;
+      let degradedReason = null;
 
-      // 1. Tentar query com filtros e colunas avançadas
       try {
-        let query = supabase
-          .from('leads')
-          .select("*", { count: "exact" })
-          .eq("client_id", clientId);
+        let query = supabase.from("leads").select("*").eq("client_id", clientId);
 
         if (operatorIdentifiers && operatorIdentifiers.length > 0) {
-          const orClauses = operatorIdentifiers
-            .map((id) => `assigned_to.eq.${id}`)
-            .concat("assigned_to.is.null")
-            .join(",");
+          const orClauses = operatorIdentifiers.map((id) => `assigned_to.eq.${id}`).concat("assigned_to.is.null").join(",");
           query = query.or(orClauses);
         } else if (targetAssignedTo) {
           query = query.eq("assigned_to", targetAssignedTo);
         }
-
-        if (stage && stage !== "all") {
-          query = query.eq("stage", stage);
-        }
-
-        if (temperature && temperature !== "all") {
-          query = query.eq("temperature", temperature);
-        }
-
-        if (tag) {
-          query = query.contains("tags", [tag]);
-        }
-
-        if (search) {
-          query = query.or(`nome.ilike.%${search}%,telefone.ilike.%${search}%`);
-        }
-
+        if (stage && stage !== "all") query = query.eq("stage", stage);
+        if (temperature && temperature !== "all") query = query.eq("temperature", temperature);
+        if (tag) query = query.contains("tags", [tag]);
+        if (search) query = query.or(`nome.ilike.%${search}%,telefone.ilike.%${search}%`);
         query = query.order("created_at", { ascending: false });
 
-        if (limit < 2000) {
-          const from = (page - 1) * limit;
-          const to = from + limit - 1;
-          query = query.range(from, to);
-        }
-
         const resQuery = await query;
-        if (!resQuery.error && Array.isArray(resQuery.data)) {
-          data = resQuery.data;
-          totalCount = resQuery.count ?? data.length;
-        } else if (resQuery.error) {
-          throw resQuery.error;
-        }
+        if (resQuery.error) throw resQuery.error;
+        data = Array.isArray(resQuery.data) ? resQuery.data : [];
       } catch (advancedErr) {
-        console.warn("[leads] Advanced query failed, using base query fallback:", advancedErr?.message || advancedErr);
-        // Fallback para query básica garantida que nunca falha
-        let fallbackQ = supabase
-          .from('leads')
-          .select("*")
-          .eq("client_id", clientId);
-
+        // Antes: caía aqui em silêncio e devolvia as 2.000 primeiras linhas SEM filtro. Agora a resposta diz que degradou.
+        console.error("[leads] Advanced query failed, using base query fallback:", advancedErr?.message || advancedErr);
+        degraded = true;
+        degradedReason = "FILTERS_UNAVAILABLE";
+        let fallbackQ = supabase.from("leads").select("*").eq("client_id", clientId);
         if (operatorIdentifiers && operatorIdentifiers.length > 0) {
-          const orClauses = operatorIdentifiers
-            .map((id) => `assigned_to.eq.${id}`)
-            .concat("assigned_to.is.null")
-            .join(",");
+          const orClauses = operatorIdentifiers.map((id) => `assigned_to.eq.${id}`).concat("assigned_to.is.null").join(",");
           fallbackQ = fallbackQ.or(orClauses);
         } else if (targetAssignedTo) {
           fallbackQ = fallbackQ.eq("assigned_to", targetAssignedTo);
         }
-
-        fallbackQ = fallbackQ.order("created_at", { ascending: false }).limit(2000);
-        const fallbackRes = await fallbackQ;
-
+        const fallbackRes = await fallbackQ.order("created_at", { ascending: false }).limit(2000);
+        if (fallbackRes.error) throw fallbackRes.error;
         data = fallbackRes.data || [];
-        totalCount = data.length;
       }
 
-      // 2. Calcular agregações para métricas da base do tenant (com fallback)
-      let allItems = [];
+      // Totais da base: agregados no banco (antes: `select("*")` da tabela inteira contada no Node).
+      let summary = null;
       try {
-        let allLeadsQ = supabase
-          .from('leads')
-          .select("*")
-          .eq("client_id", clientId);
-
-        if (operatorIdentifiers && operatorIdentifiers.length > 0) {
-          const orClauses = operatorIdentifiers
-            .map((id) => `assigned_to.eq.${id}`)
-            .concat("assigned_to.is.null")
-            .join(",");
-          allLeadsQ = allLeadsQ.or(orClauses);
-        } else if (targetAssignedTo) {
-          allLeadsQ = allLeadsQ.eq("assigned_to", targetAssignedTo);
-        }
-
-        const { data: allLeadsData } = await allLeadsQ;
-        allItems = allLeadsData || [];
-      } catch {
-        allItems = data || [];
+        ({ summary } = await queryBaseFacets(pgDatabasePool, scope, { parts: ["summary"] }));
+      } catch (summaryErr) {
+        console.error("[leads] Resumo da base falhou:", summaryErr?.message || summaryErr);
+        degraded = true;
+        degradedReason = degradedReason || "SUMMARY_UNAVAILABLE";
       }
-
-      const totalLeads = allItems.length;
-
-      // 1. Fora das faixas primeiro: stage === 'buyer' e stage === 'lost'
-      const buyersCount = allItems.filter((l) => l.stage === "buyer").length;
-      const lostCount = allItems.filter((l) => l.stage === "lost").length;
-
-      const nonExcluded = allItems.filter(
-        (l) => l.stage !== "buyer" && l.stage !== "lost"
-      );
-
-      // 2. inNegotiationCount — stage === 'open_budget' ou status === 'orcamento'
-      const inNegotiation = nonExcluded.filter(
-        (l) => l.stage === "open_budget" || l.status === "orcamento"
-      );
-      const inNegotiationCount = inNegotiation.length;
-
-      // 3. inConversationCount — do que sobrou, os que têm conversa comercial real (não nulo e não começa com 🚫)
-      const afterNegotiation = nonExcluded.filter(
-        (l) => !(l.stage === "open_budget" || l.status === "orcamento")
-      );
-      const inConversation = afterNegotiation.filter((l) => temConversaComercial(l));
-      const inConversationCount = inConversation.length;
-
-      // 4. neverContactedCount — todo o resto (sem histórico OU conversa pessoal 🚫). Cobre agenda, planilha e formulário
-      const neverContacted = afterNegotiation.filter((l) => !temConversaComercial(l));
-      const neverContactedCount = neverContacted.length;
-
-      const activeLeadsCount = inNegotiationCount + inConversationCount + neverContactedCount;
-
-      // Validação obrigatória: as três faixas + buyers + lost têm que somar totalLeads
-      const checkSum =
-        buyersCount + lostCount + inNegotiationCount + inConversationCount + neverContactedCount;
-      if (checkSum !== totalLeads) {
-        console.error(
-          `[leads-summary] Desvio detectado no fechamento das faixas: totalLeads=${totalLeads} vs checkSum=${checkSum} (buyers=${buyersCount}, lost=${lostCount}, inNegotiation=${inNegotiationCount}, inConversation=${inConversationCount}, neverContacted=${neverContactedCount})`
-        );
-      }
-
-      // estimatedRevenue soma apenas potential_contract_value reais sem fallback inventado
-      const openBudgetsSum = inNegotiation.reduce(
-        (sum, l) => sum + (Number(l.potential_contract_value) || 0),
-        0
-      );
 
       res.json({
-        items: data || [],
-        total: totalCount,
-        page,
-        limit,
-        summary: {
-          totalLeads,
-          buyersCount,
-          lostCount,
-          openBudgetsCount: inNegotiationCount,
-          inNegotiationCount,
-          inConversationCount,
-          neverContactedCount,
-          activeLeadsCount,
-          estimatedRevenue: openBudgetsSum,
-        },
+        items: data,
+        total: data.length,
+        page: 1,
+        limit: 2000,
+        summary,
+        degraded,
+        ...(degraded ? { degradedReason, filtersIgnored: degradedReason === "FILTERS_UNAVAILABLE" } : {}),
       });
     } catch (error) {
       console.error("leads query error:", error);
-      res.json({
-        items: [],
-        total: 0,
-        page: 1,
-        limit: 2000,
-        summary: {
-          totalLeads: 0,
-          buyersCount: 0,
-          lostCount: 0,
-          openBudgetsCount: 0,
-          inNegotiationCount: 0,
-          inConversationCount: 0,
-          neverContactedCount: 0,
-          activeLeadsCount: 0,
-          estimatedRevenue: 0,
-        },
+      sendError(res, 500, "LEADS_QUERY_FAILED", "Falha ao carregar a lista de leads.");
+    }
+  });
+
+  // Totais da BASE inteira (cartões de origem, faixas do Potencial, tags, origens): agregados no banco.
+  app.get("/api/leads/facets", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    try {
+      const facets = await queryBaseFacets(pgDatabasePool, resolveLeadListScope(req, clientId));
+      res.json({ ...facets, degraded: false });
+    } catch (error) {
+      console.error("[leads-facets] falhou:", error?.message || error);
+      sendError(res, 500, "LEADS_FACETS_FAILED", "Falha ao calcular os totais da base.");
+    }
+  });
+
+  // Todos os ids da combinação de filtros (selecionar todos, disparo por canal).
+  app.get("/api/leads/ids", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    const parsed = parseLeadListFilters(req.query);
+    if (parsed.problem) {
+      sendError(res, 400, "INVALID_LEAD_FILTER", parsed.problem);
+      return;
+    }
+    try {
+      res.json(await queryLeadIds(pgDatabasePool, { scope: resolveLeadListScope(req, clientId), filters: parsed.filters, contacts: req.query.contacts === "1" }));
+    } catch (error) {
+      console.error("[leads-ids] falhou:", error?.message || error);
+      sendError(res, 500, "LEADS_IDS_FAILED", "Falha ao listar os leads do filtro.");
+    }
+  });
+
+  // Público do assistente de campanha (estágios, tag, regras). Regra com campo fora da lista simples é RECUSADA, dizendo qual.
+  app.post("/api/leads/audience", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    const rules = Array.isArray(req.body?.rules) ? req.body.rules : [];
+    const problems = validateAudienceRules(rules);
+    if (problems.length > 0) {
+      res.status(400).json({ error: { code: "UNSUPPORTED_RULES", message: problems[0].message }, problems });
+      return;
+    }
+    try {
+      const result = await queryCampaignAudience(pgDatabasePool, {
+        scope: resolveLeadListScope(req, clientId),
+        stages: Array.isArray(req.body?.stages) ? req.body.stages.map(String) : [],
+        tag: normalizeString(req.body?.tag) || "",
+        rules,
       });
+      res.json(result);
+    } catch (error) {
+      console.error("[leads-audience] falhou:", error?.message || error);
+      sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.");
+    }
+  });
+
+  // Um lead pelo id ou pelo telefone (abrir pelo ?leadId= / ?phone= da URL, mesmo fora da página carregada).
+  app.get("/api/leads/lookup", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+    const leadId = normalizeString(req.query.leadId) || null;
+    const phone = normalizeString(req.query.phone) || null;
+    if (!leadId && !phone) {
+      sendError(res, 400, "LOOKUP_KEY_REQUIRED", "Informe leadId ou phone.");
+      return;
+    }
+    try {
+      const item = await lookupLead(pgDatabasePool, {
+        scope: resolveLeadListScope(req, clientId),
+        leadId,
+        phoneVariants: phone ? buildPhoneLookupVariants(phone) : [],
+      });
+      res.json({ item });
+    } catch (error) {
+      console.error("[leads-lookup] falhou:", error?.message || error);
+      sendError(res, 500, "LEADS_LOOKUP_FAILED", "Falha ao localizar o lead.");
     }
   });
 
@@ -2183,6 +2123,9 @@ export function registerLeadsRoutes(app, deps) {
   });
 
   // Importação simplificada via CSV / Excel com Suporte a Tags de Origem
+  // Importação do Banco num POST só (texto colado da IA, chamadas antigas). Registra a importação no MESMO lugar da tela de Planilhas
+  // (lead_imports + lead_import_items) pelo caminho em lotes e grava os leads em fatias de 500. Arquivos grandes vêm pelas rotas em
+  // lotes do Banco (/api/leads/import-batches/…): o corpo único de milhares de linhas estourava o limite de 15 MiB do express.json.
   app.post("/api/leads/import-csv", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
     if (!ensureDb(res)) return;
 
@@ -2197,194 +2140,146 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
 
-    // Identificador desta importação, gravado em dados.import_ids de cada lead. A tag continua sendo o
-    // vínculo para o que já existe, mas tag é editável e apagável pelo usuário: exclusão em massa não
-    // pode depender dela para sempre.
-    const importId = randomUUID();
-
-    const rawImportTags = req.body?.importTags || req.body?.tags || [];
-    const importTagsArray = Array.isArray(rawImportTags)
-      ? rawImportTags.map((t) => String(t).trim()).filter(Boolean)
-      : typeof rawImportTags === "string"
-      ? rawImportTags.split(",").map((t) => t.trim()).filter(Boolean)
-      : [];
-
     const rawMapping = req.body?.columnMapping || req.body?.mapping || null;
-    const mappingItems = Array.isArray(rawMapping)
-      ? rawMapping
-      : Array.isArray(rawMapping?.mapping)
-      ? rawMapping.mapping
-      : null;
-
-    if (mappingItems) {
-      const phoneMapping = mappingItems.find((m) => m && m.target === "telefone");
-      if (!phoneMapping) {
-        sendError(res, 400, "INVALID_MAPPING", "Nenhuma coluna mapeada para telefone. O telefone é obrigatório para importar.");
-        return;
-      }
-      // Registra novos campos customizados no cliente (lead_custom_fields)
-      const customItems = mappingItems.filter((m) => m && m.target === "custom");
-      if (customItems.length > 0) {
-        for (const item of customItems) {
-          const key = item.key || normalizeHeaderKey(item.label || item.column);
-          const label = item.label || item.column;
-          const detectedType = item.type || "text";
-          if (!key) continue;
-
-          const { data: existingField } = await supabase
-            .from("lead_custom_fields")
-            .select("id, client_id, key, label, type")
-            .eq("client_id", clientId)
-            .eq("key", key)
-            .maybeSingle();
-
-          if (!existingField) {
-            await supabase.from("lead_custom_fields").insert({
-              client_id: clientId,
-              key,
-              label,
-              type: detectedType,
-              import_id: null,
-            });
-          }
-        }
-      }
+    const mappingItems = Array.isArray(rawMapping) ? rawMapping : Array.isArray(rawMapping?.mapping) ? rawMapping.mapping : null;
+    if (mappingItems && !mappingItems.find((m) => m && m.target === "telefone")) {
+      sendError(res, 400, "INVALID_MAPPING", "Nenhuma coluna mapeada para telefone. O telefone é obrigatório para importar.");
+      return;
     }
 
     try {
-      let importedCount = 0;
-      let skippedNoPhoneCount = 0;
-      const parsedLeads = [];
-      const phoneMapping = mappingItems?.find((m) => m && m.target === "telefone");
-
-      for (const row of rows) {
-        let formattedPhone = null;
-        let name = null;
-        let rawPhone = "";
-        let customCampos = {};
-
-        if (mappingItems) {
-          const normalized = defaultNormalizeImportedLead(
-            row,
-            clientId,
-            defaultDdd,
-            mappingItems
-          );
-          if (normalized.telefone) {
-            formattedPhone = normalized.telefone.startsWith("+")
-              ? normalized.telefone
-              : `+${normalized.telefone}`;
-          }
-          name = normalized.nome;
-          rawPhone = normalized.dados?.telefone_bruto || (phoneMapping ? row[phoneMapping.column] : "") || "";
-          customCampos = normalized.dados?.campos || {};
-        } else {
-          rawPhone = row.telefone || row.phone || row.celular || row.whatsapp || row.numero || "";
-          formattedPhone = sanitizePhoneE164(rawPhone, defaultDdd);
-          name = normalizeString(row.nome || row.name || row.cliente || row.contato || formattedPhone || "Lead Social");
-          if (row.dados && typeof row.dados.campos === "object" && row.dados.campos) {
-            customCampos = { ...row.dados.campos };
-          }
-        }
-
-        if (!formattedPhone || formattedPhone.replace(/^\+/, "").startsWith("5500")) {
-          // Sem telefone válido: não inventa número sintético 5500.
-          // Linha é pulada no cadastro de WhatsApp da planilha.
-          skippedNoPhoneCount++;
-          continue;
-        }
-
-        const isClosedSales = Boolean(req.body?.asClosedSales || req.body?.isClosedSales);
-        const stageInput = normalizeString(row.stage || row.estagio || row.etapa)?.toLowerCase();
-        const validStage = isClosedSales
-          ? "buyer"
-          : (['buyer', 'open_budget', 'inquiry', 'cold', 'lost'].includes(stageInput) ? stageInput : 'cold');
-        
-        const tempInput = normalizeString(row.temperature || row.temperatura)?.toLowerCase();
-        const validTemp = isClosedSales
-          ? "hot"
-          : (['hot', 'warm', 'cold'].includes(tempInput) ? tempInput : 'warm');
-
-        const rowTags = row.tags || row.tag || [];
-        const parsedRowTags = Array.isArray(rowTags)
-          ? rowTags.map((t) => String(t).trim())
-          : typeof rowTags === "string"
-          ? rowTags.split(",").map((t) => t.trim()).filter(Boolean)
-          : [];
-
-        const closedSalesTags = isClosedSales ? ["Venda Fechada", "Cliente Histórico"] : [];
-        // Origem: canal informado (tag da importação ou da linha, coluna de origem), vendas fechadas, ou —
-        // se ninguém informou nada — a própria importação. Nunca um canal inventado.
-        const resolvedOrigin = resolveImportOrigin({
-          importTags: importTagsArray,
-          rowTags: parsedRowTags,
-          rowOrigem: row.origem,
-          isClosedSales,
-        });
-        const originTag = resolvedOrigin.originTag;
-
-        const combinedTags = Array.from(
-          new Set([...parsedRowTags, ...importTagsArray, ...closedSalesTags, ...(originTag ? [originTag] : [])])
-        );
-
-        const valorVenda = Number(row.valor_venda || row.valor || row.valor_total) || null;
-
-        const dadosPayload = {
-          import_ids: [importId],
-          origem: resolvedOrigin.origem,
-          origem_marketing: resolvedOrigin.origemMarketing,
-          lead_source: resolvedOrigin.leadSource,
-          resumo_chat: row.interesse || row.resumo_chat || (isClosedSales ? "Cliente histórico importado como venda fechada" : "Interação no Direct"),
-          telefone_bruto: rawPhone ? String(rawPhone).trim() : null,
-          valor_venda: valorVenda || undefined,
-          data_fechamento: row.data_fechamento || undefined,
-          produto_comprado: row.produto_comprado || undefined,
-        };
-
-        if (Object.keys(customCampos).length > 0) {
-          dadosPayload.campos = customCampos;
-        }
-
-        parsedLeads.push({
-          client_id: clientId,
-          telefone: formattedPhone,
-          phone: formattedPhone,
-          nome: name,
-          stage: validStage,
-          stage_source: isClosedSales ? "manual" : undefined,
-          temperature: validTemp,
-          potential_contract_value: valorVenda || undefined,
-          tags: combinedTags,
-          dados: dadosPayload,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-      }
-
-      if (parsedLeads.length > 0) {
-        try {
-          const { insertedCount, updatedCount, totalCount } = await upsertLeadsBatchByPhone(
-            pgDatabasePool,
-            clientId,
-            parsedLeads
-          );
-          importedCount = totalCount;
-        } catch (dbErr) {
-          console.error("[leads-import-csv] Erro no upsertLeadsBatchByPhone:", dbErr);
-          throw dbErr;
-        }
-      }
-
+      const out = await runBancoImportInOnePost(pgDatabasePool, {
+        clientId,
+        rows,
+        defaultDdd,
+        columnMapping: rawMapping,
+        importTags: req.body?.importTags || req.body?.tags || [],
+        asClosedSales: Boolean(req.body?.asClosedSales || req.body?.isClosedSales),
+        sourceName: normalizeString(req.body?.sourceName || req.body?.fileName),
+        uploadedByUid: req.authAccess?.uid || null,
+        uploadedByEmail: req.authAccess?.email || null,
+      });
       res.json({
         success: true,
-        importId,
-        importedCount,
-        skippedNoPhoneCount,
+        importId: out.importId,
+        importedCount: out.leadsTouched,
+        skippedNoPhoneCount: out.skippedNoPhone,
         totalRows: rows.length,
+        totals: out.totals,
       });
     } catch (err) {
+      if (err instanceof ImportError) {
+        res.status(err.status).json({ error: { code: err.code, message: err.message, details: { importId: err.importId, receivedOffset: err.receivedOffset } } });
+        return;
+      }
       console.error("[leads-csv-import] Erro ao importar CSV:", err);
-      sendError(res, 500, "CSV_IMPORT_FAILED", err.message || "Falha ao importar planilha");
+      res.status(500).json({
+        error: { code: "CSV_IMPORT_FAILED", message: err.message || "Falha ao importar planilha", details: { importId: err.importId || null, receivedOffset: err.receivedOffset ?? null } },
+        message: err.message || "Falha ao importar planilha",
+      });
+    }
+  });
+
+  // Importação do Banco em LOTES (arquivos grandes): abrir → lotes de até 500 linhas → fechar. Cada lote grava os leads e registra o lote.
+  const authorizeBancoImportOwner = async (req, res) => {
+    const importId = normalizeString(req.params.importId);
+    if (!importId || !/^[0-9a-f-]{36}$/i.test(importId)) {
+      sendError(res, 400, "INVALID_IMPORT_ID", "importId inválido");
+      return null;
+    }
+    const owner = await findLeadImportOwner(pgDatabasePool, importId);
+    if (!owner) {
+      sendError(res, 404, "IMPORT_NOT_FOUND", "Importação não encontrada");
+      return null;
+    }
+    const clientId = resolveAuthorizedClientId(req, res, owner);
+    if (!clientId) return null;
+    const ctx = await getLeadImportContext(pgDatabasePool, { importId, clientId });
+    if (ctx.params?.mode !== BANCO_IMPORT_MODE) {
+      sendError(res, 409, "IMPORT_MODE_MISMATCH", "Esta importação é de uma planilha da tela de Planilhas, não do Banco de Dados.");
+      return null;
+    }
+    return ctx;
+  };
+  const respondBancoImportError = (res, error, label) => {
+    if (error instanceof ImportError) {
+      res.status(error.status).json({ error: { code: error.code, message: error.message, details: error.details } });
+      return;
+    }
+    console.error(label, error);
+    sendError(res, 500, "LEAD_IMPORT_FAILED", error instanceof Error ? error.message : "Falha na importação");
+  };
+
+  app.post("/api/leads/import-batches/open", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
+    if (!clientId) return;
+    const mappingRaw = req.body?.columnMapping || req.body?.mapping || null;
+    const mappingItems = Array.isArray(mappingRaw) ? mappingRaw : Array.isArray(mappingRaw?.mapping) ? mappingRaw.mapping : null;
+    if (mappingItems && !mappingItems.find((m) => m && m.target === "telefone")) {
+      return sendError(res, 400, "INVALID_MAPPING", "Nenhuma coluna mapeada para telefone. O telefone é obrigatório para importar.");
+    }
+    try {
+      const out = await openBancoImport(pgDatabasePool, {
+        clientId,
+        sourceName: req.body?.sourceName,
+        defaultDdd: req.body?.defaultDdd,
+        columnMapping: mappingRaw,
+        totalRows: req.body?.totalRows,
+        sampleRows: req.body?.sampleRows,
+        fingerprint: normalizeString(req.body?.fingerprint),
+        importTags: req.body?.importTags,
+        asClosedSales: Boolean(req.body?.asClosedSales),
+        uploadedByUid: req.authAccess?.uid || null,
+        uploadedByEmail: req.authAccess?.email || null,
+      });
+      res.status(201).json(out);
+    } catch (error) {
+      respondBancoImportError(res, error, "banco import open error:");
+    }
+  });
+
+  app.post("/api/leads/import-batches/:importId/batches", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    try {
+      const ctx = await authorizeBancoImportOwner(req, res);
+      if (!ctx) return;
+      const out = await appendBancoImportBatch(pgDatabasePool, ctx, {
+        startIndex: req.body?.startIndex,
+        rows: req.body?.rows,
+        fingerprint: normalizeString(req.body?.fingerprint),
+        normalizeImportedLead,
+        isImportedLeadEmpty,
+      });
+      res.json(out);
+    } catch (error) {
+      respondBancoImportError(res, error, "banco import batch error:");
+    }
+  });
+
+  app.post("/api/leads/import-batches/:importId/close", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    try {
+      const ctx = await authorizeBancoImportOwner(req, res);
+      if (!ctx) return;
+      res.json(await closeLeadImport(pgDatabasePool, { importId: ctx.importId, clientId: ctx.clientId }));
+    } catch (error) {
+      respondBancoImportError(res, error, "banco import close error:");
+    }
+  });
+
+  app.get("/api/leads/import-batches/:importId/progress", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    try {
+      const ctx = await authorizeBancoImportOwner(req, res);
+      if (!ctx) return;
+      res.json(await getLeadImportProgress(pgDatabasePool, { importId: ctx.importId, clientId: ctx.clientId }));
+    } catch (error) {
+      respondBancoImportError(res, error, "banco import progress error:");
     }
   });
 
@@ -2600,7 +2495,7 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
-  // Exportação filtrada para CSV
+  // Exportação filtrada para CSV: a base INTEIRA da combinação de filtros (antes: `.limit(5000)` calado), em blocos, sem carregar tudo.
   app.get("/api/leads/export", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
     if (!ensureDb(res)) return;
 
@@ -2608,67 +2503,51 @@ export function registerLeadsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const stage = normalizeString(req.query.stage);
-    const temperature = normalizeString(req.query.temperature);
+    const parsed = parseLeadListFilters(req.query);
+    if (parsed.problem) {
+      sendError(res, 400, "INVALID_LEAD_FILTER", parsed.problem);
+      return;
+    }
+    const scope = resolveLeadListScope(req, clientId);
+    const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
     try {
-      let query = supabase
-        .from("leads")
-        .select("nome, telefone, stage, temperature, tags, raw_chat_summary, created_at, last_interaction_at, dados")
-        .eq("client_id", clientId)
-        .order("created_at", { ascending: false });
-
-      if (stage && stage !== "all") {
-        query = query.eq("stage", stage);
-      }
-      if (temperature && temperature !== "all") {
-        query = query.eq("temperature", temperature);
-      }
-
-      const { data, error } = await query.limit(5000);
-      if (error) throw error;
-
-      const leads = data || [];
-
-      // Coleta dinâmica de todas as chaves customizadas dos leads
-      const allCustomKeys = new Set();
-      leads.forEach(l => {
-        const campos = l.dados && typeof l.dados === "object" ? l.dados.campos : null;
-        if (campos && typeof campos === "object") {
-          Object.keys(campos).forEach(k => allCustomKeys.add(k));
-        }
-      });
-      const customKeyList = Array.from(allCustomKeys).sort();
-
+      const customKeyList = await queryCustomKeys(pgDatabasePool, { scope, filters: parsed.filters });
       const baseHeaders = ["Nome", "Telefone", "Estágio", "Temperatura", "Tags", "Última Interação", "Resumo Chat"];
-      const allHeaders = [...baseHeaders, ...customKeyList];
-      const csvHeader = allHeaders.map(h => `"${h.replace(/"/g, '""')}"`).join(",") + "\n";
-
-      const csvRows = leads.map(l => {
-        const nome = `"${(l.nome || '').replace(/"/g, '""')}"`;
-        const fone = `"${(l.telefone || '').replace(/"/g, '""')}"`;
-        const stg = `"${l.stage || 'cold'}"`;
-        const tmp = `"${l.temperature || 'warm'}"`;
-        const tgs = `"${(Array.isArray(l.tags) ? l.tags.join("; ") : '').replace(/"/g, '""')}"`;
-        const last = `"${l.last_interaction_at ? new Date(l.last_interaction_at).toLocaleString('pt-BR') : ''}"`;
-        const sum = `"${(l.raw_chat_summary || '').replace(/"/g, '""')}"`;
-        const baseCols = [nome, fone, stg, tmp, tgs, last, sum];
-
-        const campos = (l.dados && typeof l.dados === "object" && l.dados.campos) || {};
-        const customCols = customKeyList.map(k => {
-          const val = campos[k];
-          const strVal = val !== undefined && val !== null ? String(val) : "";
-          return `"${strVal.replace(/"/g, '""')}"`;
-        });
-
-        return [...baseCols, ...customCols].join(",");
-      }).join("\n");
+      const csvHeader = [...baseHeaders, ...customKeyList].map(csvCell).join(",") + "\n";
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="leads_export_${clientId}_${Date.now()}.csv"`);
-      res.status(200).send("\uFEFF" + csvHeader + csvRows);
+      res.status(200);
+      res.write("\uFEFF" + csvHeader);
+
+      let wrote = 0;
+      for await (const block of iterateLeadsForExport(pgDatabasePool, { scope, filters: parsed.filters })) {
+        const lines = block.map((l) => {
+          const base = [
+            l.nome || "",
+            l.telefone || "",
+            l.stage || "cold",
+            l.temperature || "warm",
+            Array.isArray(l.tags) ? l.tags.join("; ") : "",
+            l.last_interaction_at ? new Date(l.last_interaction_at).toLocaleString("pt-BR") : "",
+            l.raw_chat_summary || "",
+          ];
+          const campos = (l.dados && typeof l.dados === "object" && l.dados.campos) || {};
+          const custom = customKeyList.map((k) => (campos[k] !== undefined && campos[k] !== null ? String(campos[k]) : ""));
+          return [...base, ...custom].map(csvCell).join(",");
+        });
+        wrote += lines.length;
+        res.write(lines.join("\n") + "\n");
+      }
+      console.log(`[leads-export] ${wrote} leads exportados (client ${clientId})`);
+      res.end();
     } catch (err) {
       console.error("[leads-export] Erro ao exportar leads:", err);
+      if (res.headersSent) {
+        res.destroy(err); // arquivo já começou: derruba a conexão para o navegador NÃO tratar o CSV pela metade como completo
+        return;
+      }
       sendError(res, 500, "EXPORT_FAILED", "Falha ao exportar base de leads");
     }
   });
@@ -2961,6 +2840,11 @@ export function registerLeadsRoutes(app, deps) {
     if (!clientId) return;
 
     try {
+      // Com Postgres direto, a lista traz também status/progresso da importação em lotes (e funciona com o schema antigo).
+      if (pgDatabasePool) {
+        res.json({ items: await listLeadImports(pgDatabasePool, clientId, 20) });
+        return;
+      }
       const { data, error } = await supabase
         .from("lead_imports")
         .select("id, client_id, source_name, source_type, total_rows, imported_rows, skipped_rows, uploaded_by_uid, uploaded_by_email, created_at, column_mapping")
@@ -3186,23 +3070,6 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
-  const isRowHeader = (row) => {
-    if (!row || typeof row !== "object") return false;
-    const values = Object.values(row).map(val =>
-      String(val ?? "").trim().toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]+/g, "")
-    );
-    const hasPhoneHeader = values.some(val =>
-      ["telefone", "celular", "phone", "fone", "whatsapp", "number", "numero"].some(alias => val.includes(alias))
-    );
-    const hasNameHeader = values.some(val =>
-      ["nome", "name", "cliente", "contato", "lead", "responsavel"].some(alias => val.includes(alias))
-    );
-    return hasPhoneHeader && hasNameHeader;
-  };
-
   app.post("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
 
@@ -3228,10 +3095,8 @@ export function registerLeadsRoutes(app, deps) {
       return;
     }
 
-    if (rows.length > 5000) {
-      sendError(res, 413, "PAYLOAD_TOO_LARGE", "Maximum 5000 rows per import");
-      return;
-    }
+    // Sem teto de linhas: o teto de 5.000 existia porque tudo ia num único INSERT (9 colunas × 7.282 linhas estoura os 65.535
+    // parâmetros do Postgres). Os itens agora são gravados em fatias de IMPORT_BATCH_SIZE linhas.
 
     try {
       // 1. Processamento e identificação de campos customizados conhecidos
@@ -3274,48 +3139,18 @@ export function registerLeadsRoutes(app, deps) {
         }
       }
 
-      const filteredRows = rows.filter(row => !isRowHeader(row));
-      const autoMapping = detectImportColumns(filteredRows);
-      const parsedItems = filteredRows.map((row, index) => {
-        const enrichedRow = { ...row };
-        if (!mappingItems) {
-          if (autoMapping.telefone && !enrichedRow.telefone) {
-            enrichedRow.telefone = row[autoMapping.telefone];
-          }
-          if (autoMapping.nome && !enrichedRow.nome) {
-            enrichedRow.nome = row[autoMapping.nome];
-          }
-        }
-
-        const normalized = normalizeImportedLead(
-          enrichedRow,
-          clientId,
-          defaultDdd,
-          mappingItems || null
-        );
-        const imported = !!normalized.telefone;
-        const phoneMapping = mappingItems?.find((m) => m.target === "telefone");
-        const rawPhone = phoneMapping
-          ? String(row[phoneMapping.column] ?? "").trim()
-          : String(enrichedRow.telefone ?? "").trim();
-        const rawDigits = rawPhone.replace(/\D/g, "");
-        const skipReason = imported
-          ? null
-          : isImportedLeadEmpty(normalized)
-            ? "Linha vazia ou sem dados aproveitaveis"
-            : (rawDigits.length === 8 || rawDigits.length === 9) && !defaultDdd
-              ? "Telefone incompleto (faltou DDD)"
-              : rawDigits.length >= 15 || rawPhone.includes("@g.us")
-                ? "Identificador de grupo do WhatsApp bloqueado"
-                : "Telefone ausente ou invalido";
-
-        return {
-          rowNumber: index + 2,
-          rawData: row,
-          normalized,
-          imported,
-          skipReason,
-        };
+      const filteredRows = rows.filter((row) => !isRowHeader(row));
+      const autoMapping = mappingItems ? null : detectImportColumns(filteredRows);
+      // numbering "filtered": numeração de linha deste caminho sempre foi a posição entre as linhas que não são cabeçalho
+      const parsedItems = parseImportRows(filteredRows, {
+        clientId,
+        defaultDdd,
+        mappingItems,
+        autoMapping,
+        startIndex: 0,
+        numbering: "filtered",
+        normalizeImportedLead,
+        isImportedLeadEmpty,
       });
 
       const validRowsMap = new Map();
@@ -3374,9 +3209,17 @@ export function registerLeadsRoutes(app, deps) {
         normalized_data: item.normalized,
       }));
 
-      const { error: itemsError } = await supabase.from("lead_import_items").insert(importItems);
-      if (itemsError) {
-        throw itemsError;
+      // Fatias de IMPORT_BATCH_SIZE linhas (9 colunas × 500 = 4.500 parâmetros): o teto de parâmetros do Postgres não aparece.
+      // Falha no meio: remove o registro (os itens saem junto, ON DELETE CASCADE) — esta rota não cria planilha pela metade
+      // com cara de completa. Para retomar de onde parou, use o fluxo em lotes (/api/lead-imports/open).
+      try {
+        for (let start = 0; start < importItems.length; start += IMPORT_BATCH_SIZE) {
+          const { error: itemsError } = await supabase.from("lead_import_items").insert(importItems.slice(start, start + IMPORT_BATCH_SIZE));
+          if (itemsError) throw itemsError;
+        }
+      } catch (itemsFailure) {
+        await supabase.from("lead_imports").delete().eq("id", importRecord.id).then(() => null, () => null);
+        throw itemsFailure;
       }
 
       res.status(201).json({
@@ -3392,6 +3235,112 @@ export function registerLeadsRoutes(app, deps) {
         "LEAD_IMPORT_CREATE_FAILED",
         error instanceof Error ? error.message : "Failed to import spreadsheet"
       );
+    }
+  });
+
+  // ── Importação em lotes (sem teto de linhas): abrir → enviar lotes → fechar. Ver services/leadImportBatches.js ──────────
+  const respondImportError = (res, error, label) => {
+    if (error instanceof ImportError) {
+      sendError(res, error.status, error.code, error.message, error.details ?? undefined);
+      return;
+    }
+    console.error(label, error);
+    sendError(res, 500, "LEAD_IMPORT_FAILED", error instanceof Error ? error.message : "Falha na importação da planilha");
+  };
+
+  app.post("/api/lead-imports/open", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.body?.clientId));
+    if (!clientId) return;
+    try {
+      const out = await openLeadImport(pgDatabasePool, {
+        clientId,
+        sourceName: req.body?.sourceName,
+        sourceType: req.body?.sourceType,
+        defaultDdd: req.body?.defaultDdd,
+        columnMapping: req.body?.columnMapping || req.body?.mapping || null,
+        totalRows: req.body?.totalRows,
+        sampleRows: req.body?.sampleRows,
+        fingerprint: normalizeString(req.body?.fingerprint),
+        uploadedByUid: req.authAccess?.uid || null,
+        uploadedByEmail: req.authAccess?.email || null,
+      });
+      res.status(201).json(out);
+    } catch (error) {
+      respondImportError(res, error, "lead import open error:");
+    }
+  });
+
+  // Resolve a importação e autoriza o tenant DONO dela (o clientId do corpo não decide nada nas rotas por :importId).
+  const authorizeImportOwner = async (req, res) => {
+    const importId = normalizeString(req.params.importId);
+    if (!importId || !/^[0-9a-f-]{36}$/i.test(importId)) {
+      sendError(res, 400, "INVALID_IMPORT_ID", "importId inválido");
+      return null;
+    }
+    const owner = await findLeadImportOwner(pgDatabasePool, importId);
+    if (!owner) {
+      sendError(res, 404, "IMPORT_NOT_FOUND", "Importação não encontrada");
+      return null;
+    }
+    const clientId = resolveAuthorizedClientId(req, res, owner);
+    if (!clientId) return null;
+    return { importId, clientId };
+  };
+
+  // Uma importação aberta pelo Banco cria LEADS a cada lote: continuar pelas rotas da tela de Planilhas (que só registram itens) a deixaria
+  // sem leads. Por isso essas rotas recusam, e a retomada é pela rota do Banco.
+  const isBancoImport = async ({ importId, clientId }) => {
+    const ctx = await getLeadImportContext(pgDatabasePool, { importId, clientId });
+    return ctx.params?.mode === BANCO_IMPORT_MODE;
+  };
+  const rejectBancoImportOnPlanilhas = (res) =>
+    sendError(res, 409, "IMPORT_MODE_MISMATCH", "Esta importação foi feita pelo Banco de Dados. Reenvie a planilha pela tela do Banco (o reenvio não duplica leads).");
+
+  app.post("/api/lead-imports/:importId/batches", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    try {
+      const target = await authorizeImportOwner(req, res);
+      if (!target) return;
+      if (await isBancoImport(target)) return rejectBancoImportOnPlanilhas(res);
+      const out = await appendLeadImportBatch(pgDatabasePool, {
+        ...target,
+        startIndex: req.body?.startIndex,
+        rows: req.body?.rows,
+        fingerprint: normalizeString(req.body?.fingerprint),
+        normalizeImportedLead,
+        isImportedLeadEmpty,
+      });
+      res.json(out);
+    } catch (error) {
+      respondImportError(res, error, "lead import batch error:");
+    }
+  });
+
+  app.post("/api/lead-imports/:importId/close", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    try {
+      const target = await authorizeImportOwner(req, res);
+      if (!target) return;
+      if (await isBancoImport(target)) return rejectBancoImportOnPlanilhas(res);
+      res.json(await closeLeadImport(pgDatabasePool, target));
+    } catch (error) {
+      respondImportError(res, error, "lead import close error:");
+    }
+  });
+
+  app.get("/api/lead-imports/:importId/progress", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    try {
+      const target = await authorizeImportOwner(req, res);
+      if (!target) return;
+      res.json(await getLeadImportProgress(pgDatabasePool, target));
+    } catch (error) {
+      respondImportError(res, error, "lead import progress error:");
     }
   });
 

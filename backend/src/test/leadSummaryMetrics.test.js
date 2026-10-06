@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import http from "http";
 import { readFileSync } from "fs";
@@ -6,6 +6,8 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
 import { isManagerOrAdmin } from "../access/claims.js";
+import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
+import { createPgliteDb } from "./helpers/pgliteDb.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -28,46 +30,40 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
   });
 
   describe("Cálculo das 3 Faixas no Summary (GET /api/leads)", () => {
-    function setupAppWithMockLeads(leadsList) {
+    // O resumo da base agora é calculado NO BANCO (services/leadListQuery.js): estes casos rodam contra Postgres real (pglite),
+    // não mais contra uma lista simulada que o Node contava.
+    const SCHEMA = `
+      SET TimeZone = 'UTC';
+      CREATE TABLE leads_clients (id text PRIMARY KEY, name text, ticket_medio numeric);
+      CREATE TABLE leads (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL REFERENCES leads_clients(id) ON DELETE CASCADE,
+        telefone text NOT NULL, phone text, nome text, status text, potential_contract_value numeric(14,2), dados jsonb NOT NULL DEFAULT '{}'::jsonb,
+        lead_source text, created_at timestamptz NOT NULL DEFAULT now(), stage text DEFAULT 'cold', temperature text DEFAULT 'warm',
+        tags text[] DEFAULT ARRAY[]::text[], last_interaction_at timestamptz, raw_chat_summary text, assigned_to text);
+      INSERT INTO leads_clients (id, name, ticket_medio) VALUES ('gmca', 'GMCA', 1000);
+    `;
+    const openDbs = [];
+    afterAll(async () => {
+      for (const d of openDbs) await d.close();
+    });
+
+    async function setupAppWithMockLeads(leadsList) {
+      const db = await createPgliteDb(SCHEMA);
+      openDbs.push(db);
+      const withPhone = leadsList.map((l, i) => ({ ...l, telefone: `55${String(i + 1).padStart(11, "0")}` }));
+      await db.query(
+        `INSERT INTO leads (client_id, telefone, stage, status, tags, raw_chat_summary, potential_contract_value)
+         SELECT client_id, telefone, stage, status, COALESCE(tags, ARRAY[]::text[]), raw_chat_summary, potential_contract_value
+           FROM jsonb_to_recordset($1::jsonb) AS x(client_id text, telefone text, stage text, status text, tags text[], raw_chat_summary text, potential_contract_value numeric)`,
+        [JSON.stringify(withPhone)]
+      );
+      const pool = { query: (sql, params) => db.query(sql, params) };
       const app = express();
       app.use(express.json());
 
-      const mockSupabase = {
-        from: vi.fn((table) => {
-          if (table === "leads") {
-            const queryBuilder = {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockReturnThis(),
-              order: vi.fn().mockReturnThis(),
-              range: vi.fn().mockReturnThis(),
-              or: vi.fn().mockReturnThis(),
-              then: (resolve) =>
-                resolve({
-                  data: leadsList,
-                  error: null,
-                  count: leadsList.length,
-                }),
-            };
-            return queryBuilder;
-          }
-          if (table === "leads_clients") {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockReturnThis(),
-              order: vi.fn().mockReturnThis(),
-              maybeSingle: vi.fn().mockResolvedValue({
-                data: { id: "gmca", name: "GMCA", ticket_medio: 1000 },
-                error: null,
-              }),
-            };
-          }
-          return {};
-        }),
-      };
-
       const deps = {
         app,
-        supabase: mockSupabase,
+        supabase: createPgSupabaseClient(pool),
         ensureDb: () => true,
         ensureDbClient: vi.fn(),
         requireFirebaseAuth: (req, _res, next) => {
@@ -81,7 +77,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         normalizeTenantKey: (k) => k,
         normalizeString: (s) => (s ? String(s).trim() : ""),
         sendError: (res, status, code, msg) => res.status(status).json({ error: code, message: msg }),
-        pgDatabasePool: { query: vi.fn().mockResolvedValue({ rows: [] }) },
+        pgDatabasePool: pool,
       };
 
       registerLeadsRoutes(app, deps);
@@ -99,7 +95,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         },
       ];
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
@@ -140,7 +136,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         },
       ];
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
@@ -183,7 +179,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         },
       ];
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
@@ -222,7 +218,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         },
       ];
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
@@ -257,7 +253,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         { id: "nunca-2", client_id: "gmca", stage: "cold", raw_chat_summary: "" },
       ];
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
@@ -326,7 +322,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
 
       expect(leads.length).toBe(2106);
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);
@@ -369,7 +365,7 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
         },
       ];
 
-      const app = setupAppWithMockLeads(leads);
+      const app = await setupAppWithMockLeads(leads);
       const srv = await startTestServer(app);
       try {
         const res = await fetch(`${srv.baseUrl}/api/leads?clientId=gmca`);

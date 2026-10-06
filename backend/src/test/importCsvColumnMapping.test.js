@@ -9,6 +9,7 @@ import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vites
 import express from "express";
 import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
+import { attachImportRegistry } from "./helpers/importRegistryStub.js";
 import { sanitizePhone } from "../services/leadImport.js";
 
 function createMockDb() {
@@ -174,6 +175,7 @@ describe("Mapeamento Dinâmico de Colunas em /api/leads/import-csv", () => {
     const app = express();
     app.use(express.json());
     mockDb = createMockDb();
+    await attachImportRegistry(mockDb);
     mockSupabase = createMockSupabase();
 
     const deps = {
@@ -201,13 +203,15 @@ describe("Mapeamento Dinâmico de Colunas em /api/leads/import-csv", () => {
   });
 
   afterAll(async () => {
+    await mockDb?.registry?.close();
     if (server) await new Promise((resolve) => server.close(resolve));
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockDb.leads.length = 0;
     mockDb.query.mockClear();
     mockSupabase.customFieldsTable.length = 0;
+    await mockDb.registry.exec("DELETE FROM lead_custom_fields; DELETE FROM lead_import_items; DELETE FROM lead_imports;");
   });
 
   it("1. Planilha com header 'Telefone 1' mapeado importa corretamente (solução para o caso de 19.998 leads)", async () => {
@@ -292,14 +296,16 @@ describe("Mapeamento Dinâmico de Colunas em /api/leads/import-csv", () => {
     expect(data.success).toBe(true);
     expect(data.importedCount).toBe(1);
 
-    // Verifica se os campos foram registrados em lead_custom_fields
-    expect(mockSupabase.customFieldsTable).toHaveLength(2);
-    const valorField = mockSupabase.customFieldsTable.find((f) => f.key === "valor_da_venda");
+    // Verifica se os campos foram registrados em lead_custom_fields (agora pelo registro da importação, no mesmo banco)
+    const { rows: customFields } = await mockDb.registry.query("SELECT key, type, client_id, import_id FROM lead_custom_fields WHERE client_id = $1 ORDER BY key", [testClientId]);
+    expect(customFields).toHaveLength(2);
+    const valorField = customFields.find((f) => f.key === "valor_da_venda");
     expect(valorField).toBeDefined();
     expect(valorField.type).toBe("number");
     expect(valorField.client_id).toBe(testClientId);
+    expect(valorField.import_id).toBe(data.importId); // e o campo aponta para a importação que o criou
 
-    const segmentoField = mockSupabase.customFieldsTable.find((f) => f.key === "segmento");
+    const segmentoField = customFields.find((f) => f.key === "segmento");
     expect(segmentoField).toBeDefined();
     expect(segmentoField.type).toBe("text");
 
