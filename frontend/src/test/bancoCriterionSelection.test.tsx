@@ -793,7 +793,7 @@ describe("Bloco 1 — Seleção por Critério", () => {
 
     // 7. Confirma a remoção clicando no botão destrutivo
     const submitBtn = screen.getByTestId("btn-submit-bulk-tag");
-    expect(submitBtn.textContent).toContain("Remover Tag de 77.550 leads");
+    expect(submitBtn.textContent).toContain('Remover "#Imp-Campanha_Teste_1_2_x" dos 77.550 leads');
     fireEvent.click(submitBtn);
 
     // 8. Confirma que a API foi chamada com updates: { removeTag: ... }, criteria e excludedLeadIds

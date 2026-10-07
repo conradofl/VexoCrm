@@ -1,8 +1,9 @@
 import { groupTagsByKind } from "@/lib/leads/leadListApi";
 
-interface TagItem {
+export interface TagItem {
   tag: string;
   kind?: string;
+  count?: number;
 }
 
 interface TagSelectProps {
@@ -24,9 +25,9 @@ export function TagSelect({ value, onChange, tags, className, ...rest }: TagSele
       <option value="">Todas as Tags</option>
       {groups.map((g) => (
         <optgroup key={g.kind} label={g.label} data-testid={`tag-group-${g.kind}`}>
-          {g.tags.map((t) => (
-            <option key={t} value={t}>
-              {t}
+          {g.items.map((t) => (
+            <option key={t.tag} value={t.tag}>
+              {t.tag} {t.count !== undefined ? `(${t.count.toLocaleString("pt-BR")})` : ""}
             </option>
           ))}
         </optgroup>

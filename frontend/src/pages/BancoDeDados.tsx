@@ -659,6 +659,7 @@ export default function BancoDeDados() {
   const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
   const [bulkTagValue, setBulkTagValue] = useState("");
   const [bulkTagMode, setBulkTagMode] = useState<"add" | "remove">("add");
+  const [targetTagCount, setTargetTagCount] = useState<number | null>(null);
   const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
   const [bulkAssignValue, setBulkAssignValue] = useState<string>("none");
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
@@ -2211,11 +2212,15 @@ export default function BancoDeDados() {
     setExcludedLeadIds([]);
     setSelectedLeadIds([]);
     if (selectedTag && selectedTag.trim()) {
+      const tagClean = selectedTag.trim();
       setBulkTagMode("remove");
-      setBulkTagValue(selectedTag.trim());
+      setBulkTagValue(tagClean);
+      const found = facets?.tags?.find((t) => t.tag === tagClean);
+      setTargetTagCount(found?.count ?? listTotal);
     } else {
       setBulkTagMode("add");
       setBulkTagValue("");
+      setTargetTagCount(null);
     }
     setIsBulkTagModalOpen(true);
   };
@@ -2508,19 +2513,23 @@ export default function BancoDeDados() {
   };
 
   const handleBulkTagSubmit = async () => {
-    if (bancoEffectiveSelectedCount === 0 || !bulkTagValue.trim()) return;
+    if (!bulkTagValue.trim()) return;
     try {
       const token = await getIdToken();
       const isCriterion = selectionMode === "criterion";
       const isRemove = bulkTagMode === "remove";
+      const tagToApply = bulkTagValue.trim();
       const payload: any = {
         clientId,
         updates: isRemove
-          ? { removeTag: bulkTagValue.trim() }
-          : { addTag: bulkTagValue.trim() },
+          ? { removeTag: tagToApply }
+          : { addTag: tagToApply },
       };
       if (isCriterion) {
-        payload.criteria = listFilters;
+        payload.criteria = { ...listFilters };
+        if (isRemove && tagToApply) {
+          payload.criteria.tag = tagToApply;
+        }
         if (excludedLeadIds.length > 0) payload.excludedLeadIds = excludedLeadIds;
       } else {
         payload.leadIds = selectedLeadIds;
@@ -2539,11 +2548,12 @@ export default function BancoDeDados() {
       const data = await res.json().catch(() => ({}));
       const count = typeof data.updatedCount === "number"
         ? data.updatedCount
-        : (isCriterion ? bancoEffectiveSelectedCount : selectedLeadIds.length);
+        : (isRemove && targetTagCount !== null ? targetTagCount : (isCriterion ? bancoEffectiveSelectedCount : selectedLeadIds.length));
 
-      toast.success(`Tag "${bulkTagValue.trim()}" ${isRemove ? "removida de" : "adicionada a"} ${count.toLocaleString("pt-BR")} leads!`);
+      toast.success(`Tag "${tagToApply}" ${isRemove ? "removida de" : "adicionada a"} ${count.toLocaleString("pt-BR")} leads!`);
       setIsBulkTagModalOpen(false);
       setBulkTagValue("");
+      setTargetTagCount(null);
       handleClearSelection();
       fetchLeads();
       loadFacets();
@@ -2795,8 +2805,8 @@ export default function BancoDeDados() {
   }, [knownTags, selectedTag]);
   // as mesmas tags, com o tipo (planilha, origem, IA, minhas) para o seletor agrupado; a tag selecionada que não está na lista entra como "minhas"
   const availableTagItems = useMemo(() => {
-    const items = (facets?.tags ?? []).map((t) => ({ tag: t.tag, kind: t.kind }));
-    if (selectedTag && !items.some((i) => i.tag === selectedTag)) items.push({ tag: selectedTag, kind: "minhas" as const });
+    const items = (facets?.tags ?? []).map((t) => ({ tag: t.tag, kind: t.kind, count: t.count }));
+    if (selectedTag && !items.some((i) => i.tag === selectedTag)) items.push({ tag: selectedTag, kind: "minhas" as const, count: undefined });
     return items;
   }, [facets, selectedTag]);
 
@@ -5838,6 +5848,7 @@ export default function BancoDeDados() {
           setIsBulkTagModalOpen(open);
           if (!open) {
             setBulkTagValue("");
+            setTargetTagCount(null);
             setBulkTagMode("add");
           }
         }}
@@ -5846,15 +5857,21 @@ export default function BancoDeDados() {
           <DialogHeader>
             <DialogTitle className="text-sm font-bold flex items-center gap-1.5">
               <TagIcon className="w-4 h-4 text-indigo-500" />
-              Gerenciar Tags em Lote ({bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads)
+              Gerenciar Tags em Lote ({((bulkTagMode === "remove" && targetTagCount !== null) ? targetTagCount : bancoEffectiveSelectedCount).toLocaleString("pt-BR")} leads)
             </DialogTitle>
           </DialogHeader>
 
           <Tabs
             value={bulkTagMode}
             onValueChange={(val) => {
-              setBulkTagMode(val as "add" | "remove");
-              setBulkTagValue("");
+              const mode = val as "add" | "remove";
+              setBulkTagMode(mode);
+              if (mode === "remove" && bulkTagValue.trim()) {
+                const found = facets?.tags?.find((t) => t.tag === bulkTagValue.trim());
+                setTargetTagCount(found ? found.count : null);
+              } else {
+                setTargetTagCount(null);
+              }
             }}
             className="w-full"
           >
@@ -5865,7 +5882,7 @@ export default function BancoDeDados() {
                 className="text-xs"
                 onClick={() => {
                   setBulkTagMode("add");
-                  setBulkTagValue("");
+                  setTargetTagCount(null);
                 }}
               >
                 Adicionar Tag
@@ -5876,7 +5893,10 @@ export default function BancoDeDados() {
                 className="text-xs text-rose-600 dark:text-rose-400 data-[state=active]:text-rose-600"
                 onClick={() => {
                   setBulkTagMode("remove");
-                  setBulkTagValue("");
+                  if (bulkTagValue.trim()) {
+                    const found = facets?.tags?.find((t) => t.tag === bulkTagValue.trim());
+                    if (found) setTargetTagCount(found.count);
+                  }
                 }}
               >
                 Remover Tag
@@ -5888,33 +5908,53 @@ export default function BancoDeDados() {
                 Adicione uma tag aos <strong>{bancoEffectiveSelectedCount.toLocaleString("pt-BR")}</strong> leads selecionados.
               </p>
               <div className="space-y-1.5">
-                <Input
-                  placeholder="Digite a nova tag (ex: #qualificado)..."
-                  value={bulkTagValue}
-                  onChange={(e) => setBulkTagValue(e.target.value)}
-                  className="text-xs"
-                  data-testid="input-bulk-tag"
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Digite a nova tag (ex: #qualificado)..."
+                    value={bulkTagValue}
+                    onChange={(e) => setBulkTagValue(e.target.value)}
+                    className="text-xs flex-1"
+                    data-testid="input-bulk-tag"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedTag(bulkTagValue.trim());
+                      setIsBulkTagModalOpen(false);
+                    }}
+                    disabled={!bulkTagValue.trim()}
+                    className="text-xs gap-1 shrink-0"
+                    data-testid="btn-inspect-tag-table-add"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    Ver leads na tabela
+                  </Button>
+                </div>
               </div>
-              {knownTags.length > 0 && (
+              {facets?.tags && facets.tags.length > 0 && (
                 <div className="space-y-1.5 pt-1">
                   <span className="text-[11px] font-medium text-muted-foreground block">
                     Ou selecione uma tag existente:
                   </span>
                   <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-muted/30 rounded border">
-                    {knownTags.slice(0, 20).map((t) => (
+                    {facets.tags.slice(0, 30).map((t) => (
                       <button
-                        key={t}
+                        key={t.tag}
                         type="button"
-                        onClick={() => setBulkTagValue(t)}
+                        onClick={() => setBulkTagValue(t.tag)}
                         className={cn(
-                          "px-2 py-0.5 rounded text-[11px] font-medium border transition-colors",
-                          bulkTagValue === t
+                          "px-2 py-0.5 rounded text-[11px] font-medium border transition-colors flex items-center gap-1",
+                          bulkTagValue === t.tag
                             ? "bg-indigo-600 text-white border-indigo-600"
                             : "bg-background hover:bg-muted text-foreground border-border"
                         )}
                       >
-                        {t}
+                        <span>{t.tag}</span>
+                        <span className="opacity-70 text-[10px] font-normal">
+                          ({(t.count ?? 0).toLocaleString("pt-BR")})
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -5926,38 +5966,66 @@ export default function BancoDeDados() {
               <Alert className="py-2.5 border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300">
                 <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
                 <AlertDescription className="text-xs leading-relaxed">
-                  Remova uma tag de todos os <strong>{bancoEffectiveSelectedCount.toLocaleString("pt-BR")}</strong> leads selecionados.
+                  Remova uma tag de todos os <strong>{((bulkTagMode === "remove" && targetTagCount !== null) ? targetTagCount : bancoEffectiveSelectedCount).toLocaleString("pt-BR")}</strong> leads selecionados.
                   O lead <strong>não</strong> será excluído, apenas a tag indicada será desvinculada.
                 </AlertDescription>
               </Alert>
               <div className="space-y-1.5">
-                <Input
-                  placeholder="Nome exato da tag a remover..."
-                  value={bulkTagValue}
-                  onChange={(e) => setBulkTagValue(e.target.value)}
-                  className="text-xs border-rose-500/40 focus-visible:ring-rose-500"
-                  data-testid="input-bulk-tag-remove"
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Nome exato da tag a remover..."
+                    value={bulkTagValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setBulkTagValue(val);
+                      const found = facets?.tags?.find((t) => t.tag === val.trim());
+                      setTargetTagCount(found ? found.count : null);
+                    }}
+                    className="text-xs border-rose-500/40 focus-visible:ring-rose-500 flex-1"
+                    data-testid="input-bulk-tag-remove"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedTag(bulkTagValue.trim());
+                      setIsBulkTagModalOpen(false);
+                    }}
+                    disabled={!bulkTagValue.trim()}
+                    className="text-xs gap-1 shrink-0"
+                    data-testid="btn-inspect-tag-table"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    Ver leads na tabela
+                  </Button>
+                </div>
               </div>
-              {knownTags.length > 0 && (
+              {facets?.tags && facets.tags.length > 0 && (
                 <div className="space-y-1.5 pt-1">
                   <span className="text-[11px] font-medium text-muted-foreground block">
                     Tags existentes na base (clique para preencher):
                   </span>
-                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-muted/30 rounded border">
-                    {knownTags.slice(0, 30).map((t) => (
+                  <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-1 bg-muted/30 rounded border">
+                    {facets.tags.slice(0, 40).map((t) => (
                       <button
-                        key={t}
+                        key={t.tag}
                         type="button"
-                        onClick={() => setBulkTagValue(t)}
+                        onClick={() => {
+                          setBulkTagValue(t.tag);
+                          setTargetTagCount(t.count);
+                        }}
                         className={cn(
-                          "px-2 py-0.5 rounded text-[11px] font-medium border transition-colors",
-                          bulkTagValue === t
+                          "px-2 py-0.5 rounded text-[11px] font-medium border transition-colors flex items-center gap-1",
+                          bulkTagValue === t.tag
                             ? "bg-rose-600 text-white border-rose-600"
                             : "bg-background hover:bg-rose-50 dark:hover:bg-rose-950/30 text-foreground border-border"
                         )}
                       >
-                        {t}
+                        <span>{t.tag}</span>
+                        <span className="opacity-70 text-[10px] font-normal">
+                          ({(t.count ?? 0).toLocaleString("pt-BR")})
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -5967,7 +6035,14 @@ export default function BancoDeDados() {
           </Tabs>
 
           <DialogFooter className="pt-2">
-            <Button variant="outline" size="sm" onClick={() => setIsBulkTagModalOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsBulkTagModalOpen(false);
+                setTargetTagCount(null);
+              }}
+            >
               Cancelar
             </Button>
             <Button
@@ -5982,7 +6057,9 @@ export default function BancoDeDados() {
               }
             >
               {bulkTagMode === "remove"
-                ? `Remover Tag de ${bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads`
+                ? bulkTagValue.trim()
+                  ? `Remover "${bulkTagValue.trim()}" dos ${(targetTagCount || bancoEffectiveSelectedCount).toLocaleString("pt-BR")} leads`
+                  : `Remover Tag de ${bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads`
                 : `Adicionar Tag`}
             </Button>
           </DialogFooter>

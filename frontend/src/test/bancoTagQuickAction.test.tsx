@@ -264,15 +264,15 @@ describe("Frente 2: Botão de Ação Rápida de Tags no Banco de Dados", () => {
     fireEvent.change(inputRemove, { target: { value: "#Imp-Campanha_Teste" } });
     expect(inputRemove.value).toBe("#Imp-Campanha_Teste");
 
-    // O botão exibe 'Remover Tag de 150 leads'
+    // O botão exibe 'Remover "#Imp-Campanha_Teste" dos 120 leads'
     const submitBtn = screen.getByTestId("btn-submit-bulk-tag");
-    expect(submitBtn).toHaveTextContent("Remover Tag de 150 leads");
+    expect(submitBtn).toHaveTextContent('Remover "#Imp-Campanha_Teste" dos 120 leads');
 
     // Clica para submeter
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      // Verifica se a chamada enviou criterion e removeTag
+      // Verifica se a chamada enviou criterion e removeTag focando na tag selecionada
       const bulkCalls = (global.fetch as any).mock.calls.filter((c: any[]) =>
         String(c[0]).includes("/api/leads/bulk-update")
       );
@@ -280,7 +280,63 @@ describe("Frente 2: Botão de Ação Rápida de Tags no Banco de Dados", () => {
       const reqBody = JSON.parse(bulkCalls[0][1].body);
       expect(reqBody.updates).toEqual({ removeTag: "#Imp-Campanha_Teste" });
       expect(reqBody.criteria).toBeDefined();
+      expect(reqBody.criteria.tag).toBe("#Imp-Campanha_Teste");
     });
+  });
+
+  it("permite clicar em 'Ver leads na tabela' fechando o modal e filtrando a tabela pela tag", async () => {
+    setupFetchMock();
+    renderBanco();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-manage-tags-bar")).toBeInTheDocument();
+    });
+
+    // Abre o modal
+    fireEvent.click(screen.getByTestId("btn-manage-tags-bar"));
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-remove-tag")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("tab-remove-tag"));
+    const inputRemove = screen.getByTestId("input-bulk-tag-remove") as HTMLInputElement;
+
+    // Digita a tag
+    fireEvent.change(inputRemove, { target: { value: "#Imp-Campanha_Teste" } });
+
+    // O botão de inspeção na tabela fica habilitado
+    const inspectBtn = screen.getByTestId("btn-inspect-tag-table");
+    expect(inspectBtn).toBeEnabled();
+
+    // Clica para inspecionar
+    fireEvent.click(inspectBtn);
+
+    // O modal deve fechar e a busca de leads com a tag deve ocorrer
+    await waitFor(() => {
+      expect(screen.queryByTestId("input-bulk-tag-remove")).not.toBeInTheDocument();
+      const leadCalls = (global.fetch as any).mock.calls.filter((c: any[]) =>
+        String(c[0]).includes("tag=%23Imp-Campanha_Teste") || String(c[0]).includes("tag=#Imp-Campanha_Teste")
+      );
+      expect(leadCalls.length).toBeGreaterThan(0);
+    });
+  });
+});
+
+describe("TagSelect com Contadores", () => {
+  it("renderiza opções com as contagens formatadas", async () => {
+    const { TagSelect } = await import("@/components/leads/TagSelect");
+    render(
+      <TagSelect
+        value=""
+        onChange={vi.fn()}
+        tags={[
+          { tag: "VIP", count: 42, kind: "minhas" },
+          { tag: "#Imp-Planilha1", count: 1500, kind: "planilha" },
+        ]}
+      />
+    );
+    expect(screen.getByText("VIP (42)")).toBeInTheDocument();
+    expect(screen.getByText("#Imp-Planilha1 (1.500)")).toBeInTheDocument();
   });
 });
 

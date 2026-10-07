@@ -62,13 +62,26 @@ export const TAG_KIND_LABELS: Record<TagKind, string> = {
  * Agrupa as tags por tipo, na ordem fixa Planilhas → Grupos e origem → Rótulos da IA → Minhas. Nenhuma tag some: tipo desconhecido ou ausente
  * cai em "Minhas", e a união dos grupos é exatamente a lista recebida.
  */
-export function groupTagsByKind(tags: ReadonlyArray<{ tag: string; kind?: string }>): Array<{ kind: TagKind; label: string; tags: string[] }> {
-  const buckets: Record<TagKind, string[]> = { planilha: [], origem: [], ia: [], minhas: [] };
+export function groupTagsByKind<T extends { tag: string; kind?: string } = { tag: string; kind?: string }>(
+  tags: ReadonlyArray<T>
+): Array<{ kind: TagKind; label: string; tags: string[]; items: T[] }> {
+  const buckets: Record<TagKind, { tags: string[]; items: T[] }> = {
+    planilha: { tags: [], items: [] },
+    origem: { tags: [], items: [] },
+    ia: { tags: [], items: [] },
+    minhas: { tags: [], items: [] },
+  };
   for (const t of tags) {
     const kind = (TAG_KIND_ORDER as string[]).includes(t.kind ?? "") ? (t.kind as TagKind) : "minhas";
-    buckets[kind].push(t.tag);
+    buckets[kind].tags.push(t.tag);
+    buckets[kind].items.push(t);
   }
-  return TAG_KIND_ORDER.filter((k) => buckets[k].length > 0).map((k) => ({ kind: k, label: TAG_KIND_LABELS[k], tags: buckets[k] }));
+  return TAG_KIND_ORDER.filter((k) => buckets[k].tags.length > 0).map((k) => ({
+    kind: k,
+    label: TAG_KIND_LABELS[k],
+    tags: buckets[k].tags,
+    items: buckets[k].items,
+  }));
 }
 
 export type FacetPartName = "summary" | "channels" | "sources" | "tags";
