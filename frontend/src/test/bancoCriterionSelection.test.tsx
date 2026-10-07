@@ -114,7 +114,7 @@ const jsonResponse = (data: unknown, status = 200) =>
 function setupFetchMock(totalCount = TOTAL_FILTER) {
   const pageItems = generatePageLeads(PAGE_SIZE);
 
-  global.fetch = vi.fn(async (url: string | URL | Request) => {
+  global.fetch = vi.fn(async (url: string | URL | Request, init?: any) => {
     const u = new URL(String(url), "http://localhost");
 
     if (u.pathname === "/api/leads/facets") {
@@ -184,6 +184,18 @@ function setupFetchMock(totalCount = TOTAL_FILTER) {
         items: pageItems,
         total: totalCount,
         truncated: false,
+      });
+    }
+
+    if (u.pathname === "/api/leads/bulk-update") {
+      let body: any = {};
+      try {
+        body = typeof init?.body === "string" ? JSON.parse(init.body) : ((url as any)?.body ? JSON.parse((url as any).body) : {});
+      } catch {}
+      const affected = body.criteria ? totalCount - (body.excludedLeadIds?.length || 0) : (body.leadIds?.length || 0);
+      return jsonResponse({
+        success: true,
+        updatedCount: affected,
       });
     }
 
@@ -452,25 +464,79 @@ describe("Bloco 1 — Seleção por Critério", () => {
     expect(reminderBtn).toBeDisabled();
     expect(reminderBtn).toHaveAttribute("title", expectedReason);
 
-    // 6. Botões da barra flutuante de ações em lote: Comprador, Perdido, Estágio, Tag
+    // 6. Botões da barra flutuante destravados na Fase 2A: Comprador, Perdido, Estágio, Tag
     const buyerBtn = screen.getByTestId("btn-floating-buyer");
-    expect(buyerBtn).toBeDisabled();
-    expect(buyerBtn).toHaveAttribute("title", expectedReason);
+    expect(buyerBtn).not.toBeDisabled();
 
     const lostBtn = screen.getByTestId("btn-floating-lost");
-    expect(lostBtn).toBeDisabled();
-    expect(lostBtn).toHaveAttribute("title", expectedReason);
+    expect(lostBtn).not.toBeDisabled();
 
     const stageBtn = screen.getByTestId("btn-floating-stage");
-    expect(stageBtn).toBeDisabled();
-    expect(stageBtn).toHaveAttribute("title", expectedReason);
+    expect(stageBtn).not.toBeDisabled();
 
     const tagBtn = screen.getByTestId("btn-floating-tag");
-    expect(tagBtn).toBeDisabled();
-    expect(tagBtn).toHaveAttribute("title", expectedReason);
+    expect(tagBtn).not.toBeDisabled();
 
-    // 7. O botão "Criar campanha" CONTINUA HABILITADO (foi o único adaptado no Bloco 1)
+    // 7. O botão "Criar campanha" CONTINUA HABILITADO
     const createCampaignBtn = screen.getByTestId("btn-create-campaign");
     expect(createCampaignBtn).not.toBeDisabled();
+  });
+
+  it("[FASE 2A] ação em lote por critério dispara bulk-update com criteria, excludedLeadIds e exibe contagem dinâmica", async () => {
+    renderBanco();
+
+    await waitFor(() => {
+      expect(screen.getByText("Lead Empresa 1")).toBeInTheDocument();
+    });
+
+    // 1. Ativa seleção por critério (77.551)
+    const headerCheckbox = screen.getByTestId("header-select-all-checkbox");
+    fireEvent.click(headerCheckbox);
+
+    const btnSelectAllCriterion = await screen.findByTestId("btn-select-all-criterion");
+    fireEvent.click(btnSelectAllCriterion);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toBeInTheDocument();
+    });
+
+    // 2. Desmarca 1 lead como exceção (cai para 77.550)
+    const checkLead1 = screen.getByTestId("lead-checkbox-lead-uuid-1");
+    fireEvent.click(checkLead1);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toHaveTextContent("− 1 desmarcado");
+    });
+
+    // 3. Clica em Comprador na barra flutuante
+    const buyerBtn = screen.getByTestId("btn-floating-buyer");
+    fireEvent.click(buyerBtn);
+
+    // 4. Modal de confirmação abre exibindo a contagem dinâmica (77.550 leads)
+    expect(await screen.findByText(/Confirmar fechamento de negócio para os 77\.550 leads selecionados/)).toBeInTheDocument();
+
+    // 5. Clica em "Confirmar Cliente 🟢"
+    const confirmBtn = screen.getByRole("button", { name: /Confirmar Cliente/i });
+    fireEvent.click(confirmBtn);
+
+    // 6. Confirma que a API foi chamada com criteria e excludedLeadIds
+    await waitFor(() => {
+      const bulkCalls = (global.fetch as any).mock.calls.filter(([url]: [string]) => String(url).includes("/api/leads/bulk-update"));
+      expect(bulkCalls.length).toBeGreaterThan(0);
+      const [, init] = bulkCalls[0];
+      const parsedBody = JSON.parse(init.body);
+      expect(parsedBody.criteria).toBeDefined();
+      expect(parsedBody.excludedLeadIds).toEqual(["lead-uuid-1"]);
+      expect(parsedBody.updates).toEqual({
+        stage: "buyer",
+        stage_source: "manual",
+        potential_contract_value: null,
+      });
+    });
+
+    // 7. Toast de sucesso exibe o total dinâmico
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("77.550 leads marcados como Cliente!"));
+    });
   });
 });

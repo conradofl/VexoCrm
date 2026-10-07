@@ -2266,28 +2266,41 @@ export default function BancoDeDados() {
           });
         }
       } else {
+        const isCriterion = selectionMode === "criterion";
+        const payload: any = {
+          clientId,
+          updates: {
+            stage: "buyer",
+            stage_source: "manual",
+            potential_contract_value: parsedValue,
+          },
+        };
+        if (isCriterion) {
+          payload.criteria = listFilters;
+          if (excludedLeadIds.length > 0) payload.excludedLeadIds = excludedLeadIds;
+        } else {
+          payload.leadIds = markAsClientTarget.leadIds;
+        }
+
         const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            clientId,
-            leadIds: markAsClientTarget.leadIds,
-            updates: {
-              stage: "buyer",
-              stage_source: "manual",
-              potential_contract_value: parsedValue,
-            },
-          }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error("Falha ao atualizar leads em lote.");
-        toast.success(`${markAsClientTarget.leadIds.length} leads marcados como Cliente!`);
-        setSelectedLeadIds([]);
+        const data = await res.json().catch(() => ({}));
+        const count = typeof data.updatedCount === "number"
+          ? data.updatedCount
+          : (isCriterion ? bancoEffectiveSelectedCount : markAsClientTarget.leadIds.length);
+        toast.success(`${count.toLocaleString("pt-BR")} leads marcados como Cliente!`);
+        handleClearSelection();
       }
       setIsMarkAsClientModalOpen(false);
       fetchLeads();
+      loadFacets();
     } catch (err: any) {
       toast.error("Erro ao marcar como cliente", { description: err.message });
     }
@@ -2331,35 +2344,48 @@ export default function BancoDeDados() {
           });
         }
       } else {
+        const isCriterion = selectionMode === "criterion";
+        const payload: any = {
+          clientId,
+          updates: {
+            stage: "lost",
+            stage_source: "manual",
+            lost_reason: markAsLostReason,
+          },
+        };
+        if (isCriterion) {
+          payload.criteria = listFilters;
+          if (excludedLeadIds.length > 0) payload.excludedLeadIds = excludedLeadIds;
+        } else {
+          payload.leadIds = markAsLostTarget.leadIds;
+        }
+
         const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            clientId,
-            leadIds: markAsLostTarget.leadIds,
-            updates: {
-              stage: "lost",
-              stage_source: "manual",
-              lost_reason: markAsLostReason,
-            },
-          }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error("Falha ao atualizar leads em lote.");
-        toast.success(`${markAsLostTarget.leadIds.length} leads marcados como Perdido!`);
-        setSelectedLeadIds([]);
+        const data = await res.json().catch(() => ({}));
+        const count = typeof data.updatedCount === "number"
+          ? data.updatedCount
+          : (isCriterion ? bancoEffectiveSelectedCount : markAsLostTarget.leadIds.length);
+        toast.success(`${count.toLocaleString("pt-BR")} leads marcados como Perdido!`);
+        handleClearSelection();
       }
       setIsMarkAsLostModalOpen(false);
       fetchLeads();
+      loadFacets();
     } catch (err: any) {
       toast.error("Erro ao marcar como perdido", { description: err.message });
     }
   };
 
   const handleBulkStageSubmit = async () => {
-    if (selectedLeadIds.length === 0) return;
+    if (bancoEffectiveSelectedCount === 0) return;
     try {
       const token = await getIdToken();
       const updates: any = {
@@ -2374,87 +2400,126 @@ export default function BancoDeDados() {
         updates.lost_reason = bulkLostReason || "preco";
       }
 
+      const isCriterion = selectionMode === "criterion";
+      const payload: any = {
+        clientId,
+        updates,
+      };
+      if (isCriterion) {
+        payload.criteria = listFilters;
+        if (excludedLeadIds.length > 0) payload.excludedLeadIds = excludedLeadIds;
+      } else {
+        payload.leadIds = selectedLeadIds;
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientId,
-          leadIds: selectedLeadIds,
-          updates,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error("Falha ao atualizar em lote.");
+      const data = await res.json().catch(() => ({}));
+      const count = typeof data.updatedCount === "number"
+        ? data.updatedCount
+        : (isCriterion ? bancoEffectiveSelectedCount : selectedLeadIds.length);
 
-      toast.success(`Estágio alterado para ${selectedLeadIds.length} leads!`);
+      toast.success(`Estágio alterado para ${count.toLocaleString("pt-BR")} leads!`);
       setIsBulkStageModalOpen(false);
       setBulkContractValue("");
-      setSelectedLeadIds([]);
+      handleClearSelection();
       fetchLeads();
+      loadFacets();
     } catch (err: any) {
       toast.error("Erro na atualização em lote", { description: err.message });
     }
   };
 
   const handleBulkTagSubmit = async () => {
-    if (selectedLeadIds.length === 0 || !bulkTagValue.trim()) return;
+    if (bancoEffectiveSelectedCount === 0 || !bulkTagValue.trim()) return;
     try {
       const token = await getIdToken();
+      const isCriterion = selectionMode === "criterion";
+      const payload: any = {
+        clientId,
+        updates: { addTag: bulkTagValue.trim() },
+      };
+      if (isCriterion) {
+        payload.criteria = listFilters;
+        if (excludedLeadIds.length > 0) payload.excludedLeadIds = excludedLeadIds;
+      } else {
+        payload.leadIds = selectedLeadIds;
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/leads/bulk-update`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientId,
-          leadIds: selectedLeadIds,
-          updates: { addTag: bulkTagValue.trim() },
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error("Falha ao adicionar tag em lote.");
+      const data = await res.json().catch(() => ({}));
+      const count = typeof data.updatedCount === "number"
+        ? data.updatedCount
+        : (isCriterion ? bancoEffectiveSelectedCount : selectedLeadIds.length);
 
-      toast.success(`Tag "${bulkTagValue.trim()}" adicionada a ${selectedLeadIds.length} leads!`);
+      toast.success(`Tag "${bulkTagValue.trim()}" adicionada a ${count.toLocaleString("pt-BR")} leads!`);
       setIsBulkTagModalOpen(false);
       setBulkTagValue("");
-      setSelectedLeadIds([]);
+      handleClearSelection();
       fetchLeads();
+      loadFacets();
     } catch (err: any) {
       toast.error("Erro na tag em lote", { description: err.message });
     }
   };
 
   const handleBulkAssignSubmit = async () => {
-    if (selectedLeadIds.length === 0) return;
+    if (bancoEffectiveSelectedCount === 0) return;
     try {
       const token = await getIdToken();
       const targetUid = bulkAssignValue === "none" ? null : bulkAssignValue;
+      const isCriterion = selectionMode === "criterion";
+      const payload: any = {
+        clientId,
+        updates: { assigned_to: targetUid },
+      };
+      if (isCriterion) {
+        payload.criteria = listFilters;
+        if (excludedLeadIds.length > 0) payload.excludedLeadIds = excludedLeadIds;
+      } else {
+        payload.leadIds = selectedLeadIds;
+      }
+
       const res = await fetchApi(`/api/leads/bulk-update`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientId,
-          leadIds: selectedLeadIds,
-          updates: { assigned_to: targetUid },
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const errorMsg = await readApiErrorMessage(res, "Falha ao reatribuir leads em massa.");
         throw new Error(errorMsg);
       }
+      const data = await res.json().catch(() => ({}));
+      const count = typeof data.updatedCount === "number"
+        ? data.updatedCount
+        : (isCriterion ? bancoEffectiveSelectedCount : selectedLeadIds.length);
 
-      toast.success(`Responsável atualizado para ${selectedLeadIds.length} leads!`);
+      toast.success(`Responsável atualizado para ${count.toLocaleString("pt-BR")} leads!`);
       setIsBulkAssignModalOpen(false);
-      setSelectedLeadIds([]);
+      handleClearSelection();
       fetchLeads();
+      loadFacets();
     } catch (err: any) {
       toast.error("Erro na reatribuição em lote", { description: err.message });
     }
@@ -3894,10 +3959,8 @@ export default function BancoDeDados() {
               size="sm"
               variant="ghost"
               data-testid="btn-floating-buyer"
-              disabled={selectionMode === "criterion"}
-              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => openMarkAsClientModal({ type: "bulk", leadIds: selectedLeadIds })}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 dark:text-emerald-600 dark:hover:text-emerald-700 font-semibold gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 dark:text-emerald-600 dark:hover:text-emerald-700 font-semibold gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               Comprador ({bancoEffectiveSelectedCount.toLocaleString("pt-BR")})
@@ -3908,10 +3971,8 @@ export default function BancoDeDados() {
               size="sm"
               variant="ghost"
               data-testid="btn-floating-lost"
-              disabled={selectionMode === "criterion"}
-              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => openMarkAsLostModal({ type: "bulk", leadIds: selectedLeadIds })}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 dark:text-rose-600 dark:hover:text-rose-700 font-semibold gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 dark:text-rose-600 dark:hover:text-rose-700 font-semibold gap-1.5"
             >
               <XCircle className="w-3.5 h-3.5" />
               Perdido ({bancoEffectiveSelectedCount.toLocaleString("pt-BR")})
@@ -3922,10 +3983,8 @@ export default function BancoDeDados() {
               size="sm"
               variant="ghost"
               data-testid="btn-floating-stage"
-              disabled={selectionMode === "criterion"}
-              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => setIsBulkStageModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1"
             >
               Estágio <ChevronDown className="w-3 h-3 opacity-70" />
             </Button>
@@ -3935,10 +3994,8 @@ export default function BancoDeDados() {
               size="sm"
               variant="ghost"
               data-testid="btn-floating-tag"
-              disabled={selectionMode === "criterion"}
-              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => setIsBulkTagModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1.5"
             >
               <TagIcon className="w-3.5 h-3.5" />
               Tag
@@ -3978,20 +4035,16 @@ export default function BancoDeDados() {
                 </DropdownMenuItem>
                 {canManageUsers && (
                   <DropdownMenuItem
-                    disabled={selectionMode === "criterion"}
-                    title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
                     onClick={() => setIsBulkAssignModalOpen(true)}
-                    className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="text-xs gap-2 cursor-pointer"
                   >
                     <UserCheck className="w-3.5 h-3.5 text-sky-500" />
                     Reatribuir responsável
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
-                  disabled={selectionMode === "criterion"}
-                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
                   onClick={handleExportXLSX}
-                  className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs gap-2 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5 text-muted-foreground" />
                   Exportar seleção
@@ -5562,7 +5615,7 @@ export default function BancoDeDados() {
               Cancelar
             </Button>
             <Button size="sm" onClick={handleBulkStageSubmit} className="bg-indigo-600 text-white">
-              Aplicar a {selectedLeadIds.length} leads
+              Aplicar a {bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -5580,7 +5633,7 @@ export default function BancoDeDados() {
           <div className="py-2 space-y-3">
             <p className="text-xs text-muted-foreground leading-relaxed">
               {markAsClientTarget?.type === "bulk"
-                ? `Confirmar fechamento de negócio para os ${markAsClientTarget.leadIds.length} leads selecionados. Este status é manual e protegido contra inteligência automática.`
+                ? `Confirmar fechamento de negócio para os ${bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads selecionados. Este status é manual e protegido contra inteligência automática.`
                 : "Confirmar que o lead fechou negócio. Este status é manual e protegido contra inteligência automática."}
             </p>
             <div>
@@ -5619,7 +5672,7 @@ export default function BancoDeDados() {
           <div className="py-2 space-y-3">
             <p className="text-xs text-muted-foreground leading-relaxed">
               {markAsLostTarget?.type === "bulk"
-                ? `Indique o motivo pelo qual estes ${markAsLostTarget.leadIds.length} leads não avançaram:`
+                ? `Indique o motivo pelo qual estes ${bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads não avançaram:`
                 : "Indique o motivo pelo qual este lead não avançou:"}
             </p>
             <div>
@@ -5686,7 +5739,7 @@ export default function BancoDeDados() {
           </DialogHeader>
           <div className="py-3 space-y-2">
             <p className="text-xs text-muted-foreground">
-              Selecione o operador responsável para os {selectedLeadIds.length} leads selecionados:
+              Selecione o operador responsável para os {bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads selecionados:
             </p>
             <Select
               value={bulkAssignValue}
@@ -5710,7 +5763,7 @@ export default function BancoDeDados() {
               Cancelar
             </Button>
             <Button size="sm" onClick={handleBulkAssignSubmit} className="bg-sky-600 hover:bg-sky-700 text-white">
-              Reatribuir {selectedLeadIds.length} leads
+              Reatribuir {bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads
             </Button>
           </DialogFooter>
         </DialogContent>

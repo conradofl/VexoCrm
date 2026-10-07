@@ -2882,13 +2882,26 @@ export function registerLeadsRoutes(app, deps) {
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
-    if (leadIds.length === 0) {
+    let targetLeadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
+
+    if (targetLeadIds.length === 0 && req.body?.criteria && typeof req.body.criteria === "object") {
+      const parsed = parseLeadListFilters(req.body.criteria);
+      if (parsed.problem) {
+        sendError(res, 400, "INVALID_LEAD_FILTER", parsed.problem);
+        return;
+      }
+      const scope = resolveLeadListScope(req, clientId);
+      const queryResult = await queryLeadIds(pgDatabasePool, { scope, filters: parsed.filters });
+      const excludedSet = new Set(Array.isArray(req.body?.excludedLeadIds) ? req.body.excludedLeadIds : []);
+      targetLeadIds = queryResult.ids.filter((id) => !excludedSet.has(id));
+    }
+
+    if (targetLeadIds.length === 0) {
       sendError(res, 400, "INVALID_BODY", "Nenhum lead selecionado.");
       return;
     }
 
-    const { stage, stage_source, lost_reason, potential_contract_value, temperature, addTag, assigned_to, assignedTo } = req.body?.updates || {};
+    const { stage, stage_source, lost_reason, potential_contract_value, temperature, addTag, removeTag, assigned_to, assignedTo } = req.body?.updates || {};
     const targetAssignedTo = assigned_to !== undefined ? assigned_to : assignedTo;
     if (targetAssignedTo !== undefined) {
       if (!isManagerOrAdmin(req.authAccess)) {
@@ -2922,11 +2935,35 @@ export function registerLeadsRoutes(app, deps) {
       }
 
       if (Object.keys(updates).length > 1) {
-        await supabase
-          .from("leads")
-          .update(updates)
-          .eq("client_id", clientId)
-          .in("id", leadIds);
+        if (pgDatabasePool) {
+          const setCols = [];
+          const values = [clientId, targetLeadIds];
+          let paramIdx = 3;
+          for (const [col, val] of Object.entries(updates)) {
+            if (col === "updated_at") {
+              setCols.push("updated_at = now()");
+            } else {
+              setCols.push(`${col} = $${paramIdx++}`);
+              values.push(val);
+            }
+          }
+          await pgDatabasePool.query(
+            `UPDATE public.leads 
+             SET ${setCols.join(", ")}
+             WHERE client_id = $1 AND id = ANY($2::uuid[])`,
+            values
+          );
+        } else {
+          const CHUNK_SIZE = 200;
+          for (let i = 0; i < targetLeadIds.length; i += CHUNK_SIZE) {
+            const chunk = targetLeadIds.slice(i, i + CHUNK_SIZE);
+            await supabase
+              .from("leads")
+              .update(updates)
+              .eq("client_id", clientId)
+              .in("id", chunk);
+          }
+        }
       }
 
       if (addTag && pgDatabasePool) {
@@ -2935,15 +2972,25 @@ export function registerLeadsRoutes(app, deps) {
            SET tags = ARRAY(SELECT DISTINCT unnest(array_append(COALESCE(tags, ARRAY[]::text[]), $1))),
                updated_at = now()
            WHERE client_id = $2 AND id = ANY($3::uuid[])`,
-          [addTag, clientId, leadIds]
+          [addTag, clientId, targetLeadIds]
         );
       }
 
-      if (stage && leadIds.length > 0 && pgDatabasePool) {
+      if (removeTag && pgDatabasePool) {
+        await pgDatabasePool.query(
+          `UPDATE public.leads 
+           SET tags = array_remove(COALESCE(tags, ARRAY[]::text[]), $1),
+               updated_at = now()
+           WHERE client_id = $2 AND id = ANY($3::uuid[])`,
+          [removeTag, clientId, targetLeadIds]
+        );
+      }
+
+      if (stage && targetLeadIds.length > 0 && pgDatabasePool) {
         try {
           const { rows: leadPhones } = await pgDatabasePool.query(
             `SELECT telefone FROM public.leads WHERE client_id = $1 AND id = ANY($2::uuid[]) AND telefone IS NOT NULL`,
-            [clientId, leadIds]
+            [clientId, targetLeadIds]
           );
           for (const row of leadPhones) {
             cancelFollowupCadenceOnStageChange({
@@ -2958,7 +3005,7 @@ export function registerLeadsRoutes(app, deps) {
         }
       }
 
-      res.json({ success: true, updatedCount: leadIds.length });
+      res.json({ success: true, updatedCount: targetLeadIds.length });
     } catch (err) {
       console.error("[leads-bulk-update] Error:", err);
       sendError(res, 500, "BULK_UPDATE_FAILED", err.message || "Falha na atualização em lote");
