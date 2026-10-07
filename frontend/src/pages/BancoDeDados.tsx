@@ -1494,16 +1494,20 @@ export default function BancoDeDados() {
   // Open Campaign Wizard
   const handleOpenCampaignWizard = async () => {
     setIsCampaignWizardOpen(true);
+    setCampaignSourceType("funnel");
     const initialTag = selectedTag || "";
     setCampaignTagFilter(initialTag);
     const initialStages = activeTab && activeTab !== "all" ? [activeTab] : ["all"];
     setCampaignStageFilters(initialStages);
-    setCampaignImportId("");
+    const initialImportId = selectedImportId || "";
+    setCampaignImportId(initialImportId);
     setCampaignImportScope("all");
+    const initialImportFilter = initialImportId ? { importId: initialImportId, scope: "all" } : null;
     prevFiltersKeyRef.current = serializeCampaignFiltersKey(
       initialStages,
       initialTag,
-      campaignFunnelFilterRules
+      campaignFunnelFilterRules,
+      initialImportFilter
     );
     // A seleção inicial é a lista filtrada da tela (a base inteira da combinação, não só a página carregada)
     try {
@@ -1782,11 +1786,21 @@ export default function BancoDeDados() {
       const selected = campaignFunnelFilteredLeads.filter(
         (l) => campaignSelectedLeadIds.includes(l.id) && validFilteredIds.has(l.id)
       );
-      if (selected.length === 0) {
+      if (selected.length === 0 && (selectionMode !== "criterion" || bancoEffectiveSelectedCount === 0)) {
         toast.error("Nenhum lead selecionado para a campanha.");
         return;
       }
-      campaignTitleName = buildCampaignTitle(campaignStageFilters, campaignTagFilter, selected.length, campaignImportOrigin?.sourceName);
+
+      const effectiveTotalCount = selectionMode === "criterion" && bancoEffectiveSelectedCount > 0
+        ? bancoEffectiveSelectedCount
+        : selected.length;
+
+      campaignTitleName = buildCampaignTitle(
+        campaignStageFilters,
+        campaignTagFilter,
+        effectiveTotalCount,
+        campaignImportOrigin?.sourceName
+      );
 
       // Bloco 3: "Criar campanha" passa o OBJETO DE CRITÉRIOS do filtro (< 500 bytes), nunca a lista bruta (> 15 MB)
       const stageCriteria = campaignStageFilters.includes("all") ? [] : campaignStageFilters;
@@ -1798,8 +1812,9 @@ export default function BancoDeDados() {
         importId: campaignImportId || undefined,
         importScope: campaignImportScope || "all",
       };
-      const description = buildFilterAudienceDescription(criteria, selected.length, {
-        sheetName: campaignImportOrigin?.sourceName,
+      const sheetName = campaignImportOrigin?.sourceName || pastImports.find((i) => i.id === campaignImportId)?.source_name;
+      const description = selectionSummary || buildFilterAudienceDescription(criteria, effectiveTotalCount, {
+        sheetName,
       });
 
       try {
@@ -1807,8 +1822,10 @@ export default function BancoDeDados() {
           "vexo_pending_campaign_audience",
           JSON.stringify({
             criteria,
+            excludedLeadIds: selectionMode === "criterion" && excludedLeadIds.length > 0 ? excludedLeadIds : undefined,
+            selectionMode,
             description,
-            totalCount: selected.length,
+            totalCount: effectiveTotalCount,
             campaignName: campaignTitleName,
           })
         );
@@ -2740,7 +2757,7 @@ export default function BancoDeDados() {
             onManageSpreadsheets={() => setIsSavedSheetsOpen(true)}
             onExportXLSX={handleExportXLSX}
             onExportCSV={handleExportCSV}
-            onCreateCampaign={handleCreateCampaignFromBanco}
+            onCreateCampaign={handleOpenCampaignWizard}
             onNewLead={() => setIsCreateModalOpen(true)}
             selectedCount={bancoEffectiveSelectedCount}
             selectionSummary={selectionSummary}
@@ -5071,6 +5088,7 @@ export default function BancoDeDados() {
               Cancelar
             </Button>
             <Button
+              data-testid="btn-proceed-to-campaign"
               onClick={handleProceedToCampaign}
               className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
             >

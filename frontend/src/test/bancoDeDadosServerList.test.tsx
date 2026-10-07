@@ -288,7 +288,7 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
     fireEvent.click(screen.getByText(/Nunca abordados · 19\.?650/i).closest("div.cursor-pointer")!);
     const botao = await screen.findByRole("button", { name: /Selecionar todos desta faixa/i });
     fireEvent.click(botao);
-    expect(await screen.findByText(/1234 selecionados/)).toBeInTheDocument();
+    expect(await screen.findByText(/1\.?234 selecionados/)).toBeInTheDocument();
     await waitFor(() => expect(server.otherUrls.some((u) => u.includes("/api/leads/ids") && u.includes("segment=never_contacted"))).toBe(true));
   });
 

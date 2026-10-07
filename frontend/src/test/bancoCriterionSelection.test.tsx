@@ -179,6 +179,14 @@ function setupFetchMock(totalCount = TOTAL_FILTER) {
       });
     }
 
+    if (u.pathname === "/api/leads/audience") {
+      return jsonResponse({
+        items: pageItems,
+        total: totalCount,
+        truncated: false,
+      });
+    }
+
     return jsonResponse({});
   });
 }
@@ -378,9 +386,18 @@ describe("Bloco 1 — Seleção por Critério", () => {
       expect(screen.getByTestId("selection-summary-badge")).toHaveTextContent("− 2 desmarcados");
     });
 
-    // Clica em "Criar campanha" na barra de ações
+    // Clica em "Criar campanha" na barra de ações (abre o modal de opções de campanha)
     const btnCreateCampaign = screen.getByTestId("btn-create-campaign");
     fireEvent.click(btnCreateCampaign);
+
+    // Aguarda o assistente calcular o público da campanha (debounce 250ms + fetch)
+    await waitFor(() => {
+      expect(screen.getByText(/Lista de Leads Selecionados \(\d+ de \d+\)/i)).not.toHaveTextContent("Lista de Leads Selecionados (0 de 0)");
+    }, { timeout: 3000 });
+
+    // No modal aberto, clica em "Avançar para Disparos ➔"
+    const btnProceed = await screen.findByTestId("btn-proceed-to-campaign");
+    fireEvent.click(btnProceed);
 
     // Verifica o item salvo no localStorage
     const savedRaw = window.localStorage.getItem("vexo_pending_campaign_audience");
