@@ -743,6 +743,82 @@ describe("Bloco 1 — Seleção por Critério", () => {
       );
     });
   });
+
+  it("[TAG EM LOTE] remoção de tag por critério dispara bulk-update com removeTag e excludedLeadIds", async () => {
+    renderBanco();
+
+    await waitFor(() => {
+      expect(screen.getByText("Lead Empresa 1")).toBeInTheDocument();
+    });
+
+    // 1. Ativa seleção por critério (77.551)
+    const headerCheckbox = screen.getByTestId("header-select-all-checkbox");
+    fireEvent.click(headerCheckbox);
+
+    const btnSelectAllCriterion = await screen.findByTestId("btn-select-all-criterion");
+    fireEvent.click(btnSelectAllCriterion);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toBeInTheDocument();
+    });
+
+    // 2. Desmarca 1 lead (77.550 leads)
+    const checkLead1 = screen.getByTestId("lead-checkbox-lead-uuid-1");
+    fireEvent.click(checkLead1);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toHaveTextContent("− 1 desmarcado");
+    });
+
+    // 3. Clica no botão Tag na barra flutuante
+    const tagBtn = screen.getByTestId("btn-floating-tag");
+    fireEvent.click(tagBtn);
+
+    // 4. Modal de gerenciamento de tags abre com título dinâmico
+    expect(await screen.findByText(/Gerenciar Tags em Lote \(77\.550 leads\)/i)).toBeInTheDocument();
+
+    // 5. Clica na aba "Remover Tag"
+    const removeTab = screen.getByTestId("tab-remove-tag");
+    fireEvent.click(removeTab);
+
+    // Verifica que o input da aba de remoção e o aviso aparecem
+    expect(await screen.findByTestId("input-bulk-tag-remove")).toBeInTheDocument();
+    expect(
+      screen.getByText(/apenas a tag indicada será desvinculada/i)
+    ).toBeInTheDocument();
+
+    // 6. Preenche a tag a ser removida
+    const removeInput = screen.getByTestId("input-bulk-tag-remove");
+    fireEvent.change(removeInput, { target: { value: "#Imp-Campanha_Teste_1_2_x" } });
+
+    // 7. Confirma a remoção clicando no botão destrutivo
+    const submitBtn = screen.getByTestId("btn-submit-bulk-tag");
+    expect(submitBtn.textContent).toContain("Remover Tag de 77.550 leads");
+    fireEvent.click(submitBtn);
+
+    // 8. Confirma que a API foi chamada com updates: { removeTag: ... }, criteria e excludedLeadIds
+    await waitFor(() => {
+      const bulkCalls = (global.fetch as any).mock.calls.filter(([url]: [string]) =>
+        String(url).includes("/api/leads/bulk-update")
+      );
+      expect(bulkCalls.length).toBeGreaterThan(0);
+      const [, init] = bulkCalls[0];
+      const parsedBody = JSON.parse(init.body);
+      expect(parsedBody.criteria).toBeDefined();
+      expect(parsedBody.excludedLeadIds).toEqual(["lead-uuid-1"]);
+      expect(parsedBody.updates).toEqual({
+        removeTag: "#Imp-Campanha_Teste_1_2_x",
+      });
+    });
+
+    // 9. Toast de sucesso exibe o total dinâmico e nome da tag
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringContaining('Tag "#Imp-Campanha_Teste_1_2_x" removida de 77.550 leads!')
+      );
+    });
+  });
 });
+
 
 

@@ -320,8 +320,8 @@ export default function ApplyFollowupModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-6 overflow-hidden">
+        <DialogHeader className="shrink-0 pb-2">
           <DialogTitle className="flex items-center gap-2">
             <CalendarClock className="h-5 w-5 text-indigo-600" />
             Aplicar Follow-up
@@ -332,7 +332,7 @@ export default function ApplyFollowupModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto flex-1 min-h-0 pr-1.5 -mr-1.5">
           {selectionMode === "criterion" ? (
             <div className="rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground flex items-center justify-between border">
               <span>
@@ -536,7 +536,7 @@ export default function ApplyFollowupModal({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 pt-3 border-t mt-3 flex items-center justify-end gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancelar
           </Button>

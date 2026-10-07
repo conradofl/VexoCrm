@@ -111,6 +111,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -645,6 +651,7 @@ export default function BancoDeDados() {
   const [bulkLostReason, setBulkLostReason] = useState("preco");
   const [isBulkTagModalOpen, setIsBulkTagModalOpen] = useState(false);
   const [bulkTagValue, setBulkTagValue] = useState("");
+  const [bulkTagMode, setBulkTagMode] = useState<"add" | "remove">("add");
   const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
   const [bulkAssignValue, setBulkAssignValue] = useState<string>("none");
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
@@ -2449,9 +2456,12 @@ export default function BancoDeDados() {
     try {
       const token = await getIdToken();
       const isCriterion = selectionMode === "criterion";
+      const isRemove = bulkTagMode === "remove";
       const payload: any = {
         clientId,
-        updates: { addTag: bulkTagValue.trim() },
+        updates: isRemove
+          ? { removeTag: bulkTagValue.trim() }
+          : { addTag: bulkTagValue.trim() },
       };
       if (isCriterion) {
         payload.criteria = listFilters;
@@ -2469,13 +2479,13 @@ export default function BancoDeDados() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Falha ao adicionar tag em lote.");
+      if (!res.ok) throw new Error(`Falha ao ${isRemove ? "remover" : "adicionar"} tag em lote.`);
       const data = await res.json().catch(() => ({}));
       const count = typeof data.updatedCount === "number"
         ? data.updatedCount
         : (isCriterion ? bancoEffectiveSelectedCount : selectedLeadIds.length);
 
-      toast.success(`Tag "${bulkTagValue.trim()}" adicionada a ${count.toLocaleString("pt-BR")} leads!`);
+      toast.success(`Tag "${bulkTagValue.trim()}" ${isRemove ? "removida de" : "adicionada a"} ${count.toLocaleString("pt-BR")} leads!`);
       setIsBulkTagModalOpen(false);
       setBulkTagValue("");
       handleClearSelection();
@@ -4023,7 +4033,11 @@ export default function BancoDeDados() {
               size="sm"
               variant="ghost"
               data-testid="btn-floating-tag"
-              onClick={() => setIsBulkTagModalOpen(true)}
+              onClick={() => {
+                setBulkTagMode("add");
+                setBulkTagValue("");
+                setIsBulkTagModalOpen(true);
+              }}
               className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1.5"
             >
               <TagIcon className="w-3.5 h-3.5" />
@@ -5743,26 +5757,159 @@ export default function BancoDeDados() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal Bulk Add Tag */}
-      <Dialog open={isBulkTagModalOpen} onOpenChange={setIsBulkTagModalOpen}>
-        <DialogContent className="sm:max-w-xs">
+      {/* Modal Bulk Tag (Adicionar ou Remover) */}
+      <Dialog
+        open={isBulkTagModalOpen}
+        onOpenChange={(open) => {
+          setIsBulkTagModalOpen(open);
+          if (!open) {
+            setBulkTagValue("");
+            setBulkTagMode("add");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-sm font-bold">Adicionar Tag em Lote</DialogTitle>
+            <DialogTitle className="text-sm font-bold flex items-center gap-1.5">
+              <TagIcon className="w-4 h-4 text-indigo-500" />
+              Gerenciar Tags em Lote ({bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads)
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-3">
-            <Input
-              placeholder="Digite a nova tag..."
-              value={bulkTagValue}
-              onChange={(e) => setBulkTagValue(e.target.value)}
-              className="text-xs"
-            />
-          </div>
-          <DialogFooter>
+
+          <Tabs
+            value={bulkTagMode}
+            onValueChange={(val) => {
+              setBulkTagMode(val as "add" | "remove");
+              setBulkTagValue("");
+            }}
+            className="w-full"
+          >
+            <TabsList className="grid w-full grid-cols-2 mb-3">
+              <TabsTrigger
+                value="add"
+                data-testid="tab-add-tag"
+                className="text-xs"
+                onClick={() => {
+                  setBulkTagMode("add");
+                  setBulkTagValue("");
+                }}
+              >
+                Adicionar Tag
+              </TabsTrigger>
+              <TabsTrigger
+                value="remove"
+                data-testid="tab-remove-tag"
+                className="text-xs text-rose-600 dark:text-rose-400 data-[state=active]:text-rose-600"
+                onClick={() => {
+                  setBulkTagMode("remove");
+                  setBulkTagValue("");
+                }}
+              >
+                Remover Tag
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="add" className="space-y-3 mt-0">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Adicione uma tag aos <strong>{bancoEffectiveSelectedCount.toLocaleString("pt-BR")}</strong> leads selecionados.
+              </p>
+              <div className="space-y-1.5">
+                <Input
+                  placeholder="Digite a nova tag (ex: #qualificado)..."
+                  value={bulkTagValue}
+                  onChange={(e) => setBulkTagValue(e.target.value)}
+                  className="text-xs"
+                  data-testid="input-bulk-tag"
+                />
+              </div>
+              {knownTags.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-medium text-muted-foreground block">
+                    Ou selecione uma tag existente:
+                  </span>
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-muted/30 rounded border">
+                    {knownTags.slice(0, 20).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setBulkTagValue(t)}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[11px] font-medium border transition-colors",
+                          bulkTagValue === t
+                            ? "bg-indigo-600 text-white border-indigo-600"
+                            : "bg-background hover:bg-muted text-foreground border-border"
+                        )}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="remove" className="space-y-3 mt-0">
+              <Alert className="py-2.5 border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300">
+                <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                <AlertDescription className="text-xs leading-relaxed">
+                  Remova uma tag de todos os <strong>{bancoEffectiveSelectedCount.toLocaleString("pt-BR")}</strong> leads selecionados.
+                  O lead <strong>não</strong> será excluído, apenas a tag indicada será desvinculada.
+                </AlertDescription>
+              </Alert>
+              <div className="space-y-1.5">
+                <Input
+                  placeholder="Nome exato da tag a remover..."
+                  value={bulkTagValue}
+                  onChange={(e) => setBulkTagValue(e.target.value)}
+                  className="text-xs border-rose-500/40 focus-visible:ring-rose-500"
+                  data-testid="input-bulk-tag-remove"
+                />
+              </div>
+              {knownTags.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-medium text-muted-foreground block">
+                    Tags existentes na base (clique para preencher):
+                  </span>
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-muted/30 rounded border">
+                    {knownTags.slice(0, 30).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setBulkTagValue(t)}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[11px] font-medium border transition-colors",
+                          bulkTagValue === t
+                            ? "bg-rose-600 text-white border-rose-600"
+                            : "bg-background hover:bg-rose-50 dark:hover:bg-rose-950/30 text-foreground border-border"
+                        )}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="pt-2">
             <Button variant="outline" size="sm" onClick={() => setIsBulkTagModalOpen(false)}>
               Cancelar
             </Button>
-            <Button size="sm" onClick={handleBulkTagSubmit} className="bg-indigo-600 text-white">
-              Adicionar Tag
+            <Button
+              size="sm"
+              onClick={handleBulkTagSubmit}
+              disabled={!bulkTagValue.trim()}
+              data-testid="btn-submit-bulk-tag"
+              className={
+                bulkTagMode === "remove"
+                  ? "bg-rose-600 hover:bg-rose-700 text-white"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+              }
+            >
+              {bulkTagMode === "remove"
+                ? `Remover Tag de ${bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads`
+                : `Adicionar Tag`}
             </Button>
           </DialogFooter>
         </DialogContent>
