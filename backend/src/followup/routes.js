@@ -2,7 +2,8 @@
 // Importar e chamar registerFollowupRoutes(app) no final de registerAllDomainRoutes.js
 import express, { Router } from "express";
 import crypto from "crypto";
-import { getSupabase, query } from "./db.js";
+import { getPool, getSupabase, query } from "./db.js";
+import { parseLeadListFilters, resolveLeadListScope, queryLeadIds } from "../services/leadListQuery.js";
 import {
   generateSecret,
   generateWebhookUrl,
@@ -1008,8 +1009,10 @@ function normalizeInstanceList(list, fallback) {
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
 
     const body = req.body && typeof req.body === "object" ? req.body : {};
-    const leads = Array.isArray(body.leads) ? body.leads : [];
-    if (leads.length === 0) {
+    let leads = Array.isArray(body.leads) ? body.leads : [];
+    const hasCriteria = Boolean(body.criteria && typeof body.criteria === "object");
+
+    if (leads.length === 0 && !hasCriteria) {
       return sendErr(res, 400, "NO_LEADS", "Envie ao menos um lead para enrolar.");
     }
     const globalMeeting = str(body.meeting_datetime);
@@ -1031,6 +1034,55 @@ function normalizeInstanceList(list, fallback) {
           "CAMPAIGN_NOT_ACTIVE",
           `A cadência "${campaignName}" está em rascunho ou pausada. Ative-a antes de aplicar aos leads.`
         );
+      }
+
+      let targetCount = leads.length;
+
+      if (leads.length === 0 && hasCriteria) {
+        const parsed = parseLeadListFilters(body.criteria);
+        if (parsed.problem) {
+          return sendErr(res, 400, "INVALID_LEAD_FILTER", parsed.problem);
+        }
+
+        const { data: company, error: compErr } = await supabase
+          .from("followup_companies")
+          .select("tenant_id")
+          .eq("id", campaign.company_id)
+          .maybeSingle();
+        const tenantId = company?.tenant_id;
+        if (compErr || !tenantId) {
+          return sendErr(res, 400, "TENANT_NOT_FOUND", "Tenant da cadência não encontrado.");
+        }
+
+        const scope = resolveLeadListScope(req, tenantId);
+        const pool = getPool();
+        const queryResult = await queryLeadIds(pool, { scope, filters: parsed.filters });
+        const excludedSet = new Set(Array.isArray(body.excludedLeadIds) ? body.excludedLeadIds : []);
+        const targetLeadIds = queryResult.ids.filter((targetId) => !excludedSet.has(targetId));
+
+        if (targetLeadIds.length === 0) {
+          return sendErr(res, 400, "NO_LEADS_FOUND", "Nenhum lead encontrado para os critérios fornecidos.");
+        }
+
+        targetCount = targetLeadIds.length;
+
+        const { rows } = await pool.query(
+          `SELECT id, nome, telefone, data_nascimento 
+           FROM public.leads 
+           WHERE client_id = $1 AND id = ANY($2::uuid[])`,
+          [tenantId, targetLeadIds]
+        );
+
+        leads = rows.map((row) => ({
+          name: row.nome || "Lead",
+          phone: row.telefone,
+          data_nascimento: row.data_nascimento,
+          id: row.id,
+        }));
+
+        if (leads.length === 0) {
+          return sendErr(res, 400, "NO_LEADS_FOUND", "Nenhum lead encontrado para os critérios fornecidos.");
+        }
       }
 
       let enrolled = 0;
@@ -1087,6 +1139,7 @@ function normalizeInstanceList(list, fallback) {
 
         return res.status(422).json({
           success: false,
+          count: targetCount,
           enrolled,
           enqueued: 0,
           missingPhone,
@@ -1104,6 +1157,7 @@ function normalizeInstanceList(list, fallback) {
 
       return res.status(201).json({
         success: true,
+        count: targetCount,
         enrolled,
         enqueued,
         missingPhone,

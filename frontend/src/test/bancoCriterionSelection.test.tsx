@@ -199,6 +199,69 @@ function setupFetchMock(totalCount = TOTAL_FILTER) {
       });
     }
 
+    if (u.pathname === "/api/leads/bulk-delete") {
+      let body: any = {};
+      try {
+        body = typeof init?.body === "string" ? JSON.parse(init.body) : ((url as any)?.body ? JSON.parse((url as any).body) : {});
+      } catch {}
+      const affected = body.criteria ? totalCount - (body.excludedLeadIds?.length || 0) : (body.leadIds?.length || 0);
+      return jsonResponse({
+        success: true,
+        deletedCount: affected,
+      });
+    }
+
+    if (u.pathname === "/api/followup/companies") {
+      return jsonResponse({
+        companies: [{ id: "comp-1", name: "Empresa Followup 1" }],
+      });
+    }
+
+    if (u.pathname === "/api/followup/campaigns") {
+      return jsonResponse({
+        campaigns: [{ id: "camp-1", name: "Cadência Principal", status: "active" }],
+      });
+    }
+
+    if (u.pathname === "/api/followup/templates") {
+      return jsonResponse({
+        templates: [
+          {
+            id: "tpl-1",
+            name: "Passo 1 Boas-vindas",
+            message: "Olá lead",
+            trigger_type: "delay",
+            trigger_value: 0,
+            trigger_unit: "minutes",
+            order_index: 0,
+          },
+        ],
+      });
+    }
+
+    if (u.pathname.includes("/upcoming")) {
+      return jsonResponse({
+        days: [
+          { dayKey: "2026-10-08", dateFormatted: "08/10", dayOfWeek: "Qui", count: 10, limit: 200 },
+        ],
+        chipLimit: 200,
+      });
+    }
+
+    if (u.pathname.includes("/enroll")) {
+      let body: any = {};
+      try {
+        body = typeof init?.body === "string" ? JSON.parse(init.body) : ((url as any)?.body ? JSON.parse((url as any).body) : {});
+      } catch {}
+      const affected = body.criteria ? totalCount - (body.excludedLeadIds?.length || 0) : (body.leads?.length || 0);
+      return jsonResponse({
+        success: true,
+        count: affected,
+        enrolled: affected,
+        enqueued: affected,
+      });
+    }
+
     return jsonResponse({});
   });
 }
@@ -425,7 +488,7 @@ describe("Bloco 1 — Seleção por Critério", () => {
     expect(savedRaw!.length).toBeLessThan(1000);
   });
 
-  it("[REGRA 1.5] botões não adaptados ficam desabilitados enquanto a seleção for por critério, com motivo visível", async () => {
+  it("[REGRA 1.5] botões adaptados na Fase 2A/2B ficam habilitados e lembrete avulso exige lead único com motivo visível", async () => {
     renderBanco();
 
     await waitFor(() => {
@@ -447,22 +510,21 @@ describe("Bloco 1 — Seleção por Critério", () => {
       expect(screen.getByTestId("selection-summary-badge")).toBeInTheDocument();
     });
 
-    const expectedReason = "Disponível na próxima versão para seleção por filtro";
-
-    // 3. Botão Exportar leads no header deve estar desabilitado com o motivo
+    // 3. Botão Exportar leads no header continua HABILITADO na Fase 2A
     const exportBtn = screen.getByTestId("btn-export-menu");
-    expect(exportBtn).toBeDisabled();
-    expect(exportBtn).toHaveAttribute("title", expectedReason);
+    expect(exportBtn).not.toBeDisabled();
 
-    // 4. Botão "Aplicar Follow-up" no header deve estar desabilitado com o motivo
+    // 4. Botão "Aplicar Follow-up" no header agora está HABILITADO na Fase 2B
     const followupBtn = screen.getByRole("button", { name: /Aplicar Follow-up/i });
-    expect(followupBtn).toBeDisabled();
-    expect(followupBtn).toHaveAttribute("title", expectedReason);
+    expect(followupBtn).not.toBeDisabled();
 
-    // 5. Botão "Lembrete avulso" no header deve estar desabilitado com o motivo
+    // 5. Botão "Lembrete avulso" no header fica desabilitado para seleções != 1 com tooltip explicativo
     const reminderBtn = screen.getByRole("button", { name: /Lembrete avulso/i });
     expect(reminderBtn).toBeDisabled();
-    expect(reminderBtn).toHaveAttribute("title", expectedReason);
+    expect(reminderBtn).toHaveAttribute(
+      "title",
+      "O lembrete avulso é individual. Para múltiplos leads ou filtros, utilize 'Aplicar follow-up'."
+    );
 
     // 6. Botões da barra flutuante destravados na Fase 2A: Comprador, Perdido, Estágio, Tag
     const buyerBtn = screen.getByTestId("btn-floating-buyer");
@@ -539,4 +601,148 @@ describe("Bloco 1 — Seleção por Critério", () => {
       expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("77.550 leads marcados como Cliente!"));
     });
   });
+
+  it("[FASE 2B] modal de exclusão exige a palavra 'EXCLUIR' quando a contagem dinâmica for superior a 500 e dispara bulk-delete leve", async () => {
+    renderBanco();
+
+    await waitFor(() => {
+      expect(screen.getByText("Lead Empresa 1")).toBeInTheDocument();
+    });
+
+    // 1. Ativa seleção por critério (77.551)
+    const headerCheckbox = screen.getByTestId("header-select-all-checkbox");
+    fireEvent.click(headerCheckbox);
+
+    const btnSelectAllCriterion = await screen.findByTestId("btn-select-all-criterion");
+    fireEvent.click(btnSelectAllCriterion);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toBeInTheDocument();
+    });
+
+    // 2. Desmarca 1 lead (77.550 leads)
+    const checkLead1 = screen.getByTestId("lead-checkbox-lead-uuid-1");
+    fireEvent.click(checkLead1);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toHaveTextContent("− 1 desmarcado");
+    });
+
+    // 3. Abre o menu Mais ações da barra flutuante
+    const moreBtn = screen.getByTestId("btn-floating-more");
+    fireEvent.keyDown(moreBtn, { key: "Enter" });
+
+    // 4. Clica em "Excluir"
+    const deleteMenuItem = await screen.findByTestId("btn-floating-delete");
+    fireEvent.click(deleteMenuItem);
+
+    // 5. Diálogo de exclusão deve abrir com título dinâmico "Excluir 77.550 leads"
+    expect(await screen.findByText(/Excluir 77\.550 leads/i)).toBeInTheDocument();
+    expect(screen.getByText(/Esta ação é permanente e irreversível/i)).toBeInTheDocument();
+
+    // 6. Como 77.550 > 500, o botão de exclusão permanente deve estar desabilitado até digitar "EXCLUIR"
+    const confirmDeleteBtn = screen.getByTestId("btn-confirm-bulk-delete");
+    expect(confirmDeleteBtn).toBeDisabled();
+
+    // Digita texto incorreto (minúsculo)
+    const confirmInput = screen.getByTestId("input-delete-confirmation");
+    fireEvent.change(confirmInput, { target: { value: "excluir" } });
+    expect(confirmDeleteBtn).toBeDisabled();
+
+    // Digita exatamente "EXCLUIR"
+    fireEvent.change(confirmInput, { target: { value: "EXCLUIR" } });
+    expect(confirmDeleteBtn).not.toBeDisabled();
+
+    // 7. Clica para excluir permanentemente
+    fireEvent.click(confirmDeleteBtn);
+
+    // 8. Confirma que a rota POST /api/leads/bulk-delete foi chamada com criteria, excludedLeadIds e confirmation
+    await waitFor(() => {
+      const deleteCalls = (global.fetch as any).mock.calls.filter(([url]: [string]) =>
+        String(url).includes("/api/leads/bulk-delete")
+      );
+      expect(deleteCalls.length).toBeGreaterThan(0);
+      const [, init] = deleteCalls[0];
+      const parsedBody = JSON.parse(init.body);
+      expect(parsedBody.criteria).toBeDefined();
+      expect(parsedBody.excludedLeadIds).toEqual(["lead-uuid-1"]);
+      expect(parsedBody.confirmation).toBe("EXCLUIR");
+    });
+
+    // 9. Toast exibe confirmação dinâmica de exclusão
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringContaining("77.550 leads excluídos com sucesso!")
+      );
+    });
+  });
+
+  it("[FASE 2B] modal de aplicar follow-up projeta contagem dinâmica, exibe alerta anti-ban quando > cota diária e envia payload por critério", async () => {
+    renderBanco();
+
+    await waitFor(() => {
+      expect(screen.getByText("Lead Empresa 1")).toBeInTheDocument();
+    });
+
+    // 1. Ativa seleção por critério (77.551)
+    const headerCheckbox = screen.getByTestId("header-select-all-checkbox");
+    fireEvent.click(headerCheckbox);
+
+    const btnSelectAllCriterion = await screen.findByTestId("btn-select-all-criterion");
+    fireEvent.click(btnSelectAllCriterion);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toBeInTheDocument();
+    });
+
+    // 2. Desmarca 2 leads (77.549)
+    const checkLead1 = screen.getByTestId("lead-checkbox-lead-uuid-1");
+    const checkLead2 = screen.getByTestId("lead-checkbox-lead-uuid-2");
+    fireEvent.click(checkLead1);
+    fireEvent.click(checkLead2);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selection-summary-badge")).toHaveTextContent("− 2 desmarcados");
+    });
+
+    // 3. Abre o modal "Aplicar Follow-up" clicando no botão do header
+    const followupBtn = screen.getByRole("button", { name: /Aplicar Follow-up \(77\.549\)/i });
+    fireEvent.click(followupBtn);
+
+    // 4. O modal deve abrir com a contagem projetada de 77.549 leads
+    expect(await screen.findByText(/Proteção Anti-Ban do WhatsApp/i)).toBeInTheDocument();
+    expect(screen.getByText("Filtro dinâmico")).toBeInTheDocument();
+    expect(screen.getByText(/Inscrever 77\.549 lead\(s\)/i)).toBeInTheDocument();
+
+    // 5. Verifica se o alerta de Proteção Anti-Ban está visível (77.549 > chipLimit de 200)
+    // Math.ceil(77549 / 200) = 388 dias
+    expect(screen.getByText(/este número tem um teto seguro de/i)).toBeInTheDocument();
+    expect(screen.getByText(/388 dias/i)).toBeInTheDocument();
+
+    // 6. Confirma o envio clicando no botão de submissão do modal
+    const submitBtn = screen.getByRole("button", { name: /Aplicar a 77\.549 lead\(s\)/i });
+    fireEvent.click(submitBtn);
+
+    // 7. Confirma que POST /api/followup/campaigns/camp-1/enroll foi disparado com criteria e excludedLeadIds
+    await waitFor(() => {
+      const enrollCalls = (global.fetch as any).mock.calls.filter(([url]: [string]) =>
+        String(url).includes("/enroll")
+      );
+      expect(enrollCalls.length).toBeGreaterThan(0);
+      const [, init] = enrollCalls[0];
+      const parsedBody = JSON.parse(init.body);
+      expect(parsedBody.criteria).toBeDefined();
+      expect(parsedBody.excludedLeadIds).toEqual(["lead-uuid-1", "lead-uuid-2"]);
+      expect(parsedBody.origin).toBe("banco_dados");
+    });
+
+    // 8. Toast de sucesso confirma a inscrição dinâmica
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringContaining("77.549 leads inscritos na cadência!")
+      );
+    });
+  });
 });
+
+

@@ -130,9 +130,7 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
               variant="outline"
               size="sm"
               data-testid="btn-export-menu"
-              disabled={isCriterionSelection}
-              title={isCriterionSelection ? "Disponível na próxima versão para seleção por filtro" : undefined}
-              className="gap-2 text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+              className="gap-2 text-xs"
             >
               <Download className="w-3.5 h-3.5" />
               Exportar leads
@@ -184,14 +182,7 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
               variant="default"
               size="sm"
               onClick={onApplyFollowup}
-              disabled={isCriterionSelection}
-              title={isCriterionSelection ? "Disponível na próxima versão para seleção por filtro" : undefined}
-              className={cn(
-                "gap-2 text-xs text-white",
-                isCriterionSelection
-                  ? "bg-slate-400 dark:bg-zinc-700 cursor-not-allowed opacity-60"
-                  : "bg-emerald-600 hover:bg-emerald-700"
-              )}
+              className="gap-2 text-xs text-white bg-emerald-600 hover:bg-emerald-700"
             >
               <CalendarClock className="w-3.5 h-3.5" />
               Aplicar Follow-up ({selectedCount.toLocaleString("pt-BR")})
@@ -200,8 +191,8 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
               variant="outline"
               size="sm"
               onClick={onSingleReminder}
-              disabled={isCriterionSelection}
-              title={isCriterionSelection ? "Disponível na próxima versão para seleção por filtro" : undefined}
+              disabled={selectedCount !== 1}
+              title={selectedCount !== 1 ? "O lembrete avulso é individual. Para múltiplos leads ou filtros, utilize 'Aplicar follow-up'." : undefined}
               className="gap-1.5 border-emerald-600/40 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Clock className="w-3.5 h-3.5 text-emerald-500" />

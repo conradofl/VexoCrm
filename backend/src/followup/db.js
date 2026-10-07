@@ -35,3 +35,8 @@ export async function query(text, params = []) {
     client.release();
   }
 }
+
+export function _setPoolForTesting(pool) {
+  _pool = pool;
+  _supabase = pool ? createPgSupabaseClient(pool) : null;
+}

@@ -40,6 +40,8 @@ import {
   Instagram,
   HelpCircle,
   CheckSquare,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { InstagramImportModal } from "@/components/leads/InstagramImportModal";
 import { ContactsWithoutChannelSection } from "@/components/leads/ContactsWithoutChannelSection";
@@ -93,6 +95,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
 import { TagSelect } from "@/components/leads/TagSelect";
@@ -644,6 +647,9 @@ export default function BancoDeDados() {
   const [bulkTagValue, setBulkTagValue] = useState("");
   const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
   const [bulkAssignValue, setBulkAssignValue] = useState<string>("none");
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [deleteConfirmationInput, setDeleteConfirmationInput] = useState("");
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
 
   // Modais dedicados: Marcar como Cliente e Marcar como Perdido
   const [isMarkAsClientModalOpen, setIsMarkAsClientModalOpen] = useState(false);
@@ -2526,32 +2532,55 @@ export default function BancoDeDados() {
   };
 
   const handleBulkDeleteSubmit = async () => {
-    if (selectedLeadIds.length === 0) return;
-    if (!confirm(`Tem certeza que deseja excluir os ${selectedLeadIds.length} leads selecionados?`)) {
+    if (bancoEffectiveSelectedCount === 0) return;
+    if (bancoEffectiveSelectedCount > 500 && deleteConfirmationInput !== "EXCLUIR") {
+      toast.error("Para excluir mais de 500 leads, digite a palavra EXCLUIR.");
       return;
     }
 
+    setIsDeletingBulk(true);
     try {
       const token = await getIdToken();
+      const isCriterion = selectionMode === "criterion";
+      const payload: any = {
+        clientId,
+        confirmation: bancoEffectiveSelectedCount > 500 ? "EXCLUIR" : undefined,
+      };
+
+      if (isCriterion) {
+        payload.criteria = listFilters;
+        if (excludedLeadIds.length > 0) {
+          payload.excludedLeadIds = excludedLeadIds;
+        }
+      } else {
+        payload.leadIds = selectedLeadIds;
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/leads/bulk-delete`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientId,
-          leadIds: selectedLeadIds,
-        }),
+        body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Falha ao excluir em lote.");
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error?.message || data?.message || "Falha ao excluir em lote.");
+      }
 
-      toast.success(`${selectedLeadIds.length} leads excluídos com sucesso!`);
-      setSelectedLeadIds([]);
+      const count = data.deletedCount ?? bancoEffectiveSelectedCount;
+      toast.success(`${count.toLocaleString("pt-BR")} leads excluídos com sucesso!`);
+      setIsBulkDeleteModalOpen(false);
+      setDeleteConfirmationInput("");
+      handleClearSelection();
       fetchLeads();
+      loadFacets();
     } catch (err: any) {
       toast.error("Erro ao excluir leads", { description: err.message });
+    } finally {
+      setIsDeletingBulk(false);
     }
   };
 
@@ -4016,17 +4045,15 @@ export default function BancoDeDados() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem
-                  disabled={selectionMode === "criterion"}
-                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
                   onClick={() => setIsFollowupModalOpen(true)}
-                  className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs gap-2 cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
                   Aplicar follow-up
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={selectionMode === "criterion"}
-                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
+                  disabled={bancoEffectiveSelectedCount !== 1}
+                  title={bancoEffectiveSelectedCount !== 1 ? "O lembrete avulso é individual. Para múltiplos leads ou filtros, utilize 'Aplicar follow-up'." : undefined}
                   onClick={() => setIsSingleReminderModalOpen(true)}
                   className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -4051,9 +4078,13 @@ export default function BancoDeDados() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  disabled={selectionMode === "criterion"}
-                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
-                  onClick={handleBulkDeleteSubmit}
+                  data-testid="btn-floating-delete"
+                  disabled={!canMassDelete}
+                  title={!canMassDelete ? "Apenas gestor ou administrador pode excluir leads" : undefined}
+                  onClick={() => {
+                    setDeleteConfirmationInput("");
+                    setIsBulkDeleteModalOpen(true);
+                  }}
                   className="text-xs gap-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -5196,10 +5227,19 @@ export default function BancoDeDados() {
         clientId={clientId}
         apiBase={API_BASE_URL}
         getToken={getIdToken}
+        selectionMode={selectionMode}
+        criteria={selectionMode === "criterion" ? listFilters : undefined}
+        excludedLeadIds={selectionMode === "criterion" ? excludedLeadIds : undefined}
+        effectiveTotalCount={bancoEffectiveSelectedCount}
         leads={selectedLeadIds.map((id) => {
           const c = selectedContacts[id];
           return { id, nome: c?.nome ?? null, phone: c?.phone, telefone: c?.telefone };
         })}
+        onSuccess={() => {
+          handleClearSelection();
+          fetchLeads();
+          loadFacets();
+        }}
       />
 
       {/* Modal Lembrete Avulso para Lead */}
@@ -5764,6 +5804,66 @@ export default function BancoDeDados() {
             </Button>
             <Button size="sm" onClick={handleBulkAssignSubmit} className="bg-sky-600 hover:bg-sky-700 text-white">
               Reatribuir {bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Exclusão Segura em Lote */}
+      <Dialog open={isBulkDeleteModalOpen} onOpenChange={setIsBulkDeleteModalOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+              <Trash2 className="w-4 h-4" />
+              Excluir {bancoEffectiveSelectedCount.toLocaleString("pt-BR")} leads
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            <Alert variant="destructive" className="py-2.5">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-xs font-bold">Ação Permanente e Irreversível</AlertTitle>
+              <AlertDescription className="text-xs mt-1 leading-relaxed">
+                Esta ação é permanente e irreversível. Todos os dados cadastrais dos leads selecionados serão apagados.
+              </AlertDescription>
+            </Alert>
+
+            {bancoEffectiveSelectedCount > 500 && (
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-medium text-foreground block">
+                  Para confirmar a exclusão de mais de 500 leads, digite <strong>EXCLUIR</strong>:
+                </label>
+                <Input
+                  placeholder="Digite EXCLUIR"
+                  value={deleteConfirmationInput}
+                  onChange={(e) => setDeleteConfirmationInput(e.target.value)}
+                  className="text-xs h-9"
+                  data-testid="input-delete-confirmation"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsBulkDeleteModalOpen(false);
+                setDeleteConfirmationInput("");
+              }}
+              disabled={isDeletingBulk}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              data-testid="btn-confirm-bulk-delete"
+              onClick={handleBulkDeleteSubmit}
+              disabled={isDeletingBulk || (bancoEffectiveSelectedCount > 500 && deleteConfirmationInput !== "EXCLUIR")}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {isDeletingBulk ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
+              Excluir permanentemente
             </Button>
           </DialogFooter>
         </DialogContent>

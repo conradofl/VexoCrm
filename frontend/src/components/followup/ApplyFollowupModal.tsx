@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, CalendarClock, Send, Info, AlertTriangle, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Loader2, CalendarClock, Send, Info, AlertTriangle, AlertCircle, CheckCircle2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -71,6 +71,11 @@ interface Props {
   leads: LeadForFollowup[];
   apiBase: string;
   getToken: () => Promise<string | null>;
+  selectionMode?: "manual" | "criterion";
+  criteria?: any;
+  excludedLeadIds?: string[];
+  effectiveTotalCount?: number;
+  onSuccess?: () => void;
 }
 
 // getStepPreview unificado via lib/followup/describeStep ("warning_past" / "Horário já passou" / "warning_no_date")
@@ -78,7 +83,19 @@ function getStepPreview(step: FollowupStep, meetingDatetime: string) {
   return sharedGetStepPreview(step, meetingDatetime);
 }
 
-export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads, apiBase, getToken }: Props) {
+export default function ApplyFollowupModal({
+  open,
+  onOpenChange,
+  clientId,
+  leads,
+  apiBase,
+  getToken,
+  selectionMode = "manual",
+  criteria,
+  excludedLeadIds,
+  effectiveTotalCount,
+  onSuccess,
+}: Props) {
   const [companies, setCompanies] = useState<FollowupCompany[]>([]);
   const [companyId, setCompanyId] = useState<string>("");
   const [cadences, setCadences] = useState<FollowupCadence[]>([]);
@@ -165,10 +182,12 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
     })();
   }, [cadenceId]);
 
-  // Faixa "Próximos 7 dias" projetando o que ESTA aplicação (leads.length) vai gerar
+  const totalCount = selectionMode === "criterion" ? (effectiveTotalCount ?? 0) : leads.length;
+
+  // Faixa "Próximos 7 dias" projetando o que ESTA aplicação (totalCount) vai gerar
   // somado ao que já existe — teto real é do chip, compartilhado entre cadências.
   useEffect(() => {
-    if (!cadenceId || leads.length === 0) {
+    if (!cadenceId || totalCount === 0) {
       setUpcomingDays(undefined);
       setUpcomingChipLimit(null);
       return;
@@ -178,7 +197,7 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
       setUpcomingLoading(true);
       try {
         const res = await authFetch(
-          `/api/followup/campaigns/${encodeURIComponent(cadenceId)}/upcoming?days=7&projectLeads=${leads.length}`
+          `/api/followup/campaigns/${encodeURIComponent(cadenceId)}/upcoming?days=7&projectLeads=${totalCount}`
         );
         const body = await res.json();
         if (cancelled) return;
@@ -196,11 +215,14 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
     return () => {
       cancelled = true;
     };
-  }, [cadenceId, leads.length]);
+  }, [cadenceId, totalCount]);
 
   const totalSelected = leads.length;
   const validPhoneCount = leads.filter((l) => Boolean(l.phone || l.telefone)).length;
   const missingPhoneCount = totalSelected - validPhoneCount;
+
+  const dailyLimit = upcomingChipLimit || 200;
+  const estimatedDays = Math.ceil(totalCount / dailyLimit);
 
   const stepPreviews = steps.map((s) => ({ step: s, preview: getStepPreview(s, meetingDatetime) }));
   const validStepsCount = stepPreviews.filter((p) => p.preview.type === "valid").length;
@@ -216,18 +238,29 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
     setErrorDetails(null);
 
     try {
-      const payloadLeads = leads.map((lead) => ({
-        name: lead.nome || "Lead",
-        phone: lead.phone || lead.telefone || null,
-      }));
-
-      const res = await authFetch(`/api/followup/campaigns/${encodeURIComponent(cadenceId)}/enroll`, {
-        method: "POST",
-        body: JSON.stringify({
+      let reqBody: any;
+      if (selectionMode === "criterion") {
+        reqBody = {
+          criteria,
+          excludedLeadIds: excludedLeadIds && excludedLeadIds.length > 0 ? excludedLeadIds : undefined,
+          meeting_datetime: meetingDatetime ? new Date(meetingDatetime).toISOString() : null,
+          origin: "banco_dados",
+        };
+      } else {
+        const payloadLeads = leads.map((lead) => ({
+          name: lead.nome || "Lead",
+          phone: lead.phone || lead.telefone || null,
+        }));
+        reqBody = {
           leads: payloadLeads,
           meeting_datetime: meetingDatetime ? new Date(meetingDatetime).toISOString() : null,
           origin: "banco_dados",
-        }),
+        };
+      }
+
+      const res = await authFetch(`/api/followup/campaigns/${encodeURIComponent(cadenceId)}/enroll`, {
+        method: "POST",
+        body: JSON.stringify(reqBody),
       });
 
       const body = await res.json();
@@ -259,18 +292,23 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
       }
 
       // Sucesso total ou parcial com mensagens agendadas
-      const parts = [`${body.enrolled} lead(s) inscrito(s)`, `${body.enqueued} mensagem(ns) agendada(s)`];
-      if (body.skippedPastDate) parts.push(`${body.skippedPastDate} passo(s) no passado`);
-      if (body.skippedNoDate) parts.push(`${body.skippedNoDate} passo(s) sem data`);
-      if (body.missingPhone) parts.push(`${body.missingPhone} sem telefone`);
-
-      if (body.failed > 0 || body.skippedPastDate > 0 || body.missingPhone > 0) {
-        toast.warning(parts.join(" · "));
+      if (selectionMode === "criterion") {
+        toast.success(`${totalCount.toLocaleString("pt-BR")} leads inscritos na cadência!`);
       } else {
-        toast.success(parts.join(" · "));
+        const parts = [`${body.enrolled} lead(s) inscrito(s)`, `${body.enqueued} mensagem(ns) agendada(s)`];
+        if (body.skippedPastDate) parts.push(`${body.skippedPastDate} passo(s) no passado`);
+        if (body.skippedNoDate) parts.push(`${body.skippedNoDate} passo(s) sem data`);
+        if (body.missingPhone) parts.push(`${body.missingPhone} sem telefone`);
+
+        if (body.failed > 0 || body.skippedPastDate > 0 || body.missingPhone > 0) {
+          toast.warning(parts.join(" · "));
+        } else {
+          toast.success(parts.join(" · "));
+        }
       }
 
       onOpenChange(false);
+      onSuccess?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Falha ao aplicar o follow-up.";
       setErrorDetails(msg);
@@ -289,23 +327,47 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
             Aplicar Follow-up
           </DialogTitle>
           <DialogDescription>
-            Inscrever {leads.length} lead(s) selecionado(s) numa cadência de follow-up. As mensagens
+            Inscrever {totalCount.toLocaleString("pt-BR")} lead(s) selecionado(s) numa cadência de follow-up. As mensagens
             saem automaticamente conforme as regras de cada passo.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground flex items-center justify-between border">
-            <span>
-              <strong>{validPhoneCount}</strong> de <strong>{totalSelected}</strong> leads com WhatsApp válido
-            </span>
-            {missingPhoneCount > 0 && (
-              <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/30 text-[11px] gap-1">
-                <AlertTriangle className="w-3 h-3" />
-                {missingPhoneCount} sem telefone (serão pulados)
+          {selectionMode === "criterion" ? (
+            <div className="rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground flex items-center justify-between border">
+              <span>
+                <strong>{totalCount.toLocaleString("pt-BR")}</strong> leads selecionados por filtro
+              </span>
+              <Badge variant="outline" className="text-indigo-600 dark:text-indigo-400 border-indigo-500/30 text-[11px] gap-1">
+                Filtro dinâmico
               </Badge>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground flex items-center justify-between border">
+              <span>
+                <strong>{validPhoneCount}</strong> de <strong>{totalSelected}</strong> leads com WhatsApp válido
+              </span>
+              {missingPhoneCount > 0 && (
+                <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/30 text-[11px] gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  {missingPhoneCount} sem telefone (serão pulados)
+                </Badge>
+              )}
+            </div>
+          )}
+
+          {totalCount > dailyLimit && (
+            <Alert className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200">
+              <ShieldAlert className="h-4 w-4 text-amber-600" />
+              <AlertTitle className="text-xs font-semibold">Proteção Anti-Ban do WhatsApp</AlertTitle>
+              <AlertDescription className="text-xs leading-relaxed mt-1">
+                Para proteger o chip contra bloqueios por envio em massa, este número tem um teto seguro de{" "}
+                <strong>{dailyLimit} envios/dia</strong>. O envio para estes{" "}
+                <strong>{totalCount.toLocaleString("pt-BR")} leads</strong> será distribuído automaticamente ao longo de aproximadamente{" "}
+                <strong>{estimatedDays} dias</strong> úteis na sua janela de envio.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {errorDetails && (
             <Alert variant="destructive" className="py-2.5">
@@ -480,13 +542,16 @@ export default function ApplyFollowupModal({ open, onOpenChange, clientId, leads
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || loading || !cadenceId || hasOnlySkippedSteps}
+            disabled={submitting || loading || !cadenceId || hasOnlySkippedSteps || totalCount === 0}
           >
             {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-            Aplicar a {leads.length} lead(s)
+            Aplicar a {totalCount.toLocaleString("pt-BR")} lead(s)
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+
+export { ApplyFollowupModal };
+

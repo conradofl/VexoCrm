@@ -32,6 +32,8 @@ import {
   queryLeadIds,
   queryImportOrigin,
   queryLeadsPage,
+  parseLeadListFilters,
+  resolveLeadListScope,
   validateAudienceRules,
 } from "../../services/leadListQuery.js";
 import { SecondNumberInputError, listSecondNumberCampaigns, querySecondNumberAudience } from "../../services/secondNumberAudience.js";
@@ -1049,42 +1051,6 @@ export function registerLeadsRoutes(app, deps) {
   }
 
   // ── Lista do Banco de Dados: filtro, ordenação, contagem e paginação no SQL (services/leadListQuery.js) ──────────────
-  // O escopo do usuário é o mesmo em todas as rotas de lista: operador interno vê os seus e os sem dono; usuário interno pode
-  // filtrar por responsável; cliente vê tudo da própria empresa. Sempre por client_id.
-  function resolveLeadListScope(req, clientId) {
-    const isInternalOperator = req.authAccess?.role === "internal" && req.authAccess?.accessPreset === "operador";
-    if (isInternalOperator) {
-      const uid = req.authAccess?.uid || req.authUser?.uid;
-      const email = req.authAccess?.email || req.authUser?.email;
-      return { clientId, operatorIdentifiers: [uid, email].filter(Boolean) };
-    }
-    if (req.authAccess?.role !== "client") {
-      const assignedTo = normalizeString(req.query?.assigned_to || req.query?.assignedTo || req.query?.userId);
-      return { clientId, assignedTo: assignedTo || null };
-    }
-    return { clientId };
-  }
-
-  /** Filtros de lista vindos da URL. Devolve { filters } ou { problem } (valor fora da lista conhecida vira 400, nunca lista vazia calada). */
-  function parseLeadListFilters(query) {
-    const filters = {
-      stage: normalizeString(query.stage) || "",
-      temperature: normalizeString(query.temperature) || "",
-      tag: normalizeString(query.tag) || "",
-      search: normalizeString(query.search) || "",
-      source: normalizeString(query.source) || "",
-      channel: normalizeString(query.channel) || "",
-      segment: normalizeString(query.segment) || "",
-      importId: normalizeString(query.importId) || "",
-    };
-    if (filters.channel && filters.channel !== "all" && !MARKETING_CHANNEL_IDS.includes(filters.channel)) {
-      return { problem: `Canal inválido: ${filters.channel}` };
-    }
-    if (filters.segment && !BASE_POTENTIAL_SEGMENTS.includes(filters.segment)) {
-      return { problem: `Faixa inválida: ${filters.segment}` };
-    }
-    return { filters };
-  }
 
   const LEAD_LIST_SORTS = ["contato", "ultima_conversa"];
   const EMPTY_SUMMARY = {
@@ -3015,25 +2981,65 @@ export function registerLeadsRoutes(app, deps) {
   // Exclusão em lote de leads
   app.post("/api/leads/bulk-delete", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
     if (!ensureDb(res)) return;
+    if (!isManagerOrAdmin(req.authAccess)) {
+      sendError(res, 403, "FORBIDDEN", "Apenas gestor ou administrador pode excluir leads em massa.");
+      return;
+    }
     const requestedClientId = normalizeString(req.body?.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
 
-    const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
-    if (leadIds.length === 0) {
+    let targetLeadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
+
+    if (targetLeadIds.length === 0 && req.body?.criteria && typeof req.body.criteria === "object") {
+      const parsed = parseLeadListFilters(req.body.criteria);
+      if (parsed.problem) {
+        sendError(res, 400, "INVALID_LEAD_FILTER", parsed.problem);
+        return;
+      }
+      const scope = resolveLeadListScope(req, clientId);
+      const queryResult = await queryLeadIds(pgDatabasePool, { scope, filters: parsed.filters });
+      const excludedSet = new Set(Array.isArray(req.body?.excludedLeadIds) ? req.body.excludedLeadIds : []);
+      targetLeadIds = queryResult.ids.filter((id) => !excludedSet.has(id));
+    }
+
+    if (targetLeadIds.length === 0) {
       sendError(res, 400, "INVALID_BODY", "Nenhum lead selecionado.");
       return;
     }
 
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .delete()
-        .eq("client_id", clientId)
-        .in("id", leadIds);
+    if (targetLeadIds.length > 500) {
+      const confirmation = String(req.body?.confirmation || "").trim();
+      if (confirmation !== "EXCLUIR") {
+        sendError(res, 400, "CONFIRMATION_REQUIRED", "Para excluir mais de 500 leads, digite a palavra EXCLUIR.");
+        return;
+      }
+    }
 
-      if (error) throw error;
-      res.json({ success: true, deletedCount: leadIds.length });
+    try {
+      if (pgDatabasePool) {
+        const CHUNK_SIZE = 1000;
+        for (let i = 0; i < targetLeadIds.length; i += CHUNK_SIZE) {
+          const chunk = targetLeadIds.slice(i, i + CHUNK_SIZE);
+          await pgDatabasePool.query(
+            `DELETE FROM public.leads WHERE client_id = $1 AND id = ANY($2::uuid[])`,
+            [clientId, chunk]
+          );
+        }
+      } else {
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < targetLeadIds.length; i += CHUNK_SIZE) {
+          const chunk = targetLeadIds.slice(i, i + CHUNK_SIZE);
+          const { error } = await supabase
+            .from("leads")
+            .delete()
+            .eq("client_id", clientId)
+            .in("id", chunk);
+          if (error) throw error;
+        }
+      }
+
+      res.json({ success: true, deletedCount: targetLeadIds.length });
     } catch (err) {
       console.error("[leads-bulk-delete] Error:", err);
       sendError(res, 500, "BULK_DELETE_FAILED", err.message || "Falha na exclusão em lote");

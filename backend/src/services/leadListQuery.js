@@ -615,3 +615,41 @@ export async function* iterateLeadsForExport(pool, { scope, filters = {}, blockS
     offset += blockSize;
   }
 }
+
+/** Filtros de lista vindos da URL ou body. Devolve { filters } ou { problem } (valor fora da lista conhecida vira 400, nunca lista vazia calada). */
+export function parseLeadListFilters(query = {}) {
+  const norm = (v) => (typeof v === "string" ? v.trim() : "");
+  const filters = {
+    stage: norm(query.stage),
+    temperature: norm(query.temperature),
+    tag: norm(query.tag),
+    search: norm(query.search),
+    source: norm(query.source),
+    channel: norm(query.channel),
+    segment: norm(query.segment),
+    importId: norm(query.importId),
+  };
+  if (filters.channel && filters.channel !== "all" && !MARKETING_CHANNEL_IDS.includes(filters.channel)) {
+    return { problem: `Canal inválido: ${filters.channel}` };
+  }
+  if (filters.segment && !BASE_POTENTIAL_SEGMENTS.includes(filters.segment)) {
+    return { problem: `Faixa inválida: ${filters.segment}` };
+  }
+  return { filters };
+}
+
+/** Escopo de tenant e operador para queries de leads. Usado por Banco de Dados, Campanhas e Follow-up. */
+export function resolveLeadListScope(req, clientId) {
+  const norm = (v) => (typeof v === "string" ? v.trim() : "");
+  const isInternalOperator = req?.authAccess?.role === "internal" && req?.authAccess?.accessPreset === "operador";
+  if (isInternalOperator) {
+    const uid = req?.authAccess?.uid || req?.authUser?.uid;
+    const email = req?.authAccess?.email || req?.authUser?.email;
+    return { clientId, operatorIdentifiers: [uid, email].filter(Boolean) };
+  }
+  if (req?.authAccess?.role !== "client") {
+    const assignedTo = norm(req?.query?.assigned_to || req?.query?.assignedTo || req?.query?.userId);
+    return { clientId, assignedTo: assignedTo || null };
+  }
+  return { clientId };
+}
