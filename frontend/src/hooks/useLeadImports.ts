@@ -89,6 +89,7 @@ interface CreateLeadImportPayload {
       key?: string;
     }>;
   };
+  duplicateStrategy?: "merge" | "skip" | "overwrite";
 }
 
 interface CreateLeadImportResponse {
@@ -425,7 +426,50 @@ export interface CreateBancoImportPayload {
   columnMapping?: unknown;
   importTags?: string[];
   asClosedSales?: boolean;
+  duplicateStrategy?: "merge" | "skip" | "overwrite";
   onProgress?: (progress: ImportProgress) => void;
+}
+
+export interface LeadImportAnalysisResult {
+  totalRows: number;
+  newCount: number;
+  duplicateCount: number;
+  duplicatesByPhone: number;
+  duplicatesByName: number;
+  sampleDuplicates: Array<{
+    nome: string;
+    telefone: string;
+    existingTags?: string[];
+  }>;
+}
+
+export interface AnalyzeLeadImportPayload {
+  clientId: string;
+  rows: Record<string, unknown>[];
+  columnMapping?: unknown;
+  defaultDdd?: string;
+}
+
+export function useAnalyzeLeadImport() {
+  const { getIdToken } = useAuth();
+  return useMutation({
+    mutationFn: async (payload: AnalyzeLeadImportPayload): Promise<LeadImportAnalysisResult> => {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/lead-imports/analyze`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Falha na análise de duplicados.");
+      }
+      return res.json();
+    },
+  });
 }
 
 /**

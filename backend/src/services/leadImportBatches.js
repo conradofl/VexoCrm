@@ -338,7 +338,7 @@ export async function openLeadImport(pool, input) {
       [
         clientId, sourceName, sourceType, columnMapping ? JSON.stringify(columnMapping) : null,
         input.uploadedByUid || null, input.uploadedByEmail || null, totalRows,
-        JSON.stringify({ defaultDdd, autoMapping, ...(input.importParams && typeof input.importParams === "object" ? input.importParams : {}) }), JSON.stringify({ valid: 0, intact: 0, completed: 0, missing: 0 }),
+        JSON.stringify({ defaultDdd, autoMapping, duplicateStrategy: input.duplicateStrategy || "merge", ...(input.importParams && typeof input.importParams === "object" ? input.importParams : {}) }), JSON.stringify({ valid: 0, intact: 0, completed: 0, missing: 0 }),
         input.fingerprint || null,
       ]
     );

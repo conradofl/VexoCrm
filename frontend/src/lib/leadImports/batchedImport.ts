@@ -34,6 +34,7 @@ export interface BatchedImportPayload {
   /** Importação do Banco de Dados: tags da importação e "vendas fechadas" (o servidor guarda e usa em cada lote). */
   importTags?: string[];
   asClosedSales?: boolean;
+  duplicateStrategy?: "merge" | "skip" | "overwrite";
 }
 
 export interface ImportTotals {
@@ -211,6 +212,7 @@ export async function runBatchedImport(payload: BatchedImportPayload, opts: RunO
       totalRows: total,
       sampleRows: rows.slice(0, 15), // o mapeamento automático decide por uma amostra
       fingerprint,
+      duplicateStrategy: payload.duplicateStrategy || "merge",
       ...(payload.importTags ? { importTags: payload.importTags } : {}),
       ...(payload.asClosedSales ? { asClosedSales: true } : {}),
     });

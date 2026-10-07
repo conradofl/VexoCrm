@@ -14,6 +14,7 @@ import {
   Upload,
   ChevronDown,
   Database,
+  Tag,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,8 @@ interface BancoActionsBarProps {
   // 3) o que AGE sobre a base
   onCreateCampaign: () => void;
   onNewLead: () => void;
+  onManageTags?: () => void;
+  hasFilteredLeads?: boolean;
   selectedCount: number;
   selectionSummary?: string | null;
   onClearSelection?: () => void;
@@ -66,6 +69,8 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
     onExportCSV,
     onCreateCampaign,
     onNewLead,
+    onManageTags,
+    hasFilteredLeads = false,
     selectedCount,
     selectionSummary,
     onClearSelection,
@@ -156,6 +161,19 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
           <Rocket className="w-3.5 h-3.5" />
           Criar campanha
         </Button>
+
+        {hasFilteredLeads && onManageTags && (
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="btn-manage-tags-bar"
+            onClick={onManageTags}
+            className="gap-2 text-xs font-semibold border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 dark:border-indigo-800/60 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-slate-800"
+          >
+            <Tag className="w-3.5 h-3.5 text-indigo-500" />
+            Gerenciar Tags
+          </Button>
+        )}
 
         {selectedCount > 0 && (
           <>

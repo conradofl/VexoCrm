@@ -150,12 +150,15 @@ import {
 import { ColumnMappingStep } from "@/pages/LeadImports/ColumnMappingStep";
 import {
   useCreateBancoImport,
+  useAnalyzeLeadImport,
   useLeadCustomFields,
   useLeadImports,
   useDeleteLeadImport,
   useResumeLeadImport,
   type LeadImportItem,
+  type LeadImportAnalysisResult,
 } from "@/hooks/useLeadImports";
+import { DuplicateDecisionCard, type DuplicateStrategy } from "@/components/leads/DuplicateDecisionCard";
 import { SavedSheetsCards } from "@/pages/LeadImports/SavedSheetsCards";
 import { ImportViewerDialog } from "@/pages/LeadImports/ImportViewerDialog";
 import { ImportProgressBanner } from "@/pages/LeadImports/ImportProgressBanner";
@@ -588,6 +591,10 @@ export default function BancoDeDados() {
     validCount: 0,
     invalidCount: 0,
   });
+  const analyzeLeadImport = useAnalyzeLeadImport();
+  const [importAnalysis, setImportAnalysis] = useState<LeadImportAnalysisResult | null>(null);
+  const [importDuplicateStrategy, setImportDuplicateStrategy] = useState<DuplicateStrategy>("merge");
+  const [isAnalyzingImport, setIsAnalyzingImport] = useState(false);
   const [importAuditStats, setImportAuditStats] = useState<{
     total: number;
     valid: number;
@@ -1169,6 +1176,7 @@ export default function BancoDeDados() {
 
   const handleMappingChange = (newMappings: ColumnMappingItem[]) => {
     setImportColumnMappings(newMappings);
+    setImportAnalysis(null);
     if (importRawRows.length > 0) {
       recalculateImportStatsWithMappings(importRawRows, newMappings, importDefaultDdd);
     }
@@ -1177,6 +1185,7 @@ export default function BancoDeDados() {
   const handleDefaultDddChange = (newDdd: string) => {
     const clean = newDdd.replace(/\D/g, "").slice(0, 2);
     setImportDefaultDdd(clean);
+    setImportAnalysis(null);
     if (importRawRows.length > 0) {
       if (importColumnMappings.length > 0) {
         recalculateImportStatsWithMappings(importRawRows, importColumnMappings, clean);
@@ -1191,6 +1200,8 @@ export default function BancoDeDados() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImportFile(file);
+    setImportAnalysis(null);
+    setImportDuplicateStrategy("merge");
 
     const cleanFileName = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "_");
     const autoTag = `#Imp-${cleanFileName}`;
@@ -1238,6 +1249,34 @@ export default function BancoDeDados() {
       return;
     }
 
+    const rows = importColumnMappings.length > 0 ? importRawRows : importParsedRows;
+
+    // Se ainda não foi realizada a análise de duplicados, faz a checagem prévia
+    if (!importAnalysis) {
+      setIsAnalyzingImport(true);
+      try {
+        const analysis = await analyzeLeadImport.mutateAsync({
+          clientId,
+          rows,
+          columnMapping: importColumnMappings.length > 0 ? importColumnMappings : undefined,
+          defaultDdd: importDefaultDdd || undefined,
+        });
+        setImportAnalysis(analysis);
+
+        if (analysis.duplicateCount > 0) {
+          toast.info("Contatos duplicados detectados", {
+            description: `${analysis.duplicateCount} contatos já constam no banco. Escolha a estratégia antes de prosseguir.`,
+          });
+          setIsAnalyzingImport(false);
+          return;
+        }
+      } catch (err: any) {
+        console.warn("[BancoDeDados] Erro na análise prévia de duplicados, prosseguindo com importação:", err);
+      } finally {
+        setIsAnalyzingImport(false);
+      }
+    }
+
     setIsUploadingImport(true);
     setImportProgress(null);
     try {
@@ -1248,7 +1287,6 @@ export default function BancoDeDados() {
 
       // Em LOTES de 500 linhas (sem o corpo único que estourava o limite do servidor com milhares de linhas). O registro da importação
       // nasce com o NOME do arquivo e fica no mesmo lugar da tela de Planilhas; os leads são criados a cada lote.
-      const rows = importColumnMappings.length > 0 ? importRawRows : importParsedRows;
       const result = await createBancoImport.mutateAsync({
         clientId,
         sourceName: importFile?.name || "",
@@ -1258,6 +1296,7 @@ export default function BancoDeDados() {
         columnMapping: importColumnMappings.length > 0 ? importColumnMappings : undefined,
         importTags,
         asClosedSales: importAsClosedSales,
+        duplicateStrategy: importDuplicateStrategy,
         onProgress: setImportProgress,
       });
       toast.success(
@@ -1276,6 +1315,8 @@ export default function BancoDeDados() {
       setImportAsClosedSales(false);
       setImportParsedRows([]);
       setImportRawRows([]);
+      setImportAnalysis(null);
+      setImportDuplicateStrategy("merge");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -2164,6 +2205,21 @@ export default function BancoDeDados() {
     setSelectedLeadIds([]);
   };
 
+  const handleOpenManageTagsQuickAction = () => {
+    setSelectionMode("criterion");
+    setCriterionTotal(listTotal);
+    setExcludedLeadIds([]);
+    setSelectedLeadIds([]);
+    if (selectedTag && selectedTag.trim()) {
+      setBulkTagMode("remove");
+      setBulkTagValue(selectedTag.trim());
+    } else {
+      setBulkTagMode("add");
+      setBulkTagValue("");
+    }
+    setIsBulkTagModalOpen(true);
+  };
+
   const handleClearSelection = useCallback(() => {
     setSelectionMode("manual");
     setSelectedLeadIds([]);
@@ -2863,6 +2919,8 @@ export default function BancoDeDados() {
             onExportCSV={handleExportCSV}
             onCreateCampaign={handleOpenCampaignWizard}
             onNewLead={() => setIsCreateModalOpen(true)}
+            onManageTags={handleOpenManageTagsQuickAction}
+            hasFilteredLeads={listTotal > 0 || (facets?.baseTotal ?? 0) > 0}
             selectedCount={bancoEffectiveSelectedCount}
             selectionSummary={selectionSummary}
             onClearSelection={handleClearSelection}
@@ -4289,6 +4347,8 @@ export default function BancoDeDados() {
             setImportColumnMappings([]);
             setImportRawRows([]);
             setImportParsedRows([]);
+            setImportAnalysis(null);
+            setImportDuplicateStrategy("merge");
             if (fileInputRef.current) {
               fileInputRef.current.value = "";
             }
@@ -4435,6 +4495,14 @@ export default function BancoDeDados() {
                     </Button>
                   )}
                 </div>
+
+                {importAnalysis && importAnalysis.duplicateCount > 0 && (
+                  <DuplicateDecisionCard
+                    analysis={importAnalysis}
+                    strategy={importDuplicateStrategy}
+                    onStrategyChange={setImportDuplicateStrategy}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -4449,6 +4517,8 @@ export default function BancoDeDados() {
                 setImportColumnMappings([]);
                 setImportRawRows([]);
                 setImportParsedRows([]);
+                setImportAnalysis(null);
+                setImportDuplicateStrategy("merge");
                 if (fileInputRef.current) {
                   fileInputRef.current.value = "";
                 }
@@ -4458,15 +4528,19 @@ export default function BancoDeDados() {
             </Button>
             <Button
               onClick={handleImportSubmit}
-              disabled={!importFile || isUploadingImport || !isImportMappingValid || importSanitizePreview.validCount === 0}
+              disabled={!importFile || isUploadingImport || isAnalyzingImport || !isImportMappingValid || importSanitizePreview.validCount === 0}
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
             >
-              {isUploadingImport ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
-              {isUploadingImport && importProgress && importProgress.phase === "sending"
-                ? `Enviando ${importProgress.sentRows.toLocaleString("pt-BR")} de ${importProgress.totalRows.toLocaleString("pt-BR")}…`
-                : isUploadingImport && importProgress?.phase === "closing"
-                  ? "Concluindo…"
-                  : "Processar e Importar"}
+              {isUploadingImport || isAnalyzingImport ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
+              {isAnalyzingImport
+                ? "Analisando duplicados..."
+                : isUploadingImport && importProgress && importProgress.phase === "sending"
+                  ? `Enviando ${importProgress.sentRows.toLocaleString("pt-BR")} de ${importProgress.totalRows.toLocaleString("pt-BR")}…`
+                  : isUploadingImport && importProgress?.phase === "closing"
+                    ? "Concluindo…"
+                    : importAnalysis && importAnalysis.duplicateCount > 0
+                      ? "Confirmar e Importar"
+                      : "Processar e Importar"}
             </Button>
           </DialogFooter>
         </DialogContent>

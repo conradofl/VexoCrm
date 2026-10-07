@@ -140,12 +140,13 @@ export function buildBancoLeads(rows, { clientId, defaultDdd = null, mappingItem
 }
 
 /** O que a abertura guarda em import_params para os lotes seguintes (o servidor é a fonte, o cliente não reenvia a cada lote). */
-export function bancoImportParams({ importTags = [], asClosedSales = false }) {
-  return { mode: BANCO_IMPORT_MODE, importTags: normalizeImportTags(importTags), asClosedSales: Boolean(asClosedSales) };
+export function bancoImportParams({ importTags = [], asClosedSales = false, duplicateStrategy = "merge" }) {
+  const strategy = ["merge", "skip", "overwrite"].includes(duplicateStrategy) ? duplicateStrategy : "merge";
+  return { mode: BANCO_IMPORT_MODE, importTags: normalizeImportTags(importTags), asClosedSales: Boolean(asClosedSales), duplicateStrategy: strategy };
 }
 
 /** Abre o registro de uma importação do Banco (mesma tabela e mesmo caminho da tela de Planilhas). */
-export function openBancoImport(pool, { clientId, sourceName, defaultDdd, columnMapping, totalRows, sampleRows, fingerprint, importTags, asClosedSales, uploadedByUid, uploadedByEmail }) {
+export function openBancoImport(pool, { clientId, sourceName, defaultDdd, columnMapping, totalRows, sampleRows, fingerprint, importTags, asClosedSales, duplicateStrategy, uploadedByUid, uploadedByEmail }) {
   const tags = normalizeImportTags(importTags);
   const name = describeImportSource({ sourceName, importTags: tags, asClosedSales });
   return openLeadImport(pool, {
@@ -159,13 +160,13 @@ export function openBancoImport(pool, { clientId, sourceName, defaultDdd, column
     fingerprint,
     uploadedByUid,
     uploadedByEmail,
-    importParams: bancoImportParams({ importTags: tags, asClosedSales }),
+    importParams: bancoImportParams({ importTags: tags, asClosedSales, duplicateStrategy }),
   });
 }
 
 /**
  * Um lote do Banco: cria/atualiza os LEADS e depois registra o lote. `ctx` é o contexto lido do servidor (parâmetros da abertura):
- * { importId, clientId, params: {defaultDdd, mode, importTags, asClosedSales}, columnMapping }.
+ * { importId, clientId, params: {defaultDdd, mode, importTags, asClosedSales, duplicateStrategy}, columnMapping }.
  */
 export async function appendBancoImportBatch(pool, ctx, { startIndex, rows, fingerprint, normalizeImportedLead, isImportedLeadEmpty, upsert = upsertLeadsBatchByPhone }) {
   if (!Array.isArray(rows) || rows.length === 0) throw new ImportError(400, "INVALID_BODY", "O lote precisa ter pelo menos uma linha");
@@ -173,6 +174,7 @@ export async function appendBancoImportBatch(pool, ctx, { startIndex, rows, fing
     throw new ImportError(413, "BATCH_TOO_LARGE", `Cada lote aceita no máximo ${IMPORT_BATCH_SIZE} linhas (recebeu ${rows.length}). Divida o envio em lotes de até ${IMPORT_BATCH_SIZE}.`);
   }
   const params = ctx.params || {};
+  const duplicateStrategy = params.duplicateStrategy || "merge";
   const { leads, skippedNoPhoneCount } = buildBancoLeads(rows, {
     clientId: ctx.clientId,
     defaultDdd: params.defaultDdd || null,
@@ -184,7 +186,7 @@ export async function appendBancoImportBatch(pool, ctx, { startIndex, rows, fing
   });
   let leadsTouched = 0;
   if (leads.length > 0) {
-    const result = await upsert(pool, ctx.clientId, leads);
+    const result = await upsert(pool, ctx.clientId, leads, { duplicateStrategy });
     leadsTouched = result?.totalCount ?? leads.length;
     await markExtraPhoneCollisions(pool, ctx.clientId, leads);
   }
@@ -217,6 +219,7 @@ export async function runBancoImportInOnePost(pool, input, deps = {}) {
     sampleRows: rows.slice(0, 15),
     importTags: input.importTags,
     asClosedSales: input.asClosedSales,
+    duplicateStrategy: input.duplicateStrategy,
     uploadedByUid: input.uploadedByUid,
     uploadedByEmail: input.uploadedByEmail,
   });
@@ -224,7 +227,13 @@ export async function runBancoImportInOnePost(pool, input, deps = {}) {
   const ctx = {
     importId,
     clientId: input.clientId,
-    params: { defaultDdd: input.defaultDdd || null, mode: BANCO_IMPORT_MODE, importTags: normalizeImportTags(input.importTags), asClosedSales: Boolean(input.asClosedSales) },
+    params: {
+      defaultDdd: input.defaultDdd || null,
+      mode: BANCO_IMPORT_MODE,
+      importTags: normalizeImportTags(input.importTags),
+      asClosedSales: Boolean(input.asClosedSales),
+      duplicateStrategy: input.duplicateStrategy || "merge",
+    },
     columnMapping: mappingItems ? input.columnMapping : null,
   };
   let leadsTouched = 0;

@@ -17,6 +17,7 @@ import {
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
 import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadUpsert.js";
+import { analyzeImportDuplicates } from "../../services/leadImportDeduplication.js";
 import { summarizeChatWithAI } from "./chatInsight.js";
 import {
   BASE_POTENTIAL_SEGMENTS,
@@ -2283,6 +2284,7 @@ export function registerLeadsRoutes(app, deps) {
         columnMapping: rawMapping,
         importTags: req.body?.importTags || req.body?.tags || [],
         asClosedSales: Boolean(req.body?.asClosedSales || req.body?.isClosedSales),
+        duplicateStrategy: req.body?.duplicateStrategy,
         sourceName: normalizeString(req.body?.sourceName || req.body?.fileName),
         uploadedByUid: req.authAccess?.uid || null,
         uploadedByEmail: req.authAccess?.email || null,
@@ -2359,6 +2361,7 @@ export function registerLeadsRoutes(app, deps) {
         fingerprint: normalizeString(req.body?.fingerprint),
         importTags: req.body?.importTags,
         asClosedSales: Boolean(req.body?.asClosedSales),
+        duplicateStrategy: req.body?.duplicateStrategy,
         uploadedByUid: req.authAccess?.uid || null,
         uploadedByEmail: req.authAccess?.email || null,
       });
@@ -3463,6 +3466,27 @@ export function registerLeadsRoutes(app, deps) {
     sendError(res, 500, "LEAD_IMPORT_FAILED", error instanceof Error ? error.message : "Falha na importação da planilha");
   };
 
+  app.post("/api/lead-imports/analyze", requireFirebaseAuth, requireBancoDeDadosOrCampanhas, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    const requestedClientId = normalizeString(req.body?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      const result = await analyzeImportDuplicates(pgDatabasePool, {
+        clientId,
+        rows: req.body?.rows || [],
+        columnMapping: req.body?.columnMapping || req.body?.mapping || null,
+        defaultDdd: req.body?.defaultDdd || null,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("[lead-imports-analyze] error:", error);
+      sendError(res, 500, "ANALYZE_FAILED", error instanceof Error ? error.message : "Falha ao analisar duplicados");
+    }
+  });
+
   app.post("/api/lead-imports/open", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
     if (!ensureDb(res)) return;
     if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
@@ -3478,6 +3502,7 @@ export function registerLeadsRoutes(app, deps) {
         totalRows: req.body?.totalRows,
         sampleRows: req.body?.sampleRows,
         fingerprint: normalizeString(req.body?.fingerprint),
+        duplicateStrategy: req.body?.duplicateStrategy,
         uploadedByUid: req.authAccess?.uid || null,
         uploadedByEmail: req.authAccess?.email || null,
       });

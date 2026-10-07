@@ -252,6 +252,7 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
   }
 
   const preserveExistingName = options.preserveExistingName !== false;
+  const duplicateStrategy = options.duplicateStrategy || "merge";
 
   // 1. Deduplicação em memória por telefone dentro do próprio arquivo/lote
   const dedupMap = new Map();
@@ -420,70 +421,88 @@ export async function upsertLeadsBatchByPhone(pool, clientId, leads = [], option
     }
 
     // ── UPDATE (Existentes) ─────────────────────────────────────────────────
-    for (const { lead, existing } of toUpdate) {
-      let finalName = lead.nome;
-      if (preserveExistingName && isRealName(existing.nome) && !isRealName(lead.nome)) {
-        finalName = existing.nome;
+    if (duplicateStrategy !== "skip") {
+      for (const { lead, existing } of toUpdate) {
+        let finalName = lead.nome;
+        if (preserveExistingName && isRealName(existing.nome) && !isRealName(lead.nome)) {
+          finalName = existing.nome;
+        }
+
+        const mergedTags = duplicateStrategy === "overwrite"
+          ? Array.from(new Set(Array.isArray(lead.tags) ? lead.tags : []))
+          : Array.from(new Set([
+              ...(Array.isArray(existing.tags)
+                ? existing.tags
+                : typeof existing.tags === "string"
+                ? existing.tags.split(",").map((t) => t.trim()).filter(Boolean)
+                : []),
+              ...(Array.isArray(lead.tags) ? lead.tags : []),
+            ]));
+
+        const existingDados = typeof existing.dados === "object" && existing.dados ? existing.dados : {};
+        const leadDados = typeof lead.dados === "object" && lead.dados ? lead.dados : {};
+        const existingCampos = (typeof existingDados.campos === "object" && existingDados.campos) ? existingDados.campos : {};
+        const leadCampos = (typeof leadDados.campos === "object" && leadDados.campos) ? leadDados.campos : {};
+        const mergedCampos = duplicateStrategy === "overwrite"
+          ? (Object.keys(leadCampos).length > 0 ? leadCampos : existingCampos)
+          : ((Object.keys(existingCampos).length > 0 || Object.keys(leadCampos).length > 0)
+            ? { ...existingCampos, ...leadCampos }
+            : undefined);
+
+        const mergedImportIds = unionImportIds(existingDados.import_ids, leadDados.import_ids);
+        const mergedProcedencia = duplicateStrategy === "overwrite"
+          ? (leadDados.procedencia || existingDados.procedencia)
+          : mergeProcedencia(existingDados.procedencia, leadDados.procedencia);
+        const mergedExtras = duplicateStrategy === "overwrite"
+          ? (leadDados.telefones_extras || existingDados.telefones_extras)
+          : mergeTelefonesExtras(existingDados.telefones_extras, leadDados.telefones_extras);
+        const mergedDados = duplicateStrategy === "overwrite"
+          ? {
+              ...leadDados,
+              ...(mergedCampos ? { campos: mergedCampos } : {}),
+              ...(mergedImportIds ? { import_ids: mergedImportIds } : {}),
+              ...(mergedProcedencia ? { procedencia: mergedProcedencia } : {}),
+              ...(mergedExtras ? { telefones_extras: mergedExtras } : {}),
+            }
+          : {
+              ...existingDados,
+              ...leadDados,
+              ...(mergedCampos ? { campos: mergedCampos } : {}),
+              ...(mergedImportIds ? { import_ids: mergedImportIds } : {}),
+              ...(mergedProcedencia ? { procedencia: mergedProcedencia } : {}),
+              ...(mergedExtras ? { telefones_extras: mergedExtras } : {}),
+            };
+
+        const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";
+        const finalStage = isManualProtected ? existing.stage : (lead.stage !== undefined ? (lead.stage || null) : existing.stage);
+        const finalStageSource = isManualProtected ? existing.stage_source : (lead.stage_source !== undefined ? (lead.stage_source || null) : existing.stage_source);
+        const finalLostReason = isManualProtected ? existing.lost_reason : (lead.lost_reason !== undefined ? (lead.lost_reason || null) : existing.lost_reason);
+
+        await pool.query(
+          `UPDATE public.leads
+           SET nome = $1,
+               stage = COALESCE($2, stage),
+               stage_source = COALESCE($3, stage_source),
+               lost_reason = $4,
+               temperature = COALESCE($5, temperature),
+               tags = $6,
+               dados = $7,
+               updated_at = now()
+           WHERE id = $8`,
+          [
+            finalName || existing.nome || lead.telefone,
+            finalStage,
+            finalStageSource,
+            finalLostReason,
+            lead.temperature || null,
+            mergedTags,
+            JSON.stringify(mergedDados),
+            existing.id,
+          ]
+        );
+
+        totalUpdated += 1;
       }
-
-      const mergedTags = Array.from(new Set([
-        ...(Array.isArray(existing.tags)
-          ? existing.tags
-          : typeof existing.tags === "string"
-          ? existing.tags.split(",").map((t) => t.trim()).filter(Boolean)
-          : []),
-        ...(Array.isArray(lead.tags) ? lead.tags : []),
-      ]));
-
-      const existingDados = typeof existing.dados === "object" && existing.dados ? existing.dados : {};
-      const leadDados = typeof lead.dados === "object" && lead.dados ? lead.dados : {};
-      const existingCampos = (typeof existingDados.campos === "object" && existingDados.campos) ? existingDados.campos : {};
-      const leadCampos = (typeof leadDados.campos === "object" && leadDados.campos) ? leadDados.campos : {};
-      const mergedCampos = (Object.keys(existingCampos).length > 0 || Object.keys(leadCampos).length > 0)
-        ? { ...existingCampos, ...leadCampos }
-        : undefined;
-
-      const mergedImportIds = unionImportIds(existingDados.import_ids, leadDados.import_ids);
-      const mergedProcedencia = mergeProcedencia(existingDados.procedencia, leadDados.procedencia);
-      const mergedExtras = mergeTelefonesExtras(existingDados.telefones_extras, leadDados.telefones_extras);
-      const mergedDados = {
-        ...existingDados,
-        ...leadDados,
-        ...(mergedCampos ? { campos: mergedCampos } : {}),
-        ...(mergedImportIds ? { import_ids: mergedImportIds } : {}),
-        ...(mergedProcedencia ? { procedencia: mergedProcedencia } : {}),
-        ...(mergedExtras ? { telefones_extras: mergedExtras } : {}),
-      };
-
-      const isManualProtected = existing.stage_source === "manual" && lead.stage_source !== "manual";
-      const finalStage = isManualProtected ? existing.stage : (lead.stage !== undefined ? (lead.stage || null) : existing.stage);
-      const finalStageSource = isManualProtected ? existing.stage_source : (lead.stage_source !== undefined ? (lead.stage_source || null) : existing.stage_source);
-      const finalLostReason = isManualProtected ? existing.lost_reason : (lead.lost_reason !== undefined ? (lead.lost_reason || null) : existing.lost_reason);
-
-      await pool.query(
-        `UPDATE public.leads
-         SET nome = $1,
-             stage = COALESCE($2, stage),
-             stage_source = COALESCE($3, stage_source),
-             lost_reason = $4,
-             temperature = COALESCE($5, temperature),
-             tags = $6,
-             dados = $7,
-             updated_at = now()
-         WHERE id = $8`,
-        [
-          finalName || existing.nome || lead.telefone,
-          finalStage,
-          finalStageSource,
-          finalLostReason,
-          lead.temperature || null,
-          mergedTags,
-          JSON.stringify(mergedDados),
-          existing.id,
-        ]
-      );
-
-      totalUpdated += 1;
     }
   }
 
