@@ -270,6 +270,78 @@ describe("MassDeleteDialog", () => {
     expect(executes()).toHaveLength(0);
   });
 
+  it("[TESTE OBRIGATÓRIO] exportar trata singular (1 lead) e plural (N leads) na concordância do botão", async () => {
+    // 1 lead apagado
+    previews = [preview({ willDelete: 1, matched: 10, kept: 9 })];
+    const { unmount } = renderDialog();
+    await escolherTag();
+    expect(screen.getByRole("button", { name: "Exportar o 1 lead que será apagado (planilha)" })).toBeTruthy();
+    unmount();
+
+    // Vários leads apagados
+    previews = [preview({ willDelete: 17845, matched: 20000, kept: 2155 })];
+    renderDialog();
+    await escolherTag();
+    expect(screen.getByRole("button", { name: "Exportar os 17.845 leads que serão apagados (planilha)" })).toBeTruthy();
+  });
+
+  it("[TESTE OBRIGATÓRIO] explica por que os demais leads estão protegidos quando há diferença entre selecionados e a apagar", async () => {
+    // Caso com muitos protegidos (salto de 17.845 selecionados para 1 a apagar)
+    previews = [preview({ matched: 17845, willDelete: 1, kept: 17844 })];
+    const { unmount } = renderDialog();
+    await escolherTag();
+
+    const note = screen.getByTestId("mass-delete-protected-note");
+    expect(note.textContent).toBe(
+      "Os demais 17.844 leads estão protegidos porque vieram de mais de uma importação ou já trocaram mensagem — marque as caixas abaixo para incluí-los."
+    );
+    unmount();
+
+    // Caso singular: 2 selecionados, 1 a apagar, 1 protegido
+    previews = [preview({ matched: 2, willDelete: 1, kept: 1 })];
+    const { unmount: unmount2 } = renderDialog();
+    await escolherTag();
+    expect(screen.getByTestId("mass-delete-protected-note").textContent).toBe(
+      "O outro lead está protegido porque veio de mais de uma importação ou já trocou mensagem — marque as caixas abaixo para incluí-lo."
+    );
+    unmount2();
+
+    // Caso sem mantidos (kept === 0): a nota explicativa não aparece
+    previews = [preview({ matched: 10, willDelete: 10, kept: 0 })];
+    renderDialog();
+    await escolherTag();
+    expect(screen.queryByTestId("mass-delete-protected-note")).toBeNull();
+  });
+
+  it("[TESTE OBRIGATÓRIO] layout da modal fixa cabeçalho e rodapé, limita altura em 85vh e rola miolo e lista de tags", async () => {
+    previews = [preview({ willDelete: 10, matched: 20, kept: 10 })];
+    renderDialog();
+    await escolherTag();
+
+    const dialog = screen.getByTestId("mass-delete-dialog");
+    expect(dialog.className).toContain("max-h-[85vh]");
+    expect(dialog.className).toContain("flex");
+    expect(dialog.className).toContain("flex-col");
+    expect(dialog.className).toContain("overflow-hidden");
+
+    // Cabeçalho e rodapé têm shrink-0 para não serem esmagados
+    const header = dialog.querySelector("div.border-b");
+    expect(header?.className).toContain("shrink-0");
+
+    const footer = dialog.querySelector("div.border-t");
+    expect(footer?.className).toContain("shrink-0");
+
+    // Miolo tem flex-1 e overflow-y-auto
+    const body = dialog.querySelector("div.flex-1");
+    expect(body?.className).toContain("overflow-y-auto");
+    expect(body?.className).toContain("min-h-0");
+
+    // Lista de tags tem altura limitada max-h-28 e rolagem própria
+    const tagList = screen.getByRole("group", { name: "Lista de tags disponíveis" });
+    expect(tagList.className).toContain("max-h-28");
+    expect(tagList.className).toContain("overflow-y-auto");
+  });
+
   it("sem nada a apagar, o botão de confirmar fica desabilitado", async () => {
     previews = [preview({ willDelete: 0, kept: 40, matched: 40 })];
     renderDialog();

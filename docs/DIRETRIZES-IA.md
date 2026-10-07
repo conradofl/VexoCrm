@@ -16,3 +16,8 @@
 ## 3. Isolamento Multi-Tenant
 - Toda query e mutação no banco de dados deve filtrar obrigatoriamente por `client_id` via `resolveAuthorizedClientId(req, res, clientId)`.
 - Nenhuma leitura ou escrita cruzada entre clientes é permitida.
+
+## 4. Exclusão em Massa de Leads (Proteção por Padrão)
+- A exclusão em massa de leads é irreversível e o sistema não tem desfazer.
+- A proteção por padrão fica mantida: leads que vieram de mais de uma importação ou que já trocaram mensagem continuam protegidos por padrão (`includeMultiImport: false`, `includeWithMessages: false`).
+- Para incluí-los na exclusão, o usuário precisa declarar explicitamente marcando as respectivas caixas de seleção na interface.

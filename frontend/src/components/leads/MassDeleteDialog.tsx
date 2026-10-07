@@ -143,82 +143,86 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg" data-testid="mass-delete-dialog">
-        <DialogHeader>
+      <DialogContent
+        className="max-w-lg max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden"
+        data-testid="mass-delete-dialog"
+      >
+        <DialogHeader className="p-5 pb-3 border-b shrink-0 pr-10 text-left">
           <DialogTitle>Excluir leads por tags</DialogTitle>
           <DialogDescription>
             Exclusão em massa, irreversível. Selecione uma ou mais tags e confira os números antes de confirmar.
           </DialogDescription>
         </DialogHeader>
 
-        {report ? (
-          <div data-testid="mass-delete-report" className="space-y-1.5 text-sm">
-            {reportLines(report).map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-            <p className="text-xs text-muted-foreground pt-1">
-              A exclusão foi registrada com seu usuário, o critério, a quantidade e a data.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Seletor com busca e seleção múltipla de tags */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-foreground">
-                  Tags selecionadas ({selectedTags.length})
-                </label>
-                {selectedTags.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedTags([]);
-                      resetReview();
-                    }}
-                    className="text-[11px] text-muted-foreground hover:text-foreground underline"
-                  >
-                    Limpar seleção
-                  </button>
-                )}
-              </div>
-
-              {/* Badges das tags selecionadas */}
-              {selectedTags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 p-2 bg-muted/40 rounded-md border text-xs max-h-24 overflow-y-auto">
-                  {selectedTags.map((t) => (
-                    <span
-                      key={t}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium text-xs"
+        <div className="flex-1 overflow-y-auto p-5 py-4 space-y-4 min-h-0">
+          {report ? (
+            <div data-testid="mass-delete-report" className="space-y-1.5 text-sm">
+              {reportLines(report).map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              <p className="text-xs text-muted-foreground pt-1">
+                A exclusão foi registrada com seu usuário, o critério, a quantidade e a data.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Seletor com busca e seleção múltipla de tags */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground">
+                    Tags selecionadas ({selectedTags.length})
+                  </label>
+                  {selectedTags.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTags([]);
+                        resetReview();
+                      }}
+                      className="text-[11px] text-muted-foreground hover:text-foreground underline"
                     >
-                      {t}
-                      <button
-                        type="button"
-                        onClick={() => toggleTag(t)}
-                        className="hover:text-rose-500 rounded-full"
-                        aria-label={`Remover tag ${t}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
+                      Limpar seleção
+                    </button>
+                  )}
                 </div>
-              )}
 
-              {/* Campo de busca para filtrar as tags */}
-              <Input
-                placeholder="Buscar tags..."
-                value={tagSearch}
-                onChange={(e) => setTagSearch(e.target.value)}
-                className="h-8 text-xs"
-                aria-label="Buscar tags"
-              />
+                {/* Badges das tags selecionadas */}
+                {selectedTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-muted/40 rounded-md border text-xs max-h-20 overflow-y-auto">
+                    {selectedTags.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium text-xs"
+                      >
+                        {t}
+                        <button
+                          type="button"
+                          onClick={() => toggleTag(t)}
+                          className="hover:text-rose-500 rounded-full"
+                          aria-label={`Remover tag ${t}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
 
-              {/* Lista rolável de tags com checkboxes */}
-              <div
-                className="max-h-36 overflow-y-auto rounded-md border bg-background p-1 space-y-0.5 text-xs"
-                role="group"
-                aria-label="Lista de tags disponíveis"
-              >
+                {/* Campo de busca para filtrar as tags */}
+                <Input
+                  placeholder="Buscar tags..."
+                  value={tagSearch}
+                  onChange={(e) => setTagSearch(e.target.value)}
+                  className="h-8 text-xs"
+                  aria-label="Buscar tags"
+                />
+
+                {/* Lista rolável de tags com checkboxes */}
+                <div
+                  className="max-h-28 overflow-y-auto rounded-md border bg-background p-1 space-y-0.5 text-xs"
+                  role="group"
+                  aria-label="Lista de tags disponíveis"
+                >
                 {filteredTags.length === 0 ? (
                   <p className="p-2 text-center text-muted-foreground text-xs">
                     {tagSearch ? "Nenhuma tag encontrada para esta busca." : "Nenhuma tag disponível."}
@@ -312,6 +316,21 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
                   <dd data-testid="num-kept">{data.kept}</dd>
                 </dl>
 
+                {data.kept > 0 && (
+                  <p
+                    data-testid="mass-delete-protected-note"
+                    className="text-xs text-muted-foreground bg-muted/40 rounded-md border border-border/60 p-2.5 leading-relaxed"
+                  >
+                    {data.willDelete > 0
+                      ? data.kept === 1
+                        ? "O outro lead está protegido porque veio de mais de uma importação ou já trocou mensagem — marque as caixas abaixo para incluí-lo."
+                        : `Os demais ${data.kept.toLocaleString("pt-BR")} leads estão protegidos porque vieram de mais de uma importação ou já trocaram mensagem — marque as caixas abaixo para incluí-los.`
+                      : data.kept === 1
+                        ? "O lead está protegido porque veio de mais de uma importação ou já trocou mensagem — marque as caixas abaixo para incluí-lo."
+                        : `Os ${data.kept.toLocaleString("pt-BR")} leads estão protegidos porque vieram de mais de uma importação ou já trocaram mensagem — marque as caixas abaixo para incluí-los.`}
+                  </p>
+                )}
+
                 <div className="space-y-1.5 rounded-md border p-2.5 text-xs">
                   <label className="flex items-start gap-2">
                     <input
@@ -349,7 +368,9 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
                         onClick={handleExport}
                       >
                         <Download className="h-3.5 w-3.5" />
-                        Exportar os {data.willDelete} leads que serão apagados (planilha)
+                        {data.willDelete === 1
+                          ? "Exportar o 1 lead que será apagado (planilha)"
+                          : `Exportar os ${data.willDelete.toLocaleString("pt-BR")} leads que serão apagados (planilha)`}
                       </Button>
                       <p className="text-[11px] text-muted-foreground">
                         Não há desfazer. Se precisar voltar atrás, só reimportando esta planilha.
@@ -393,8 +414,9 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
             )}
           </div>
         )}
+        </div>
 
-        <DialogFooter>
+        <DialogFooter className="p-4 pt-3 border-t bg-muted/20 shrink-0 flex flex-row items-center justify-end gap-2 sm:space-x-0">
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             {report ? "Fechar" : "Cancelar"}
           </Button>

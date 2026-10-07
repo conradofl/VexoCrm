@@ -98,6 +98,7 @@ E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... npx playwright test --workers=1   # 1
 | `src/test/leadImportsLoading.test.ts` | Valida strings de comentário morto — não estender esse padrão; destino pendente de decisão |
 | Histórico de registros | Imutável — nunca UPDATE/DELETE em histórico sem aprovação explícita |
 | Status calculado | Nunca persistir status derivável — calcular na leitura |
+| Exclusão em massa de leads (`leadMassDelete`) | **Padrão protege**: leads de mais de uma importação ou que já trocaram mensagem continuam protegidos por padrão (`includeMultiImport: false`, `includeWithMessages: false`). Motivo: exclusão é irreversível e o sistema não tem desfazer; quem quer apagar mais precisa marcar as caixas explicitamente. |
 
 ---
 

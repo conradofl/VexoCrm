@@ -29,6 +29,12 @@ export interface MassDeleteReport {
   criterion: { type: string; value: string; values?: string[] };
 }
 
+/**
+ * Decisão do dono: a proteção por padrão fica mantida como está.
+ * Motivo: exclusão é irreversível e o sistema não tem desfazer, então o padrão protege
+ * (leads de mais de uma importação ou que já trocaram mensagem ficam preservados)
+ * e quem quer apagar mais declara explicitamente marcando as caixas.
+ */
 export const DEFAULT_MASS_DELETE_OPTIONS: MassDeleteOptions = {
   includeMultiImport: false,
   includeWithMessages: false,
