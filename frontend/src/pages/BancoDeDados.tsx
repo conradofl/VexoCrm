@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
@@ -150,7 +150,11 @@ import {
 import { SavedSheetsCards } from "@/pages/LeadImports/SavedSheetsCards";
 import { ImportViewerDialog } from "@/pages/LeadImports/ImportViewerDialog";
 import { ImportProgressBanner } from "@/pages/LeadImports/ImportProgressBanner";
-import { buildFilterAudienceDescription } from "@/lib/leads/audienceDescription";
+import {
+  buildFilterAudienceDescription,
+  buildFilterCriterionSummary,
+  formatSelectionBarLabel,
+} from "@/lib/leads/audienceDescription";
 import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
 import { ImportBatchError, type ImportProgress } from "@/lib/leadImports/batchedImport";
 import { resolveRowPhones, summarizePhonePreview, type PhonePreviewSummary } from "@/lib/leadImports/multiPhone";
@@ -627,8 +631,11 @@ export default function BancoDeDados() {
   const [isDetailSheetOpen, setIsDetailSheetOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState("");
 
-  // Bulk Selection (Ações em Lote)
+  // Bulk Selection (Ações em Lote & Seleção por Critério)
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState<"manual" | "criterion">("manual");
+  const [criterionTotal, setCriterionTotal] = useState<number>(0);
+  const [excludedLeadIds, setExcludedLeadIds] = useState<string[]>([]);
   const [isBulkStageModalOpen, setIsBulkStageModalOpen] = useState(false);
   const [bulkStageValue, setBulkStageValue] = useState<"buyer" | "open_budget" | "inquiry" | "cold" | "lost">("cold");
   const [bulkContractValue, setBulkContractValue] = useState("");
@@ -1408,11 +1415,13 @@ export default function BancoDeDados() {
   const handleExportXLSX = async () => {
     const progressToast = toast.loading("Preparando planilha Excel…");
     try {
-      const allLeads = await fetchAllLeadsForExport<LeadIntelligenceItem>(leadRequest, {
+      const allLeadsRaw = await fetchAllLeadsForExport<LeadIntelligenceItem>(leadRequest, {
         clientId,
         filters: listFilters,
         onProgress: (done, total) => toast.loading(`Preparando planilha Excel… ${done.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")}`, { id: progressToast }),
       });
+      const excludedSet = new Set(excludedLeadIds);
+      const allLeads = excludedSet.size > 0 ? allLeadsRaw.filter((l) => !excludedSet.has(l.id)) : allLeadsRaw;
       // Coleta todas as chaves customizadas presentes nos leads filtrados
       const allCustomKeys = new Set<string>();
       allLeads.forEach((l) => {
@@ -1506,15 +1515,16 @@ export default function BancoDeDados() {
     }
   };
 
-  // Bloco 3: "Criar campanha" leva a seleção junto por critérios (não por lista de linhas)
+  // Handoff por critério para Campanhas (leve, sem enviar 77k ids)
   const handleCreateCampaignFromBanco = () => {
-    if (listTotal === 0) {
+    const totalToUse = bancoEffectiveSelectedCount > 0 ? bancoEffectiveSelectedCount : listTotal;
+    if (totalToUse === 0) {
       toast.error("Nenhum lead encontrado com os filtros aplicados.");
       return;
     }
     const sheetName = pastImports.find((i) => i.id === selectedImportId)?.source_name;
     const channelDef = MARKETING_CHANNELS.find((c) => c.id === selectedChannel);
-    const description = buildFilterAudienceDescription(listFilters, listTotal, {
+    const description = selectionSummary || buildFilterAudienceDescription(listFilters, totalToUse, {
       sheetName,
       channelName: channelDef?.name,
     });
@@ -1525,8 +1535,10 @@ export default function BancoDeDados() {
         "vexo_pending_campaign_audience",
         JSON.stringify({
           criteria: listFilters,
+          excludedLeadIds: selectionMode === "criterion" && excludedLeadIds.length > 0 ? excludedLeadIds : undefined,
+          selectionMode,
           description,
-          totalCount: listTotal,
+          totalCount: totalToUse,
           campaignName,
         })
       );
@@ -2090,22 +2102,112 @@ export default function BancoDeDados() {
     }
   };
 
-  // Bulk Selection Actions
+  // As linhas da página já vêm filtradas e ordenadas pelo servidor (SQL); a tela não refaz nenhuma conta.
+  const paginatedLeads = leads;
+
+  // Bloco 1: Seleção por Critério vs Seleção Manual
+  const isLeadSelected = useCallback(
+    (id: string) => {
+      if (selectionMode === "criterion") {
+        return !excludedLeadIds.includes(id);
+      }
+      return selectedLeadIds.includes(id);
+    },
+    [selectionMode, excludedLeadIds, selectedLeadIds]
+  );
+
+  const pageIds = useMemo(() => paginatedLeads.map((l) => l.id), [paginatedLeads]);
+  const isAllPageSelected = pageIds.length > 0 && pageIds.every((id) => isLeadSelected(id));
+
+  const effectiveBaseTotal = selectionMode === "criterion" ? (criterionTotal || listTotal) : 0;
+  const bancoEffectiveSelectedCount = useMemo(() => {
+    if (selectionMode === "criterion") {
+      return Math.max(0, effectiveBaseTotal - excludedLeadIds.length);
+    }
+    return selectedLeadIds.length;
+  }, [selectionMode, effectiveBaseTotal, excludedLeadIds.length, selectedLeadIds.length]);
+
+  const handleSelectAllByCriterion = () => {
+    setSelectionMode("criterion");
+    setCriterionTotal(listTotal);
+    setExcludedLeadIds([]);
+    setSelectedLeadIds([]);
+  };
+
+  const handleClearSelection = useCallback(() => {
+    setSelectionMode("manual");
+    setSelectedLeadIds([]);
+    setExcludedLeadIds([]);
+    setCriterionTotal(0);
+  }, []);
+
   const handleToggleSelectAll = () => {
-    const pageIds = paginatedLeads.map((l) => l.id);
-    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedLeadIds.includes(id));
-    if (allPageSelected) {
-      setSelectedLeadIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    if (selectionMode === "criterion") {
+      if (isAllPageSelected) {
+        // Desmarcar todos da página atual: adiciona à lista de exceções
+        setExcludedLeadIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+      } else {
+        // Remarcar todos da página atual: remove da lista de exceções
+        setExcludedLeadIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+      }
     } else {
-      setSelectedLeadIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+      if (isAllPageSelected) {
+        setSelectedLeadIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+      } else {
+        setSelectedLeadIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+      }
     }
   };
 
   const handleToggleSelectOne = (id: string) => {
-    setSelectedLeadIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
+    if (selectionMode === "criterion") {
+      setExcludedLeadIds((prev) =>
+        prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+      );
+    } else {
+      setSelectedLeadIds((prev) =>
+        prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+      );
+    }
   };
+
+  // Trocar o filtro limpa a seleção por critério, com aviso. Nunca carregar seleção velha para filtro novo.
+  const filtersKey = useMemo(() => JSON.stringify(listFilters), [listFilters]);
+  const prevBancoFiltersKeyRef = useRef(filtersKey);
+
+  useEffect(() => {
+    if (prevBancoFiltersKeyRef.current !== filtersKey) {
+      prevBancoFiltersKeyRef.current = filtersKey;
+      if (selectionMode === "criterion") {
+        setSelectionMode("manual");
+        setExcludedLeadIds([]);
+        setSelectedLeadIds([]);
+        setCriterionTotal(0);
+        toast.info("Filtro alterado: a seleção por critério anterior foi limpa.");
+      }
+    }
+  }, [filtersKey, selectionMode]);
+
+  const filterCriterionSummary = useMemo(() => {
+    const sheetName = pastImports.find((i) => i.id === selectedImportId)?.source_name;
+    const channelDef = MARKETING_CHANNELS.find((c) => c.id === selectedChannel);
+    return buildFilterCriterionSummary(listFilters, {
+      sheetName,
+      channelName: channelDef?.name,
+    });
+  }, [pastImports, selectedImportId, selectedChannel, listFilters]);
+
+  const selectionSummary = useMemo(() => {
+    if (bancoEffectiveSelectedCount === 0) return null;
+    if (selectionMode === "criterion") {
+      return formatSelectionBarLabel({
+        totalCount: effectiveBaseTotal,
+        filterSummary: filterCriterionSummary,
+        excludedCount: excludedLeadIds.length,
+      });
+    }
+    return `${bancoEffectiveSelectedCount.toLocaleString("pt-BR")} lead${bancoEffectiveSelectedCount === 1 ? "" : "s"} selecionado${bancoEffectiveSelectedCount === 1 ? "" : "s"}`;
+  }, [bancoEffectiveSelectedCount, selectionMode, effectiveBaseTotal, filterCriterionSummary, excludedLeadIds.length]);
 
   const openMarkAsClientModal = (target: { type: "single"; leadId: string } | { type: "bulk"; leadIds: string[] }) => {
     setMarkAsClientTarget(target);
@@ -2428,9 +2530,6 @@ export default function BancoDeDados() {
     }
   };
 
-  // As linhas da página já vêm filtradas e ordenadas pelo servidor (SQL); a tela não refaz nenhuma conta.
-  const paginatedLeads = leads;
-
   // Abas: contagem do banco DENTRO do filtro ativo de tag e busca (sem filtro coincide com a base inteira).
   // Se o servidor degradou (sem abas), mostra o que sabe da base em vez de inventar.
   const stageCounts = useMemo<LeadTabCounts>(() => {
@@ -2641,13 +2740,16 @@ export default function BancoDeDados() {
             onManageSpreadsheets={() => setIsSavedSheetsOpen(true)}
             onExportXLSX={handleExportXLSX}
             onExportCSV={handleExportCSV}
-            onCreateCampaign={handleOpenCampaignWizard}
+            onCreateCampaign={handleCreateCampaignFromBanco}
             onNewLead={() => setIsCreateModalOpen(true)}
-            selectedCount={selectedLeadIds.length}
+            selectedCount={bancoEffectiveSelectedCount}
+            selectionSummary={selectionSummary}
+            onClearSelection={handleClearSelection}
             onApplyFollowup={() => setIsFollowupModalOpen(true)}
             onSingleReminder={() => setIsSingleReminderModalOpen(true)}
             clientId={clientId}
             canManageBulk={canMassDelete}
+            isCriterionSelection={selectionMode === "criterion"}
           />
         </SectionHeader>
 
@@ -3336,7 +3438,8 @@ export default function BancoDeDados() {
                       <TableHead className="w-[40px] px-3 py-[10px]">
                         <input
                           type="checkbox"
-                          checked={paginatedLeads.length > 0 && paginatedLeads.every((l) => selectedLeadIds.includes(l.id))}
+                          data-testid="header-select-all-checkbox"
+                          checked={isAllPageSelected}
                           onChange={handleToggleSelectAll}
                           className="rounded border-input text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                         />
@@ -3488,12 +3591,54 @@ export default function BancoDeDados() {
                         Ação
                       </TableHead>
                     </TableRow>
+                    {((isAllPageSelected && listTotal > paginatedLeads.length) || selectionMode === "criterion") && (
+                      <TableRow
+                        data-testid="selection-criterion-banner"
+                        className="bg-indigo-50/90 dark:bg-indigo-950/60 border-b border-indigo-200/80 dark:border-indigo-900/50 hover:bg-indigo-50/90 dark:hover:bg-indigo-950/60 transition-colors"
+                      >
+                        <TableCell colSpan={8} className="py-2.5 px-4 text-center text-xs font-medium text-indigo-950 dark:text-indigo-200">
+                          {selectionMode === "criterion" ? (
+                            <span>
+                              Todos os <strong>{effectiveBaseTotal.toLocaleString("pt-BR")}</strong> leads que batem com este filtro estão selecionados
+                              {excludedLeadIds.length > 0 && (
+                                <span className="font-normal opacity-90">
+                                  {" "}
+                                  (−{excludedLeadIds.length.toLocaleString("pt-BR")}{" "}
+                                  {excludedLeadIds.length === 1 ? "desmarcado" : "desmarcados"})
+                                </span>
+                              )}
+                              .{" "}
+                              <button
+                                type="button"
+                                onClick={handleClearSelection}
+                                data-testid="btn-clear-criterion-selection"
+                                className="font-semibold text-indigo-700 dark:text-indigo-300 underline hover:text-indigo-950 dark:hover:text-indigo-100 cursor-pointer ml-1"
+                              >
+                                Limpar seleção
+                              </button>
+                            </span>
+                          ) : (
+                            <span>
+                              Todos os <strong>{paginatedLeads.length}</strong> leads desta página estão selecionados.{" "}
+                              <button
+                                type="button"
+                                onClick={handleSelectAllByCriterion}
+                                data-testid="btn-select-all-criterion"
+                                className="font-bold text-indigo-700 dark:text-indigo-300 underline hover:text-indigo-950 dark:hover:text-indigo-100 cursor-pointer ml-1"
+                              >
+                                Selecionar todos os {listTotal.toLocaleString("pt-BR")} que batem com este filtro
+                              </button>
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableHeader>
                   <TableBody>
                     {paginatedLeads.map((lead) => {
                       const displayPhone = lead.phone || lead.telefone || "";
                       const displayName = lead.nome || "Sem Nome";
-                      const isSelected = selectedLeadIds.includes(lead.id);
+                      const isSelected = isLeadSelected(lead.id);
                       const tempDot = getTemperatureDot(lead.temperature);
                       const shortDate = formatShortDate(lead.last_interaction_at || lead.created_at);
                       const fullDate = lead.last_interaction_at
@@ -3516,6 +3661,7 @@ export default function BancoDeDados() {
                           <TableCell className="px-3 py-[10px]" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
+                              data-testid={`lead-checkbox-${lead.id}`}
                               checked={isSelected}
                               onChange={() => handleToggleSelectOne(lead.id)}
                               className="rounded border-input text-indigo-600 focus:ring-indigo-500 cursor-pointer"
@@ -3718,10 +3864,10 @@ export default function BancoDeDados() {
         )}
 
         {/* Barra Flutuante de Ações em Lote (Bulk Actions) */}
-        {selectedLeadIds.length > 0 && (
+        {bancoEffectiveSelectedCount > 0 && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 border border-zinc-700 dark:border-zinc-300 animate-in fade-in slide-in-from-bottom-4">
             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-500 text-white shrink-0">
-              {selectedLeadIds.length} selecionados
+              {bancoEffectiveSelectedCount.toLocaleString("pt-BR")} selecionados
             </span>
 
             <div className="h-4 w-px bg-zinc-700 dark:bg-zinc-300 shrink-0" />
@@ -3730,30 +3876,39 @@ export default function BancoDeDados() {
             <Button
               size="sm"
               variant="ghost"
+              data-testid="btn-floating-buyer"
+              disabled={selectionMode === "criterion"}
+              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => openMarkAsClientModal({ type: "bulk", leadIds: selectedLeadIds })}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 dark:text-emerald-600 dark:hover:text-emerald-700 font-semibold gap-1.5"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-emerald-400 hover:text-emerald-300 dark:text-emerald-600 dark:hover:text-emerald-700 font-semibold gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Comprador ({selectedLeadIds.length})
+              Comprador ({bancoEffectiveSelectedCount.toLocaleString("pt-BR")})
             </Button>
 
             {/* Ação 2: Perdido */}
             <Button
               size="sm"
               variant="ghost"
+              data-testid="btn-floating-lost"
+              disabled={selectionMode === "criterion"}
+              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => openMarkAsLostModal({ type: "bulk", leadIds: selectedLeadIds })}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 dark:text-rose-600 dark:hover:text-rose-700 font-semibold gap-1.5"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-rose-400 hover:text-rose-300 dark:text-rose-600 dark:hover:text-rose-700 font-semibold gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <XCircle className="w-3.5 h-3.5" />
-              Perdido ({selectedLeadIds.length})
+              Perdido ({bancoEffectiveSelectedCount.toLocaleString("pt-BR")})
             </Button>
 
             {/* Ação 3: Estágio ▾ */}
             <Button
               size="sm"
               variant="ghost"
+              data-testid="btn-floating-stage"
+              disabled={selectionMode === "criterion"}
+              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => setIsBulkStageModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Estágio <ChevronDown className="w-3 h-3 opacity-70" />
             </Button>
@@ -3762,8 +3917,11 @@ export default function BancoDeDados() {
             <Button
               size="sm"
               variant="ghost"
+              data-testid="btn-floating-tag"
+              disabled={selectionMode === "criterion"}
+              title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
               onClick={() => setIsBulkTagModalOpen(true)}
-              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1.5"
+              className="text-xs h-8 hover:bg-zinc-800 dark:hover:bg-zinc-200 gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <TagIcon className="w-3.5 h-3.5" />
               Tag
@@ -3775,6 +3933,7 @@ export default function BancoDeDados() {
                 <Button
                   size="sm"
                   variant="ghost"
+                  data-testid="btn-floating-more"
                   className="text-xs h-8 w-8 p-0 hover:bg-zinc-800 dark:hover:bg-zinc-200"
                   title="Mais ações"
                 >
@@ -3782,28 +3941,50 @@ export default function BancoDeDados() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => setIsFollowupModalOpen(true)} className="text-xs gap-2 cursor-pointer">
+                <DropdownMenuItem
+                  disabled={selectionMode === "criterion"}
+                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
+                  onClick={() => setIsFollowupModalOpen(true)}
+                  className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
                   Aplicar follow-up
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setIsSingleReminderModalOpen(true)} className="text-xs gap-2 cursor-pointer">
+                <DropdownMenuItem
+                  disabled={selectionMode === "criterion"}
+                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
+                  onClick={() => setIsSingleReminderModalOpen(true)}
+                  className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Clock className="w-3.5 h-3.5 text-emerald-500" />
                   Lembrete avulso
                 </DropdownMenuItem>
                 {canManageUsers && (
-                  <DropdownMenuItem onClick={() => setIsBulkAssignModalOpen(true)} className="text-xs gap-2 cursor-pointer">
+                  <DropdownMenuItem
+                    disabled={selectionMode === "criterion"}
+                    title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
+                    onClick={() => setIsBulkAssignModalOpen(true)}
+                    className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     <UserCheck className="w-3.5 h-3.5 text-sky-500" />
                     Reatribuir responsável
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={handleExportXLSX} className="text-xs gap-2 cursor-pointer">
+                <DropdownMenuItem
+                  disabled={selectionMode === "criterion"}
+                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
+                  onClick={handleExportXLSX}
+                  className="text-xs gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Download className="w-3.5 h-3.5 text-muted-foreground" />
                   Exportar seleção
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
+                  disabled={selectionMode === "criterion"}
+                  title={selectionMode === "criterion" ? "Disponível na próxima versão para seleção por filtro" : undefined}
                   onClick={handleBulkDeleteSubmit}
-                  className="text-xs gap-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/40 cursor-pointer"
+                  className="text-xs gap-2 text-rose-600 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Excluir
@@ -3814,7 +3995,7 @@ export default function BancoDeDados() {
             <Button
               size="icon"
               variant="ghost"
-              onClick={() => setSelectedLeadIds([])}
+              onClick={handleClearSelection}
               className="h-7 w-7 text-zinc-400 hover:text-white dark:hover:text-zinc-900"
               title="Limpar seleção"
             >

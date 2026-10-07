@@ -788,7 +788,10 @@ export default function LeadImports({
 
           fetchLeadIds(leadRequest, { clientId: activeClientId, filters: data.criteria, contacts: true })
             .then((res) => {
-              const contacts = (res.contacts || []).map((c) => ({
+              const excluded = new Set(Array.isArray(data.excludedLeadIds) ? data.excludedLeadIds : []);
+              const contacts = (res.contacts || [])
+                .filter((c) => !excluded.has(c.id))
+                .map((c) => ({
                 id: c.id,
                 telefone: c.phone || c.telefone || "",
                 nome: c.nome || "",

@@ -14,10 +14,12 @@ import {
   Upload,
   ChevronDown,
   Database,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LeadBulkActions } from "@/components/leads/LeadBulkActions";
+import { cn } from "@/lib/utils";
 
 interface BancoActionsBarProps {
   loading: boolean;
@@ -35,11 +37,14 @@ interface BancoActionsBarProps {
   onCreateCampaign: () => void;
   onNewLead: () => void;
   selectedCount: number;
+  selectionSummary?: string | null;
+  onClearSelection?: () => void;
   onApplyFollowup: () => void;
   onSingleReminder: () => void;
   // 4) a exclusão, separada
   clientId: string;
   canManageBulk: boolean;
+  isCriterionSelection?: boolean;
 }
 
 /**
@@ -62,10 +67,13 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
     onCreateCampaign,
     onNewLead,
     selectedCount,
+    selectionSummary,
+    onClearSelection,
     onApplyFollowup,
     onSingleReminder,
     clientId,
     canManageBulk,
+    isCriterionSelection = false,
   } = props;
 
   return (
@@ -118,7 +126,14 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
       <div data-group="leva" className="flex flex-wrap items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" data-testid="btn-export-menu" className="gap-2 text-xs">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="btn-export-menu"
+              disabled={isCriterionSelection}
+              title={isCriterionSelection ? "Disponível na próxima versão para seleção por filtro" : undefined}
+              className="gap-2 text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+            >
               <Download className="w-3.5 h-3.5" />
               Exportar leads
               <ChevronDown className="w-3 h-3 opacity-70" />
@@ -146,15 +161,48 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
 
         {selectedCount > 0 && (
           <>
-            <Button variant="default" size="sm" onClick={onApplyFollowup} className="gap-2 bg-emerald-600 text-xs text-white hover:bg-emerald-700">
+            {selectionSummary && (
+              <div
+                data-testid="selection-summary-badge"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200/90 bg-indigo-50/90 px-2.5 py-1 text-xs font-medium text-indigo-900 shadow-sm dark:border-indigo-800/60 dark:bg-indigo-950/60 dark:text-indigo-200"
+              >
+                <span>{selectionSummary}</span>
+                {onClearSelection && (
+                  <button
+                    type="button"
+                    onClick={onClearSelection}
+                    data-testid="btn-clear-selection-bar"
+                    className="p-0.5 rounded text-indigo-500 hover:text-indigo-800 dark:hover:text-indigo-200 transition-colors"
+                    title="Limpar seleção"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onApplyFollowup}
+              disabled={isCriterionSelection}
+              title={isCriterionSelection ? "Disponível na próxima versão para seleção por filtro" : undefined}
+              className={cn(
+                "gap-2 text-xs text-white",
+                isCriterionSelection
+                  ? "bg-slate-400 dark:bg-zinc-700 cursor-not-allowed opacity-60"
+                  : "bg-emerald-600 hover:bg-emerald-700"
+              )}
+            >
               <CalendarClock className="w-3.5 h-3.5" />
-              Aplicar Follow-up ({selectedCount})
+              Aplicar Follow-up ({selectedCount.toLocaleString("pt-BR")})
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={onSingleReminder}
-              className="gap-1.5 border-emerald-600/40 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+              disabled={isCriterionSelection}
+              title={isCriterionSelection ? "Disponível na próxima versão para seleção por filtro" : undefined}
+              className="gap-1.5 border-emerald-600/40 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Clock className="w-3.5 h-3.5 text-emerald-500" />
               Lembrete avulso
