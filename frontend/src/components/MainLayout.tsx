@@ -1,6 +1,12 @@
 import { AppSidebar } from "@/components/AppSidebar";
 import { CrmClientProvider } from "@/contexts/CrmClientContext";
+import { useSmartLinkAlerts } from "@/hooks/useSmartLinkAlerts";
 import { Outlet } from "react-router-dom";
+
+function SmartLinkAlertsListener() {
+  useSmartLinkAlerts();
+  return null;
+}
 
 export function MainLayout() {
   return (
@@ -10,6 +16,7 @@ export function MainLayout() {
         <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.028)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.028)_1px,transparent_1px)] bg-[size:54px_54px] [mask-image:radial-gradient(circle_at_center,black_38%,transparent_82%)] dark:bg-[linear-gradient(rgba(255,255,255,0.022)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.022)_1px,transparent_1px)]" />
       </div>
       <CrmClientProvider>
+        <SmartLinkAlertsListener />
         <div className="relative mx-auto flex h-[calc(100vh-1rem)] w-full max-w-none overflow-hidden rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(242,246,255,0.96))] shadow-[0_30px_90px_rgba(15,23,42,0.10)] ring-1 ring-slate-200/60 dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(10,12,40,0.9),rgba(5,6,28,0.96))] dark:shadow-[0_30px_90px_rgba(0,0,0,0.40)] dark:ring-white/5 lg:h-[calc(100vh-1.5rem)] print:h-auto print:overflow-visible print:rounded-none print:border-none print:shadow-none print:ring-0 print:bg-white">
           <AppSidebar />
           <main className="relative min-w-0 flex-1 overflow-hidden print:overflow-visible print:h-auto">

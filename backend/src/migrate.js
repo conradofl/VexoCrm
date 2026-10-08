@@ -396,6 +396,11 @@ async function isAlreadyApplied(pool, filename) {
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='dashboard_metrics_cache' AND column_name='calculated_at')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='dashboard_metrics_cache' AND column_name='status')
     ) AS ok`,
+    "20261008120000_create_smart_links.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='smart_links')
+      AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='smart_link_clicks')
+      AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_smart_links_code')
+    ) AS ok`,
   };
 
   const query = checks[filename];

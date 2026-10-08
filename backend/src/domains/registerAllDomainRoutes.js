@@ -19,6 +19,7 @@ import { registerRemindersRoutes } from "./reminders/routes.js";
 import { registerCampaignsRoutes } from "./campaigns/routes.js";
 import { registerSuperAdminRoutes } from "./superadmin/routes.js";
 import { registerAcademyRoutes } from "./academy/routes.js";
+import { registerSmartLinksRoutes } from "./smartLinks/routes.js";
 
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
@@ -50,6 +51,7 @@ export function registerAllDomainRoutes(app) {
   registerRemindersRoutes(app, routeDeps);
   registerCampaignsRoutes(app, routeDeps);
   registerAcademyRoutes(app, routeDeps);
+  registerSmartLinksRoutes(app, routeDeps);
 
   // ─── Fila de Follow-up (painel de moderação /api/followup-queue) ───
   registerFollowupQueueRoutes(app, routeDeps);
