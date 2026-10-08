@@ -162,7 +162,7 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
           Criar campanha
         </Button>
 
-        {hasFilteredLeads && onManageTags && (
+        {onManageTags && (
           <Button
             variant="outline"
             size="sm"

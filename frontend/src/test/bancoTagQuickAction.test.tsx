@@ -207,7 +207,7 @@ describe("Frente 2: Botão de Ação Rápida de Tags no Banco de Dados", () => {
     expect(onManageTags).toHaveBeenCalledTimes(1);
   });
 
-  it("não renderiza o botão 'Gerenciar Tags' quando hasFilteredLeads for false", () => {
+  it("renderiza o botão 'Gerenciar Tags' mesmo quando a base tiver 0 leads (hasFilteredLeads = false)", () => {
     const queryClient = new QueryClient();
     render(
       <QueryClientProvider client={queryClient}>
@@ -224,6 +224,36 @@ describe("Frente 2: Botão de Ação Rápida de Tags no Banco de Dados", () => {
             onCreateCampaign={vi.fn()}
             onNewLead={vi.fn()}
             onManageTags={vi.fn()}
+            hasFilteredLeads={false}
+            selectedCount={0}
+            onApplyFollowup={vi.fn()}
+            onSingleReminder={vi.fn()}
+            clientId="tenant-test"
+            canManageBulk={true}
+          />
+        </TooltipProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByTestId("btn-manage-tags-bar")).toBeInTheDocument();
+  });
+
+  it("não renderiza o botão 'Gerenciar Tags' quando onManageTags não for fornecido", () => {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <BancoActionsBar
+            loading={false}
+            onRefresh={vi.fn()}
+            onExtractWhatsApp={vi.fn()}
+            onImportInstagram={vi.fn()}
+            onPasteText={vi.fn()}
+            onImportSpreadsheet={vi.fn()}
+            onExportXLSX={vi.fn()}
+            onExportCSV={vi.fn()}
+            onCreateCampaign={vi.fn()}
+            onNewLead={vi.fn()}
             hasFilteredLeads={false}
             selectedCount={0}
             onApplyFollowup={vi.fn()}
