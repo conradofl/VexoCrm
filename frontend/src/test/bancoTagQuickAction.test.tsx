@@ -87,7 +87,7 @@ const jsonResponse = (data: unknown, status = 200) =>
     text: async () => JSON.stringify(data),
   } as any);
 
-function setupFetchMock() {
+function setupFetchMock(customLeads?: any[]) {
   global.fetch = vi.fn(async (url: string | URL | Request, init?: any) => {
     const u = new URL(String(url), "http://localhost");
 
@@ -117,7 +117,7 @@ function setupFetchMock() {
     }
 
     if (u.pathname === "/api/leads") {
-      const mockLeadList = [
+      const mockLeadList = customLeads || [
         {
           id: "lead-1",
           client_id: "tenant-test",
@@ -333,6 +333,84 @@ describe("Frente 2: Botão de Ação Rápida de Tags no Banco de Dados", () => {
     // Tag do lead deve aparecer como badge na célula do contato
     const leadRow = leadContact.closest("tr")!;
     expect(within(leadRow).getByText("#Imp-Campanha_Teste")).toBeInTheDocument();
+  });
+
+  it("deduplica tags repetidas e exibe contador excedente (+N) com tooltip", async () => {
+    setupFetchMock([
+      {
+        id: "lead-dup",
+        client_id: "tenant-test",
+        nome: "Lead Com Duplicatas",
+        stage: "cold",
+        telefone: "551199990002",
+        phone: null,
+        temperature: "cold",
+        tags: ["#Tag1", "#Tag2", "#Tag1", "#Tag3", "#Tag4"],
+        created_at: "2026-01-01T00:00:00.000Z",
+        dados: {},
+      },
+    ]);
+    renderBanco();
+
+    const leadContact = await screen.findByText("Lead Com Duplicatas");
+    const leadRow = leadContact.closest("tr")!;
+
+    // #Tag1 deve ser deduplicada e aparecer apenas 1 vez na linha
+    const tag1Badges = within(leadRow).getAllByText("#Tag1");
+    expect(tag1Badges).toHaveLength(1);
+
+    // As 3 primeiras tags únicas (#Tag1, #Tag2, #Tag3) estão visíveis
+    expect(within(leadRow).getByText("#Tag2")).toBeInTheDocument();
+    expect(within(leadRow).getByText("#Tag3")).toBeInTheDocument();
+
+    // A 4ª tag excedente está oculta atrás do badge +1 com tooltip "#Tag4"
+    const plusBadge = within(leadRow).getByText("+1");
+    expect(plusBadge).toBeInTheDocument();
+    expect(plusBadge).toHaveAttribute("title", "#Tag4");
+  });
+
+  it("prioriza a selectedTag ativa no 1º slot, aplica destaque visual e permite clicar para filtrar tag secundária", async () => {
+    setupFetchMock([
+      {
+        id: "lead-priority",
+        client_id: "tenant-test",
+        nome: "Lead Prioridade",
+        stage: "cold",
+        telefone: "551199990003",
+        phone: null,
+        temperature: "cold",
+        // No array original do lead, #Outra_Tag está na 1ª posição e #Imp-Campanha_Teste na 2ª
+        tags: ["#Outra_Tag", "#Imp-Campanha_Teste"],
+        created_at: "2026-01-01T00:00:00.000Z",
+        dados: {},
+      },
+    ]);
+    renderBanco();
+
+    const leadContact = await screen.findByText("Lead Prioridade");
+    const leadRow = leadContact.closest("tr")!;
+
+    // Inicialmente sem filtro ativo, #Outra_Tag é secundária com classe neutra e title para filtrar
+    const outraTagBadge = within(leadRow).getByText("#Outra_Tag");
+    expect(outraTagBadge).toHaveClass("bg-muted/70", "text-muted-foreground");
+    expect(outraTagBadge).toHaveAttribute("title", "Tag: #Outra_Tag (Clique para filtrar)");
+
+    // Clica na badge da tag secundária #Imp-Campanha_Teste para ativá-la no filtro
+    const impTagBadge = within(leadRow).getByText("#Imp-Campanha_Teste");
+    fireEvent.click(impTagBadge);
+
+    // Agora com #Imp-Campanha_Teste ativa no filtro:
+    await waitFor(() => {
+      // #Imp-Campanha_Teste deve ter o estilo em destaque de filtro ativo
+      const activeFilterBadge = within(leadRow).getByText("#Imp-Campanha_Teste");
+      expect(activeFilterBadge).toHaveClass("bg-indigo-500/15", "text-indigo-700", "font-semibold");
+      expect(activeFilterBadge).toHaveAttribute("title", "Tag do filtro atual: #Imp-Campanha_Teste");
+
+      // E deve estar na 1ª posição visual (antes de #Outra_Tag)
+      const allRowBadges = within(leadRow).getAllByText(/#Outra_Tag|#Imp-Campanha_Teste/);
+      expect(allRowBadges[0]).toHaveTextContent("#Imp-Campanha_Teste");
+      expect(allRowBadges[1]).toHaveTextContent("#Outra_Tag");
+    });
   });
 
   it("atualiza dinamicamente contagem no título e descrição ao selecionar tag existente na aba Adicionar Tag", async () => {

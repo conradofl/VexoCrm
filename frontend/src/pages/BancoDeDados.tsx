@@ -3851,6 +3851,15 @@ export default function BancoDeDados() {
                         ? new Date(lead.created_at).toLocaleString("pt-BR")
                         : undefined;
 
+                      const rawTags = Array.isArray(lead.tags) ? lead.tags.filter(Boolean) : [];
+                      const uniqueTags = Array.from(new Set(rawTags));
+                      const sortedLeadTags = selectedTag && selectedTag.trim()
+                        ? [
+                            ...uniqueTags.filter((t) => t.trim().toLowerCase() === selectedTag.trim().toLowerCase()),
+                            ...uniqueTags.filter((t) => t.trim().toLowerCase() !== selectedTag.trim().toLowerCase()),
+                          ]
+                        : uniqueTags;
+
                       return (
                         <TableRow
                           key={lead.id}
@@ -3892,20 +3901,39 @@ export default function BancoDeDados() {
                                     <Sparkles className="w-2.5 h-2.5" /> Extraído via WA
                                   </span>
                                 )}
-                                {Array.isArray(lead.tags) && lead.tags.length > 0 && (
+                                {sortedLeadTags.length > 0 && (
                                   <div className="flex flex-wrap gap-1 mt-1 max-w-[260px]">
-                                    {lead.tags.slice(0, 3).map((tag: string) => (
+                                    {sortedLeadTags.slice(0, 3).map((tag: string) => {
+                                      const isFilterTag = Boolean(
+                                        selectedTag && selectedTag.trim().toLowerCase() === tag.trim().toLowerCase()
+                                      );
+                                      return (
+                                        <span
+                                          key={tag}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!isFilterTag) {
+                                              setSelectedTag(tag);
+                                            }
+                                          }}
+                                          className={cn(
+                                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] truncate max-w-[155px] transition-colors border",
+                                            isFilterTag
+                                              ? "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 font-semibold ring-1 ring-indigo-500/20 cursor-default"
+                                              : "bg-muted/70 text-muted-foreground border-border/50 hover:bg-muted hover:text-foreground cursor-pointer"
+                                          )}
+                                          title={isFilterTag ? `Tag do filtro atual: ${tag}` : `Tag: ${tag} (Clique para filtrar)`}
+                                        >
+                                          {tag}
+                                        </span>
+                                      );
+                                    })}
+                                    {sortedLeadTags.length > 3 && (
                                       <span
-                                        key={tag}
-                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted/80 text-muted-foreground border border-border/60 truncate max-w-[120px]"
-                                        title={tag}
+                                        className="text-[10px] text-muted-foreground/70 self-center cursor-help"
+                                        title={sortedLeadTags.slice(3).join(", ")}
                                       >
-                                        {tag}
-                                      </span>
-                                    ))}
-                                    {lead.tags.length > 3 && (
-                                      <span className="text-[10px] text-muted-foreground/70 self-center">
-                                        +{lead.tags.length - 3}
+                                        +{sortedLeadTags.length - 3}
                                       </span>
                                     )}
                                   </div>
