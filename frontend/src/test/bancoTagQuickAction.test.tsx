@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -117,21 +117,23 @@ function setupFetchMock() {
     }
 
     if (u.pathname === "/api/leads") {
+      const mockLeadList = [
+        {
+          id: "lead-1",
+          client_id: "tenant-test",
+          nome: "Lead Teste 1",
+          stage: "cold",
+          telefone: "551199990001",
+          phone: null,
+          temperature: "cold",
+          tags: ["#Imp-Campanha_Teste"],
+          created_at: "2026-01-01T00:00:00.000Z",
+          dados: {},
+        },
+      ];
       return jsonResponse({
-        leads: [
-          {
-            id: "lead-1",
-            client_id: "tenant-test",
-            nome: "Lead Teste 1",
-            stage: "cold",
-            telefone: "551199990001",
-            phone: null,
-            temperature: "cold",
-            tags: ["#Imp-Campanha_Teste"],
-            created_at: "2026-01-01T00:00:00.000Z",
-            dados: {},
-          },
-        ],
+        items: mockLeadList,
+        leads: mockLeadList,
         total: 150,
         page: 1,
         pageSize: 50,
@@ -320,7 +322,69 @@ describe("Frente 2: Botão de Ação Rápida de Tags no Banco de Dados", () => {
       expect(leadCalls.length).toBeGreaterThan(0);
     });
   });
+
+  it("exibe tags dos leads como badges na coluna de Contato na tabela", async () => {
+    setupFetchMock();
+    renderBanco();
+
+    const leadContact = await screen.findByText("Lead Teste 1");
+    expect(leadContact).toBeInTheDocument();
+
+    // Tag do lead deve aparecer como badge na célula do contato
+    const leadRow = leadContact.closest("tr")!;
+    expect(within(leadRow).getByText("#Imp-Campanha_Teste")).toBeInTheDocument();
+  });
+
+  it("atualiza dinamicamente contagem no título e descrição ao selecionar tag existente na aba Adicionar Tag", async () => {
+    setupFetchMock();
+    renderBanco();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("btn-manage-tags-bar")).toBeInTheDocument();
+    });
+
+    // Abre o modal
+    fireEvent.click(screen.getByTestId("btn-manage-tags-bar"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-add-tag")).toBeInTheDocument();
+    });
+
+    // Título inicial com total da base (150 leads)
+    expect(screen.getByText(/Gerenciar Tags em Lote \(150 leads\)/i)).toBeInTheDocument();
+
+    // Na lista de tags existentes, clica na tag #Imp-Campanha_Teste (120 leads)
+    const tagBtn = await screen.findByRole("button", { name: /#Imp-Campanha_Teste 120 leads/i });
+    fireEvent.click(tagBtn);
+
+    // O título do modal deve atualizar dinamicamente para os 120 leads da tag
+    await waitFor(() => {
+      expect(screen.getByText(/Gerenciar Tags em Lote \(120 leads\)/i)).toBeInTheDocument();
+    });
+
+    // A descrição na aba Adicionar Tag reflete os 120 leads da tag
+    const desc = screen.getByText(/Adicionar a tag aos/i);
+    expect(desc).toHaveTextContent("120");
+    expect(screen.getByTestId("btn-submit-bulk-tag")).toHaveTextContent("120 leads");
+
+    // O seletor de público-alvo permite alternar para seleção atual
+    const btnScopeSelection = screen.getByTestId("btn-scope-selection");
+    fireEvent.click(btnScopeSelection);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Gerenciar Tags em Lote \(150 leads\)/i)).toBeInTheDocument();
+    });
+
+    // Alterna de volta para os leads da tag
+    const btnScopeTag = screen.getByTestId("btn-scope-tag");
+    fireEvent.click(btnScopeTag);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Gerenciar Tags em Lote \(120 leads\)/i)).toBeInTheDocument();
+    });
+  });
 });
+
 
 describe("TagSelect com Contadores", () => {
   it("renderiza opções com as contagens formatadas", async () => {
