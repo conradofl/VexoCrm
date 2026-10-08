@@ -173,6 +173,7 @@ import { ImportBatchError, type ImportProgress } from "@/lib/leadImports/batched
 import { resolveRowPhones, summarizePhonePreview, type PhonePreviewSummary } from "@/lib/leadImports/multiPhone";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { LeadCustomFieldsSection } from "@/components/leads/LeadCustomFieldsSection";
 
 export function toggleStageFilter(current: string[], stageToToggle: string): string[] {
   if (stageToToggle === "all") {
@@ -655,6 +656,7 @@ export default function BancoDeDados() {
   const [selectedLead, setSelectedLead] = useState<LeadIntelligenceItem | null>(null);
   const [isDetailSheetOpen, setIsDetailSheetOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState("");
+  const [isExtractingAi, setIsExtractingAi] = useState(false);
 
   // Bulk Selection (Ações em Lote & Seleção por Critério)
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -2107,6 +2109,75 @@ export default function BancoDeDados() {
       toast.success(`Tag "${tagToRemove}" removida!`);
     } catch (err: any) {
       toast.error("Erro ao remover tag", { description: err.message });
+    }
+  };
+
+  const handleUpdateCustomField = async (leadId: string, key: string, value: string) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ campos: { [key]: value } }),
+      });
+
+      if (!res.ok) {
+        const errorMsg = await readApiErrorMessage(res, "Falha ao atualizar campo.");
+        throw new Error(errorMsg);
+      }
+
+      toast.success("Campo atualizado com sucesso!");
+      if (selectedLead && selectedLead.id === leadId) {
+        const currentDados = (selectedLead.dados && typeof selectedLead.dados === "object") ? { ...selectedLead.dados } : {};
+        const currentCampos = (currentDados.campos && typeof currentDados.campos === "object") ? { ...currentDados.campos } : {};
+        const currentManual = Array.isArray(currentDados.manual_fields) ? [...currentDados.manual_fields] : [];
+        currentCampos[key] = value;
+        if (!currentManual.includes(key)) currentManual.push(key);
+        currentDados.campos = currentCampos;
+        currentDados.manual_fields = currentManual;
+        setSelectedLead({ ...selectedLead, dados: currentDados });
+      }
+      fetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao atualizar campo", { description: err.message });
+    }
+  };
+
+  const handleTriggerLeadAiExtraction = async (leadId: string) => {
+    setIsExtractingAi(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/leads/${leadId}/extract-fields`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ clientId }),
+      });
+
+      if (!res.ok) {
+        const errorMsg = await readApiErrorMessage(res, "Falha ao extrair perfil comercial com IA.");
+        throw new Error(errorMsg);
+      }
+
+      const data = await res.json();
+      toast.success("Ficha do lead preenchida com sucesso pela IA!");
+      if (data.lead && selectedLead && selectedLead.id === leadId) {
+        setSelectedLead({
+          ...selectedLead,
+          ...data.lead,
+          dados: data.lead.dados || selectedLead.dados,
+        });
+      }
+      fetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao extrair com IA", { description: err.message });
+    } finally {
+      setIsExtractingAi(false);
     }
   };
 
@@ -5737,28 +5808,13 @@ export default function BancoDeDados() {
                   </div>
                 )}
 
-                {/* Seção Campos do Lead */}
-                {Boolean(
-                  (selectedLead.dados as any)?.campos &&
-                  typeof (selectedLead.dados as any).campos === "object" &&
-                  Object.keys((selectedLead.dados as any).campos).length > 0
-                ) && (
-                  <div className="space-y-2 pt-3 border-t border-border">
-                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" /> Campos do Lead
-                    </label>
-                    <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-1.5 text-xs">
-                      {Object.entries((selectedLead.dados as any).campos).map(([key, val]) => (
-                        <div key={key} className="flex justify-between items-center gap-2">
-                          <span className="text-muted-foreground font-medium truncate max-w-[130px]">{key}:</span>
-                          <span className="font-semibold text-foreground truncate max-w-[200px]" title={String(val ?? "")}>
-                            {val !== null && val !== undefined && String(val).trim() !== "" ? String(val) : "—"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* Seção Campos Personalizados / Informações Comerciais com Extração de IA (Pilar 4) */}
+                <LeadCustomFieldsSection
+                  lead={selectedLead}
+                  onUpdateField={(key, val) => handleUpdateCustomField(selectedLead.id, key, val)}
+                  onTriggerAiExtraction={() => handleTriggerLeadAiExtraction(selectedLead.id)}
+                  isExtractingAi={isExtractingAi}
+                />
 
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1">Alterar Estágio</label>

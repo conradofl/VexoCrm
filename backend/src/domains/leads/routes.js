@@ -56,6 +56,10 @@ import {
   resolveEvolutionInstanceOwner,
 } from "../../services/evolution.js";
 import { getLeadClientN8nSettings as getLeadClientN8nSettingsService } from "../../services/n8nSettings.js";
+import {
+  extractCommercialProfileFromChat,
+  syncExtractedFieldsToLead,
+} from "../../services/leadAiFieldExtractor.js";
 
 import {
   buildPhoneLookupVariants,
@@ -2770,6 +2774,105 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
+  // Pilar 4: Extração Semântica da Conversa para preencher a Ficha do Lead
+  app.post("/api/leads/:id/extract-fields", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const { id } = req.params;
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      const { rows } = await pgDatabasePool.query(
+        `SELECT id, client_id, phone, telefone, nome, dados FROM public.leads WHERE id = $1 AND client_id = $2 LIMIT 1`,
+        [id, clientId]
+      );
+      if (!rows.length) {
+        return sendError(res, 404, "LEAD_NOT_FOUND", "Lead não encontrado ou não pertence a este tenant.");
+      }
+
+      const lead = rows[0];
+      const targetPhone = String(lead.phone || lead.telefone || "").replace(/\D/g, "");
+
+      // 1. Busca mensagens do lead (lead_messages ou histórico nos dados)
+      let messagesText = [];
+      if (targetPhone) {
+        const last8 = targetPhone.slice(-8);
+        try {
+          const msgQuery = await pgDatabasePool.query(
+            `SELECT content, text, direction, sender_role, created_at 
+             FROM public.lead_messages 
+             WHERE client_id = $1 AND (
+               phone = $2 OR phone = $3 OR phone LIKE $4
+             )
+             ORDER BY created_at ASC 
+             LIMIT 100`,
+            [clientId, targetPhone, `55${targetPhone}`, `%${last8}`]
+          );
+          if (msgQuery.rows?.length > 0) {
+            messagesText = msgQuery.rows
+              .map((m) => {
+                const body = m.content || m.text || "";
+                const sender = m.direction === "outbound" ? "Consultor" : "Lead";
+                return body ? `${sender}: ${body}` : null;
+              })
+              .filter(Boolean);
+          }
+        } catch (msgErr) {
+          console.warn("[extract-fields] Erro ao buscar mensagens em lead_messages:", msgErr?.message);
+        }
+      }
+
+      if (messagesText.length === 0 && lead.dados?.historico) {
+        const hist = Array.isArray(lead.dados.historico) ? lead.dados.historico : [];
+        messagesText = hist
+          .map((h) => {
+            if (typeof h === "string") return h;
+            if (h && typeof h === "object") {
+              return `${h.role === "assistant" ? "Consultor" : "Lead"}: ${h.content || h.text || ""}`;
+            }
+            return null;
+          })
+          .filter(Boolean);
+      }
+
+      if (messagesText.length === 0 && req.body?.messages && Array.isArray(req.body.messages)) {
+        messagesText = req.body.messages;
+      }
+
+      // 2. Extrai perfil comercial estruturado com IA
+      const extractedFields = await extractCommercialProfileFromChat({
+        messages: messagesText,
+        leadName: lead.nome,
+        mockLlmResponse: req.body?.mockLlmResponse,
+      });
+
+      // 3. Mescla na ficha do lead
+      const syncResult = await syncExtractedFieldsToLead(pgDatabasePool, {
+        leadId: id,
+        clientId,
+        extractedFields,
+      });
+
+      // 4. Retorna lead atualizado
+      const updatedLead = await pgDatabasePool.query(
+        `SELECT id, client_id, phone, telefone, nome, dados, updated_at FROM public.leads WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+
+      res.json({
+        success: true,
+        extractedFields,
+        syncResult,
+        lead: updatedLead.rows[0] || lead,
+      });
+    } catch (err) {
+      console.error("[extract-fields] Falha ao extrair perfil comercial do lead:", err);
+      sendError(res, 500, "AI_EXTRACTION_FAILED", err.message || "Falha na extração de campos pela IA");
+    }
+  });
+
   // Exportação filtrada para CSV: a base INTEIRA da combinação de filtros (antes: `.limit(5000)` calado), em blocos, sem carregar tudo.
   app.get("/api/leads/export", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
     if (!ensureDb(res)) return;
@@ -2939,6 +3042,37 @@ export function registerLeadsRoutes(app, deps) {
         updates.assigned_at = val ? new Date().toISOString() : null;
       }
       updates.updated_at = new Date().toISOString();
+
+      if (req.body.campos !== undefined && typeof req.body.campos === "object" && pgDatabasePool) {
+        const leadRow = await pgDatabasePool.query(
+          `SELECT id, dados, client_id FROM public.leads WHERE id = $1 LIMIT 1`,
+          [id]
+        );
+        const currentDados = (leadRow.rows[0]?.dados && typeof leadRow.rows[0].dados === "object")
+          ? { ...leadRow.rows[0].dados }
+          : {};
+        const currentCampos = (currentDados.campos && typeof currentDados.campos === "object")
+          ? { ...currentDados.campos }
+          : {};
+        const manualFields = Array.isArray(currentDados.manual_fields) ? [...currentDados.manual_fields] : [];
+
+        for (const [k, v] of Object.entries(req.body.campos)) {
+          currentCampos[k] = v;
+          if (!manualFields.includes(k)) {
+            manualFields.push(k);
+          }
+        }
+        currentDados.campos = currentCampos;
+        currentDados.manual_fields = manualFields;
+        updates.dados = currentDados;
+
+        await pgDatabasePool.query(
+          `UPDATE public.leads SET dados = $1, updated_at = now() WHERE id = $2`,
+          [JSON.stringify(currentDados), id]
+        );
+      } else if (req.body.dados !== undefined && typeof req.body.dados === "object") {
+        updates.dados = req.body.dados;
+      }
 
       if (tagsArray !== undefined && pgDatabasePool) {
         await pgDatabasePool.query(

@@ -14,6 +14,10 @@ import { summarizeChatWithAI } from "../leads/chatInsight.js";
 import { saveLeadAgreement } from "../../services/leadAgreement.js";
 import { applyCorsHeaders } from "../../services/corsPolicy.js";
 import { upsertLeadByPhone, isRealName } from "../../services/leadUpsert.js";
+import {
+  extractCommercialProfileFromChat,
+  syncExtractedFieldsToLead,
+} from "../../services/leadAiFieldExtractor.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
 import { OutlierQualificationBot } from "../../hardcoded-chatbot-outlier.js";
 import {
@@ -1216,7 +1220,7 @@ export function registerChatbotRoutes(app, deps) {
             [JSON.stringify(updatedDados), summaryText, clientId, cleanPhone, `+${cleanPhone}`, `%${last8}`]
           );
 
-          if (!updRes || updRes.rowCount === 0) {
+            if (!updRes || updRes.rowCount === 0) {
             await upsertLeadByPhone(pgDatabasePool, clientId, cleanPhone, {
               nome: contactName && contactName !== "não informado" ? contactName : null,
               phone: cleanPhone,
@@ -1225,6 +1229,25 @@ export function registerChatbotRoutes(app, deps) {
               extracted_from_wa: true,
             }).catch((e) => console.warn("[summarize-chat] DB upsert warning:", e.message));
           }
+
+          // Pilar 4: Extração semântica da conversa em background para preenchimento da ficha
+          (async () => {
+            try {
+              const extracted = await extractCommercialProfileFromChat({
+                messages: messageTexts,
+                leadName: contactName,
+              });
+              if (extracted && Object.keys(extracted).length > 0) {
+                await syncExtractedFieldsToLead(pgDatabasePool, {
+                  phone: cleanPhone,
+                  clientId,
+                  extractedFields: extracted,
+                });
+              }
+            } catch (extErr) {
+              console.warn("[summarize-chat] Falha na extração de campos pela IA:", extErr?.message || extErr);
+            }
+          })();
         } catch (e) {
           console.warn("[summarize-chat] DB update warning:", e.message);
         }
