@@ -48,12 +48,14 @@ describe("Módulo Vexo Smart Links - Etapa 2 (Live Feed & Alertas SDR)", () => {
         client_id TEXT NOT NULL REFERENCES public.leads_clients(id),
         nome TEXT,
         telefone TEXT,
-        stage TEXT
+        stage TEXT,
+        dados JSONB DEFAULT '{}'::jsonb
       );
       CREATE TABLE IF NOT EXISTS public.lead_client_n8n_settings (
         client_id TEXT PRIMARY KEY REFERENCES public.leads_clients(id),
         sdr_whatsapp_number TEXT,
         sdr_whatsapp_numbers JSONB,
+        sdr_distribution TEXT DEFAULT 'todos',
         dispatch_webhook_url TEXT,
         dispatch_webhook_token TEXT
       );
@@ -317,6 +319,77 @@ describe("Módulo Vexo Smart Links - Etapa 2 (Live Feed & Alertas SDR)", () => {
             body: expect.stringContaining("5534988887777"),
           })
         );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it("respeita o modo 'rodizio' notificando apenas o SDR dono do lead ou avançando a fila", async () => {
+      const originalFetch = global.fetch;
+      const fetchSpy = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ message: "sent" }),
+      });
+      global.fetch = fetchSpy;
+
+      try {
+        // Configura lista com 3 SDRs no modo rodízio
+        await db.query(
+          `UPDATE public.lead_client_n8n_settings
+           SET sdr_whatsapp_numbers = '["5534911111111", "5534922222222", "5534933333333"]'::jsonb,
+               sdr_distribution = 'rodizio'
+           WHERE client_id = $1`,
+          [TENANT_A]
+        );
+
+        // Caso 1: Lead já tem dono fixado em dados.sdr_rotation_owner (ex: SDR 2)
+        await db.query(
+          `UPDATE public.leads
+           SET dados = '{"sdr_rotation_owner": "5534922222222"}'::jsonb
+           WHERE id = $1`,
+          [leadA1]
+        );
+
+        const res1 = await notifySdrOnLinkClick(db, {
+          link: linkA1,
+          click: { device_type: "mobile", clicked_at: new Date() },
+          lead: { nome: "Carlos Oliveira", telefone: "5511999998888" },
+        });
+
+        expect(res1.sent).toBe(true);
+        expect(res1.sentCount).toBe(1);
+        expect(res1.sdrNumbers).toEqual(["5534922222222"]); // Foi APENAS para o dono!
+
+        // Caso 2: Lead novo sem dono
+        const { rows: newLeadRows } = await db.query(
+          `INSERT INTO public.leads (client_id, nome, telefone) VALUES ($1, 'Lead Novo', '5511888888888') RETURNING id`,
+          [TENANT_A]
+        );
+        const newLeadId = newLeadRows[0].id;
+
+        const newLink = await createSmartLink(db, {
+          clientId: TENANT_A,
+          destinationUrl: "https://vexoia.com/lead-novo",
+          leadId: newLeadId,
+        });
+
+        const res2 = await notifySdrOnLinkClick(db, {
+          link: newLink,
+          click: { device_type: "desktop", clicked_at: new Date() },
+        });
+
+        expect(res2.sent).toBe(true);
+        expect(res2.sentCount).toBe(1);
+        // O próximo SDR da fila deve ter sido selecionado e fixado no lead
+        const assignedSdr = res2.sdrNumbers[0];
+        expect(["5534911111111", "5534922222222", "5534933333333"]).toContain(assignedSdr);
+
+        const { rows: verifyLead } = await db.query(
+          `SELECT dados FROM public.leads WHERE id = $1`,
+          [newLeadId]
+        );
+        expect(verifyLead[0].dados.sdr_rotation_owner).toBe(assignedSdr);
       } finally {
         global.fetch = originalFetch;
       }

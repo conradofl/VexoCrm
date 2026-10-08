@@ -2,6 +2,8 @@
 // Serviço de Alertas de Cliques em Smart Links para SDR / Vendedores
 // Dispara notificações imediatas no WhatsApp quando um lead interage com um link rastreado.
 
+import { advanceSdrRotationCursor } from "./sdrRotationState.js";
+
 /**
  * Formata a data/hora do clique para o padrão brasileiro de exibição (HH:mm - DD/MM/YYYY).
  * @param {string|Date|null|undefined} timestamp
@@ -93,14 +95,24 @@ export async function notifySdrOnLinkClick(pool, { link, click, lead = null, cam
     let sdrNumbers = [];
     let webhookUrl = null;
     let webhookToken = null;
+    let sdrDistribution = "todos";
 
     const { rows: n8nRows } = await pool.query(
-      `SELECT sdr_whatsapp_number, sdr_whatsapp_numbers, dispatch_webhook_url, dispatch_webhook_token
+      `SELECT sdr_whatsapp_number, sdr_whatsapp_numbers, sdr_distribution, dispatch_webhook_url, dispatch_webhook_token
        FROM public.lead_client_n8n_settings
        WHERE client_id = $1
        LIMIT 1`,
       [clientId]
-    ).catch((err) => {
+    ).catch(async (err) => {
+      if (err?.code === "42703") {
+        return await pool.query(
+          `SELECT sdr_whatsapp_number, sdr_whatsapp_numbers, dispatch_webhook_url, dispatch_webhook_token
+           FROM public.lead_client_n8n_settings
+           WHERE client_id = $1
+           LIMIT 1`,
+          [clientId]
+        ).catch(() => ({ rows: [] }));
+      }
       if (err?.code === "42P01") return { rows: [] };
       throw err;
     });
@@ -112,12 +124,13 @@ export async function notifySdrOnLinkClick(pool, { link, click, lead = null, cam
       } else if (n8nSettings.sdr_whatsapp_number) {
         sdrNumbers = [n8nSettings.sdr_whatsapp_number];
       }
+      sdrDistribution = n8nSettings.sdr_distribution || "todos";
       webhookUrl = n8nSettings.dispatch_webhook_url;
       webhookToken = n8nSettings.dispatch_webhook_token;
     }
 
     // Normaliza números de SDR válidos (10 a 15 dígitos)
-    const validSdrNumbers = Array.from(
+    let validSdrNumbers = Array.from(
       new Set(
         sdrNumbers
           .map((n) => String(n || "").replace(/\D/g, ""))
@@ -127,6 +140,35 @@ export async function notifySdrOnLinkClick(pool, { link, click, lead = null, cam
 
     if (validSdrNumbers.length === 0) {
       return { sent: false, reason: "sem_numero_sdr" };
+    }
+
+    // Se o modo rodízio estiver ativo e houver mais de um SDR e o lead for identificado
+    if (sdrDistribution === "rodizio" && validSdrNumbers.length > 1 && link?.lead_id) {
+      const { rows: leadDadosRows } = await pool.query(
+        `SELECT dados FROM public.leads WHERE id = $1 AND client_id = $2 LIMIT 1`,
+        [link.lead_id, clientId]
+      ).catch(() => ({ rows: [] }));
+
+      const dados = leadDadosRows?.[0]?.dados || {};
+      const owner = dados?.sdr_rotation_owner ? String(dados.sdr_rotation_owner).replace(/\D/g, "") : null;
+
+      if (owner && validSdrNumbers.includes(owner)) {
+        // Envia exclusivamente para o SDR dono do lead
+        validSdrNumbers = [owner];
+      } else {
+        // Se ainda não tiver dono, pega o próximo consultor da fila e gruda no lead
+        const cursor = await advanceSdrRotationCursor(pool, clientId).catch(() => 0);
+        const proximo = validSdrNumbers[cursor % validSdrNumbers.length];
+        if (proximo) {
+          validSdrNumbers = [proximo];
+          await pool.query(
+            `UPDATE public.leads
+             SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{sdr_rotation_owner}', to_jsonb($1::text))
+             WHERE id = $2 AND client_id = $3`,
+            [proximo, link.lead_id, clientId]
+          ).catch((e) => console.warn("[smartLinkAlerts] Falha ao gravar sdr_rotation_owner no lead:", e.message));
+        }
+      }
     }
 
     // Se webhook não estiver em n8n_settings, busca instância Evolution ativa do tenant
