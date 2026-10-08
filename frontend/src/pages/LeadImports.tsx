@@ -581,6 +581,11 @@ export default function LeadImports({
   const [newConsultantLink, setNewConsultantLink] = useLocalStorage(`vexo_consultantLink_${activeClientId}`, "");
   const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
   const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
+  const [isRecurring, setIsRecurring] = useLocalStorage(`vexo_isRecurring_${activeClientId}`, false);
+  const [recurrencePattern, setRecurrencePattern] = useLocalStorage<"monthly" | "weekly" | "biweekly">(`vexo_recurrencePattern_${activeClientId}`, "monthly");
+  const [recurrenceDayOfMonth, setRecurrenceDayOfMonth] = useLocalStorage<number>(`vexo_recurrenceDayOfMonth_${activeClientId}`, 15);
+  const [recurrenceDayOfWeek, setRecurrenceDayOfWeek] = useLocalStorage<number>(`vexo_recurrenceDayOfWeek_${activeClientId}`, 2);
+  const [recurrenceTime, setRecurrenceTime] = useLocalStorage<string>(`vexo_recurrenceTime_${activeClientId}`, "09:00");
   const [batchingEnabled, setBatchingEnabled] = useLocalStorage(`vexo_batching_${activeClientId}`, false);
   const [batchSize, setBatchSize] = useLocalStorage(`vexo_batchSize_${activeClientId}`, "100");
   const [batchIntervalHours, setBatchIntervalHours] = useLocalStorage(`vexo_batchInterval_${activeClientId}`, "1");
@@ -1136,6 +1141,11 @@ export default function LeadImports({
     setCampaignAgentPrompt("");
     setNewTriggerType("manual");
     setNewScheduledAt("");
+    setIsRecurring(false);
+    setRecurrencePattern("monthly");
+    setRecurrenceDayOfMonth(15);
+    setRecurrenceDayOfWeek(2);
+    setRecurrenceTime("09:00");
     setBatchingEnabled(false);
     setBatchSize("100");
     setBatchIntervalHours("1");
@@ -1326,6 +1336,11 @@ export default function LeadImports({
         campaignPromptId,
         startsAt: null,
         endsAt: null,
+        isRecurring,
+        recurrencePattern: isRecurring ? recurrencePattern : null,
+        recurrenceDayOfMonth: isRecurring && recurrencePattern === "monthly" ? recurrenceDayOfMonth : null,
+        recurrenceDayOfWeek: isRecurring && (recurrencePattern === "weekly" || recurrencePattern === "biweekly") ? recurrenceDayOfWeek : null,
+        recurrenceTime: isRecurring ? recurrenceTime : null,
         analyticsMeta: {
           // Segmentação unificada: as regras dinâmicas (coluna/operador/valor) viram o
           // filtro de disparo. Mesmo shape do catálogo da empresa e do matcher do backend.
@@ -1492,6 +1507,11 @@ export default function LeadImports({
       setMultiAgendaEnabled(false);
       setNewScheduledAt("");
       setNewTriggerType("manual");
+      setIsRecurring(false);
+      setRecurrencePattern("monthly");
+      setRecurrenceDayOfMonth(15);
+      setRecurrenceDayOfWeek(2);
+      setRecurrenceTime("09:00");
 
       await Promise.allSettled([refetchCampaigns(), refetchDispatches(), refetchImports(), refetchPending()]);
       setActiveTab("agendamentos");
@@ -1684,6 +1704,14 @@ export default function LeadImports({
       setReplyAgent("atendimento");
       setCampaignAgentPrompt("");
     }
+
+    // Restaura Recorrência se houver
+    setIsRecurring(Boolean(c.is_recurring));
+    setRecurrencePattern((c.recurrence_pattern as any) || "monthly");
+    setRecurrenceDayOfMonth(c.recurrence_day_of_month || 15);
+    setRecurrenceDayOfWeek(c.recurrence_day_of_week ?? 2);
+    setRecurrenceTime(c.recurrence_time || "09:00");
+
     setActiveTab("campanha");
     toast({ title: "Carregado para edição", description: `Edite a campanha "${c.name}" no formulário de Novo Disparo.` });
   };
@@ -1746,6 +1774,11 @@ export default function LeadImports({
     // Agendamento nao e copiado de proposito: data antiga dispararia na hora.
     setNewTriggerType("manual");
     setNewScheduledAt("");
+    setIsRecurring(false);
+    setRecurrencePattern("monthly");
+    setRecurrenceDayOfMonth(15);
+    setRecurrenceDayOfWeek(2);
+    setRecurrenceTime("09:00");
     setActiveTab("campanha");
 
     toast({
@@ -1968,6 +2001,16 @@ export default function LeadImports({
               setNewTriggerType={setNewTriggerType}
               newScheduledAt={newScheduledAt}
               setNewScheduledAt={setNewScheduledAt}
+              isRecurring={isRecurring}
+              setIsRecurring={setIsRecurring}
+              recurrencePattern={recurrencePattern}
+              setRecurrencePattern={setRecurrencePattern}
+              recurrenceDayOfMonth={recurrenceDayOfMonth}
+              setRecurrenceDayOfMonth={setRecurrenceDayOfMonth}
+              recurrenceDayOfWeek={recurrenceDayOfWeek}
+              setRecurrenceDayOfWeek={setRecurrenceDayOfWeek}
+              recurrenceTime={recurrenceTime}
+              setRecurrenceTime={setRecurrenceTime}
               onSubmit={handleCreateAndDispatch}
               isSubmitting={isSubmitting}
               editingCampaignId={editingCampaignId}

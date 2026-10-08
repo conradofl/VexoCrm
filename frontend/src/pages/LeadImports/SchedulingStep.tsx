@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
-import { AlertTriangle, Archive, Bot, Clock3, FilePlus2, Pause, Play, Plus, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Archive, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,6 +11,7 @@ import { InfoTip } from "@/components/InfoTip";
 import { cn } from "@/lib/utils";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { formatSendWindowNotice } from "@/lib/sendWindow";
+import { WEEKDAY_OPTIONS } from "@/lib/campaignRecurrence";
 import type { CampaignDispatchOptions } from "@/hooks/useCampanhas";
 import type { CampaignPreDispatchAudit } from "@/lib/leadImports/spreadsheet";
 import { isConsultantPermissionError } from "@/hooks/useConsultantSchedules";
@@ -76,6 +77,17 @@ interface SchedulingStepProps {
   newScheduledAt: string;
   setNewScheduledAt: Dispatch<SetStateAction<string>>;
 
+  isRecurring?: boolean;
+  setIsRecurring?: Dispatch<SetStateAction<boolean>>;
+  recurrencePattern?: "monthly" | "weekly" | "biweekly";
+  setRecurrencePattern?: Dispatch<SetStateAction<"monthly" | "weekly" | "biweekly">>;
+  recurrenceDayOfMonth?: number;
+  setRecurrenceDayOfMonth?: Dispatch<SetStateAction<number>>;
+  recurrenceDayOfWeek?: number;
+  setRecurrenceDayOfWeek?: Dispatch<SetStateAction<number>>;
+  recurrenceTime?: string;
+  setRecurrenceTime?: Dispatch<SetStateAction<string>>;
+
   onSubmit: () => void;
   isSubmitting: boolean;
   editingCampaignId: string | null;
@@ -120,6 +132,16 @@ export function SchedulingStep({
   setNewTriggerType,
   newScheduledAt,
   setNewScheduledAt,
+  isRecurring: isRecurringProp,
+  setIsRecurring: setIsRecurringProp,
+  recurrencePattern: recurrencePatternProp,
+  setRecurrencePattern: setRecurrencePatternProp,
+  recurrenceDayOfMonth: recurrenceDayOfMonthProp,
+  setRecurrenceDayOfMonth: setRecurrenceDayOfMonthProp,
+  recurrenceDayOfWeek: recurrenceDayOfWeekProp,
+  setRecurrenceDayOfWeek: setRecurrenceDayOfWeekProp,
+  recurrenceTime: recurrenceTimeProp,
+  setRecurrenceTime: setRecurrenceTimeProp,
   onSubmit,
   isSubmitting,
   editingCampaignId,
@@ -127,6 +149,23 @@ export function SchedulingStep({
   onNovaCampanha,
   preDispatchAudit,
 }: SchedulingStepProps) {
+  const [internalIsRecurring, setInternalIsRecurring] = useState(false);
+  const [internalPattern, setInternalPattern] = useState<"monthly" | "weekly" | "biweekly">("monthly");
+  const [internalDayOfMonth, setInternalDayOfMonth] = useState(15);
+  const [internalDayOfWeek, setInternalDayOfWeek] = useState(2);
+  const [internalTime, setInternalTime] = useState("09:00");
+
+  const isRecurring = isRecurringProp ?? internalIsRecurring;
+  const setIsRecurring = setIsRecurringProp ?? setInternalIsRecurring;
+  const recurrencePattern = recurrencePatternProp ?? internalPattern;
+  const setRecurrencePattern = setRecurrencePatternProp ?? setInternalPattern;
+  const recurrenceDayOfMonth = recurrenceDayOfMonthProp ?? internalDayOfMonth;
+  const setRecurrenceDayOfMonth = setRecurrenceDayOfMonthProp ?? setInternalDayOfMonth;
+  const recurrenceDayOfWeek = recurrenceDayOfWeekProp ?? internalDayOfWeek;
+  const setRecurrenceDayOfWeek = setRecurrenceDayOfWeekProp ?? setInternalDayOfWeek;
+  const recurrenceTime = recurrenceTimeProp ?? internalTime;
+  const setRecurrenceTime = setRecurrenceTimeProp ?? setInternalTime;
+
   const [showAuditModal, setShowAuditModal] = useState(false);
   const crmContext = useOptionalCrmClient();
   const client = crmContext?.selectedClient;
@@ -531,6 +570,118 @@ export function SchedulingStep({
               )}
             </div>
           )}
+
+          {/* Recorrência Automática (Pilar 3: Calendário o Ano Inteiro) */}
+          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 dark:border-white/5 dark:bg-slate-900/10 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  <RefreshCw className="h-3.5 w-3.5 text-indigo-500" />
+                  🔄 Repetir esta campanha periodicamente (Recorrência Automática)
+                  <InfoTip text="Ao término de cada disparo, o agendador calcula a próxima data de execução e mantém o calendário rodando o ano inteiro." />
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  Ideal para Aviso de Assembleia Mensal ou Ações Semanais
+                </p>
+              </div>
+              <Switch
+                data-testid="recurrence-switch"
+                checked={isRecurring}
+                onCheckedChange={(checked) => {
+                  setIsRecurring(checked);
+                  if (checked && newTriggerType === "manual") {
+                    setNewTriggerType("scheduled");
+                  }
+                }}
+              />
+            </div>
+
+            {isRecurring && (
+              <div className="space-y-3 pt-2 animate-fadeIn" data-testid="recurrence-options">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Frequência</label>
+                  <Select
+                    value={recurrencePattern}
+                    onValueChange={(val: "monthly" | "weekly" | "biweekly") => setRecurrencePattern(val)}
+                  >
+                    <SelectTrigger data-testid="recurrence-pattern-select" className="h-10 text-xs rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className={darkSelectContentClass}>
+                      <SelectItem value="monthly">Mensal (Dia fixo do mês)</SelectItem>
+                      <SelectItem value="weekly">Semanal (Dia fixo da semana)</SelectItem>
+                      <SelectItem value="biweekly">Quinzenal (A cada 2 semanas)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {recurrencePattern === "monthly" && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Todo dia do mês</label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">Todo dia</span>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="31"
+                          data-testid="recurrence-day-of-month-input"
+                          value={recurrenceDayOfMonth}
+                          onChange={(e) => setRecurrenceDayOfMonth(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                          className="h-10 text-xs rounded-xl text-center font-bold"
+                          placeholder="15"
+                        />
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">do mês</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Horário do disparo</label>
+                      <Input
+                        type="time"
+                        data-testid="recurrence-time-input"
+                        value={recurrenceTime}
+                        onChange={(e) => setRecurrenceTime(e.target.value)}
+                        className="h-10 text-xs rounded-xl"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {(recurrencePattern === "weekly" || recurrencePattern === "biweekly") && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Dia da semana</label>
+                      <Select
+                        value={String(recurrenceDayOfWeek)}
+                        onValueChange={(val) => setRecurrenceDayOfWeek(parseInt(val, 10))}
+                      >
+                        <SelectTrigger data-testid="recurrence-day-of-week-select" className="h-10 text-xs rounded-xl">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className={darkSelectContentClass}>
+                          {WEEKDAY_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={String(opt.value)}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Horário do disparo</label>
+                      <Input
+                        type="time"
+                        data-testid="recurrence-time-input"
+                        value={recurrenceTime}
+                        onChange={(e) => setRecurrenceTime(e.target.value)}
+                        className="h-10 text-xs rounded-xl"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Aviso de Auditoria Pré-Disparo (não bloqueia o envio) */}

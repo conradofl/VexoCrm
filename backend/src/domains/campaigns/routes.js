@@ -59,6 +59,7 @@ import {
   resolveSendWindowConfig,
   adjustDateToSendWindow,
 } from "../../services/sendWindow.js";
+import { computeNextRecurrenceDate } from "../../services/campaignRecurrence.js";
 import { getDateKey } from "../../services/analytics.js";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../../services/canonicalPhone.js";
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
@@ -1005,7 +1006,7 @@ export function registerCampaignsRoutes(app, deps) {
 
     try {
       const campaignSelect =
-        "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta";
+        "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at";
       const fallbackCampaignSelect =
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at";
       let query = supabase
@@ -1205,7 +1206,31 @@ export function registerCampaignsRoutes(app, deps) {
     
     const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
     const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 5000);
-    const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
+    let scheduledFor = normalizeString(req.body?.scheduledFor) || null;
+    const isRecurring = Boolean(req.body?.isRecurring ?? req.body?.is_recurring ?? false);
+    const recurrencePattern = normalizeString(req.body?.recurrencePattern || req.body?.recurrence_pattern) || (isRecurring ? "monthly" : null);
+    const recurrenceDayOfMonth = req.body?.recurrenceDayOfMonth != null
+      ? Number(req.body.recurrenceDayOfMonth)
+      : (req.body?.recurrence_day_of_month != null ? Number(req.body.recurrence_day_of_month) : null);
+    const recurrenceDayOfWeek = req.body?.recurrenceDayOfWeek != null
+      ? Number(req.body.recurrenceDayOfWeek)
+      : (req.body?.recurrence_day_of_week != null ? Number(req.body.recurrence_day_of_week) : null);
+    const recurrenceTime = normalizeString(req.body?.recurrenceTime || req.body?.recurrence_time) || "09:00";
+    let nextRunAt = normalizeString(req.body?.nextRunAt || req.body?.next_run_at) || null;
+
+    if (isRecurring && !scheduledFor) {
+      const nextDate = computeNextRecurrenceDate({
+        pattern: recurrencePattern,
+        dayOfMonth: recurrenceDayOfMonth,
+        dayOfWeek: recurrenceDayOfWeek,
+        timeStr: recurrenceTime,
+        fromDate: new Date(),
+      });
+      scheduledFor = nextDate.toISOString();
+      nextRunAt = scheduledFor;
+    } else if (isRecurring && scheduledFor && !nextRunAt) {
+      nextRunAt = scheduledFor;
+    }
     const analyticsMeta =
       req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
         ? req.body.analyticsMeta
@@ -1293,8 +1318,14 @@ export function registerCampaignsRoutes(app, deps) {
           analytics_meta: analyticsMetaWithDispatch,
           campaign_prompt_id: campaignPromptId,
           mode: campaignMode,
+          is_recurring: isRecurring,
+          recurrence_pattern: recurrencePattern,
+          recurrence_day_of_month: recurrenceDayOfMonth,
+          recurrence_day_of_week: recurrenceDayOfWeek,
+          recurrence_time: recurrenceTime,
+          next_run_at: nextRunAt,
         })
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id, mode")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id, mode, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at")
         .single();
 
       if (error) {
@@ -1393,6 +1424,26 @@ export function registerCampaignsRoutes(app, deps) {
       }
       updates.analytics_meta = validation.analyticsMeta;
     }
+    if ("isRecurring" in req.body || "is_recurring" in req.body) {
+      updates.is_recurring = Boolean(req.body?.isRecurring ?? req.body?.is_recurring);
+    }
+    if ("recurrencePattern" in req.body || "recurrence_pattern" in req.body) {
+      updates.recurrence_pattern = normalizeString(req.body?.recurrencePattern || req.body?.recurrence_pattern) || null;
+    }
+    if ("recurrenceDayOfMonth" in req.body || "recurrence_day_of_month" in req.body) {
+      const v = req.body?.recurrenceDayOfMonth ?? req.body?.recurrence_day_of_month;
+      updates.recurrence_day_of_month = v != null ? Number(v) : null;
+    }
+    if ("recurrenceDayOfWeek" in req.body || "recurrence_day_of_week" in req.body) {
+      const v = req.body?.recurrenceDayOfWeek ?? req.body?.recurrence_day_of_week;
+      updates.recurrence_day_of_week = v != null ? Number(v) : null;
+    }
+    if ("recurrenceTime" in req.body || "recurrence_time" in req.body) {
+      updates.recurrence_time = normalizeString(req.body?.recurrenceTime || req.body?.recurrence_time) || "09:00";
+    }
+    if ("nextRunAt" in req.body || "next_run_at" in req.body) {
+      updates.next_run_at = normalizeString(req.body?.nextRunAt || req.body?.next_run_at) || null;
+    }
 
     if (Object.keys(updates).length === 0) {
       sendError(res, 400, "INVALID_BODY", "No valid fields to update");
@@ -1434,7 +1485,7 @@ export function registerCampaignsRoutes(app, deps) {
         .update(updates)
         .eq("id", id)
         .eq("client_id", authorizedClientId)
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, last_triggered_at, archived_at, created_at, analytics_meta")
+        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, last_triggered_at, archived_at, created_at, analytics_meta, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at")
         .single();
 
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {

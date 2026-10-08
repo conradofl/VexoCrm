@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
 import { CAMPAIGN_STATUS_LABELS, type Campaign } from "@/hooks/useCampanhas";
+import { formatRecurrenceBadge, formatNextRunDate } from "@/lib/campaignRecurrence";
 import { ListFilterBar } from "@/components/ListFilterBar";
 import { useListFilter } from "@/hooks/useListFilter";
 import { CAMPAIGNS_FILTER } from "@/lib/leadImportsListFilters";
@@ -61,6 +62,17 @@ export function CampaignsTable({
           <span className="font-semibold text-foreground">Último chip:</span>{" "}
           {c.chip_name ?? "Nenhum lote enviado ainda"}
         </p>
+        {c.is_recurring && (
+          <p data-testid={`campaign-recurrence-detail-${c.id}`}>
+            <span className="font-semibold text-foreground">Recorrência:</span>{" "}
+            🔄 {formatRecurrenceBadge(c)}
+            {(c.next_run_at || c.scheduled_for) && (
+              <span className="ml-1 text-indigo-600 dark:text-indigo-400 font-medium">
+                — Próxima Execução: {formatNextRunDate(c.next_run_at || c.scheduled_for)}
+              </span>
+            )}
+          </p>
+        )}
       </div>
 
       {/* Ações da campanha */}
@@ -200,6 +212,16 @@ export function CampaignsTable({
             >
               {campaignField("mode").render(c)}
             </span>
+            {c.is_recurring && (
+              <Badge
+                data-field="recurrence"
+                data-testid={`campaign-recurrence-${c.id}`}
+                variant="outline"
+                className="border-indigo-500/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold"
+              >
+                🔄 {formatRecurrenceBadge(c)}
+              </Badge>
+            )}
           </div>
 
           {/* Linha 3: quantos leads à esquerda e data à direita */}
@@ -222,6 +244,16 @@ export function CampaignsTable({
               {campaignField("date").render(c)}
             </span>
           </div>
+
+          {c.is_recurring && (c.next_run_at || c.scheduled_for) && (
+            <div
+              data-testid={`campaign-next-run-${c.id}`}
+              className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1 pt-1"
+            >
+              <span>Próxima Execução:</span>
+              <span className="font-semibold">{formatNextRunDate(c.next_run_at || c.scheduled_for)}</span>
+            </div>
+          )}
         </div>
 
         {/* O resto abre aqui dentro quando o cartão é expandido */}

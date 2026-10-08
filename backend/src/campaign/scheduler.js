@@ -7,6 +7,7 @@
 import { executeCampaignDispatch } from "./dispatch.js";
 import { isMissingSchemaError } from "../services/analytics.js";
 import { supabase } from "../services/database.js";
+import { computeNextRecurrenceDate } from "../services/campaignRecurrence.js";
 
 export const DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS = 60 * 1000;
 export const CAMPAIGN_SCHEDULER_MAX_BATCH = 25;
@@ -30,7 +31,7 @@ export async function runDueCampaignDispatches({ limit = 10, triggerSource = "sc
 
   const now = new Date().toISOString();
   const campaignSelect =
-    "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, analytics_meta";
+    "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, analytics_meta, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at";
   const fallbackCampaignSelect =
     "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email";
 
@@ -74,6 +75,32 @@ export async function runDueCampaignDispatches({ limit = 10, triggerSource = "sc
         status: "sent",
         total: result.total,
       });
+
+      if (campaign.is_recurring) {
+        try {
+          const nextRun = computeNextRecurrenceDate({
+            pattern: campaign.recurrence_pattern,
+            dayOfMonth: campaign.recurrence_day_of_month,
+            dayOfWeek: campaign.recurrence_day_of_week,
+            timeStr: campaign.recurrence_time,
+            fromDate: new Date(),
+            forceNextCycle: true,
+          });
+          const nextRunIso = nextRun.toISOString();
+
+          await supabase
+            .from("campaigns")
+            .update({
+              scheduled_for: nextRunIso,
+              next_run_at: nextRunIso,
+              last_triggered_at: null,
+              status: "active",
+            })
+            .eq("id", campaign.id);
+        } catch (recErr) {
+          console.error("failed to reschedule recurring campaign:", campaign.id, recErr);
+        }
+      }
     } catch (error) {
       items.push({
         campaignId: campaign.id,

@@ -28,6 +28,12 @@ export interface Campaign {
   chatbot_prompt_type: string;
   campaign_prompt_id: string | null;
   mode: "disparo" | "agente";
+  is_recurring?: boolean | null;
+  recurrence_pattern?: "monthly" | "weekly" | "biweekly" | null;
+  recurrence_day_of_month?: number | null;
+  recurrence_day_of_week?: number | null;
+  recurrence_time?: string | null;
+  next_run_at?: string | null;
   // ── Campos PRÉ-CABEADOS (Dashboard Fase 1 — desempenho por campanha).
   // O endpoint de campanhas ainda NÃO retorna estes; quando retornar, a tabela
   // do Dashboard preenche sozinha (helper "—" enquanto nulo).
@@ -202,6 +208,11 @@ export interface CreateCampaignPayload {
   startsAt?: string | null;
   endsAt?: string | null;
   analyticsMeta?: CampaignAnalyticsMeta;
+  isRecurring?: boolean;
+  recurrencePattern?: "monthly" | "weekly" | "biweekly" | null;
+  recurrenceDayOfMonth?: number | null;
+  recurrenceDayOfWeek?: number | null;
+  recurrenceTime?: string | null;
 }
 
 export interface DirectDispatchPayload {
@@ -227,6 +238,12 @@ export interface UpdateCampaignPayload {
   mode?: "disparo" | "agente";
   archived?: boolean;
   analyticsMeta?: CampaignAnalyticsMeta;
+  isRecurring?: boolean;
+  recurrencePattern?: "monthly" | "weekly" | "biweekly" | null;
+  recurrenceDayOfMonth?: number | null;
+  recurrenceDayOfWeek?: number | null;
+  recurrenceTime?: string | null;
+  nextRunAt?: string | null;
 }
 
 export interface CreateDispatchPayload {
