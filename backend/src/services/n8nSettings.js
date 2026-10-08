@@ -102,6 +102,10 @@ export function maskN8nSettings(row) {
       send_window_timezone: "America/Sao_Paulo",
       send_window_enabled: true,
       agent_replies_outside_window: true,
+      reactivation_enabled: false,
+      reactivation_stalled_days: 7,
+      reactivation_cadence_id: null,
+      reactivation_cooldown_days: 30,
       updated_at: null,
     };
   }
@@ -143,6 +147,16 @@ export function maskN8nSettings(row) {
     send_window_timezone: row.send_window_timezone || "America/Sao_Paulo",
     send_window_enabled: row.send_window_enabled !== false,
     agent_replies_outside_window: row.agent_replies_outside_window !== false,
+    reactivation_enabled: row.reactivation_enabled === true,
+    reactivation_stalled_days:
+      Number.isInteger(Number(row.reactivation_stalled_days)) && Number(row.reactivation_stalled_days) >= 1
+        ? Number(row.reactivation_stalled_days)
+        : 7,
+    reactivation_cadence_id: row.reactivation_cadence_id || null,
+    reactivation_cooldown_days:
+      Number.isInteger(Number(row.reactivation_cooldown_days)) && Number(row.reactivation_cooldown_days) >= 1
+        ? Number(row.reactivation_cooldown_days)
+        : 30,
     // Preserva a lista de instâncias já mascarada por maskEvolutionInstance (server.js:1717).
     // Sem isso a whitelist cortava o campo e a UI mostrava "0 instâncias".
     evolution_instances: Array.isArray(row.evolution_instances) ? row.evolution_instances : [],

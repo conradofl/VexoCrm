@@ -223,4 +223,17 @@ export async function ensureLeadCustomFieldsTable(pgClientOrPool) {
   }
 }
 
-
+export async function ensureLeadReactivationSettingsColumns(pgClientOrPool) {
+  if (!pgClientOrPool) return;
+  try {
+    await pgClientOrPool.query(`
+      ALTER TABLE public.lead_client_n8n_settings
+        ADD COLUMN IF NOT EXISTS reactivation_enabled BOOLEAN DEFAULT false,
+        ADD COLUMN IF NOT EXISTS reactivation_stalled_days INT DEFAULT 7,
+        ADD COLUMN IF NOT EXISTS reactivation_cadence_id UUID NULL,
+        ADD COLUMN IF NOT EXISTS reactivation_cooldown_days INT DEFAULT 30;
+    `);
+  } catch (err) {
+    console.warn("[lead-client-tables] Could not add reactivation columns to lead_client_n8n_settings:", err?.message || err);
+  }
+}

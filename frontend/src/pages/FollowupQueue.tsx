@@ -16,6 +16,7 @@ import { FollowUpJourneys } from "@/components/followup/FollowUpJourneys";
 import CadenceEditor from "@/components/followup/CadenceEditor";
 import FollowupCalendar from "@/components/followup/FollowupCalendar";
 import { FollowupQueueTable } from "@/components/followup/FollowupQueueTable";
+import { LeadReactivationCard } from "@/components/followup/LeadReactivationCard";
 import { UpsellCard } from "@/components/UpsellCard";
 import { resolveTenantPlan, hasFeatureUnlocked } from "@/lib/planTier";
 import { cn } from "@/lib/utils";
@@ -359,6 +360,11 @@ export default function FollowupDashboard() {
                 <p className="text-xs text-muted-foreground">Cadastre o número de WhatsApp (passo 1) para criar cadências.</p>
               )}
             </StepSection>
+          )}
+
+          {/* Passo 3 — Reativação Automática de Leads Parados (Pilar 2) */}
+          {tenantId && (
+            <LeadReactivationCard clientId={tenantId} />
           )}
 
           {/* Passo 3 — Automações por evento (Ocultado até os emissores de eventos serem conectados no CRM) */}

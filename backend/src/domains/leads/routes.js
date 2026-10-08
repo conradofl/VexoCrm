@@ -13,7 +13,16 @@ import {
   ensureLeadIntelligenceColumns,
   ensureLeadsClientsTicketMedioColumn,
   ensureLeadCustomFieldsTable,
+  ensureLeadReactivationSettingsColumns,
 } from "../../lead-client-tables.js";
+import {
+  getReactivationSettings,
+  saveReactivationSettings,
+  getCadenceOptions,
+  countEligibleReactivations,
+  countReactivatedLast30Days,
+  runDueReactivations,
+} from "../../services/leadReactivationEngine.js";
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
 import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadUpsert.js";
@@ -1261,6 +1270,106 @@ export function registerLeadsRoutes(app, deps) {
     } catch (error) {
       console.error("[leads-stalled] Falha ao consultar leads parados:", error?.message || error);
       sendError(res, 500, "STALLED_LEADS_QUERY_FAILED", "Falha ao consultar leads parados.", { cause: errorCause(error) });
+    }
+  });
+
+  // Pilar 2: Configurações de Reativação Automática (GET)
+  app.get("/api/leads/reactivation-settings", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard", "followup", "planilhas"])) return;
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+
+    try {
+      await ensureLeadReactivationSettingsColumns(pgDatabasePool);
+      const settings = await getReactivationSettings(pgDatabasePool, clientId);
+      const cadences = await getCadenceOptions(pgDatabasePool, clientId);
+      const eligibleCount = await countEligibleReactivations(pgDatabasePool, {
+        clientId,
+        stalledDays: settings.reactivation_stalled_days,
+        cadenceId: settings.reactivation_cadence_id,
+        cooldownDays: settings.reactivation_cooldown_days,
+      });
+      const reactivatedLast30Days = await countReactivatedLast30Days(pgDatabasePool, {
+        clientId,
+        cadenceId: settings.reactivation_cadence_id,
+      });
+
+      res.json({
+        client_id: clientId,
+        ...settings,
+        eligible_count: eligibleCount,
+        reactivated_last_30_days: reactivatedLast30Days,
+        cadences,
+      });
+    } catch (error) {
+      console.error("[leads-reactivation-settings] Falha ao consultar configurações:", error?.message || error);
+      sendError(res, 500, "REACTIVATION_SETTINGS_FAILED", "Falha ao consultar configurações de reativação.", {
+        cause: errorCause(error),
+      });
+    }
+  });
+
+  // Pilar 2: Configurações de Reativação Automática (POST)
+  app.post("/api/leads/reactivation-settings", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard", "followup", "planilhas"])) return;
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      await ensureLeadReactivationSettingsColumns(pgDatabasePool);
+      const updated = await saveReactivationSettings(pgDatabasePool, clientId, req.body);
+      const cadences = await getCadenceOptions(pgDatabasePool, clientId);
+      const eligibleCount = await countEligibleReactivations(pgDatabasePool, {
+        clientId,
+        stalledDays: updated.reactivation_stalled_days,
+        cadenceId: updated.reactivation_cadence_id,
+        cooldownDays: updated.reactivation_cooldown_days,
+      });
+      const reactivatedLast30Days = await countReactivatedLast30Days(pgDatabasePool, {
+        clientId,
+        cadenceId: updated.reactivation_cadence_id,
+      });
+
+      res.json({
+        success: true,
+        client_id: clientId,
+        ...updated,
+        eligible_count: eligibleCount,
+        reactivated_last_30_days: reactivatedLast30Days,
+        cadences,
+      });
+    } catch (error) {
+      console.error("[leads-reactivation-settings] Falha ao salvar configurações:", error?.message || error);
+      sendError(res, 500, "REACTIVATION_SETTINGS_SAVE_FAILED", "Falha ao salvar configurações de reativação.", {
+        cause: errorCause(error),
+      });
+    }
+  });
+
+  // Pilar 2: Gatilho manual para "Reativar Leads Parados Agora"
+  app.post("/api/leads/reactivation-run", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard", "followup", "planilhas"])) return;
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    try {
+      await ensureLeadReactivationSettingsColumns(pgDatabasePool);
+      const result = await runDueReactivations(pgDatabasePool, {
+        clientId,
+        manual: true,
+        enrollLeadFn: deps.enrollLead || null,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("[leads-reactivation-run] Falha ao executar reativação:", error?.message || error);
+      sendError(res, 500, "REACTIVATION_RUN_FAILED", error.message || "Falha ao executar reativação de leads parados.", {
+        cause: errorCause(error),
+      });
     }
   });
 
