@@ -33,6 +33,7 @@ import {
   queryLeadIds,
   queryImportOrigin,
   queryLeadsPage,
+  queryStalledLeads,
   parseLeadListFilters,
   resolveLeadListScope,
   validateAudienceRules,
@@ -1053,7 +1054,7 @@ export function registerLeadsRoutes(app, deps) {
 
   // ── Lista do Banco de Dados: filtro, ordenação, contagem e paginação no SQL (services/leadListQuery.js) ──────────────
 
-  const LEAD_LIST_SORTS = ["contato", "ultima_conversa"];
+  const LEAD_LIST_SORTS = ["contato", "ultima_conversa", "stalled", "days_idle"];
   const EMPTY_SUMMARY = {
     totalLeads: 0, buyersCount: 0, lostCount: 0, openBudgetsCount: 0, inNegotiationCount: 0,
     inConversationCount: 0, neverContactedCount: 0, activeLeadsCount: 0, estimatedRevenue: 0,
@@ -1226,6 +1227,40 @@ export function registerLeadsRoutes(app, deps) {
     } catch (error) {
       console.error("[leads-facets] falhou:", error?.message || error);
       sendError(res, 500, "LEADS_FACETS_FAILED", "Falha ao calcular os totais da base.", { cause: errorCause(error) });
+    }
+  });
+
+  // Pilar 1: Aviso de Lead Parado (Nenhum Lead Esquecido)
+  app.get("/api/leads/stalled", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard"])) return;
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+
+    try {
+      await ensureLeadIntelligenceColumns(pgDatabasePool);
+    } catch (e) {
+      console.warn("[leads-stalled] Column check warning:", e?.message || e);
+    }
+
+    const minDays = Math.max(0, parseInt(req.query?.minDays ?? "3", 10) || 3);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query?.limit ?? "50", 10) || 50));
+    const offset = Math.max(0, parseInt(req.query?.offset ?? "0", 10) || 0);
+    const stage = req.query?.stage ? normalizeString(req.query.stage) : null;
+    const scope = resolveLeadListScope(req, clientId);
+
+    try {
+      const result = await queryStalledLeads(pgDatabasePool, {
+        scope,
+        minDays,
+        limit,
+        offset,
+        stage,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("[leads-stalled] Falha ao consultar leads parados:", error?.message || error);
+      sendError(res, 500, "STALLED_LEADS_QUERY_FAILED", "Falha ao consultar leads parados.", { cause: errorCause(error) });
     }
   });
 

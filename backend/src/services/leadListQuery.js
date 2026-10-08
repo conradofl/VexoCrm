@@ -220,6 +220,11 @@ export function buildFilterConditions(params, f = {}) {
   if (f.channel && f.channel !== "all") c.channel = `e._channel = ${params.add(f.channel)}`;
   if (f.segment) c.segment = `e._segment = ${params.add(f.segment)}`;
   if (f.importId) c.importId = importIdCond(params, f.importId, "e");
+  if (f.stalledDays !== undefined && f.stalledDays !== null) {
+    const p = params.add(f.stalledDays);
+    c.stalledDays = `(NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) >= (${p} || ' days')::interval
+      AND (e.stage IS NULL OR lower(e.stage) NOT IN ('fechado', 'perdido', 'descartado', 'buyer', 'lost'))`;
+  }
   return c;
 }
 
@@ -234,6 +239,9 @@ function orderBy(sort, dir) {
   // Com lower() "Ana" e "ana" virariam a mesma chave e o desempate seria arbitrário. Desempate por data e id para a paginação ser estável.
   if (sort === "contato") return `ORDER BY COALESCE(e.nome, '') COLLATE ${ICU} ${direction}, e.created_at DESC, e.id`;
   if (sort === "ultima_conversa") return `ORDER BY COALESCE(e.last_interaction_at, e.created_at) ${direction}, e.created_at DESC, e.id`;
+  if (sort === "stalled" || sort === "days_idle") {
+    return `ORDER BY (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) DESC, e.id DESC`;
+  }
   return "ORDER BY e.created_at DESC, e.id";
 }
 
@@ -283,7 +291,9 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
               COALESCE(sum(e.potential_contract_value) FILTER (WHERE e._segment = 'in_negotiation'), 0)::float8 AS estimated_revenue,
               count(*) FILTER (WHERE e.stage = 'open_budget')::int AS st_open_budget,
               count(*) FILTER (WHERE e.stage = 'inquiry')::int AS st_inquiry,
-              count(*) FILTER (WHERE e.stage = 'cold')::int AS st_cold
+              count(*) FILTER (WHERE e.stage = 'cold')::int AS st_cold,
+              count(*) FILTER (WHERE (e.stage IS NULL OR lower(e.stage) NOT IN ('buyer', 'fechado', 'perdido', 'descartado', 'lost'))
+                AND (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) >= interval '3 days')::int AS stalled_count
          FROM e`),
     channels: () => pool.query(channelsSql(scopeSql), p.values),
     sources: () => pool.query(`${sourceOnly} SELECT s0._source AS source, count(*)::int AS n FROM s0 GROUP BY 1 ORDER BY n DESC, source`, p.values),
@@ -335,8 +345,10 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
         neverContactedCount: r.never_contacted,
         activeLeadsCount: r.in_negotiation + r.in_conversation + r.never_contacted,
         estimatedRevenue: r.estimated_revenue,
+        stalledCount: r.stalled_count,
       };
       out.baseTotal = r.total;
+      out.stalledCount = r.stalled_count;
       // contagem por estágio EXATA (cada estágio é o seu), para o assistente de campanha; `other` = nulo ou desconhecido
       out.stagesExact = {
         buyer: r.buyers,
@@ -378,8 +390,8 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
     const where = whereOf(buildFilterConditions(p, only), keys);
     return { p, cte: enrichedCte(scopeSql, needsOf(only)), where };
   };
-  const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"];
-  const TAB_KEYS = ["temperature", "tag", "search", "importId"]; // as abas ignoram estágio, origem, canal e faixa
+  const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"];
+  const TAB_KEYS = ["temperature", "tag", "search", "importId", "stalledDays"]; // as abas ignoram estágio, origem, canal e faixa
 
   const total = prepare(ALL_KEYS);
   const pageQ = prepare(ALL_KEYS);
@@ -389,7 +401,7 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
 
   const [{ rows: totalRows }, { rows: pageRows }, tabsRes] = await Promise.all([
     pool.query(`${total.cte} SELECT count(*)::int AS n FROM e ${total.where}`, total.p.values),
-    pool.query(`${pageQ.cte} SELECT e.* FROM e ${pageQ.where} ${orderBy(sort, dir)} LIMIT ${limitSql} OFFSET ${offsetSql}`, pageQ.p.values),
+    pool.query(`${pageQ.cte} SELECT e.*, EXTRACT(DAY FROM (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)))::int AS days_idle FROM e ${pageQ.where} ${orderBy(sort || (filters.stalledDays !== undefined ? "stalled" : null), dir)} LIMIT ${limitSql} OFFSET ${offsetSql}`, pageQ.p.values),
     withTabs
       ? pool.query(
           `${tabs.cte}
@@ -397,7 +409,9 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
                   count(*) FILTER (WHERE e.stage = 'buyer')::int AS buyer,
                   count(*) FILTER (WHERE e.stage = 'open_budget')::int AS open_budget,
                   count(*) FILTER (WHERE e.stage IS NULL OR e.stage NOT IN ('buyer', 'open_budget', 'lost'))::int AS cold,
-                  count(*) FILTER (WHERE e.stage = 'lost')::int AS lost
+                  count(*) FILTER (WHERE e.stage = 'lost')::int AS lost,
+                  count(*) FILTER (WHERE (e.stage IS NULL OR lower(e.stage) NOT IN ('buyer', 'fechado', 'perdido', 'descartado', 'lost'))
+                    AND (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) >= interval '3 days')::int AS stalled
              FROM e ${tabs.where}`,
           tabs.p.values
         )
@@ -411,7 +425,7 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
     page: safePage,
     limit: safeLimit,
     totalPages: Math.max(1, Math.ceil(count / safeLimit)),
-    tabs: t ? { all: t.all_n, buyer: t.buyer, open_budget: t.open_budget, cold: t.cold, lost: t.lost } : null,
+    tabs: t ? { all: t.all_n, buyer: t.buyer, open_budget: t.open_budget, cold: t.cold, lost: t.lost, stalled: t.stalled } : null,
   };
 }
 
@@ -424,7 +438,7 @@ export async function queryLeadIds(pool, { scope, filters = {}, contacts = false
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const conds = buildFilterConditions(p, filters);
-  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"]);
+  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"]);
   const { rows } = await pool.query(
     `${enrichedCte(scopeSql, needsOf(filters))} SELECT e.id${contacts ? ", e.nome, e.telefone, e.phone" : ""} FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
     p.values
@@ -580,7 +594,7 @@ export async function queryCustomKeys(pool, { scope, filters = {} }) {
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const conds = buildFilterConditions(p, filters);
-  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"]);
+  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"]);
   const { rows } = await pool.query(
     `${enrichedCte(scopeSql, needsOf(filters))}
      SELECT DISTINCT k.key AS key FROM e
@@ -600,7 +614,7 @@ export async function* iterateLeadsForExport(pool, { scope, filters = {}, blockS
     const p = new Params();
     const scopeSql = buildScope(p, scope);
     const conds = buildFilterConditions(p, filters);
-    const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId"]);
+    const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"]);
     const limitSql = p.add(blockSize);
     const offsetSql = p.add(offset);
     const { rows } = await pool.query(
@@ -619,6 +633,15 @@ export async function* iterateLeadsForExport(pool, { scope, filters = {}, blockS
 /** Filtros de lista vindos da URL ou body. Devolve { filters } ou { problem } (valor fora da lista conhecida vira 400, nunca lista vazia calada). */
 export function parseLeadListFilters(query = {}) {
   const norm = (v) => (typeof v === "string" ? v.trim() : "");
+  const stalledRaw = query.stalledDays ?? query.stalled;
+  let stalledDays = undefined;
+  if (stalledRaw !== undefined && stalledRaw !== null && String(stalledRaw).trim() !== "") {
+    const parsed = parseInt(String(stalledRaw).trim(), 10);
+    if (!isNaN(parsed) && parsed >= 0) {
+      stalledDays = parsed;
+    }
+  }
+
   const filters = {
     stage: norm(query.stage),
     temperature: norm(query.temperature),
@@ -628,6 +651,7 @@ export function parseLeadListFilters(query = {}) {
     channel: norm(query.channel),
     segment: norm(query.segment),
     importId: norm(query.importId),
+    ...(stalledDays !== undefined ? { stalledDays } : {}),
   };
   if (filters.channel && filters.channel !== "all" && !MARKETING_CHANNEL_IDS.includes(filters.channel)) {
     return { problem: `Canal inválido: ${filters.channel}` };
@@ -637,6 +661,73 @@ export function parseLeadListFilters(query = {}) {
   }
   return { filters };
 }
+
+/**
+ * Consulta de Leads Parados (Pilar 1: Aviso de Lead Parado - Nenhum Lead Esquecido).
+ * Retorna leads em etapas ativas sem resposta/interação há pelo menos minDays dias.
+ */
+export async function queryStalledLeads(pool, { scope, minDays = 3, limit = 50, offset = 0, stage = null }) {
+  await useCollation(pool);
+  const safeMinDays = Math.max(0, parseInt(minDays, 10) || 3);
+  const safeLimit = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
+  const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+
+  const p = new Params();
+  const scopeSql = buildScope(p, scope);
+
+  const conds = [
+    `(NOW() - COALESCE(s.last_message_at, s.last_interaction_at, s.updated_at, s.created_at)) >= (${p.add(safeMinDays)} || ' days')::interval`,
+  ];
+
+  if (stage && stage !== "all") {
+    conds.push(`s.stage = ${p.add(stage)}`);
+  } else {
+    conds.push(`(s.stage IS NULL OR lower(s.stage) NOT IN ('fechado', 'perdido', 'descartado', 'buyer', 'lost'))`);
+  }
+
+  const whereSql = `WHERE ${scopeSql} AND ${conds.join(" AND ")}`;
+
+  const countPValues = [...p.values];
+  const countSql = `SELECT count(*)::int AS count FROM public.leads s ${whereSql}`;
+
+  const limitParam = p.add(safeLimit);
+  const offsetParam = p.add(safeOffset);
+
+  const leadsSql = `
+    SELECT
+      s.id,
+      s.nome,
+      s.telefone,
+      s.phone,
+      s.stage,
+      s.temperature,
+      s.tags,
+      s.raw_chat_summary,
+      s.created_at,
+      s.updated_at,
+      s.last_interaction_at,
+      s.last_message_at,
+      COALESCE(s.dados->>'sdr_rotation_owner', s.assigned_to) AS sdr_rotation_owner,
+      EXTRACT(DAY FROM (NOW() - COALESCE(s.last_message_at, s.last_interaction_at, s.updated_at, s.created_at)))::int AS days_idle
+    FROM public.leads s
+    ${whereSql}
+    ORDER BY days_idle DESC, s.id DESC
+    LIMIT ${limitParam} OFFSET ${offsetParam}
+  `;
+
+  const [{ rows: countRows }, { rows: leadRows }] = await Promise.all([
+    pool.query(countSql, countPValues),
+    pool.query(leadsSql, p.values),
+  ]);
+
+  return {
+    count: countRows[0]?.count ?? 0,
+    minDays: safeMinDays,
+    leads: leadRows,
+  };
+}
+
+export const queryBaseLeads = queryLeadsPage;
 
 /** Escopo de tenant e operador para queries de leads. Usado por Banco de Dados, Campanhas e Follow-up. */
 export function resolveLeadListScope(req, clientId) {

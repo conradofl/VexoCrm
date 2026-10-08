@@ -26,6 +26,7 @@ const SCHEMA = `
     telefone text NOT NULL, phone text, nome text, status text, cidade text, potential_contract_value numeric(14,2),
     dados jsonb NOT NULL DEFAULT '{}'::jsonb, lead_source text, created_at timestamptz NOT NULL DEFAULT now(),
     stage text DEFAULT 'cold', temperature text DEFAULT 'warm', tags text[] DEFAULT ARRAY[]::text[], last_interaction_at timestamptz,
+    updated_at timestamptz DEFAULT now(), last_message_at timestamptz,
     raw_chat_summary text, assigned_to text, UNIQUE (client_id, telefone));
   CREATE TABLE lead_imports (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL REFERENCES leads_clients(id) ON DELETE CASCADE,
     source_name text NOT NULL, source_type text NOT NULL DEFAULT 'spreadsheet', total_rows integer NOT NULL DEFAULT 0, imported_rows integer NOT NULL DEFAULT 0,

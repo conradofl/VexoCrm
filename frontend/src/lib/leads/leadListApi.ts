@@ -15,9 +15,11 @@ export interface LeadListFilters {
   /** "never_contacted" | "in_conversation" | "in_negotiation" */
   segment?: string | null;
   importId?: string;
+  /** Inatividade em dias para filtro de leads parados (Pilar 1) */
+  stalledDays?: number | string;
 }
 
-export type LeadSortColumn = "contato" | "ultima_conversa";
+export type LeadSortColumn = "contato" | "ultima_conversa" | "stalled" | "days_idle";
 
 export interface LeadTabCounts {
   all: number;
@@ -25,6 +27,7 @@ export interface LeadTabCounts {
   open_budget: number;
   cold: number;
   lost: number;
+  stalled?: number;
 }
 
 export interface LeadPageResponse<TLead = Record<string, unknown>> {
@@ -100,6 +103,8 @@ export interface LeadFacetsResponse {
   tags: FacetTag[] | null;
   /** contagem EXATA por estágio (cada estágio é o seu); `other` = nulo ou desconhecido */
   stagesExact: { buyer: number; open_budget: number; inquiry: number; cold: number; lost: number; other: number } | null;
+  /** Total de leads parados há mais de 3 dias no tenant (Pilar 1) */
+  stalledCount?: number | null;
   failedParts: Partial<Record<FacetPartName, { message: string; code?: string }>>;
 }
 
@@ -188,6 +193,9 @@ export function filterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.segment && SEGMENTS.includes(filters.segment)) p.set("segment", filters.segment);
   const importId = (filters.importId || "").trim();
   if (importId) p.set("importId", importId);
+  if (filters.stalledDays !== undefined && filters.stalledDays !== null && String(filters.stalledDays).trim() !== "") {
+    p.set("stalledDays", String(filters.stalledDays).trim());
+  }
   return p;
 }
 
@@ -249,8 +257,48 @@ export async function fetchLeadFacets(request: LeadRequest, clientId: string): P
     sources: data.sources ?? null,
     tags: data.tags ?? null,
     stagesExact: data.stagesExact ?? null,
+    stalledCount: data.stalledCount ?? (data.summary as any)?.stalledCount ?? null,
     failedParts: data.failedParts ?? {},
   };
+}
+
+export interface StalledLeadItem {
+  id: string;
+  nome?: string | null;
+  telefone?: string | null;
+  phone?: string | null;
+  stage?: string | null;
+  temperature?: string | null;
+  tags?: string[] | null;
+  raw_chat_summary?: string | null;
+  days_idle: number;
+  last_interaction_at?: string | null;
+  last_message_at?: string | null;
+  sdr_rotation_owner?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StalledLeadsResponse {
+  count: number;
+  minDays: number;
+  leads: StalledLeadItem[];
+}
+
+/** Consulta leads parados (Pilar 1: Aviso de Lead Parado - Nenhum Lead Esquecido). */
+export async function fetchStalledLeads(
+  request: LeadRequest,
+  clientId: string,
+  options?: { minDays?: number; limit?: number; offset?: number; stage?: string }
+): Promise<StalledLeadsResponse> {
+  const p = new URLSearchParams();
+  p.set("clientId", clientId);
+  if (options?.minDays !== undefined) p.set("minDays", String(options.minDays));
+  if (options?.limit !== undefined) p.set("limit", String(options.limit));
+  if (options?.offset !== undefined) p.set("offset", String(options.offset));
+  if (options?.stage && options.stage !== "all") p.set("stage", options.stage);
+  const res = await request(`/api/leads/stalled?${p.toString()}`);
+  return readJson<StalledLeadsResponse>(res, "Falha ao consultar leads parados.");
 }
 
 /** Todos os ids da combinação de filtros (selecionar todos da faixa, disparo por origem). `contacts` traz nome e telefone junto. */

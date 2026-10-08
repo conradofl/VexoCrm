@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { InstagramImportModal } from "@/components/leads/InstagramImportModal";
 import { ContactsWithoutChannelSection } from "@/components/leads/ContactsWithoutChannelSection";
+import { StalledLeadBadge } from "@/components/leads/StalledLeadBadge";
 import { useContactsWithoutChannel } from "@/hooks/useContactsWithoutChannel";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
@@ -497,6 +498,10 @@ export default function BancoDeDados() {
 
   // Filters & Tabs
   const [activeTab, setActiveTab] = useState<string>(() => normalizeStageTab(searchParams.get("tab")));
+  const [isStalledFilterActive, setIsStalledFilterActive] = useState<boolean>(() => {
+    const p = searchParams.get("stalled") || searchParams.get("stalledDays");
+    return Boolean(p && !isNaN(Number(p)));
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState<string>("");
   const [selectedSource, setSelectedSource] = useState<string>("");
@@ -505,12 +510,16 @@ export default function BancoDeDados() {
   const [isInstagramImportModalOpen, setIsInstagramImportModalOpen] = useState(false);
   const { data: contactsWithoutChannel = [] } = useContactsWithoutChannel(clientId);
 
-  // Sincroniza activeTab quando o parâmetro da URL mudar
+  // Sincroniza activeTab e isStalledFilterActive quando os parâmetros da URL mudarem
   useEffect(() => {
     const urlTab = searchParams.get("tab");
     if (urlTab) {
       const normalized = normalizeStageTab(urlTab);
       setActiveTab(normalized);
+    }
+    const stalledParam = searchParams.get("stalled") || searchParams.get("stalledDays");
+    if (stalledParam && !isNaN(Number(stalledParam))) {
+      setIsStalledFilterActive(true);
     }
   }, [searchParams]);
 
@@ -720,6 +729,7 @@ export default function BancoDeDados() {
     channel: selectedChannel,
     segment: selectedSegment,
     importId: selectedImportId || undefined,
+    stalledDays: isStalledFilterActive ? 3 : undefined,
   };
 
   const isMountedRef = useRef(true);
@@ -2827,6 +2837,7 @@ export default function BancoDeDados() {
 
   // Checagem de filtros ativos e limpador global
   const hasActiveFilters = Boolean(
+    isStalledFilterActive ||
     selectedTag ||
     selectedSource ||
     selectedChannel !== "all" ||
@@ -2837,6 +2848,7 @@ export default function BancoDeDados() {
   );
 
   const handleClearAllFilters = () => {
+    setIsStalledFilterActive(false);
     setSelectedTag("");
     setSelectedSource("");
     setSelectedChannel("all");
@@ -3384,6 +3396,38 @@ export default function BancoDeDados() {
                 </span>
               )}
             </Button>
+
+            {/* Pilar 1: Botão de Filtro Rápido - Leads Parados (> 3 dias) */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="tab-stalled-leads"
+              onClick={() => {
+                setIsStalledFilterActive((prev) => !prev);
+                setCurrentPage(1);
+              }}
+              className={cn(
+                "rounded-full text-xs transition-all gap-1.5 border",
+                isStalledFilterActive
+                  ? "bg-amber-500/15 text-amber-900 dark:text-amber-200 border-amber-500/40 shadow-xs ring-1 ring-amber-500/30 font-semibold"
+                  : "text-muted-foreground hover:text-foreground border-transparent hover:bg-muted"
+              )}
+              title="Filtrar contatos ativos sem resposta há mais de 3 dias"
+            >
+              <Clock className={cn("w-3.5 h-3.5", isStalledFilterActive ? "text-amber-600 dark:text-amber-400" : "text-amber-500/80")} />
+              <span>⏱️ Parados (&gt; 3 dias)</span>
+              {(facets?.stalledCount ?? (facets?.summary as any)?.stalledCount ?? 0) > 0 && (
+                <span className={cn(
+                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-semibold",
+                  isStalledFilterActive
+                    ? "bg-amber-500/25 text-amber-800 dark:text-amber-300 border border-amber-500/40"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                )}>
+                  {facets?.stalledCount ?? (facets?.summary as any)?.stalledCount ?? 0}
+                </span>
+              )}
+            </Button>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -3446,6 +3490,19 @@ export default function BancoDeDados() {
               <Filter className="w-3 h-3 text-indigo-500" />
               Filtros:
             </span>
+            {isStalledFilterActive && (
+              <Badge variant="secondary" className="gap-1 text-[11px] pr-1 bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+                <span>⏱️ Parados (&gt; 3 dias)</span>
+                <button
+                  type="button"
+                  onClick={() => setIsStalledFilterActive(false)}
+                  className="hover:text-rose-500 p-0.5 rounded"
+                  title="Remover filtro de leads parados"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
             {activeTab !== "all" && (
               <Badge variant="secondary" className="gap-1 text-[11px] pr-1 bg-muted/80">
                 Estágio: {activeTab}
@@ -3949,7 +4006,10 @@ export default function BancoDeDados() {
 
                           {/* Coluna 3: Estágio */}
                           <TableCell className="text-[12.5px] py-[10px]">
-                            {getStageBadge(lead.stage, lead.lost_reason, lead.stage_source)}
+                            <div className="flex flex-col gap-1 items-start">
+                              {getStageBadge(lead.stage, lead.lost_reason, lead.stage_source)}
+                              <StalledLeadBadge lead={lead} minDays={3} />
+                            </div>
                           </TableCell>
 
                           {/* Coluna 4: Última conversa */}

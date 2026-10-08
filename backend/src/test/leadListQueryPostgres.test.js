@@ -48,6 +48,7 @@ const SCHEMA = `
     lead_temperature text, source_campaign_name text, lead_source text, lead_score numeric(8,2), potential_contract_value numeric(14,2),
     lead_origin text, dados jsonb NOT NULL DEFAULT '{}'::jsonb, created_at timestamptz NOT NULL DEFAULT now(),
     stage text DEFAULT 'cold', temperature text DEFAULT 'warm', tags text[] DEFAULT ARRAY[]::text[], last_interaction_at timestamptz,
+    updated_at timestamptz DEFAULT now(), last_message_at timestamptz,
     raw_chat_summary text, assigned_to text, UNIQUE (client_id, telefone));
   CREATE INDEX idx_leads_client_id ON leads (client_id);
 `;
