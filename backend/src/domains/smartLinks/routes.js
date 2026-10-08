@@ -150,4 +150,133 @@ export function registerSmartLinksRoutes(app, deps) {
       return res.status(500).json({ error: "Falha ao carregar live feed de links", message: err.message });
     }
   });
+
+  // ─── 3. Endpoint Autenticado de Métricas Analíticas (GET /api/smart-links/metrics) ───
+  app.get("/api/smart-links/metrics", requireAuth, async (req, res) => {
+    if (deps?.ensureDb && !deps.ensureDb(res)) return;
+
+    const requestedClientId = req.query?.clientId ? String(req.query.clientId).trim() : null;
+    const clientId = resolveClientId(req, res, requestedClientId);
+    if (!clientId) return;
+
+    const pool = getPool();
+    if (!pool) {
+      if (deps?.sendError) {
+        return deps.sendError(res, 500, "DB_UNAVAILABLE", "Banco de dados indisponível");
+      }
+      return res.status(500).json({ error: "Banco de dados indisponível" });
+    }
+
+    try {
+      const rawPeriodDays = Number.parseInt(String(req.query?.periodDays || "30"), 10);
+      const periodDays = Number.isInteger(rawPeriodDays) && rawPeriodDays > 0 ? rawPeriodDays : 30;
+
+      const campaignId = req.query?.campaignId ? String(req.query.campaignId).trim() : null;
+
+      // 1. Resumo no período: totalLinks, totalClicks, uniqueLeadsClicked
+      const summaryValues = [clientId, periodDays];
+      let summaryCampaignFilter = "";
+      if (campaignId) {
+        summaryValues.push(campaignId);
+        summaryCampaignFilter = `AND campaign_id = $${summaryValues.length}`;
+      }
+
+      const summarySql = `
+        SELECT 
+          COUNT(*)::int AS total_links,
+          COALESCE(SUM(clicks_count), 0)::int AS total_clicks,
+          COUNT(DISTINCT lead_id) FILTER (WHERE clicks_count > 0 AND lead_id IS NOT NULL)::int AS unique_leads_clicked
+        FROM public.smart_links
+        WHERE client_id = $1
+          AND created_at >= NOW() - ($2 || ' days')::INTERVAL
+          ${summaryCampaignFilter};
+      `;
+
+      const summaryRes = await pool.query(summarySql, summaryValues);
+      const summaryRow = summaryRes.rows?.[0] || {};
+      const totalLinks = Number(summaryRow.total_links || 0);
+      const totalClicks = Number(summaryRow.total_clicks || 0);
+      const uniqueLeadsClicked = Number(summaryRow.unique_leads_clicked || 0);
+      const ctr = totalLinks > 0 ? Number(((uniqueLeadsClicked / totalLinks) * 100).toFixed(1)) : 0;
+
+      // 2. Cliques nas últimas 24 horas
+      const last24hValues = [clientId];
+      let last24hCampaignFilter = "";
+      if (campaignId) {
+        last24hValues.push(campaignId);
+        last24hCampaignFilter = `AND l.campaign_id = $${last24hValues.length}`;
+      }
+
+      const last24hSql = `
+        SELECT COUNT(*)::int AS clicks_last_24h
+        FROM public.smart_link_clicks c
+        JOIN public.smart_links l ON l.id = c.link_id
+        WHERE l.client_id = $1
+          AND c.clicked_at >= NOW() - INTERVAL '24 hours'
+          ${last24hCampaignFilter};
+      `;
+      const last24hRes = await pool.query(last24hSql, last24hValues);
+      const clicksLast24h = Number(last24hRes.rows?.[0]?.clicks_last_24h || 0);
+
+      // 3. Top 5 Leads mais quentes no período
+      const topLeadsValues = [clientId, periodDays];
+      let topLeadsCampaignFilter = "";
+      if (campaignId) {
+        topLeadsValues.push(campaignId);
+        topLeadsCampaignFilter = `AND l.campaign_id = $${topLeadsValues.length}`;
+      }
+
+      const topLeadsSql = `
+        SELECT 
+          l.lead_id,
+          COALESCE(ld.nome, 'Lead sem nome') AS lead_nome,
+          COALESCE(ld.telefone, '') AS lead_telefone,
+          l.code AS link_code,
+          l.destination_url,
+          l.title AS link_title,
+          l.clicks_count,
+          l.last_clicked_at,
+          l.campaign_id,
+          cmp.name AS campaign_name
+        FROM public.smart_links l
+        LEFT JOIN public.leads ld ON ld.id = l.lead_id
+        LEFT JOIN public.campaigns cmp ON cmp.id = l.campaign_id
+        WHERE l.client_id = $1
+          AND l.clicks_count > 0
+          AND l.created_at >= NOW() - ($2 || ' days')::INTERVAL
+          ${topLeadsCampaignFilter}
+        ORDER BY l.clicks_count DESC, l.last_clicked_at DESC NULLS LAST
+        LIMIT 5;
+      `;
+      const topLeadsRes = await pool.query(topLeadsSql, topLeadsValues);
+      const topLeads = (topLeadsRes.rows || []).map((row) => ({
+        leadId: row.lead_id,
+        leadNome: row.lead_nome,
+        leadTelefone: row.lead_telefone,
+        linkCode: row.link_code,
+        destinationUrl: row.destination_url,
+        linkTitle: row.link_title || null,
+        clicksCount: Number(row.clicks_count || 0),
+        lastClickedAt: row.last_clicked_at ? new Date(row.last_clicked_at).toISOString() : null,
+        campaignId: row.campaign_id || null,
+        campaignName: row.campaign_name || null,
+      }));
+
+      return res.json({
+        totalLinks,
+        totalClicks,
+        uniqueLeadsClicked,
+        ctr,
+        clicksLast24h,
+        periodDays,
+        topLeads,
+      });
+    } catch (err) {
+      console.error("[smartLinks] Erro ao consultar métricas:", err);
+      if (deps?.sendError) {
+        return deps.sendError(res, 500, "METRICS_ERROR", "Falha ao carregar métricas de links", err.message);
+      }
+      return res.status(500).json({ error: "Falha ao carregar métricas de links", message: err.message });
+    }
+  });
 }

@@ -14,7 +14,8 @@
 // ("se a divisao em 4 criar ciclo interno, mescle os modulos conflitantes").
 
 import { normalizeString } from "../textNormalize.js";
-import { supabase } from "../services/database.js";
+import { supabase, pgDatabasePool } from "../services/database.js";
+import { wrapMessageUrlsWithSmartLinks } from "../services/smartLinks.js";
 import { normalizeIsoDate } from "../services/httpInfra.js";
 import {
   isMissingSchemaError,
@@ -51,6 +52,41 @@ const { appendLeadMessage } = createLeadMessaging({
   leadsTableName,
   isMissingSchemaError,
 });
+
+/**
+ * Prepara o texto do passo da campanha para o lead individualizado,
+ * auto-encurtando URLs em smart links rastreados caso configurado ou
+ * por padrão quando existirem links HTTP/HTTPS.
+ */
+export async function prepareCampaignStepText({
+  text,
+  clientId,
+  leadId = null,
+  campaignId = null,
+  dispatchId = null,
+  trackLinks = true,
+  pool = pgDatabasePool,
+  baseUrl = process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || "https://crm.vexoia.com",
+} = {}) {
+  if (!text || typeof text !== "string") return text;
+  if (trackLinks === false) return text;
+  if (!/https?:\/\//i.test(text)) return text;
+  if (!pool) return text;
+
+  try {
+    return await wrapMessageUrlsWithSmartLinks(pool, {
+      text,
+      clientId,
+      leadId,
+      campaignId,
+      dispatchId,
+      baseUrl,
+    });
+  } catch (err) {
+    console.warn("[campaign/dispatch] Falha ao auto-encurtar links com smart links:", err?.message);
+    return text;
+  }
+}
 
 // ---- dispatch ----
 
@@ -583,6 +619,16 @@ export async function executeCampaignDispatch(campaign, { triggerSource = "manua
         ...meta,
         sequence: immediateSteps,
       },
+      transformStepText: async ({ text, lead }) => {
+        const trackLinksOption = claimedCampaign?.track_links ?? meta?.dispatchOptions?.trackLinks ?? true;
+        return prepareCampaignStepText({
+          text,
+          clientId: claimedCampaign.client_id,
+          leadId: lead?.id || null,
+          campaignId: claimedCampaign.id,
+          trackLinks: trackLinksOption,
+        });
+      },
       context: {
         campaign: {
           id: claimedCampaign.id,
@@ -824,6 +870,16 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
         waitForReply: false,
         leadDelaySeconds: 0,
       },
+    },
+    transformStepText: async ({ text, lead }) => {
+      const trackLinksOption = campaign?.track_links ?? analyticsMeta?.dispatchOptions?.trackLinks ?? true;
+      return prepareCampaignStepText({
+        text,
+        clientId,
+        leadId: lead?.id || null,
+        campaignId: campaign.id,
+        trackLinks: trackLinksOption,
+      });
     },
     context: {
       campaign: {
@@ -1644,6 +1700,16 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         leadDelaySeconds: 0,
         waitForReply: false,
       },
+    },
+    transformStepText: async ({ text, lead: l }) => {
+      const trackLinksOption = campaign?.track_links ?? analyticsMeta?.dispatchOptions?.trackLinks ?? true;
+      return prepareCampaignStepText({
+        text,
+        clientId,
+        leadId: (l || lead)?.id || null,
+        campaignId: campaign.id,
+        trackLinks: trackLinksOption,
+      });
     },
     context: {
       campaign: {

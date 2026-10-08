@@ -10,6 +10,7 @@ import { Block1WhatHappened } from "./Dashboard/Block1WhatHappened";
 import { Block2Rankings } from "./Dashboard/Block2Rankings";
 import { Block3ActionAlerts } from "./Dashboard/Block3ActionAlerts";
 import { Block4Analysis } from "./Dashboard/Block4Analysis";
+import { SmartLinkEngagementCard } from "@/components/dashboard/SmartLinkEngagementCard";
 
 interface DashboardProps {
   fixedClientId?: string;
@@ -53,6 +54,18 @@ export default function Dashboard({
         return "Últimos 30 dias";
     }
   }, [period, range]);
+
+  const periodDays = useMemo(() => {
+    if (period === "7d") return 7;
+    if (period === "this_month") return 30;
+    if (period === "custom" && customRange?.from && customRange?.to) {
+      const from = new Date(customRange.from).getTime();
+      const to = new Date(customRange.to).getTime();
+      const diffDays = Math.round(Math.abs(to - from) / (1000 * 60 * 60 * 24));
+      return Math.max(1, diffDays);
+    }
+    return 30;
+  }, [period, customRange]);
 
   if (!effectiveClientId) {
     return (
@@ -110,6 +123,12 @@ export default function Dashboard({
               periodLabel={periodLabel}
               unavailableBlocks={data.unavailableBlocks}
               comparison={data.periodInfo}
+            />
+
+            {/* Card de Engajamento de Links & Cliques em Tempo Real */}
+            <SmartLinkEngagementCard
+              clientId={effectiveClientId}
+              periodDays={periodDays}
             />
 
             {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}

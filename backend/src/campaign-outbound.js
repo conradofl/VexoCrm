@@ -838,6 +838,7 @@ export async function dispatchCampaignSequence({
   onLeadFailed = null,
   onLeadCheckOptout = null,
   quotaGate = null,
+  transformStepText = null,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -1027,17 +1028,34 @@ export async function dispatchCampaignSequence({
         break;
       }
 
-      const stepForPayload = {
-        ...step,
-        text: applyMessagePlaceholders(
-          resolveStepTextForLead(step, leadIndex, activeChip, {
+      let stepText = applyMessagePlaceholders(
+        resolveStepTextForLead(step, leadIndex, activeChip, {
+          lead,
+          phone,
+          campaignId: rotationCampaignId,
+        }),
+        lead,
+        phone
+      );
+
+      if (typeof transformStepText === "function") {
+        try {
+          stepText = await transformStepText({
+            text: stepText,
+            step,
             lead,
             phone,
-            campaignId: rotationCampaignId,
-          }),
-          lead,
-          phone
-        ),
+            leadIndex,
+            activeChip,
+          });
+        } catch (transformErr) {
+          console.warn("[campaign-outbound] transformStepText falhou:", transformErr?.message);
+        }
+      }
+
+      const stepForPayload = {
+        ...step,
+        text: stepText,
       };
       const extendedContext = {
         ...context,
