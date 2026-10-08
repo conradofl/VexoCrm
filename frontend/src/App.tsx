@@ -32,6 +32,7 @@ import CommercialIntelligence from "./pages/CommercialIntelligence";
 import Relatorios from "./pages/Relatorios";
 import FollowupQueue from "./pages/FollowupQueue";
 import OnboardingWizard from "./pages/OnboardingWizard";
+import VexoOnboardingSetup from "./pages/VexoOnboardingSetup";
 import LivPub from "./pages/LivPub";
 import AgenteIA from "./pages/AgenteIA";
 import ChatbotSettings from "./pages/ChatbotSettings";
@@ -306,6 +307,15 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="implantacao"
+                element={
+                  <ProtectedRoute allowedRoles={["internal", "client"]}>
+                    <VexoOnboardingSetup />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="setup" element={<Navigate to="/crm/implantacao" replace />} />
               <Route
                 path="apresentacao"
                 element={

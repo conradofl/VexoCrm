@@ -808,7 +808,7 @@ export function isPathAllowedForClient(
     else if (path.includes("tab=relacionamento") || path.includes("/crm/relacionamento")) tabKey = "relacionamento";
     else tabKey = "livpub";
   }
-  else if (path.includes("/crm/onboarding")) tabKey = "onboarding";
+  else if (path.includes("/crm/onboarding") || path.includes("/crm/implantacao") || path.includes("/crm/setup")) tabKey = "onboarding";
   else if (path.includes("/crm/admin") || path.includes("/crm/empresas") || path.includes("/crm/usuarios") || path.includes("/crm/integracoes")) {
     if (path.includes("tab=usuarios") || path.includes("/crm/usuarios")) tabKey = "usuarios";
     else if (path.includes("tab=integracoes") || path.includes("/crm/integracoes")) tabKey = "integracoes";

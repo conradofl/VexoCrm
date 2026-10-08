@@ -19,6 +19,7 @@ import {
   FileText,
   Layers,
   Database,
+  Rocket,
 } from "lucide-react";
 import { type InternalPage } from "@/lib/access";
 
@@ -70,6 +71,7 @@ export const LIVPUB_ITEMS: SidebarItem[] = [
 
 // ━━ AJUDA & SETUP ━━
 export const AJUDA_ITEMS: SidebarItem[] = [
+  { key: "implantacao", label: "Implantação (Setup)", url: "/crm/implantacao", icon: Rocket, page: "onboarding-wizard" },
   { key: "onboarding", label: "Treinamento Vexo", url: "/crm/onboarding", icon: ListChecks, page: "onboarding-wizard" },
 ];
 

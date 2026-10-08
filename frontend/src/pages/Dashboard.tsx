@@ -12,6 +12,7 @@ import { Block3ActionAlerts } from "./Dashboard/Block3ActionAlerts";
 import { Block4Analysis } from "./Dashboard/Block4Analysis";
 import { SmartLinkEngagementCard } from "@/components/dashboard/SmartLinkEngagementCard";
 import { StalledLeadsAlertCard } from "@/components/dashboard/StalledLeadsAlertCard";
+import { OnboardingProgressCard } from "@/components/dashboard/OnboardingProgressCard";
 
 interface DashboardProps {
   fixedClientId?: string;
@@ -96,6 +97,10 @@ export default function Dashboard({
       {/* O seletor de período fica SEMPRE na tela: sem dados ainda, ou com intervalo recusado pelo
           servidor, é por ele que o usuário escolhe outro período. */}
       <div className="space-y-6">
+        <OnboardingProgressCard
+          clientId={effectiveClientId}
+          baseTotal={data?.analysis?.leadClassification?.total ?? data?.analysis?.baseHealth?.total}
+        />
         <DashboardHeader
           period={period}
           onPeriodChange={setPeriod}
