@@ -44,19 +44,31 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
   });
 
-  it("[TESTE OBRIGATÓRIO] os vinte e um entram e aparecem — seis fundamento, quinze receita", () => {
-    expect(ACADEMY_CONTENT).toHaveLength(21);
+  it("[TESTE OBRIGATÓRIO] os trinta e nove entram e aparecem — seis fundamento, trinta e três receita", () => {
+    expect(ACADEMY_CONTENT).toHaveLength(39);
     expect(ACADEMY_FUNDAMENTOS).toHaveLength(6);
-    expect(ACADEMY_RECIPES).toHaveLength(15);
+    expect(ACADEMY_RECIPES).toHaveLength(33);
     ACADEMY_FUNDAMENTOS.forEach((f) => expect(f.tipo).toBe("fundamento"));
     ACADEMY_RECIPES.forEach((r) => expect(r.tipo).toBe("receita"));
   });
 
-  it("[TESTE OBRIGATÓRIO] três segmentos novos aparecem no filtro, junto com os dois que já existem", async () => {
+  it("[TESTE OBRIGATÓRIO] os onze segmentos aparecem no filtro", async () => {
     const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
     renderWithProviders(<OnboardingWizard />);
 
-    for (const segmento of ["Turismo", "Contabilidade", "Comércio local", "Prestadores de serviço", "Clubes de permuta e redes de negócios"]) {
+    for (const segmento of [
+      "Turismo",
+      "Contabilidade",
+      "Comércio local",
+      "Prestadores de serviço",
+      "Clubes de permuta e redes de negócios",
+      "Óticas",
+      "Bares e restaurantes",
+      "Lavanderias e tinturarias",
+      "Clínicas médicas",
+      "Estética e beleza",
+      "Pet shop e clínicas veterinárias",
+    ]) {
       expect(screen.getByRole("button", { name: segmento }), `filtro de segmento "${segmento}" não apareceu`).toBeTruthy();
     }
   });
@@ -102,7 +114,7 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     }
   });
 
-  it("[TESTE OBRIGATÓRIO] os vinte aparecem na tela (sem filtro nenhum)", async () => {
+  it("[TESTE OBRIGATÓRIO] os trinta e nove aparecem na tela (sem filtro nenhum)", async () => {
     const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
     renderWithProviders(<OnboardingWizard />);
 
@@ -271,7 +283,7 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
 
   const FORBIDDEN_CLIENT_NAMES = ["geracao-digital", "geração digital", "sonhare", "vexo os", "infinie", "outlier"];
 
-  it("[TESTE OBRIGATÓRIO] nenhum dos vinte cita nome de empresa — só nome de segmento", () => {
+  it("[TESTE OBRIGATÓRIO] nenhum dos trinta e nove cita nome de empresa — só nome de segmento", () => {
     for (const content of ACADEMY_CONTENT) {
       const haystack = JSON.stringify(content).toLowerCase();
       for (const name of FORBIDDEN_CLIENT_NAMES) {
@@ -463,10 +475,10 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
   });
 
   describe("Envio 5 — Segundo fundamento na Academy ('Quem conduz a conversa')", () => {
-    it("[TESTE OBRIGATÓRIO] vinte e um conteúdos na biblioteca: seis fundamentos e quinze receitas", () => {
-      expect(ACADEMY_CONTENT).toHaveLength(21);
+    it("[TESTE OBRIGATÓRIO] trinta e nove conteúdos na biblioteca: seis fundamentos e trinta e três receitas", () => {
+      expect(ACADEMY_CONTENT).toHaveLength(39);
       expect(ACADEMY_FUNDAMENTOS).toHaveLength(6);
-      expect(ACADEMY_RECIPES).toHaveLength(15);
+      expect(ACADEMY_RECIPES).toHaveLength(33);
     });
 
     it("[TESTE OBRIGATÓRIO] o novo é fundamento: sem botão de instalar, sem passo, sem cadência", async () => {
@@ -540,4 +552,65 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
       }
     });
   });
+
+  describe("Item 05 — Seis segmentos que faltam na Vexo Academy (18 novas receitas)", () => {
+    const idsItem05 = [
+      "receita-oticas-retorno-anual",
+      "receita-oticas-ajuste-garantia",
+      "receita-oticas-orcamento-lentes",
+      "receita-restaurantes-reserva-fim-de-semana",
+      "receita-restaurantes-aniversariante",
+      "receita-restaurantes-happy-hour-corporativo",
+      "receita-lavanderias-roupa-pronta-retirada",
+      "receita-lavanderias-edredons-inverno",
+      "receita-lavanderias-corporativo-uniformes",
+      "receita-clinicas-lembrete-consulta",
+      "receita-clinicas-retorno-preventivo",
+      "receita-clinicas-pre-procedimento",
+      "receita-estetica-manutencao-periodica",
+      "receita-estetica-pos-sessao-cuidados",
+      "receita-estetica-reativacao-cliente-sumida",
+      "receita-pet-shop-lembrete-vacina",
+      "receita-pet-shop-banho-tosa-recorrente",
+      "receita-pet-shop-boas-vindas-filhote",
+    ];
+
+    it("[TESTE OBRIGATÓRIO] todas as 18 receitas do Item 05 estão presentes e são do tipo receita", () => {
+      expect(idsItem05).toHaveLength(18);
+      for (const id of idsItem05) {
+        const recipe = ACADEMY_RECIPES.find((r) => r.id === id);
+        expect(recipe, `receita "${id}" não encontrada`).toBeDefined();
+        expect(recipe!.tipo).toBe("receita");
+      }
+    });
+
+    it("[TESTE OBRIGATÓRIO] todas as 18 receitas são instaláveis, sem manualSteps nem fixed_date nem âncora", () => {
+      for (const id of idsItem05) {
+        const recipe = ACADEMY_RECIPES.find((r) => r.id === id)!;
+        expect(recipe.installable).not.toBe(false);
+        expect(recipe.manualSteps).toBeUndefined();
+        expect(recipe.templates.length).toBeGreaterThan(0);
+        for (const tpl of recipe.templates) {
+          expect(tpl.trigger_type).toMatch(/^(after_enrollment|no_reply)$/);
+          expect(tpl.anchor_field).toBeUndefined();
+        }
+      }
+    });
+
+    it("[TESTE OBRIGATÓRIO] cada um dos 6 novos segmentos possui exatamente 3 receitas", () => {
+      const segmentsItem05 = [
+        "Óticas",
+        "Bares e restaurantes",
+        "Lavanderias e tinturarias",
+        "Clínicas médicas",
+        "Estética e beleza",
+        "Pet shop e clínicas veterinárias",
+      ];
+      for (const seg of segmentsItem05) {
+        const recipes = ACADEMY_RECIPES.filter((r) => r.segments.includes(seg));
+        expect(recipes, `segmento "${seg}" deveria ter 3 receitas`).toHaveLength(3);
+      }
+    });
+  });
 });
+

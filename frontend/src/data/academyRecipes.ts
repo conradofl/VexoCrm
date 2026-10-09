@@ -978,6 +978,604 @@ export const ACADEMY_RECIPES: AcademyRecipe[] = [
     screenNote:
       "Um passo só. É base fechada e conhecida, então a mensagem não precisa se apresentar — e insistir dentro da própria rede é o jeito mais rápido de ficar com fama de chato entre quem você vai encontrar de novo. A mesma receita serve para qualquer associado; troque {{produto}} pelo que a empresa oferece.",
   },
+
+  // ─── Óticas ───
+  {
+    id: "receita-oticas-retorno-anual",
+    tipo: "receita",
+    title: "Óticas · Retorno anual do exame de vista e graduação",
+    contactTemperature: "morno",
+    resultPhrase: "O cliente volta para revisar a graduação antes de comprar em outro lugar.",
+    segments: ["Óticas"],
+    prerequisites: ["Clientes com última compra ou consulta há quase um ano."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 330 e 365 dias depois da inscrição, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Retorno anual do exame de vista",
+    cadenceDescription: "Cadência de retorno anual e revisão de grau, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 330 dias depois",
+        message:
+          "{{nome}}, tudo bem? Já faz quase um ano desde a sua última avaliação visual aqui na loja.\nComo estão as lentes? Sentindo a vista cansar no fim do dia?",
+        trigger_type: "after_enrollment",
+        trigger_value: 330,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+      {
+        label: "Passo 2 — 365 dias depois",
+        message:
+          "{{nome}}, a validade médica da receita de óculos costuma ser de 1 ano.\nSe quiser, me avisa que reservo um horário para conferir sua graduação sem custo.",
+        trigger_type: "after_enrollment",
+        trigger_value: 365,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Em ótica, quem avisa primeiro ganha a renovação. Se esperar o cliente quebrar o óculos, ele compra na primeira vitrine que vir.",
+  },
+  {
+    id: "receita-oticas-ajuste-garantia",
+    tipo: "receita",
+    title: "Óticas · Ajuste gratuito e revisão da armação",
+    contactTemperature: "quente",
+    resultPhrase: "Cliente volta à loja, gera vínculo e recomenda para conhecidos.",
+    segments: ["Óticas"],
+    prerequisites: ["Clientes que compraram óculos novos há 2 meses."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 60 dias depois da compra, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Ajuste gratuito e revisão da armação",
+    cadenceDescription: "Pós-venda para ajuste e limpeza de armação, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 60 dias depois",
+        message:
+          "{{nome}}, tudo bem? Já se adaptou aos óculos novos?\nPassa aqui na ótica quando puder para fazermos o ajuste das plaquetas e a limpeza ultrassônica das lentes. É rapidinho e não custa nada.",
+        trigger_type: "after_enrollment",
+        trigger_value: 60,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Serviço pós-venda gratuito cria pretexto para o cliente entrar na loja e olhar óculos de sol.",
+  },
+  {
+    id: "receita-oticas-orcamento-lentes",
+    tipo: "receita",
+    title: "Óticas · Orçamento de lentes sem resposta",
+    contactTemperature: "frio",
+    resultPhrase: "Desfaz a dúvida de tratamentos de lente que travou a compra.",
+    segments: ["Óticas"],
+    prerequisites: ["Leads com orçamento de lentes enviado."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 1 e 3 dias depois do orçamento, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Orçamento de lentes sem resposta",
+    cadenceDescription: "Cadência para destravar orçamentos de lentes e armações, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 1 dia depois",
+        message:
+          "{{nome}}, ficou alguma dúvida sobre as lentes que te passei ontem?\nSe quiser, te explico a diferença do filtro azul em áudio bem rápido.",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+      {
+        label: "Passo 2 — 3 dias depois",
+        message:
+          "{{nome}}, consigo manter a condição das lentes até amanhã.\nQuer que eu separe sua armação?",
+        trigger_type: "after_enrollment",
+        trigger_value: 3,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Orçamento de lente quase sempre trava porque o cliente não entende a sopa de letrinhas (antirreflexo, blue, policarbonato).",
+  },
+
+  // ─── Bares e restaurantes ───
+  {
+    id: "receita-restaurantes-reserva-fim-de-semana",
+    tipo: "receita",
+    title: "Bares e restaurantes · Reserva antecipada para o fim de semana",
+    contactTemperature: "morno",
+    resultPhrase: "Salão cheio e previsibilidade de mesas antes da sexta-feira.",
+    segments: ["Bares e restaurantes"],
+    prerequisites: ["Clientes frequentes ou que já frequentaram o restaurante."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 2 dias após a inscrição, quinta-feira às 15h, com saída por resposta.",
+    cadenceName: "Reserva antecipada para o fim de semana",
+    cadenceDescription: "Convite para reserva de mesas no fim de semana, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 2 dias depois",
+        message:
+          "{{nome}}, tudo bem? O movimento deste fim de semana vai ser bem disputado.\nQuer que eu reserve uma mesa boa pra você e sua família?",
+        trigger_type: "after_enrollment",
+        trigger_value: 2,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "15:00",
+      },
+    ],
+    screenNote:
+      "Mensagem na quinta à tarde pega a pessoa exatamente no momento de combinar a saída do fim de semana.",
+  },
+  {
+    id: "receita-restaurantes-aniversariante",
+    tipo: "receita",
+    title: "Bares e restaurantes · Comemoração de aniversário com mesa reservada",
+    contactTemperature: "quente",
+    resultPhrase: "Atrai mesas de 6 a 15 pessoas trazendo amigos e consumindo no salão.",
+    segments: ["Bares e restaurantes"],
+    prerequisites: ["Clientes com data de aniversário próxima ou inscritos na semana."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 1 passo, 5 dias antes da comemoração, hora fixa 11h, com saída por resposta.",
+    cadenceName: "Comemoração de aniversário com mesa reservada",
+    cadenceDescription: "Convite e cortesia de aniversário para mesas e grupos, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 5 dias antes",
+        message:
+          "{{nome}}, seu aniversário tá chegando!\nSe for comemorar esta semana, a casa tem uma cortesia de sobremesa ou brinde especial para a sua mesa. Quer ver o cardápio de grupos?",
+        trigger_type: "after_enrollment",
+        trigger_value: 5,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "11:00",
+      },
+    ],
+    screenNote:
+      "Aniversariante não vem sozinho: traz no mínimo 4 pessoas e garante o ticket médio da noite.",
+  },
+  {
+    id: "receita-restaurantes-happy-hour-corporativo",
+    tipo: "receita",
+    title: "Bares e restaurantes · Happy hour corporativo e confraternizações",
+    contactTemperature: "frio",
+    resultPhrase: "Empresas locais fechando mesas e comandas coletivas de meio de semana.",
+    segments: ["Bares e restaurantes"],
+    prerequisites: ["Contatos de empresas e escritórios da região."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 1 e 4 dias depois da prospecção, hora fixa 14h, com saída por resposta.",
+    cadenceName: "Happy hour corporativo e confraternizações",
+    cadenceDescription: "Prospecção de eventos corporativos e happy hours, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 1 dia depois",
+        message:
+          "{{nome}}, tudo bem? Estamos com condições especiais de happy hour para equipes de empresas aqui da região.\nVocês costumam reunir o pessoal para comemorações?",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "14:00",
+      },
+      {
+        label: "Passo 2 — 4 dias depois",
+        message:
+          "{{nome}}, temos pacote com petiscos e bebidas por valor fechado por pessoa, para facilitar o acerto da equipe. Posso te mandar o PDF?",
+        trigger_type: "after_enrollment",
+        trigger_value: 4,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "14:00",
+      },
+    ],
+    screenNote:
+      "Confraternização corporativa resolve as terças e quartas-feiras fracas do salão.",
+  },
+
+  // ─── Lavanderias e tinturarias ───
+  {
+    id: "receita-lavanderias-roupa-pronta-retirada",
+    tipo: "receita",
+    title: "Lavanderias e tinturarias · Roupa pronta aguardando retirada",
+    contactTemperature: "quente",
+    resultPhrase: "Giro de estoque e peças liberadas sem acumular araras.",
+    segments: ["Lavanderias e tinturarias"],
+    prerequisites: ["Clientes com ordens de serviço finalizadas."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, no mesmo dia (0 dias às 16h) e 4 dias depois, com saída por resposta.",
+    cadenceName: "Roupa pronta aguardando retirada",
+    cadenceDescription: "Aviso de peças prontas e oferta de delivery, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — no dia às 16h",
+        message:
+          "{{nome}}, suas peças estão prontas, cheirosas e passadas!\nPode passar para retirar até às 19h ou prefere que a gente entregue?",
+        trigger_type: "after_enrollment",
+        trigger_value: 0,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "16:00",
+      },
+      {
+        label: "Passo 2 — 4 dias depois",
+        message:
+          "{{nome}}, suas peças continuam guardadas com carinho na nossa arara.\nSe estiver corrido para buscar, podemos enviar pelo delivery hoje à tarde.",
+        trigger_type: "after_enrollment",
+        trigger_value: 4,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "14:00",
+      },
+    ],
+    screenNote:
+      "Oferecer a entrega no segundo aviso converte o atraso em receita adicional de frete.",
+  },
+  {
+    id: "receita-lavanderias-edredons-inverno",
+    tipo: "receita",
+    title: "Lavanderias e tinturarias · Higienização de edredons e peças pesadas",
+    contactTemperature: "morno",
+    resultPhrase: "Aumento de faturamento em peças de alto valor por lavagem.",
+    segments: ["Lavanderias e tinturarias"],
+    prerequisites: ["Base de clientes que utilizam o serviço para roupas do dia a dia."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 30 dias após inscrição, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Higienização de edredons e peças pesadas",
+    cadenceDescription: "Campanha de peças de inverno e lavagem pesada, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 30 dias depois",
+        message:
+          "{{nome}}, antes de o tempo esfriar de vez: já lavou os edredons e casacos pesados que estavam guardados?\nEstamos com promoção de lavagem dupla nesta semana.",
+        trigger_type: "after_enrollment",
+        trigger_value: 30,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Edredom em máquina doméstica não cabe ou estraga o motor. A conveniência vende sozinha.",
+  },
+  {
+    id: "receita-lavanderias-corporativo-uniformes",
+    tipo: "receita",
+    title: "Lavanderias e tinturarias · Coleta programada para empresas e clínicas",
+    contactTemperature: "frio",
+    resultPhrase: "Contratos fixos mensais de lavagem de jalecos, toalhas e uniformes.",
+    segments: ["Lavanderias e tinturarias"],
+    prerequisites: ["Empresas, clínicas, spas e consultórios do bairro."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 1 e 5 dias depois da prospecção, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Coleta programada para empresas e clínicas",
+    cadenceDescription: "Prospecção corporativa para contratos de lavagem recorrente, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 1 dia depois",
+        message:
+          "{{nome}}, tudo bem? Atendemos várias clínicas e escritórios aqui no bairro com coleta e entrega semanal de toalhas e uniformes.\nComo vocês cuidam disso hoje?",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+      {
+        label: "Passo 2 — 5 dias depois",
+        message:
+          "{{nome}}, se quiser fazemos uma primeira coleta sem compromisso de volume mínimo para você conhecer a qualidade da higienização.",
+        trigger_type: "after_enrollment",
+        trigger_value: 5,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Contrato recorrente de empresa é o fluxo de caixa estável que mantém o ponto em meses de chuva ou férias.",
+  },
+
+  // ─── Clínicas médicas ───
+  {
+    id: "receita-clinicas-lembrete-consulta",
+    tipo: "receita",
+    title: "Clínicas médicas · Lembrete humanizado e confirmação de consulta",
+    contactTemperature: "quente",
+    resultPhrase: "Redução drástica de ausências (no-show) na agenda dos médicos.",
+    segments: ["Clínicas médicas"],
+    prerequisites: ["Pacientes com consulta agendada para o dia seguinte."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 1 dia antes às 09h e reforço às 14h, com saída por resposta.",
+    cadenceName: "Lembrete humanizado e confirmação de consulta",
+    cadenceDescription: "Confirmação em duas etapas para evitar faltas em consultas médicas, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 1 dia antes às 09h",
+        message:
+          "Olá, {{nome}}! Lembramos da sua consulta com o médico amanhã às {{horario}}.\nVocê confirma sua presença? (Responda SIM ou NÃO).",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "09:00",
+      },
+      {
+        label: "Passo 2 — 1 dia antes às 14h",
+        message:
+          "{{nome}}, precisamos confirmar seu horário para liberar a sala do consultório.\nConsegue nos avisar até às 17h?",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "14:00",
+      },
+    ],
+    screenNote:
+      "Lembrete simples em duas etapas recupera 80% das faltas e permite encaixar outro paciente a tempo.",
+  },
+  {
+    id: "receita-clinicas-retorno-preventivo",
+    tipo: "receita",
+    title: "Clínicas médicas · Retorno preventivo e exames de rotina",
+    contactTemperature: "morno",
+    resultPhrase: "Pacientes antigos voltando para acompanhamento e prevenção.",
+    segments: ["Clínicas médicas"],
+    prerequisites: ["Pacientes que consultaram há 6 meses."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 180 dias depois da consulta, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Retorno preventivo e exames de rotina",
+    cadenceDescription: "Reativação preventiva semestral de pacientes, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 180 dias depois",
+        message:
+          "Olá, {{nome}}, tudo bem? Já faz 6 meses da sua última consulta na clínica.\nO médico costuma recomendar exames periódicos de rotina para acompanhar a sua saúde. Deseja agendar?",
+        trigger_type: "after_enrollment",
+        trigger_value: 180,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Em saúde, o paciente esquece do preventivo se estiver sem dor. Lembrete ético demonstra cuidado genuíno.",
+  },
+  {
+    id: "receita-clinicas-pre-procedimento",
+    tipo: "receita",
+    title: "Clínicas médicas · Orientações essenciais pré-procedimento",
+    contactTemperature: "quente",
+    resultPhrase: "Procedimento realizado com segurança, sem cancelamento de última hora por falta de preparo.",
+    segments: ["Clínicas médicas"],
+    prerequisites: ["Pacientes com pequenos procedimentos ou exames agendados."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 2 dias antes do procedimento, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Orientações essenciais pré-procedimento",
+    cadenceDescription: "Checklist e orientações pré-procedimento, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 2 dias antes",
+        message:
+          "{{nome}}, para seu procedimento de quinta-feira, lembre-se: jejum de 8 horas, levar exames anteriores e comparecer com acompanhante adulto.\nQualquer dúvida sobre as medicações, estamos à disposição aqui.",
+        trigger_type: "after_enrollment",
+        trigger_value: 2,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Paciente que chega desinformado cancela a cirurgia/exame e deixa a equipe parada.",
+  },
+
+  // ─── Estética e beleza ───
+  {
+    id: "receita-estetica-manutencao-periodica",
+    tipo: "receita",
+    title: "Estética e beleza · Retoque e manutenção de procedimentos",
+    contactTemperature: "morno",
+    resultPhrase: "Cliente mantém o efeito estético e garante a recorrência do salão/clínica.",
+    segments: ["Estética e beleza"],
+    prerequisites: ["Clientes que realizaram procedimentos com ciclo de retoque (3 a 4 meses)."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 90 e 120 dias depois da aplicação, hora fixa 11h, com saída por resposta.",
+    cadenceName: "Retoque e manutenção de procedimentos",
+    cadenceDescription: "Cadência de manutenção e retoque estético, instalada pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 90 dias depois",
+        message:
+          "{{nome}}, tudo bem? Já faz 3 meses do seu procedimento.\nEssa é a fase ideal para manutenção antes de o efeito sumir por completo. Quer garantir seu horário para esta semana?",
+        trigger_type: "after_enrollment",
+        trigger_value: 90,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "11:00",
+      },
+      {
+        label: "Passo 2 — 120 dias depois",
+        message:
+          "{{nome}}, estamos com poucas vagas para retoque no fim do mês.\nMe avisa se quiser encaixar seu atendimento.",
+        trigger_type: "after_enrollment",
+        trigger_value: 120,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "11:00",
+      },
+    ],
+    screenNote:
+      "Botox, preenchimento, cílios e depilação a laser dependem de ciclo. Avisar na janela certa evita que o cliente refaça em outro lugar.",
+  },
+  {
+    id: "receita-estetica-pos-sessao-cuidados",
+    tipo: "receita",
+    title: "Estética e beleza · Acompanhamento pós-sessão e home care",
+    contactTemperature: "quente",
+    resultPhrase: "Zero reclamações, excelente cicatrização e venda de produtos complementares.",
+    segments: ["Estética e beleza"],
+    prerequisites: ["Clientes atendidos no dia anterior."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 1 dia após a sessão, hora fixa 09h, com saída por resposta.",
+    cadenceName: "Acompanhamento pós-sessão e home care",
+    cadenceDescription: "Pós-atendimento com cuidados e recomendação de home care, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 1 dia após",
+        message:
+          "Oi, {{nome}}! Como amanheceu a sua pele hoje? Sentindo algum inchaço ou sensibilidade?\nLembre-se de caprichar no protetor solar e evitar água quente no rosto hoje.",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "09:00",
+      },
+    ],
+    screenNote:
+      "A pergunta 'como amanheceu' transforma um serviço estético em experiência VIP e fideliza imediatamente.",
+  },
+  {
+    id: "receita-estetica-reativacao-cliente-sumida",
+    tipo: "receita",
+    title: "Estética e beleza · Reativação carinhosa de cliente sumida",
+    contactTemperature: "frio",
+    resultPhrase: "Resgate de clientes que deixaram de frequentar sem motivo de atrito.",
+    segments: ["Estética e beleza"],
+    prerequisites: ["Clientes sem agendamentos há mais de 60 dias."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 60 e 90 dias após o último contato, hora fixa 14h, com saída por resposta.",
+    cadenceName: "Reativação carinhosa de cliente sumida",
+    cadenceDescription: "Resgate afetuoso de clientes inativas, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 60 dias depois",
+        message:
+          "{{nome}}, sumiu! Tudo bem com você?\nEstamos com saudades de você por aqui. Que tal tirar um momento para você esta semana?",
+        trigger_type: "after_enrollment",
+        trigger_value: 60,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "14:00",
+      },
+      {
+        label: "Passo 2 — 90 dias depois",
+        message:
+          "{{nome}}, preparamos uma cortesia especial de revitalização para quem vier nos visitar este mês. Posso reservar o seu horário?",
+        trigger_type: "after_enrollment",
+        trigger_value: 90,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "14:00",
+      },
+    ],
+    screenNote:
+      "Cliente de beleza não some por raiva, some por falta de tempo. Mensagem afetuosa sem cobrança funciona perfeitamente.",
+  },
+
+  // ─── Pet shop e clínicas veterinárias ───
+  {
+    id: "receita-pet-shop-lembrete-vacina",
+    tipo: "receita",
+    title: "Pet shop e clínicas veterinárias · Lembrete anual de vacina e vermífugo",
+    contactTemperature: "quente",
+    resultPhrase: "Animais protegidos e faturamento garantido no consultório veterinário.",
+    segments: ["Pet shop e clínicas veterinárias"],
+    prerequisites: ["Tutores com data da última vacina do pet registrada."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 330 e 360 dias após a última dose, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Lembrete anual de vacina e vermífugo",
+    cadenceDescription: "Lembrete preventivo de vacinação anual e vermifugação, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 330 dias depois",
+        message:
+          "Olá, {{nome}}! A vacina anual do seu pet está perto de vencer.\nMantendo em dia você evita que ele fique desprotegido contra viroses. Quer agendar a aplicação?",
+        trigger_type: "after_enrollment",
+        trigger_value: 330,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+      {
+        label: "Passo 2 — 360 dias depois",
+        message:
+          "{{nome}}, a carteirinha de vacinação do seu pet venceu esta semana.\nEstamos com horário aberto hoje à tarde para aplicação rápida com a veterinária.",
+        trigger_type: "after_enrollment",
+        trigger_value: 360,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Nenhum tutor quer ver o pet doente por esquecimento de vacina. É o disparo de maior taxa de resposta do segmento.",
+  },
+  {
+    id: "receita-pet-shop-banho-tosa-recorrente",
+    tipo: "receita",
+    title: "Pet shop e clínicas veterinárias · Agendamento recorrente de banho e tosa",
+    contactTemperature: "morno",
+    resultPhrase: "Agenda de banho e tosa cheia a semana inteira, com aproveitamento do táxi dog.",
+    segments: ["Pet shop e clínicas veterinárias"],
+    prerequisites: ["Tutores que realizam banho quinzenalmente."],
+    timeLabel: "10 minutos",
+    whatHappens: "Cadência de 1 passo, 12 dias após o último banho, hora fixa 10h, com saída por resposta.",
+    cadenceName: "Agendamento recorrente de banho e tosa",
+    cadenceDescription: "Lembrete de banho e tosa com rota de táxi dog, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo único — 12 dias após",
+        message:
+          "{{nome}}, tudo bem? Já faz quase duas semanas do último banho do seu pet.\nQuer garantir a vaga para sexta ou sábado? Nosso táxi dog pode buscar em casa.",
+        trigger_type: "after_enrollment",
+        trigger_value: 12,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "10:00",
+      },
+    ],
+    screenNote:
+      "Fim de semana sempre lota. Chamar o tutor na quarta-feira garante a rota do táxi dog otimizada.",
+  },
+  {
+    id: "receita-pet-shop-boas-vindas-filhote",
+    tipo: "receita",
+    title: "Pet shop e clínicas veterinárias · Guia de cuidados para filhotes e novos tutores",
+    contactTemperature: "frio",
+    resultPhrase: "Captação do pet nos primeiros meses, fidelizando a família por anos.",
+    segments: ["Pet shop e clínicas veterinárias"],
+    prerequisites: ["Novos clientes que acabaram de adotar ou comprar um filhote."],
+    timeLabel: "15 minutos",
+    whatHappens: "Cadência de 2 passos, 1 e 5 dias após o primeiro contato, hora fixa 11h, com saída por resposta.",
+    cadenceName: "Guia de cuidados para filhotes e novos tutores",
+    cadenceDescription: "Acolhimento e fidelização de novos tutores de filhotes, instalado pela Vexo Academy.",
+    templates: [
+      {
+        label: "Passo 1 — 1 dia após primeiro contato",
+        message:
+          "{{nome}}, parabéns pelo novo membro da família! Filhotes trazem muita alegria.\nSe precisar de ajuda com a ração ideal ou cronograma de vacinas, nossa veterinária está à disposição aqui.",
+        trigger_type: "after_enrollment",
+        trigger_value: 1,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "11:00",
+      },
+      {
+        label: "Passo 2 — 5 dias depois",
+        message:
+          "{{nome}}, preparamos uma listinha de primeiros cuidados e brinquedos para a fase de dentição do filhote. Quer que eu te mande pelo WhatsApp?",
+        trigger_type: "after_enrollment",
+        trigger_value: 5,
+        trigger_unit: "days",
+        trigger_direction: "after",
+        scheduled_time: "11:00",
+      },
+    ],
+    screenNote:
+      "Quem ajuda o tutor no primeiro filhote conquista a compra de ração, banho e vacina pelos próximos 15 anos.",
+  },
 ];
 
 export const ACADEMY_CONTENT: AcademyContent[] = [...ACADEMY_FUNDAMENTOS, ...ACADEMY_RECIPES];
