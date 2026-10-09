@@ -31,6 +31,7 @@ import WhatsAppInbox from "./pages/WhatsAppInbox";
 import CommercialIntelligence from "./pages/CommercialIntelligence";
 import Relatorios from "./pages/Relatorios";
 import FollowupQueue from "./pages/FollowupQueue";
+import CalendarSchedule from "./pages/CalendarSchedule";
 import OnboardingWizard from "./pages/OnboardingWizard";
 import VexoOnboardingSetup from "./pages/VexoOnboardingSetup";
 import LivPub from "./pages/LivPub";
@@ -96,6 +97,8 @@ function InternalIndexRedirect() {
     aquecimento: "aquecimento",
     relatorios: "relatorios",
     "inbound-agents": "inbound-agents",
+    calendario: "calendario",
+    agenda: "calendario",
   };
 
   const path = pageToPath[target] || target;
@@ -160,6 +163,8 @@ const App = () => (
             <Route path="/banco-de-dados" element={<Navigate to="/crm/banco-de-dados" replace />} />
             <Route path="/planilhas" element={<Navigate to="/crm/planilhas" replace />} />
             <Route path="/campanhas" element={<Navigate to="/crm/planilhas" replace />} />
+            <Route path="/calendario" element={<Navigate to="/crm/calendario" replace />} />
+            <Route path="/agenda" element={<Navigate to="/crm/calendario" replace />} />
             <Route path="/relatorios" element={<Navigate to="/crm/planilhas?tab=relatorios" replace />} />
             <Route path="/inteligencia-comercial" element={<Navigate to="/crm/inteligencia-comercial" replace />} />
             <Route path="/agente" element={<Navigate to="/crm/agente" replace />} />
@@ -254,6 +259,15 @@ const App = () => (
               <Route path="followup-templates" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
               <Route path="followup-analytics" element={<Navigate to="/crm/followup?tab=metrics" replace />} />
               <Route path="followup-sugestoes" element={<Navigate to="/crm/followup?tab=sugestoes" replace />} />
+              <Route
+                path="calendario"
+                element={
+                  <ProtectedRoute allowedRoles={["internal", "client"]}>
+                    <CalendarSchedule />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="agenda" element={<Navigate to="/crm/calendario" replace />} />
 
               <Route
                 path="admin"

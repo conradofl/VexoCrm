@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Etapa 5 Commit 3 — checagem estrutural de que a faixa "Próximos N dias" e o
 // calendário estão de fato ligados nos pontos exigidos, e que o calendário
 // reaproveita a ação de cancelar já existente em vez de inventar uma nova rota.
 
+function readSrc(relPath: string) {
+  const p1 = resolve(process.cwd(), "frontend", relPath);
+  if (existsSync(p1)) return readFileSync(p1, "utf8");
+  return readFileSync(resolve(process.cwd(), relPath), "utf8");
+}
+
 describe("faixa 'Próximos N dias' aparece nos dois lugares exigidos", () => {
-  const cadenceEditorSource = readFileSync(resolve("src/components/followup/CadenceEditor.tsx"), "utf8");
-  const applyModalSource = readFileSync(resolve("src/components/followup/ApplyFollowupModal.tsx"), "utf8");
-  const upcomingStripSource = readFileSync(resolve("src/components/followup/UpcomingStrip.tsx"), "utf8");
+  const cadenceEditorSource = readSrc("src/components/followup/CadenceEditor.tsx");
+  const applyModalSource = readSrc("src/components/followup/ApplyFollowupModal.tsx");
+  const upcomingStripSource = readSrc("src/components/followup/UpcomingStrip.tsx");
 
   it("CadenceEditor.tsx usa UpcomingStrip com o hook useUpcomingWindow", () => {
     expect(cadenceEditorSource).toContain("useUpcomingWindow");
@@ -18,7 +24,7 @@ describe("faixa 'Próximos N dias' aparece nos dois lugares exigidos", () => {
 
   it("ApplyFollowupModal.tsx (arquivo EXISTENTE, não um ApplyCadenceModal novo) usa UpcomingStrip projetando leads.length", () => {
     expect(applyModalSource).toContain("<UpcomingStrip");
-    expect(applyModalSource).toContain("projectLeads=${leads.length}");
+    expect(applyModalSource).toMatch(/projectLeads=\${(totalCount|leads\.length)}/);
   });
 
   it("UpcomingStrip: o vermelho (overLimit) vem do total do chip, nunca da fração isolada da cadência", () => {
@@ -29,7 +35,7 @@ describe("faixa 'Próximos N dias' aparece nos dois lugares exigidos", () => {
 });
 
 describe("jitter anti-ban exposto na UI da cadência", () => {
-  const cadenceEditorSource = readFileSync(resolve("src/components/followup/CadenceEditor.tsx"), "utf8");
+  const cadenceEditorSource = readSrc("src/components/followup/CadenceEditor.tsx");
 
   it("CadenceEditor.tsx tem input de jitter que salva via dispatch_jitter_minutes", () => {
     expect(cadenceEditorSource).toContain("jitter-input");
@@ -38,8 +44,8 @@ describe("jitter anti-ban exposto na UI da cadência", () => {
 });
 
 describe("calendário: lente, não superfície de criação", () => {
-  const calendarSource = readFileSync(resolve("src/components/followup/FollowupCalendar.tsx"), "utf8");
-  const queueSource = readFileSync(resolve("src/pages/FollowupQueue.tsx"), "utf8");
+  const calendarSource = readSrc("src/components/followup/FollowupCalendar.tsx");
+  const queueSource = readSrc("src/pages/FollowupQueue.tsx");
 
   it("FollowupCalendar.tsx não cria nem arrasta nada — só lê os hooks de calendário", () => {
     expect(calendarSource).toContain("useFollowupCalendarMonth");

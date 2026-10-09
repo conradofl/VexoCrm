@@ -211,11 +211,15 @@ export function hasFeatureUnlocked(client: any, featureKey: string): boolean {
     }
 
     // 4. Follow-up & Cadências
-    if (["followup", "fila-de-followup"].includes(k)) {
+    if (["followup", "fila-de-followup", "calendario", "agenda"].includes(k)) {
       return (
         isModuleInList(modulosAvulsos, "followup") ||
         isModuleInList(modulosAvulsos, "followup_automations") ||
-        isModuleInList(modulosAvulsos, "fila-de-followup")
+        isModuleInList(modulosAvulsos, "fila-de-followup") ||
+        isModuleInList(modulosAvulsos, "campanhas") ||
+        isModuleInList(modulosAvulsos, "disparador_campanhas") ||
+        isModuleInList(modulosAvulsos, "disparos") ||
+        isModuleInList(modulosAvulsos, "planilhas")
       );
     }
 

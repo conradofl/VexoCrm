@@ -727,6 +727,10 @@ export function isInternalPageAllowedForClient(
 ): boolean {
   if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
 
+  if (page === "calendario" || page === "agenda" || page === "/crm/calendario" || page === "/crm/agenda") {
+    return allowedTabs.includes("followup") || allowedTabs.includes("campanhas");
+  }
+
   const pageToTabKey: Record<string, string> = {
     dashboard: "dashboard",
     "banco-de-dados": "leads",
@@ -735,6 +739,8 @@ export function isInternalPageAllowedForClient(
     usuarios: "usuarios",
     empresas: "empresas",
     campanhas: "campanhas",
+    calendario: "followup",
+    agenda: "followup",
     "inteligencia-comercial": "inteligencia",
     "chatbot-kanban": "chatbot-kanban",
     "chatbot-config": "chatbot",
@@ -775,6 +781,10 @@ export function isPathAllowedForClient(
   allowedTabs: string[] | null | undefined
 ): boolean {
   if (!allowedTabs || !Array.isArray(allowedTabs)) return true;
+
+  if (path.includes("/crm/calendario") || path.includes("/crm/agenda")) {
+    return allowedTabs.includes("followup") || allowedTabs.includes("campanhas");
+  }
 
   let tabKey = "";
   if (path.includes("/crm/dashboard")) tabKey = "dashboard";

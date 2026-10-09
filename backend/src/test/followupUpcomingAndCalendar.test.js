@@ -328,5 +328,105 @@ describe("Etapa 5 Commit 3 — faixa 'Próximos N dias' e calendário", () => {
       expect(body.items).toHaveLength(1);
       expect(body.items[0]).toMatchObject({ jobId: "job-cal-1", scheduleId: "sched-cal-1", leadName: "Lead Calendário" });
     });
+
+    it("unificação no calendário: /calendar devolve dayBreakdown somando campanhas e follow-ups", async () => {
+      mockQuery.mockImplementation(async (sql) => {
+        if (sql.includes("FROM followup_jobs fj")) {
+          return {
+            rows: [
+              { status: "pending", scheduled_for: "2026-10-26T14:00:00.000Z" },
+              { status: "pending", scheduled_for: "2026-10-26T15:00:00.000Z" },
+            ],
+          };
+        }
+        if (sql.includes("FROM public.campaign_dispatches d")) {
+          return {
+            rows: [
+              { scheduled_at: "2026-10-26T10:00:00.000Z", target_count: 1200, status: "scheduled" },
+            ],
+          };
+        }
+        return { rows: [] };
+      });
+      const handler = getRouteHandler("/calendar", "get");
+      const req = {
+        query: { clientId: "geracao-digital", month: "2026-10" },
+        authAccess: accessAssignedClients(["geracao-digital"]),
+      };
+      const res = fakeRes();
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json.mock.calls[0][0];
+      expect(body.dayCounts["2026-10-26"]).toBe(3); // 2 followups + 1 campaign
+      expect(body.dayBreakdown["2026-10-26"]).toEqual({
+        followupCount: 2,
+        campaignCount: 1,
+        campaignLeadsTotal: 1200,
+        total: 3,
+      });
+    });
+
+    it("unificação no dia: /calendar/day devolve arrays campaigns e followups separados, mantendo items", async () => {
+      mockQuery.mockImplementation(async (sql) => {
+        if (sql.includes("SELECT fj.id AS job_id")) {
+          return {
+            rows: [
+              {
+                job_id: "job-cal-1",
+                schedule_id: "sched-cal-1",
+                campaign_id: "camp-cal-1",
+                campaign_name: "Cadência X",
+                template_name: "Passo 1",
+                lead_name: "Lead Calendário",
+                phone: "5534999994000",
+                scheduled_for: "2026-10-26T14:00:00.000Z",
+                status: "pending",
+              },
+            ],
+          };
+        }
+        if (sql.includes("SELECT d.id AS dispatch_id")) {
+          return {
+            rows: [
+              {
+                dispatch_id: "disp-100",
+                campaign_id: "camp-100",
+                campaign_name: "Campanha Black Friday",
+                dispatch_name: "Lote 1",
+                target_count: 500,
+                status: "scheduled",
+                scheduled_at: "2026-10-26T10:00:00.000Z",
+                evolution_instance_id: "inst-1",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      });
+      const handler = getRouteHandler("/calendar/day", "get");
+      const req = {
+        query: { clientId: "geracao-digital", date: "2026-10-26" },
+        authAccess: accessAssignedClients(["geracao-digital"]),
+      };
+      const res = fakeRes();
+      await handler(req, res);
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json.mock.calls[0][0];
+      expect(body.items).toHaveLength(1);
+      expect(body.followups).toHaveLength(1);
+      expect(body.campaigns).toHaveLength(1);
+      expect(body.campaigns[0]).toEqual({
+        dispatchId: "disp-100",
+        campaignId: "camp-100",
+        campaignName: "Campanha Black Friday",
+        dispatchName: "Lote 1",
+        targetCount: 500,
+        scheduledAt: "2026-10-26T10:00:00.000Z",
+        status: "scheduled",
+        evolutionInstanceId: "inst-1",
+      });
+    });
   });
 });

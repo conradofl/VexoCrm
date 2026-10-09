@@ -1373,13 +1373,43 @@ function normalizeInstanceList(list, fallback) {
       );
       const counts = groupPendingJobsByDay(jobs, { timezone });
 
-      const dayCounts = {};
-      for (let d = 1; d <= daysInMonth; d++) {
-        const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        dayCounts[key] = counts.get(key) || 0;
+      const { rows: dispatches } = await query(
+        `SELECT d.scheduled_at, d.target_count, d.status
+           FROM public.campaign_dispatches d
+          WHERE d.client_id = $1
+            AND d.status IN ('scheduled', 'draft', 'pending')
+            AND d.scheduled_at >= $2 AND d.scheduled_at < $3`,
+        [clientId, monthStart.toISOString(), monthEnd.toISOString()]
+      );
+
+      const dayCampaignCounts = new Map();
+      const dayCampaignLeads = new Map();
+      for (const d of dispatches || []) {
+        if (!d.scheduled_at) continue;
+        const key = dayKeyInTimezone(new Date(d.scheduled_at), timezone);
+        dayCampaignCounts.set(key, (dayCampaignCounts.get(key) || 0) + 1);
+        dayCampaignLeads.set(key, (dayCampaignLeads.get(key) || 0) + (Number(d.target_count) || 0));
       }
 
-      return res.json({ success: true, tenantId: clientId, month: monthStr, dayCounts });
+      const dayCounts = {};
+      const dayBreakdown = {};
+      for (let d = 1; d <= daysInMonth; d++) {
+        const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        const fuCount = counts.get(key) || 0;
+        const campCount = dayCampaignCounts.get(key) || 0;
+        const campLeads = dayCampaignLeads.get(key) || 0;
+        const total = fuCount + campCount;
+
+        dayCounts[key] = total;
+        dayBreakdown[key] = {
+          followupCount: fuCount,
+          campaignCount: campCount,
+          campaignLeadsTotal: campLeads,
+          total,
+        };
+      }
+
+      return res.json({ success: true, tenantId: clientId, month: monthStr, dayCounts, dayBreakdown });
     } catch (err) {
       return sendErr(res, 500, "CALENDAR_FETCH_FAILED", err.message);
     }
@@ -1419,21 +1449,49 @@ function normalizeInstanceList(list, fallback) {
         [clientId, dayStart.toISOString(), dayEnd.toISOString()]
       );
 
+      const { rows: campaignRows } = await query(
+        `SELECT d.id AS dispatch_id, d.campaign_id, c.name AS campaign_name,
+               d.name AS dispatch_name, d.target_count, d.status,
+               d.scheduled_at, d.evolution_instance_id
+          FROM public.campaign_dispatches d
+          JOIN public.campaigns c ON c.id = d.campaign_id
+         WHERE d.client_id = $1
+           AND d.status IN ('scheduled', 'draft', 'pending')
+           AND d.scheduled_at >= $2 AND d.scheduled_at < $3
+         ORDER BY d.scheduled_at ASC`,
+        [clientId, dayStart.toISOString(), dayEnd.toISOString()]
+      );
+
+      const formattedFollowups = items.map((it) => ({
+        jobId: it.job_id,
+        scheduleId: it.schedule_id,
+        campaignId: it.campaign_id,
+        campaignName: it.campaign_name,
+        templateName: it.template_name,
+        leadName: it.lead_name,
+        phone: it.phone,
+        scheduledFor: it.scheduled_for,
+        status: it.status,
+      }));
+
+      const formattedCampaigns = campaignRows.map((c) => ({
+        dispatchId: c.dispatch_id,
+        campaignId: c.campaign_id,
+        campaignName: c.campaign_name,
+        dispatchName: c.dispatch_name,
+        targetCount: Number(c.target_count) || 0,
+        scheduledAt: c.scheduled_at,
+        status: c.status,
+        evolutionInstanceId: c.evolution_instance_id,
+      }));
+
       return res.json({
         success: true,
         tenantId: clientId,
         date: dateStr,
-        items: items.map((it) => ({
-          jobId: it.job_id,
-          scheduleId: it.schedule_id,
-          campaignId: it.campaign_id,
-          campaignName: it.campaign_name,
-          templateName: it.template_name,
-          leadName: it.lead_name,
-          phone: it.phone,
-          scheduledFor: it.scheduled_for,
-          status: it.status,
-        })),
+        items: formattedFollowups,
+        followups: formattedFollowups,
+        campaigns: formattedCampaigns,
       });
     } catch (err) {
       return sendErr(res, 500, "CALENDAR_DAY_FETCH_FAILED", err.message);

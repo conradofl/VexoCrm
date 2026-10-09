@@ -20,12 +20,14 @@ import {
   Layers,
   Database,
   Rocket,
+  CalendarDays,
 } from "lucide-react";
 import { type InternalPage } from "@/lib/access";
 
 export type SidebarItem = {
   key: string;
   label: string;
+  title?: string;
   url: string;
   icon: ComponentType<{ className?: string }>;
   badge?: string;
@@ -39,6 +41,7 @@ export const OPERACAO_ITEMS: SidebarItem[] = [
   { key: "conversas", label: "Conversas", url: "/crm/whatsapp", icon: MessageCircle, page: "whatsapp" },
   { key: "followup", label: "Follow-up", url: "/crm/followup", icon: ListChecks, page: "fila-de-followup" },
   { key: "campanhas", label: "Campanhas", url: "/crm/campanhas", icon: FileSpreadsheet, page: "planilhas" },
+  { key: "calendario", label: "Calendário", title: "Calendário", url: "/crm/calendario", icon: CalendarDays, page: "followup" },
 ];
 
 // ━━ INTELIGÊNCIA ━━

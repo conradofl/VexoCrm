@@ -411,10 +411,18 @@ export function useUpcomingWindow(
   });
 }
 
+export interface CalendarMonthBreakdown {
+  followupCount: number;
+  campaignCount: number;
+  campaignLeadsTotal: number;
+  total: number;
+}
+
 export interface CalendarMonth {
   tenantId: string;
   month: string;
   dayCounts: Record<string, number>;
+  dayBreakdown?: Record<string, CalendarMonthBreakdown>;
 }
 
 export function useFollowupCalendarMonth(clientId?: string, month?: string) {
@@ -426,6 +434,17 @@ export function useFollowupCalendarMonth(clientId?: string, month?: string) {
       apiCall<CalendarMonth>(`/api/followup/calendar?clientId=${clientId}&month=${month}`, getIdToken),
     staleTime: 15_000,
   });
+}
+
+export interface CalendarCampaignItem {
+  dispatchId: string;
+  campaignId: string;
+  campaignName: string;
+  dispatchName?: string;
+  targetCount: number;
+  scheduledAt: string;
+  status: string;
+  evolutionInstanceId?: string | null;
 }
 
 export interface CalendarDayItem {
@@ -444,6 +463,8 @@ export interface CalendarDay {
   tenantId: string;
   date: string;
   items: CalendarDayItem[];
+  followups?: CalendarDayItem[];
+  campaigns?: CalendarCampaignItem[];
 }
 
 export function useFollowupCalendarDay(clientId?: string, date?: string) {
