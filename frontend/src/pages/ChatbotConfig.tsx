@@ -16,6 +16,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
 
+import { VoiceSettingsCard } from "@/components/agente/VoiceSettingsCard";
+
 const BACKEND_URL = "https://crm.vexoia.com";
 
 function buildWebhookUrl(clientId: string) {
@@ -51,9 +53,23 @@ interface ClientChatbotCardProps {
   chatbotEnabled: boolean;
   chatbotModel: string;
   sdrWhatsappNumber: string | null;
+  chatbotVoiceMode?: string;
+  chatbotVoiceId?: string;
+  chatbotVoiceSpeed?: number;
 }
 
-function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolutionUrl, chatbotEnabled: initialEnabled, chatbotModel: initialModel, sdrWhatsappNumber: initialSdrNumber }: ClientChatbotCardProps) {
+function ClientChatbotCard({
+  clientId,
+  clientName,
+  hasEvolutionConfigured,
+  evolutionUrl,
+  chatbotEnabled: initialEnabled,
+  chatbotModel: initialModel,
+  sdrWhatsappNumber: initialSdrNumber,
+  chatbotVoiceMode,
+  chatbotVoiceId,
+  chatbotVoiceSpeed,
+}: ClientChatbotCardProps) {
   const webhookUrl = buildWebhookUrl(clientId);
   const { getIdToken, hasPermission } = useAuth();
   const [testing, setTesting] = useState(false);
@@ -256,6 +272,17 @@ function ClientChatbotCard({ clientId, clientName, hasEvolutionConfigured, evolu
           </div>
         )}
 
+        {/* Marco 4: Painel de Controle de Voz da IA & Multimodal */}
+        <VoiceSettingsCard
+          clientId={clientId}
+          clientName={clientName}
+          initialVoiceMode={chatbotVoiceMode}
+          initialVoiceId={chatbotVoiceId}
+          initialVoiceSpeed={chatbotVoiceSpeed}
+          canEdit={canEdit}
+          className="border-slate-200/90 dark:border-white/10"
+        />
+
         {/* URL do Webhook */}
         <div className="space-y-1.5">
           <Label className="text-xs text-slate-500 dark:text-slate-400">URL do Webhook (cole na Evolution)</Label>
@@ -428,6 +455,9 @@ export default function ChatbotConfig() {
               chatbotEnabled={client.n8n_settings?.chatbot_enabled ?? false}
               chatbotModel={client.n8n_settings?.chatbot_model ?? "outlier"}
               sdrWhatsappNumber={client.n8n_settings?.sdr_whatsapp_number ?? null}
+              chatbotVoiceMode={client.n8n_settings?.chatbot_voice_mode ?? "disabled"}
+              chatbotVoiceId={client.n8n_settings?.chatbot_voice_id ?? "nova"}
+              chatbotVoiceSpeed={Number(client.n8n_settings?.chatbot_voice_speed) || 1.0}
             />
           ))}
         </div>

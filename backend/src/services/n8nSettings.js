@@ -36,7 +36,7 @@ import {
 import { isMaskedSecretPlaceholder, getRequestBearerToken, sendError } from "./httpInfra.js";
 
 export const N8N_SETTINGS_SELECT_FIELDS =
-  "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, chatbot_llm_model, chatbot_instances, chatbot_inbound_scope, recontact_message, sdr_whatsapp_numbers, sdr_distribution, agent_name, segmentation_config, sdr_whatsapp_number, allowed_tabs, plan_tier, modulos_avulsos, chip_limit, degustacao_expira_em, send_window_start, send_window_end, send_window_days, send_window_timezone, send_window_enabled, agent_replies_outside_window, updated_at, updated_by_uid, updated_by_email";
+  "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, chatbot_llm_model, chatbot_instances, chatbot_inbound_scope, recontact_message, sdr_whatsapp_numbers, sdr_distribution, agent_name, segmentation_config, sdr_whatsapp_number, allowed_tabs, plan_tier, modulos_avulsos, chip_limit, degustacao_expira_em, send_window_start, send_window_end, send_window_days, send_window_timezone, send_window_enabled, agent_replies_outside_window, chatbot_voice_mode, chatbot_voice_id, chatbot_voice_speed, updated_at, updated_by_uid, updated_by_email";
 
 export function resolveSingleLeadClientSettings(rawRow, instances = []) {
   const masked = rawRow ? maskN8nSettings(rawRow) : null;
@@ -275,6 +275,9 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const sendWindowTimezoneProvided = Object.prototype.hasOwnProperty.call(body, "sendWindowTimezone") || Object.prototype.hasOwnProperty.call(body, "send_window_timezone");
   const sendWindowEnabledProvided = Object.prototype.hasOwnProperty.call(body, "sendWindowEnabled") || Object.prototype.hasOwnProperty.call(body, "send_window_enabled");
   const agentRepliesOutsideWindowProvided = Object.prototype.hasOwnProperty.call(body, "agentRepliesOutsideWindow") || Object.prototype.hasOwnProperty.call(body, "agent_replies_outside_window");
+  const chatbotVoiceModeProvided = Object.prototype.hasOwnProperty.call(body, "chatbotVoiceMode") || Object.prototype.hasOwnProperty.call(body, "chatbot_voice_mode");
+  const chatbotVoiceIdProvided = Object.prototype.hasOwnProperty.call(body, "chatbotVoiceId") || Object.prototype.hasOwnProperty.call(body, "chatbot_voice_id");
+  const chatbotVoiceSpeedProvided = Object.prototype.hasOwnProperty.call(body, "chatbotVoiceSpeed") || Object.prototype.hasOwnProperty.call(body, "chatbot_voice_speed");
 
   const payload = {
     active: activeProvided ? body.active !== false : existing?.active ?? true,
@@ -355,6 +358,17 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
     agent_replies_outside_window: agentRepliesOutsideWindowProvided
       ? (body.agentRepliesOutsideWindow ?? body.agent_replies_outside_window) !== false && (body.agentRepliesOutsideWindow ?? body.agent_replies_outside_window) !== "false"
       : existing?.agent_replies_outside_window ?? true,
+    chatbot_voice_mode: chatbotVoiceModeProvided
+      ? (["disabled", "mirror", "always"].includes(String(body.chatbotVoiceMode ?? body.chatbot_voice_mode).toLowerCase())
+          ? String(body.chatbotVoiceMode ?? body.chatbot_voice_mode).toLowerCase()
+          : "disabled")
+      : existing?.chatbot_voice_mode ?? "disabled",
+    chatbot_voice_id: chatbotVoiceIdProvided
+      ? (String(body.chatbotVoiceId ?? body.chatbot_voice_id).trim() || "nova")
+      : existing?.chatbot_voice_id ?? "nova",
+    chatbot_voice_speed: chatbotVoiceSpeedProvided
+      ? (Number(body.chatbotVoiceSpeed ?? body.chatbot_voice_speed) || 1.0)
+      : Number(existing?.chatbot_voice_speed ?? 1.0),
     // allowed_tabs so e escrita aqui; a garantia das abas dos modulos vem logo
     // abaixo, depois que plan_tier e modulos_avulsos ja estao resolvidos.
     allowed_tabs: allowedTabsProvided
@@ -441,6 +455,9 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
       send_window_timezone: sendWindowTimezoneProvided,
       send_window_enabled: sendWindowEnabledProvided,
       agent_replies_outside_window: agentRepliesOutsideWindowProvided,
+      chatbot_voice_mode: chatbotVoiceModeProvided,
+      chatbot_voice_id: chatbotVoiceIdProvided,
+      chatbot_voice_speed: chatbotVoiceSpeedProvided,
     };
     for (const [coluna, foiEnviado] of Object.entries(enviados)) {
       if (!foiEnviado) delete payload[coluna];

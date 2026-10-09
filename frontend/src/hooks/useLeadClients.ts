@@ -77,6 +77,12 @@ export interface LeadClientN8nSettingsPayload {
   sendWindowEnabled?: boolean;
   agent_replies_outside_window?: boolean;
   agentRepliesOutsideWindow?: boolean;
+  chatbot_voice_mode?: "disabled" | "mirror" | "always" | string;
+  chatbotVoiceMode?: "disabled" | "mirror" | "always" | string;
+  chatbot_voice_id?: string;
+  chatbotVoiceId?: string;
+  chatbot_voice_speed?: number;
+  chatbotVoiceSpeed?: number;
 }
 
 export interface LeadClientEvolutionInstancePayload {
@@ -156,6 +162,9 @@ export interface LeadClientN8nSettingsSummary {
   send_window_timezone?: string;
   send_window_enabled?: boolean;
   agent_replies_outside_window?: boolean;
+  chatbot_voice_mode?: "disabled" | "mirror" | "always" | string;
+  chatbot_voice_id?: string;
+  chatbot_voice_speed?: number;
   updated_at: string | null;
   updated_by_email?: string | null;
   allowed_tabs?: string[] | null;

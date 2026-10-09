@@ -37,6 +37,7 @@ import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
 import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
+import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceService.js";
 
 const SQL_NUMBER_CHANGE_MATCH = (col) => `(
   ${col} ~* 'estamos\\s+desativando\\s+esse\\s+n[úu]mero|chama\\s+meu\\s+vendedor|nos\\s+chame\\s+no\\s+(contato|n[úu]mero|link)|novo\\s+n[úu]mero|troca\\s+de\\s+n[úu]mero'
@@ -3175,60 +3176,122 @@ export function registerChatbotRoutes(app, deps) {
             evolutionHeaders.Authorization = `Bearer ${evolutionToken}`;
           }
 
-          const evolutionResponse = await fetch(evolutionUrl, {
-            method: "POST",
-            headers: evolutionHeaders,
-            body: JSON.stringify({
-              number: phone,
-              text: aiResponse.mensagem,
-              message: aiResponse.mensagem,
-              options: {
-                delay: 2500,
-                presence: "composing",
-              },
-            }),
-          });
+          // Marco 4: Mensageria Multimodal — Modo de Voz ('disabled' | 'mirror' | 'always')
+          const voiceMode = tenantSettings?.chatbot_voice_mode || "disabled";
+          const voiceId = tenantSettings?.chatbot_voice_id || "nova";
+          const voiceSpeed = Number(tenantSettings?.chatbot_voice_speed || 1.0);
 
-          if (evolutionResponse.ok) {
-            console.log("[chatbot-webhook] Sent to WhatsApp", {
-              phone: maskPhoneForLog(phone),
-              status: aiResponse.status_conversa,
-              classificacao: aiResponse.classificacao,
-            });
+          const leadSentAudio = Array.isArray(messages) && messages.some((m) => m?.type === "audio" || m?.media_type === "audio");
+          const shouldSendVoice = resolveVoiceDecision({ voiceMode, leadSentAudio });
 
-            let outboundWaId = null;
-            try {
-              const evoData = await evolutionResponse.json();
-              outboundWaId = evoData?.key?.id || evoData?.data?.key?.id || evoData?.messageId || null;
-            } catch {
-              // Ignora erro de parsing de json caso resposta seja texto
-            }
+          let sentViaVoice = false;
+          let outboundWaId = null;
 
-            await appendLeadMessage({
+          if (shouldSendVoice) {
+            console.log("[chatbot-webhook] Modo de voz ativado:", {
               clientId,
-              phone,
-              senderType: "bot",
-              direction: "outbound",
-              messageText: aiResponse.mensagem,
-              engagementSignal: aiResponse.classificacao || null,
-              meta: {
-                source: "hardcoded-chat-webhook",
-                model: chatbotModel,
-                conversationStatus: aiResponse.status_conversa || null,
-                finalized: aiResponse.finalizado === true,
-                recontact: aiResponse._recontato === true,
-                classificacao: aiResponse.classificacao || null,
-                dados: aiResponse.dados || {},
-                spinFase: aiResponse.spin_fase || null,
-              },
-              instanceName,
-              waMessageId: outboundWaId,
-              messageTimestamp: new Date().toISOString(),
+              voiceMode,
+              voiceId,
+              voiceSpeed,
+              leadSentAudio,
             });
-          } else {
-            const errText = await evolutionResponse.text();
-            console.error("[chatbot-webhook] Evolution send failed:", evolutionResponse.status, errText.slice(0, 200));
+
+            const speech = await generateSpeechAudio({
+              text: aiResponse.mensagem,
+              voice: voiceId,
+              speed: voiceSpeed,
+            });
+
+            if (speech?.base64) {
+              try {
+                const targetInstance = dispatchSettings.instanceName || instanceName;
+                const evoBaseUrl = evolutionUrl ? new URL(evolutionUrl).origin : null;
+                const voiceRes = await sendMediaMessageViaEvolution({
+                  instanceName: targetInstance,
+                  number: phone,
+                  mediaType: "audio",
+                  base64: speech.base64,
+                  mimetype: speech.mimetype,
+                  webhookToken: evolutionToken,
+                  baseUrl: evoBaseUrl,
+                });
+
+                if (voiceRes?.success) {
+                  sentViaVoice = true;
+                  outboundWaId = voiceRes.waMessageId || null;
+                  console.log("[chatbot-webhook] Áudio PTT enviado com sucesso ao WhatsApp", {
+                    phone: maskPhoneForLog(phone),
+                    waMessageId: outboundWaId,
+                  });
+                } else {
+                  console.warn("[chatbot-webhook] Falha no retorno da Evolution para áudio, ativando Fallback de Ouro em texto");
+                }
+              } catch (sendVoiceErr) {
+                console.warn("[chatbot-webhook] Erro ao enviar áudio via Evolution, ativando Fallback de Ouro em texto:", sendVoiceErr.message);
+              }
+            } else {
+              console.warn("[chatbot-webhook] Síntese de voz retornou nulo (OpenAI indisponível/sem chave), ativando Fallback de Ouro em texto");
+            }
           }
+
+          // Fallback de Ouro: Envia em texto se não for voz ou se a tentativa de voz falhou
+          if (!sentViaVoice) {
+            const evolutionResponse = await fetch(evolutionUrl, {
+              method: "POST",
+              headers: evolutionHeaders,
+              body: JSON.stringify({
+                number: phone,
+                text: aiResponse.mensagem,
+                message: aiResponse.mensagem,
+                options: {
+                  delay: 2500,
+                  presence: "composing",
+                },
+              }),
+            });
+
+            if (evolutionResponse.ok) {
+              console.log("[chatbot-webhook] Sent to WhatsApp (texto)", {
+                phone: maskPhoneForLog(phone),
+                status: aiResponse.status_conversa,
+                classificacao: aiResponse.classificacao,
+              });
+
+              try {
+                const evoData = await evolutionResponse.json();
+                outboundWaId = evoData?.key?.id || evoData?.data?.key?.id || evoData?.messageId || null;
+              } catch {
+                // Ignora erro de parsing de json caso resposta seja texto
+              }
+            } else {
+              const errText = await evolutionResponse.text();
+              console.error("[chatbot-webhook] Evolution send failed:", evolutionResponse.status, errText.slice(0, 200));
+            }
+          }
+
+          await appendLeadMessage({
+            clientId,
+            phone,
+            senderType: "bot",
+            direction: "outbound",
+            messageText: aiResponse.mensagem,
+            engagementSignal: aiResponse.classificacao || null,
+            meta: {
+              source: "hardcoded-chat-webhook",
+              model: chatbotModel,
+              conversationStatus: aiResponse.status_conversa || null,
+              finalized: aiResponse.finalizado === true,
+              recontact: aiResponse._recontato === true,
+              classificacao: aiResponse.classificacao || null,
+              dados: aiResponse.dados || {},
+              spinFase: aiResponse.spin_fase || null,
+              isVoice: sentViaVoice,
+              voiceId: sentViaVoice ? voiceId : null,
+            },
+            instanceName,
+            waMessageId: outboundWaId,
+            messageTimestamp: new Date().toISOString(),
+          });
 
           // PRECEDENCIA DO SDR, documentada porque ja gerou confusao:
           //
@@ -3627,6 +3690,48 @@ export function registerChatbotRoutes(app, deps) {
       });
     }
   });
+
+  /**
+   * POST /api/chatbot/voice-preview
+   * Gera uma amostra de áudio (síntese TTS) com a voz e velocidade especificadas
+   * para permitir teste no painel antes de salvar as configurações.
+   */
+  app.post("/api/chatbot/voice-preview", requireFirebaseAuth, async (req, res) => {
+    try {
+      const { voice = "nova", speed = 1.0, text } = req.body || {};
+      const sampleText = text && typeof text === "string" && text.trim()
+        ? text.trim()
+        : "Olá! Sou o assistente virtual da sua empresa. Como posso te ajudar hoje?";
+
+      const speech = await generateSpeechAudio({
+        text: sampleText,
+        voice,
+        speed,
+      });
+
+      if (!speech?.base64) {
+        return res.status(502).json({
+          success: false,
+          error: "Não foi possível sintetizar a prévia de voz. Verifique se a chave OPENAI_API_KEY está configurada no servidor.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        audioBase64: speech.base64,
+        mimetype: speech.mimetype,
+        format: speech.format,
+      });
+    } catch (err) {
+      console.error("[chatbot-voice-preview] Erro ao gerar prévia de áudio:", err.message);
+      return res.status(500).json({
+        success: false,
+        error: "Falha interna ao gerar prévia de áudio.",
+        reason: err.message,
+      });
+    }
+  });
+
   /**
    * GET /api/hardcoded-chat-leads
    * Lista leads do chatbot hardcoded para o Kanban
