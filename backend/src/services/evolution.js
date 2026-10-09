@@ -27,6 +27,8 @@ import { upsertLeadByPhone } from "./leadUpsert.js";
 import { ensureEvolutionInstanceDailyUsageTable } from "./chipQuota.js";
 import { getDateKey } from "./analytics.js";
 import { resolveSendWindowConfig } from "./sendWindow.js";
+import { reclassifyLeadFromMessages } from "./funnelService.js";
+import { cancelFollowupCadenceOnReply } from "./followupExitGuard.js";
 
 /** Timeout padrão para chamadas HTTP de saída (Evolution health-check e webhooks de campanha). */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
@@ -990,6 +992,27 @@ export async function syncEvolutionInstanceChatsAndMessages(
                   insertedMessages++;
                 }
               } catch (fallbackErr) {}
+            }
+
+            // Classificação semântica automática para mensagens inbound
+            if (!fromMe && messageText && db) {
+              reclassifyLeadFromMessages({
+                pool: db,
+                clientId,
+                leadId,
+                phone,
+                messages: [messageText],
+              }).then(async (result) => {
+                if (result.updated) {
+                  console.info(`[auto-funnel] Lead ${phone} transitou: ${result.previousStage} ➔ ${result.newStage} (${result.reason})`);
+                  // Se transitou para buyer, cancela follow-up ativo
+                  if (result.newStage === "buyer") {
+                    await cancelFollowupCadenceOnReply({ companyId: clientId, phone, queryFn: db.query.bind(db) });
+                  }
+                }
+              }).catch((err) => {
+                console.warn("[auto-funnel] Erro ao reclassificar lead inbound:", err.message);
+              });
             }
           }
           syncedChats++;

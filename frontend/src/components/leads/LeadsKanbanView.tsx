@@ -12,6 +12,8 @@ import {
   MoreHorizontal,
   Flame,
   Sun,
+  Bot,
+  UserCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -403,6 +405,25 @@ export function LeadsKanbanView({
                               {originLabel}
                             </Badge>
                           )}
+
+                          {/* Badge de Origem do Estágio (IA Automático vs Manual) */}
+                          {lead.stage_source === "auto" ? (
+                            <Badge
+                              variant="outline"
+                              data-testid={`badge-stage-source-${lead.id}`}
+                              className="text-[9px] py-0 border-indigo-200 bg-indigo-50/50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 gap-1 font-normal"
+                            >
+                              <Bot className="w-2.5 h-2.5" /> IA Automático
+                            </Badge>
+                          ) : lead.stage_source === "manual" ? (
+                            <Badge
+                              variant="outline"
+                              data-testid={`badge-stage-source-${lead.id}`}
+                              className="text-[9px] py-0 border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400 gap-1 font-normal"
+                            >
+                              <UserCheck className="w-2.5 h-2.5" /> Manual
+                            </Badge>
+                          ) : null}
                         </div>
 
                         {/* Tags */}

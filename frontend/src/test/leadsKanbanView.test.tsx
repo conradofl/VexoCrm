@@ -12,6 +12,7 @@ const mockLeads: LeadIntelligenceItem[] = [
     phone: "11987654321",
     telefone: "11987654321",
     stage: "cold",
+    stage_source: "manual",
     temperature: "hot",
     tags: ["vip", "campanha-sp"],
     origem: "Google Ads",
@@ -24,6 +25,7 @@ const mockLeads: LeadIntelligenceItem[] = [
     phone: "21998765432",
     telefone: "21998765432",
     stage: "inquiry",
+    stage_source: "auto",
     temperature: "warm",
     tags: ["novo"],
     campaign_name: "Lancamento Outono",
@@ -144,6 +146,27 @@ describe("LeadsKanbanView Component", () => {
     expect(screen.getByText("(21) 99876-5432")).toBeInTheDocument();
     expect(screen.getByTestId("badge-temp-lead-2")).toHaveTextContent("Morno");
     expect(screen.getByText("Lancamento Outono")).toBeInTheDocument();
+  });
+
+  it("exibe badges de origem do estágio (IA Automático vs Manual)", () => {
+    render(
+      <LeadsKanbanView
+        leads={mockLeads}
+        ticketMedio={1000}
+        onUpdateStage={vi.fn()}
+        onOpenWhatsapp={vi.fn()}
+      />
+    );
+
+    // lead-1 tem stage_source: 'manual'
+    const manualBadge = screen.getByTestId("badge-stage-source-lead-1");
+    expect(manualBadge).toBeInTheDocument();
+    expect(manualBadge).toHaveTextContent("Manual");
+
+    // lead-2 tem stage_source: 'auto'
+    const autoBadge = screen.getByTestId("badge-stage-source-lead-2");
+    expect(autoBadge).toBeInTheDocument();
+    expect(autoBadge).toHaveTextContent("IA Automático");
   });
 
   it("dispara onOpenWhatsapp ao clicar no botão de WhatsApp do card", () => {

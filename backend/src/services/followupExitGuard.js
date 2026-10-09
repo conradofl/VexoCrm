@@ -9,7 +9,7 @@ import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 export function isWonStage(stage) {
   if (!stage) return false;
   const s = String(stage).trim().toLowerCase();
-  return ["won", "ganho", "fechado", "cliente"].includes(s);
+  return ["won", "ganho", "fechado", "cliente", "buyer"].includes(s);
 }
 
 export function isLostStage(stage) {

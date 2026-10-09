@@ -35,7 +35,8 @@ import {
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
-import { cancelFollowupCadenceOnTakeover } from "../../services/followupExitGuard.js";
+import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
+import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
 
 const SQL_NUMBER_CHANGE_MATCH = (col) => `(
   ${col} ~* 'estamos\\s+desativando\\s+esse\\s+n[úu]mero|chama\\s+meu\\s+vendedor|nos\\s+chame\\s+no\\s+(contato|n[úu]mero|link)|novo\\s+n[úu]mero|troca\\s+de\\s+n[úu]mero'
@@ -2626,6 +2627,26 @@ export function registerChatbotRoutes(app, deps) {
       });
     } catch (msgErr) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);
+    }
+
+    // Classificação semântica automática para mensagens inbound
+    if (!fromMe && messageData?.text && pgDatabasePool) {
+      reclassifyLeadFromMessages({
+        pool: pgDatabasePool,
+        clientId,
+        phone,
+        messages: [messageData.text],
+      }).then(async (result) => {
+        if (result.updated) {
+          console.info(`[auto-funnel] Lead ${phone} transitou: ${result.previousStage} ➔ ${result.newStage} (${result.reason})`);
+          // Se transitou para buyer, cancela follow-up ativo
+          if (result.newStage === "buyer") {
+            await cancelFollowupCadenceOnReply({ companyId: clientId, phone, queryFn: pgDatabasePool.query.bind(pgDatabasePool) });
+          }
+        }
+      }).catch((err) => {
+        console.warn("[auto-funnel] Erro ao reclassificar lead inbound:", err.message);
+      });
     }
 
     // Auto-reativação e manutenção de estados:
