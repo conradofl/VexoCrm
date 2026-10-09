@@ -159,7 +159,7 @@ const App = () => (
               }
             />
             <Route path="/dashboard" element={<Navigate to="/crm/dashboard" replace />} />
-            <Route path="/leads" element={<Navigate to="/crm/banco-de-dados" replace />} />
+            <Route path="/leads" element={<Navigate to="/crm/banco-de-dados?view=kanban" replace />} />
             <Route path="/banco-de-dados" element={<Navigate to="/crm/banco-de-dados" replace />} />
             <Route path="/planilhas" element={<Navigate to="/crm/planilhas" replace />} />
             <Route path="/campanhas" element={<Navigate to="/crm/planilhas" replace />} />
@@ -188,7 +188,7 @@ const App = () => (
                 }
               />
 
-              <Route path="leads" element={<Navigate to="/crm/banco-de-dados" replace />} />
+              <Route path="leads" element={<Navigate to="/crm/banco-de-dados?view=kanban" replace />} />
               <Route
                 path="banco-de-dados"
                 element={

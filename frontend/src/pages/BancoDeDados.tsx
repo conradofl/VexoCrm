@@ -42,7 +42,10 @@ import {
   CheckSquare,
   AlertTriangle,
   Loader2,
+  LayoutGrid,
+  Table as TableIcon,
 } from "lucide-react";
+import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
 import { InstagramImportModal } from "@/components/leads/InstagramImportModal";
 import { ContactsWithoutChannelSection } from "@/components/leads/ContactsWithoutChannelSection";
 import { StalledLeadBadge } from "@/components/leads/StalledLeadBadge";
@@ -497,6 +500,13 @@ export default function BancoDeDados() {
     return "all";
   };
 
+  // Modo de visualização: Tabela vs Funil Kanban (persistido em localStorage e sincronizado via URL ?view=...)
+  const [viewMode, setViewMode] = useState<"table" | "kanban">(() => {
+    const paramView = searchParams.get("view");
+    if (paramView === "kanban" || paramView === "table") return paramView;
+    return (localStorage.getItem("vexo_leads_view_mode") as "table" | "kanban") || "table";
+  });
+
   // Filters & Tabs
   const [activeTab, setActiveTab] = useState<string>(() => normalizeStageTab(searchParams.get("tab")));
   const [isStalledFilterActive, setIsStalledFilterActive] = useState<boolean>(() => {
@@ -511,7 +521,7 @@ export default function BancoDeDados() {
   const [isInstagramImportModalOpen, setIsInstagramImportModalOpen] = useState(false);
   const { data: contactsWithoutChannel = [] } = useContactsWithoutChannel(clientId);
 
-  // Sincroniza activeTab e isStalledFilterActive quando os parâmetros da URL mudarem
+  // Sincroniza activeTab, isStalledFilterActive e viewMode quando os parâmetros da URL mudarem
   useEffect(() => {
     const urlTab = searchParams.get("tab");
     if (urlTab) {
@@ -521,6 +531,10 @@ export default function BancoDeDados() {
     const stalledParam = searchParams.get("stalled") || searchParams.get("stalledDays");
     if (stalledParam && !isNaN(Number(stalledParam))) {
       setIsStalledFilterActive(true);
+    }
+    const paramView = searchParams.get("view");
+    if (paramView === "kanban" || paramView === "table") {
+      setViewMode(paramView);
     }
   }, [searchParams]);
 
@@ -2023,28 +2037,63 @@ export default function BancoDeDados() {
     }
   };
 
-  // Lead Detail Sheet Actions
-  const handleUpdateLeadStage = async (leadId: string, newStage: string) => {
+  // Ação de WhatsApp direto (ex.: disparado pelos cards do Funil Kanban)
+  const handleOpenWhatsapp = (phone: string) => {
+    const rawStr = String(phone || "").trim();
+    if (!rawStr) return;
+    const canonical = sanitizePhone(rawStr);
+    const digits = rawStr.replace(/\D/g, "");
+    const cleanPhone = canonical || (digits.startsWith("55") ? digits : `55${digits}`);
+    if (!cleanPhone) return;
+    navigate(`/crm/whatsapp?phone=${cleanPhone}`);
+  };
+
+  // Lead Detail Sheet Actions & Kanban Stage Update
+  const handleUpdateLeadStage = async (leadId: string, newStage: string, lostReason?: string | null) => {
+    // Atualização otimista local
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.id === leadId
+          ? {
+              ...l,
+              stage: newStage as any,
+              stage_source: "manual",
+              lost_reason: newStage === "lost" ? lostReason || null : null,
+            }
+          : l
+      )
+    );
+    if (selectedLead && selectedLead.id === leadId) {
+      setSelectedLead({
+        ...selectedLead,
+        stage: newStage as any,
+        stage_source: "manual",
+        lost_reason: newStage === "lost" ? lostReason || null : null,
+      });
+    }
+
     try {
       const token = await getIdToken();
-      const res = await fetch(`${API_BASE_URL}/api/leads/${leadId}`, {
+      const res = await fetchApi(`/api/leads/${leadId}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ stage: newStage }),
+        body: JSON.stringify({
+          stage: newStage,
+          stage_source: "manual",
+          lost_reason: lostReason || null,
+        }),
       });
 
       if (!res.ok) throw new Error("Falha ao atualizar estágio.");
 
       toast.success("Estágio do lead atualizado!");
-      if (selectedLead && selectedLead.id === leadId) {
-        setSelectedLead({ ...selectedLead, stage: newStage as any });
-      }
       fetchLeads();
     } catch (err: any) {
       toast.error("Erro ao atualizar estágio", { description: err.message });
+      fetchLeads();
     }
   };
 
@@ -3502,6 +3551,36 @@ export default function BancoDeDados() {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* Seletor Visual: Funil Kanban vs Tabela */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-border/60 shrink-0">
+              <Button
+                variant={viewMode === "kanban" ? "default" : "ghost"}
+                size="sm"
+                data-testid="view-mode-kanban-btn"
+                onClick={() => {
+                  setViewMode("kanban");
+                  localStorage.setItem("vexo_leads_view_mode", "kanban");
+                }}
+                className="h-8 px-3 text-xs font-bold gap-1.5 rounded-lg"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                Funil Kanban
+              </Button>
+              <Button
+                variant={viewMode === "table" ? "default" : "ghost"}
+                size="sm"
+                data-testid="view-mode-table-btn"
+                onClick={() => {
+                  setViewMode("table");
+                  localStorage.setItem("vexo_leads_view_mode", "table");
+                }}
+                className="h-8 px-3 text-xs font-bold gap-1.5 rounded-lg"
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+                Tabela
+              </Button>
+            </div>
+
             <div className="relative flex-1 sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -3674,11 +3753,19 @@ export default function BancoDeDados() {
           </div>
         )}
 
-        {/* Tabela Principal ou Trabalho Manual do Instagram */}
+        {/* Tabela Principal ou Trabalho Manual do Instagram ou Funil Kanban */}
         {activeTab === "contacts_without_channel" ? (
           <ContactsWithoutChannelSection
             clientId={clientId}
             onLeadConverted={fetchLeads}
+          />
+        ) : viewMode === "kanban" ? (
+          <LeadsKanbanView
+            leads={leads}
+            loading={loading}
+            ticketMedio={ticketMedio}
+            onUpdateStage={handleUpdateLeadStage}
+            onOpenWhatsapp={handleOpenWhatsapp}
           />
         ) : (
           <Card className="bg-card text-card-foreground border-border shadow-sm dark:bg-zinc-900/60 dark:border-zinc-800">

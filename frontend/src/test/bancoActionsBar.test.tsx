@@ -193,10 +193,10 @@ describe("barra de ações: a ordem dos grupos", () => {
   });
 
   it("com leads selecionados, follow-up e lembrete entram no grupo que age sobre a base, antes de 'Novo lead'", () => {
-    const props = renderBar({ selectedCount: 3 });
+    const props = renderBar({ selectedCount: 1 });
     const age = [...bar().querySelector('[data-group="age"]')!.querySelectorAll("button")].map((b) => (b.textContent || "").trim());
 
-    expect(age).toEqual(["Criar campanha", "Aplicar Follow-up (3)", "Lembrete avulso", "Novo lead"]);
+    expect(age).toEqual(["Criar campanha", "Aplicar Follow-up (1)", "Lembrete avulso", "Novo lead"]);
     fireEvent.click(screen.getByRole("button", { name: /Aplicar Follow-up/ }));
     fireEvent.click(screen.getByRole("button", { name: /Lembrete avulso/ }));
     expect(props.onApplyFollowup).toHaveBeenCalledTimes(1);
