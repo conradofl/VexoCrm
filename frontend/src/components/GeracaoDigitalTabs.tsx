@@ -23,7 +23,8 @@ export function GeracaoDigitalTabs() {
   const hasPropostas = isInternalUser;
   const hasPacotes = isInternalUser;
   const hasContratos = isInternalUser;
-  const hasImplantacao = isInternalUser;
+  // Fase 4: O briefing de implantação foi promovido a módulo central do sistema (/crm/implantacao)
+  const hasImplantacao = false;
 
   // Determine active tab based on path name
   let activeTab = "";

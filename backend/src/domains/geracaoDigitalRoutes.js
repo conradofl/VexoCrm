@@ -3652,10 +3652,10 @@ Condições: ${condicoes}`;
         conditions.push(`tenant_id = $${queryParams.length}`);
       }
 
-      if (ownerCompany) {
+      if (ownerCompany && ownerCompany !== "all") {
         queryParams.push(ownerCompany);
         conditions.push(`owner_company = $${queryParams.length}`);
-      } else {
+      } else if (!ownerCompany) {
         conditions.push(`(owner_company = 'geracao-digital' OR owner_company IS NULL)`);
       }
 
@@ -3930,6 +3930,24 @@ Condições: ${condicoes}`;
     } catch (error) {
       console.error("[GeracaoDigital] Erro ao atualizar briefing de implantação:", error);
       res.status(500).json({ error: `Erro ao atualizar briefing de implantação: ${error.message}` });
+    }
+  });
+
+  // DELETE /api/gd/implementation-briefings/:id
+  app.delete("/api/gd/implementation-briefings/:id", requireFirebaseAuth, requireVexoCommercialAccess, guardBriefingVexo, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { rowCount } = await pool.query(
+        "DELETE FROM public.gd_implementation_briefings WHERE id = $1",
+        [id]
+      );
+      if (rowCount === 0) {
+        return res.status(404).json({ error: "Briefing de implantação não encontrado." });
+      }
+      res.json({ success: true, message: "Briefing excluído com sucesso." });
+    } catch (error) {
+      console.error("[GeracaoDigital] Erro ao excluir briefing de implantação:", error);
+      res.status(500).json({ error: `Erro ao excluir briefing de implantação: ${error.message}` });
     }
   });
 

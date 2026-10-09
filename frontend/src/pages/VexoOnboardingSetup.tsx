@@ -1,18 +1,20 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Sparkles, Wrench } from "lucide-react";
+import { Sparkles, Wrench, FolderOpen } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { EmptyState } from "@/components/EmptyState";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useOnboardingProgress } from "@/hooks/useOnboardingProgress";
+import { useAuth } from "@/contexts/AuthContext";
 import { SetupCelebration } from "./VexoOnboardingSetup/SetupCelebration";
 import { SuperpowersMapTab } from "./VexoOnboardingSetup/SuperpowersMapTab";
 import { PracticalPipelineTab } from "./VexoOnboardingSetup/PracticalPipelineTab";
+import { SavedImplementationsTab } from "./VexoOnboardingSetup/SavedImplementationsTab";
 
 interface VexoOnboardingSetupProps {
   baseTotal?: number | null;
-  defaultTab?: "mapa" | "esteira";
+  defaultTab?: "mapa" | "esteira" | "salvas";
 }
 
 export default function VexoOnboardingSetup({
@@ -24,17 +26,39 @@ export default function VexoOnboardingSetup({
   const clientId = crmClient?.selectedClientId || "";
   const clientName = selectedClient?.name || clientId || "Sua Empresa";
 
+  const { isAdminUser, canAccessInternalPage } = useAuth();
+  const hasTechnicalAccess = Boolean(
+    isAdminUser ||
+      canAccessInternalPage?.("onboarding-agent") ||
+      canAccessInternalPage?.("briefings-gd")
+  );
+
   const progress = useOnboardingProgress(clientId, { baseTotal });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const resolvedInitialTab: "mapa" | "esteira" =
-    defaultTab ||
-    (tabParam === "esteira" || tabParam === "briefing" ? "esteira" : "mapa");
-  const [activeTab, setActiveTab] = useState<"mapa" | "esteira">(resolvedInitialTab);
+  const resolvedInitialTab: "mapa" | "esteira" | "salvas" = (() => {
+    if (!hasTechnicalAccess) return "mapa";
+    if (defaultTab && (defaultTab === "mapa" || defaultTab === "esteira" || defaultTab === "salvas")) {
+      return defaultTab;
+    }
+    if (tabParam === "salvas") return "salvas";
+    if (tabParam === "esteira" || tabParam === "briefing") return "esteira";
+    return "mapa";
+  })();
+
+  const [activeTab, setActiveTab] = useState<"mapa" | "esteira" | "salvas">(resolvedInitialTab);
+
+  useEffect(() => {
+    if (!hasTechnicalAccess && activeTab !== "mapa") {
+      setActiveTab("mapa");
+    }
+  }, [hasTechnicalAccess, activeTab]);
 
   const handleTabChange = (val: string) => {
-    const nextTab = val as "mapa" | "esteira";
+    const nextTab = (hasTechnicalAccess && (val === "esteira" || val === "salvas"))
+      ? (val as "esteira" | "salvas")
+      : "mapa";
     setActiveTab(nextTab);
     setSearchParams(
       (prev) => {
@@ -133,26 +157,35 @@ export default function VexoOnboardingSetup({
       {/* Painel Comemorativo quando 100% Concluído */}
       {progress.isFullyReady && <SetupCelebration />}
 
-      {/* Abas Superiores: 1. Mapa de Superpoderes | 2. Esteira Prática de Implantação */}
+      {/* Abas Superiores: Se tiver acesso técnico, exibe as 3 abas centralizadas. Caso contrário, exibe direto o Mapa */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
-        <div className="flex justify-center">
-          <TabsList className="grid w-full grid-cols-2 max-w-xl h-11 p-1 bg-slate-100/90 dark:bg-muted/80 rounded-xl border border-slate-200/80 dark:border-border/60 shadow-2xs">
-            <TabsTrigger
-              value="mapa"
-              className="rounded-lg text-xs sm:text-sm font-semibold gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-card data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400 data-[state=active]:shadow-xs transition-all"
-            >
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>🌟 Mapa de Superpoderes</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="esteira"
-              className="rounded-lg text-xs sm:text-sm font-semibold gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-card data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400 data-[state=active]:shadow-xs transition-all"
-            >
-              <Wrench className="w-4 h-4 text-indigo-500" />
-              <span>🛠️ Esteira de Implantação</span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        {hasTechnicalAccess && (
+          <div className="flex justify-center">
+            <TabsList className="grid w-full grid-cols-3 max-w-2xl h-11 p-1 bg-slate-100/90 dark:bg-muted/80 rounded-xl border border-slate-200/80 dark:border-border/60 shadow-2xs">
+              <TabsTrigger
+                value="mapa"
+                className="rounded-lg text-xs sm:text-sm font-semibold gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-card data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400 data-[state=active]:shadow-xs transition-all"
+              >
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span className="truncate">🌟 Mapa de Superpoderes</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="esteira"
+                className="rounded-lg text-xs sm:text-sm font-semibold gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-card data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400 data-[state=active]:shadow-xs transition-all"
+              >
+                <Wrench className="w-4 h-4 text-indigo-500" />
+                <span className="truncate">🛠️ Esteira Técnica & Simulador</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="salvas"
+                className="rounded-lg text-xs sm:text-sm font-semibold gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-card data-[state=active]:text-indigo-600 dark:data-[state=active]:text-indigo-400 data-[state=active]:shadow-xs transition-all"
+              >
+                <FolderOpen className="w-4 h-4 text-emerald-500" />
+                <span className="truncate">📁 Implantações Salvas</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
+        )}
 
         {/* ABA 1: Mapa de Superpoderes do Vexo OS */}
         <TabsContent
@@ -163,24 +196,39 @@ export default function VexoOnboardingSetup({
           <SuperpowersMapTab />
         </TabsContent>
 
-        {/* ABA 2: Esteira Prática de Implantação (Simplificação Geração Digital) */}
-        <TabsContent
-          value="esteira"
-          forceMount
-          className="data-[state=inactive]:hidden focus-visible:outline-none"
-        >
-          <PracticalPipelineTab
-            clientId={clientId}
-            selectedClient={selectedClient}
-            progress={progress}
-            connectedInstances={connectedInstances}
-            chatbotEnabled={chatbotEnabled}
-            chatbotModel={chatbotModel}
-            chipStepDone={chipStepDone}
-            agentStepDone={agentStepDone}
-            leadsStepDone={leadsStepDone}
-          />
-        </TabsContent>
+        {/* ABA 2 & 3: Apenas se possuir permissão técnica */}
+        {hasTechnicalAccess && (
+          <>
+            <TabsContent
+              value="esteira"
+              forceMount
+              className="data-[state=inactive]:hidden focus-visible:outline-none"
+            >
+              <PracticalPipelineTab
+                clientId={clientId}
+                selectedClient={selectedClient}
+                progress={progress}
+                connectedInstances={connectedInstances}
+                chatbotEnabled={chatbotEnabled}
+                chatbotModel={chatbotModel}
+                chipStepDone={chipStepDone}
+                agentStepDone={agentStepDone}
+                leadsStepDone={leadsStepDone}
+              />
+            </TabsContent>
+
+            <TabsContent
+              value="salvas"
+              forceMount
+              className="data-[state=inactive]:hidden focus-visible:outline-none"
+            >
+              <SavedImplementationsTab
+                clientId={clientId}
+                onGoToEsteira={() => handleTabChange("esteira")}
+              />
+            </TabsContent>
+          </>
+        )}
       </Tabs>
     </PageShell>
   );

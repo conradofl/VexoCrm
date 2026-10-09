@@ -23,6 +23,7 @@ import {
   Monitor,
   Rocket,
   ShieldAlert,
+  Wrench,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -2123,9 +2124,17 @@ function UserListItem({
           <p className="truncate text-xs text-muted-foreground">{user.email || "Sem e-mail"}</p>
         </div>
 
-        <Badge className={protectedAccount ? "bg-primary/10 text-primary" : ROLE_BADGE_CLASS[draft.role]}>
-          {protectedAccount ? "Protegido" : ROLE_LABELS[draft.role]}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge className={protectedAccount ? "bg-primary/10 text-primary" : ROLE_BADGE_CLASS[draft.role]}>
+            {protectedAccount ? "Protegido" : ROLE_LABELS[draft.role]}
+          </Badge>
+          {(draft.accessPreset === "admin_vexo" || draft.accessPreset === "admin" || draft.internalPages.includes("onboarding-agent")) && (
+            <Badge variant="outline" className="text-[10px] py-0 border-indigo-200 bg-indigo-50/60 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 gap-1 font-medium">
+              <Wrench className="w-2.5 h-2.5" />
+              Setup Técnico
+            </Badge>
+          )}
+        </div>
       </div>
 
       {draft.disabled || dirty ? (
@@ -2977,6 +2986,27 @@ export default function UserAccessManagement() {
                   </div>
                 </div>
 
+                <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-gradient-to-r from-indigo-50/50 via-white to-purple-50/30 dark:from-indigo-950/20 dark:via-background dark:to-purple-950/10 p-4 flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-foreground flex items-center gap-2">
+                      <Wrench className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <span>Esteira Técnica de Implantação & Briefings</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Libera o acesso às ferramentas de Esteira Técnica (gerador de prompt, simulador ao vivo) e ao histórico de Implantações Salvas (WhatsApp e PDF).
+                    </p>
+                  </div>
+                  <Switch
+                    checked={createDraft.internalPages.includes("onboarding-agent")}
+                    onCheckedChange={(checked) => {
+                      const nextPages = checked
+                        ? Array.from(new Set([...createDraft.internalPages, "onboarding-agent", "briefings-gd"]))
+                        : createDraft.internalPages.filter(p => p !== "onboarding-agent" && p !== "briefings-gd");
+                      updateCreateDraft({ internalPages: nextPages as InternalPage[] });
+                    }}
+                    className="scale-90 data-[state=checked]:bg-indigo-600"
+                  />
+                </div>
 
                 <div className="rounded-2xl border border-border/60 bg-muted/5 p-4">
                   <label className="flex items-center gap-3 text-sm text-foreground font-semibold cursor-pointer">
@@ -3215,6 +3245,12 @@ export default function UserAccessManagement() {
                                   <Badge className={cn("font-medium", protectedAccount ? "bg-primary/10 text-primary" : ROLE_BADGE_CLASS[draft.role])}>
                                     {protectedAccount ? "Admin Protegido" : ROLE_LABELS[draft.role]}
                                   </Badge>
+                                  {(draft.accessPreset === "admin_vexo" || draft.accessPreset === "admin" || draft.internalPages.includes("onboarding-agent")) && (
+                                    <Badge variant="outline" className="text-[10px] py-0 border-indigo-200 bg-indigo-50/60 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 gap-1 font-medium">
+                                      <Wrench className="w-2.5 h-2.5" />
+                                      Setup Técnico
+                                    </Badge>
+                                  )}
                                 </div>
                               </TableCell>
                               <TableCell className="text-right py-4 px-6">
@@ -3484,6 +3520,29 @@ export default function UserAccessManagement() {
                                           </div>
                                         </div>
                                       )}
+
+                                      <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-gradient-to-r from-indigo-50/50 via-white to-purple-50/30 dark:from-indigo-950/20 dark:via-background dark:to-purple-950/10 p-4 flex items-center justify-between gap-4 md:col-span-2">
+                                        <div className="space-y-1">
+                                          <p className="font-semibold text-sm text-foreground flex items-center gap-2">
+                                            <Wrench className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                            <span>Esteira Técnica de Implantação & Briefings</span>
+                                          </p>
+                                          <p className="text-xs text-muted-foreground leading-relaxed">
+                                            Libera o acesso às ferramentas de Esteira Técnica (gerador de prompt, simulador ao vivo) e ao histórico de Implantações Salvas (WhatsApp e PDF).
+                                          </p>
+                                        </div>
+                                        <Switch
+                                          checked={selectedDraft.internalPages.includes("onboarding-agent")}
+                                          disabled={!selectedEditable || isFixedAdminAccount(selectedUser.uid, selectedUser.email)}
+                                          onCheckedChange={(checked) => {
+                                            const nextPages = checked
+                                              ? Array.from(new Set([...selectedDraft.internalPages, "onboarding-agent", "briefings-gd"]))
+                                              : selectedDraft.internalPages.filter(p => p !== "onboarding-agent" && p !== "briefings-gd");
+                                            updateDraft(selectedUser.uid, { internalPages: nextPages as InternalPage[] });
+                                          }}
+                                          className="scale-90 data-[state=checked]:bg-indigo-600"
+                                        />
+                                      </div>
 
                                       <div className="space-y-2">
                                         <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Empresa / Tenant Vinculado</label>

@@ -13,10 +13,14 @@ import type { LeadClient } from "@/hooks/useLeadClients";
 // Mocks
 let mockSelectedClient: Partial<LeadClient> | null = null;
 let mockFacetsBaseTotal: number | null = 0;
+let mockIsAdminUser = true;
+let mockCanAccessInternalPage = vi.fn().mockImplementation((_page: string) => true);
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     isAuthenticated: true,
+    isAdminUser: mockIsAdminUser,
+    canAccessInternalPage: (page: string) => mockCanAccessInternalPage(page),
     getIdToken: async () => "mock-token",
   }),
 }));
@@ -32,10 +36,27 @@ vi.mock("@/hooks/useCrmClient", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  fetchApi: vi.fn().mockImplementation(async () => ({
-    ok: true,
-    json: async () => ({ baseTotal: mockFacetsBaseTotal }),
-  })),
+  fetchApi: vi.fn().mockImplementation(async (url: string) => {
+    if (typeof url === "string" && url.includes("implementation-briefings")) {
+      return {
+        ok: true,
+        json: async () => [
+          {
+            id: "briefing-1",
+            empresa_nome: "Cliente Alfa",
+            ramo_atuacao: "Varejo",
+            status: "concluido",
+            created_at: "2026-10-01T12:00:00Z",
+            updated_at: "2026-10-01T12:00:00Z",
+          },
+        ],
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ baseTotal: mockFacetsBaseTotal }),
+    };
+  }),
   readApiJson: vi.fn().mockImplementation(async () => ({ baseTotal: mockFacetsBaseTotal })),
 }));
 
@@ -53,6 +74,8 @@ function renderWithProviders(ui: React.ReactElement) {
 describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsAdminUser = true;
+    mockCanAccessInternalPage = vi.fn().mockImplementation(() => true);
     mockSelectedClient = {
       id: "empresa-1",
       name: "Empresa Teste",
@@ -311,7 +334,7 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
 
       // Abas presentes no topo
       expect(screen.getByRole("tab", { name: /Mapa de Superpoderes/i })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: /Esteira de Implantação/i })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Esteira Técnica/i })).toBeInTheDocument();
 
       // 8 Superpoderes
       expect(screen.getByText("Agente de Atendimento 24/7")).toBeInTheDocument();
@@ -484,6 +507,37 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(isPathAllowedForClient("/crm/implantacao", ["onboarding"])).toBe(true);
       expect(isPathAllowedForClient("/crm/setup", ["onboarding"])).toBe(true);
       expect(isPathAllowedForClient("/crm/implantacao", ["dashboard"])).toBe(false);
+    });
+  });
+
+  describe("6. Proteção e Gating de Permissões Técnicas (Esteira & Implantações Salvas)", () => {
+    it("Usuário sem permissão técnica vê apenas o Mapa de Superpoderes e não vê abas técnicas", () => {
+      mockIsAdminUser = false;
+      mockCanAccessInternalPage = vi.fn().mockReturnValue(false);
+
+      renderWithProviders(<VexoOnboardingSetup baseTotal={0} defaultTab="esteira" />);
+
+      // Não exibe os seletores de abas nem títulos de abas técnicas
+      expect(screen.queryByRole("tab", { name: /Esteira Técnica/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: /Implantações Salvas/i })).not.toBeInTheDocument();
+
+      // Conteúdo do Mapa de Superpoderes deve estar visível
+      expect(screen.getByText("🌟 Mapa de Superpoderes do Vexo OS")).toBeInTheDocument();
+    });
+
+    it("Usuário com permissão técnica (onboarding-agent) vê as 3 abas e pode navegar até Implantações Salvas", async () => {
+      mockIsAdminUser = false;
+      mockCanAccessInternalPage = vi.fn().mockImplementation((page: string) => page === "onboarding-agent");
+
+      renderWithProviders(<VexoOnboardingSetup baseTotal={0} defaultTab="salvas" />);
+
+      // As 3 abas devem estar presentes no TabsList
+      expect(screen.getByRole("tab", { name: /Mapa de Superpoderes/i })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Esteira Técnica/i })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Implantações Salvas/i })).toBeInTheDocument();
+
+      // Como defaultTab="salvas", o conteúdo da aba de Implantações Salvas deve ser renderizado
+      expect(screen.getByPlaceholderText(/Buscar por nome da empresa/i)).toBeInTheDocument();
     });
   });
 });

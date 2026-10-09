@@ -148,3 +148,11 @@ export function buildImplementationBriefingWhatsAppMessage(b: ImplementationBrie
 
 _Registrado via Vexo CRM em ${new Date(b.updated_at || b.created_at || Date.now()).toLocaleDateString("pt-BR")}_`;
 }
+
+export function exportImplementationBriefingToPdf(b: ImplementationBriefingExportData) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+  win.document.write(buildImplementationBriefingPdfHtml(b));
+  win.document.close();
+}
+

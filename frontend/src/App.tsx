@@ -380,14 +380,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="implantacao-gd"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <GeracaoDigitalImplementationBriefing />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="implantacao-gd" element={<Navigate to="/crm/implantacao?tab=salvas" replace />} />
               <Route path="briefings-gd" element={<Navigate to="/crm/geracao-digital?tab=briefings" replace />} />
             </Route>
               <Route
