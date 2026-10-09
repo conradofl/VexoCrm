@@ -1382,6 +1382,15 @@ function normalizeInstanceList(list, fallback) {
         [clientId, monthStart.toISOString(), monthEnd.toISOString()]
       );
 
+      const { rows: eventRows } = await query(
+        `SELECT id, name, date, location
+           FROM public.events
+          WHERE client_id = $1
+            AND date >= $2 AND date < $3
+          ORDER BY date ASC`,
+        [clientId, monthStart.toISOString(), monthEnd.toISOString()]
+      );
+
       const dayCampaignCounts = new Map();
       const dayCampaignLeads = new Map();
       for (const d of dispatches || []) {
@@ -1391,6 +1400,21 @@ function normalizeInstanceList(list, fallback) {
         dayCampaignLeads.set(key, (dayCampaignLeads.get(key) || 0) + (Number(d.target_count) || 0));
       }
 
+      const dayEvents = new Map();
+      for (const ev of eventRows || []) {
+        if (!ev.date) continue;
+        const key = dayKeyInTimezone(new Date(ev.date), timezone);
+        if (!dayEvents.has(key)) {
+          dayEvents.set(key, []);
+        }
+        dayEvents.get(key).push({
+          id: ev.id,
+          name: ev.name,
+          location: ev.location,
+          date: ev.date,
+        });
+      }
+
       const dayCounts = {};
       const dayBreakdown = {};
       for (let d = 1; d <= daysInMonth; d++) {
@@ -1398,6 +1422,7 @@ function normalizeInstanceList(list, fallback) {
         const fuCount = counts.get(key) || 0;
         const campCount = dayCampaignCounts.get(key) || 0;
         const campLeads = dayCampaignLeads.get(key) || 0;
+        const eventsForDay = dayEvents.get(key) || [];
         const total = fuCount + campCount;
 
         dayCounts[key] = total;
@@ -1405,6 +1430,7 @@ function normalizeInstanceList(list, fallback) {
           followupCount: fuCount,
           campaignCount: campCount,
           campaignLeadsTotal: campLeads,
+          events: eventsForDay,
           total,
         };
       }
@@ -1462,6 +1488,15 @@ function normalizeInstanceList(list, fallback) {
         [clientId, dayStart.toISOString(), dayEnd.toISOString()]
       );
 
+      const { rows: eventRows } = await query(
+        `SELECT id, name, date, location, esteiras_status
+           FROM public.events
+          WHERE client_id = $1
+            AND date >= $2 AND date < $3
+          ORDER BY date ASC`,
+        [clientId, dayStart.toISOString(), dayEnd.toISOString()]
+      );
+
       const formattedFollowups = items.map((it) => ({
         jobId: it.job_id,
         scheduleId: it.schedule_id,
@@ -1485,6 +1520,15 @@ function normalizeInstanceList(list, fallback) {
         evolutionInstanceId: c.evolution_instance_id,
       }));
 
+      const formattedEvents = (eventRows || []).map((ev) => ({
+        id: ev.id,
+        name: ev.name,
+        date: ev.date,
+        location: ev.location,
+        esteiras_status: ev.esteiras_status,
+        esteirasStatus: ev.esteiras_status,
+      }));
+
       return res.json({
         success: true,
         tenantId: clientId,
@@ -1492,6 +1536,7 @@ function normalizeInstanceList(list, fallback) {
         items: formattedFollowups,
         followups: formattedFollowups,
         campaigns: formattedCampaigns,
+        events: formattedEvents,
       });
     } catch (err) {
       return sendErr(res, 500, "CALENDAR_DAY_FETCH_FAILED", err.message);

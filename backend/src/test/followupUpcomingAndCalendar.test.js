@@ -363,6 +363,7 @@ describe("Etapa 5 Commit 3 — faixa 'Próximos N dias' e calendário", () => {
         followupCount: 2,
         campaignCount: 1,
         campaignLeadsTotal: 1200,
+        events: [],
         total: 3,
       });
     });

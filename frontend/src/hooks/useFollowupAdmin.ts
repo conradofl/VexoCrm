@@ -411,10 +411,20 @@ export function useUpcomingWindow(
   });
 }
 
+export interface CalendarEventItem {
+  id: string;
+  name: string;
+  location?: string | null;
+  date?: string;
+  esteiras_status?: Record<string, string>;
+  esteirasStatus?: Record<string, string>;
+}
+
 export interface CalendarMonthBreakdown {
   followupCount: number;
   campaignCount: number;
   campaignLeadsTotal: number;
+  events?: CalendarEventItem[];
   total: number;
 }
 
@@ -465,6 +475,7 @@ export interface CalendarDay {
   items: CalendarDayItem[];
   followups?: CalendarDayItem[];
   campaigns?: CalendarCampaignItem[];
+  events?: CalendarEventItem[];
 }
 
 export function useFollowupCalendarDay(clientId?: string, date?: string) {

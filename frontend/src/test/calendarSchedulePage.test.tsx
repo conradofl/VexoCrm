@@ -55,6 +55,14 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
             followupCount: 1,
             campaignCount: 1,
             campaignLeadsTotal: 1200,
+            events: [
+              {
+                id: "evt-1",
+                name: "Festival Sunset",
+                location: "Arena Central",
+                date: "2026-10-26T20:00:00.000Z",
+              },
+            ],
             total: 2,
           },
         },
@@ -103,6 +111,14 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
             status: "scheduled",
           },
         ],
+        events: [
+          {
+            id: "evt-1",
+            name: "Festival Sunset",
+            location: "Arena Central",
+            date: "2026-10-26T20:00:00.000Z",
+          },
+        ],
       },
       isLoading: false,
     });
@@ -124,7 +140,7 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
     ).toBeDefined();
   });
 
-  it("exibe filtros rápidos [Todos], [Apenas Campanhas] e [Apenas Follow-ups]", () => {
+  it("exibe filtros rápidos [Todos], [Campanhas], [Follow-ups] e [Eventos]", () => {
     const queryClient = new QueryClient();
     render(
       <QueryClientProvider client={queryClient}>
@@ -135,8 +151,9 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
     );
 
     expect(screen.getByRole("button", { name: "Todos" })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Apenas Campanhas/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Apenas Follow-ups/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Campanhas/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Follow-ups/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Eventos/i })).toBeDefined();
   });
 
   it("exibe campanhas e follow-ups no painel do dia ao clicar em uma data", () => {
@@ -158,6 +175,12 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
     expect(screen.getByText("Campanha Black Friday")).toBeDefined();
     expect(screen.getByText("1.200")).toBeDefined();
     expect(screen.getByText("Ver campanha")).toBeDefined();
+
+    // Seção 🎪 Eventos & Festas do Dia
+    expect(screen.getByText("Eventos & Festas do Dia")).toBeDefined();
+    expect(screen.getAllByText(/Festival Sunset/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Arena Central")).toBeDefined();
+    expect(screen.getByText("Ver evento")).toBeDefined();
 
     // Seção de Follow-ups Individuais
     expect(screen.getByText("Follow-ups Individuais")).toBeDefined();
@@ -183,23 +206,33 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
     // Seleciona o dia 26
     fireEvent.click(screen.getByRole("button", { name: /26/i }));
 
-    // Ambos visíveis no modo Todos
+    // Todos visíveis no modo Todos
     expect(screen.getByText("Campanha Black Friday")).toBeDefined();
     expect(screen.getByText("João da Silva")).toBeDefined();
+    expect(screen.getAllByText(/Festival Sunset/i).length).toBeGreaterThan(0);
 
     // Filtra apenas campanhas
-    fireEvent.click(screen.getByRole("button", { name: /Apenas Campanhas/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^📢 Campanhas$/i }));
     expect(screen.getByText("Campanha Black Friday")).toBeDefined();
     expect(screen.queryByText("João da Silva")).toBeNull();
+    expect(screen.queryByText("Eventos & Festas do Dia")).toBeNull();
 
     // Filtra apenas follow-ups
-    fireEvent.click(screen.getByRole("button", { name: /Apenas Follow-ups/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^🔄 Follow-ups$/i }));
     expect(screen.queryByText("Campanha Black Friday")).toBeNull();
     expect(screen.getByText("João da Silva")).toBeDefined();
+    expect(screen.queryByText("Eventos & Festas do Dia")).toBeNull();
+
+    // Filtra apenas eventos
+    fireEvent.click(screen.getByRole("button", { name: /^🎪 Eventos$/i }));
+    expect(screen.queryByText("Campanha Black Friday")).toBeNull();
+    expect(screen.queryByText("João da Silva")).toBeNull();
+    expect(screen.getByText("Eventos & Festas do Dia")).toBeDefined();
 
     // Volta para todos
     fireEvent.click(screen.getByRole("button", { name: "Todos" }));
     expect(screen.getByText("Campanha Black Friday")).toBeDefined();
     expect(screen.getByText("João da Silva")).toBeDefined();
+    expect(screen.getByText("Eventos & Festas do Dia")).toBeDefined();
   });
 });

@@ -10,6 +10,8 @@ import {
   FileSpreadsheet,
   Users,
   Clock,
+  MapPin,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,13 +22,12 @@ import { useFollowupCalendarMonth, useFollowupCalendarDay } from "@/hooks/useFol
 import { useCancelFollowupJob } from "@/hooks/useFollowupQueue";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 
-// Calendário do módulo de Follow-up (Etapa 5 Commit 3 / Marco 1 Fase 3). É LENTE, não superfície de
-// criação: nada se cria nem se arrasta aqui. Ações permitidas ao abrir um dia:
-// abrir a conversa do lead e cancelar um passo pendente específico.
+// Calendário do módulo de Follow-up (Etapa 5 Commit 3 / Marco 1 & 5 Fase 3). É LENTE, não superfície de
+// criação: exibe followups, campanhas programadas e eventos/festas com esteiras.
 
 const WEEKDAY_LABELS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 
-type CalendarFilter = "all" | "campaigns" | "followups";
+type CalendarFilter = "all" | "campaigns" | "followups" | "events";
 
 function monthKey(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -91,9 +92,11 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
 
   const dayCampaigns = day?.campaigns || [];
   const dayFollowups = day?.followups || day?.items || [];
+  const dayEvents = day?.events || [];
   const visibleCampaigns = filter === "all" || filter === "campaigns" ? dayCampaigns : [];
   const visibleFollowups = filter === "all" || filter === "followups" ? dayFollowups : [];
-  const hasNoItems = visibleCampaigns.length === 0 && visibleFollowups.length === 0;
+  const visibleEvents = filter === "all" || filter === "events" ? dayEvents : [];
+  const hasNoItems = visibleCampaigns.length === 0 && visibleFollowups.length === 0 && visibleEvents.length === 0;
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -134,7 +137,7 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
           </div>
 
           {/* Barra de Filtros Rápidos */}
-          <div className="flex items-center gap-1.5 pt-1 border-t border-border/50">
+          <div className="flex items-center gap-1.5 pt-1 border-t border-border/50 flex-wrap">
             <Button
               type="button"
               variant={filter === "all" ? "default" : "outline"}
@@ -156,7 +159,7 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
               )}
               onClick={() => setFilter("campaigns")}
             >
-              <span>📢</span> Apenas Campanhas
+              <span>📢</span> Campanhas
             </Button>
             <Button
               type="button"
@@ -170,7 +173,21 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
               )}
               onClick={() => setFilter("followups")}
             >
-              <span>🔄</span> Apenas Follow-ups
+              <span>🔄</span> Follow-ups
+            </Button>
+            <Button
+              type="button"
+              variant={filter === "events" ? "default" : "outline"}
+              size="sm"
+              className={cn(
+                "h-7 text-xs px-2.5 gap-1",
+                filter === "events"
+                  ? "bg-pink-600 hover:bg-pink-700 text-white"
+                  : "text-pink-700 dark:text-pink-300 border-pink-300/60 dark:border-pink-800/60 hover:bg-pink-50 dark:hover:bg-pink-950/40"
+              )}
+              onClick={() => setFilter("events")}
+            >
+              <span>🎪</span> Eventos
             </Button>
           </div>
 
@@ -190,9 +207,11 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
               const campCount = breakdown?.campaignCount ?? 0;
               const campLeads = breakdown?.campaignLeadsTotal ?? 0;
               const fuCount = breakdown?.followupCount ?? (campCount === 0 ? rawTotal : 0);
+              const cellEvents = breakdown?.events || [];
 
               const showCampaign = (filter === "all" || filter === "campaigns") && campCount > 0;
               const showFollowup = (filter === "all" || filter === "followups") && fuCount > 0;
+              const showEvents = (filter === "all" || filter === "events") && cellEvents.length > 0;
               const showLegacy = filter === "all" && !breakdown && rawTotal > 0;
 
               const isToday = cell.date === todayStr;
@@ -221,6 +240,16 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
                   </span>
 
                   <div className="flex flex-col items-center gap-0.5 w-full mt-auto">
+                    {showEvents && cellEvents.map((ev) => (
+                      <Badge
+                        key={ev.id}
+                        variant="outline"
+                        className="bg-pink-500/10 text-pink-700 dark:text-pink-300 border-pink-500/20 text-[9px] px-1 w-full flex items-center justify-center font-medium truncate"
+                        title={`🎪 ${ev.name}${ev.location ? ` - ${ev.location}` : ""}`}
+                      >
+                        🎪 {ev.name}
+                      </Badge>
+                    ))}
                     {showCampaign && (
                       <Badge
                         variant="outline"
@@ -254,7 +283,7 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
           </div>
 
           <p className="text-[10px] text-muted-foreground">
-            Lente operacional: exibe tanto as mensagens 1-a-1 de cadências de follow-up quanto os disparos de campanhas em massa programados.
+            Lente operacional: exibe mensagens de follow-up, disparos de campanhas e eventos/festas programados.
           </p>
         </CardContent>
       </Card>
@@ -293,6 +322,64 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {/* Seção 🎪 Eventos & Festas do Dia */}
+                  {visibleEvents.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between pb-1 border-b border-border/50">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-pink-700 dark:text-pink-300">
+                          <span>🎪</span>
+                          <span>Eventos & Festas do Dia</span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] h-4 px-1.5 bg-pink-500/10 text-pink-700 dark:text-pink-300 border-pink-500/30 font-semibold"
+                        >
+                          {visibleEvents.length}
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {visibleEvents.map((ev) => (
+                          <div
+                            key={ev.id}
+                            className="rounded-lg border border-pink-200/70 dark:border-pink-900/40 bg-pink-50/30 dark:bg-pink-950/20 p-2.5 space-y-1.5 text-xs"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-foreground truncate" title={ev.name}>
+                                  🎪 {ev.name}
+                                </p>
+                                {ev.location && (
+                                  <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1 mt-0.5">
+                                    <MapPin className="h-3 w-3 text-pink-600 dark:text-pink-400 shrink-0" />
+                                    {ev.location}
+                                  </p>
+                                )}
+                              </div>
+                              {ev.date && (
+                                <span className="text-[10px] text-muted-foreground font-mono shrink-0 flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  {formatTime(ev.date)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="pt-1 flex items-center justify-end">
+                              <Link to="/crm/livpub?tab=eventos">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[10px] gap-1 hover:bg-pink-100 dark:hover:bg-pink-900/40 text-pink-700 dark:text-pink-300 border-pink-300/50"
+                                >
+                                  <CalendarDays className="h-3 w-3 text-pink-600 dark:text-pink-400" />
+                                  Ver evento
+                                </Button>
+                              </Link>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Seção 📢 Campanhas Programadas */}
                   {visibleCampaigns.length > 0 && (
                     <div className="space-y-2">
