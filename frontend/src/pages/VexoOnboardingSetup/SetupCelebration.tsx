@@ -4,19 +4,19 @@ import { Button } from "@/components/ui/button";
 
 export function SetupCelebration() {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 via-background to-indigo-950/30 p-6 md:p-8 shadow-lg">
+    <div className="relative overflow-hidden rounded-2xl border border-emerald-200/90 bg-gradient-to-br from-emerald-50/70 via-white to-indigo-50/40 dark:from-emerald-950/40 dark:via-background dark:to-indigo-950/30 dark:border-emerald-500/30 p-6 md:p-8 shadow-sm">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-3 max-w-2xl">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100/80 border border-emerald-200 text-emerald-800 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" />
             Implantação Concluída com Sucesso
           </div>
 
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             🎉 Sua Operação Vexo OS está 100% Pronta!
           </h2>
 
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className="text-sm text-slate-600 dark:text-muted-foreground leading-relaxed">
             Parabéns! Todos os 3 pilares da sua máquina comercial inteligente foram configurados:
             chips de WhatsApp conectados, Agente de IA Comercial ativo e base de leads importada.
             Agora é hora de escalar seus resultados.

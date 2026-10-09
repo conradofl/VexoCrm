@@ -34,10 +34,10 @@ export function SetupStepCard({
       className={cn(
         "flex flex-col justify-between rounded-xl border p-5 transition-all shadow-sm",
         isDone
-          ? "bg-card/70 border-emerald-500/20"
+          ? "bg-emerald-50/40 border-emerald-200/80 dark:bg-card/70 dark:border-emerald-500/20"
           : isPrimary
-          ? "bg-card border-indigo-500/40 ring-1 ring-indigo-500/20 shadow-md"
-          : "bg-card/40 border-border/80"
+          ? "bg-white border-indigo-300 ring-1 ring-indigo-500/20 shadow-sm dark:bg-card dark:border-indigo-500/40"
+          : "bg-white border-slate-200/80 dark:bg-card/40 dark:border-border/80"
       )}
     >
       <div className="space-y-4">
@@ -48,17 +48,17 @@ export function SetupStepCard({
               className={cn(
                 "flex items-center justify-center w-10 h-10 rounded-xl shrink-0",
                 isDone
-                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                  : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                  ? "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
+                  : "bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20"
               )}
             >
               {icon}
             </div>
             <div>
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-muted-foreground uppercase tracking-wider">
                 Passo {stepNumber}
               </span>
-              <h3 className="text-base font-semibold text-foreground">
+              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                 {title}
               </h3>
             </div>
@@ -68,14 +68,14 @@ export function SetupStepCard({
             className={cn(
               "inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border",
               isDone
-                ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                : "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                ? "text-emerald-700 bg-emerald-100/80 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/20"
+                : "text-amber-800 bg-amber-100/80 border-amber-200 dark:text-amber-400 dark:bg-amber-500/10 dark:border-amber-500/20"
             )}
           >
             {isDone ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             ) : (
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
             )}
             {statusLabel}
           </span>

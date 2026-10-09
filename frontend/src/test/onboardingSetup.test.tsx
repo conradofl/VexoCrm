@@ -225,6 +225,36 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(screen.getByText("✅ Operação 100% Ativa")).toBeInTheDocument();
       expect(screen.getByText(/Ver Guia de Implantação/i)).toBeInTheDocument();
     });
+    it("Aplica classes de alto contraste e fundo neutro para modo claro e modo escuro", () => {
+      mockSelectedClient = {
+        id: "empresa-1",
+        name: "Empresa Teste",
+        n8n_settings: {
+          chatbot_enabled: false,
+          evolution_instances: [{ name: "Chip 1", active: true }],
+        } as any,
+      };
+
+      const { container } = renderWithProviders(
+        <OnboardingProgressCard clientId="empresa-1" baseTotal={0} />
+      );
+
+      // Container principal com gradiente suave no modo claro
+      const mainCard = container.querySelector(".rounded-xl.border");
+      expect(mainCard?.className).toContain("from-white");
+      expect(mainCard?.className).toContain("via-slate-50");
+      expect(mainCard?.className).toContain("border-slate-200/80");
+
+      // Badge de pronto com alto contraste no modo claro
+      const prontoBadge = screen.getByText("Pronto").closest("span");
+      expect(prontoBadge?.className).toContain("text-emerald-700");
+      expect(prontoBadge?.className).toContain("bg-emerald-100/80");
+
+      // Badge de pendente com alto contraste no modo claro
+      const pendenteBadges = screen.getAllByText("Pendente");
+      expect(pendenteBadges[0].className).toContain("text-amber-800");
+      expect(pendenteBadges[0].className).toContain("bg-amber-100/80");
+    });
   });
 
   describe("3. Tela Dedicada VexoOnboardingSetup (/crm/implantacao)", () => {
@@ -265,6 +295,115 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(screen.getByText("Passo 3")).toBeInTheDocument();
       expect(screen.getByText("Base Vazia")).toBeInTheDocument();
       expect(screen.getByText("Subir Planilha / Importar")).toBeInTheDocument();
+    });
+
+    it("Renderiza Aba 1 (🌟 Mapa de Superpoderes) com os 8 cards didáticos, explicações e atalhos", () => {
+      mockSelectedClient = {
+        id: "empresa-1",
+        name: "Empresa Teste",
+        n8n_settings: {
+          chatbot_enabled: false,
+          evolution_instances: [],
+        } as any,
+      };
+
+      renderWithProviders(<VexoOnboardingSetup baseTotal={0} defaultTab="mapa" />);
+
+      // Abas presentes no topo
+      expect(screen.getByRole("tab", { name: /Mapa de Superpoderes/i })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Esteira de Implantação/i })).toBeInTheDocument();
+
+      // 8 Superpoderes
+      expect(screen.getByText("Agente de Atendimento 24/7")).toBeInTheDocument();
+      expect(screen.getByText("Agente Extrator de Ficha")).toBeInTheDocument();
+      expect(screen.getByText("Agente de Disparo em Massa")).toBeInTheDocument();
+      expect(screen.getByText("Campanhas Recorrentes")).toBeInTheDocument();
+      expect(screen.getByText("Vexo Smart Links (Cliques)")).toBeInTheDocument();
+      expect(screen.getByText("Aviso de Lead Parado (SLA)")).toBeInTheDocument();
+      expect(screen.getByText("Reativação Automática")).toBeInTheDocument();
+      expect(screen.getByText("Vexo Academy")).toBeInTheDocument();
+
+      // Caixa didática "Por que usar:" em múltiplos cards
+      expect(screen.getAllByText(/💡 Por que usar:/i).length).toBe(8);
+
+      // Atalhos dos superpoderes
+      const links = screen.getAllByRole("link");
+      expect(links.some((l) => l.getAttribute("href") === "/crm/agente")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/banco-de-dados")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/planilhas")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/planilhas?tab=campanhas")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/banco-de-dados?stalled=3")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/followup")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/onboarding")).toBe(true);
+    });
+
+    it("Renderiza Aba 2 (🛠️ Esteira Prática de Implantação) com 3 etapas didáticas e simulador", () => {
+      mockSelectedClient = {
+        id: "empresa-1",
+        name: "Empresa Teste",
+        n8n_settings: {
+          chatbot_enabled: true,
+          evolution_instances: [{ name: "Chip Principal", active: true }],
+        } as any,
+      };
+
+      renderWithProviders(<VexoOnboardingSetup baseTotal={0} defaultTab="esteira" />);
+
+      // Passo 1: Identidade da Empresa & Horários
+      expect(screen.getByText("Identidade da Empresa & Horários")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /Para o robô saber a hora certa de transferir para sua equipe ou avisar que o escritório está fechado/i
+        )
+      ).toBeInTheDocument();
+
+      // Passo 2: O Cérebro do Agente (5 Pilares Simplificados)
+      expect(
+        screen.getByText("O Cérebro do Agente (5 Pilares Simplificados)")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /Para blindar as respostas da IA contra promessas falsas e garantir precisão cirúrgica/i
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("5. Blindagem: O que a IA NUNCA pode prometer")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Documentos & PDFs para Conhecimento do Robô (RAG)")
+      ).toBeInTheDocument();
+
+      // Passo 3: Conectar WhatsApp & Testar no Simulador ao Vivo
+      expect(
+        screen.getByText("Conectar WhatsApp & Testar no Simulador ao Vivo")
+      ).toBeInTheDocument();
+      expect(screen.getByText("Simulador Interativo ao Vivo")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Digite uma mensagem de teste/i)).toBeInTheDocument();
+    });
+
+    it("Permite interagir com perguntas rápidas no Simulador ao Vivo", async () => {
+      mockSelectedClient = {
+        id: "empresa-1",
+        name: "Empresa Teste",
+        n8n_settings: {
+          chatbot_enabled: true,
+          evolution_instances: [{ name: "Chip Principal", active: true }],
+        } as any,
+      };
+
+      renderWithProviders(<VexoOnboardingSetup baseTotal={0} defaultTab="esteira" />);
+
+      // Clica em um teste rápido
+      const quickButton = screen.getByText("💰 Qual o valor do serviço?");
+      fireEvent.click(quickButton);
+
+      // Mensagem do usuário deve ser exibida na tela
+      expect(screen.getByText("Qual é o valor do serviço?")).toBeInTheDocument();
+
+      // Aguarda resposta da IA simulada
+      await waitFor(() => {
+        expect(screen.getByText(/Nossos serviços e produtos têm investimento/i)).toBeInTheDocument();
+      }, { timeout: 1500 });
     });
 
     it("Exibe painel comemorativo quando isFullyReady === true com atalhos rápidos", () => {
