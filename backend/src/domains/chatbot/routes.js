@@ -13,6 +13,7 @@ import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
 import { summarizeChatWithAI } from "../leads/chatInsight.js";
 import { saveLeadAgreement } from "../../services/leadAgreement.js";
 import { applyCorsHeaders } from "../../services/corsPolicy.js";
+import { normalizeHttpUrl } from "../../services/tenant.js";
 import { upsertLeadByPhone, isRealName } from "../../services/leadUpsert.js";
 import {
   extractCommercialProfileFromChat,
