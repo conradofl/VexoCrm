@@ -19,12 +19,12 @@ import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 
 export const AVAILABLE_VOICES = [
-  { id: "nova", label: "Nova", desc: "Feminina Expressiva & Enérgica (Padrão)", gender: "Feminina" },
-  { id: "shimmer", label: "Shimmer", desc: "Feminina Suave & Calma", gender: "Feminina" },
-  { id: "alloy", label: "Alloy", desc: "Neutra & Profissional", gender: "Neutra" },
-  { id: "echo", label: "Echo", desc: "Masculina Natural & Dinâmica", gender: "Masculina" },
-  { id: "onyx", label: "Onyx", desc: "Masculina Encorpada & Confiante", gender: "Masculina" },
-  { id: "fable", label: "Fable", desc: "Expressiva & Marcante", gender: "Expressiva" },
+  { id: "nova", label: "Nova (Francisca)", desc: "Feminina Expressiva - Padrão", gender: "Feminina" },
+  { id: "echo", label: "Echo (Antônio)", desc: "Masculina Natural", gender: "Masculina" },
+  { id: "shimmer", label: "Shimmer (Thalita)", desc: "Feminina Jovem", gender: "Feminina" },
+  { id: "alloy", label: "Alloy (Manuela)", desc: "Feminina Suave", gender: "Feminina" },
+  { id: "onyx", label: "Onyx (Fábio)", desc: "Masculina Corporativa", gender: "Masculina" },
+  { id: "fable", label: "Fable (Donato)", desc: "Masculina Encorpada", gender: "Masculina" },
 ] as const;
 
 export const VOICE_MODES = [
@@ -207,7 +207,7 @@ export function VoiceSettingsCard({
         throw new Error("Resposta de áudio vazia do servidor");
       }
 
-      const audioSrc = `data:${data.mimetype || "audio/ogg; codecs=opus"};base64,${data.audioBase64}`;
+      const audioSrc = `data:${data.mimetype || "audio/mpeg"};base64,${data.audioBase64}`;
       const audio = new Audio(audioSrc);
       audioPlayerRef.current = audio;
 
@@ -249,7 +249,7 @@ export function VoiceSettingsCard({
               <Sparkles className="h-3.5 w-3.5 text-amber-500" />
             </CardTitle>
             <CardDescription className="text-xs">
-              Responda leads no WhatsApp com notas de voz humanizadas e naturais (OpenAI TTS).
+              Responda leads no WhatsApp com notas de voz humanizadas e naturais (Microsoft Neural TTS Gratuito).
             </CardDescription>
           </div>
           <Badge

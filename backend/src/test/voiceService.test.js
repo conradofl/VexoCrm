@@ -1,22 +1,31 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   generateSpeechAudio,
   resolveVoiceDecision,
   isSupportedVoice,
   SUPPORTED_OPENAI_VOICES,
-  OPENAI_TTS_URL,
+  EDGE_VOICE_MAP,
 } from "../services/voiceService.js";
+import { EdgeTTS } from "@travisvn/edge-tts";
 
-describe("voiceService — Marco 4: Mensageria Multimodal & Voz da IA", () => {
-  const originalEnv = process.env;
-
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    vi.restoreAllMocks();
+vi.mock("@travisvn/edge-tts", () => {
+  const MockEdgeTTS = vi.fn().mockImplementation(function (text, voice, options) {
+    this.text = text;
+    this.voice = voice;
+    this.options = options;
+    this.synthesize = vi.fn().mockResolvedValue({
+      audio: {
+        arrayBuffer: async () => new Uint8Array([10, 20, 30, 40, 50, 60]).buffer,
+      },
+      subtitle: [],
+    });
   });
+  return { EdgeTTS: MockEdgeTTS };
+});
 
-  afterEach(() => {
-    process.env = originalEnv;
+describe("voiceService — Marco 4: Microsoft Edge Neural TTS Gratuito (pt-BR)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   describe("1. Regras de Decisão de Voz (resolveVoiceDecision)", () => {
@@ -42,14 +51,21 @@ describe("voiceService — Marco 4: Mensageria Multimodal & Voz da IA", () => {
     });
   });
 
-  describe("2. Catálogo e Validação de Vozes Suportadas", () => {
-    it("reconhece as 6 vozes OpenAI canônicas", () => {
-      const canonical = ["nova", "shimmer", "alloy", "echo", "onyx", "fable"];
+  describe("2. Catálogo e Mapeamento de Vozes PT-BR", () => {
+    it("reconhece as 6 vozes neurais e mapeia para vozes pt-BR da Microsoft", () => {
+      const canonical = ["nova", "echo", "shimmer", "alloy", "onyx", "fable"];
       for (const v of canonical) {
         expect(isSupportedVoice(v)).toBe(true);
         expect(isSupportedVoice(v.toUpperCase())).toBe(true);
       }
       expect(SUPPORTED_OPENAI_VOICES.length).toBe(6);
+
+      expect(EDGE_VOICE_MAP.nova).toBe("pt-BR-FranciscaNeural");
+      expect(EDGE_VOICE_MAP.echo).toBe("pt-BR-AntonioNeural");
+      expect(EDGE_VOICE_MAP.shimmer).toBe("pt-BR-ThalitaNeural");
+      expect(EDGE_VOICE_MAP.alloy).toBe("pt-BR-ManuelaNeural");
+      expect(EDGE_VOICE_MAP.onyx).toBe("pt-BR-FabioNeural");
+      expect(EDGE_VOICE_MAP.fable).toBe("pt-BR-DonatoNeural");
     });
 
     it("rejeita vozes inválidas ou inexistentes", () => {
@@ -59,9 +75,8 @@ describe("voiceService — Marco 4: Mensageria Multimodal & Voz da IA", () => {
     });
   });
 
-  describe("3. Síntese de Áudio com OpenAI TTS (generateSpeechAudio)", () => {
+  describe("3. Síntese de Áudio com EdgeTTS (generateSpeechAudio)", () => {
     it("retorna null se o texto for vazio ou conter apenas espaços", async () => {
-      process.env.OPENAI_API_KEY = "sk-test-key";
       const res1 = await generateSpeechAudio({ text: "" });
       const res2 = await generateSpeechAudio({ text: "   \n\t  " });
       const res3 = await generateSpeechAudio({ text: null });
@@ -70,25 +85,8 @@ describe("voiceService — Marco 4: Mensageria Multimodal & Voz da IA", () => {
       expect(res3).toBeNull();
     });
 
-    it("retorna null de forma segura se OPENAI_API_KEY não estiver configurada no servidor", async () => {
-      delete process.env.OPENAI_API_KEY;
-      const res = await generateSpeechAudio({ text: "Olá cliente" });
-      expect(res).toBeNull();
-    });
-
-    it("dispara requisição para OpenAI com parâmetros corretos e formato opus", async () => {
-      process.env.OPENAI_API_KEY = "sk-valid-test-key";
-
-      const uint8 = new Uint8Array([10, 20, 30, 40, 50, 60]);
-      const fakeArrayBuffer = uint8.buffer;
-      const expectedBase64 = Buffer.from(fakeArrayBuffer).toString("base64");
-
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        arrayBuffer: async () => fakeArrayBuffer,
-      });
-      global.fetch = fetchMock;
+    it("executa síntese via EdgeTTS com voz pt-BR mapeada, velocidade convertida e formato mp3", async () => {
+      const expectedBase64 = Buffer.from(new Uint8Array([10, 20, 30, 40, 50, 60]).buffer).toString("base64");
 
       const result = await generateSpeechAudio({
         text: "Olá! Como posso ajudar você hoje?",
@@ -96,40 +94,34 @@ describe("voiceService — Marco 4: Mensageria Multimodal & Voz da IA", () => {
         speed: 1.1,
       });
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [calledUrl, calledOptions] = fetchMock.mock.calls[0];
-
-      expect(calledUrl).toBe(OPENAI_TTS_URL);
-      expect(calledOptions.method).toBe("POST");
-      expect(calledOptions.headers).toMatchObject({
-        Authorization: "Bearer sk-valid-test-key",
-        "Content-Type": "application/json",
-      });
-
-      const body = JSON.parse(calledOptions.body);
-      expect(body).toEqual({
-        model: "tts-1",
-        input: "Olá! Como posso ajudar você hoje?",
-        voice: "echo",
-        response_format: "opus",
-        speed: 1.1,
-      });
+      expect(EdgeTTS).toHaveBeenCalledWith(
+        "Olá! Como posso ajudar você hoje?",
+        "pt-BR-AntonioNeural",
+        { rate: "+10%" }
+      );
 
       expect(result).not.toBeNull();
-      expect(result.mimetype).toBe("audio/ogg; codecs=opus");
-      expect(result.format).toBe("opus");
+      expect(result.mimetype).toBe("audio/mpeg");
+      expect(result.format).toBe("mp3");
       expect(result.base64).toBe(expectedBase64);
     });
 
-    it("Fallback de Ouro: retorna null sem estourar exceção quando a API da OpenAI retorna erro HTTP", async () => {
-      process.env.OPENAI_API_KEY = "sk-valid-test-key";
-
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 429,
-        text: async () => JSON.stringify({ error: { message: "Rate limit exceeded" } }),
+    it("usa FranciscaNeural (+0%) como voz padrão quando voz não for informada", async () => {
+      await generateSpeechAudio({
+        text: "Mensagem de teste",
       });
-      global.fetch = fetchMock;
+
+      expect(EdgeTTS).toHaveBeenCalledWith(
+        "Mensagem de teste",
+        "pt-BR-FranciscaNeural",
+        { rate: "+0%" }
+      );
+    });
+
+    it("Fallback de Ouro: retorna null sem estourar exceção quando o EdgeTTS falha", async () => {
+      vi.mocked(EdgeTTS).mockImplementationOnce(function () {
+        this.synthesize = vi.fn().mockRejectedValue(new Error("Falha na conexão com Microsoft TTS"));
+      });
 
       const result = await generateSpeechAudio({
         text: "Teste de erro",
@@ -139,14 +131,13 @@ describe("voiceService — Marco 4: Mensageria Multimodal & Voz da IA", () => {
       expect(result).toBeNull();
     });
 
-    it("Fallback de Ouro: retorna null quando ocorre timeout ou erro de rede", async () => {
-      process.env.OPENAI_API_KEY = "sk-valid-test-key";
-
-      const fetchMock = vi.fn().mockRejectedValue(new Error("Timeout de conexão"));
-      global.fetch = fetchMock;
+    it("Fallback de Ouro: retorna null quando o retorno de áudio é nulo", async () => {
+      vi.mocked(EdgeTTS).mockImplementationOnce(function () {
+        this.synthesize = vi.fn().mockResolvedValue({ audio: null });
+      });
 
       const result = await generateSpeechAudio({
-        text: "Teste de timeout",
+        text: "Teste de audio nulo",
         voice: "nova",
       });
 

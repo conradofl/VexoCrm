@@ -3712,7 +3712,7 @@ export function registerChatbotRoutes(app, deps) {
       if (!speech?.base64) {
         return res.status(502).json({
           success: false,
-          error: "Não foi possível sintetizar a prévia de voz. Verifique se a chave OPENAI_API_KEY está configurada no servidor.",
+          error: "Não foi possível sintetizar a prévia de voz.",
         });
       }
 
