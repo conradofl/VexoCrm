@@ -40,8 +40,8 @@ describe("Card Potencial da Base — Métricas do Backend (GET /api/leads) e Per
       CREATE TABLE leads (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL REFERENCES leads_clients(id) ON DELETE CASCADE,
         telefone text NOT NULL, phone text, nome text, status text, potential_contract_value numeric(14,2), dados jsonb NOT NULL DEFAULT '{}'::jsonb,
-        lead_source text, created_at timestamptz NOT NULL DEFAULT now(), stage text DEFAULT 'cold', temperature text DEFAULT 'warm',
-        tags text[] DEFAULT ARRAY[]::text[], last_interaction_at timestamptz, raw_chat_summary text, assigned_to text);
+        lead_source text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), stage text DEFAULT 'cold', temperature text DEFAULT 'warm',
+        tags text[] DEFAULT ARRAY[]::text[], last_interaction_at timestamptz, last_message_at timestamptz, raw_chat_summary text, assigned_to text);
       INSERT INTO leads_clients (id, name, ticket_medio) VALUES ('gmca', 'GMCA', 1000);
     `;
     const openDbs = [];

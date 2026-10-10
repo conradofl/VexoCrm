@@ -2000,13 +2000,7 @@ export async function resolveInstanceIdentifier({ clientId, identifier = null, p
   const requested = raw.split(",").map((s) => s.trim()).filter(Boolean);
   if (requested.length === 0) return { canonicalName: null, aliases: [], chip: null };
 
-  let instances = [];
-  try {
-    instances = await getLeadClientEvolutionInstances(clientId, db);
-  } catch (err) {
-    console.warn("[resolveInstanceIdentifier] Erro ao buscar instâncias:", err?.message || err);
-    return { canonicalName: requested[0], aliases: requested, chip: null };
-  }
+  const instances = await getLeadClientEvolutionInstances(clientId, db);
 
   const aliasesSet = new Set();
   let firstCanonical = null;
@@ -2071,37 +2065,58 @@ export async function resolveEvolutionInstanceOwner({ clientId, instanceName = n
   return chip?.owner_uid || null;
 }
 
+export function buildEvolutionGetBase64Payload(messagePayload) {
+  if (!messagePayload) return null;
+
+  // 1. Se for string simples (waMessageId)
+  if (typeof messagePayload === "string") {
+    return {
+      message: { key: { id: messagePayload.trim() } },
+      convertToMp4: false,
+    };
+  }
+
+  // 2. Se já estiver explicitamente envelopado com a chave canônica: message.key.id
+  if (
+    typeof messagePayload === "object" &&
+    messagePayload !== null &&
+    messagePayload.message &&
+    typeof messagePayload.message === "object" &&
+    messagePayload.message.key &&
+    typeof messagePayload.message.key === "object" &&
+    messagePayload.message.key.id
+  ) {
+    return {
+      message: messagePayload.message,
+      convertToMp4: messagePayload.convertToMp4 ?? false,
+    };
+  }
+
+  // 3. Qualquer outro objeto (ex: payload do webhook da Evolution com key.id e message.audioMessage):
+  // Envelopa o objeto inteiro dentro da chave "message", conforme exigido pelo endpoint /chat/getBase64FromMediaMessage
+  return {
+    message: messagePayload,
+    convertToMp4: false,
+  };
+}
+
 /**
  * Puxa o base64 de uma mensagem de mídia sob demanda da Evolution API.
  * Formatos suportados:
  * 1. Objeto completo recebido no webhook: { message: data, convertToMp4: false } (~43ms)
  * 2. Somente a chave wa_message_id na cascata: { message: { key: { id: waMessageId } }, convertToMp4: false } (~200-300ms)
  */
-export async function fetchMediaBase64FromEvolution(instanceName, messagePayload) {
+export async function fetchMediaBase64FromEvolution(instanceName, messagePayload, options = {}) {
   if (!instanceName || !messagePayload) return null;
-  const baseUrl = normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
-  const apiKey = process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+  const baseUrl = normalizeHttpUrl(options.baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey = options.apiKey || options.webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
   if (!apiKey) {
     console.warn("[evolution] EVOLUTION_API_KEY não configurada para fetchMediaBase64FromEvolution");
     return null;
   }
 
   const url = `${baseUrl.replace(/\/+$/, "")}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`;
-
-  let bodyPayload;
-  if (messagePayload && typeof messagePayload === "object" && "message" in messagePayload) {
-    bodyPayload = messagePayload;
-  } else if (typeof messagePayload === "string") {
-    bodyPayload = {
-      message: { key: { id: messagePayload } },
-      convertToMp4: false,
-    };
-  } else {
-    bodyPayload = {
-      message: messagePayload,
-      convertToMp4: false,
-    };
-  }
+  const bodyPayload = buildEvolutionGetBase64Payload(messagePayload);
 
   try {
     const res = await fetch(url, {
@@ -2115,7 +2130,8 @@ export async function fetchMediaBase64FromEvolution(instanceName, messagePayload
     });
 
     if (!res.ok) {
-      console.warn(`[evolution] getBase64FromMediaMessage HTTP ${res.status} para instância "${instanceName}"`);
+      const errText = await res.text().catch(() => "");
+      console.warn(`[evolution] getBase64FromMediaMessage HTTP ${res.status} para instância "${instanceName}": ${errText}`);
       return null;
     }
 

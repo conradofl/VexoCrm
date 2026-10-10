@@ -691,6 +691,10 @@ function normalizeInstanceList(list, fallback) {
           .map((f) => ({ name: f.name, required: f.required })),
       ];
 
+      if (!audit.prompt.value || !String(audit.prompt.value).trim()) {
+        return sendErr(res, 400, "EMPTY_EFFECTIVE_PROMPT", "Escreva o prompt deste agente antes de consolidar.");
+      }
+
       // Validação estrita: o prompt e campos consolidados DEVEM possuir instruções viáveis.
       // Se não passar, recusa com 400 e lista os erros detalhados item por item.
       const validation = validateAutonomousPrompt({

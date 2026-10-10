@@ -765,10 +765,28 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
     if (mediaBase64 && !isGroup && !fromMe) {
       const transcription = await transcribeAudio(mediaBase64, effectiveMime);
       if (transcription) {
-        return { type, text: transcription, transcribed: true, waMessageId, messageTimestamp, mediaPath };
+        return {
+          type,
+          text: transcription,
+          displayLabel: transcription,
+          transcribed: true,
+          transcriptionFailed: false,
+          waMessageId,
+          messageTimestamp,
+          mediaPath,
+        };
       }
     }
-    return { type, text: "[áudio]", transcribed: false, waMessageId, messageTimestamp, mediaPath };
+    return {
+      type,
+      text: "[áudio]",
+      displayLabel: "[áudio]",
+      transcribed: false,
+      transcriptionFailed: true,
+      waMessageId,
+      messageTimestamp,
+      mediaPath,
+    };
   }
 
   if (type === "image") {
@@ -1447,20 +1465,34 @@ export function appendToHistory(history, userText, assistantText) {
   ];
 }
 
+export function isSystemPlaceholderOrMediaMarker(text) {
+  if (!text || typeof text !== "string") return false;
+  const t = text.trim().toLowerCase();
+  return /^\[(áudio|audio|imagem|image|vídeo|video|sticker|figurinha|documento|document|reação|reaction|contato|contact|localização|location).*\]$/i.test(t);
+}
+
 /**
  * Freio contra loop com menus/bots automáticos:
  * Se as últimas `threshold` mensagens recebidas de um mesmo contato forem idênticas,
  * detecta loop para parar o ciclo infinito sem gastar chamadas de IA.
+ * Ignora estritamente marcadores de sistema e placeholders de mídia ([áudio], [imagem], etc.).
  */
 export function checkBotLoop(storedHistorico = [], currentIncomingText = "", threshold = 3) {
   if (!currentIncomingText || !currentIncomingText.trim()) {
     return { isLoop: false, count: 0, reason: null };
   }
+
+  // Placeholders de mídia/sistema nunca contam como repetição de menu de bot
+  if (isSystemPlaceholderOrMediaMarker(currentIncomingText)) {
+    return { isLoop: false, count: 0, reason: null };
+  }
+
   const normalizedIncoming = currentIncomingText.trim().toLowerCase();
 
   const userHistory = (storedHistorico || [])
     .filter((h) => h && h.role === "user" && typeof h.content === "string")
-    .map((h) => h.content.trim().toLowerCase());
+    .map((h) => h.content.trim().toLowerCase())
+    .filter((content) => !isSystemPlaceholderOrMediaMarker(content));
 
   userHistory.push(normalizedIncoming);
 
@@ -1664,18 +1696,6 @@ export async function processBatch({
   const modelConfig = getChatbotModel(effectivePersonaModel);
   const leadsTable = chatbotLeadsTable(clientId);
 
-  // Combinar textos do batch
-  const combinedText = messages
-    .map((m) => m.text)
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-
-  if (!combinedText) {
-    console.log("[chatbot-ai] Empty batch, skipping");
-    return null;
-  }
-
   // Carregar estado atual do banco
   const { data: existingArray } = await supabase
     .from(leadsTable)
@@ -1690,6 +1710,115 @@ export async function processBatch({
     .limit(1);
 
   const existing = existingArray?.[0] || null;
+
+  // Combinar textos válidos do batch (excluindo marcadores de áudio não transcrito)
+  const validTexts = (messages || [])
+    .filter((m) => {
+      if (!m?.text) return false;
+      // Se for áudio não transcrito / com falha, NÃO alimenta a LLM como texto digitado
+      if (m.type === "audio" && (m.transcribed === false || m.transcriptionFailed === true || m.text === "[áudio]")) {
+        return false;
+      }
+      return true;
+    })
+    .map((m) => (typeof m.text === "string" ? m.text.trim() : ""))
+    .filter(Boolean);
+
+  const combinedText = validTexts.join("\n").trim();
+  const hasFailedAudioOnly = (messages || []).some((m) => m.type === "audio" && (m.transcribed === false || m.transcriptionFailed === true || m.text === "[áudio]")) && !combinedText;
+
+  // Se o lead enviou apenas áudio que não pôde ser transcrito (falha de download ou áudio inaudível):
+  if (hasFailedAudioOnly) {
+    const dadosAntigos = existing?.dados || {};
+    const audioWarnedAt = dadosAntigos.audio_unclear_warned_at || null;
+    const storedHistorico = parseStoredHistorico(existing?.historico) || parseStoredHistorico(existing?.dados?.historico);
+    const history = buildHistory(storedHistorico);
+
+    // Se já avisou uma vez nesta conversa sobre áudio incompreendido, o robô NÃO responde de novo
+    // para evitar parecer robô quebrado e queimar cota do chip.
+    // Apenas registra [áudio não compreendido] no histórico para o operador ver na tela.
+    if (audioWarnedAt) {
+      console.log("[chatbot-ai] Áudio inaudível recebido, mas lead já foi avisado anteriormente nesta conversa. Silenciando resposta automática.", {
+        clientId,
+        phone: maskPhoneForLog(phone),
+      });
+
+      if (existing?.id && !isSimulation && !noPersist) {
+        const newHistory = [...history, { role: "user", content: "[áudio não compreendido]" }];
+        const audioFailCount = (dadosAntigos.audio_fail_count || 1) + 1;
+        await supabase
+          .from(leadsTable)
+          .update({
+            historico: serializeHistorico(newHistory),
+            dados: {
+              ...dadosAntigos,
+              audio_fail_count: audioFailCount,
+              audio_last_failed_at: new Date().toISOString(),
+            },
+            status_conversa: "em_atendimento",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id)
+          .eq("client_id", clientId);
+      }
+
+      return {
+        mensagem: null,
+        status_conversa: "em_atendimento",
+        dados: existing?.dados || {},
+        lead_source: existing?.lead_source || null,
+        classificacao: existing?.status || null,
+        finalizado: false,
+        audioTranscriptionFailed: true,
+        silencedRepeatedAudioWarning: true,
+      };
+    }
+
+    // Primeira vez: envia o aviso explicativo e grava audio_unclear_warned_at em dados
+    console.warn("[chatbot-ai] Áudio recebido não pôde ser transcrito. Enviando resposta explicativa ao lead.", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+    });
+
+    const audioUnclearMsg = "Recebi seu áudio, mas infelizmente não consegui ouvi-lo com clareza. Poderia me enviar por texto ou tentar mandar novamente?";
+
+    if (existing?.id && !isSimulation && !noPersist) {
+      const newHistory = appendToHistory(history, "[áudio não compreendido]", audioUnclearMsg);
+      await supabase
+        .from(leadsTable)
+        .update({
+          historico: serializeHistorico(newHistory),
+          dados: {
+            ...dadosAntigos,
+            audio_unclear_warned_at: new Date().toISOString(),
+            audio_fail_count: 1,
+            audio_last_failed_at: new Date().toISOString(),
+          },
+          status_conversa: "em_atendimento",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id)
+        .eq("client_id", clientId);
+    }
+
+    return {
+      mensagem: audioUnclearMsg,
+      status_conversa: "em_atendimento",
+      dados: {
+        ...dadosAntigos,
+        audio_unclear_warned_at: new Date().toISOString(),
+      },
+      lead_source: existing?.lead_source || null,
+      classificacao: existing?.status || null,
+      finalizado: false,
+      audioTranscriptionFailed: true,
+    };
+  }
+
+  if (!combinedText) {
+    console.log("[chatbot-ai] Empty batch, skipping");
+    return null;
+  }
 
   // ── Cenário 1: lead já finalizado voltou a contatar ──────────────────────
   //

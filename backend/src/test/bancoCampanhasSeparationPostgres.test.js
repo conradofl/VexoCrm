@@ -37,6 +37,8 @@ const SCHEMA = `
     lead_source TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
+    last_message_at TIMESTAMPTZ,
+    last_interaction_at TIMESTAMPTZ,
     UNIQUE (client_id, telefone)
   );
   CREATE TABLE IF NOT EXISTS public.lead_imports (
