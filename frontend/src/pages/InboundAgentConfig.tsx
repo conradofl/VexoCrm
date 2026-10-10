@@ -18,6 +18,8 @@ import {
   ChevronRight,
   Database,
   Archive,
+  Users,
+  UserCheck,
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -223,7 +225,7 @@ export default function InboundAgentConfig() {
   const [inboundRole, setInboundRole] = useState<"atendimento" | "qualificador">("atendimento");
 
   // Escopo de inbound e Frase de Recontato configurados no tenant (lead_client_n8n_settings)
-  const [chatbotInboundScope, setChatbotInboundScope] = useState<"leads_only" | "all">("leads_only");
+  const [chatbotInboundScope, setChatbotInboundScope] = useState<"leads_only" | "all">("all");
   const [recontactMessage, setRecontactMessage] = useState("");
   // Rodízio de SDR: "todos" avisa a lista inteira (de sempre); "rodizio" gira
   // um consultor por vez, fixo por lead (services/sdrTarget.js).
@@ -235,11 +237,12 @@ export default function InboundAgentConfig() {
 
   useEffect(() => {
     if (tenantN8nSettings) {
-      setChatbotInboundScope(tenantN8nSettings.chatbot_inbound_scope === "all" ? "all" : "leads_only");
+      setChatbotInboundScope(tenantN8nSettings.chatbot_inbound_scope === "leads_only" ? "leads_only" : "all");
       setRecontactMessage(tenantN8nSettings.recontact_message ?? "");
       setSdrDistribution(tenantN8nSettings.sdr_distribution === "rodizio" ? "rodizio" : "todos");
     }
-  }, [tenantN8nSettings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClientId, tenantN8nSettings?.updated_at]);
 
   const rotationNext = useSdrRotationNext(selectedClientId || null, sdrDistribution === "rodizio");
 
@@ -342,6 +345,14 @@ export default function InboundAgentConfig() {
           tenant_id: selectedClientId,
           ...payload,
         } as any);
+        if (selectedClientId) {
+          await updateN8nSettings.mutateAsync({
+            tenantId: selectedClientId,
+            chatbotInboundScope,
+            recontactMessage,
+            sdrDistribution,
+          });
+        }
         const draftIdSalvo = activeCompany.id;
         if (criada?.id) setCompanyId(criada.id);
         setDrafts((prev) => prev.filter((d) => d.id !== draftIdSalvo));
@@ -1050,6 +1061,59 @@ export default function InboundAgentConfig() {
                       <SelectItem value="qualificador">Qualificador — responde quem recebeu disparo</SelectItem>
                     </SelectContent>
                   </Select>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4 text-indigo-500" />
+                    Escopo de Atendimento
+                  </CardTitle>
+                  <CardDescription>
+                    Define quem o chatbot do tenant está autorizado a atender automaticamente. Vale para o tenant inteiro.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+                    <button
+                      type="button"
+                      onClick={() => setChatbotInboundScope("all")}
+                      className={cn(
+                        "flex flex-col items-start gap-1.5 rounded-lg border p-3.5 text-left transition-colors cursor-pointer",
+                        chatbotInboundScope === "all"
+                          ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 ring-1 ring-indigo-500"
+                          : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-950"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 font-semibold text-sm">
+                        <Users className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        <span>Atender a todos</span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Novos contatos + Leads cadastrados
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setChatbotInboundScope("leads_only")}
+                      className={cn(
+                        "flex flex-col items-start gap-1.5 rounded-lg border p-3.5 text-left transition-colors cursor-pointer",
+                        chatbotInboundScope === "leads_only"
+                          ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 ring-1 ring-indigo-500"
+                          : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-950"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 font-semibold text-sm">
+                        <UserCheck className="h-4 w-4 text-slate-600 dark:text-slate-400 shrink-0" />
+                        <span>Apenas Leads no CRM</span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Apenas Leads cadastrados no CRM
+                      </p>
+                    </button>
+                  </div>
                 </CardContent>
               </Card>
 

@@ -47,11 +47,17 @@ vi.mock("@/hooks/useCrmClient", () => ({
   }),
 }));
 
+const updateN8nMutateAsync = vi.fn(async (payload: any) => ({ item: payload }));
+
+const mockClients = [
+  { id: "sonhare", n8n_settings: { chatbot_inbound_scope: "all", evolution_instances: [{ id: "chip-1", name: "Chip 1", active: true }] } },
+];
+
 vi.mock("@/hooks/useLeadClients", () => ({
   useLeadClients: () => ({
-    data: [{ id: "sonhare", n8n_settings: { evolution_instances: [{ id: "chip-1", name: "Chip 1", active: true }] } }],
+    data: mockClients,
   }),
-  useUpdateLeadClientN8nSettings: () => ({ mutateAsync: vi.fn() }),
+  useUpdateLeadClientN8nSettings: () => ({ mutateAsync: updateN8nMutateAsync, isPending: false }),
   useSdrRotationNext: () => ({ data: { next: null }, isLoading: false }),
 }));
 
@@ -271,5 +277,67 @@ describe("InboundAgentConfig — Arquivar agente", () => {
     renderWithProviders(<InboundAgentConfig />);
 
     expect(screen.queryByRole("button", { name: /Arquivar agente/i })).toBeNull();
+  });
+});
+
+describe("InboundAgentConfig — Escopo de Atendimento", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    updateMutateAsync.mockClear();
+    updateN8nMutateAsync.mockClear();
+  });
+
+  it("renderiza os seletores de escopo e permite alternar para 'leads_only'", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    // Abre a seção Avançado
+    const avancadoBtn = screen.getByRole("button", { name: /Avançado/i });
+    fireEvent.click(avancadoBtn);
+
+    expect(screen.getByText("Escopo de Atendimento")).toBeTruthy();
+    expect(screen.getByText("Atender a todos")).toBeTruthy();
+    expect(screen.getByText("Apenas Leads no CRM")).toBeTruthy();
+
+    // Clica em 'Apenas Leads no CRM'
+    const leadsOnlyBtn = screen.getByRole("button", { name: /Apenas Leads no CRM/i });
+    fireEvent.click(leadsOnlyBtn);
+
+    // Salva alterações
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateN8nMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: "sonhare",
+          chatbotInboundScope: "leads_only",
+        })
+      );
+    });
+  });
+
+  it("salva com escopo 'all' por padrão", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    // Salva alterações diretamente
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateN8nMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: "sonhare",
+          chatbotInboundScope: "all",
+        })
+      );
+    });
   });
 });

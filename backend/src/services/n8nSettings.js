@@ -88,7 +88,7 @@ export function maskN8nSettings(row) {
       chatbot_model: "generico",
       chatbot_llm_model: defaultGroqModel(),
       chatbot_instances: [],
-      chatbot_inbound_scope: "leads_only",
+      chatbot_inbound_scope: "all",
       recontact_message: null,
       sdr_whatsapp_numbers: [],
       // "todos" avisa a lista inteira (comportamento de sempre); "rodizio"
@@ -124,9 +124,9 @@ export function maskN8nSettings(row) {
     chatbot_llm_model: row.chatbot_llm_model || null,
     // Chips que este chatbot atende. Vazio = qualquer chip sem agente inbound.
     chatbot_instances: Array.isArray(row.chatbot_instances) ? row.chatbot_instances : [],
-    // Quem o chatbot atende. Default seguro: so lead conhecido. So o literal
-    // "all" abre para qualquer inbound.
-    chatbot_inbound_scope: row.chatbot_inbound_scope === "all" ? "all" : "leads_only",
+    // Quem o chatbot atende. Default: "all" atende qualquer novo contato ou lead.
+    // O valor "leads_only" restringe apenas a leads cadastrados no CRM.
+    chatbot_inbound_scope: row.chatbot_inbound_scope === "leads_only" ? "leads_only" : "all",
     recontact_message: row.recontact_message || null,
     // Lista de destinos do briefing. Cai no numero antigo enquanto houver linha
     // nao migrada — durante o deploy as duas colunas convivem.
@@ -329,8 +329,8 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
     chatbot_inbound_scope: chatbotInboundScopeProvided
       ? (["all", "leads_only"].includes(String(body.chatbotInboundScope || body.chatbot_inbound_scope).toLowerCase())
           ? String(body.chatbotInboundScope || body.chatbot_inbound_scope).toLowerCase()
-          : "leads_only")
-      : existing?.chatbot_inbound_scope ?? "leads_only",
+          : "all")
+      : existing?.chatbot_inbound_scope ?? "all",
     recontact_message: recontactMessageProvided
       ? (normalizeString(body.recontactMessage || body.recontact_message) || null)
       : existing?.recontact_message ?? null,
