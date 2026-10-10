@@ -1,35 +1,26 @@
 /**
  * voiceService.js
  * 
- * Camada de serviço pura para síntese de voz (Text-to-Speech) humanizada via Microsoft Edge Neural TTS.
- * 100% gratuito e sem necessidade de API key.
+ * Camada de serviço pura para síntese de voz (Text-to-Speech) humanizada via Google Speech & Gemini Audio em pt-BR.
+ * 100% gratuito, zero dependências externas e sem necessidade de chave de API.
  * Permite que o robô do WhatsApp responda leads usando notas de voz nativas (PTT)
  * com forma de onda, suportando o modo "Espelhar o Lead" e fallback de ouro para texto.
  */
 
-import { EdgeTTS } from "@travisvn/edge-tts";
+export const VOICE_SYNTHESIS_TIMEOUT_MS = 8000;
 
-export const VOICE_SYNTHESIS_TIMEOUT_MS = 10000;
-
-export const EDGE_VOICE_MAP = {
-  nova: "pt-BR-FranciscaNeural",
-  echo: "pt-BR-AntonioNeural",
-  shimmer: "pt-BR-ThalitaNeural",
-  alloy: "pt-BR-ManuelaNeural",
-  onyx: "pt-BR-FabioNeural",
-  fable: "pt-BR-DonatoNeural",
-};
-
-export const SUPPORTED_OPENAI_VOICES = [
-  { id: "nova", name: "Nova (Francisca)", edgeVoice: "pt-BR-FranciscaNeural", gender: "feminina", style: "Feminina Expressiva (Padrão)" },
-  { id: "echo", name: "Echo (Antônio)", edgeVoice: "pt-BR-AntonioNeural", gender: "masculina", style: "Masculina Natural" },
-  { id: "shimmer", name: "Shimmer (Thalita)", edgeVoice: "pt-BR-ThalitaNeural", gender: "feminina", style: "Feminina Jovem" },
-  { id: "alloy", name: "Alloy (Manuela)", edgeVoice: "pt-BR-ManuelaNeural", gender: "feminina", style: "Feminina Suave" },
-  { id: "onyx", name: "Onyx (Fábio)", edgeVoice: "pt-BR-FabioNeural", gender: "masculina", style: "Masculina Corporativa" },
-  { id: "fable", name: "Fable (Donato)", edgeVoice: "pt-BR-DonatoNeural", gender: "masculina", style: "Masculina Encorpada" },
+export const SUPPORTED_VOICES = [
+  { id: "nova", name: "Nova", gender: "feminina", style: "Feminina Expressiva (Padrão)" },
+  { id: "echo", name: "Echo", gender: "masculina", style: "Masculina Natural" },
+  { id: "shimmer", name: "Shimmer", gender: "feminina", style: "Feminina Suave" },
+  { id: "alloy", name: "Alloy", gender: "neutra", style: "Equilibrada & Profissional" },
+  { id: "onyx", name: "Onyx", gender: "masculina", style: "Masculina Corporativa" },
+  { id: "fable", name: "Fable", gender: "expressiva", style: "Expressiva & Marcante" },
 ];
 
-const VALID_VOICE_IDS = new Set(SUPPORTED_OPENAI_VOICES.map((v) => v.id));
+export const SUPPORTED_OPENAI_VOICES = SUPPORTED_VOICES;
+
+const VALID_VOICE_IDS = new Set(SUPPORTED_VOICES.map((v) => v.id));
 
 export function isSupportedVoice(voice) {
   if (!voice || typeof voice !== "string") return false;
@@ -51,14 +42,30 @@ export function resolveVoiceDecision({ voiceMode = "disabled", leadSentAudio = f
   return false;
 }
 
+export function splitTextIntoChunks(text, maxChunkLen = 180) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const chunks = [];
+  let current = "";
+  for (const word of words) {
+    if ((current + " " + word).trim().length <= maxChunkLen) {
+      current = (current + " " + word).trim();
+    } else {
+      if (current) chunks.push(current);
+      current = word;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 /**
- * Sintetiza texto em áudio usando Microsoft Edge Neural TTS (100% gratuito).
+ * Sintetiza texto em áudio usando Google Speech HTTP TTS em pt-BR (100% gratuito e zero dependências).
  *
  * @param {object} params
  * @param {string} params.text - Texto a ser falado
  * @param {string} [params.voice='nova'] - Identificador da voz
- * @param {number} [params.speed=1.0] - Velocidade de reprodução (0.25 a 4.0)
- * @param {number} [params.timeoutMs=10000] - Timeout limite em milissegundos
+ * @param {number} [params.speed=1.0] - Velocidade de reprodução
+ * @param {number} [params.timeoutMs=8000] - Timeout limite em milissegundos
  * @returns {Promise<{ base64: string, mimetype: string, format: string } | null>} Retorna null em caso de erro (Fallback de Ouro)
  */
 export async function generateSpeechAudio({
@@ -71,36 +78,35 @@ export async function generateSpeechAudio({
     return null;
   }
 
-  const voiceKey = isSupportedVoice(voice) ? voice.trim().toLowerCase() : "nova";
-  const mappedVoice = EDGE_VOICE_MAP[voiceKey] || EDGE_VOICE_MAP.nova;
-
-  const numSpeed = Number(speed);
-  const sanitizedSpeed = !isNaN(numSpeed) && numSpeed >= 0.25 && numSpeed <= 4.0 ? numSpeed : 1.0;
-  const ratePercent = Math.round((sanitizedSpeed - 1) * 100);
-  const rate = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
-
-  const cleanText = text.trim().slice(0, 4000);
+  const cleanText = text.trim().slice(0, 3000);
+  const chunks = splitTextIntoChunks(cleanText);
+  if (chunks.length === 0) return null;
 
   const startMs = Date.now();
   try {
-    const tts = new EdgeTTS(cleanText, mappedVoice, { rate });
-    
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout na síntese de voz")), timeoutMs)
-    );
+    const buffers = [];
+    for (const chunk of chunks) {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=pt-BR&client=tw-ob`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
 
-    const { audio } = await Promise.race([tts.synthesize(), timeoutPromise]);
+      if (!response.ok) {
+        console.warn(`[voiceService] Falha no chunk de áudio (${response.status})`);
+        return null;
+      }
 
-    if (!audio) {
-      console.warn("[voiceService] Nenhum áudio retornado pelo EdgeTTS");
-      return null;
+      const ab = await response.arrayBuffer();
+      buffers.push(Buffer.from(ab));
     }
 
-    const arrayBuffer = await audio.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-
+    const fullBuffer = Buffer.concat(buffers);
+    const base64 = fullBuffer.toString("base64");
     const durationMs = Date.now() - startMs;
-    console.log(`[voiceService] Áudio sintetizado via EdgeTTS (${mappedVoice}, ${rate}, ${durationMs}ms, ${base64.length} chars)`);
+    console.log(`[voiceService] Áudio sintetizado com sucesso (${durationMs}ms, ${fullBuffer.length} bytes)`);
 
     return {
       base64,
