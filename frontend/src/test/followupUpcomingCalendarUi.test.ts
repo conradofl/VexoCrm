@@ -64,8 +64,9 @@ describe("calendário: lente, não superfície de criação", () => {
     expect(calendarSource).toContain("/crm/whatsapp?phone=");
   });
 
-  it("FollowupQueue.tsx expõe o Calendário como uma aba própria, ao lado de Cadências e Fila", () => {
-    expect(queueSource).toContain('"calendario"');
-    expect(queueSource).toContain("<FollowupCalendar");
+  it("FollowupQueue.tsx mantém foco em Cadências e Fila de Acompanhamento", () => {
+    expect(queueSource).toContain('"cadencias"');
+    expect(queueSource).toContain('"fila"');
+    expect(queueSource).not.toContain("<FollowupCalendar");
   });
 });

@@ -190,10 +190,17 @@ export default function VexoOnboardingSetup({
         {/* ABA 1: Mapa de Superpoderes do Vexo OS */}
         <TabsContent
           value="mapa"
-          forceMount
-          className="data-[state=inactive]:hidden focus-visible:outline-none"
+          className="focus-visible:outline-none"
         >
-          <SuperpowersMapTab />
+          <SuperpowersMapTab
+            progress={progress}
+            connectedInstances={connectedInstances}
+            chatbotEnabled={chatbotEnabled}
+            chatbotModel={chatbotModel}
+            chipStepDone={chipStepDone}
+            agentStepDone={agentStepDone}
+            leadsStepDone={leadsStepDone}
+          />
         </TabsContent>
 
         {/* ABA 2 & 3: Apenas se possuir permissão técnica */}
@@ -201,8 +208,7 @@ export default function VexoOnboardingSetup({
           <>
             <TabsContent
               value="esteira"
-              forceMount
-              className="data-[state=inactive]:hidden focus-visible:outline-none"
+              className="focus-visible:outline-none"
             >
               <PracticalPipelineTab
                 clientId={clientId}
@@ -219,8 +225,7 @@ export default function VexoOnboardingSetup({
 
             <TabsContent
               value="salvas"
-              forceMount
-              className="data-[state=inactive]:hidden focus-visible:outline-none"
+              className="focus-visible:outline-none"
             >
               <SavedImplementationsTab
                 clientId={clientId}

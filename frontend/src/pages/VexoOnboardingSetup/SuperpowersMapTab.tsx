@@ -16,9 +16,14 @@ import {
   Cpu,
   Volume2,
   PartyPopper,
+  Smartphone,
+  FileSpreadsheet,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SetupStepCard } from "./SetupStepCard";
 import { cn } from "@/lib/utils";
+import type { OnboardingProgress } from "@/lib/onboarding/progress";
 
 interface Superpower {
   id: string;
@@ -204,9 +209,153 @@ const SUPERPOWERS: Superpower[] = [
   },
 ];
 
-export function SuperpowersMapTab() {
+interface SuperpowersMapTabProps {
+  progress?: OnboardingProgress;
+  connectedInstances?: any[];
+  chatbotEnabled?: boolean;
+  chatbotModel?: string;
+  chipStepDone?: boolean;
+  agentStepDone?: boolean;
+  leadsStepDone?: boolean;
+}
+
+export function SuperpowersMapTab({
+  progress,
+  connectedInstances = [],
+  chatbotEnabled = false,
+  chatbotModel = "Modelo Padrão Vexo",
+  chipStepDone = false,
+  agentStepDone = false,
+  leadsStepDone = false,
+}: SuperpowersMapTabProps = {}) {
   return (
     <div className="space-y-6">
+      {/* 3 Grandes Cards de Status Técnico da Operação */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <span>Status Técnico da Operação</span>
+            {progress && (
+              <span className="text-xs font-normal text-slate-500">
+                ({progress.completedCount} de 3 pilares ativos)
+              </span>
+            )}
+          </h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {/* Card 1: WhatsApp Conectado */}
+          <SetupStepCard
+            stepNumber={1}
+            title="WhatsApp Conectado"
+            icon={<Smartphone className="w-5 h-5" />}
+            isDone={chipStepDone}
+            statusLabel={chipStepDone ? "Conectado" : "Conexão Pendente"}
+            description="Vincule um número de WhatsApp via Evolution API para envio de mensagens ativas e recebimento de respostas."
+            details={
+              chipStepDone ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-slate-500 dark:text-muted-foreground">
+                    <span>Instâncias Ativas:</span>
+                    <span className="font-semibold text-slate-900 dark:text-foreground">
+                      {connectedInstances.length} chip(s)
+                    </span>
+                  </div>
+                  {connectedInstances.slice(0, 2).map((inst: any, idx: number) => (
+                    <div
+                      key={inst.id || idx}
+                      className="flex items-center justify-between text-[11px] text-slate-500 dark:text-muted-foreground truncate"
+                    >
+                      <span className="truncate">📱 {inst.name}</span>
+                      <span className="text-emerald-700 dark:text-emerald-400 font-medium shrink-0 ml-2">
+                        {inst.chip_state === "warm" ? "Aquecido" : "Pronto"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Nenhum chip de WhatsApp conectado ainda.</span>
+                </div>
+              )
+            }
+            ctaText={chipStepDone ? "Gerenciar Chips & Instâncias" : "Escanear QR Code / Conectar"}
+            ctaRoute="/crm/chips-whatsapp?tab=conexoes"
+            isPrimary={!chipStepDone}
+          />
+
+          {/* Card 2: Agente de IA Comercial */}
+          <SetupStepCard
+            stepNumber={2}
+            title="Agente de IA Comercial"
+            icon={<Bot className="w-5 h-5" />}
+            isDone={agentStepDone}
+            statusLabel={agentStepDone ? "Ativo" : "Desligado"}
+            description="Configure as instruções, tom de voz e regras de qualificação do seu consultor comercial inteligente."
+            details={
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-slate-500 dark:text-muted-foreground">
+                  <span>Status do Bot:</span>
+                  <span
+                    className={
+                      chatbotEnabled
+                        ? "font-semibold text-emerald-700 dark:text-emerald-400"
+                        : "font-semibold text-slate-500 dark:text-muted-foreground"
+                    }
+                  >
+                    {chatbotEnabled ? "Ativo no Inbound" : "Desligado"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-slate-500 dark:text-muted-foreground">
+                  <span>Modelo LLM:</span>
+                  <span className="font-medium text-slate-900 dark:text-foreground truncate max-w-[150px]">
+                    {chatbotModel}
+                  </span>
+                </div>
+              </div>
+            }
+            ctaText="Ajustar Tom de Voz / Configurar"
+            ctaRoute="/crm/agente"
+            isPrimary={chipStepDone && !agentStepDone}
+          />
+
+          {/* Card 3: Base de Leads & Disparos */}
+          <SetupStepCard
+            stepNumber={3}
+            title="Base de Leads & Disparos"
+            icon={<FileSpreadsheet className="w-5 h-5" />}
+            isDone={leadsStepDone}
+            statusLabel={leadsStepDone ? "Base Ativa" : "Base Vazia"}
+            description="Importe planilhas de contatos ou integre fontes de leads para disparar campanhas de prospecção."
+            details={
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-slate-500 dark:text-muted-foreground">
+                  <span>Volume de Contatos:</span>
+                  <span
+                    className={
+                      leadsStepDone
+                        ? "font-semibold text-emerald-700 dark:text-emerald-400"
+                        : "font-semibold text-amber-700 dark:text-amber-400"
+                    }
+                  >
+                    {leadsStepDone ? "Contatos Cadastrados" : "Nenhum lead importado"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-muted-foreground">
+                  {leadsStepDone
+                    ? "Sua base possui leads aptos para receber mensagens."
+                    : "Faça upload de um arquivo .xlsx ou .csv para começar."}
+                </p>
+              </div>
+            }
+            ctaText="Subir Planilha / Importar"
+            ctaRoute="/crm/planilhas"
+            isPrimary={chipStepDone && agentStepDone && !leadsStepDone}
+          />
+        </div>
+      </div>
+
       {/* Intro Banner */}
       <div className="rounded-xl border border-slate-200/80 bg-gradient-to-r from-white via-indigo-50/20 to-slate-50 dark:from-slate-900/60 dark:via-background dark:to-indigo-950/20 dark:border-slate-800 p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
