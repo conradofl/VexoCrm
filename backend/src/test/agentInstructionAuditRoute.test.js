@@ -168,3 +168,171 @@ describe("GET /companies/:id/instruction-audit", () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+describe("POST /companies/:id/consolidate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    n8nSettingsMock.getLeadClientN8nSettings.mockResolvedValue({ chatbot_model: "generico" });
+    engineMock.fetchDynamicPrompt.mockResolvedValue("Prompt padrão longo e detalhado do tenant para atendimento geral.");
+    engineMock.fetchTemplate.mockResolvedValue({
+      template_key: "generico",
+      data_fields: [{ key: "interesse", label: "Interesse", description: "..." }],
+      required_fields: ["interesse"],
+    });
+  });
+
+  it("[TESTE OBRIGATÓRIO] prompt vazio ou inválido: recusado com 400 e erros detalhados item por item, nada é gravado", async () => {
+    const updateSpy = vi.fn();
+    supabaseMock.from.mockReturnValue({
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: mockAgentRow({ inbound_prompt: "curto" }), error: null }) }) }),
+      update: updateSpy,
+    });
+    engineMock.fetchDynamicPrompt.mockResolvedValue(""); // tenant sem prompt também
+
+    const handler = getRouteHandler("/companies/:id/consolidate", "post");
+    const req = { params: { id: "agente-1" }, authAccess: adminAccess() };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_AUTONOMOUS_PROMPT");
+    expect(res.body.error.message).toContain("muito curto");
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("[TESTE OBRIGATÓRIO] agente com prompt válido: consolida com sucesso e grava instructions_consolidated_at", async () => {
+    const updatedRow = {
+      id: "agente-1",
+      inbound_prompt: "Você é o consultor de vendas oficial da empresa. Seu objetivo é qualificar leads com excelência.",
+      inbound_spin_fields: [{ name: "interesse", required: true }],
+      instructions_consolidated_at: "2026-10-10T14:00:00.000Z",
+    };
+
+    const updateSpy = vi.fn().mockReturnValue({
+      eq: () => ({
+        select: () => ({
+          maybeSingle: () => Promise.resolve({ data: updatedRow, error: null }),
+        }),
+      }),
+    });
+
+    supabaseMock.from.mockImplementation((table) => {
+      if (table === "followup_companies") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: mockAgentRow({
+                    inbound_prompt: "Você é o consultor de vendas oficial da empresa. Seu objetivo é qualificar leads com excelência.",
+                    instructions_consolidated_at: null,
+                  }),
+                  error: null,
+                }),
+            }),
+          }),
+          update: updateSpy,
+        };
+      }
+      return {};
+    });
+
+    const handler = getRouteHandler("/companies/:id/consolidate", "post");
+    const req = { params: { id: "agente-1" }, authAccess: adminAccess() };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.consolidated).toBe(true);
+    expect(res.body.consolidatedAt).toBe("2026-10-10T14:00:00.000Z");
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions_consolidated_at: expect.any(String),
+      })
+    );
+  });
+
+  it("agente já consolidado -> 409", async () => {
+    supabaseMock.from.mockReturnValue({
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: mockAgentRow({ instructions_consolidated_at: "2026-10-10T10:00:00Z" }), error: null }) }) }),
+    });
+
+    const handler = getRouteHandler("/companies/:id/consolidate", "post");
+    const req = { params: { id: "agente-1" }, authAccess: adminAccess() };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.error.code).toBe("ALREADY_CONSOLIDATED");
+  });
+});
+
+describe("POST /companies/:id/unconsolidate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("[TESTE OBRIGATÓRIO] 'Voltar ao template': limpa instructions_consolidated_at e devolve consolidated=false", async () => {
+    const updateSpy = vi.fn().mockReturnValue({
+      eq: () => ({
+        select: () => ({
+          maybeSingle: () => Promise.resolve({ data: { id: "agente-1", instructions_consolidated_at: null }, error: null }),
+        }),
+      }),
+    });
+
+    supabaseMock.from.mockImplementation((table) => {
+      if (table === "followup_companies") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: mockAgentRow({ instructions_consolidated_at: "2026-10-10T14:00:00.000Z" }),
+                  error: null,
+                }),
+            }),
+          }),
+          update: updateSpy,
+        };
+      }
+      return {};
+    });
+
+    const handler = getRouteHandler("/companies/:id/unconsolidate", "post");
+    const req = { params: { id: "agente-1" }, authAccess: adminAccess() };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.consolidated).toBe(false);
+    expect(res.body.consolidatedAt).toBeNull();
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions_consolidated_at: null,
+      })
+    );
+  });
+
+  it("tentar desconsolidar agente que não está consolidado -> 400", async () => {
+    supabaseMock.from.mockReturnValue({
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: mockAgentRow({ instructions_consolidated_at: null }), error: null }) }) }),
+    });
+
+    const handler = getRouteHandler("/companies/:id/unconsolidate", "post");
+    const req = { params: { id: "agente-1" }, authAccess: adminAccess() };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe("NOT_CONSOLIDATED");
+  });
+});
+

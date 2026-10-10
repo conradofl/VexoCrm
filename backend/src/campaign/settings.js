@@ -356,11 +356,15 @@ export async function resolveInboundDispatchSettings({ clientId, instanceName = 
     } else if (!normalizeString(casada.dispatch_webhook_url)) {
       tentativas.push({ fonte: "chip_do_webhook", instanceName: alvo, resultado: "sem_url_de_disparo" });
     } else {
+      const urlInstance = casada.dispatch_webhook_url
+        ? casada.dispatch_webhook_url.split("/").filter(Boolean).pop()
+        : null;
       const resolved = {
         webhookUrl: normalizeString(casada.dispatch_webhook_url),
         webhookToken: normalizeString(casada.dispatch_webhook_token) || null,
         source: "inbound_chip",
-        instanceName: casada.name || alvo,
+        instanceName: urlInstance || casada.name || alvo,
+        rawInstanceName: casada.name || alvo,
         tentativas,
       };
       // Guarda leitura boa no cache isolado do tenant

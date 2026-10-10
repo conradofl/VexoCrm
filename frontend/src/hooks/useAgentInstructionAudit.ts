@@ -93,3 +93,27 @@ export function useConsolidateAgent(agentId: string | undefined) {
     },
   });
 }
+
+export function useUnconsolidateAgent(agentId: string | undefined) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<{ success: boolean; agentId: string; consolidated: boolean }> => {
+      if (!agentId) throw new Error("Agente não selecionado.");
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/followup/companies/${agentId}/unconsolidate`, {
+        method: "POST",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao voltar ao template da empresa"));
+      }
+      return readApiJson<{ success: boolean; agentId: string; consolidated: boolean }>(res, "unconsolidate-agent");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agentInstructionAudit", agentId] });
+      queryClient.invalidateQueries({ queryKey: ["fup-companies"] });
+    },
+  });
+}
+

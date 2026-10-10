@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Bot,
   Save,
@@ -116,6 +117,7 @@ Não repita perguntas já respondidas. Quando tiver o suficiente, resuma o que e
 }
 
 export default function InboundAgentConfig() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const crmClient = useOptionalCrmClient();
   const { getIdToken } = useAuth();
@@ -151,6 +153,21 @@ export default function InboundAgentConfig() {
   const chips = useMemo(() => {
     return (currentTenant?.n8n_settings?.evolution_instances ?? []).filter((i) => i.active !== false);
   }, [currentTenant]);
+
+  const assignedChipNames = useMemo(() => {
+    const set = new Set<string>();
+    rawCompanies.forEach((c: any) => {
+      instancesOfCompany(c).forEach((inst) => set.add(inst));
+    });
+    return set;
+  }, [rawCompanies]);
+
+  const unassignedChips = useMemo(() => {
+    return chips.filter((chip: any) => {
+      const inst = instanceNameFromChip(chip);
+      return !assignedChipNames.has(inst) && !assignedChipNames.has(chip?.name) && !assignedChipNames.has(chip?.id);
+    });
+  }, [chips, assignedChipNames]);
 
   // Lista de SDR do TENANT — a mesma que o disparo usa. O backend ja resolve por
   // ela (services/sdrTarget.js: resolveSdrTarget), entao aqui e so leitura: mostrar
@@ -456,6 +473,35 @@ export default function InboundAgentConfig() {
       title="Agentes"
       description="Cada chip do WhatsApp tem um agente — ou nenhum. Aqui você vê e configura cada um."
     >
+      {/* Aviso de transparência: se o chatbot global da empresa estiver desligado */}
+      {tenantN8nSettings && tenantN8nSettings.chatbot_enabled === false && (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="space-y-1">
+              <p className="font-semibold text-sm">
+                Atendimento geral da empresa desligado
+              </p>
+              <p>
+                O <strong>Chatbot Global</strong> está desativado em Padrões da Empresa.
+                Apenas chips com agente próprio configurado e ligado aqui responderão.
+                {unassignedChips.length > 0 && (
+                  <span> Chips sem agente ({unassignedChips.map((c: any) => c.name || instanceNameFromChip(c)).join(", ")}) não responderão automaticamente.</span>
+                )}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 text-xs border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+            onClick={() => navigate("/crm/padroes-da-empresa")}
+          >
+            Padrões da Empresa
+          </Button>
+        </div>
+      )}
+
       {/* Lista de agentes — chip e função visíveis em cada um, pra entender em
           três segundos quem atende o quê. Sempre visível, mesmo com um só:
           é o que ensina que "agente" e "chip" não são a mesma coisa. */}
@@ -692,6 +738,11 @@ export default function InboundAgentConfig() {
                         ? "Escolha um número para poder ligar este agente."
                         : "Se ligado, a IA responde automaticamente às mensagens recebidas nos números acima."}
                     </p>
+                    {numerosVinculados.length > 0 && tenantN8nSettings?.chatbot_enabled === false && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        O robô geral da empresa está desligado, mas este agente responderá normalmente por ter chip próprio.
+                      </p>
+                    )}
                   </div>
                   <Switch
                     checked={inboundEnabled}

@@ -88,3 +88,39 @@ export function auditAgentInstructionSources({ agentRow, tenantPromptContent = n
 
   return { prompt, collection, model };
 }
+
+/**
+ * Valida se o prompt e a lista de campos de um agente possuem as condições
+ * mínimas para operar de forma autônoma sem o template padrão do tenant.
+ *
+ * Retorna { valid: boolean, errors: string[] } com os erros detalhados item por item.
+ *
+ * @param {object} params
+ * @param {string|null} params.promptText - Prompt consolidado
+ * @param {Array} [params.collectionFields] - Campos de coleta a serem gravados
+ */
+export function validateAutonomousPrompt({ promptText, collectionFields = [] } = {}) {
+  const errors = [];
+  const cleanPrompt = typeof promptText === "string" ? promptText.trim() : "";
+
+  if (!cleanPrompt) {
+    errors.push("Prompt está vazio — defina as instruções de atendimento do agente antes de torná-lo autônomo.");
+  } else if (cleanPrompt.length < 20) {
+    errors.push("Prompt é muito curto (mínimo de 20 caracteres) — detalhe o objetivo e as instruções de conversa.");
+  }
+
+  if (Array.isArray(collectionFields)) {
+    for (let i = 0; i < collectionFields.length; i++) {
+      const f = collectionFields[i];
+      if (!f?.name || !String(f.name).trim()) {
+        errors.push(`Campo de coleta #${i + 1} possui nome vazio.`);
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+

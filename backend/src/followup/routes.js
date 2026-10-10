@@ -37,7 +37,7 @@ import { resolveEvolutionInstanceForFollowup } from "./worker.js";
 import { getLeadClientEvolutionInstances } from "../services/evolution.js";
 import { resolveChipDailyLimit } from "../services/chipQuota.js";
 import { fetchDynamicPrompt, fetchTemplate } from "../chatbot-ai-engine.js";
-import { auditAgentInstructionSources } from "../services/agentInstructionAudit.js";
+import { auditAgentInstructionSources, validateAutonomousPrompt } from "../services/agentInstructionAudit.js";
 import { findChipExclusivityConflict } from "../services/chipExclusivity.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -681,21 +681,6 @@ function normalizeInstanceList(list, fallback) {
 
       const audit = auditAgentInstructionSources({ agentRow, tenantPromptContent, template, defaultLlmModel: defaultGroqModel() });
 
-      // Prompt efetivo vazio (nem o agente, nem o tenant têm prompt hoje):
-      // consolidar gravaria inbound_prompt = "", e um agente consolidado NUNCA
-      // busca o prompt do tenant como fallback — o motor cai direto em
-      // "PROMPT NOT FOUND" e silencia o lead pra sempre. Consolidação é mão
-      // única (409 na segunda tentativa): sem essa trava, não haveria botão
-      // que desfizesse. Recusa antes de gravar qualquer coisa.
-      if (!audit.prompt.value) {
-        return sendErr(
-          res,
-          400,
-          "EMPTY_EFFECTIVE_PROMPT",
-          "Este agente não tem prompt próprio nem o tenant tem prompt padrão — não há o que consolidar. Escreva o prompt deste agente antes de consolidar."
-        );
-      }
-
       // Consolidar nunca pode fazer o lead parar de ser perguntado algo que já
       // era perguntado: a coleta gravada é a UNIÃO, não só a do agente.
       const nomesJaNaColeta = new Set(audit.collection.agentFields.map((f) => f.name.toLowerCase()));
@@ -705,6 +690,23 @@ function normalizeInstanceList(list, fallback) {
           .filter((f) => !nomesJaNaColeta.has(f.name.toLowerCase()))
           .map((f) => ({ name: f.name, required: f.required })),
       ];
+
+      // Validação estrita: o prompt e campos consolidados DEVEM possuir instruções viáveis.
+      // Se não passar, recusa com 400 e lista os erros detalhados item por item.
+      const validation = validateAutonomousPrompt({
+        promptText: audit.prompt.value,
+        collectionFields: coletaConsolidada,
+      });
+
+      if (!validation.valid) {
+        return sendErr(
+          res,
+          400,
+          "INVALID_AUTONOMOUS_PROMPT",
+          `O prompt deste agente não possui as instruções mínimas necessárias para operar de forma autônoma: ${validation.errors.join("; ")}`,
+          { details: validation.errors }
+        );
+      }
 
       const { data: updated, error: updateError } = await supabase
         .from("followup_companies")
@@ -722,12 +724,61 @@ function normalizeInstanceList(list, fallback) {
       return res.json({
         success: true,
         agentId: id,
+        consolidated: true,
         consolidatedAt: updated.instructions_consolidated_at,
         prompt: updated.inbound_prompt,
         collectionFields: updated.inbound_spin_fields,
       });
     } catch (err) {
       return sendErr(res, 500, "CONSOLIDATE_FAILED", err.message);
+    }
+  });
+
+  // POST /api/followup/companies/:id/unconsolidate
+  //
+  // "Voltar ao template da empresa": limpa instructions_consolidated_at no agente.
+  // A partir daí o motor volta a compor dinamicamente com o template e o prompt padrão do tenant.
+  router.post("/companies/:id/unconsolidate", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+
+    try {
+      const supabase = getSupabase();
+      const { data: agentRow, error } = await supabase
+        .from("followup_companies")
+        .select("id, tenant_id, instructions_consolidated_at")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!agentRow) return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+
+      if (!hasTenantAccess(req, agentRow.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+      }
+
+      if (!agentRow.instructions_consolidated_at) {
+        return sendErr(res, 400, "NOT_CONSOLIDATED", "Este agente já segue o template padrão da empresa.");
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("followup_companies")
+        .update({
+          instructions_consolidated_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .select("id, instructions_consolidated_at")
+        .maybeSingle();
+      if (updateError) throw updateError;
+
+      return res.json({
+        success: true,
+        agentId: id,
+        consolidated: false,
+        consolidatedAt: null,
+      });
+    } catch (err) {
+      return sendErr(res, 500, "UNCONSOLIDATE_FAILED", err.message);
     }
   });
 

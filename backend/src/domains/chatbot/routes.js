@@ -2909,7 +2909,6 @@ export function registerChatbotRoutes(app, deps) {
 
     // ── CAMINHO 2: CHATBOT / AGENTE IA (INBOUND OU AGENTE DE CAMPANHA) ──
     // SÓ AQUI CONSULTA SE O AGENTE DE IA ESTÁ HABILITADO.
-    // O toggle "chatbot_enabled" significa estritamente se o robô responde sozinho ou não.
     let tenantSettingsReadFailed = false;
     const tenantSettings = await getLeadClientN8nSettings(clientId).catch((err) => {
       tenantSettingsReadFailed = true;
@@ -2920,33 +2919,15 @@ export function registerChatbotRoutes(app, deps) {
       return null;
     });
 
-    if (tenantSettings && tenantSettings.chatbot_enabled === false) {
-      descartar("chatbot_disabled", { clientId, phone: maskPhoneForLog(phone) });
-      return;
-    }
-
     // Agente inbound configurado na tela "Agente IA → Inbound", por NUMERO.
+    // "Um agente por chip, com função declarada" — regras explícitas:
     //
-    // "Um agente por chip, com função declarada" — três caminhos, três
-    // regras explícitas, decididas a partir daqui:
-    //
-    // 1. Mensagem de atendimento (lead novo, SEM campanha ativa) no chip X:
-    //    usa o agente do chip X, SE ele for `atendimento`. Sendo `campanha`,
-    //    não responde — chip de disparo não faz atendimento, e isso é
-    //    decisão, não falha. Ver shouldCampaignKindChipEngage logo abaixo.
-    // 2. Resposta de campanha no chip X: o roteiro da campanha manda no
-    //    conteúdo, o agente do chip manda em como falar (modelo, tom,
-    //    coleta, base de conhecimento) — composição, não substituição. Vale
-    //    nos dois `agentKind`. Ver services/campaignAgentRouting.js
-    //    (resolveCampaignAgent, já resolvido mais acima) e a camada
-    //    "CAMADA DA CAMPANHA" em chatbot-ai-engine.js.
-    // 3. Chip SEM agente (inboundConfig null): segue o chatbot do TENANT,
-    //    como hoje — nada muda pra quem não configurou nada. É o branch
-    //    `if (!inboundConfig)` logo abaixo desta função.
-    //
-    // Precedência escondida foi o que criou o problema atual — por isso as
-    // três regras vivem aqui, no ÚNICO lugar que resolve qual agente atende,
-    // e não espalhadas ou implícitas na ordem de checagens.
+    // 1. Chip COM agente próprio: obedece ao agente (inboundConfig.enabled).
+    //    O chatbot_enabled global do tenant NÃO bloqueia chip com agente próprio.
+    // 2. Chip SEM agente próprio (inboundConfig null): segue o chatbot global
+    //    do tenant (chatbot_enabled). Se chatbot_enabled === false, descarta.
+    // 3. Chip com função 'campanha': chip de disparo não faz atendimento espontâneo
+    //    (shouldCampaignKindChipEngage).
     const inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch((err) => {
       console.warn("[chatbot-webhook] falha ao resolver agente inbound:", err?.message || err);
       return null;
@@ -2957,7 +2938,7 @@ export function registerChatbotRoutes(app, deps) {
       return;
     }
 
-    // Regra 1.
+    // Regra 1: Chip com função 'campanha' só responde se houver campanha ativa casada
     if (inboundConfig) {
       const decisaoChipCampanha = shouldCampaignKindChipEngage({
         agentKind: inboundConfig.agentKind,
@@ -2967,10 +2948,14 @@ export function registerChatbotRoutes(app, deps) {
         descartar(decisaoChipCampanha.reason, { clientId, instanceName });
         return;
       }
-    }
+    } else {
+      // Chip SEM agente próprio: depende do chatbot global do tenant
+      if (tenantSettings && tenantSettings.chatbot_enabled === false) {
+        descartar("chatbot_disabled", { clientId, phone: maskPhoneForLog(phone) });
+        return;
+      }
 
-    // Chips explicitamente vinculados ao chatbot do tenant (aba Configuracoes).
-    if (!inboundConfig) {
+      // Chips explicitamente vinculados ao chatbot do tenant (aba Configuracoes).
       const chipsDoChatbot = Array.isArray(tenantSettings?.chatbot_instances)
         ? tenantSettings.chatbot_instances.map((v) => String(v ?? "").trim()).filter(Boolean)
         : [];
@@ -3204,7 +3189,10 @@ export function registerChatbotRoutes(app, deps) {
 
             if (speech?.base64) {
               try {
-                const targetInstance = dispatchSettings.instanceName || instanceName;
+                const targetInstance =
+                  (evolutionUrl ? new URL(evolutionUrl).pathname.split("/").filter(Boolean).pop() : null) ||
+                  dispatchSettings.instanceName ||
+                  instanceName;
                 const evoBaseUrl = evolutionUrl ? new URL(evolutionUrl).origin : null;
                 const voiceRes = await sendMediaMessageViaEvolution({
                   instanceName: targetInstance,

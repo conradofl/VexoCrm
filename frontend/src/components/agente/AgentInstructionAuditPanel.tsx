@@ -1,4 +1,4 @@
-import { AlertTriangle, Lock } from "lucide-react";
+import { AlertTriangle, Lock, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -12,46 +12,69 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { useAgentInstructionAudit, useConsolidateAgent } from "@/hooks/useAgentInstructionAudit";
+import { useAgentInstructionAudit, useConsolidateAgent, useUnconsolidateAgent } from "@/hooks/useAgentInstructionAudit";
 
-// "Uma tela, um agente" — este painel virou um aviso condicional, não mais
-// um diagnóstico permanente. Antes ele sempre renderizava (mostrando até
-// "Sem conflito" quando estava tudo certo); agora ele só existe quando há
-// algo a resolver. Consolidado ou sem conflito de Coleta → não renderiza
-// nada. "Resolver agora" abre a mesma confirmação de sempre — consolidar
-// grava no agente o prompt efetivo + a união dos campos e marca a partir daí
-// que nem template nem prompt padrão do tenant são buscados de novo
-// (chatbot-ai-engine.js). Ação de mão única: não existe "desconsolidar".
 export function AgentInstructionAuditPanel({ agentId }: { agentId: string | undefined }) {
   const { data, isLoading, error } = useAgentInstructionAudit(agentId);
   const consolidateMutation = useConsolidateAgent(agentId);
+  const unconsolidateMutation = useUnconsolidateAgent(agentId);
 
   if (!agentId || isLoading || error || !data) return null;
 
   const { audit, templateKeyEmUso, consolidated } = data;
   const temConflitos = audit.collection.conflicts.length > 0;
 
-  if (consolidated || !temConflitos) return null;
-
   const handleConsolidate = () => {
     consolidateMutation.mutate(undefined, {
-      onSuccess: () => toast.success("Agente consolidado — a partir de agora ele não recebe mais instrução de fora."),
-      onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao consolidar o agente."),
+      onSuccess: () => toast.success("Agente autônomo ativo — a partir de agora ele não recebe mais instrução de fora."),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao tornar o agente autônomo."),
     });
   };
 
-  // Prévia do que "Consolidar" vai gravar: o prompt efetivo de hoje, e os
-  // campos do template que ainda não estão na Coleta do agente (os que já
-  // estão não mudam nada).
+  const handleUnconsolidate = () => {
+    unconsolidateMutation.mutate(undefined, {
+      onSuccess: () => toast.success("Agente restaurado — voltou a seguir o template e instruções da empresa."),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Erro ao voltar ao template da empresa."),
+    });
+  };
+
+  // Se já estiver consolidado (autônomo), exibe o aviso claro de estado com o botão de desfazer
+  if (consolidated) {
+    return (
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+        <div className="flex items-start gap-2.5">
+          <Sparkles className="w-4 h-4 mt-0.5 text-indigo-500 shrink-0" />
+          <div className="space-y-0.5">
+            <p className="text-xs font-semibold text-foreground">Agente operando de forma autônoma</p>
+            <p className="text-[11px] text-muted-foreground">
+              Este agente não usa mais o template da empresa. O que ele pergunta e como responde vem só do que está escrito aqui.
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleUnconsolidate}
+          disabled={unconsolidateMutation.isPending}
+          className="h-8 text-xs border-indigo-500/30 hover:bg-indigo-500/10 shrink-0 gap-1.5"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          {unconsolidateMutation.isPending ? "Restaurando..." : "Voltar ao template da empresa"}
+        </Button>
+      </div>
+    );
+  }
+
+  // Sem conflito e não consolidado -> nada a resolver
+  if (!temConflitos) return null;
+
+  // Prévia do que "Tornar autônomo" vai gravar:
   const nomesJaNaColeta = new Set(audit.collection.agentFields.map((f) => f.name.toLowerCase()));
   const camposQueVaoEntrar = audit.collection.templateFields.filter((f) => !nomesJaNaColeta.has(f.name.toLowerCase()));
+  const todosOsCampos = [...audit.collection.agentFields, ...camposQueVaoEntrar];
 
-  // Prompt efetivo vazio (nem agente nem tenant têm prompt): consolidar
-  // gravaria inbound_prompt = "" e, como o agente consolidado nunca mais
-  // busca o prompt do tenant como reserva, o motor calaria o agente pra
-  // sempre — sem botão que desfizesse (consolidar é mão única). O backend já
-  // recusa isso; aqui é prevenir ANTES do clique, não só reagir ao erro dele.
-  const promptEfetivoVazio = !audit.prompt.value;
+  const promptEfetivoVazio = !audit.prompt.value || audit.prompt.value.trim().length < 20;
 
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
@@ -70,47 +93,48 @@ export function AgentInstructionAuditPanel({ agentId }: { agentId: string | unde
             <button
               type="button"
               disabled={promptEfetivoVazio}
-              className="text-[11px] font-medium text-amber-600 hover:text-amber-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
+              className="text-[11px] font-medium text-amber-600 hover:text-amber-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1 mt-1"
             >
               <Lock className="w-3 h-3" />
-              Resolver agora →
+              Tornar agente autônomo (ignorar template) →
             </button>
           </AlertDialogTrigger>
-          <AlertDialogContent>
+          <AlertDialogContent className="max-w-lg">
             <AlertDialogHeader>
-              <AlertDialogTitle>Consolidar este agente?</AlertDialogTitle>
-              <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+              <AlertDialogTitle>Tornar este agente autônomo?</AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground space-y-3 pt-1">
                 <span className="block">
-                  O prompt deste agente passa a ser:{" "}
-                  <span className="text-foreground font-medium">
-                    {audit.prompt.source === "agente" ? "o texto que já está aqui (sem mudança)." : "o prompt padrão do tenant, copiado pra este agente."}
+                  <strong>1. Prompt que será gravado:</strong>
+                  <span className="block p-2 mt-1 rounded bg-slate-100 dark:bg-slate-900 font-mono text-[11px] text-foreground max-h-28 overflow-y-auto">
+                    {audit.prompt.value || "(Nenhum prompt definido)"}
                   </span>
                 </span>
-                {camposQueVaoEntrar.length > 0 ? (
-                  <span className="block">
-                    A Coleta ganha {camposQueVaoEntrar.length} campo(s) que o template "{templateKeyEmUso}" pedia e este agente ainda não pedia:{" "}
-                    <span className="text-foreground font-medium">{camposQueVaoEntrar.map((f) => f.name).join(", ")}</span>.
+
+                <span className="block">
+                  <strong>2. Campos de Coleta que serão gravados:</strong>
+                  <span className="block mt-1 text-foreground font-medium">
+                    {todosOsCampos.length > 0 ? todosOsCampos.map((f) => f.name).join(", ") : "Nenhum campo"}
                   </span>
-                ) : (
-                  <span className="block">A Coleta não ganha nenhum campo novo — já pede tudo que o template pedia.</span>
-                )}
-                <span className="block font-medium text-amber-600">
-                  Depois disso, este agente ignora o template e o prompt padrão do tenant pra sempre. Não existe desfazer.
+                </span>
+
+                <span className="block p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 font-medium">
+                  Este agente não usará mais o template da empresa ("{templateKeyEmUso}"). O que ele pergunta e como responde virá exclusivamente do que está configurado nele. Você poderá desfazer e voltar ao template a qualquer momento.
                 </span>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
               <AlertDialogAction onClick={handleConsolidate} disabled={consolidateMutation.isPending} className="h-8 text-xs">
-                {consolidateMutation.isPending ? "Consolidando..." : "Consolidar"}
+                {consolidateMutation.isPending ? "Gravando..." : "Tornar autônomo"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
         {promptEfetivoVazio && (
-          <p className="text-[10px] text-rose-600">Escreva o prompt deste agente antes de consolidar.</p>
+          <p className="text-[10px] text-rose-600">Escreva o prompt deste agente (mínimo de 20 caracteres) antes de torná-lo autônomo.</p>
         )}
       </div>
     </div>
   );
 }
+

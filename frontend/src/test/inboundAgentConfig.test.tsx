@@ -17,6 +17,15 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<any>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 vi.mock("@/components/HelpDeskWidget", () => ({
   HelpDeskWidget: () => null,
   default: () => null,
@@ -49,13 +58,13 @@ vi.mock("@/hooks/useCrmClient", () => ({
 
 const updateN8nMutateAsync = vi.fn(async (payload: any) => ({ item: payload }));
 
-const mockClients = [
-  { id: "sonhare", n8n_settings: { chatbot_inbound_scope: "all", evolution_instances: [{ id: "chip-1", name: "Chip 1", active: true }] } },
+let currentMockClients = [
+  { id: "sonhare", n8n_settings: { chatbot_enabled: true, chatbot_inbound_scope: "all", evolution_instances: [{ id: "chip-1", name: "Chip 1", active: true }] } },
 ];
 
 vi.mock("@/hooks/useLeadClients", () => ({
   useLeadClients: () => ({
-    data: mockClients,
+    data: currentMockClients,
   }),
   useUpdateLeadClientN8nSettings: () => ({ mutateAsync: updateN8nMutateAsync, isPending: false }),
   useSdrRotationNext: () => ({ data: { next: null }, isLoading: false }),
@@ -89,13 +98,17 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
     vi.resetModules();
     updateMutateAsync.mockClear();
     archiveMutate.mockClear();
+    mockNavigate.mockClear();
+    currentMockClients = [
+      { id: "sonhare", n8n_settings: { chatbot_enabled: true, chatbot_inbound_scope: "all", evolution_instances: [{ id: "chip-1", name: "Chip 1", active: true }] } },
+    ];
   });
 
   it("[TESTE OBRIGATÓRIO] agente sem chip: interruptor desabilitado, com o motivo visível", async () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: [] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     expect(screen.getByText(/Escolha um número para poder ligar este agente/)).toBeTruthy();
@@ -108,7 +121,7 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: ["chip-1"] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     const enableSwitch = screen.getAllByRole("switch")[0];
@@ -122,13 +135,10 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
   });
 
   it("[TESTE OBRIGATÓRIO] agente ligado sem chip nunca fica ligado — autodesliga", async () => {
-    // Cenário de auto-cura: uma linha chega do backend já ligada mas sem
-    // nenhum chip vinculado (ex.: o chip foi removido em outro lugar). A tela
-    // nunca deve manter isso — desliga sozinha assim que carrega.
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: [] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     await waitFor(() => {
@@ -136,6 +146,38 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
     });
     const enableSwitch = screen.getAllByRole("switch")[0];
     expect(enableSwitch).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("quando o robô global do tenant está desligado, exibe banner honesto com link para Padrões da Empresa", async () => {
+    currentMockClients = [
+      {
+        id: "sonhare",
+        n8n_settings: {
+          chatbot_enabled: false, // robô global desligado
+          chatbot_inbound_scope: "all",
+          evolution_instances: [
+            { id: "chip-1", name: "Chip 1", active: true },
+            { id: "chip-sem-agente", name: "Chip 2 Sem Agente", active: true },
+          ],
+        },
+      },
+    ];
+
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    // Banner de aviso visível
+    expect(screen.getByText("Atendimento geral da empresa desligado")).toBeTruthy();
+    expect(screen.getByText(/O robô geral da empresa está desligado, mas este agente responderá normalmente por ter chip próprio/)).toBeTruthy();
+
+    const linkButton = screen.getByRole("button", { name: "Padrões da Empresa" });
+    expect(linkButton).toBeTruthy();
+    fireEvent.click(linkButton);
+    expect(mockNavigate).toHaveBeenCalledWith("/crm/padroes-da-empresa");
   });
 });
 
@@ -147,8 +189,8 @@ describe("InboundAgentConfig — Passo 6 (Testar antes de soltar)", () => {
   });
 
   it("[TESTE OBRIGATÓRIO] agente ainda não salvo (rascunho): o simulador não aparece — não há id pra testar", async () => {
-    mockCompanies([]); // sem nenhum agente salvo => a tela injeta um rascunho
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    mockCompanies([]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     expect(screen.getByText(/Salve este agente para poder testar/)).toBeTruthy();
@@ -166,7 +208,7 @@ describe("InboundAgentConfig — Passo 6 (Testar antes de soltar)", () => {
     }));
     vi.doMock("@/lib/api", () => ({ fetchApi: fetchApiMock }));
 
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     const input = screen.getByPlaceholderText("Digite sua mensagem...") as HTMLInputElement;
@@ -192,7 +234,7 @@ describe("InboundAgentConfig — Passo 6 (Testar antes de soltar)", () => {
     }));
     vi.doMock("@/lib/api", () => ({ fetchApi: fetchApiMock }));
 
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     const input = screen.getByPlaceholderText("Digite sua mensagem...") as HTMLInputElement;
@@ -218,11 +260,9 @@ describe("InboundAgentConfig — Arquivar agente", () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
-    // Um só agente existe, então ele aparece na lista E aberto — os dois
-    // botões de arquivar (card + topo do agente) coexistem.
     const triggers = screen.getAllByRole("button", { name: /Arquivar agente/i });
     expect(triggers.length).toBe(2);
     fireEvent.click(triggers[triggers.length - 1]);
@@ -239,7 +279,7 @@ describe("InboundAgentConfig — Arquivar agente", () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: [] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     const trigger = screen.getAllByRole("button", { name: /Arquivar agente/i })[0];
@@ -258,7 +298,7 @@ describe("InboundAgentConfig — Arquivar agente", () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     const trigger = screen.getAllByRole("button", { name: /Arquivar agente/i })[0];
@@ -273,7 +313,7 @@ describe("InboundAgentConfig — Arquivar agente", () => {
 
   it("agente ainda não salvo (rascunho): sem botão de arquivar — nada pra arquivar ainda", async () => {
     mockCompanies([]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
     expect(screen.queryByRole("button", { name: /Arquivar agente/i })).toBeNull();
@@ -291,10 +331,9 @@ describe("InboundAgentConfig — Escopo de Atendimento", () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
-    // Abre a seção Avançado
     const avancadoBtn = screen.getByRole("button", { name: /Avançado/i });
     fireEvent.click(avancadoBtn);
 
@@ -302,11 +341,9 @@ describe("InboundAgentConfig — Escopo de Atendimento", () => {
     expect(screen.getByText("Atender a todos")).toBeTruthy();
     expect(screen.getByText("Apenas Leads no CRM")).toBeTruthy();
 
-    // Clica em 'Apenas Leads no CRM'
     const leadsOnlyBtn = screen.getByRole("button", { name: /Apenas Leads no CRM/i });
     fireEvent.click(leadsOnlyBtn);
 
-    // Salva alterações
     const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
     fireEvent.click(saveBtn);
 
@@ -324,10 +361,9 @@ describe("InboundAgentConfig — Escopo de Atendimento", () => {
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
     ]);
-    const { default: InboundAgentConfig } = await import("@/pages/InboundAgentConfig");
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
-    // Salva alterações diretamente
     const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
     fireEvent.click(saveBtn);
 
