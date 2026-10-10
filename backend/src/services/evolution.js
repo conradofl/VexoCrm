@@ -1977,6 +1977,19 @@ export async function validateWhatsappNumbersWithCache({ pool, webhookUrl, webho
  */
 const warnedUnmappedChips = new Map();
 
+export function extractEvolutionInstanceSlug(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : null;
+  } catch {
+    const clean = String(url).split("?")[0].split("#")[0];
+    const parts = clean.split("/").filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : null;
+  }
+}
+
 export async function resolveInstanceIdentifier({ clientId, identifier = null, pool = null, dbPool = null }) {
   const db = pool || dbPool || pgDatabasePool;
   if (!clientId || !db) return { canonicalName: null, aliases: [], chip: null };
@@ -2002,17 +2015,13 @@ export async function resolveInstanceIdentifier({ clientId, identifier = null, p
   for (const wanted of requested) {
     aliasesSet.add(wanted);
     const matched = (instances || []).find((inst) => {
-      const urlSuffix = inst.dispatch_webhook_url
-        ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
-        : null;
+      const urlSuffix = extractEvolutionInstanceSlug(inst.dispatch_webhook_url);
       return inst.name === wanted || inst.id === wanted || urlSuffix === wanted;
     });
 
     if (matched) {
       if (!matchedChip) matchedChip = matched;
-      const urlSuffix = matched.dispatch_webhook_url
-        ? matched.dispatch_webhook_url.split("/").filter(Boolean).pop()
-        : null;
+      const urlSuffix = extractEvolutionInstanceSlug(matched.dispatch_webhook_url);
       const canonical = urlSuffix || matched.name || matched.id;
       if (!firstCanonical) firstCanonical = canonical;
 
@@ -2035,9 +2044,7 @@ export async function resolveInstanceIdentifier({ clientId, identifier = null, p
         if (oldestKey) warnedUnmappedChips.delete(oldestKey);
       }
       const knownChips = (instances || []).map((inst) => {
-        const urlSuffix = inst.dispatch_webhook_url
-          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
-          : null;
+        const urlSuffix = extractEvolutionInstanceSlug(inst.dispatch_webhook_url);
         return `"${inst.name || "sem-nome"}" (id: ${inst.id}${urlSuffix ? `, urlSuffix: ${urlSuffix}` : ""})`;
       });
       console.warn(

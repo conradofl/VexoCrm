@@ -10,7 +10,11 @@ import {
   getClientEnvSuffix,
   parseJsonEnvMap,
 } from "../services/tenant.js";
-import { getSafeEvolutionEndpointLog, getLeadClientEvolutionInstances } from "../services/evolution.js";
+import {
+  getSafeEvolutionEndpointLog,
+  getLeadClientEvolutionInstances,
+  resolveInstanceIdentifier,
+} from "../services/evolution.js";
 import { getLeadClientN8nSettingsStatus } from "../services/n8nSettings.js";
 import { normalizeCampaignAnalyticsMeta } from "../campaign-outbound.js";
 
@@ -280,16 +284,16 @@ export function _resetInboundChipLastGoodCache() {
  *   de 5 minutos. Passado esse horizonte, recusa o envio com erro explícito para evitar
  *   disparar por chips que foram desconectados ou banidos.
  */
-export async function resolveInboundDispatchSettings({ clientId, instanceName = null }) {
+export async function resolveInboundDispatchSettings({ clientId, instanceName = null, pool = null, dbPool = null }) {
   const agora = Date.now();
   const tentativas = [];
   const alvo = normalizeString(instanceName);
   const cacheKey = `${clientId}::${alvo || "__default__"}`;
 
   if (alvo) {
-    let instancias;
+    let resolvedInstance;
     try {
-      instancias = await getLeadClientEvolutionInstances(clientId);
+      resolvedInstance = await resolveInstanceIdentifier({ clientId, identifier: alvo, pool: pool || dbPool });
     } catch (err) {
       const lastGood = inboundChipLastGoodCache.get(cacheKey);
       // Isolamento estrito por tenant: garante que o registro pertence exatamente a este clientId
@@ -340,14 +344,7 @@ export async function resolveInboundDispatchSettings({ clientId, instanceName = 
       );
     }
 
-    // O mesmo chip tem tres nomes: o amigavel, o id, e o ultimo segmento da URL de
-    // disparo. O webhook manda um deles — comparar so por `name` erra.
-    const casada = instancias.find((inst) => {
-      const daUrl = inst.dispatch_webhook_url
-        ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop()
-        : null;
-      return inst.name === alvo || inst.id === alvo || daUrl === alvo;
-    });
+    const casada = resolvedInstance?.chip;
 
     if (!casada) {
       tentativas.push({ fonte: "chip_do_webhook", instanceName: alvo, resultado: "instancia_nao_encontrada" });
@@ -356,14 +353,11 @@ export async function resolveInboundDispatchSettings({ clientId, instanceName = 
     } else if (!normalizeString(casada.dispatch_webhook_url)) {
       tentativas.push({ fonte: "chip_do_webhook", instanceName: alvo, resultado: "sem_url_de_disparo" });
     } else {
-      const urlInstance = casada.dispatch_webhook_url
-        ? casada.dispatch_webhook_url.split("/").filter(Boolean).pop()
-        : null;
       const resolved = {
         webhookUrl: normalizeString(casada.dispatch_webhook_url),
         webhookToken: normalizeString(casada.dispatch_webhook_token) || null,
         source: "inbound_chip",
-        instanceName: urlInstance || casada.name || alvo,
+        instanceName: resolvedInstance.canonicalName || casada.name || alvo,
         rawInstanceName: casada.name || alvo,
         tentativas,
       };

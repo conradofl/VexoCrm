@@ -111,8 +111,106 @@ describe("Teste-Guarda: Resolução Canônica de Identificadores de Chip", () =>
     expect(conteudo).toMatch(/resolveInstanceIdentifier\(\s*\{\s*\n?\s*clientId,\s*\n?\s*identifier:\s*rawInstanceName,\s*\n?\s*pool:\s*pgDatabasePool/);
   });
 
-  // 5. Prova de mutação (Mutation Testing):
-  // Se removermos a invocação de resolveInstanceIdentifier de leadMessaging, a guarda DEVE acusar violação.
+  // 5. Teste funcional de envio de áudio/mídia via Evolution com resolução canônica
+  it("resolveInboundDispatchSettings resolve nome amigável para slug canônico e sendMediaMessageViaEvolution monta endpoint sem espaços", async () => {
+    const { resolveInboundDispatchSettings } = await import("../campaign/settings.js");
+    const { sendMediaMessageViaEvolution } = await import("../services/evolution.js");
+
+    const mockDb = {
+      query: vi.fn(async () => ({
+        rows: [
+          {
+            id: "11111111-2222-3333-4444-555555555555",
+            client_id: "vexo-adm",
+            name: "Vexo atende",
+            dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/vexo-adm-vexo-atende",
+            dispatch_webhook_token: "token-123",
+            active: true,
+          },
+        ],
+      })),
+    };
+
+    // 1. resolveInboundDispatchSettings recebendo nome amigável "Vexo atende"
+    const resolved = await resolveInboundDispatchSettings({
+      clientId: "vexo-adm",
+      instanceName: "Vexo atende",
+      pool: mockDb,
+    });
+
+    expect(resolved.instanceName).toBe("vexo-adm-vexo-atende");
+    expect(resolved.instanceName).not.toBe("Vexo atende");
+
+    // 2. Intercepta fetch para garantir que o endpoint chamado pela Evolution contém o slug e NÃO o nome amigável
+    let fetchUrlChamada = null;
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url) => {
+      fetchUrlChamada = String(url);
+      return {
+        ok: true,
+        text: async () => JSON.stringify({ success: true, key: { id: "wa-msg-audio-id-123" } }),
+      };
+    });
+
+    try {
+      await sendMediaMessageViaEvolution({
+        instanceName: resolved.instanceName,
+        number: "553499999999",
+        mediaType: "audio",
+        base64: "ZmFrZS1hdWRpby1ieXRlcw==",
+        webhookToken: "token-123",
+        baseUrl: "https://vexo-evolution-api.xdvm8y.easypanel.host",
+      });
+
+      expect(fetchUrlChamada).toBe("https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendWhatsAppAudio/vexo-adm-vexo-atende");
+      expect(fetchUrlChamada).not.toContain("Vexo%20atende");
+      expect(fetchUrlChamada).not.toContain("Vexo atende");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  // 6. Prova de mutação (Mutation Testing):
+  // Se alguém passar o nome amigável direto ("Vexo atende") para a Evolution API,
+  // a requisição com espaços/caracteres inválidos DEVE falhar.
+  it("PROVA DE MUTAÇÃO: passar nome amigável ('Vexo atende') diretamente para sendMediaMessageViaEvolution gera endpoint inválido e DERROTA a asserção canônica", async () => {
+    const { sendMediaMessageViaEvolution } = await import("../services/evolution.js");
+
+    let endpointGerado = null;
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url) => {
+      endpointGerado = String(url);
+      return {
+        ok: true,
+        text: async () => JSON.stringify({ success: true }),
+      };
+    });
+
+    try {
+      // Mutação simulada: passar o nome amigável sem resolução
+      const nomeAmigavelMutante = "Vexo atende";
+      await sendMediaMessageViaEvolution({
+        instanceName: nomeAmigavelMutante,
+        number: "553499999999",
+        mediaType: "audio",
+        base64: "ZmFrZS1hdWRpby1ieXRlcw==",
+        webhookToken: "token-123",
+        baseUrl: "https://vexo-evolution-api.xdvm8y.easypanel.host",
+      });
+
+      // O endpoint mutante conteria "Vexo%20atende"
+      const contemSlugValido = endpointGerado === "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendWhatsAppAudio/vexo-adm-vexo-atende";
+      const contemNomeAmigavelInvalido = endpointGerado.includes("Vexo%20atende") || endpointGerado.includes("Vexo atende");
+
+      // Demonstra que sem a resolução canônica, a asserção de slug falha rigorosamente
+      expect(contemSlugValido).toBe(false);
+      expect(contemNomeAmigavelInvalido).toBe(true);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  // 7. Prova de mutação de código estático:
   it("PROVA DE MUTAÇÃO: código simulado sem resolveInstanceIdentifier em leadMessaging falha", () => {
     const codigoMutante = `
       async function appendLeadMessage({ clientId, instanceName }) {

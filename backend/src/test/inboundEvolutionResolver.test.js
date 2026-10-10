@@ -71,7 +71,8 @@ describe("o inbound resolve pelo chip que recebeu a mensagem", () => {
       expect(res.webhookUrl).toBe("https://evo.vexo.com/message/sendText/priscila_evo");
       expect(res.webhookToken).toBe("token-priscila");
       expect(res.source).toBe("inbound_chip");
-      expect(res.instanceName).toBe("GD Priscila");
+      expect(res.instanceName).toBe("priscila_evo");
+      expect(res.rawInstanceName).toBe("GD Priscila");
     } finally {
       _setPgDatabasePoolForTesting(null);
     }
@@ -88,7 +89,8 @@ describe("o inbound resolve pelo chip que recebeu a mensagem", () => {
       expect(res.webhookUrl).toBe("https://evo.vexo.com/message/sendText/priscila_evo");
       expect(res.webhookToken).toBe("token-priscila");
       expect(res.source).toBe("inbound_chip");
-      expect(res.instanceName).toBe("GD Priscila");
+      expect(res.instanceName).toBe("priscila_evo");
+      expect(res.rawInstanceName).toBe("GD Priscila");
     } finally {
       _setPgDatabasePoolForTesting(null);
     }

@@ -3189,11 +3189,8 @@ export function registerChatbotRoutes(app, deps) {
 
             if (speech?.base64) {
               try {
-                const targetInstance =
-                  (evolutionUrl ? new URL(evolutionUrl).pathname.split("/").filter(Boolean).pop() : null) ||
-                  dispatchSettings.instanceName ||
-                  instanceName;
-                const evoBaseUrl = evolutionUrl ? new URL(evolutionUrl).origin : null;
+                const targetInstance = resolvedInstanceName || dispatchSettings.instanceName || instanceName;
+                const evoBaseUrl = normalizeHttpUrl(process.env.EVOLUTION_API_URL) || (evolutionUrl ? new URL(evolutionUrl).origin : null);
                 const voiceRes = await sendMediaMessageViaEvolution({
                   instanceName: targetInstance,
                   number: phone,

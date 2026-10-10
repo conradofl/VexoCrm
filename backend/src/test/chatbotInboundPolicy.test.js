@@ -116,7 +116,10 @@ describe("[Um agente por chip, Regra 1] chip de campanha não faz atendimento es
   });
 
   it("[TESTE OBRIGATÓRIO — Regra 3] PROVA ESTRUTURAL: chip sem agente continua igual — a checagem de agent_kind só roda dentro de 'if (inboundConfig)', nunca alcança o caminho do chatbot do tenant", async () => {
-    const fonte = readFileSync(resolve("src/domains/chatbot/routes.js"), "utf8");
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const raizSrc = existsSync(resolve("backend/src")) ? resolve("backend/src") : resolve("src");
+    const fonte = readFileSync(join(raizSrc, "domains/chatbot/routes.js"), "utf8");
     const idx = fonte.indexOf("shouldCampaignKindChipEngage({");
     expect(idx, "chamada de shouldCampaignKindChipEngage não encontrada em routes.js").toBeGreaterThan(-1);
 
