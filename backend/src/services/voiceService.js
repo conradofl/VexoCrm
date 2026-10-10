@@ -1,13 +1,23 @@
 /**
  * voiceService.js
  * 
- * Camada de serviço pura para síntese de voz (Text-to-Speech) humanizada via Google Gemini 2.0 Audio
- * com vozes neurais masculinas e femininas em pt-BR e fallback resiliente via Google Speech HTTP MP3.
+ * Camada de serviço pura para síntese de voz (Text-to-Speech) humanizada via Google Neural TTS
+ * (texttospeech.googleapis.com) e Gemini 2.0 Audio com vozes neurais masculinas e femininas em pt-BR,
+ * contando com fallback resiliente via Google Speech HTTP MP3.
  * Permite que o robô do WhatsApp responda leads usando notas de voz nativas (PTT)
  * com forma de onda, suportando o modo "Espelhar o Lead" e fallback de ouro para texto.
  */
 
 export const VOICE_SYNTHESIS_TIMEOUT_MS = 8000;
+
+export const GOOGLE_NEURAL_VOICES = {
+  nova: { name: "pt-BR-Neural2-A", gender: "FEMALE" },
+  echo: { name: "pt-BR-Neural2-B", gender: "MALE" },
+  shimmer: { name: "pt-BR-Neural2-C", gender: "FEMALE" },
+  alloy: { name: "pt-BR-Wavenet-A", gender: "FEMALE" },
+  onyx: { name: "pt-BR-Wavenet-B", gender: "MALE" },
+  fable: { name: "pt-BR-Wavenet-C", gender: "FEMALE" },
+};
 
 export const GEMINI_VOICE_MAP = {
   nova: "Aoede",     // Feminina Expressiva
@@ -19,12 +29,12 @@ export const GEMINI_VOICE_MAP = {
 };
 
 export const SUPPORTED_VOICES = [
-  { id: "nova", name: "Nova", gender: "feminina", style: "Feminina Expressiva (Padrão)", geminiVoice: "Aoede" },
-  { id: "echo", name: "Echo", gender: "masculina", style: "Masculina Natural", geminiVoice: "Charon" },
-  { id: "shimmer", name: "Shimmer", gender: "feminina", style: "Feminina Suave", geminiVoice: "Kore" },
-  { id: "alloy", name: "Alloy", gender: "neutra", style: "Equilibrada & Profissional", geminiVoice: "Puck" },
-  { id: "onyx", name: "Onyx", gender: "masculina", style: "Masculina Corporativa", geminiVoice: "Fenrir" },
-  { id: "fable", name: "Fable", gender: "expressiva", style: "Expressiva & Marcante", geminiVoice: "Aoede" },
+  { id: "nova", name: "Nova", gender: "feminina", style: "Feminina Expressiva (Padrão)", googleVoice: "pt-BR-Neural2-A", geminiVoice: "Aoede" },
+  { id: "echo", name: "Echo", gender: "masculina", style: "Masculina Natural", googleVoice: "pt-BR-Neural2-B", geminiVoice: "Charon" },
+  { id: "shimmer", name: "Shimmer", gender: "feminina", style: "Feminina Suave", googleVoice: "pt-BR-Neural2-C", geminiVoice: "Kore" },
+  { id: "alloy", name: "Alloy", gender: "neutra", style: "Equilibrada & Profissional", googleVoice: "pt-BR-Wavenet-A", geminiVoice: "Puck" },
+  { id: "onyx", name: "Onyx", gender: "masculina", style: "Masculina Corporativa", googleVoice: "pt-BR-Wavenet-B", geminiVoice: "Fenrir" },
+  { id: "fable", name: "Fable", gender: "expressiva", style: "Expressiva & Marcante", googleVoice: "pt-BR-Wavenet-C", geminiVoice: "Aoede" },
 ];
 
 export const SUPPORTED_OPENAI_VOICES = SUPPORTED_VOICES;
@@ -113,7 +123,7 @@ async function generateSpeechAudioFallback(cleanText, timeoutMs) {
 }
 
 /**
- * Sintetiza texto em áudio usando Google Gemini 2.0 Audio com vozes neurais e fallback automático.
+ * Sintetiza texto em áudio usando Google Neural TTS / Gemini 2.0 Audio com vozes neurais e fallback automático.
  *
  * @param {object} params
  * @param {string} params.text - Texto a ser falado
@@ -134,13 +144,59 @@ export async function generateSpeechAudio({
 
   const cleanText = text.trim().slice(0, 3000);
   const voiceKey = isSupportedVoice(voice) ? voice.trim().toLowerCase() : "nova";
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
-  if (geminiKey) {
-    const geminiVoice = GEMINI_VOICE_MAP[voiceKey] || "Aoede";
+  if (apiKey) {
+    // Tentativa 1: Google Cloud Neural TTS (texttospeech.googleapis.com)
+    const voiceConfig = GOOGLE_NEURAL_VOICES[voiceKey] || GOOGLE_NEURAL_VOICES.nova;
+    const numSpeed = Number(speed);
+    const sanitizedSpeed = !isNaN(numSpeed) && numSpeed >= 0.25 && numSpeed <= 4.0 ? numSpeed : 1.0;
     const startMs = Date.now();
+
     try {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+      const ttsUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+      const res = await fetch(ttsUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: { text: cleanText },
+          voice: {
+            languageCode: "pt-BR",
+            name: voiceConfig.name,
+            ssmlGender: voiceConfig.gender,
+          },
+          audioConfig: {
+            audioEncoding: "MP3",
+            speakingRate: sanitizedSpeed,
+          },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.audioContent) {
+          const durationMs = Date.now() - startMs;
+          console.log(`[voiceService] Áudio sintetizado via Google Neural TTS (${voiceConfig.name}, ${voiceConfig.gender}, ${durationMs}ms)`);
+          return {
+            base64: data.audioContent,
+            mimetype: "audio/mpeg",
+            format: "mp3",
+          };
+        }
+      } else {
+        const errBody = await res.text().catch(() => "");
+        console.warn(`[voiceService] Falha na síntese Google Neural TTS (${res.status}):`, errBody.slice(0, 200));
+      }
+    } catch (ttsErr) {
+      console.warn("[voiceService] Erro ao chamar Google Neural TTS, tentando Gemini 2.0 Audio:", ttsErr.message);
+    }
+
+    // Tentativa 2: Gemini 2.0 Audio (gemini-2.0-flash)
+    const geminiVoice = GEMINI_VOICE_MAP[voiceKey] || "Aoede";
+    const geminiStartMs = Date.now();
+    try {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
       const payload = {
         contents: [{
           role: "user",
@@ -173,7 +229,7 @@ export async function generateSpeechAudio({
         const data = await response.json();
         const inlineData = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inlineData?.data) {
-          const durationMs = Date.now() - startMs;
+          const durationMs = Date.now() - geminiStartMs;
           const mimeType = inlineData.mimeType || "audio/wav";
           const format = mimeType.includes("mp3") || mimeType.includes("mpeg") ? "mp3" : "wav";
           console.log(`[voiceService] Áudio sintetizado via Gemini 2.0 Audio (${geminiVoice}, ${durationMs}ms, ${inlineData.data.length} chars)`);
@@ -195,3 +251,4 @@ export async function generateSpeechAudio({
   // Fallback para Google Speech HTTP MP3
   return generateSpeechAudioFallback(cleanText, timeoutMs);
 }
+
