@@ -11,6 +11,11 @@ import {
   ArrowRight,
   Sparkles,
   CheckCircle2,
+  CalendarDays,
+  LayoutGrid,
+  Cpu,
+  Volume2,
+  PartyPopper,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -132,6 +137,71 @@ const SUPERPOWERS: Superpower[] = [
     route: "/crm/onboarding",
     ctaLabel: "Acessar Academy",
   },
+  {
+    id: "calendario-unificado",
+    icon: CalendarDays,
+    tag: "Operação & Disparos",
+    tagColor: "bg-pink-100 text-pink-700 dark:bg-pink-500/10 dark:text-pink-400",
+    title: "Calendário Comercial Unificado",
+    description:
+      "Visão mensal consolidada de campanhas, disparos agendados e follow-ups com controle de fuso horário.",
+    whyUse:
+      "Tenha previsibilidade operacional completa de todos os envios programados para sua base de leads.",
+    route: "/crm/calendario",
+    ctaLabel: "Ver Calendário",
+  },
+  {
+    id: "kanban-metricas",
+    icon: LayoutGrid,
+    tag: "Gestão Comercial",
+    tagColor: "bg-cyan-100 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-400",
+    title: "Pipeline Visual Kanban & Métricas",
+    description:
+      "Gestão de oportunidades em 5 colunas canônicas com cálculo de volume financeiro e filtro de inatividade.",
+    whyUse:
+      "Visualize e movimente oportunidades em tempo real para maximizar a conversão de vendas.",
+    route: "/crm/banco-de-dados",
+    ctaLabel: "Abrir Funil Kanban",
+  },
+  {
+    id: "transicao-funil-ia",
+    icon: Cpu,
+    tag: "Automação com IA",
+    tagColor: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400",
+    title: "Motor de Automações & Transição de Funil por IA",
+    description:
+      "Classificação semântica automática de leads e cancelamento seguro de follow-up após ganho ou perda.",
+    whyUse:
+      "A IA atualiza o estágio do lead e interrompe réguas automaticamente quando o cliente compra ou desiste.",
+    route: "/crm/banco-de-dados",
+    ctaLabel: "Ver Automações",
+  },
+  {
+    id: "voz-ia-multimodal",
+    icon: Volume2,
+    tag: "Voz & Multimodal",
+    tagColor: "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
+    title: "Voz da IA & Mensageria Multimodal",
+    description:
+      "Áudios ultra-realistas via OpenAI TTS (6 vozes) com modo espelho inteligente e transcrição via Groq Whisper.",
+    whyUse:
+      "Humaniza o atendimento no WhatsApp com respostas de voz naturais quando o cliente envia áudios.",
+    route: "/crm/agente",
+    ctaLabel: "Configurar Voz da IA",
+  },
+  {
+    id: "eventos-reguas",
+    icon: PartyPopper,
+    tag: "Eventos & Réguas",
+    tagColor: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/10 dark:text-fuchsia-400",
+    title: "Módulo de Eventos & Réguas Temporais",
+    description:
+      "Gestão de lotes/ingressos e réguas automáticas em contagem regressiva D-7, D-3, D-1, VIP e D+1.",
+    whyUse:
+      "Automatiza a pré-venda com escassez e o pós-evento para lotar festas, shows e congressos corporativos.",
+    route: "/crm/livpub?tab=eventos",
+    ctaLabel: "Gerenciar Eventos",
+  },
 ];
 
 export function SuperpowersMapTab() {
@@ -149,19 +219,19 @@ export function SuperpowersMapTab() {
               🌟 Mapa de Superpoderes do Vexo OS
             </h3>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
-              Explore as 8 frentes de inteligência e automação da plataforma. Cada recurso foi desenhado para eliminar trabalho braçal, blindar sua operação contra esquecimentos e acelerar seu faturamento no WhatsApp.
+              Explore as 13 frentes de inteligência e automação da plataforma. Cada recurso foi desenhado para eliminar trabalho braçal, blindar sua operação contra esquecimentos e acelerar seu faturamento no WhatsApp.
             </p>
           </div>
           <div className="shrink-0 flex items-center gap-2">
             <div className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              8 Módulos Disponíveis
+              13 Superpoderes Disponíveis
             </div>
           </div>
         </div>
       </div>
 
-      {/* Grid de 8 Superpoderes */}
+      {/* Grid de Superpoderes */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         {SUPERPOWERS.map((power) => {
           const Icon = power.icon;

@@ -54,6 +54,7 @@ import { assertTenantMatch } from "@/lib/tenantIsolation";
 import { AgentInstructionAuditPanel } from "@/components/agente/AgentInstructionAuditPanel";
 import { AgentKnowledgeBaseSection } from "@/components/agente/AgentKnowledgeBaseSection";
 import { SdrNumbersDialog } from "@/components/agente/SdrNumbersDialog";
+import { VoiceSettingsCard } from "@/components/agente/VoiceSettingsCard";
 
 // Empresa "de mentira" mostrada quando o tenant ainda nao tem linha em
 // followup_companies. Salvar com ela cria a linha de verdade. Toda linha de
@@ -141,21 +142,32 @@ export default function InboundAgentConfig() {
   // deste agente. Cada chip vira uma linha propria em followup_companies, entao
   // varios numeros de atendimento funcionam sem mudar schema.
   const { data: leadClients = [] } = useLeadClients();
-  const chips = useMemo(() => {
-    const tenant = leadClients.find((c) => c.id === selectedClientId);
-    return (tenant?.n8n_settings?.evolution_instances ?? []).filter((i) => i.active !== false);
+  const currentTenant = useMemo(() => {
+    return leadClients.find((c) => c.id === selectedClientId);
   }, [leadClients, selectedClientId]);
+
+  const chips = useMemo(() => {
+    return (currentTenant?.n8n_settings?.evolution_instances ?? []).filter((i) => i.active !== false);
+  }, [currentTenant]);
 
   // Lista de SDR do TENANT — a mesma que o disparo usa. O backend ja resolve por
   // ela (services/sdrTarget.js: resolveSdrTarget), entao aqui e so leitura: mostrar
   // quem recebe hoje evita a impressao de que o inbound so aceita um numero.
   const sdrNumbersDoTenant = useMemo(() => {
-    const tenant = leadClients.find((c) => c.id === selectedClientId);
-    const lista = tenant?.n8n_settings?.sdr_whatsapp_numbers;
+    const lista = currentTenant?.n8n_settings?.sdr_whatsapp_numbers;
     if (Array.isArray(lista) && lista.length > 0) return lista;
-    const unico = tenant?.n8n_settings?.sdr_whatsapp_number;
+    const unico = currentTenant?.n8n_settings?.sdr_whatsapp_number;
     return unico ? [unico] : [];
-  }, [leadClients, selectedClientId]);
+  }, [currentTenant]);
+
+  const voiceSettings = useMemo(() => {
+    const settings = currentTenant?.n8n_settings;
+    return {
+      mode: settings?.chatbot_voice_mode,
+      id: settings?.chatbot_voice_id,
+      speed: settings?.chatbot_voice_speed,
+    };
+  }, [currentTenant]);
 
   const [companyId, setCompanyId] = useState<string>("all");
   const updateCompany = useUpdateFupCompany();
@@ -724,6 +736,18 @@ export default function InboundAgentConfig() {
                 />
               </CardContent>
             </Card>
+
+            {/* Voz da IA & Respostas em Áudio (OpenAI TTS & Groq Whisper) */}
+            {selectedClientId && (
+              <VoiceSettingsCard
+                clientId={selectedClientId}
+                clientName={activeCompany?.name || currentTenant?.name}
+                initialVoiceMode={voiceSettings.mode}
+                initialVoiceId={voiceSettings.id}
+                initialVoiceSpeed={voiceSettings.speed}
+                canEdit={true}
+              />
+            )}
           </section>
 
           {/* 3 — O que ele precisa descobrir */}

@@ -336,7 +336,7 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(screen.getByRole("tab", { name: /Mapa de Superpoderes/i })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: /Esteira Técnica/i })).toBeInTheDocument();
 
-      // 8 Superpoderes
+      // 13 Superpoderes
       expect(screen.getByText("Agente de Atendimento 24/7")).toBeInTheDocument();
       expect(screen.getByText("Agente Extrator de Ficha")).toBeInTheDocument();
       expect(screen.getByText("Agente de Disparo em Massa")).toBeInTheDocument();
@@ -345,9 +345,14 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(screen.getByText("Aviso de Lead Parado (SLA)")).toBeInTheDocument();
       expect(screen.getByText("Reativação Automática")).toBeInTheDocument();
       expect(screen.getByText("Vexo Academy")).toBeInTheDocument();
+      expect(screen.getByText("Calendário Comercial Unificado")).toBeInTheDocument();
+      expect(screen.getByText("Pipeline Visual Kanban & Métricas")).toBeInTheDocument();
+      expect(screen.getByText("Motor de Automações & Transição de Funil por IA")).toBeInTheDocument();
+      expect(screen.getByText("Voz da IA & Mensageria Multimodal")).toBeInTheDocument();
+      expect(screen.getByText("Módulo de Eventos & Réguas Temporais")).toBeInTheDocument();
 
       // Caixa didática "Por que usar:" em múltiplos cards
-      expect(screen.getAllByText(/💡 Por que usar:/i).length).toBe(8);
+      expect(screen.getAllByText(/💡 Por que usar:/i).length).toBe(13);
 
       // Atalhos dos superpoderes
       const links = screen.getAllByRole("link");
@@ -358,6 +363,8 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(links.some((l) => l.getAttribute("href") === "/crm/banco-de-dados?stalled=3")).toBe(true);
       expect(links.some((l) => l.getAttribute("href") === "/crm/followup")).toBe(true);
       expect(links.some((l) => l.getAttribute("href") === "/crm/onboarding")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/calendario")).toBe(true);
+      expect(links.some((l) => l.getAttribute("href") === "/crm/livpub?tab=eventos")).toBe(true);
     });
 
     it("Renderiza Aba 2 (🛠️ Esteira Prática de Implantação) com 3 etapas didáticas e simulador", () => {
