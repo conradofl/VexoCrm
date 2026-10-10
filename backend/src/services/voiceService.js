@@ -123,7 +123,7 @@ async function generateSpeechAudioFallback(cleanText, timeoutMs) {
 }
 
 /**
- * Sintetiza texto em áudio usando Google Neural TTS / Gemini 2.0 Audio com vozes neurais e fallback automático.
+ * Sintetiza texto em áudio usando OpenAI TTS, Google Neural TTS ou Gemini Audio com vozes neurais e fallback automático.
  *
  * @param {object} params
  * @param {string} params.text - Texto a ser falado
@@ -144,13 +144,53 @@ export async function generateSpeechAudio({
 
   const cleanText = text.trim().slice(0, 3000);
   const voiceKey = isSupportedVoice(voice) ? voice.trim().toLowerCase() : "nova";
+  const numSpeed = Number(speed);
+  const sanitizedSpeed = !isNaN(numSpeed) && numSpeed >= 0.25 && numSpeed <= 4.0 ? numSpeed : 1.0;
+
+  // Tentativa 0: OpenAI TTS (se OPENAI_API_KEY estiver configurada)
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      const startMs = Date.now();
+      const res = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "tts-1",
+          input: cleanText,
+          voice: voiceKey,
+          speed: sanitizedSpeed,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (res.ok) {
+        const ab = await res.arrayBuffer();
+        const base64 = Buffer.from(ab).toString("base64");
+        const durationMs = Date.now() - startMs;
+        console.log(`[voiceService] Áudio sintetizado via OpenAI TTS (${voiceKey}, ${durationMs}ms)`);
+        return {
+          base64,
+          mimetype: "audio/mpeg",
+          format: "mp3",
+        };
+      } else {
+        const errBody = await res.text().catch(() => "");
+        console.warn(`[voiceService] Falha na síntese OpenAI TTS (${res.status}):`, errBody.slice(0, 200));
+      }
+    } catch (openAiErr) {
+      console.warn("[voiceService] Erro ao chamar OpenAI TTS, tentando provedores Google:", openAiErr.message);
+    }
+  }
+
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
   if (apiKey) {
     // Tentativa 1: Google Cloud Neural TTS (texttospeech.googleapis.com)
     const voiceConfig = GOOGLE_NEURAL_VOICES[voiceKey] || GOOGLE_NEURAL_VOICES.nova;
-    const numSpeed = Number(speed);
-    const sanitizedSpeed = !isNaN(numSpeed) && numSpeed >= 0.25 && numSpeed <= 4.0 ? numSpeed : 1.0;
     const startMs = Date.now();
 
     try {
@@ -189,66 +229,77 @@ export async function generateSpeechAudio({
         console.warn(`[voiceService] Falha na síntese Google Neural TTS (${res.status}):`, errBody.slice(0, 200));
       }
     } catch (ttsErr) {
-      console.warn("[voiceService] Erro ao chamar Google Neural TTS, tentando Gemini 2.0 Audio:", ttsErr.message);
+      console.warn("[voiceService] Erro ao chamar Google Neural TTS, tentando Gemini Audio:", ttsErr.message);
     }
 
-    // Tentativa 2: Gemini 2.0 Audio (gemini-2.0-flash)
+    // Tentativa 2: Gemini Audio com fallback dinâmico de modelo
     const geminiVoice = GEMINI_VOICE_MAP[voiceKey] || "Aoede";
-    const geminiStartMs = Date.now();
-    try {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{
-          role: "user",
-          parts: [{
-            text: "Leia o seguinte texto com entonação comercial natural em português do Brasil, exatamente como escrito, sem introduções:\n\n" + cleanText,
+    const candidateModels = [
+      process.env.GEMINI_VOICE_MODEL,
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-exp",
+      "gemini-1.5-flash",
+    ].filter(Boolean);
+
+    for (const model of candidateModels) {
+      const geminiStartMs = Date.now();
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const payload = {
+          contents: [{
+            role: "user",
+            parts: [{
+              text: "Leia o seguinte texto com entonação comercial natural em português do Brasil, exatamente como escrito, sem introduções:\n\n" + cleanText,
+            }],
           }],
-        }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: geminiVoice,
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: geminiVoice,
+                },
               },
             },
           },
-        },
-      };
+        };
 
-      const response = await fetch(geminiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+        const response = await fetch(geminiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        const inlineData = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-        if (inlineData?.data) {
-          const durationMs = Date.now() - geminiStartMs;
-          const mimeType = inlineData.mimeType || "audio/wav";
-          const format = mimeType.includes("mp3") || mimeType.includes("mpeg") ? "mp3" : "wav";
-          console.log(`[voiceService] Áudio sintetizado via Gemini 2.0 Audio (${geminiVoice}, ${durationMs}ms, ${inlineData.data.length} chars)`);
-          return {
-            base64: inlineData.data,
-            mimetype: mimeType,
-            format,
-          };
+        if (response.ok) {
+          const data = await response.json();
+          const inlineData = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+          if (inlineData?.data) {
+            const durationMs = Date.now() - geminiStartMs;
+            const mimeType = inlineData.mimeType || "audio/wav";
+            const format = mimeType.includes("mp3") || mimeType.includes("mpeg") ? "mp3" : "wav";
+            console.log(`[voiceService] Áudio sintetizado via Gemini Audio (${model}, ${geminiVoice}, ${durationMs}ms, ${inlineData.data.length} chars)`);
+            return {
+              base64: inlineData.data,
+              mimetype: mimeType,
+              format,
+            };
+          }
+        } else {
+          const errBody = await response.text().catch(() => "");
+          console.warn(`[voiceService] Falha na síntese Gemini (${model} - ${response.status}):`, errBody.slice(0, 200));
         }
-      } else {
-        const errBody = await response.text().catch(() => "");
-        console.warn(`[voiceService] Falha na síntese Gemini (${response.status}):`, errBody.slice(0, 200));
+      } catch (geminiErr) {
+        console.warn(`[voiceService] Erro ao chamar Gemini Audio (${model}):`, geminiErr.message);
       }
-    } catch (geminiErr) {
-      console.warn("[voiceService] Erro ao chamar Gemini 2.0 Audio, ativando fallback:", geminiErr.message);
     }
   }
 
   // Fallback para Google Speech HTTP MP3
   return generateSpeechAudioFallback(cleanText, timeoutMs);
 }
+
 

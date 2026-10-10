@@ -99,7 +99,43 @@ describe("voiceService — Síntese Multimodal Google Neural TTS, Gemini 2.0 Aud
     });
   });
 
-  describe("4. Tentativa 1: Google Cloud Neural TTS (texttospeech.googleapis.com)", () => {
+  describe("4. Tentativa 0: OpenAI TTS (quando OPENAI_API_KEY configurada)", () => {
+    it("sintetiza via OpenAI TTS com voz masculina 'echo'", async () => {
+      process.env.OPENAI_API_KEY = "test-openai-key";
+
+      const mockMp3Bytes = new Uint8Array([79, 103, 103, 83]);
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => mockMp3Bytes.buffer,
+      });
+      global.fetch = fetchMock;
+
+      const result = await generateSpeechAudio({
+        text: "Olá! Teste com OpenAI TTS.",
+        voice: "echo",
+        speed: 1.05,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe("https://api.openai.com/v1/audio/speech");
+      expect(options.headers.Authorization).toBe("Bearer test-openai-key");
+
+      const body = JSON.parse(options.body);
+      expect(body.model).toBe("tts-1");
+      expect(body.voice).toBe("echo");
+      expect(body.speed).toBe(1.05);
+
+      expect(result).toEqual({
+        base64: Buffer.from(mockMp3Bytes).toString("base64"),
+        mimetype: "audio/mpeg",
+        format: "mp3",
+      });
+    });
+  });
+
+  describe("5. Tentativa 1: Google Cloud Neural TTS (texttospeech.googleapis.com)", () => {
     it("sintetiza com voz masculina (pt-BR-Neural2-B / MALE) quando voice='echo'", async () => {
       process.env.GEMINI_API_KEY = "test-api-key";
 
@@ -268,27 +304,33 @@ describe("voiceService — Síntese Multimodal Google Neural TTS, Gemini 2.0 Aud
 
     it("cai para o fallback Google Speech HTTP se tanto Neural TTS quanto Gemini falharem", async () => {
       process.env.GEMINI_API_KEY = "test-api-key";
+      process.env.GEMINI_VOICE_MODEL = "gemini-custom-model";
 
       const chunkBytes = new Uint8Array([10, 20, 30]);
-      const fetchMock = vi.fn()
-        // 1ª chamada: Neural TTS falha
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          text: async () => "Internal Server Error",
-        })
-        // 2ª chamada: Gemini falha
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 429,
-          text: async () => "Quota exceeded",
-        })
-        // 3ª chamada: Google Speech HTTP fallback funciona
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          arrayBuffer: async () => chunkBytes.buffer,
-        });
+      const fetchMock = vi.fn((url) => {
+        if (String(url).includes("texttospeech.googleapis.com")) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            text: async () => "Internal Server Error",
+          });
+        }
+        if (String(url).includes("generativelanguage.googleapis.com")) {
+          return Promise.resolve({
+            ok: false,
+            status: 429,
+            text: async () => "Quota exceeded",
+          });
+        }
+        if (String(url).includes("translate.google.com")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => chunkBytes.buffer,
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
       global.fetch = fetchMock;
 
       const result = await generateSpeechAudio({
@@ -296,7 +338,6 @@ describe("voiceService — Síntese Multimodal Google Neural TTS, Gemini 2.0 Aud
         voice: "onyx",
       });
 
-      expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(result).not.toBeNull();
       expect(result.mimetype).toBe("audio/mpeg");
       expect(result.format).toBe("mp3");

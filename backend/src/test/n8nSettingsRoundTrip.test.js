@@ -44,6 +44,9 @@ describe("n8nSettings Round-Trip: Gravação e Leitura com Paridade Total", () =
       sendWindowTimezone: "America/Manaus",
       sendWindowEnabled: true,
       agentRepliesOutsideWindow: false,
+      chatbotVoiceMode: "mirror",
+      chatbotVoiceId: "echo",
+      chatbotVoiceSpeed: 1.15,
     };
 
     const authAccess = { uid: "user-123", email: "admin@sonhare.com" };
@@ -86,6 +89,9 @@ describe("n8nSettings Round-Trip: Gravação e Leitura com Paridade Total", () =
     expect(masked.send_window_timezone).toBe("America/Manaus");
     expect(masked.send_window_enabled).toBe(true);
     expect(masked.agent_replies_outside_window).toBe(false);
+    expect(masked.chatbot_voice_mode).toBe("mirror");
+    expect(masked.chatbot_voice_id).toBe("echo");
+    expect(masked.chatbot_voice_speed).toBe(1.15);
   });
 
   it("não usa mais 'outlier' como fallback padrão em tenants novos ou nulos", () => {

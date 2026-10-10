@@ -106,6 +106,9 @@ export function maskN8nSettings(row) {
       reactivation_stalled_days: 7,
       reactivation_cadence_id: null,
       reactivation_cooldown_days: 30,
+      chatbot_voice_mode: "disabled",
+      chatbot_voice_id: "nova",
+      chatbot_voice_speed: 1.0,
       updated_at: null,
     };
   }
@@ -157,6 +160,9 @@ export function maskN8nSettings(row) {
       Number.isInteger(Number(row.reactivation_cooldown_days)) && Number(row.reactivation_cooldown_days) >= 1
         ? Number(row.reactivation_cooldown_days)
         : 30,
+    chatbot_voice_mode: row.chatbot_voice_mode || "disabled",
+    chatbot_voice_id: row.chatbot_voice_id || "nova",
+    chatbot_voice_speed: row.chatbot_voice_speed !== undefined && row.chatbot_voice_speed !== null ? Number(row.chatbot_voice_speed) : 1.0,
     // Preserva a lista de instâncias já mascarada por maskEvolutionInstance (server.js:1717).
     // Sem isso a whitelist cortava o campo e a UI mostrava "0 instâncias".
     evolution_instances: Array.isArray(row.evolution_instances) ? row.evolution_instances : [],
