@@ -179,14 +179,14 @@ describe("Pilar 1: StalledLeadBadge & Funções Puras", () => {
       expect(screen.getByText(/⚠️ 8 Leads Parados/)).toBeInTheDocument();
       expect(screen.getByText(/Nenhum lead esquecido/)).toBeInTheDocument();
 
-      // Botão de navegação para o Banco de Dados
+      // Botão de navegação para a tela de Leads Parados
       const button = screen.getByTestId("view-stalled-leads-button");
       expect(button).toBeInTheDocument();
-      expect(button.textContent).toContain("Visualizar no Banco de Dados");
+      expect(button.textContent).toContain("Visualizar Leads Parados");
 
-      // Clicar redireciona para /crm/banco-de-dados?stalled=3
+      // Clicar redireciona para /crm/leads-parados
       fireEvent.click(button);
-      expect(mockNavigate).toHaveBeenCalledWith("/crm/banco-de-dados?stalled=3");
+      expect(mockNavigate).toHaveBeenCalledWith("/crm/leads-parados");
     });
 
     it("renderiza estado positivo quando nenhum lead está parado", () => {

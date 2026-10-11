@@ -33,6 +33,7 @@ export const INTERNAL_PAGE_ORDER = [
   "relacionamento",
   "livpub",
   "banco-de-dados",
+  "leads-parados",
 ] as const;
 
 export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];

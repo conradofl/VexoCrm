@@ -96,6 +96,7 @@ import {
   MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS,
   buildMessageEffectivenessSql,
 } from "../../services/messageEffectiveness.js";
+import { syncDailyStalledNotificationsForAllTenants } from "../../services/leadReactivationEngine.js";
 
 export {
   MESSAGE_EFFECTIVENESS_MIN_SENT,
@@ -1903,6 +1904,13 @@ export function registerCampaignsRoutes(app, deps) {
       } catch (err) {
         console.error("[campaign-dispatch-scheduler] background tick failed:", err);
       }
+      try {
+        if (pgDatabasePool) {
+          await syncDailyStalledNotificationsForAllTenants(pgDatabasePool);
+        }
+      } catch (err) {
+        console.error("[stalled-notifications-scheduler] background sync failed:", err);
+      }
     }, 30000); // ticks every 30 seconds
     if (_dueDispatchInterval?.unref) _dueDispatchInterval.unref();
   }
@@ -1919,7 +1927,10 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       const result = await runDueCampaignDispatches({ limit, triggerSource: "external_runner" });
       const dispatchResult = await runDueIndependentDispatches({ limit });
-      res.json({ campaigns: result, independentDispatches: dispatchResult });
+      const stalledNotifyResult = pgDatabasePool
+        ? await syncDailyStalledNotificationsForAllTenants(pgDatabasePool)
+        : null;
+      res.json({ campaigns: result, independentDispatches: dispatchResult, stalledNotifications: stalledNotifyResult });
     } catch (error) {
       console.error("campaign run-due error:", error);
       sendError(

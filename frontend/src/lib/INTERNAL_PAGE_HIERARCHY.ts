@@ -5,6 +5,7 @@ export const INTERNAL_PAGE_HIERARCHY = [
     children: [
       { key: "dashboard", label: "Dashboard" },
       { key: "banco-de-dados", label: "Banco de Dados" },
+      { key: "leads-parados", label: "Leads Parados" },
       { key: "whatsapp", label: "Conversas" },
       { key: "inteligencia-comercial", label: "Inteligência Comercial" },
       { key: "chatbot-kanban", label: "Chatbot Kanban" },

@@ -231,7 +231,8 @@ export async function ensureLeadReactivationSettingsColumns(pgClientOrPool) {
         ADD COLUMN IF NOT EXISTS reactivation_enabled BOOLEAN DEFAULT false,
         ADD COLUMN IF NOT EXISTS reactivation_stalled_days INT DEFAULT 7,
         ADD COLUMN IF NOT EXISTS reactivation_cadence_id UUID NULL,
-        ADD COLUMN IF NOT EXISTS reactivation_cooldown_days INT DEFAULT 30;
+        ADD COLUMN IF NOT EXISTS reactivation_cooldown_days INT DEFAULT 30,
+        ADD COLUMN IF NOT EXISTS stalled_notifications_synced_at TIMESTAMPTZ NULL;
     `);
   } catch (err) {
     console.warn("[lead-client-tables] Could not add reactivation columns to lead_client_n8n_settings:", err?.message || err);

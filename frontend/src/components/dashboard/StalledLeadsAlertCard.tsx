@@ -76,7 +76,7 @@ export function StalledLeadsAlertCard({ clientId, minDays = 3 }: StalledLeadsAle
         <Button
           size="sm"
           data-testid="view-stalled-leads-button"
-          onClick={() => navigate(`/crm/banco-de-dados?stalled=${minDays}`)}
+          onClick={() => navigate("/crm/leads-parados")}
           className={cn(
             "shrink-0 h-9 gap-2 rounded-xl font-semibold text-xs self-start sm:self-auto",
             hasStalled
@@ -84,7 +84,7 @@ export function StalledLeadsAlertCard({ clientId, minDays = 3 }: StalledLeadsAle
               : "variant-outline"
           )}
         >
-          <span>Visualizar no Banco de Dados</span>
+          <span>Visualizar Leads Parados</span>
           <ArrowRight className="h-3.5 w-3.5" />
         </Button>
       </CardContent>

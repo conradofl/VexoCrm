@@ -22,6 +22,8 @@ import {
   countEligibleReactivations,
   countReactivatedLast30Days,
   runDueReactivations,
+  queryStalledLeadsList,
+  syncStalledLeadsNotifications,
 } from "../../services/leadReactivationEngine.js";
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
@@ -1256,7 +1258,11 @@ export function registerLeadsRoutes(app, deps) {
       console.warn("[leads-stalled] Column check warning:", e?.message || e);
     }
 
-    const minDays = Math.max(0, parseInt(req.query?.minDays ?? "3", 10) || 3);
+    const minDaysRaw = req.query?.minDays ?? req.query?.stalledDays;
+    const minDays =
+      minDaysRaw !== undefined && minDaysRaw !== null && String(minDaysRaw).trim() !== ""
+        ? Math.max(0, parseInt(String(minDaysRaw).trim(), 10))
+        : null;
     const limit = Math.min(500, Math.max(1, parseInt(req.query?.limit ?? "50", 10) || 50));
     const offset = Math.max(0, parseInt(req.query?.offset ?? "0", 10) || 0);
     const stage = req.query?.stage ? normalizeString(req.query.stage) : null;
@@ -1270,10 +1276,44 @@ export function registerLeadsRoutes(app, deps) {
         offset,
         stage,
       });
+
+      // Se solicitado via query, sincroniza notificações de alerta no mesmo ciclo
+      if (req.query?.notify === "true" || req.query?.syncNotifications === "true") {
+        await syncStalledLeadsNotifications(pgDatabasePool, {
+          clientId,
+          stalledDays: result.minDays,
+        }).catch((err) => console.warn("[leads-stalled] Warning auto-syncing notifications:", err?.message || err));
+      }
+
       res.json(result);
     } catch (error) {
       console.error("[leads-stalled] Falha ao consultar leads parados:", error?.message || error);
       sendError(res, 500, "STALLED_LEADS_QUERY_FAILED", "Falha ao consultar leads parados.", { cause: errorCause(error) });
+    }
+  });
+
+  // Pilar 1: Sincronização / Disparo de Notificações de Leads Parados (POST /api/leads/stalled/notify)
+  app.post("/api/leads/stalled/notify", requireFirebaseAuth, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!ensureSharedRoutePageAccess(req, res, ["banco-de-dados", "dashboard", "followup", "whatsapp"])) return;
+    const clientId = authorizeLeadList(req, res);
+    if (!clientId) return;
+
+    const minDaysRaw = req.body?.minDays ?? req.body?.stalledDays;
+    const minDays =
+      minDaysRaw !== undefined && minDaysRaw !== null && String(minDaysRaw).trim() !== ""
+        ? Math.max(0, parseInt(String(minDaysRaw).trim(), 10))
+        : null;
+
+    try {
+      const result = await syncStalledLeadsNotifications(pgDatabasePool, {
+        clientId,
+        stalledDays: minDays,
+      });
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("[leads-stalled-notify] Falha ao sincronizar notificações:", error?.message || error);
+      sendError(res, 500, "STALLED_LEADS_NOTIFY_FAILED", "Falha ao sincronizar notificações de leads parados.", { cause: errorCause(error) });
     }
   });
 

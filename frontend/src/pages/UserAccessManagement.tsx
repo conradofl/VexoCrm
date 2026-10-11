@@ -289,6 +289,7 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   relacionamento: "Relacionamento",
   livpub: "LivPub",
   "banco-de-dados": "Banco de Dados",
+  "leads-parados": "Leads Parados",
 };
 
 const CLIENT_PAGE_TABS = [

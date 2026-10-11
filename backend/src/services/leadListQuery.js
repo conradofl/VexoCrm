@@ -52,6 +52,12 @@ export const activeCollation = () => ICU;
 const WS = "E' \\t\\n\\r\\f\\v\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff'";
 
 import { classifyTagKind } from "./leadProcedencia.js";
+import {
+  queryStalledLeadsList,
+  sqlStalledStageCondition,
+  sqlIdleTimestamp,
+  sqlIsStalled,
+} from "./leadReactivationEngine.js";
 
 export const MARKETING_CHANNEL_IDS = [
   "instagram", "google", "facebook", "tiktok", "indicacao", "whatsapp", "campanha", "organico", "trafego_pago",
@@ -664,67 +670,21 @@ export function parseLeadListFilters(query = {}) {
 
 /**
  * Consulta de Leads Parados (Pilar 1: Aviso de Lead Parado - Nenhum Lead Esquecido).
- * Retorna leads em etapas ativas sem resposta/interação há pelo menos minDays dias.
+ * Delega estritamente para a definição única e canônica de leadReactivationEngine.js.
  */
-export async function queryStalledLeads(pool, { scope, minDays = 3, limit = 50, offset = 0, stage = null }) {
+export async function queryStalledLeads(pool, { scope, minDays = null, limit = 50, offset = 0, stage = null }) {
   await useCollation(pool);
-  const safeMinDays = Math.max(0, parseInt(minDays, 10) || 3);
-  const safeLimit = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
-  const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+  const clientId = scope?.clientId;
+  const operatorUid = scope?.operatorUid;
 
-  const p = new Params();
-  const scopeSql = buildScope(p, scope);
-
-  const conds = [
-    `(NOW() - COALESCE(s.last_message_at, s.last_interaction_at, s.updated_at, s.created_at)) >= (${p.add(safeMinDays)} || ' days')::interval`,
-  ];
-
-  if (stage && stage !== "all") {
-    conds.push(`s.stage = ${p.add(stage)}`);
-  } else {
-    conds.push(`(s.stage IS NULL OR lower(s.stage) NOT IN ('fechado', 'perdido', 'descartado', 'buyer', 'lost'))`);
-  }
-
-  const whereSql = `WHERE ${scopeSql} AND ${conds.join(" AND ")}`;
-
-  const countPValues = [...p.values];
-  const countSql = `SELECT count(*)::int AS count FROM public.leads s ${whereSql}`;
-
-  const limitParam = p.add(safeLimit);
-  const offsetParam = p.add(safeOffset);
-
-  const leadsSql = `
-    SELECT
-      s.id,
-      s.nome,
-      s.telefone,
-      s.phone,
-      s.stage,
-      s.temperature,
-      s.tags,
-      s.raw_chat_summary,
-      s.created_at,
-      s.updated_at,
-      s.last_interaction_at,
-      s.last_message_at,
-      COALESCE(s.dados->>'sdr_rotation_owner', s.assigned_to) AS sdr_rotation_owner,
-      EXTRACT(DAY FROM (NOW() - COALESCE(s.last_message_at, s.last_interaction_at, s.updated_at, s.created_at)))::int AS days_idle
-    FROM public.leads s
-    ${whereSql}
-    ORDER BY days_idle DESC, s.id DESC
-    LIMIT ${limitParam} OFFSET ${offsetParam}
-  `;
-
-  const [{ rows: countRows }, { rows: leadRows }] = await Promise.all([
-    pool.query(countSql, countPValues),
-    pool.query(leadsSql, p.values),
-  ]);
-
-  return {
-    count: countRows[0]?.count ?? 0,
-    minDays: safeMinDays,
-    leads: leadRows,
-  };
+  return queryStalledLeadsList(pool, {
+    clientId,
+    stalledDays: minDays,
+    limit,
+    offset,
+    stage,
+    ownerUid: operatorUid,
+  });
 }
 
 export const queryBaseLeads = queryLeadsPage;

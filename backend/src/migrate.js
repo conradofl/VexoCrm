@@ -401,6 +401,10 @@ async function isAlreadyApplied(pool, filename) {
       AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='smart_link_clicks')
       AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_smart_links_code')
     ) AS ok`,
+    "20261011183000_add_stalled_notifications_synced_at.sql": `SELECT (
+      NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='lead_client_n8n_settings')
+      OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='stalled_notifications_synced_at')
+    ) AS ok`,
   };
 
   const query = checks[filename];

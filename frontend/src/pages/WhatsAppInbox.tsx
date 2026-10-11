@@ -123,6 +123,8 @@ import { VoiceRecorderButton } from "@/components/inbox/VoiceRecorderButton";
 import { API_BASE_URL } from "@/lib/api";
 import { sanitizePhone } from "@/lib/phone";
 import { formatHeaderCount, parseDossierSummary } from "@/lib/messageFormatting";
+import { isLeadStalled, computeLeadDaysIdle } from "@/lib/leads/stalledLeads";
+import { useLeadReactivationSettings } from "@/hooks/useLeadReactivation";
 
 function formatScheduleDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -401,6 +403,8 @@ export default function WhatsAppInbox({
   const sendMediaMessage = useSendWhatsAppMediaMessage(clientId, selectedChatId);
   const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const clearChats = useClearWhatsAppChats(clientId);
+  const { data: reactivationSettings } = useLeadReactivationSettings(clientId || undefined);
+  const reactivationStalledDays = reactivationSettings?.reactivation_stalled_days ?? 7;
 
   const remindersSummaryQuery = useInboxRemindersSummary(clientId);
   const completeLeadReminder = useCompleteLeadReminder(clientId);
@@ -1791,6 +1795,15 @@ export default function WhatsAppInbox({
                             >
                               <Bell className={cn("h-2.5 w-2.5 shrink-0", cardPendingReminders[0].isOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
                               <span>{cardPendingReminders[0].isOverdue ? `⏰ Venceu · ${cardPendingReminders[0].title}` : `📌 ${cardPendingReminders[0].title}`}</span>
+                            </span>
+                          )}
+                          {lead && isLeadStalled(lead, reactivationStalledDays) && (
+                            <span
+                              data-testid={`lead-stalled-badge-${chat.id}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300"
+                              title={`Lead parado há ${computeLeadDaysIdle(lead)} dias sem resposta`}
+                            >
+                              <span>⚠️ Parado há {computeLeadDaysIdle(lead)}d</span>
                             </span>
                           )}
                           <OriginBadge

@@ -13,6 +13,27 @@ export const DEFAULT_REACTIVATION_SETTINGS = {
 
 export const REACTIVATION_TAG = "#Reativacao-Automatica";
 
+// Definição ÚNICA e CANÔNICA de "Lead Parado" (Zero Perdas / Nenhum Lead Esquecido)
+// Reusada por todo o sistema: tela de leads parados, dashboard, motor de reativação e notificações.
+export const STALLED_EXCLUDED_STAGES = ["fechado", "buyer", "perdido", "descartado", "lost"];
+export const SQL_STALLED_EXCLUDED_STAGES = "'fechado', 'buyer', 'perdido', 'descartado', 'lost'";
+
+/** Condição SQL canônica que define estágio ativo (não fechado / não perdido) */
+export const sqlStalledStageCondition = (alias = "l") =>
+  `(${alias}.stage IS NULL OR lower(${alias}.stage) NOT IN (${SQL_STALLED_EXCLUDED_STAGES}))`;
+
+/** Expressão SQL canônica para timestamp da última interação/mensagem do lead */
+export const sqlIdleTimestamp = (alias = "l") =>
+  `COALESCE(${alias}.last_message_at, ${alias}.last_interaction_at, ${alias}.updated_at, ${alias}.created_at)`;
+
+/** Expressão SQL canônica para cálculo de dias parado (days_idle) */
+export const sqlDaysIdle = (alias = "l") =>
+  `EXTRACT(DAY FROM (NOW() - ${sqlIdleTimestamp(alias)}))::int`;
+
+/** Condição SQL canônica para verificar se o lead está inativo há pelo menos X dias */
+export const sqlIsStalled = (alias = "l", paramPlaceholder = "$2") =>
+  `(NOW() - ${sqlIdleTimestamp(alias)}) >= (${paramPlaceholder} || ' days')::interval`;
+
 /**
  * Normaliza e sanitiza as configurações de reativação
  */
@@ -144,8 +165,8 @@ export async function countEligibleReactivations(pool, { clientId, stalledDays =
       `SELECT COUNT(*)::int AS count
        FROM public.leads l
        WHERE l.client_id = $1
-         AND (l.stage IS NULL OR l.stage NOT IN ('fechado', 'buyer', 'perdido', 'descartado', 'lost'))
-         AND (NOW() - COALESCE(l.last_message_at, l.last_interaction_at, l.updated_at, l.created_at)) >= ($2 || ' days')::interval
+         AND ${sqlStalledStageCondition("l")}
+         AND ${sqlIsStalled("l", "$2")}
          AND NOT EXISTS (
            SELECT 1 FROM public.followup_schedules fs
            WHERE (
@@ -265,11 +286,11 @@ export async function runDueReactivations(
   // 3. Buscar candidatos elegíveis no tenant
   const { rows: candidates } = await pool.query(
     `SELECT l.id, l.nome, l.telefone, l.phone, l.stage, l.tags, l.data_nascimento,
-            EXTRACT(DAY FROM (NOW() - COALESCE(l.last_message_at, l.last_interaction_at, l.updated_at, l.created_at)))::int AS days_idle
+            ${sqlDaysIdle("l")} AS days_idle
      FROM public.leads l
      WHERE l.client_id = $1
-       AND (l.stage IS NULL OR l.stage NOT IN ('fechado', 'buyer', 'perdido', 'descartado', 'lost'))
-       AND (NOW() - COALESCE(l.last_message_at, l.last_interaction_at, l.updated_at, l.created_at)) >= ($2 || ' days')::interval
+       AND ${sqlStalledStageCondition("l")}
+       AND ${sqlIsStalled("l", "$2")}
        AND NOT EXISTS (
          SELECT 1 FROM public.followup_schedules fs
          WHERE (
@@ -356,3 +377,248 @@ export async function runDueReactivations(
     leads: reactivatedLeads,
   };
 }
+
+/**
+ * Consulta canônica de Leads Parados (Pilar 1: Aviso de Lead Parado - Nenhum Lead Esquecido).
+ * Retorna contagem e lista de leads em etapas ativas sem contato há pelo menos stalledDays dias.
+ * Funciona independentemente de reactivation_enabled estar ligado ou desligado (ver não é agir).
+ * Ordenada estritamente por quem está parado há mais tempo (days_idle DESC, l.id DESC).
+ */
+export async function queryStalledLeadsList(pool, {
+  clientId,
+  stalledDays = null,
+  limit = 50,
+  offset = 0,
+  stage = null,
+  ownerUid = null,
+} = {}) {
+  if (!pool || !clientId) {
+    return { count: 0, minDays: 7, reactivation_enabled: false, reactivation_stalled_days: 7, leads: [] };
+  }
+
+  // Se stalledDays não for fornecido explicitamente, lê a configuração do tenant (default 7)
+  let safeStalledDays = stalledDays !== null && stalledDays !== undefined ? Number(stalledDays) : null;
+  const settings = await getReactivationSettings(pool, clientId);
+
+  if (!Number.isInteger(safeStalledDays) || safeStalledDays < 0) {
+    safeStalledDays = settings.reactivation_stalled_days || 7;
+  }
+
+  const safeLimit = Math.min(500, Math.max(1, Number(limit) || 50));
+  const safeOffset = Math.max(0, Number(offset) || 0);
+
+  const params = [clientId, safeStalledDays];
+  const conditions = [
+    `l.client_id = $1`,
+    sqlIsStalled("l", "$2"),
+  ];
+
+  if (stage && stage !== "all") {
+    params.push(String(stage).toLowerCase().trim());
+    conditions.push(`lower(l.stage) = $${params.length}`);
+  } else {
+    conditions.push(sqlStalledStageCondition("l"));
+  }
+
+  if (ownerUid) {
+    params.push(String(ownerUid).trim());
+    conditions.push(`(l.assigned_to = $${params.length} OR l.dados->>'sdr_rotation_owner' = $${params.length})`);
+  }
+
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+  // Contagem total
+  const countSql = `SELECT COUNT(*)::int AS count FROM public.leads l ${whereClause}`;
+
+  // Verifica se a tabela public.lead_messages existe no banco
+  let hasMessagesTable = false;
+  try {
+    const { rows: regRows } = await pool.query(`SELECT to_regclass('public.lead_messages') AS tbl`);
+    hasMessagesTable = Boolean(regRows[0]?.tbl);
+  } catch {
+    hasMessagesTable = false;
+  }
+
+  const messageSubquery = hasMessagesTable
+    ? `(
+        SELECT lm.message_text
+        FROM public.lead_messages lm
+        WHERE lm.client_id = l.client_id
+          AND (
+            lm.lead_id = l.id
+            OR lm.phone = l.telefone
+            OR lm.phone = l.phone
+          )
+          AND lm.message_text IS NOT NULL
+          AND lm.message_text <> ''
+        ORDER BY lm.message_timestamp DESC, lm.created_at DESC
+        LIMIT 1
+      )`
+    : `NULL`;
+
+  // Busca dos leads com última mensagem e responsável
+  params.push(safeLimit);
+  const limitIdx = params.length;
+  params.push(safeOffset);
+  const offsetIdx = params.length;
+
+  const leadsSql = `
+    SELECT
+      l.id,
+      l.client_id,
+      l.nome,
+      l.telefone,
+      l.phone,
+      l.stage,
+      l.temperature,
+      l.tags,
+      l.created_at,
+      l.updated_at,
+      l.last_interaction_at,
+      l.last_message_at,
+      ${sqlDaysIdle("l")} AS days_idle,
+      COALESCE(l.dados->>'sdr_rotation_owner', l.assigned_to) AS sdr_rotation_owner,
+      COALESCE(l.assigned_to, l.dados->>'sdr_rotation_owner') AS assigned_to,
+      COALESCE(
+        ${messageSubquery},
+        l.raw_chat_summary,
+        l.dados->>'resumo_chat',
+        ''
+      ) AS last_message
+    FROM public.leads l
+    ${whereClause}
+    ORDER BY days_idle DESC, l.id DESC
+    LIMIT $${limitIdx} OFFSET $${offsetIdx}
+  `;
+
+  const [{ rows: countRows }, { rows: leadRows }] = await Promise.all([
+    pool.query(countSql, params.slice(0, params.length - 2)),
+    pool.query(leadsSql, params),
+  ]);
+
+  return {
+    count: Number(countRows[0]?.count) || 0,
+    minDays: safeStalledDays,
+    reactivation_enabled: settings.reactivation_enabled,
+    reactivation_stalled_days: settings.reactivation_stalled_days,
+    reactivation_cadence_id: settings.reactivation_cadence_id,
+    leads: leadRows,
+  };
+}
+
+/**
+ * Canal B: Sincroniza notificações de Leads Parados para o responsável em public.notifications.
+ * Idempotente: não gera duplicatas não-lidas para o mesmo contato no mesmo canal.
+ */
+export async function syncStalledLeadsNotifications(pool, { clientId, stalledDays = null }) {
+  if (!pool || !clientId) return { inserted: 0 };
+
+  let safeStalledDays = stalledDays !== null && stalledDays !== undefined ? Number(stalledDays) : null;
+  if (!Number.isInteger(safeStalledDays) || safeStalledDays < 0) {
+    const settings = await getReactivationSettings(pool, clientId);
+    safeStalledDays = settings.reactivation_stalled_days || 7;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO public.notifications (client_id, type, title, description, link, read, created_at)
+       SELECT
+         l.client_id,
+         'lead_stalled',
+         '⚠️ Lead parado: ' || COALESCE(l.nome, l.telefone, 'Contato'),
+         'Lead ' || COALESCE(l.nome, 'Sem nome') || ' (' || COALESCE(l.telefone, l.phone, 'Sem telefone') || ') está sem resposta há ' || ${sqlDaysIdle("l")} || ' dias.',
+         '/crm/whatsapp?phone=' || COALESCE(l.telefone, l.phone, ''),
+         false,
+         NOW()
+       FROM public.leads l
+       WHERE l.client_id = $1
+         AND ${sqlStalledStageCondition("l")}
+         AND ${sqlIsStalled("l", "$2")}
+         AND COALESCE(l.telefone, l.phone) IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM public.notifications n
+           WHERE n.client_id = l.client_id
+             AND n.type = 'lead_stalled'
+             AND n.link = ('/crm/whatsapp?phone=' || COALESCE(l.telefone, l.phone, ''))
+             AND (n.read = false OR n.created_at >= NOW() - INTERVAL '3 days')
+         )
+       RETURNING id`,
+      [clientId, safeStalledDays]
+    );
+
+    // Registra timestamp de sincronização do tenant para controle diário
+    try {
+      await pool.query(
+        `INSERT INTO public.lead_client_n8n_settings (client_id, stalled_notifications_synced_at, updated_at)
+         VALUES ($1, NOW(), NOW())
+         ON CONFLICT (client_id) DO UPDATE SET
+           stalled_notifications_synced_at = NOW(),
+           updated_at = NOW()`,
+        [clientId]
+      );
+    } catch {}
+
+    return { inserted: rows.length };
+  } catch (err) {
+    console.warn(`[reactivation-engine] Falha ao sincronizar notificações de leads parados para ${clientId}:`, err?.message || err);
+    return { inserted: 0, error: err?.message };
+  }
+}
+
+/**
+ * Disparo automático de Notificações de Leads Parados para todas as empresas.
+ * Reusa o loop central de background do sistema garantindo:
+ * 1. Uma vez por dia por empresa (ignora empresas sincronizadas nas últimas 24h).
+ * 2. Idempotente: não gera duplicatas não-lidas em public.notifications.
+ * 3. Roda mesmo com reactivation_enabled = false (ver/avisar não é agir).
+ * 4. Não depende de janela de envio (notificação interna do CRM, não envio ao cliente).
+ */
+export async function syncDailyStalledNotificationsForAllTenants(pool) {
+  if (!pool?.query) return { checkedTenants: 0, totalInserted: 0 };
+
+  try {
+    let dueTenants = [];
+    try {
+      // 1. Tenta consulta padrão usando a coluna stalled_notifications_synced_at
+      const { rows } = await pool.query(`
+        SELECT c.id AS client_id
+        FROM public.leads_clients c
+        LEFT JOIN public.lead_client_n8n_settings s ON s.client_id = c.id
+        WHERE s.stalled_notifications_synced_at IS NULL
+           OR s.stalled_notifications_synced_at < NOW() - INTERVAL '24 hours'
+      `);
+      dueTenants = rows || [];
+    } catch (colErr) {
+      // 2. Fallback de dois estados do schema (DIRETRIZES-IA.md, seção 12):
+      // Se a coluna ainda não foi migrada/criada no banco, consulta public.notifications
+      const { rows } = await pool.query(`
+        SELECT c.id AS client_id
+        FROM public.leads_clients c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM public.notifications n
+          WHERE n.client_id = c.id
+            AND n.type = 'lead_stalled'
+            AND n.created_at >= NOW() - INTERVAL '24 hours'
+        )
+      `);
+      dueTenants = rows || [];
+    }
+
+    if (!dueTenants || dueTenants.length === 0) {
+      return { checkedTenants: 0, totalInserted: 0 };
+    }
+
+    let totalInserted = 0;
+    for (const tenant of dueTenants) {
+      const clientId = tenant.client_id;
+      const res = await syncStalledLeadsNotifications(pool, { clientId });
+      totalInserted += res.inserted || 0;
+    }
+
+    return { checkedTenants: dueTenants.length, totalInserted };
+  } catch (err) {
+    console.warn("[reactivation-engine] Falha ao sincronizar notificações diárias de todos os tenants:", err?.message || err);
+    return { checkedTenants: 0, totalInserted: 0, error: err?.message };
+  }
+}
+

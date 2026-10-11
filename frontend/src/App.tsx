@@ -21,6 +21,7 @@ import ClientPortalWhatsApp from "./pages/ClientPortalWhatsApp";
 import LandingPage from "./pages/LandingPage";
 import Leads from "./pages/Leads";
 import BancoDeDados from "./pages/BancoDeDados";
+import LeadsParados from "./pages/LeadsParados";
 import LeadImports from "./pages/LeadImports";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -99,6 +100,7 @@ function InternalIndexRedirect() {
     "inbound-agents": "inbound-agents",
     calendario: "calendario",
     agenda: "calendario",
+    "leads-parados": "leads-parados",
   };
 
   const path = pageToPath[target] || target;
@@ -161,6 +163,7 @@ const App = () => (
             <Route path="/dashboard" element={<Navigate to="/crm/dashboard" replace />} />
             <Route path="/leads" element={<Navigate to="/crm/banco-de-dados?view=kanban" replace />} />
             <Route path="/banco-de-dados" element={<Navigate to="/crm/banco-de-dados" replace />} />
+            <Route path="/leads-parados" element={<Navigate to="/crm/leads-parados" replace />} />
             <Route path="/planilhas" element={<Navigate to="/crm/planilhas" replace />} />
             <Route path="/campanhas" element={<Navigate to="/crm/planilhas" replace />} />
             <Route path="/calendario" element={<Navigate to="/crm/calendario" replace />} />
@@ -194,6 +197,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="banco-de-dados">
                     <BancoDeDados />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="leads-parados"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="banco-de-dados">
+                    <LeadsParados />
                   </ProtectedRoute>
                 }
               />

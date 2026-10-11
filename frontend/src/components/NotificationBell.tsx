@@ -1,4 +1,5 @@
 import { Bell, CheckCheck, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -12,11 +13,18 @@ interface NotificationBellProps {
 }
 
 export function NotificationBell({ collapsed }: NotificationBellProps) {
+  const navigate = useNavigate();
   const { items, unreadCount, error, markAsRead, markAllRead } = useNotifications();
 
   const handleClick = (item: { id: string; link: string | null; read: boolean }) => {
     if (!item.read) markAsRead(item.id);
-    if (item.link) window.open(item.link, "_blank");
+    if (item.link) {
+      if (item.link.startsWith("/")) {
+        navigate(item.link);
+      } else {
+        window.open(item.link, "_blank");
+      }
+    }
   };
 
   return (
