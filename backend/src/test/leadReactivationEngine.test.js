@@ -142,18 +142,18 @@ describe("Pilar 2: Motor de Reativação Automática (leadReactivationEngine)", 
               NOW() - INTERVAL '10 days', NOW() - INTERVAL '10 days', NOW() - INTERVAL '30 days');
     `);
 
-    // Lead 2: Parado há 8 dias (Tenant A, stage cold) -> ELEGÍVEL
+    // Lead 2: Parado há 8 dias com conversa real (Tenant A, stage cold) -> ELEGÍVEL
     await db.query(`
-      INSERT INTO leads (client_id, telefone, nome, stage, updated_at, created_at)
+      INSERT INTO leads (client_id, telefone, nome, stage, last_message_at, updated_at, created_at)
       VALUES ('${TENANT_A}', '5511999991002', 'Lead Alfa Elegível 8d', 'cold',
-              NOW() - INTERVAL '8 days', NOW() - INTERVAL '20 days');
+              NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days', NOW() - INTERVAL '20 days');
     `);
 
-    // Lead 3: Parado há apenas 3 dias (Tenant A, stage open_budget) -> NÃO ELEGÍVEL (< 7 dias)
+    // Lead 3: Parado há apenas 3 dias com conversa real (Tenant A, stage open_budget) -> NÃO ELEGÍVEL (< 7 dias)
     await db.query(`
-      INSERT INTO leads (client_id, telefone, nome, stage, updated_at, created_at)
+      INSERT INTO leads (client_id, telefone, nome, stage, last_message_at, updated_at, created_at)
       VALUES ('${TENANT_A}', '5511999991003', 'Lead Alfa Recente 3d', 'open_budget',
-              NOW() - INTERVAL '3 days', NOW() - INTERVAL '10 days');
+              NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days', NOW() - INTERVAL '10 days');
     `);
 
     // Lead 4: FECHADO/BUYER parado há 15 dias (Tenant A) -> NÃO ELEGÍVEL (estágio fechado)
@@ -412,11 +412,11 @@ describe("Pilar 2: Motor de Reativação Automática (leadReactivationEngine)", 
   });
 
   it("9. Rota HTTP POST /api/leads/reactivation-run dispara reativação sob demanda", async () => {
-    // Insere novo lead parado há 12 dias para testar o endpoint de trigger
+    // Insere novo lead parado há 12 dias com conversa real para testar o endpoint de trigger
     await db.query(`
-      INSERT INTO leads (client_id, telefone, nome, stage, updated_at, created_at)
+      INSERT INTO leads (client_id, telefone, nome, stage, last_message_at, updated_at, created_at)
       VALUES ('${TENANT_A}', '5511999991099', 'Lead Teste Trigger Manual', 'cold',
-              NOW() - INTERVAL '12 days', NOW() - INTERVAL '20 days');
+              NOW() - INTERVAL '12 days', NOW() - INTERVAL '12 days', NOW() - INTERVAL '20 days');
     `);
 
     // Reativação habilitada com cadência A

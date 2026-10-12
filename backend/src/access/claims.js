@@ -75,6 +75,7 @@ export const INTERNAL_PAGE_KEYS = [
   "integracoes",
   "eventos",
   "relacionamento",
+  "leads-parados",
   "livpub",
 ];
 export const ACCESS_SCOPE_KEYS = ["all_clients", "assigned_clients", "no_client_access"];

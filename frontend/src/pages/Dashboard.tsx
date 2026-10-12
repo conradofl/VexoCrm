@@ -140,7 +140,6 @@ export default function Dashboard({
             {/* Pilar 1: Aviso de Lead Parado (Nenhum Lead Esquecido) */}
             <StalledLeadsAlertCard
               clientId={effectiveClientId}
-              minDays={3}
             />
 
             {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}

@@ -57,6 +57,7 @@ import {
   sqlStalledStageCondition,
   sqlIdleTimestamp,
   sqlIsStalled,
+  sqlDaysIdle,
 } from "./leadReactivationEngine.js";
 
 export const MARKETING_CHANNEL_IDS = [
@@ -228,8 +229,8 @@ export function buildFilterConditions(params, f = {}) {
   if (f.importId) c.importId = importIdCond(params, f.importId, "e");
   if (f.stalledDays !== undefined && f.stalledDays !== null) {
     const p = params.add(f.stalledDays);
-    c.stalledDays = `(NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) >= (${p} || ' days')::interval
-      AND (e.stage IS NULL OR lower(e.stage) NOT IN ('fechado', 'perdido', 'descartado', 'buyer', 'lost'))`;
+    c.stalledDays = `${sqlIsStalled("e", p)}
+      AND ${sqlStalledStageCondition("e")}`;
   }
   return c;
 }
@@ -298,8 +299,8 @@ export async function queryBaseFacets(pool, scope, { parts = FACET_PARTS } = {})
               count(*) FILTER (WHERE e.stage = 'open_budget')::int AS st_open_budget,
               count(*) FILTER (WHERE e.stage = 'inquiry')::int AS st_inquiry,
               count(*) FILTER (WHERE e.stage = 'cold')::int AS st_cold,
-              count(*) FILTER (WHERE (e.stage IS NULL OR lower(e.stage) NOT IN ('buyer', 'fechado', 'perdido', 'descartado', 'lost'))
-                AND (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) >= interval '3 days')::int AS stalled_count
+              count(*) FILTER (WHERE ${sqlStalledStageCondition("e")}
+                AND ${sqlIsStalled("e", "'3'")})::int AS stalled_count
          FROM e`),
     channels: () => pool.query(channelsSql(scopeSql), p.values),
     sources: () => pool.query(`${sourceOnly} SELECT s0._source AS source, count(*)::int AS n FROM s0 GROUP BY 1 ORDER BY n DESC, source`, p.values),
@@ -407,7 +408,7 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
 
   const [{ rows: totalRows }, { rows: pageRows }, tabsRes] = await Promise.all([
     pool.query(`${total.cte} SELECT count(*)::int AS n FROM e ${total.where}`, total.p.values),
-    pool.query(`${pageQ.cte} SELECT e.*, EXTRACT(DAY FROM (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)))::int AS days_idle FROM e ${pageQ.where} ${orderBy(sort || (filters.stalledDays !== undefined ? "stalled" : null), dir)} LIMIT ${limitSql} OFFSET ${offsetSql}`, pageQ.p.values),
+    pool.query(`${pageQ.cte} SELECT e.*, ${sqlDaysIdle("e")} AS days_idle FROM e ${pageQ.where} ${orderBy(sort || (filters.stalledDays !== undefined ? "stalled" : null), dir)} LIMIT ${limitSql} OFFSET ${offsetSql}`, pageQ.p.values),
     withTabs
       ? pool.query(
           `${tabs.cte}
@@ -416,8 +417,8 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
                   count(*) FILTER (WHERE e.stage = 'open_budget')::int AS open_budget,
                   count(*) FILTER (WHERE e.stage IS NULL OR e.stage NOT IN ('buyer', 'open_budget', 'lost'))::int AS cold,
                   count(*) FILTER (WHERE e.stage = 'lost')::int AS lost,
-                  count(*) FILTER (WHERE (e.stage IS NULL OR lower(e.stage) NOT IN ('buyer', 'fechado', 'perdido', 'descartado', 'lost'))
-                    AND (NOW() - COALESCE(e.last_message_at, e.last_interaction_at, e.updated_at, e.created_at)) >= interval '3 days')::int AS stalled
+                  count(*) FILTER (WHERE ${sqlStalledStageCondition("e")}
+                    AND ${sqlIsStalled("e", "'3'")})::int AS stalled
              FROM e ${tabs.where}`,
           tabs.p.values
         )

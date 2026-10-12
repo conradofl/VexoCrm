@@ -46,7 +46,8 @@ describe("os dois catalogos descrevem os mesmos modulos (em memoria)", () => {
     const frontendSet = new Set(FRONTEND_INTERNAL_PAGE_ORDER);
 
     expect([...backendSet].sort()).toEqual([...frontendSet].sort());
-    expect(backendSet.size).toBe(34);
+    expect(backendSet.size).toBe(frontendSet.size);
+    expect(backendSet.size).toBe(35);
   });
 });
 
@@ -107,7 +108,7 @@ describe("comportamento de derivacao de permissoes e isolamento", () => {
     expect(AVAILABLE_CUSTOM_MODULES.length).toBe(11);
   });
 
-  it("INTERNAL_PAGE_KEYS contem as 34 chaves de pagina incluindo as 4 chaves -gd", () => {
+  it("INTERNAL_PAGE_KEYS contem as 35 chaves de pagina incluindo as 4 chaves -gd", () => {
     expect(INTERNAL_PAGE_KEYS).toContain("propostas-gd");
     expect(INTERNAL_PAGE_KEYS).toContain("contratos-gd");
     expect(INTERNAL_PAGE_KEYS).toContain("pacotes-gd");

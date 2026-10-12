@@ -27,6 +27,8 @@ export interface StalledLead {
 
 export interface StalledLeadsData {
   count: number;
+  stalled_count?: number;
+  never_approached_count?: number;
   minDays: number;
   reactivation_enabled?: boolean;
   reactivation_stalled_days?: number;

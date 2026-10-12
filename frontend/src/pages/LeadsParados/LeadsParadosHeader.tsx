@@ -1,12 +1,13 @@
-// frontend/src/pages/LeadsParados/LeadsParadosHeader.tsx
 import React from "react";
-import { Clock, AlertTriangle, ShieldCheck, Bell, Bot, CheckCircle2 } from "lucide-react";
+import { Clock, AlertTriangle, Users, Bell, Bot, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 interface LeadsParadosHeaderProps {
   count: number;
+  stalledCount?: number;
+  neverApproachedCount?: number;
   minDays: number;
   reactivationEnabled?: boolean;
   maxDaysIdle?: number;
@@ -16,6 +17,8 @@ interface LeadsParadosHeaderProps {
 
 export function LeadsParadosHeader({
   count,
+  stalledCount,
+  neverApproachedCount = 0,
   minDays,
   reactivationEnabled = false,
   maxDaysIdle = 0,
@@ -96,8 +99,18 @@ export function LeadsParadosHeader({
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Total Parados</p>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Leads Parados (em conversa)</p>
             <p className="text-xl font-bold text-foreground">{count}</p>
+          </div>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card/60 shadow-xs p-3.5 flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Nunca Abordados (base fria)</p>
+            <p className="text-xl font-bold text-foreground">{neverApproachedCount}</p>
           </div>
         </Card>
 
@@ -118,16 +131,6 @@ export function LeadsParadosHeader({
           <div>
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Maior Tempo Sem Contato</p>
             <p className="text-xl font-bold text-foreground">{maxDaysIdle > 0 ? `${maxDaysIdle} dias` : "-"}</p>
-          </div>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card/60 shadow-xs p-3.5 flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Garantia Comercial</p>
-            <p className="text-sm font-bold text-foreground truncate">Zero Leads Esquecidos</p>
           </div>
         </Card>
       </div>

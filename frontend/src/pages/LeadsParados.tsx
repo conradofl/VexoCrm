@@ -13,6 +13,7 @@ import { LeadsParadosTable } from "./LeadsParados/LeadsParadosTable";
 import { useStalledLeads, useNotifyStalledLeads, StalledLead } from "@/hooks/useStalledLeads";
 import { CreateLeadReminderModal } from "@/components/inbox/CreateLeadReminderModal";
 import ApplyFollowupModal from "@/components/followup/ApplyFollowupModal";
+import { PageShell } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -96,16 +97,22 @@ export default function LeadsParados() {
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
-    <div className="h-full flex flex-col overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Cabeçalho e Métricas */}
-      <LeadsParadosHeader
-        count={totalCount}
-        minDays={data?.minDays ?? 7}
-        reactivationEnabled={data?.reactivation_enabled}
-        maxDaysIdle={maxDaysIdle}
-        onNotifyAll={handleNotifyAll}
-        isNotifying={notifyMutation.isPending}
-      />
+    <PageShell
+      title="Leads Parados"
+      subtitle="Zero perdas e nenhum lead esquecido: monitore contatos sem resposta e base nunca abordada"
+    >
+      <div className="space-y-6">
+        {/* Cabeçalho e Métricas */}
+        <LeadsParadosHeader
+          count={totalCount}
+          stalledCount={data?.stalled_count ?? totalCount}
+          neverApproachedCount={data?.never_approached_count ?? 0}
+          minDays={data?.minDays ?? 7}
+          reactivationEnabled={data?.reactivation_enabled}
+          maxDaysIdle={maxDaysIdle}
+          onNotifyAll={handleNotifyAll}
+          isNotifying={notifyMutation.isPending}
+        />
 
       {/* Barra de Filtros e Busca */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-card/60 border rounded-2xl p-3 shadow-xs">
@@ -263,6 +270,7 @@ export default function LeadsParados() {
           getToken={getIdToken}
         />
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }

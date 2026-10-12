@@ -1,9 +1,9 @@
 // frontend/src/components/dashboard/StalledLeadsAlertCard.tsx
-// Card indicador visual de SLA: "⚠️ X Leads Parados (> 3 dias)" (Pilar 1: Aviso de Lead Parado - Nenhum Lead Esquecido)
+// Card indicador visual de SLA: Leads Parados e Base Nunca Abordada (Pilar 1: Zero Perdas / Nenhum Lead Esquecido)
 
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Clock, ArrowRight, CheckCircle2, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,21 +12,26 @@ import { cn } from "@/lib/utils";
 
 export interface StalledLeadsAlertCardProps {
   clientId: string;
-  minDays?: number;
+  minDays?: number | null;
 }
 
-export function StalledLeadsAlertCard({ clientId, minDays = 3 }: StalledLeadsAlertCardProps) {
+export function StalledLeadsAlertCard({ clientId, minDays = null }: StalledLeadsAlertCardProps) {
   const navigate = useNavigate();
-  const { data, isLoading } = useStalledLeads(clientId, minDays, { limit: 1 });
-  const count = data?.count ?? 0;
+  const { data, isLoading } = useStalledLeads(clientId, minDays ?? null, { limit: 1 });
 
   if (isLoading && !data) {
     return (
-      <div className="h-16 rounded-2xl border border-border bg-muted/20 animate-pulse" />
+      <div
+        data-testid="stalled-leads-alert-card-skeleton"
+        className="h-20 rounded-2xl border border-border bg-muted/20 animate-pulse"
+      />
     );
   }
 
-  const hasStalled = count > 0;
+  const effectiveMinDays = data?.minDays ?? (typeof minDays === "number" ? minDays : 7);
+  const stalledCount = data?.stalled_count ?? data?.count ?? 0;
+  const neverApproachedCount = data?.never_approached_count ?? 0;
+  const hasStalled = stalledCount > 0;
 
   return (
     <Card
@@ -53,7 +58,11 @@ export function StalledLeadsAlertCard({ clientId, minDays = 3 }: StalledLeadsAle
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-sm sm:text-base font-bold text-foreground flex items-center gap-1.5">
-                <span>⚠️ {count} Leads Parados (&gt; {minDays} dias)</span>
+                {hasStalled ? (
+                  <span>⚠️ {stalledCount} Leads Parados (&gt; {effectiveMinDays} dias)</span>
+                ) : (
+                  <span>SLA 100% em dia</span>
+                )}
               </h3>
               <Badge
                 variant="outline"
@@ -66,9 +75,20 @@ export function StalledLeadsAlertCard({ clientId, minDays = 3 }: StalledLeadsAle
               >
                 {hasStalled ? "Alerta de SLA Comercial" : "SLA 100% em dia"}
               </Badge>
+              {neverApproachedCount > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-medium px-2 py-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 flex items-center gap-1"
+                >
+                  <Users className="h-3 w-3" />
+                  <span>{neverApproachedCount} nunca abordados</span>
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Nenhum lead esquecido · Identificação automática de contatos ativos sem resposta
+              {hasStalled
+                ? `Contatos em conversa sem resposta há mais de ${effectiveMinDays} dias`
+                : "Nenhum lead esquecido · SLA em dia"}
             </p>
           </div>
         </div>

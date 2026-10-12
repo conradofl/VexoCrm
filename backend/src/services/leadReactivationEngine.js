@@ -22,17 +22,17 @@ export const SQL_STALLED_EXCLUDED_STAGES = "'fechado', 'buyer', 'perdido', 'desc
 export const sqlStalledStageCondition = (alias = "l") =>
   `(${alias}.stage IS NULL OR lower(${alias}.stage) NOT IN (${SQL_STALLED_EXCLUDED_STAGES}))`;
 
-/** Expressão SQL canônica para timestamp da última interação/mensagem do lead */
+/** Expressão SQL canônica para timestamp da última interação/mensagem do lead (sem fallback para created_at/updated_at) */
 export const sqlIdleTimestamp = (alias = "l") =>
-  `COALESCE(${alias}.last_message_at, ${alias}.last_interaction_at, ${alias}.updated_at, ${alias}.created_at)`;
+  `COALESCE(${alias}.last_message_at, ${alias}.last_interaction_at)`;
 
 /** Expressão SQL canônica para cálculo de dias parado (days_idle) */
 export const sqlDaysIdle = (alias = "l") =>
   `EXTRACT(DAY FROM (NOW() - ${sqlIdleTimestamp(alias)}))::int`;
 
-/** Condição SQL canônica para verificar se o lead está inativo há pelo menos X dias */
+/** Condição SQL canônica para verificar se o lead está inativo há pelo menos X dias (exige contato prévio e parênteses estritos no OR) */
 export const sqlIsStalled = (alias = "l", paramPlaceholder = "$2") =>
-  `(NOW() - ${sqlIdleTimestamp(alias)}) >= (${paramPlaceholder} || ' days')::interval`;
+  `(${alias}.last_message_at IS NOT NULL OR ${alias}.last_interaction_at IS NOT NULL) AND (NOW() - COALESCE(${alias}.last_message_at, ${alias}.last_interaction_at)) >= (${paramPlaceholder} || ' days')::interval`;
 
 /**
  * Normaliza e sanitiza as configurações de reativação
@@ -427,8 +427,28 @@ export async function queryStalledLeadsList(pool, {
 
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
-  // Contagem total
+  // Contagem de leads parados (em conversa prévia, inativos há >= minDays dias)
   const countSql = `SELECT COUNT(*)::int AS count FROM public.leads l ${whereClause}`;
+
+  // Contagem de leads nunca abordados (estágio ativo/aberto sem nenhuma mensagem ou interação)
+  const neverApproachedParams = [clientId];
+  const neverApproachedConditions = [
+    `l.client_id = $1`,
+    sqlStalledStageCondition("l"),
+    `l.last_message_at IS NULL`,
+    `l.last_interaction_at IS NULL`,
+  ];
+  if (stage && stage !== "all") {
+    neverApproachedParams.push(String(stage).toLowerCase().trim());
+    neverApproachedConditions.push(`lower(l.stage) = $${neverApproachedParams.length}`);
+  }
+  if (ownerUid) {
+    neverApproachedParams.push(String(ownerUid).trim());
+    neverApproachedConditions.push(
+      `(l.assigned_to = $${neverApproachedParams.length} OR l.dados->>'sdr_rotation_owner' = $${neverApproachedParams.length})`
+    );
+  }
+  const neverApproachedSql = `SELECT COUNT(*)::int AS count FROM public.leads l WHERE ${neverApproachedConditions.join(" AND ")}`;
 
   // Verifica se a tabela public.lead_messages existe no banco
   let hasMessagesTable = false;
@@ -491,13 +511,19 @@ export async function queryStalledLeadsList(pool, {
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
   `;
 
-  const [{ rows: countRows }, { rows: leadRows }] = await Promise.all([
+  const [{ rows: countRows }, { rows: neverApproachedRows }, { rows: leadRows }] = await Promise.all([
     pool.query(countSql, params.slice(0, params.length - 2)),
+    pool.query(neverApproachedSql, neverApproachedParams),
     pool.query(leadsSql, params),
   ]);
 
+  const stalledCount = Number(countRows[0]?.count) || 0;
+  const neverApproachedCount = Number(neverApproachedRows[0]?.count) || 0;
+
   return {
-    count: Number(countRows[0]?.count) || 0,
+    count: stalledCount,
+    stalled_count: stalledCount,
+    never_approached_count: neverApproachedCount,
     minDays: safeStalledDays,
     reactivation_enabled: settings.reactivation_enabled,
     reactivation_stalled_days: settings.reactivation_stalled_days,

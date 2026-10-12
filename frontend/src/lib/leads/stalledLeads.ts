@@ -1,7 +1,7 @@
 // frontend/src/lib/leads/stalledLeads.ts
 // Regras e formatações do Pilar 1: Aviso de Lead Parado (Nenhum Lead Esquecido)
 
-export const STALLED_MIN_DAYS_DEFAULT = 3;
+export const STALLED_MIN_DAYS_DEFAULT = 7;
 
 const CLOSED_STAGES = new Set(["buyer", "fechado", "perdido", "descartado", "lost"]);
 
@@ -24,7 +24,8 @@ export function computeLeadDaysIdle(lead: {
   if (typeof lead.days_idle === "number" && !isNaN(lead.days_idle)) {
     return Math.max(0, lead.days_idle);
   }
-  const dateStr = lead.last_message_at || lead.last_interaction_at || lead.updated_at || lead.created_at;
+  // Estritamente baseado em conversa prévia (sem fallbacks para created_at ou updated_at)
+  const dateStr = lead.last_message_at || lead.last_interaction_at;
   if (!dateStr) return 0;
   const timestamp = new Date(dateStr).getTime();
   if (isNaN(timestamp)) return 0;
@@ -45,6 +46,10 @@ export function isLeadStalled(
   minDays: number = STALLED_MIN_DAYS_DEFAULT
 ): boolean {
   if (isLeadStageClosed(lead.stage)) return false;
+  // Lead sem nenhuma mensagem ou interação prévia nunca é "parado" (é "nunca abordado")
+  if (!lead.last_message_at && !lead.last_interaction_at && (lead.days_idle === null || lead.days_idle === undefined)) {
+    return false;
+  }
   const idle = computeLeadDaysIdle(lead);
   return idle >= minDays;
 }
