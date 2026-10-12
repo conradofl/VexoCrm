@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   generateSpeechAudio,
+  decideVoiceByMode,
   resolveVoiceDecision,
+  VOICE_REPLY_AVAILABLE,
   isSupportedVoice,
   SUPPORTED_VOICES,
   VOICE_PROFILES,
@@ -35,26 +37,40 @@ describe("voiceService — Motor Gratuito node-edge-tts com Vozes Neurais Brasil
     mockTtsPromise.mockResolvedValue(undefined);
   });
 
-  describe("1. Regras de Decisão de Voz (resolveVoiceDecision)", () => {
+  describe("0. Resposta em áudio fora do ar (EdgeTTS 403 desde 12/10/2026)", () => {
+    it("a chave está desligada", () => {
+      expect(VOICE_REPLY_AVAILABLE).toBe(false);
+    });
+
+    it("resolveVoiceDecision nunca ativa voz, em nenhum modo — nem tenta sintetizar", () => {
+      for (const voiceMode of ["disabled", "mirror", "always"]) {
+        for (const leadSentAudio of [true, false]) {
+          expect(resolveVoiceDecision({ voiceMode, leadSentAudio })).toBe(false);
+        }
+      }
+    });
+  });
+
+  describe("1. Regras de Decisão de Voz por modo (decideVoiceByMode — volta quando o TTS voltar)", () => {
     it("mantém voz desativada (false) quando voiceMode = 'disabled', mesmo se lead mandou áudio", () => {
-      expect(resolveVoiceDecision({ voiceMode: "disabled", leadSentAudio: true })).toBe(false);
-      expect(resolveVoiceDecision({ voiceMode: "disabled", leadSentAudio: false })).toBe(false);
+      expect(decideVoiceByMode({ voiceMode: "disabled", leadSentAudio: true })).toBe(false);
+      expect(decideVoiceByMode({ voiceMode: "disabled", leadSentAudio: false })).toBe(false);
     });
 
     it("ativa voz (true) no modo 'mirror' APENAS quando o lead enviou áudio", () => {
-      expect(resolveVoiceDecision({ voiceMode: "mirror", leadSentAudio: true })).toBe(true);
-      expect(resolveVoiceDecision({ voiceMode: "mirror", leadSentAudio: false })).toBe(false);
+      expect(decideVoiceByMode({ voiceMode: "mirror", leadSentAudio: true })).toBe(true);
+      expect(decideVoiceByMode({ voiceMode: "mirror", leadSentAudio: false })).toBe(false);
     });
 
     it("ativa voz (true) no modo 'always' independente do formato da mensagem do lead", () => {
-      expect(resolveVoiceDecision({ voiceMode: "always", leadSentAudio: false })).toBe(true);
-      expect(resolveVoiceDecision({ voiceMode: "always", leadSentAudio: true })).toBe(true);
+      expect(decideVoiceByMode({ voiceMode: "always", leadSentAudio: false })).toBe(true);
+      expect(decideVoiceByMode({ voiceMode: "always", leadSentAudio: true })).toBe(true);
     });
 
     it("assume 'disabled' como padrão seguro quando parâmetros forem nulos ou inválidos", () => {
-      expect(resolveVoiceDecision()).toBe(false);
-      expect(resolveVoiceDecision({ voiceMode: null, leadSentAudio: true })).toBe(false);
-      expect(resolveVoiceDecision({ voiceMode: "desconhecido", leadSentAudio: true })).toBe(false);
+      expect(decideVoiceByMode()).toBe(false);
+      expect(decideVoiceByMode({ voiceMode: null, leadSentAudio: true })).toBe(false);
+      expect(decideVoiceByMode({ voiceMode: "desconhecido", leadSentAudio: true })).toBe(false);
     });
   });
 

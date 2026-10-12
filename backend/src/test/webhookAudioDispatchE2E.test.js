@@ -10,6 +10,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 import { EVOLUTION_V2_AUDIO_UPSERT_FIXTURE } from "./audioTranscriptionAndEnvelopeGuard.test.js";
 
+// Resposta em áudio está desligada desde 12/10/2026 (VOICE_REPLY_AVAILABLE = false, EdgeTTS 403). Para a cadeia de
+// voz continuar protegida enquanto isso, o primeiro teste decide pela regra de modo (decideVoiceByMode), como será
+// quando a chave religar; o segundo usa a chave real e prova o comportamento de hoje (só texto).
+let forcarDecisaoPorModo = true;
+vi.mock("../services/voiceService.js", async (importOriginal) => {
+  const real = await importOriginal();
+  return {
+    ...real,
+    resolveVoiceDecision: (args) => (forcarDecisaoPorModo ? real.decideVoiceByMode(args) : real.resolveVoiceDecision(args)),
+  };
+});
+
 // Mock de node-edge-tts e fs/promises para síntese determinística e rápida
 const mockTtsPromise = vi.fn();
 vi.mock("node-edge-tts", () => {
@@ -34,14 +46,18 @@ vi.mock("fs/promises", () => {
 
 describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese e Envio", () => {
   let capturedAudioSend = null;
+  let capturedTextSends = [];
   let originalFetch;
 
   beforeEach(() => {
     capturedAudioSend = null;
+    capturedTextSends = [];
+    forcarDecisaoPorModo = true;
     originalFetch = global.fetch;
     process.env.EVOLUTION_API_URL = "https://vexo-evolution-api.xdvm8y.easypanel.host";
     process.env.EVOLUTION_API_KEY = "mock-evo-key";
     process.env.GROQ_API_KEY = "mock-groq-key";
+    mockTtsPromise.mockClear();
     mockTtsPromise.mockResolvedValue(undefined);
   });
 
@@ -51,7 +67,7 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
     vi.useRealTimers();
   });
 
-  it("[TESTE OBRIGATÓRIO] rota do webhook executa a cadeia completa (transcrição -> resposta -> voz -> normalizeHttpUrl -> sendMediaMessageViaEvolution) sem ReferenceError", async () => {
+  async function executarWebhookDeAudio(fixture = EVOLUTION_V2_AUDIO_UPSERT_FIXTURE) {
     vi.useFakeTimers();
 
     // 1. Mock do fetch global para:
@@ -82,6 +98,17 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
           json: async () => ({
             text: "Olá, tudo bem com você? O que você oferece?",
           }),
+        };
+      }
+
+      // Envio de texto WhatsApp via Evolution API
+      if (urlStr.includes("/message/sendText")) {
+        capturedTextSends.push({ url: urlStr, body: JSON.parse(opts.body || "{}") });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ key: { id: "wa-text-sent-123" } }),
+          text: async () => JSON.stringify({ key: { id: "wa-text-sent-123" } }),
         };
       }
 
@@ -270,7 +297,7 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
 
     // 2. Dispara webhook com fixture de áudio real
     const req = {
-      body: EVOLUTION_V2_AUDIO_UPSERT_FIXTURE,
+      body: fixture,
       query: { clientId: "vexo-adm" },
     };
     const res = {
@@ -284,6 +311,10 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
 
     // 3. Avança os timers para disparar o bufferMessage e a execução do batch com IA e voz
     await vi.advanceTimersByTimeAsync(4000);
+  }
+
+  it("[TESTE OBRIGATÓRIO] rota do webhook executa a cadeia completa (transcrição -> resposta -> voz -> normalizeHttpUrl -> sendMediaMessageViaEvolution) sem ReferenceError", async () => {
+    await executarWebhookDeAudio();
 
     // 4. Valida que o áudio de voz foi sintetizado e enviado para o endpoint da Evolution
     // SEM lançar 'ReferenceError: normalizeHttpUrl is not defined'
@@ -293,5 +324,19 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
     expect(capturedAudioSend.body.audio).toBeDefined();
     expect(capturedAudioSend.body.encoding).toBe(true);
     expect(capturedAudioSend.headers.apikey).toBe("evo-secret-token");
+  });
+
+  it("[TESTE OBRIGATÓRIO] resposta em áudio fora do ar: o áudio do lead é transcrito e a resposta sai SÓ em texto, sem tentar sintetizar", async () => {
+    forcarDecisaoPorModo = false; // a chave real: VOICE_REPLY_AVAILABLE = false
+
+    // outro id de mensagem: o webhook descarta mensagem repetida, e o primeiro teste já usou o id da fixture
+    const fixture = structuredClone(EVOLUTION_V2_AUDIO_UPSERT_FIXTURE);
+    fixture.data.key.id = "3EB0VOZDESLIGADA000001";
+    await executarWebhookDeAudio(fixture);
+
+    expect(capturedAudioSend).toBeNull();
+    expect(mockTtsPromise).not.toHaveBeenCalled();
+    expect(capturedTextSends.length).toBeGreaterThan(0);
+    expect(capturedTextSends.map((t) => t.body.text).join(" ")).toContain("Oferecemos soluções completas");
   });
 });

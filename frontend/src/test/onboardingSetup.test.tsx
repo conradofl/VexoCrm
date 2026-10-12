@@ -348,7 +348,7 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(screen.getByText("Calendário Comercial Unificado")).toBeInTheDocument();
       expect(screen.getByText("Pipeline Visual Kanban & Métricas")).toBeInTheDocument();
       expect(screen.getByText("Motor de Automações & Transição de Funil por IA")).toBeInTheDocument();
-      expect(screen.getByText("Voz da IA & Mensageria Multimodal")).toBeInTheDocument();
+      expect(screen.getByText("Entendimento de Áudio do Lead")).toBeInTheDocument();
       expect(screen.getByText("Módulo de Eventos & Réguas Temporais")).toBeInTheDocument();
 
       // Caixa didática "Por que usar:" em múltiplos cards

@@ -18,6 +18,9 @@ import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 
+// Espelha VOICE_REPLY_AVAILABLE do backend (voiceService.js). Ver comentário lá.
+export const VOICE_REPLY_AVAILABLE = false;
+
 export const AVAILABLE_VOICES = [
   { id: "nova", label: "Nova (Francisca)", desc: "Feminina Expressiva - Padrão", gender: "Feminina" },
   { id: "echo", label: "Echo (Antônio)", desc: "Masculina Natural", gender: "Masculina" },
@@ -56,7 +59,15 @@ export interface VoiceSettingsCardProps {
   className?: string;
 }
 
-export function VoiceSettingsCard({
+// A chave fica no componente exportado (e não como primeira linha do corpo abaixo) para não chamar hooks
+// condicionalmente: com a resposta em áudio fora do ar, o cartão nem monta.
+export function VoiceSettingsCard(props: VoiceSettingsCardProps) {
+  if (!VOICE_REPLY_AVAILABLE) return null;
+  return <VoiceSettingsCardBody {...props} />;
+}
+
+// Exportado para os testes manterem o cartão coberto enquanto ele está fora do ar.
+export function VoiceSettingsCardBody({
   clientId,
   clientName,
   initialVoiceMode = "disabled",

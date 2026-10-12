@@ -186,13 +186,13 @@ const SUPERPOWERS: Superpower[] = [
     icon: Volume2,
     tag: "Voz & Multimodal",
     tagColor: "bg-violet-100 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
-    title: "Voz da IA & Mensageria Multimodal",
+    title: "Entendimento de Áudio do Lead",
     description:
-      "Áudios ultra-realistas via OpenAI TTS (6 vozes) com modo espelho inteligente e transcrição via Groq Whisper.",
+      "O lead manda áudio no WhatsApp e a IA transcreve e responde em texto, via Groq Whisper.",
     whyUse:
-      "Humaniza o atendimento no WhatsApp com respostas de voz naturais quando o cliente envia áudios.",
+      "Ninguém fica sem resposta por ter preferido falar em vez de digitar.",
     route: "/crm/agente",
-    ctaLabel: "Configurar Voz da IA",
+    ctaLabel: "Configurar Agente",
   },
   {
     id: "eventos-reguas",
