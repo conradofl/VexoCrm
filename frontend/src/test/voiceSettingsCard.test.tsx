@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { VoiceSettingsCard, AVAILABLE_VOICES, VOICE_MODES } from "@/components/agente/VoiceSettingsCard";
+import {
+  VoiceSettingsCard,
+  VoiceSettingsCardBody,
+  VOICE_REPLY_AVAILABLE,
+  AVAILABLE_VOICES,
+  VOICE_MODES,
+} from "@/components/agente/VoiceSettingsCard";
 
 vi.mock("@/components/ui/use-toast", () => ({ toast: vi.fn() }));
 
@@ -49,7 +55,20 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
-describe("VoiceSettingsCard Component — Marco 4: Mensageria Multimodal", () => {
+describe("VoiceSettingsCard — resposta em áudio fora do ar (EdgeTTS 403 desde 12/10/2026)", () => {
+  it("a chave está desligada e o cartão não aparece", () => {
+    expect(VOICE_REPLY_AVAILABLE).toBe(false);
+    const qc = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <VoiceSettingsCard clientId="vexo-adm" clientName="Vexo" initialVoiceMode="mirror" />
+      </QueryClientProvider>
+    );
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("VoiceSettingsCardBody — o cartão que volta quando o TTS voltar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchApiMock.mockImplementation(async (url: string, options?: RequestInit) => {
@@ -79,7 +98,7 @@ describe("VoiceSettingsCard Component — Marco 4: Mensageria Multimodal", () =>
 
   it("renderiza o card com título, subtítulo e as 3 opções de comportamento de voz", () => {
     renderWithProviders(
-      <VoiceSettingsCard
+      <VoiceSettingsCardBody
         clientId="tenant-multimodal"
         clientName="Clínica Exemplo"
         initialVoiceMode="disabled"
@@ -96,7 +115,7 @@ describe("VoiceSettingsCard Component — Marco 4: Mensageria Multimodal", () =>
 
   it("exibe badge 'Voz Ativa' quando o modo de voz não está desativado", () => {
     renderWithProviders(
-      <VoiceSettingsCard
+      <VoiceSettingsCardBody
         clientId="tenant-multimodal"
         clientName="Clínica Exemplo"
         initialVoiceMode="mirror"
@@ -108,7 +127,7 @@ describe("VoiceSettingsCard Component — Marco 4: Mensageria Multimodal", () =>
 
   it("permite selecionar o modo 'Espelhar o Lead' e dispara salvamento em n8n_settings", async () => {
     renderWithProviders(
-      <VoiceSettingsCard
+      <VoiceSettingsCardBody
         clientId="tenant-multimodal"
         clientName="Clínica Exemplo"
         initialVoiceMode="disabled"
@@ -131,7 +150,7 @@ describe("VoiceSettingsCard Component — Marco 4: Mensageria Multimodal", () =>
 
   it("renderiza o botão de teste de prévia de voz e dispara requisição para /api/chatbot/voice-preview", async () => {
     renderWithProviders(
-      <VoiceSettingsCard
+      <VoiceSettingsCardBody
         clientId="tenant-multimodal"
         clientName="Clínica Exemplo"
         initialVoiceMode="mirror"

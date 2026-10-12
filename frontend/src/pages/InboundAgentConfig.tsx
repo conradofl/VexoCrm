@@ -799,7 +799,7 @@ export default function InboundAgentConfig() {
               </CardContent>
             </Card>
 
-            {/* Voz da IA & Respostas em Áudio (OpenAI TTS & Groq Whisper) */}
+            {/* Transcrição de Áudio (Groq Whisper) */}
             {selectedClientId && (
               <VoiceSettingsCard
                 clientId={selectedClientId}

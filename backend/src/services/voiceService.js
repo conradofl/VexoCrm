@@ -5,6 +5,11 @@ import path from "path";
 import crypto from "crypto";
 
 export const VOICE_SYNTHESIS_TIMEOUT_MS = 10000;
+// Resposta em áudio desligada em 12/10/2026: o provedor EdgeTTS passou a
+// devolver HTTP 403 (mudança do lado da Microsoft, não do nosso código).
+// O caminho inteiro fica de pé; religar = trocar este false por true depois
+// que um TTS pago (Azure Speech) assumir generateSpeechAudio.
+export const VOICE_REPLY_AVAILABLE = false;
 
 export const VOICE_PROFILES = {
   nova: { voice: "pt-BR-FranciscaNeural", pitch: "0Hz", baseRate: "0%", label: "Nova (Francisca - Feminina Expressiva)" },
@@ -31,6 +36,13 @@ export function isSupportedVoice(voice) {
 }
 
 export function resolveVoiceDecision({ voiceMode = "disabled", leadSentAudio = false } = {}) {
+  if (!VOICE_REPLY_AVAILABLE) return false;
+  return decideVoiceByMode({ voiceMode, leadSentAudio });
+}
+
+// A regra por modo do tenant (desligado / espelhar o lead / sempre). Fica testada enquanto a resposta em áudio está
+// fora do ar, para voltar intacta quando VOICE_REPLY_AVAILABLE virar true.
+export function decideVoiceByMode({ voiceMode = "disabled", leadSentAudio = false } = {}) {
   const mode = String(voiceMode || "disabled").trim().toLowerCase();
   if (mode === "always") return true;
   if (mode === "mirror" && Boolean(leadSentAudio)) return true;
