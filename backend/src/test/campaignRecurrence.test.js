@@ -180,86 +180,66 @@ describe("Pilar 3: Campanhas Recorrentes — campaignRecurrence.js", () => {
   });
 });
 
-describe("Pilar 3: Scheduler e Reagendamento Automático de Campanhas Recorrentes", () => {
-  it("ao concluir disparo no scheduler, campanha recorrente é atualizada com scheduled_for e last_triggered_at = null", async () => {
-    const { runDueCampaignDispatches } = await import("../campaign/scheduler.js");
-
-    const executedCampaigns = [];
-    const updatedCampaigns = [];
-
-    // Mock do Supabase
-    const mockSupabase = {
-      from: vi.fn((table) => {
-        if (table === "campaigns") {
-          return {
-            select: vi.fn().mockReturnThis(),
-            in: vi.fn().mockReturnThis(),
-            is: vi.fn().mockReturnThis(),
-            not: vi.fn().mockReturnThis(),
-            lte: vi.fn().mockReturnThis(),
-            order: vi.fn().mockReturnThis(),
-            limit: vi.fn().mockImplementation(() =>
-              Promise.resolve({
-                data: [
-                  {
-                    id: "camp-recorrente-1",
-                    name: "Assembleia Ademicon",
-                    client_id: "ademicon-tenant",
-                    status: "active",
-                    scheduled_for: "2026-10-15T12:00:00.000Z",
-                    last_triggered_at: null,
-                    is_recurring: true,
-                    recurrence_pattern: "monthly",
-                    recurrence_day_of_month: 15,
-                    recurrence_time: "09:00",
-                  },
-                ],
-                error: null,
-              })
-            ),
-            update: vi.fn((updates) => {
-              updatedCampaigns.push(updates);
-              return {
-                eq: vi.fn().mockResolvedValue({ data: null, error: null }),
-              };
-            }),
-          };
-        }
-        return { select: vi.fn().mockReturnThis() };
-      }),
-    };
-
-    // Temporariamente substitui supabase
-    const dbModule = await import("../services/database.js");
-    const originalSupabase = dbModule.supabase;
-    Object.defineProperty(dbModule, "supabase", { value: mockSupabase, configurable: true });
-
-    // Mock de executeCampaignDispatch
+describe("agendador antigo (runDueCampaignDispatches) não dispara campanha recorrente", () => {
+  // A recorrência mora na fila (campaign_dispatches): cada ocorrência vira um lote. Se o caminho antigo também
+  // disparasse, a mesma campanha sairia duas vezes para o mesmo público.
+  it("[OBRIGATÓRIO] recorrente vencida com scheduled_for preenchido (dado antigo ou banco mexido à mão) NÃO é disparada nem reagendada", async () => {
+    const { createPgliteDb } = await import("./helpers/pgliteDb.js");
+    const { _setPgDatabasePoolForTesting } = await import("../services/database.js");
+    const db = await createPgliteDb(`
+      SET TimeZone = 'UTC';
+      CREATE TABLE public.campaigns (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT, client_id TEXT, import_id UUID, limit_per_run INT,
+        webhook_url TEXT, webhook_token TEXT, status TEXT, scheduled_for TIMESTAMPTZ, last_triggered_at TIMESTAMPTZ,
+        archived_at TIMESTAMPTZ, created_by_uid TEXT, created_by_email TEXT, analytics_meta JSONB DEFAULT '{}'::jsonb,
+        is_recurring BOOLEAN DEFAULT false, recurrence_pattern TEXT, recurrence_day_of_month INT, recurrence_day_of_week INT,
+        recurrence_time TEXT, next_run_at TIMESTAMPTZ
+      );
+      INSERT INTO public.campaigns (name, client_id, status, scheduled_for, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_time)
+      VALUES ('Assembleia', 't', 'active', now() - interval '1 hour', true, 'monthly', 15, '09:00');
+    `);
+    _setPgDatabasePoolForTesting({ query: (sql, params) => db.query(sql, params) });
     const dispatchModule = await import("../campaign/dispatch.js");
-    const spyDispatch = vi.spyOn(dispatchModule, "executeCampaignDispatch").mockImplementation(async (c) => {
-      executedCampaigns.push(c.id);
-      return { total: 10, sent: 10, failed: 0 };
-    });
-
+    const spy = vi.spyOn(dispatchModule, "executeCampaignDispatch").mockResolvedValue({ total: 1 });
     try {
-      const result = await runDueCampaignDispatches({ limit: 10, triggerSource: "test_scheduler" });
-
-      expect(result.success).toBe(true);
-      expect(result.processed).toBe(1);
-      expect(result.sent).toBe(1);
-      expect(executedCampaigns).toContain("camp-recorrente-1");
-
-      // Verifica se o update de reagendamento foi acionado para a campanha recorrente
-      expect(updatedCampaigns.length).toBeGreaterThan(0);
-      const recurrenceUpdate = updatedCampaigns.find((u) => u.last_triggered_at === null && u.status === "active");
-      expect(recurrenceUpdate).toBeDefined();
-      expect(recurrenceUpdate.scheduled_for).toBeTruthy();
-      expect(recurrenceUpdate.next_run_at).toBeTruthy();
-      expect(recurrenceUpdate.status).toBe("active");
-      expect(recurrenceUpdate.last_triggered_at).toBeNull();
+      const { runDueCampaignDispatches } = await import("../campaign/scheduler.js");
+      const result = await runDueCampaignDispatches({ limit: 10, triggerSource: "teste" });
+      expect(result.processed).toBe(0);
+      expect(spy).not.toHaveBeenCalled();
+      const { rows } = await db.query("SELECT scheduled_for IS NOT NULL AS ainda_agendada, next_run_at FROM public.campaigns");
+      expect(rows[0]).toEqual({ ainda_agendada: true, next_run_at: null }); // intocada: nada reagendado por aqui
     } finally {
-      spyDispatch.mockRestore();
-      Object.defineProperty(dbModule, "supabase", { value: originalSupabase, configurable: true });
+      spy.mockRestore();
+      _setPgDatabasePoolForTesting(null);
+      await db.close();
+    }
+  });
+
+  it("campanha NÃO recorrente vencida continua sendo disparada pelo caminho antigo, como hoje", async () => {
+    const { createPgliteDb } = await import("./helpers/pgliteDb.js");
+    const { _setPgDatabasePoolForTesting } = await import("../services/database.js");
+    const db = await createPgliteDb(`
+      SET TimeZone = 'UTC';
+      CREATE TABLE public.campaigns (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT, client_id TEXT, import_id UUID, limit_per_run INT,
+        webhook_url TEXT, webhook_token TEXT, status TEXT, scheduled_for TIMESTAMPTZ, last_triggered_at TIMESTAMPTZ,
+        archived_at TIMESTAMPTZ, created_by_uid TEXT, created_by_email TEXT, analytics_meta JSONB DEFAULT '{}'::jsonb,
+        is_recurring BOOLEAN DEFAULT false
+      );
+      INSERT INTO public.campaigns (name, client_id, status, scheduled_for, is_recurring) VALUES ('Pontual', 't', 'active', now() - interval '1 hour', false);
+      INSERT INTO public.campaigns (name, client_id, status, scheduled_for, is_recurring) VALUES ('Pontual antiga', 't', 'active', now() - interval '1 hour', NULL);
+    `);
+    _setPgDatabasePoolForTesting({ query: (sql, params) => db.query(sql, params) });
+    const dispatchModule = await import("../campaign/dispatch.js");
+    const spy = vi.spyOn(dispatchModule, "executeCampaignDispatch").mockResolvedValue({ total: 1 });
+    try {
+      const { runDueCampaignDispatches } = await import("../campaign/scheduler.js");
+      const result = await runDueCampaignDispatches({ limit: 10, triggerSource: "teste" });
+      expect(result.processed).toBe(2);
+    } finally {
+      spy.mockRestore();
+      _setPgDatabasePoolForTesting(null);
+      await db.close();
     }
   });
 });
