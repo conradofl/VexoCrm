@@ -83,7 +83,7 @@ describe("Pilar 3: UI de Campanhas Recorrentes", () => {
       initialTime = "09:00",
     }: {
       initialIsRecurring?: boolean;
-      initialPattern?: "monthly" | "weekly" | "biweekly";
+      initialPattern?: "daily" | "monthly" | "weekly" | "biweekly";
       initialDayOfMonth?: number;
       initialDayOfWeek?: number;
       initialTime?: string;
@@ -173,6 +173,29 @@ describe("Pilar 3: UI de Campanhas Recorrentes", () => {
       expect(screen.getByTestId("recurrence-time-input")).toBeTruthy();
     });
 
+    it("repetição ligada: some o 'Disparar Agora' — nenhum envio avulso é criado junto com a repetição", () => {
+      renderWithProviders(<SchedulingStepWrapper initialIsRecurring={false} />);
+      expect(screen.getByText("Disparar Agora")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("recurrence-switch"));
+      expect(screen.queryByText("Disparar Agora")).toBeNull();
+      expect(screen.getByTestId("recurrence-replaces-trigger").textContent).toContain("Nenhum envio avulso é criado agora.");
+    });
+
+    it("[OBRIGATÓRIO] repetição ligada: lotes/limite desabilitados com o motivo; desligou, voltam", () => {
+      renderWithProviders(<SchedulingStepWrapper initialIsRecurring={false} />);
+      const sw = () => screen.getByTestId("batching-switch");
+      expect(sw().hasAttribute("disabled")).toBe(false);
+      expect(screen.queryByTestId("batching-disabled-reason")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("recurrence-switch"));
+      expect(sw().hasAttribute("disabled")).toBe(true);
+      expect(screen.getByTestId("batching-disabled-reason").textContent).toContain("cada envio cobre o público inteiro, e a cota diária do chip é o freio");
+
+      fireEvent.click(screen.getByTestId("recurrence-switch"));
+      expect(sw().hasAttribute("disabled")).toBe(false);
+      expect(screen.queryByTestId("batching-disabled-reason")).toBeNull();
+    });
+
     it("permite alterar dia do mês e horário para campanha mensal (Aviso de Assembleia)", () => {
       renderWithProviders(
         <SchedulingStepWrapper
@@ -225,6 +248,8 @@ describe("Pilar 3: UI de Campanhas Recorrentes", () => {
         recurrence_pattern: "monthly",
         recurrence_day_of_month: 15,
         recurrence_time: "09:00",
+        recurrence_end_type: "count",
+        next_run_label: "15/11 às 09:00",
       };
 
       renderWithProviders(
@@ -244,9 +269,9 @@ describe("Pilar 3: UI de Campanhas Recorrentes", () => {
       const recurrenceBadge = within(card).getByTestId("campaign-recurrence-camp-ademicon");
       expect(recurrenceBadge.textContent).toContain("🔄 Mensal (Dia 15)");
 
-      // Próxima Execução
+      // Próximo envio, em texto, no fuso do tenant (a API manda pronto)
       const nextRunEl = within(card).getByTestId("campaign-next-run-camp-ademicon");
-      expect(nextRunEl.textContent).toContain("Próxima Execução:");
+      expect(nextRunEl.textContent).toBe("Próximo envio: 15/11 às 09:00");
     });
 
     it("exibe badge semanal para campanha da Via Permuta", () => {

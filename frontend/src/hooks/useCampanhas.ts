@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
+import type { RecurrenceEndType, RecurrenceOriginKind, RecurrencePattern } from "@/lib/campaignRecurrence";
 
 const CAMPAIGN_REQUEST_TIMEOUT_MS = 15000;
 
@@ -29,11 +30,24 @@ export interface Campaign {
   campaign_prompt_id: string | null;
   mode: "disparo" | "agente";
   is_recurring?: boolean | null;
-  recurrence_pattern?: "monthly" | "weekly" | "biweekly" | null;
+  recurrence_pattern?: RecurrencePattern | null;
   recurrence_day_of_month?: number | null;
   recurrence_day_of_week?: number | null;
   recurrence_time?: string | null;
   next_run_at?: string | null;
+  recurrence_end_type?: RecurrenceEndType | null;
+  recurrence_ends_at?: string | null;
+  recurrence_max_occurrences?: number | null;
+  recurrence_occurrences_count?: number | null;
+  recurrence_ended_at?: string | null;
+  recurrence_no_end_confirmed_at?: string | null;
+  /** "15/11 às 09:00" no fuso do tenant (a API calcula). */
+  next_run_label?: string | null;
+  recurrence_ended_label?: string | null;
+  /** Avisos do salvamento (ex.: campanha do CRM sem variações). Só vem na resposta de criar/editar. */
+  recurrenceWarnings?: string[];
+  /** A conta de duração de cada envio, devolvida ao salvar. */
+  recurrenceLoad?: { overrun: boolean; message: string } | null;
   // ── Campos PRÉ-CABEADOS (Dashboard Fase 1 — desempenho por campanha).
   // O endpoint de campanhas ainda NÃO retorna estes; quando retornar, a tabela
   // do Dashboard preenche sozinha (helper "—" enquanto nulo).
@@ -209,10 +223,17 @@ export interface CreateCampaignPayload {
   endsAt?: string | null;
   analyticsMeta?: CampaignAnalyticsMeta;
   isRecurring?: boolean;
-  recurrencePattern?: "monthly" | "weekly" | "biweekly" | null;
+  recurrencePattern?: RecurrencePattern | null;
   recurrenceDayOfMonth?: number | null;
   recurrenceDayOfWeek?: number | null;
   recurrenceTime?: string | null;
+  recurrenceEndType?: RecurrenceEndType | null;
+  /** YYYY-MM-DD: último dia com envio, no fuso do tenant. */
+  recurrenceEndsOn?: string | null;
+  recurrenceMaxOccurrences?: number | null;
+  recurrenceNoEndConfirmed?: boolean;
+  /** O dono leu que cada envio leva mais que o intervalo da repetição e quer salvar assim mesmo. */
+  recurrenceOverrunConfirmed?: boolean;
 }
 
 export interface DirectDispatchPayload {
@@ -239,11 +260,16 @@ export interface UpdateCampaignPayload {
   archived?: boolean;
   analyticsMeta?: CampaignAnalyticsMeta;
   isRecurring?: boolean;
-  recurrencePattern?: "monthly" | "weekly" | "biweekly" | null;
+  recurrencePattern?: RecurrencePattern | null;
   recurrenceDayOfMonth?: number | null;
   recurrenceDayOfWeek?: number | null;
   recurrenceTime?: string | null;
-  nextRunAt?: string | null;
+  recurrenceEndType?: RecurrenceEndType | null;
+  recurrenceEndsOn?: string | null;
+  recurrenceMaxOccurrences?: number | null;
+  recurrenceNoEndConfirmed?: boolean;
+  /** O dono leu que cada envio leva mais que o intervalo da repetição e quer salvar assim mesmo. */
+  recurrenceOverrunConfirmed?: boolean;
 }
 
 export interface CreateDispatchPayload {
@@ -603,11 +629,11 @@ export function useCreateCampaign() {
         throw new Error(`Erro ao criar campanha: ${res.status} ${err}`);
       }
 
-      const data = await readCampaignJson<{ item?: Campaign }>(res, "create_campaign");
+      const data = await readCampaignJson<{ item?: Campaign; recurrenceWarnings?: string[]; recurrenceLoad?: Campaign["recurrenceLoad"] }>(res, "create_campaign");
       if (!data.item) {
         throw new Error("A API nao retornou a campanha criada.");
       }
-      return data.item;
+      return { ...data.item, recurrenceWarnings: data.recurrenceWarnings || [], recurrenceLoad: data.recurrenceLoad ?? null };
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
@@ -642,8 +668,8 @@ export function useUpdateCampaign() {
         throw new CampaignApiError(`Erro ao atualizar campanha: ${res.status} ${message}`, code, res.status);
       }
 
-      const data = await readCampaignJson<{ item: Campaign }>(res, "update_campaign");
-      return data.item;
+      const data = await readCampaignJson<{ item: Campaign; recurrenceWarnings?: string[]; recurrenceLoad?: Campaign["recurrenceLoad"] }>(res, "update_campaign");
+      return { ...data.item, recurrenceWarnings: data.recurrenceWarnings || [], recurrenceLoad: data.recurrenceLoad ?? null };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
@@ -1277,6 +1303,120 @@ export function useCampaignDispatchBulkAction() {
       qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
       qc.invalidateQueries({ queryKey: ["all-dispatches"] });
       qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+    },
+  });
+}
+
+// ── Campanha recorrente ─────────────────────────────────────────────────────────────────────────────────────────
+
+export interface RecurrenceAudience {
+  total: number;
+  toSend: number;
+  limitPerRun: number | null;
+}
+
+export interface RecurrencePreviewInput {
+  clientId: string;
+  recurrencePattern: RecurrencePattern;
+  recurrenceDayOfMonth: number | null;
+  recurrenceDayOfWeek: number | null;
+  recurrenceTime: string;
+  importId: string | null;
+  importIds: string[];
+  /** Planilha nova (ou público do Banco) ainda não importada: quantas linhas a tela vai importar. */
+  pendingRows?: number | null;
+  limitPerRun: number | null;
+  analyticsMeta: CampaignAnalyticsMeta;
+}
+
+export interface RecurrencePreview {
+  timezone: string;
+  nextRunAt: string | null;
+  nextRunLabel: string | null;
+  summary: string | null;
+  monthEndNote: string | null;
+  originKind: RecurrenceOriginKind;
+  audience: RecurrenceAudience | null;
+  missingVariantSteps: number[];
+  variantsMessage: string | null;
+  variantsBlocking: boolean;
+  /** Quanto cada envio leva com a cota real do chip, comparado com o intervalo da repetição. */
+  load: RecurrenceLoad | null;
+}
+
+export interface RecurrenceLoad {
+  overrun: boolean;
+  message: string;
+  days: number | null;
+  intervalDays: number;
+  dailyQuota: number | null;
+  chipName: string | null;
+  messagesPerLead: number;
+  leadsPerDay: number | null;
+  limitedBy: "quota" | "pace" | null;
+}
+
+/** Prévia do painel de recorrência (próximo envio, público de hoje, variações). Nada é gravado. */
+export function useRecurrencePreview(input: RecurrencePreviewInput | null) {
+  const { getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["campaign-recurrence-preview", input],
+    enabled: Boolean(input?.clientId),
+    staleTime: 15_000,
+    queryFn: async (): Promise<RecurrencePreview> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const res = await fetchCampaignsApi("/api/campaigns/recurrence-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao calcular a prévia da recorrência"));
+      return readCampaignJson<RecurrencePreview>(res, "recurrence_preview");
+    },
+  });
+}
+
+export interface RecurrenceOccurrence {
+  occurrenceAt: string;
+  label: string;
+  outcome: "created" | "skipped";
+  reason: string | null;
+  audienceCount: number | null;
+  dispatchId: string | null;
+  dispatchStatus: CampaignDispatch["status"] | null;
+  sentCount: number | null;
+  failedCount: number | null;
+  dispatchError: string | null;
+}
+
+export interface CampaignRecurrenceDetail {
+  isRecurring: boolean;
+  summary: string | null;
+  monthEndNote: string | null;
+  nextRunLabel: string | null;
+  endedLabel: string | null;
+  endSummary: string | null;
+  needsResave: boolean;
+  originKind: RecurrenceOriginKind;
+  audienceToday: RecurrenceAudience | null;
+  occurrences: RecurrenceOccurrence[];
+}
+
+/** Histórico de uma campanha recorrente: inclusive as ocorrências PULADAS, com o motivo. */
+export function useCampaignRecurrence(campaignId: string | null) {
+  const { getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["campaign-recurrence", campaignId],
+    enabled: Boolean(campaignId),
+    queryFn: async (): Promise<CampaignRecurrenceDetail> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const res = await fetchCampaignsApi(`/api/campaigns/${campaignId}/recurrence`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao carregar o histórico da recorrência"));
+      return readCampaignJson<CampaignRecurrenceDetail>(res, "campaign_recurrence");
     },
   });
 }

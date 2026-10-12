@@ -9,7 +9,7 @@ import { getPartsInTimezone, createDateInTimezone } from "../services/sendWindow
 
 describe("Pilar 3: Campanhas Recorrentes — campaignRecurrence.js", () => {
   it("valida constantes e parsing de horário de recorrência", () => {
-    expect(RECURRENCE_PATTERNS).toEqual(["monthly", "weekly", "biweekly"]);
+    expect(RECURRENCE_PATTERNS).toEqual(["daily", "monthly", "weekly", "biweekly"]);
     expect(WEEKDAY_NAMES[2]).toBe("Terça-feira");
 
     expect(parseRecurrenceTime("09:00")).toEqual({ hour: 9, minute: 0 });

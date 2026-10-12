@@ -130,12 +130,20 @@ export function resolveStepTextForLead(step, leadIndex, chip = null, options = {
   const variants = normalizeTextVariants(step?.textVariants);
   if (variants.length === 0) return normalizeString(step?.text);
 
-  const { lead = null, phone = "", campaignId = "" } = options || {};
+  const { lead = null, phone = "", campaignId = "", occurrenceOffset = null } = options || {};
   const total = variants.length;
   const sequence = Number.isInteger(chip?.sequence) ? chip.sequence : null;
 
   let candidates;
-  if (sequence === null) {
+  if (Number.isInteger(occurrenceOffset)) {
+    // Ocorrencia de campanha recorrente: a variacao e ESTAVEL por lead (hash do telefone) e anda uma casa a cada
+    // ocorrencia. Dentro do lote os leads se espalham pelas variacoes; entre duas ocorrencias seguidas o mesmo lead
+    // nunca recebe a mesma variacao (com 2+ cadastradas). A rotacao por chip nao garante isso: ela nao sabe quem
+    // recebeu o que no mes passado.
+    const leadKey = normalizeString(phone).replace(/\D/g, "") || String(leadIndex);
+    const start = (hashSeed(`${normalizeString(campaignId)}|${leadKey}`) + occurrenceOffset) % total;
+    candidates = Array.from({ length: total }, (_, i) => (start + i) % total);
+  } else if (sequence === null) {
     candidates = Array.from({ length: total }, (_, i) => (leadIndex + i) % total);
   } else {
     const cycle = Math.floor(sequence / total);
@@ -845,6 +853,7 @@ export async function dispatchCampaignSequence({
   // Entra na seed do embaralhamento: campanhas diferentes no mesmo chip nao
   // repetem a mesma ordem de variacoes.
   const rotationCampaignId = normalizeString(context?.campaign?.id);
+  const occurrenceOffset = Number.isInteger(context?.recurrence?.variantOffset) ? context.recurrence.variantOffset : null;
   const summary = {
     successCount: 0,
     failureCount: 0,
@@ -1033,6 +1042,7 @@ export async function dispatchCampaignSequence({
           lead,
           phone,
           campaignId: rotationCampaignId,
+          occurrenceOffset,
         }),
         lead,
         phone

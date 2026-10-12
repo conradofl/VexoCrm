@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Pencil, Trash2, ChevronDown } from "lucide-react";
+import { Copy, Pencil, Trash2, ChevronDown, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
 import { CAMPAIGN_STATUS_LABELS, type Campaign } from "@/hooks/useCampanhas";
-import { formatRecurrenceBadge, formatNextRunDate } from "@/lib/campaignRecurrence";
+import { formatRecurrenceBadge, recurrenceStatusText } from "@/lib/campaignRecurrence";
 import { ListFilterBar } from "@/components/ListFilterBar";
 import { useListFilter } from "@/hooks/useListFilter";
 import { CAMPAIGNS_FILTER } from "@/lib/leadImportsListFilters";
@@ -16,6 +16,8 @@ import { useViewMode } from "@/hooks/useViewMode";
 import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { RecordView, type RecordCardState, type RecordField } from "@/components/records/RecordView";
 import { DispatchKpiCards } from "./DispatchKpiCards";
+import { RecurrenceHistoryDialog } from "./RecurrenceHistoryDialog";
+
 
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
 export const CAMPAIGN_FIELDS: RecordField<Campaign>[] = [
@@ -45,6 +47,7 @@ export function CampaignsTable({
   onDeleteCampaign,
 }: CampaignsTableProps) {
   const view = useViewMode("campanhas");
+  const [historyCampaign, setHistoryCampaign] = useState<Campaign | null>(null);
   const { filtered: filteredCampaigns, controls: filterControls } = useListFilter(campaigns, CAMPAIGNS_FILTER);
 
   const renderDetails = (c: Campaign) => (
@@ -64,12 +67,10 @@ export function CampaignsTable({
         </p>
         {c.is_recurring && (
           <p data-testid={`campaign-recurrence-detail-${c.id}`}>
-            <span className="font-semibold text-foreground">Recorrência:</span>{" "}
-            🔄 {formatRecurrenceBadge(c)}
-            {(c.next_run_at || c.scheduled_for) && (
-              <span className="ml-1 text-indigo-600 dark:text-indigo-400 font-medium">
-                — Próxima Execução: {formatNextRunDate(c.next_run_at || c.scheduled_for)}
-              </span>
+            <span className="font-semibold text-foreground">Repetição:</span>{" "}
+            {formatRecurrenceBadge(c)}
+            {recurrenceStatusText(c) && (
+              <span className="ml-1 text-indigo-600 dark:text-indigo-400 font-medium">— {recurrenceStatusText(c)}</span>
             )}
           </p>
         )}
@@ -77,6 +78,19 @@ export function CampaignsTable({
 
       {/* Ações da campanha */}
       <div className="flex items-center justify-end gap-1.5 pt-1">
+        {c.is_recurring && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 rounded-xl text-xs"
+            data-testid={`campaign-recurrence-history-${c.id}`}
+            title="Envios feitos e pulados desta repetição, com o motivo"
+            onClick={() => setHistoryCampaign(c)}
+          >
+            <History className="h-3.5 w-3.5" />
+            <span>Envios</span>
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -245,13 +259,17 @@ export function CampaignsTable({
             </span>
           </div>
 
-          {c.is_recurring && (c.next_run_at || c.scheduled_for) && (
+          {recurrenceStatusText(c) && (
             <div
               data-testid={`campaign-next-run-${c.id}`}
-              className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1 pt-1"
+              className={cn(
+                "text-[11px] font-medium pt-1",
+                c.is_recurring && !c.recurrence_end_type
+                  ? "text-amber-700 dark:text-amber-300"
+                  : "text-indigo-600 dark:text-indigo-400"
+              )}
             >
-              <span>Próxima Execução:</span>
-              <span className="font-semibold">{formatNextRunDate(c.next_run_at || c.scheduled_for)}</span>
+              {recurrenceStatusText(c)}
             </div>
           )}
         </div>
@@ -320,6 +338,14 @@ export function CampaignsTable({
           )}
         </CardContent>
       </Card>
+      {historyCampaign && (
+        <RecurrenceHistoryDialog
+          campaignId={historyCampaign.id}
+          campaignName={historyCampaign.name}
+          open
+          onOpenChange={(open) => { if (!open) setHistoryCampaign(null); }}
+        />
+      )}
     </div>
   );
 }

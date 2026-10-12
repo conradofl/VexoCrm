@@ -59,7 +59,24 @@ import {
   resolveSendWindowConfig,
   adjustDateToSendWindow,
 } from "../../services/sendWindow.js";
-import { computeNextRecurrenceDate } from "../../services/campaignRecurrence.js";
+import {
+  bodyTouchesRecurrence,
+  buildMissingVariantsMessage,
+  describeOccurrenceLoad,
+  estimateOccurrenceDuration,
+  recurrenceIntervalDays,
+  computeNextRecurrenceDate,
+  describeRecurrence,
+  describeRecurrenceEnd,
+  findStepsWithoutVariants,
+  formatRecurrenceSlot,
+  resolveRecurrenceSave,
+} from "../../services/campaignRecurrence.js";
+import {
+  findConcurrentRunningDispatch,
+  materializeDueRecurringOccurrences,
+  readOccurrenceInfo,
+} from "../../services/campaignRecurrenceOccurrences.js";
 import { getDateKey } from "../../services/analytics.js";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../../services/canonicalPhone.js";
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
@@ -376,6 +393,12 @@ export function buildStepOptionsContext(sequence) {
 // A aba Fila de Envios carrega todas as encerradas de uma vez (o filtro roda no navegador). Teto de segurança:
 // acima disso a tela volta a paginar e avisa que o filtro vale só para o carregado.
 export const DISPATCH_SUMMARY_MAX_PAGE_SIZE = 5000;
+
+// Colunas de recorrencia devolvidas pelas rotas de campanha (as do pilar 3 + fim declarado do bloco 3).
+const CAMPAIGN_RECURRENCE_COLUMNS =
+  "is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at, " +
+  "recurrence_end_type, recurrence_ends_at, recurrence_max_occurrences, recurrence_occurrences_count, recurrence_ended_at, " +
+  "recurrence_no_end_confirmed_at";
 
 export function registerCampaignsRoutes(app, deps) {
   const {
@@ -1007,7 +1030,7 @@ export function registerCampaignsRoutes(app, deps) {
 
     try {
       const campaignSelect =
-        "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at";
+        `id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, ${CAMPAIGN_RECURRENCE_COLUMNS}`;
       const fallbackCampaignSelect =
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at";
       let query = supabase
@@ -1101,12 +1124,19 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
+      // "Próximo envio: 15/11 às 09:00" no fuso do tenant, pronto para a tela (o navegador pode estar em outro fuso).
+      const tenantTimezone = clientId && (data || []).some((r) => r.is_recurring)
+        ? await resolveTenantTimezone(clientId)
+        : "America/Sao_Paulo";
+
       const items = (data || []).map((row) => ({
         ...row,
         analytics_meta: normalizeCampaignAnalyticsMeta(row.analytics_meta || {}),
         client_name: clientNameMap[row.client_id] ?? null,
         chip_name: chipNameByCampaign.get(row.id) ?? null,
         webhook_token: row.webhook_token ? "***" : null,
+        next_run_label: row.is_recurring && row.next_run_at ? formatRecurrenceSlot(row.next_run_at, tenantTimezone) : null,
+        recurrence_ended_label: row.is_recurring && row.recurrence_ended_at ? formatRecurrenceSlot(row.recurrence_ended_at, tenantTimezone) : null,
       }));
 
       res.json({ items });
@@ -1207,31 +1237,9 @@ export function registerCampaignsRoutes(app, deps) {
     
     const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
     const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 5000);
-    let scheduledFor = normalizeString(req.body?.scheduledFor) || null;
-    const isRecurring = Boolean(req.body?.isRecurring ?? req.body?.is_recurring ?? false);
-    const recurrencePattern = normalizeString(req.body?.recurrencePattern || req.body?.recurrence_pattern) || (isRecurring ? "monthly" : null);
-    const recurrenceDayOfMonth = req.body?.recurrenceDayOfMonth != null
-      ? Number(req.body.recurrenceDayOfMonth)
-      : (req.body?.recurrence_day_of_month != null ? Number(req.body.recurrence_day_of_month) : null);
-    const recurrenceDayOfWeek = req.body?.recurrenceDayOfWeek != null
-      ? Number(req.body.recurrenceDayOfWeek)
-      : (req.body?.recurrence_day_of_week != null ? Number(req.body.recurrence_day_of_week) : null);
-    const recurrenceTime = normalizeString(req.body?.recurrenceTime || req.body?.recurrence_time) || "09:00";
-    let nextRunAt = normalizeString(req.body?.nextRunAt || req.body?.next_run_at) || null;
-
-    if (isRecurring && !scheduledFor) {
-      const nextDate = computeNextRecurrenceDate({
-        pattern: recurrencePattern,
-        dayOfMonth: recurrenceDayOfMonth,
-        dayOfWeek: recurrenceDayOfWeek,
-        timeStr: recurrenceTime,
-        fromDate: new Date(),
-      });
-      scheduledFor = nextDate.toISOString();
-      nextRunAt = scheduledFor;
-    } else if (isRecurring && scheduledFor && !nextRunAt) {
-      nextRunAt = scheduledFor;
-    }
+    const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
+    // Recorrencia: validada e calculada dentro do try (precisa do fuso do tenant e dos passos validados).
+    const wantsRecurring = Boolean(req.body?.isRecurring ?? req.body?.is_recurring ?? false);
     const analyticsMeta =
       req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
         ? req.body.analyticsMeta
@@ -1244,7 +1252,7 @@ export function registerCampaignsRoutes(app, deps) {
     }
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
-    let lifecycleStatus = scheduledFor ? "scheduled" : "active";
+    let lifecycleStatus = scheduledFor || wantsRecurring ? "scheduled" : "active";
     if (req.body?.status === "draft") {
       lifecycleStatus = "draft";
     }
@@ -1277,6 +1285,29 @@ export function registerCampaignsRoutes(app, deps) {
       if (!validation.valid) {
         sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
         return;
+      }
+
+      const recurrence = resolveRecurrenceSave({
+        body: req.body,
+        existing: null,
+        isCrmSource,
+        sequence: validation.analyticsMeta.sequence,
+        timezone: await resolveTenantTimezone(authorizedClientId),
+      });
+      if (!recurrence.ok) {
+        sendError(res, 400, recurrence.code, recurrence.message);
+        return;
+      }
+      let recurrenceLoad = null;
+      if (recurrence.fields.is_recurring) {
+        recurrenceLoad = await checkRecurrenceLoad({
+          req,
+          res,
+          clientId: authorizedClientId,
+          campaign: { import_id: importId, analytics_meta: analyticsMeta },
+          fields: recurrence.fields,
+        });
+        if (!recurrenceLoad) return;
       }
 
       const dispatchSettings = await resolveCampaignDispatchSettings(authorizedClientId, {
@@ -1319,14 +1350,9 @@ export function registerCampaignsRoutes(app, deps) {
           analytics_meta: analyticsMetaWithDispatch,
           campaign_prompt_id: campaignPromptId,
           mode: campaignMode,
-          is_recurring: isRecurring,
-          recurrence_pattern: recurrencePattern,
-          recurrence_day_of_month: recurrenceDayOfMonth,
-          recurrence_day_of_week: recurrenceDayOfWeek,
-          recurrence_time: recurrenceTime,
-          next_run_at: nextRunAt,
+          ...recurrence.fields,
         })
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id, mode, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at")
+        .select(`id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, campaign_prompt_id, mode, ${CAMPAIGN_RECURRENCE_COLUMNS}`)
         .single();
 
       if (error) {
@@ -1360,7 +1386,12 @@ export function registerCampaignsRoutes(app, deps) {
           ...data,
           analytics_meta: normalizeCampaignAnalyticsMeta(data.analytics_meta || analyticsMetaWithDispatch),
           webhook_token: webhookToken ? "***" : null,
+          next_run_label: data.is_recurring && data.next_run_at
+            ? formatRecurrenceSlot(data.next_run_at, await resolveTenantTimezone(authorizedClientId))
+            : null,
         },
+        recurrenceWarnings: recurrence.warnings,
+        recurrenceLoad,
       });
     } catch (error) {
       console.error("[campaigns] Erro ao criar campanha:", error);
@@ -1425,38 +1456,27 @@ export function registerCampaignsRoutes(app, deps) {
       }
       updates.analytics_meta = validation.analyticsMeta;
     }
-    if ("isRecurring" in req.body || "is_recurring" in req.body) {
-      updates.is_recurring = Boolean(req.body?.isRecurring ?? req.body?.is_recurring);
-    }
-    if ("recurrencePattern" in req.body || "recurrence_pattern" in req.body) {
-      updates.recurrence_pattern = normalizeString(req.body?.recurrencePattern || req.body?.recurrence_pattern) || null;
-    }
-    if ("recurrenceDayOfMonth" in req.body || "recurrence_day_of_month" in req.body) {
-      const v = req.body?.recurrenceDayOfMonth ?? req.body?.recurrence_day_of_month;
-      updates.recurrence_day_of_month = v != null ? Number(v) : null;
-    }
-    if ("recurrenceDayOfWeek" in req.body || "recurrence_day_of_week" in req.body) {
-      const v = req.body?.recurrenceDayOfWeek ?? req.body?.recurrence_day_of_week;
-      updates.recurrence_day_of_week = v != null ? Number(v) : null;
-    }
-    if ("recurrenceTime" in req.body || "recurrence_time" in req.body) {
-      updates.recurrence_time = normalizeString(req.body?.recurrenceTime || req.body?.recurrence_time) || "09:00";
-    }
-    if ("nextRunAt" in req.body || "next_run_at" in req.body) {
-      updates.next_run_at = normalizeString(req.body?.nextRunAt || req.body?.next_run_at) || null;
-    }
+    // Recorrencia: resolvida abaixo, com a linha atual em maos (resolveRecurrenceSave).
+    const recurrenceRequested = bodyTouchesRecurrence(req.body);
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && !recurrenceRequested) {
       sendError(res, 400, "INVALID_BODY", "No valid fields to update");
       return;
     }
 
     try {
-      const { data: current, error: currentError } = await supabase
+      let { data: current, error: currentError } = await supabase
         .from("campaigns")
-        .select("id, client_id, analytics_meta")
+        .select(`id, client_id, import_id, analytics_meta, ${CAMPAIGN_RECURRENCE_COLUMNS}`)
         .eq("id", id)
         .single();
+      if (currentError && isMissingSchemaError(currentError)) {
+        ({ data: current, error: currentError } = await supabase
+          .from("campaigns")
+          .select("id, client_id, analytics_meta")
+          .eq("id", id)
+          .single());
+      }
 
       if (currentError || !current) {
         sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
@@ -1465,6 +1485,54 @@ export function registerCampaignsRoutes(app, deps) {
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
+
+      // Revalida a recorrencia quando o dono mexe nela, ou quando muda o texto/origem de uma campanha que ja repete
+      // (trocar para planilha sem variacoes tem que ser recusado do mesmo jeito que na criacao).
+      const sourceChanged = "importId" in req.body || "importIds" in req.body;
+      let recurrenceWarnings = [];
+      let recurrenceLoad = null;
+      if (recurrenceRequested || (current.is_recurring && (sourceChanged || updates.analytics_meta))) {
+        const effectiveIsCrm = isCrmSourceUpdate
+          ? true
+          : sourceChanged
+            ? false
+            : normalizeString(current.analytics_meta?.importSource) === "__crm__";
+        const effectiveSequence = normalizeCampaignAnalyticsMeta(updates.analytics_meta || current.analytics_meta || {}).sequence;
+        const recurrence = resolveRecurrenceSave({
+          body: req.body,
+          existing: current,
+          isCrmSource: effectiveIsCrm,
+          sequence: effectiveSequence,
+          timezone: await resolveTenantTimezone(authorizedClientId),
+        });
+        if (!recurrence.ok) {
+          sendError(res, 400, recurrence.code, recurrence.message);
+          return;
+        }
+        if (recurrence.fields.is_recurring) {
+          const effectiveMeta = { ...(updates.analytics_meta || current.analytics_meta || {}) };
+          if (isCrmSourceUpdate) {
+            effectiveMeta.importSource = "__crm__";
+            delete effectiveMeta.importIds;
+          } else if (sourceChanged) {
+            delete effectiveMeta.importSource;
+            if (updatedImportIds !== null) effectiveMeta.importIds = updatedImportIds;
+          }
+          recurrenceLoad = await checkRecurrenceLoad({
+            req,
+            res,
+            clientId: authorizedClientId,
+            campaign: {
+              import_id: "import_id" in updates ? updates.import_id : current.import_id ?? null,
+              analytics_meta: effectiveMeta,
+            },
+            fields: recurrence.fields,
+          });
+          if (!recurrenceLoad) return;
+        }
+        Object.assign(updates, recurrence.fields);
+        recurrenceWarnings = recurrence.warnings;
+      }
       
       if (isCrmSourceUpdate || updatedImportIds !== null || ("importId" in req.body && updates.import_id !== null)) {
          const currentMeta = updates.analytics_meta || current.analytics_meta || {};
@@ -1486,7 +1554,7 @@ export function registerCampaignsRoutes(app, deps) {
         .update(updates)
         .eq("id", id)
         .eq("client_id", authorizedClientId)
-        .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, last_triggered_at, archived_at, created_at, analytics_meta, is_recurring, recurrence_pattern, recurrence_day_of_month, recurrence_day_of_week, recurrence_time, next_run_at")
+        .select(`id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, last_triggered_at, archived_at, created_at, analytics_meta, ${CAMPAIGN_RECURRENCE_COLUMNS}`)
         .single();
 
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {
@@ -1513,7 +1581,12 @@ export function registerCampaignsRoutes(app, deps) {
           ...data,
           analytics_meta: normalizeCampaignAnalyticsMeta(data.analytics_meta || updates.analytics_meta || {}),
           webhook_token: null,
+          next_run_label: data.is_recurring && data.next_run_at
+            ? formatRecurrenceSlot(data.next_run_at, await resolveTenantTimezone(authorizedClientId))
+            : null,
         },
+        recurrenceWarnings,
+        recurrenceLoad,
       });
     } catch (error) {
       console.error("campaign update error:", error);
@@ -1754,8 +1827,294 @@ export function registerCampaignsRoutes(app, deps) {
     next();
   }
 
+  // Ocorrencias de campanha recorrente viram lotes novos ANTES da busca de lotes vencidos: assim a ocorrencia criada
+  // neste tick ja e disparada neste mesmo tick, pelo mesmo caminho (janela, cota, claim) de qualquer lote.
+  // Fuso do tenant: o mesmo da janela de envio. Toda data de recorrencia (calculo e texto na tela) usa este.
+  async function resolveTenantTimezone(clientId) {
+    return resolveSendWindowConfig((await getLeadClientN8nSettings(clientId)) || {}).timezone || "America/Sao_Paulo";
+  }
+
+  async function materializeRecurringOccurrences() {
+    if (!pgDatabasePool) return null;
+    return materializeDueRecurringOccurrences({
+      pool: pgDatabasePool,
+      resolveTimezone: resolveTenantTimezone,
+      buildSteps: (campaign) => {
+        const meta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+        const validation = validateCampaignAnalyticsMeta(meta);
+        if (!validation.valid) return { error: validation.message || "template invalido" };
+        return { steps: validation.analyticsMeta.sequence };
+      },
+      countAudience: countCampaignAudience,
+    });
+  }
+
+  // Publico de HOJE com o mesmo criterio do envio (origem + segmentacao): o que a ocorrencia grava, o que a previa
+  // mostra antes de salvar e o que o historico mostra sao o mesmo numero. Recorrente nao tem limite por envio.
+  async function countCampaignAudience(campaign) {
+    const meta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+    const validation = validateCampaignAnalyticsMeta(meta);
+    const all = await buildDispatchLeads({
+      clientId: campaign.client_id,
+      importId: resolveCampaignImportSelection(campaign),
+      limit: null,
+      offset: null,
+      segmentation: validation.analyticsMeta?.segmentation || null,
+      excludeDispatchId: null,
+    });
+    const total = all.length;
+    return { total, toSend: total, limitPerRun: null };
+  }
+
+  // Quanto cada ocorrencia leva com a cota REAL do chip que envia (o mesmo chip e o mesmo limite que o disparo usa:
+  // resolveSendingInstance + resolveEvolutionInstanceDailyLimit) e quantas mensagens cada lead consome (a mesma conta
+  // da reserva de cota). Comparado com o intervalo da repeticao: se passa, toda ocorrencia seguinte sera pulada.
+  async function estimateRecurrenceLoad({ clientId, campaign, pattern, dayOfMonth, dayOfWeek, time, audience = null }) {
+    const settings = (await getLeadClientN8nSettings(clientId)) || {};
+    const sendWindow = resolveSendWindowConfig(settings);
+    const timezone = sendWindow.timezone || "America/Sao_Paulo";
+    const audienceNow = audience || (await countCampaignAudience({ ...campaign, client_id: clientId }));
+
+    const meta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+    const plan = getCampaignStepPlan(meta);
+    const passos = plan.shouldUseReplyFlow && plan.immediateSteps.length > 0 ? plan.immediateSteps : plan.enabledSteps;
+    const messagesPerLead = Math.max(countBurstSteps(passos), 1);
+    const extraSecondsPerLead = passos
+      .slice(0, -1)
+      .reduce((sum, step) => sum + Math.max(0, Number(step?.delayAfterSeconds) || 0), 0);
+
+    let instance = null;
+    try {
+      instance = await resolveSendingInstance({ clientId, campaign: { ...campaign, client_id: clientId }, dispatch: {} });
+    } catch (err) {
+      console.warn("[campaign-recurrence] chip de envio nao resolvido para a estimativa:", err?.message || err);
+    }
+    const dailyQuota = instance ? resolveEvolutionInstanceDailyLimit(instance) : null;
+
+    const estimate = estimateOccurrenceDuration({
+      audienceTotal: audienceNow.total,
+      messagesPerLead,
+      dailyQuota,
+      sendWindow,
+      extraSecondsPerLead,
+    });
+    const intervalDays = recurrenceIntervalDays({ pattern, dayOfMonth, dayOfWeek, time, timezone });
+    const text = describeOccurrenceLoad({
+      estimate,
+      intervalDays,
+      chipName: instance?.name || null,
+      dailyQuota,
+      messagesPerLead,
+      audienceTotal: audienceNow.total,
+    });
+    return {
+      overrun: text.overrun,
+      message: text.message,
+      days: estimate ? (estimate.days === Infinity ? null : estimate.days) : null,
+      intervalDays,
+      dailyQuota,
+      chipName: instance?.name || null,
+      messagesPerLead,
+      leadsPerDay: estimate?.leadsPerDay ?? null,
+      limitedBy: estimate?.limitedBy ?? null,
+    };
+  }
+
+  // Salvar recorrente cuja ocorrencia passa do intervalo: nao em silencio. Recusa ate o dono confirmar, com os numeros.
+  async function checkRecurrenceLoad({ req, res, clientId, campaign, fields }) {
+    const load = await estimateRecurrenceLoad({
+      clientId,
+      campaign,
+      pattern: fields.recurrence_pattern,
+      dayOfMonth: fields.recurrence_day_of_month,
+      dayOfWeek: fields.recurrence_day_of_week,
+      time: fields.recurrence_time,
+    });
+    const confirmed = (req.body?.recurrenceOverrunConfirmed ?? req.body?.recurrence_overrun_confirmed) === true;
+    if (load.overrun && !confirmed) {
+      sendError(res, 400, "RECURRENCE_OVERRUN", load.message);
+      return null;
+    }
+    return load;
+  }
+
+  // POST /api/campaigns/recurrence-preview — o painel de recorrencia ANTES de salvar: proximo envio no fuso do
+  // tenant, regra do mes curto, publico de hoje (com o corte do limite) e passos sem variacao. Nada e gravado.
+  app.post("/api/campaigns/recurrence-preview", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const clientId = resolveRequiredAuthorizedClientId({
+      req,
+      res,
+      requestedClientId: normalizeString(body.clientId),
+      resolveAuthorizedClientId,
+      sendError,
+    });
+    if (!clientId) return;
+
+    try {
+      const timezone = await resolveTenantTimezone(clientId);
+      const reqImportId = normalizeString(body.importId) || null;
+      const isCrmSource = reqImportId === "__crm__";
+      const importIds = Array.isArray(body.importIds) ? body.importIds.map((v) => normalizeString(v)).filter(Boolean) : [];
+      const analyticsMeta = body.analyticsMeta && typeof body.analyticsMeta === "object" ? { ...body.analyticsMeta } : {};
+      if (isCrmSource) analyticsMeta.importSource = "__crm__";
+      else if (importIds.length > 0) analyticsMeta.importIds = importIds;
+      const sequence = normalizeCampaignAnalyticsMeta(analyticsMeta).sequence;
+
+      const pattern = normalizeString(body.recurrencePattern).toLowerCase();
+      const time = normalizeString(body.recurrenceTime) || "09:00";
+      const dayOfMonth = body.recurrenceDayOfMonth != null ? Number(body.recurrenceDayOfMonth) : null;
+      const dayOfWeek = body.recurrenceDayOfWeek != null ? Number(body.recurrenceDayOfWeek) : null;
+
+      let nextRunAt = null;
+      let description = null;
+      try {
+        nextRunAt = computeNextRecurrenceDate({ pattern, dayOfMonth, dayOfWeek, timeStr: time, timezone });
+        description = describeRecurrence({ pattern, dayOfMonth, dayOfWeek, time });
+      } catch {
+        // padrao incompleto na tela: devolve sem data, a tela mostra o que falta
+      }
+
+      // Recorrente nao tem limite por envio: o publico e inteiro (limitPerRun do corpo e ignorado de proposito).
+      // Planilha nova (ou publico do Banco) ainda nao importada: o publico sao as linhas que a tela vai importar.
+      const pendingRows = Number.parseInt(String(body.pendingRows ?? ""), 10);
+      const isPendingSpreadsheet = Number.isFinite(pendingRows) && pendingRows >= 0 && body.pendingRows != null;
+      const audience = isPendingSpreadsheet
+        ? { total: pendingRows, toSend: pendingRows, limitPerRun: null }
+        : await countCampaignAudience({
+            client_id: clientId,
+            import_id: isCrmSource ? null : importIds[0] || reqImportId,
+            analytics_meta: analyticsMeta,
+          });
+      const originKind = isCrmSource
+        ? "crm"
+        : !isPendingSpreadsheet && importIds.length === 0 && !reqImportId
+          ? "all_spreadsheets"
+          : "spreadsheet";
+
+      let load = null;
+      if (nextRunAt) {
+        try {
+          load = await estimateRecurrenceLoad({
+            clientId,
+            campaign: { import_id: isCrmSource ? null : importIds[0] || reqImportId, analytics_meta: analyticsMeta },
+            pattern, dayOfMonth, dayOfWeek, time,
+            audience,
+          });
+        } catch (err) {
+          console.warn("[campaign-recurrence] estimativa de duracao falhou:", err?.message || err);
+        }
+      }
+
+      const missingVariantSteps = findStepsWithoutVariants(sequence);
+      res.json({
+        timezone,
+        nextRunAt: nextRunAt ? nextRunAt.toISOString() : null,
+        nextRunLabel: nextRunAt ? formatRecurrenceSlot(nextRunAt, timezone) : null,
+        summary: description?.summary || null,
+        monthEndNote: description?.monthEndNote || null,
+        originKind,
+        audience,
+        missingVariantSteps,
+        variantsMessage: missingVariantSteps.length > 0 ? buildMissingVariantsMessage(missingVariantSteps, { isCrmSource }) : null,
+        variantsBlocking: missingVariantSteps.length > 0 && !isCrmSource,
+        load,
+      });
+    } catch (err) {
+      sendError(res, 500, "RECURRENCE_PREVIEW_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // GET /api/campaigns/:id/recurrence — o que o dono precisa ver de uma campanha que repete: proximo envio, fim,
+  // publico de hoje e o historico de ocorrencias — inclusive as PULADAS, com o motivo, e o numero real de cada dia.
+  app.get("/api/campaigns/:id/recurrence", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const id = normalizeString(req.params?.id);
+    if (!id) return sendError(res, 400, "INVALID_PARAM", "Missing campaign id");
+
+    try {
+      const { rows: [campaign] = [] } = await pgDatabasePool.query(
+        `SELECT id, client_id, import_id, limit_per_run, analytics_meta, ${CAMPAIGN_RECURRENCE_COLUMNS}
+           FROM public.campaigns WHERE id = $1`,
+        [id]
+      );
+      if (!campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
+      const timezone = await resolveTenantTimezone(authorizedClientId);
+      const { rows: occurrences } = await pgDatabasePool.query(
+        `SELECT o.occurrence_at, o.outcome, o.reason, o.audience_count, o.dispatch_id,
+                d.status AS dispatch_status, d.sent_count, d.failed_count, d.target_count, d.error_message
+           FROM public.campaign_recurrence_occurrences o
+           LEFT JOIN public.campaign_dispatches d ON d.id = o.dispatch_id
+          WHERE o.campaign_id = $1
+          ORDER BY o.occurrence_at DESC
+          LIMIT 100`,
+        [id]
+      );
+
+      const description = campaign.is_recurring
+        ? describeRecurrence({
+            pattern: campaign.recurrence_pattern,
+            dayOfMonth: campaign.recurrence_day_of_month,
+            dayOfWeek: campaign.recurrence_day_of_week,
+            time: campaign.recurrence_time,
+          })
+        : null;
+      const isCrmSource = normalizeString(campaign.analytics_meta?.importSource) === "__crm__";
+      const selection = resolveCampaignImportSelection(campaign);
+      const originKind = isCrmSource ? "crm" : !selection || (Array.isArray(selection) && selection.length === 0) ? "all_spreadsheets" : "spreadsheet";
+
+      res.json({
+        isRecurring: Boolean(campaign.is_recurring),
+        summary: description?.summary || null,
+        monthEndNote: description?.monthEndNote || null,
+        nextRunLabel: campaign.next_run_at ? formatRecurrenceSlot(campaign.next_run_at, timezone) : null,
+        endedLabel: campaign.recurrence_ended_at ? formatRecurrenceSlot(campaign.recurrence_ended_at, timezone) : null,
+        endSummary: describeRecurrenceEnd({
+          endType: campaign.recurrence_end_type,
+          endsAt: campaign.recurrence_ends_at,
+          maxOccurrences: campaign.recurrence_max_occurrences,
+          occurrencesCount: campaign.recurrence_occurrences_count,
+          timezone,
+        }),
+        // Recorrente sem fim declarado = anterior a este bloco: o agendador nao a dispara ate o dono salvar de novo.
+        needsResave: Boolean(campaign.is_recurring && !campaign.recurrence_end_type),
+        originKind,
+        audienceToday: campaign.is_recurring ? await countCampaignAudience(campaign) : null,
+        occurrences: occurrences.map((o) => ({
+          occurrenceAt: new Date(o.occurrence_at).toISOString(),
+          label: formatRecurrenceSlot(o.occurrence_at, timezone),
+          outcome: o.outcome,
+          reason: o.reason,
+          audienceCount: o.audience_count,
+          dispatchId: o.dispatch_id,
+          dispatchStatus: o.dispatch_status || null,
+          sentCount: o.sent_count ?? null,
+          failedCount: o.failed_count ?? null,
+          dispatchError: o.error_message || null,
+        })),
+      });
+    } catch (err) {
+      if (isMissingSchemaError(err)) {
+        return res.json({ isRecurring: false, occurrences: [], schemaPending: true });
+      }
+      sendError(res, 500, "RECURRENCE_FETCH_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   async function runDueIndependentDispatches({ limit = 10 } = {}) {
     if (!supabase) return { success: false, processed: 0, reason: "DATABASE_NOT_CONFIGURED" };
+
+    let recurrence = null;
+    try {
+      recurrence = await materializeRecurringOccurrences();
+    } catch (err) {
+      console.error("[campaign-recurrence] falha ao materializar ocorrencias:", err);
+    }
+
     const now = new Date().toISOString();
 
     try {
@@ -1769,7 +2128,7 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (fetchErr) throw fetchErr;
       if (!dispatches || dispatches.length === 0) {
-        return { success: true, processed: 0, items: [] };
+        return { success: true, processed: 0, items: [], recurrence };
       }
 
       const results = [];
@@ -1840,6 +2199,20 @@ export function registerCampaignsRoutes(app, deps) {
             }
           }
 
+          // TRAVA POR CAMPANHA: o claim abaixo protege a LINHA; isto protege a campanha. Ocorrencia recorrente nunca
+          // roda junto com outro lote da mesma campanha (mesmo publico = mensagem dobrada para o mesmo cliente).
+          // Fica 'scheduled' e tenta de novo no proximo tick. O indice unico parcial e a ultima barreira (abaixo).
+          const concorrente = pgDatabasePool ? await findConcurrentRunningDispatch(pgDatabasePool, dispatch.id) : null;
+          if (concorrente) {
+            console.log("[campaign-dispatch-scheduler] outro lote da mesma campanha em andamento, aguardando", {
+              dispatchId: dispatch.id,
+              campaignId: dispatch.campaign_id,
+              blockingDispatchId: concorrente.id,
+            });
+            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign", blockingDispatchId: concorrente.id });
+            continue;
+          }
+
           // CLAIM ATOMICO DO DISPARO
           const { data: claimed, error: claimErr } = await supabase
             .from("campaign_dispatches")
@@ -1853,6 +2226,12 @@ export function registerCampaignsRoutes(app, deps) {
             .in("status", ["scheduled", "paused"])
             .select("id");
 
+          // 23505 = uq_campaign_dispatches_one_running_occurrence: outra ocorrencia da campanha ganhou a corrida entre a
+          // checagem acima e este UPDATE. Nao e falha do lote: continua 'scheduled' e tenta no proximo tick.
+          if (claimErr && String(claimErr.code) === "23505") {
+            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign" });
+            continue;
+          }
           if (claimErr) throw claimErr;
           if (!claimed || claimed.length === 0) {
             console.log("[campaign-dispatch-scheduler] disparo ja reivindicado por outro ciclo, pulando", {
@@ -1888,7 +2267,7 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
-      return { success: true, processed: results.length, items: results };
+      return { success: true, processed: results.length, items: results, recurrence };
     } catch (err) {
       console.error("[campaign-dispatch-scheduler] global check failed:", err);
       return { success: false, error: err.message };
@@ -2157,11 +2536,17 @@ export function registerCampaignsRoutes(app, deps) {
     // Obtém lista de leads da campanha via lead_import_items.
     // excludeDispatchId remove da fila todo lead que JÁ tem registro neste disparo
     // (claimed/sent/failed) → segunda execução do mesmo disparo traz 0 leads.
+    // Ocorrencia de campanha recorrente: publico inteiro (sem limit_per_run, nem o da campanha) e outra variacao do
+    // texto para o mesmo lead a cada ocorrencia. A cota do chip e o freio.
+    const occurrence = pgDatabasePool
+      ? await readOccurrenceInfo(pgDatabasePool, dispatchId)
+      : { isOccurrence: false, variantOffset: null };
+
     const leads = await buildDispatchLeads({
       clientId,
       importId: resolveCampaignImportSelection(campaign),
-      limit: dispatch.limit_per_run ?? campaign.limit_per_run,
-      offset: dispatch.offset ?? 0,
+      limit: occurrence.isOccurrence ? null : dispatch.limit_per_run ?? campaign.limit_per_run,
+      offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
       segmentation: validation.analyticsMeta.segmentation || null,
       excludeDispatchId: dispatchId,
     });
@@ -2810,6 +3195,7 @@ export function registerCampaignsRoutes(app, deps) {
           dispatchName: dispatch.name,
         },
         client: { id: clientId, name: await getClientName(clientId) },
+        recurrence: occurrence.variantOffset != null ? { variantOffset: occurrence.variantOffset } : null,
       },
       onLeadClaim: claimLead,
       onLeadClaimRollback: rollbackClaimLead,
@@ -3767,12 +4153,15 @@ export function registerCampaignsRoutes(app, deps) {
         .single();
       if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
 
-      // 1. Calcula quantos leads pendentes restam
+      // 1. Calcula quantos leads pendentes restam (ocorrencia recorrente: publico inteiro, sem limite — igual ao envio)
+      const occurrence = pgDatabasePool
+        ? await readOccurrenceInfo(pgDatabasePool, dispatchId)
+        : { isOccurrence: false };
       const pendingLeads = await buildDispatchLeads({
         clientId: authorizedClientId,
         importId: resolveCampaignImportSelection(campaign),
-        limit: dispatch.limit_per_run ?? campaign.limit_per_run,
-        offset: dispatch.offset ?? 0,
+        limit: occurrence.isOccurrence ? null : dispatch.limit_per_run ?? campaign.limit_per_run,
+        offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
         excludeDispatchId: dispatchId,
       });
 

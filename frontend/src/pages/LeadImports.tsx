@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "../hooks/useLocalStorage";
+import type { RecurrenceEndType, RecurrencePattern } from "@/lib/campaignRecurrence";
 import {
   Building2,
   ChevronLeft,
@@ -217,6 +218,29 @@ export function normalizeSheetTab(rawTab: string | null | undefined): SheetTab {
   if (["agendamentos", "fila", "fila-de-envios"].includes(t)) return "agendamentos";
   if (["planilhas", "salvas", "planilhas-salvas"].includes(t)) return "campanha";
   return "campanha";
+}
+
+
+// Mesmo shape do catálogo da empresa e do matcher do backend: só regras completas viram filtro de disparo.
+function buildSegmentationFromRules(rules: FilterRule[]) {
+  return {
+    filters: rules
+      .filter((rule) => rule.column && String(rule.value ?? "").trim() !== "")
+      .map((rule) => ({
+        field: rule.column,
+        operator: rule.operator,
+        value: rule.value,
+        includeMissing: !!rule.includeMissing,
+      })),
+  };
+}
+
+// "2027-06-30T02:59:59Z" → "2027-06-29"/"2027-06-30" conforme o fuso do navegador (o campo <input type="date">).
+function isoToLocalDateInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export default function LeadImports({
@@ -582,10 +606,16 @@ export default function LeadImports({
   const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
   const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
   const [isRecurring, setIsRecurring] = useLocalStorage(`vexo_isRecurring_${activeClientId}`, false);
-  const [recurrencePattern, setRecurrencePattern] = useLocalStorage<"monthly" | "weekly" | "biweekly">(`vexo_recurrencePattern_${activeClientId}`, "monthly");
+  const [recurrencePattern, setRecurrencePattern] = useLocalStorage<RecurrencePattern>(`vexo_recurrencePattern_${activeClientId}`, "monthly");
   const [recurrenceDayOfMonth, setRecurrenceDayOfMonth] = useLocalStorage<number>(`vexo_recurrenceDayOfMonth_${activeClientId}`, 15);
   const [recurrenceDayOfWeek, setRecurrenceDayOfWeek] = useLocalStorage<number>(`vexo_recurrenceDayOfWeek_${activeClientId}`, 2);
   const [recurrenceTime, setRecurrenceTime] = useLocalStorage<string>(`vexo_recurrenceTime_${activeClientId}`, "09:00");
+  // Fim declarado: sem padrão de propósito — o dono escolhe (e "sem fim" exige a confirmação dele).
+  const [recurrenceEndType, setRecurrenceEndType] = useState<RecurrenceEndType | null>(null);
+  const [recurrenceEndsOn, setRecurrenceEndsOn] = useState("");
+  const [recurrenceMaxOccurrences, setRecurrenceMaxOccurrences] = useState(12);
+  const [recurrenceNoEndConfirmed, setRecurrenceNoEndConfirmed] = useState(false);
+  const [recurrenceOverrunConfirmed, setRecurrenceOverrunConfirmed] = useState(false);
   const [batchingEnabled, setBatchingEnabled] = useLocalStorage(`vexo_batching_${activeClientId}`, false);
   const [batchSize, setBatchSize] = useLocalStorage(`vexo_batchSize_${activeClientId}`, "100");
   const [batchIntervalHours, setBatchIntervalHours] = useLocalStorage(`vexo_batchInterval_${activeClientId}`, "1");
@@ -1146,6 +1176,11 @@ export default function LeadImports({
     setRecurrenceDayOfMonth(15);
     setRecurrenceDayOfWeek(2);
     setRecurrenceTime("09:00");
+    setRecurrenceEndType(null);
+    setRecurrenceEndsOn("");
+    setRecurrenceMaxOccurrences(12);
+    setRecurrenceNoEndConfirmed(false);
+    setRecurrenceOverrunConfirmed(false);
     setBatchingEnabled(false);
     setBatchSize("100");
     setBatchIntervalHours("1");
@@ -1245,6 +1280,51 @@ export default function LeadImports({
     await executeCreateAndDispatch();
   }
 
+  // Prévia da recorrência com o MESMO critério do salvamento: origem, filtros, texto e limite por envio.
+  const recurrencePreviewInput = useMemo(() => {
+    if (!isRecurring || !activeClientId) return null;
+    const pendingSpreadsheet = Boolean(selectedFile || bancoAudience);
+    return {
+      clientId: activeClientId,
+      importId: pendingSpreadsheet || selectedImportId === ALL_IMPORTS_VALUE ? null : selectedImportId,
+      importIds: pendingSpreadsheet ? [] : selectedImportIds,
+      pendingRows: pendingSpreadsheet ? filteredRows.length : null,
+      // recorrente não tem limite por envio: o público é inteiro
+      limitPerRun: null,
+      analyticsMeta: { segmentation: buildSegmentationFromRules(filterRules), sequence: campaignSequence },
+    };
+  }, [
+    isRecurring, activeClientId, selectedFile, bancoAudience,
+    selectedImportId, selectedImportIds, filteredRows.length, filterRules, campaignSequence,
+  ]);
+
+  function resetFormAfterSave() {
+    setSelectedFile(null);
+    setParsedRows([]);
+    setFilterRules([]);
+    setBatchingEnabled(false);
+    setBatchSize("100");
+    setBatchIntervalHours("1");
+    setCampaignName("");
+    setEditingCampaignId(null);
+    setCampaignSequence([createCampaignStep("text", 1)]);
+    setNewConsultantName("");
+    setNewConsultantLink("");
+    setMultiAgendaEnabled(false);
+    setNewScheduledAt("");
+    setNewTriggerType("manual");
+    setIsRecurring(false);
+    setRecurrencePattern("monthly");
+    setRecurrenceDayOfMonth(15);
+    setRecurrenceDayOfWeek(2);
+    setRecurrenceTime("09:00");
+    setRecurrenceEndType(null);
+    setRecurrenceEndsOn("");
+    setRecurrenceMaxOccurrences(12);
+    setRecurrenceNoEndConfirmed(false);
+    setRecurrenceOverrunConfirmed(false);
+  }
+
   async function executeCreateAndDispatch() {
     if (filteredRows.length === 0) {
       toast({
@@ -1341,19 +1421,19 @@ export default function LeadImports({
         recurrenceDayOfMonth: isRecurring && recurrencePattern === "monthly" ? recurrenceDayOfMonth : null,
         recurrenceDayOfWeek: isRecurring && (recurrencePattern === "weekly" || recurrencePattern === "biweekly") ? recurrenceDayOfWeek : null,
         recurrenceTime: isRecurring ? recurrenceTime : null,
+        ...(isRecurring
+          ? {
+              recurrenceEndType,
+              recurrenceEndsOn: recurrenceEndType === "until_date" ? recurrenceEndsOn || null : null,
+              recurrenceMaxOccurrences: recurrenceEndType === "count" ? recurrenceMaxOccurrences : null,
+              recurrenceNoEndConfirmed: recurrenceEndType === "never" ? recurrenceNoEndConfirmed : false,
+              recurrenceOverrunConfirmed,
+            }
+          : {}),
         analyticsMeta: {
           // Segmentação unificada: as regras dinâmicas (coluna/operador/valor) viram o
           // filtro de disparo. Mesmo shape do catálogo da empresa e do matcher do backend.
-          segmentation: {
-            filters: filterRules
-              .filter((rule) => rule.column && String(rule.value ?? "").trim() !== "")
-              .map((rule) => ({
-                field: rule.column,
-                operator: rule.operator,
-                value: rule.value,
-                includeMissing: !!rule.includeMissing,
-              })),
-          },
+          segmentation: buildSegmentationFromRules(filterRules),
           message: campaignSequence.find(s => s.type === "text")?.text || "",
           image: campaignSequence.find(s => s.type === "image")?.image,
           sequence: campaignSequence,
@@ -1385,6 +1465,30 @@ export default function LeadImports({
         },
       });
       const campaignId = savedCampaign.id;
+
+      // Campanha que repete: os lotes nascem das ocorrências, no agendador. Nada de envio avulso aqui — ele somaria
+      // um disparo extra ao primeiro envio da repetição.
+      if (isRecurring) {
+        toast({
+          title: "Campanha recorrente salva",
+          description: savedCampaign.next_run_label
+            ? `Próximo envio: ${savedCampaign.next_run_label}.`
+            : "A repetição foi salva.",
+        });
+        if (savedCampaign.recurrenceLoad?.message) {
+          toast({
+            title: savedCampaign.recurrenceLoad.overrun ? "Atenção: envios vão ser pulados" : "Duração de cada envio",
+            description: savedCampaign.recurrenceLoad.message,
+          });
+        }
+        for (const aviso of savedCampaign.recurrenceWarnings || []) {
+          toast({ title: "Atenção: sem variações do texto", description: aviso });
+        }
+        resetFormAfterSave();
+        await Promise.allSettled([refetchCampaigns(), refetchDispatches(), refetchImports(), refetchPending()]);
+        setActiveTab("agendamentos");
+        return;
+      }
 
       setSubmittingStatus("Registrando lote na fila de envios...");
 
@@ -1493,26 +1597,7 @@ export default function LeadImports({
       }
 
       // Reset form and view queue
-      setSelectedFile(null);
-      setParsedRows([]);
-      setFilterRules([]);
-      setBatchingEnabled(false);
-      setBatchSize("100");
-      setBatchIntervalHours("1");
-      setCampaignName("");
-      setEditingCampaignId(null);
-      setCampaignSequence([createCampaignStep("text", 1)]);
-      setNewConsultantName("");
-      setNewConsultantLink("");
-      setMultiAgendaEnabled(false);
-      setNewScheduledAt("");
-      setNewTriggerType("manual");
-      setIsRecurring(false);
-      setRecurrencePattern("monthly");
-      setRecurrenceDayOfMonth(15);
-      setRecurrenceDayOfWeek(2);
-      setRecurrenceTime("09:00");
-
+      resetFormAfterSave();
       await Promise.allSettled([refetchCampaigns(), refetchDispatches(), refetchImports(), refetchPending()]);
       setActiveTab("agendamentos");
     } catch (err) {
@@ -1711,6 +1796,10 @@ export default function LeadImports({
     setRecurrenceDayOfMonth(c.recurrence_day_of_month || 15);
     setRecurrenceDayOfWeek(c.recurrence_day_of_week ?? 2);
     setRecurrenceTime(c.recurrence_time || "09:00");
+    setRecurrenceEndType(c.recurrence_end_type ?? null);
+    setRecurrenceEndsOn(c.recurrence_ends_at ? isoToLocalDateInput(c.recurrence_ends_at) : "");
+    setRecurrenceMaxOccurrences(c.recurrence_max_occurrences || 12);
+    setRecurrenceNoEndConfirmed(Boolean(c.recurrence_no_end_confirmed_at));
 
     setActiveTab("campanha");
     toast({ title: "Carregado para edição", description: `Edite a campanha "${c.name}" no formulário de Novo Disparo.` });
@@ -1779,6 +1868,11 @@ export default function LeadImports({
     setRecurrenceDayOfMonth(15);
     setRecurrenceDayOfWeek(2);
     setRecurrenceTime("09:00");
+    setRecurrenceEndType(null);
+    setRecurrenceEndsOn("");
+    setRecurrenceMaxOccurrences(12);
+    setRecurrenceNoEndConfirmed(false);
+    setRecurrenceOverrunConfirmed(false);
     setActiveTab("campanha");
 
     toast({
@@ -2011,6 +2105,17 @@ export default function LeadImports({
               setRecurrenceDayOfWeek={setRecurrenceDayOfWeek}
               recurrenceTime={recurrenceTime}
               setRecurrenceTime={setRecurrenceTime}
+              recurrenceEndType={recurrenceEndType}
+              setRecurrenceEndType={setRecurrenceEndType}
+              recurrenceEndsOn={recurrenceEndsOn}
+              setRecurrenceEndsOn={setRecurrenceEndsOn}
+              recurrenceMaxOccurrences={recurrenceMaxOccurrences}
+              setRecurrenceMaxOccurrences={setRecurrenceMaxOccurrences}
+              recurrenceNoEndConfirmed={recurrenceNoEndConfirmed}
+              setRecurrenceNoEndConfirmed={setRecurrenceNoEndConfirmed}
+              recurrenceOverrunConfirmed={recurrenceOverrunConfirmed}
+              setRecurrenceOverrunConfirmed={setRecurrenceOverrunConfirmed}
+              recurrencePreviewInput={recurrencePreviewInput}
               onSubmit={handleCreateAndDispatch}
               isSubmitting={isSubmitting}
               editingCampaignId={editingCampaignId}
