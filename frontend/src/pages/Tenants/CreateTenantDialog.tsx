@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Database, KeyRound, Link2, Plus, SlidersHorizontal, Wand2 } from "lucide-react";
+import { Database, KeyRound, Link2, Plus, Wand2 } from "lucide-react";
 import { ZodError } from "zod";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { LeadClient, useCreateLeadClient } from "@/hooks/useLeadClients";
 import { createTenantSchema } from "@/lib/validationSchemas";
-import { CHATBOT_MODEL_OPTIONS, CREATION_STEPS, type ChatbotModelValue } from "@/lib/tenants/constants";
+import { CREATION_STEPS } from "@/lib/tenants/constants";
 import { buildTenantKey } from "@/lib/tenants/helpers";
 import { AVAILABLE_CUSTOM_MODULES } from "@/lib/planTier";
 
@@ -37,19 +37,13 @@ export function CreateTenantDialog({ onTenantCreated }: CreateTenantDialogProps)
   const [inboundBearerToken, setInboundBearerToken] = useState("");
   const [formError, setFormError] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [chatbotModel, setChatbotModel] = useState<ChatbotModelValue>("energia-solar");
   const [planTier, setPlanTier] = useState<"essencial" | "avancado" | "modular">("essencial");
   const [modulosAvulsos, setModulosAvulsos] = useState<string[]>([]);
   const [tenantIdEdited, setTenantIdEdited] = useState(false);
   const canManageTenants = hasPermission("tenants.manage");
   const canManageN8n = isAdminUser;
   const tablePreviewName = tenantId ? `leads_${tenantId.replace(/-/g, "_")}` : "leads_tenant_id";
-  const selectedModel = CHATBOT_MODEL_OPTIONS.find((option) => option.value === chatbotModel) || CHATBOT_MODEL_OPTIONS[0];
   const canSubmitTenant = canManageTenants && Boolean(name.trim()) && Boolean(tenantId.trim()) && !createTenant.isPending;
-
-  const handleModelChange = (value: ChatbotModelValue) => {
-    setChatbotModel(value);
-  };
 
   useEffect(() => {
     if (!tenantIdEdited) {
@@ -93,7 +87,9 @@ export function CreateTenantDialog({ onTenantCreated }: CreateTenantDialogProps)
       const createdTenant = await createTenant.mutateAsync({
         id: payload.id!,
         name: payload.name!,
-        chatbotModel,
+        // Persona do agente: toda empresa nasce em "generico" (template que existe em chatbot_templates). A persona
+        // é escolhida depois, na tela do agente, que só oferece template real. Explícito de propósito.
+        chatbotModel: "generico",
         segmentationConfig: {
           version: 1,
           kpis: [],
@@ -126,7 +122,6 @@ export function CreateTenantDialog({ onTenantCreated }: CreateTenantDialogProps)
       setDispatchWebhookUrl("");
       setDispatchWebhookToken("");
       setInboundBearerToken("");
-      setChatbotModel("energia-solar");
       setTenantIdEdited(false);
       setCreateDialogOpen(false);
     } catch (submissionError) {
@@ -200,8 +195,8 @@ export function CreateTenantDialog({ onTenantCreated }: CreateTenantDialogProps)
                 <p className="truncate font-mono text-foreground">/clientes/{tenantId || "tenant-id"}/dashboard</p>
               </div>
               <div className="sm:col-span-2">
-                <p className="text-muted-foreground">Modelo inicial</p>
-                <p className="truncate text-foreground">{selectedModel.title}</p>
+                <p className="text-muted-foreground">Persona do agente</p>
+                <p className="truncate text-foreground">Genérico — escolha depois na tela do agente</p>
               </div>
             </div>
           </div>
@@ -304,43 +299,6 @@ export function CreateTenantDialog({ onTenantCreated }: CreateTenantDialogProps)
                 /clientes/{tenantId || "tenant-id"}/dashboard
               </span>
             </p>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-start gap-3 rounded-lg border border-border/70 bg-slate-50/50 p-3 dark:border-white/5 dark:bg-white/[0.02]">
-              <SlidersHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <div className="min-w-0 flex-1 space-y-3">
-                <div>
-                  <label className="text-xs font-semibold text-foreground">
-                    Segmentacao da empresa
-                  </label>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    Escolha o perfil do negocio. Ele define os campos de leads e os filtros que farao sentido para este tenant.
-                  </p>
-                </div>
-                <Select
-                  value={chatbotModel}
-                  onValueChange={(v) => handleModelChange(v as ChatbotModelValue)}
-                  disabled={!canManageTenants || createTenant.isPending}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CHATBOT_MODEL_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <div className="rounded-lg border border-border/70 bg-slate-100/50 p-2.5 text-[11px] leading-relaxed text-muted-foreground dark:border-white/5 dark:bg-black/25">
-                  <span className="font-semibold text-foreground">{selectedModel.title}:</span>{" "}
-                  {selectedModel.description}
-                </div>
-
-              </div>
-            </div>
           </div>
 
           <ErrorMessage message={formError} variant="banner" />
