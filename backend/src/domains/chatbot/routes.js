@@ -3216,7 +3216,7 @@ export function registerChatbotRoutes(app, deps) {
                 console.warn("[chatbot-webhook] Erro ao enviar áudio via Evolution, ativando Fallback de Ouro em texto:", sendVoiceErr.message);
               }
             } else {
-              console.warn("[chatbot-webhook] Síntese de voz retornou nulo (OpenAI indisponível/sem chave), ativando Fallback de Ouro em texto");
+              console.warn("[chatbot-webhook] Síntese de voz retornou nulo (provedor de TTS indisponível), ativando Fallback de Ouro em texto");
             }
           }
 
