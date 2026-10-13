@@ -53,16 +53,22 @@ export function isHighQuotaModel(modelName) {
 }
 
 /**
- * Quando a falha for 429 (cota estourada) em modelo de teto baixo (8.000 TPM),
- * descarta os outros modelos de 8.000 TPM restantes e pula direto para os de alta cota (>= 70.000 TPM).
- * Se o modelo já for de alta cota, tenta apenas outros de alta cota ainda não tentados.
+ * Depois de um 429 (cota estourada), o que ainda vale tentar.
+ *
+ * Escalar para modelo de alta cota (>= 50.000 TPM) é PREFERÊNCIA, não condição: se houver algum na escada, vai
+ * direto para ele (os de 8.000 TPM tendem a estourar juntos). Se não houver nenhum, segue a escada normal com os
+ * modelos restantes — cada um tem pool próprio e pode responder.
+ *
+ * Nunca devolve lista vazia enquanto houver modelo não tentado. Já devolveu: em 12/10/2026 a Groq descontinuou
+ * groq/compound e groq/compound-mini, a escada ficou só com modelos de 8.000 TPM, e o filtro antigo ("só alta
+ * cota") passou a devolver [] — o primeiro 429 truncava a escada e o robô silenciava a resposta ao lead. Não
+ * "conserte" isto de volta para condição: uma ida de rede desperdiçada é muito melhor que silêncio.
  */
 export function filterLadderOnQuotaExceeded(exhaustedModel, remainingLadder) {
   const exhausted = String(exhaustedModel || "").trim().toLowerCase();
-  if (!isHighQuotaModel(exhausted)) {
-    return remainingLadder.filter((m) => isHighQuotaModel(m) && m !== exhausted);
-  }
-  return remainingLadder.filter((m) => m !== exhausted);
+  const rest = remainingLadder.filter((m) => String(m || "").trim().toLowerCase() !== exhausted);
+  const high = rest.filter((m) => isHighQuotaModel(m));
+  return high.length > 0 ? high : rest;
 }
 
 /** Modelos que a conta NAO tem mais. Usados so para avisar, nunca para chamar. */

@@ -246,21 +246,27 @@ export async function callLlmChatCompletion({
 
     if (diagnostico.tipo === "COTA_ESTOURADA") {
       ultimaCota = { modelo: m, ...diagnostico };
+
+      // Escalar para alta cota e preferencia, nao condicao (ver filterLadderOnQuotaExceeded): sem modelo de alta
+      // cota na escada, segue com os restantes em vez de silenciar. Modelo de alta cota que estourou segue a escada
+      // como esta (sem filtro), como antes.
+      const restantes = modelsToTry.slice(cursor);
+      const proximos = isHighQuotaModel(m) ? restantes : filterLadderOnQuotaExceeded(m, restantes);
+      const escalou = !isHighQuotaModel(m) && proximos.some((x) => isHighQuotaModel(x));
       console.warn(
         `[chatbot-ai-engine] COTA ESTOURADA no modelo "${m}" (HTTP ${res.status})` +
           `${diagnostico.limiteTpm ? ` — teto ${diagnostico.limiteTpm} TPM, usados ${diagnostico.usadoTpm ?? "?"}` : ""}` +
           `${diagnostico.esperarSegundos ? `, libera em ~${diagnostico.esperarSegundos}s` : ""}.` +
-          (!isHighQuotaModel(m)
-            ? " Pulando modelos do mesmo pool (8.000 TPM) e escalando direto para modelo de alta cota."
-            : " Tentando próximo modelo de alta cota.")
+          (proximos.length === 0
+            ? " Nenhum modelo restante na escada."
+            : escalou
+              ? ` Pulando modelos do mesmo pool (8.000 TPM) e escalando direto para modelo de alta cota: ${proximos.join(", ")}.`
+              : !isHighQuotaModel(m)
+                ? ` Não há modelo de alta cota na escada; seguindo com os modelos restantes: ${proximos.join(", ")}.`
+                : ` Seguindo com os modelos restantes: ${proximos.join(", ")}.`)
       );
 
-      // Quando a cota de 8.000 TPM estoura, descarta os demais modelos de 8.000 TPM
-      // e pula direto para modelos de alta cota (>= 70.000 TPM)
-      if (!isHighQuotaModel(m)) {
-        const remaining = filterLadderOnQuotaExceeded(m, modelsToTry.slice(cursor));
-        modelsToTry = [...modelsToTry.slice(0, cursor), ...remaining];
-      }
+      modelsToTry = [...modelsToTry.slice(0, cursor), ...proximos];
       continue;
     }
 

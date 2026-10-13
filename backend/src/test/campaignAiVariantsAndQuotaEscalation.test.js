@@ -209,3 +209,78 @@ describe("Defeito 2 — Escada de Modelos e Escalada no HTTP 429", () => {
     }
   });
 });
+
+// Incidente de 12/10/2026: a Groq descontinuou groq/compound e groq/compound-mini e a conta ficou só com modelos de
+// 8.000 TPM. O filtro "só alta cota" passou a devolver [] — o primeiro 429 truncava a escada e o robô silenciava a
+// resposta ao lead. Escalar para alta cota é preferência, não condição.
+describe("429 sem modelo de alta cota na escada: nunca silenciar", () => {
+  const ESCADA_DE_HOJE = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
+
+  it("(a) escada de produção hoje: estourando gpt-oss-120b, segue com os outros dois — nunca vazio", () => {
+    const resto = filterLadderOnQuotaExceeded("openai/gpt-oss-120b", ESCADA_DE_HOJE.slice(1));
+    expect(resto).toEqual(["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]);
+    expect(resto.length).toBeGreaterThan(0);
+  });
+
+  it("(b) modelo de alta cota estourado sem outro de alta cota na escada: devolve os restantes de cota baixa", () => {
+    const resto = filterLadderOnQuotaExceeded("groq/compound", ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+    expect(resto).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+  });
+
+  it("(c) o modelo estourado nunca volta na lista, em nenhum caminho", () => {
+    const casos = [
+      ["openai/gpt-oss-120b", ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]],
+      ["openai/gpt-oss-120b", ["openai/gpt-oss-120b", "groq/compound", "openai/gpt-oss-20b"]],
+      ["groq/compound", ["groq/compound", "groq/compound-mini", "openai/gpt-oss-20b"]],
+      ["groq/compound", ["groq/compound", "openai/gpt-oss-20b"]],
+      ["Openai/GPT-OSS-120b", ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]],
+    ];
+    for (const [estourado, escada] of casos) {
+      const resto = filterLadderOnQuotaExceeded(estourado, escada);
+      expect(resto.map((m) => m.toLowerCase())).not.toContain(estourado.toLowerCase());
+    }
+  });
+
+  it("(d) [INCIDENTE REAL] callLlmChatCompletion: escada sem alta cota, 1º modelo dá 429, o 2º É chamado e a resposta chega", async () => {
+    const prevKey = process.env.GROQ_API_KEY;
+    const prevLadder = process.env.GROQ_MODEL_LADDER;
+    process.env.GROQ_API_KEY = "gsk_fake_key_for_test";
+    process.env.GROQ_MODEL_LADDER = ESCADA_DE_HOJE.join(",");
+
+    const modelosChamados = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (url, options) => {
+      const body = JSON.parse(options.body);
+      modelosChamados.push(body.model);
+      if (body.model === "openai/gpt-oss-120b") {
+        return {
+          ok: false,
+          status: 429,
+          text: async () =>
+            JSON.stringify({
+              error: { message: "Rate limit reached on tokens per minute (TPM): Limit 8000, Used 7070", code: "rate_limit_exceeded" },
+            }),
+        };
+      }
+      if (body.model === "openai/gpt-oss-20b") {
+        return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "Olá! Posso ajudar." } }] }) };
+      }
+      return { ok: false, status: 500, text: async () => "não deveria chegar aqui" };
+    });
+
+    try {
+      const res = await chatbotEngine.callLlmChatCompletion({
+        model: "openai/gpt-oss-120b",
+        messages: [{ role: "user", content: "oi" }],
+      });
+
+      expect(res).toBe("Olá! Posso ajudar.");
+      expect(modelosChamados).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.env.GROQ_API_KEY = prevKey;
+      if (prevLadder === undefined) delete process.env.GROQ_MODEL_LADDER;
+      else process.env.GROQ_MODEL_LADDER = prevLadder;
+    }
+  });
+});
