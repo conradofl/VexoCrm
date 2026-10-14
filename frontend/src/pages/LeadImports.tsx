@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi } from "@/lib/api";
-import { fetchLeadIds, type LeadRequest } from "@/lib/leads/leadListApi";
+import { fetchCampaignAudience, fetchLeadIds, type LeadRequest } from "@/lib/leads/leadListApi";
 import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -808,11 +808,6 @@ export default function LeadImports({
       if (raw) {
         const data = JSON.parse(raw);
         if (data.criteria) {
-          const desc = data.description || `Público vindo do Banco de Dados (${data.totalCount || 0} leads)`;
-          setBancoAudience({
-            description: desc,
-            count: data.totalCount ?? 0,
-          });
           if (data.campaignName) {
             setCampaignName(data.campaignName);
           }
@@ -821,17 +816,71 @@ export default function LeadImports({
           setSelectedFile(null);
           setActiveTab("campanha");
 
-          fetchLeadIds(leadRequest, { clientId: activeClientId, filters: data.criteria, contacts: true })
+          const stages = Array.isArray(data.criteria.stages)
+            ? data.criteria.stages
+            : (data.criteria.stage && data.criteria.stage !== "all" ? [data.criteria.stage] : []);
+          const tags = Array.isArray(data.criteria.tags)
+            ? data.criteria.tags
+            : (data.criteria.tag ? [data.criteria.tag] : []);
+          const rules = Array.isArray(data.criteria.rules) ? data.criteria.rules : [];
+
+          fetchCampaignAudience(leadRequest, {
+            clientId: activeClientId,
+            stages,
+            tags,
+            rules,
+            importId: data.criteria.importId ?? null,
+            importScope: data.criteria.importScope ?? "all",
+          })
             .then((res) => {
+              if (res.importNotFound) {
+                toast({
+                  variant: "destructive",
+                  title: "Planilha não encontrada",
+                  description: "A planilha associada a este critério não existe mais ou foi removida.",
+                });
+              }
+              if (res.scopeUnavailable) {
+                toast({
+                  variant: "destructive",
+                  title: "Recorte indisponível",
+                  description: res.reason || "O recorte solicitado não está disponível para esta planilha.",
+                });
+              }
+              if (res.truncated) {
+                toast({
+                  title: "Público limitado ao teto",
+                  description: `O público foi cortado no teto máximo de ${res.total.toLocaleString("pt-BR")} leads.`,
+                });
+              }
+
               const excluded = new Set(Array.isArray(data.excludedLeadIds) ? data.excludedLeadIds : []);
-              const contacts = (res.contacts || [])
+              const contacts = (res.items || [])
                 .filter((c) => !excluded.has(c.id))
                 .map((c) => ({
-                id: c.id,
-                telefone: c.phone || c.telefone || "",
-                nome: c.nome || "",
-              }));
+                  id: c.id,
+                  telefone: c.phone || c.telefone || "",
+                  nome: c.nome || "",
+                }));
               setParsedRows(contacts);
+
+              const actualCount = contacts.length;
+              const recordedCount = typeof data.totalCount === "number" ? data.totalCount : null;
+
+              let desc = data.description || `Público vindo do Banco de Dados (${actualCount} leads)`;
+              if (recordedCount !== null && recordedCount !== actualCount) {
+                desc = `${desc} — carregados ${actualCount} leads (o público mudou desde a montagem)`;
+                toast({
+                  title: "Público atualizado",
+                  description: `O público foi atualizado: carregados ${actualCount} leads (haviam sido estimados ${recordedCount}).`,
+                });
+              }
+
+              setBancoAudience({
+                description: desc,
+                count: actualCount,
+              });
+
               toast({
                 title: "Público-Alvo Carregado! 🎯",
                 description: desc,

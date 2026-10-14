@@ -1435,7 +1435,7 @@ export function registerLeadsRoutes(app, deps) {
   });
 
   // Público do assistente de campanha (estágios, tag, regras). Regra com campo fora da lista simples é RECUSADA, dizendo qual.
-  app.post("/api/leads/audience", requireFirebaseAuth, requireBancoDeDados, async (req, res) => {
+  app.post("/api/leads/audience", requireFirebaseAuth, requireBancoDeDadosOrCampanhas, async (req, res) => {
     const clientId = authorizeLeadList(req, res);
     if (!clientId) return;
     const rules = Array.isArray(req.body?.rules) ? req.body.rules : [];

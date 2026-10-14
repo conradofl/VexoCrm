@@ -161,6 +161,9 @@ export interface AudienceResponse {
   items: AudienceLead[];
   total: number;
   truncated: boolean;
+  importNotFound?: boolean;
+  scopeUnavailable?: boolean;
+  reason?: string;
 }
 
 export type LeadRequest = (path: string, init?: RequestInit) => Promise<Response>;
@@ -179,6 +182,23 @@ const SEGMENTS = ["never_contacted", "in_conversation", "in_negotiation"];
 
 /** Parâmetros de filtro, sem os vazios e sem o "todos" (o servidor lê ausência como "sem filtro"). */
 export function filterParams(filters: LeadListFilters): URLSearchParams {
+  const anyFilters = filters as any;
+  if (anyFilters?.tags !== undefined) {
+    console.error(
+      '[filterParams] Chave "tags" recebida em filtros de lista/ids, mas /api/leads/ids não a aplica. Use /api/leads/audience para filtros de público de campanha com tags.'
+    );
+  }
+  if (anyFilters?.stages !== undefined) {
+    console.error(
+      '[filterParams] Chave "stages" recebida em filtros de lista/ids, mas /api/leads/ids não a aplica. Use /api/leads/audience para filtros de público de campanha com estágios.'
+    );
+  }
+  if (anyFilters?.rules !== undefined) {
+    console.error(
+      '[filterParams] Chave "rules" recebida em filtros de lista/ids, mas /api/leads/ids não a aplica. Use /api/leads/audience para filtros de público de campanha com regras dinâmicas.'
+    );
+  }
+
   const p = new URLSearchParams();
   const stage = (filters.stage || "").trim();
   if (stage && stage !== "all" && stage !== "contacts_without_channel") p.set("stage", stage);
@@ -345,7 +365,14 @@ export async function fetchCampaignAudience(
     throw new Error(body?.error?.message || "Filtro inválido");
   }
   const data = await readJson<Partial<AudienceResponse>>(res, "Falha ao montar o público da campanha");
-  return { items: data.items ?? [], total: data.total ?? data.items?.length ?? 0, truncated: Boolean(data.truncated) };
+  return {
+    items: data.items ?? [],
+    total: data.total ?? data.items?.length ?? 0,
+    truncated: Boolean(data.truncated),
+    importNotFound: Boolean(data.importNotFound),
+    scopeUnavailable: Boolean(data.scopeUnavailable),
+    reason: data.reason,
+  };
 }
 
 export interface ImportSource {
