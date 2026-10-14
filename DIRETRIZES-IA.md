@@ -231,3 +231,45 @@ outras rotas quebravam por schema). O sintoma sumiu do console, a causa continuo
 4. **Mutação que prova o requisito, não só a existência:** a mutação "tirar o cast" tem que morrer **em cada estado** em que o cast é necessário. Se ela só morre porque o teste já converteu a tabela, o teste não está medindo o que importa.
 5. **Erro de infraestrutura de um contador, métrica ou cota nunca derruba o fluxo do cliente.** Trate-o à parte do resultado de negócio ("esgotada" pausa o lote; "indisponível" segue sem a cota, com o erro registrado e contado). Contador que derruba o disparo é pior que a falta do contador.
 6. **DDL que falha não pode ser engolido.** `.catch(() => {})` em ALTER escondeu por semanas que a conversão nunca tinha funcionado (a FK criada em junho a impedia). Registre a falha; e quem depende do resultado tem que continuar funcionando sem ele (regra 1).
+
+---
+
+## 13. Rede de segurança do agendador e `CAMPAIGN_SCHEDULER_TOKEN`
+
+**Contexto:** O agendador nativo roda em processo via `setInterval` a cada 30 segundos (`backend/src/domains/campaigns/routes.js`). Caso o processo reinicie, trave ou sofra com concorrência de múltiplos containers, existe a rota de contingência externa `POST /api/campaigns/run-due`. Essa rota permite que um cron externo (ex.: cron do Easypanel, n8n ou worker dedicado) acione os lotes vencidos independentemente do timer interno.
+
+**Regras permanentes:**
+
+1. **Proteção por segredo:** A rota `POST /api/campaigns/run-due` exige o token definido na variável de ambiente `CAMPAIGN_SCHEDULER_TOKEN`. Se a variável não estiver configurada no servidor, a rota responde `500 CAMPAIGN_SCHEDULER_TOKEN_MISSING`.
+2. **NUNCA configure o token pelo código ou em testes:** O valor do token é configurado exclusivamente pelo dono do sistema nas variáveis de ambiente do Easypanel. Não commite valores literais nem use valores de produção em código versionado.
+3. **Autenticação:** A chamada externa autentica via cabeçalho `Authorization: Bearer <CAMPAIGN_SCHEDULER_TOKEN>` ou `x-campaign-runner-secret: <CAMPAIGN_SCHEDULER_TOKEN>`.
+4. **Contrato de resposta:** O endpoint retorna o resultado da execução e a lista detalhada de lotes pulados (`skipped`), com motivo (`reason`) e código (`code`) transparentes:
+   ```json
+   {
+     "campaigns": { "processed": 0 },
+     "independentDispatches": {
+       "success": true,
+       "processed": 1,
+       "items": [{ "id": "disp-1", "status": "success" }],
+       "skipped": [
+         {
+           "id": "disp-2",
+           "name": "Lote 2",
+           "status": "scheduled",
+           "reason": "Fora da janela de envio: horário local 21:05, janela 08:00–20:00 [mon,tue,wed,thu,fri] (America/Sao_Paulo), próxima abertura prevista para 08:00 (15/10)",
+           "code": "OUTSIDE_SEND_WINDOW"
+         }
+       ]
+     },
+     "skipped": [ ... ],
+     "stalledNotifications": null
+   }
+   ```
+5. **Chamada de exemplo para cron externo:**
+   ```bash
+   curl -s -X POST https://vexo-backend.xdvm8y.easypanel.host/api/campaigns/run-due \
+     -H "Authorization: Bearer $CAMPAIGN_SCHEDULER_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"limit": 10}'
+   ```
+

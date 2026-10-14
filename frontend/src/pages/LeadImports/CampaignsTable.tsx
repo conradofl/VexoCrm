@@ -17,6 +17,7 @@ import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { RecordView, type RecordCardState, type RecordField } from "@/components/records/RecordView";
 import { DispatchKpiCards } from "./DispatchKpiCards";
 import { RecurrenceHistoryDialog } from "./RecurrenceHistoryDialog";
+import { LastUpdatedIndicator } from "@/components/LastUpdatedIndicator";
 
 
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
@@ -33,6 +34,9 @@ interface CampaignsTableProps {
   clientId: string | null;
   campaigns: Campaign[];
   loadingCampaigns: boolean;
+  dataUpdatedAt?: number;
+  onRefresh?: () => void;
+  isFetching?: boolean;
   onEditCampaign: (campaign: Campaign) => void;
   onDuplicateCampaign: (campaign: Campaign) => void;
   onDeleteCampaign: (campaign: Campaign) => void;
@@ -42,6 +46,9 @@ export function CampaignsTable({
   clientId,
   campaigns,
   loadingCampaigns,
+  dataUpdatedAt,
+  onRefresh,
+  isFetching,
   onEditCampaign,
   onDuplicateCampaign,
   onDeleteCampaign,
@@ -297,6 +304,13 @@ export function CampaignsTable({
             <CardTitle className="text-base font-bold">Campanhas Configuradas</CardTitle>
             <CardDescription>Clique para ver detalhes, editar as mensagens ou excluir as réguas</CardDescription>
           </div>
+          {dataUpdatedAt != null && (
+            <LastUpdatedIndicator
+              timestamp={dataUpdatedAt}
+              onRefresh={onRefresh}
+              isFetching={isFetching}
+            />
+          )}
         </CardHeader>
 
         <CardContent className="p-4 sm:p-6 pt-0 space-y-4">

@@ -429,6 +429,7 @@ export function DispatchQueueTable({
                         {(disp.status === "failed" ||
                           disp.status === "interrupted" ||
                           disp.status === "paused" ||
+                          disp.status === "scheduled" ||
                           (disp.error_message && disp.error_message.includes("Chip configurado não encontrado"))) &&
                           disp.error_message && (
                             <p
@@ -436,7 +437,8 @@ export function DispatchQueueTable({
                                 "mt-1 text-[10px] font-medium max-w-[240px] mx-auto leading-tight",
                                 disp.error_message.includes("Chip configurado não encontrado") ||
                                   disp.status === "interrupted" ||
-                                  disp.status === "paused"
+                                  disp.status === "paused" ||
+                                  disp.status === "scheduled"
                                   ? "text-amber-600 dark:text-amber-400"
                                   : "text-rose-500"
                               )}
