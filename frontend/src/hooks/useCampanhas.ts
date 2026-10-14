@@ -4,6 +4,32 @@ import { API_BASE_URL } from "@/lib/api";
 import type { RecurrenceEndType, RecurrenceOriginKind, RecurrencePattern } from "@/lib/campaignRecurrence";
 
 const CAMPAIGN_REQUEST_TIMEOUT_MS = 15000;
+export const ACTIVE_DISPATCH_REFETCH_INTERVAL_MS = 15000;
+
+export function hasActiveDispatches(dispatches?: { status?: string }[] | null): boolean {
+  if (!Array.isArray(dispatches)) return false;
+  return dispatches.some(
+    (d) => d && (d.status === "running" || d.status === "sending" || d.status === "processing")
+  );
+}
+
+export function hasActiveCampaigns(campaigns?: { status?: string }[] | null): boolean {
+  if (!Array.isArray(campaigns)) return false;
+  return campaigns.some(
+    (c) => c && (c.status === "sending" || c.status === "running" || c.status === "processing")
+  );
+}
+
+export function hasActiveSummaryBatches(response?: DispatchSummaryResponse | null): boolean {
+  if (!response?.campaigns) return false;
+  return response.campaigns.some(
+    (c) =>
+      c.status === "enviando" ||
+      c.batches?.some(
+        (b) => b && (b.status === "running" || (b.status as string) === "sending" || (b.status as string) === "processing")
+      )
+  );
+}
 
 export interface Campaign {
   id: string;
@@ -591,6 +617,10 @@ export function useCampanhas(clientId?: string) {
     },
     retry: (failureCount, error) => !isCampaignClientTerminalError(error) && failureCount < 1,
     staleTime: 30 * 1000,
+    refetchInterval: (query) => {
+      const campaigns = query.state.data as Campaign[] | undefined;
+      return hasActiveCampaigns(campaigns) ? ACTIVE_DISPATCH_REFETCH_INTERVAL_MS : false;
+    },
   });
 }
 
@@ -920,6 +950,10 @@ export function useCampaignDispatches(campaignId: string | null) {
     queryKey: ["campaign-dispatches", campaignId],
     enabled: !!campaignId,
     staleTime: 30_000,
+    refetchInterval: (query) => {
+      const dispatches = query.state.data as CampaignDispatch[] | undefined;
+      return hasActiveDispatches(dispatches) ? ACTIVE_DISPATCH_REFETCH_INTERVAL_MS : false;
+    },
     queryFn: async () => {
       const token = await getIdToken();
       const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
@@ -1012,6 +1046,10 @@ export function useAllDispatches(clientId: string | null) {
     queryKey: ["all-dispatches", clientId],
     enabled: !!clientId,
     staleTime: 30_000,
+    refetchInterval: (query) => {
+      const dispatches = query.state.data as CampaignDispatch[] | undefined;
+      return hasActiveDispatches(dispatches) ? ACTIVE_DISPATCH_REFETCH_INTERVAL_MS : false;
+    },
     queryFn: async () => {
       const token = await getIdToken();
       const res = await fetch(`${API_BASE_URL}/api/dispatches?clientId=${encodeURIComponent(clientId!)}`, {
@@ -1263,6 +1301,11 @@ export function useDispatchSummary(
     queryKey: ["dispatch-summary", clientId, scope, page, pageSize],
     enabled: !!clientId,
     staleTime: 15_000,
+    refetchInterval: (query) => {
+      if (scope !== "active") return false;
+      const data = query.state.data as DispatchSummaryResponse | undefined;
+      return hasActiveSummaryBatches(data) ? ACTIVE_DISPATCH_REFETCH_INTERVAL_MS : false;
+    },
     queryFn: async () => {
       const token = await getIdToken();
       const params = new URLSearchParams({

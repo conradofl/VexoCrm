@@ -232,10 +232,18 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     ).values()
   );
 
-  // Defeito A: elegibilidade por disparo. Remove da fila todo lead que JÁ tem registro
-  // neste disparo (qualquer status: claimed/sent/failed/skipped) → já tocado = fora.
-  // Escopo é POR DISPARO (excludeDispatchId), não histórico global do lead.
-  let eligibleLeads = leads;
+  // Definição da janela do lote: quando limit/offset são especificados (campanhas divididas em lotes),
+  // os candidatos deste lote são exatamente a fatia [offset, offset + limit).
+  // Quando não há limite (ex.: ocorrência de campanha recorrente cobrindo o público inteiro), cobre todos.
+  let batchLeads = leads;
+  if (limit && Number.isInteger(limit) && limit > 0) {
+    const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
+    batchLeads = batchLeads.slice(start, start + limit);
+  }
+
+  // Defeito A / Elegibilidade por disparo: remove da fila todo lead que JÁ tem registro
+  // neste disparo (qualquer status: claimed/sent/failed/skipped/invalid_number) → já tocado = fora.
+  // Escopo é POR DISPARO (excludeDispatchId), restrito aos alvos DESTE lote.
   if (excludeDispatchId) {
     const { data: touchedRows, error: touchedError } = await supabase
       .from("campaign_dispatch_runs")
@@ -255,7 +263,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
         .filter(Boolean)
     );
     if (touchedLeadIds.size > 0 || touchedPhones.size > 0) {
-      eligibleLeads = leads.filter((lead) => {
+      return batchLeads.filter((lead) => {
         if (lead.id && touchedLeadIds.has(lead.id)) return false;
         const normPhone = normalizeString(lead.telefone).replace(/\D/g, "");
         if (normPhone && touchedPhones.has(normPhone)) return false;
@@ -264,12 +272,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     }
   }
 
-  if (limit && Number.isInteger(limit) && limit > 0) {
-    const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
-    return eligibleLeads.slice(start, start + limit);
-  }
-
-  return eligibleLeads;
+  return batchLeads;
 }
 
 /**
@@ -1078,22 +1081,9 @@ export function normalizeCampaignPendingStepIndex(value) {
 
 export function resolveMatchedImportItemForCampaign(importItems, campaign) {
   if (!Array.isArray(importItems) || importItems.length === 0) return null;
-  const importIdNorm = normalizeString(campaign.import_id);
 
-  if (importIdNorm) {
-    const byImport = importItems.filter((item) => normalizeString(item.import_id) === importIdNorm);
-    if (byImport.length === 1) return byImport[0];
-    if (byImport.length > 1) {
-      // Prefer the row that already holds progress for this campaign (multi-row same phone / reimports).
-      const withProgress = byImport.find((item) => {
-        const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
-        return p && Object.keys(p).length > 0;
-      });
-      return withProgress || byImport[0];
-    }
-    return null;
-  }
-
+  // A.1: Casamento direto por progresso como fonte primária.
+  // Prioriza o item que está aguardando resposta do usuário.
   const withReplyProgress = importItems.find((item) => {
     const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
     return (
@@ -1102,7 +1092,38 @@ export function resolveMatchedImportItemForCampaign(importItems, campaign) {
       p.status === "aguardando_usuario"
     );
   });
-  return withReplyProgress || importItems[0] || null;
+  if (withReplyProgress) return withReplyProgress;
+
+  // Depois qualquer item que tenha progresso registrado para esta campanha.
+  const withAnyProgress = importItems.find((item) => {
+    const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+    return p && Object.keys(p).length > 0;
+  });
+  if (withAnyProgress) return withAnyProgress;
+
+  // A.2: Suporte a analytics_meta.importIds e campaign.import_id.
+  const targetImportIds = new Set();
+  const directImportId = normalizeString(campaign.import_id);
+  if (directImportId) targetImportIds.add(directImportId);
+
+  const metaImportIds = campaign.analytics_meta?.importIds;
+  if (Array.isArray(metaImportIds)) {
+    for (const id of metaImportIds) {
+      const norm = normalizeString(id);
+      if (norm) targetImportIds.add(norm);
+    }
+  }
+
+  if (targetImportIds.size > 0) {
+    const byImport = importItems.filter((item) => {
+      const norm = normalizeString(item.import_id);
+      return norm && targetImportIds.has(norm);
+    });
+    if (byImport.length > 0) return byImport[0];
+    return null;
+  }
+
+  return importItems[0] || null;
 }
 
 export async function findCampaignReplyMatches({ clientId, phone }) {
@@ -1205,24 +1226,40 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
   const matches = (campaignsResult.data || [])
     .map((campaign) => {
       const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+      const campaignImportIds = new Set();
+      if (campaign.import_id) {
+        const direct = normalizeString(campaign.import_id);
+        if (direct) campaignImportIds.add(direct);
+      }
+      if (Array.isArray(analyticsMeta.importIds)) {
+        for (const id of analyticsMeta.importIds) {
+          const norm = normalizeString(id);
+          if (norm) campaignImportIds.add(norm);
+        }
+      }
+
       const storedPhones = Array.isArray(campaign.phones)
         ? campaign.phones.map((value) => sanitizePhone(value)).filter(Boolean)
         : [];
       const phoneSet = new Set(storedPhones);
       const matchedByStoredPhones = phoneVariants.some((variant) => phoneSet.has(variant));
-      const matchedByImportId =
-        Boolean(campaign.import_id) && importIds.includes(normalizeString(campaign.import_id));
+      const matchedByImportId = importIds.some((id) => campaignImportIds.has(id));
       const matchedImportItem = resolveMatchedImportItemForCampaign(importItems, campaign);
 
-      if (!matchedByStoredPhones && !matchedByImportId) {
-        return null;
-      }
-
       const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
+      const hasProgress = progress && Object.keys(progress).length > 0;
       const hasPendingProgress =
         progress &&
         progress.waitForReply === true &&
         progress.status === "aguardando_usuario";
+
+      // A.1: Casamento direto por progresso como fonte primária
+      const matchedByProgress = Boolean(hasProgress);
+
+      // A.4: Elimina o return null prematuro da linha 1220.
+      if (!matchedByProgress && !matchedByStoredPhones && !matchedByImportId) {
+        return null;
+      }
 
       // Verifica se a campanha está no período ativo (starts_at <= now <= ends_at)
       const startsAt = campaign.starts_at ? new Date(campaign.starts_at) : null;
@@ -1252,7 +1289,13 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         chatbotPromptType: campaign.chatbot_prompt_type || null,
         startsAt: campaign.starts_at || null,
         endsAt: campaign.ends_at || null,
-        matchSource: matchedByStoredPhones && matchedByImportId ? "phones_and_import" : matchedByStoredPhones ? "phones" : "import",
+        matchSource: matchedByProgress
+          ? "progress"
+          : matchedByStoredPhones && matchedByImportId
+          ? "phones_and_import"
+          : matchedByStoredPhones
+          ? "phones"
+          : "import",
         leadImportItem: matchedImportItem
           ? {
             id: matchedImportItem.id,
@@ -1297,6 +1340,45 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
   };
 }
 
+/**
+ * Trava por CICLO para impedir que o passo 1 seja repetido para um lead que já
+ * está com a régua em andamento (waitForReply / aguardando_usuario) no mesmo ciclo:
+ * - Para lote avulso: o lead não repete o passo 1 dentro da MESMA sequência em andamento.
+ * - Para ocorrência recorrente: cada ocorrência é um ciclo NOVO; progresso de ocorrência anterior NÃO bloqueia.
+ */
+export function isLeadBlockedByActiveCycleProgress({ progress, occurrence, campaignId, dispatchId }) {
+  if (!progress || typeof progress !== "object") return false;
+  if (progress.campaignId && campaignId && progress.campaignId !== campaignId) return false;
+
+  const isPendingOrWaiting =
+    progress.waitForReply === true &&
+    (progress.status === "aguardando_usuario" || progress.status === "pendente");
+
+  if (!isPendingOrWaiting) return false;
+
+  // Campanha recorrente: cada ocorrência é um ciclo NOVO
+  if (occurrence?.isOccurrence) {
+    const currentOccurrenceAt = occurrence.occurrenceAt
+      ? toComparableCampaignTimestamp(occurrence.occurrenceAt)
+      : null;
+    const progressOccurrenceAt = progress.occurrenceAt
+      ? toComparableCampaignTimestamp(progress.occurrenceAt)
+      : null;
+
+    // Se o progresso é de uma ocorrência anterior (ou sem occurrenceAt registrado):
+    // é um ciclo NOVO, o progresso anterior NÃO bloqueia!
+    if (!progressOccurrenceAt || !currentOccurrenceAt || progressOccurrenceAt !== currentOccurrenceAt) {
+      return false;
+    }
+    // Mesma ocorrência já em andamento: bloqueia repetição do passo 1 no mesmo ciclo
+    return true;
+  }
+
+  // Lote avulso (não recorrente):
+  // O lead não repete o passo 1 dentro da MESMA sequência em andamento
+  return true;
+}
+
 export async function markCampaignLeadWaitingReply({
   clientId,
   lead,
@@ -1309,6 +1391,8 @@ export async function markCampaignLeadWaitingReply({
   nextStepIndex = undefined,
   status = undefined,
   userRepliedAt = undefined,
+  dispatchId = undefined,
+  occurrenceAt = undefined,
 }) {
   if (!supabase || !clientId || !phone) return;
 
@@ -1338,6 +1422,8 @@ export async function markCampaignLeadWaitingReply({
       updatedAt: dispatchedAt,
       completedAt: normalizedStatus === "finalizado" ? dispatchedAt : null,
       lastReplyAt: userRepliedAt || null,
+      dispatchId: dispatchId || null,
+      occurrenceAt: occurrenceAt || null,
     }
     : null;
 

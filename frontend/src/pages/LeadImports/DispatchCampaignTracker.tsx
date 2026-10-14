@@ -33,6 +33,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/EmptyState";
+import { LastUpdatedIndicator } from "@/components/LastUpdatedIndicator";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/use-toast";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
@@ -102,9 +103,16 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
   return (
     <Card className="border-border bg-card shadow-lg text-card-foreground rounded-2xl">
       <CardHeader className="pb-3 space-y-4">
-        <div>
-          <h3 className="text-base font-bold">Acompanhar Disparos</h3>
-          <p className="text-xs text-muted-foreground">Cartões compactos por campanha — cada lote é um quadrado na faixa.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h3 className="text-base font-bold">Acompanhar Disparos</h3>
+            <p className="text-xs text-muted-foreground">Cartões compactos por campanha — cada lote é um quadrado na faixa.</p>
+          </div>
+          <LastUpdatedIndicator
+            timestamp={current.dataUpdatedAt}
+            onRefresh={() => void current.refetch()}
+            isFetching={current.isFetching}
+          />
         </div>
 
         {/* Cartões do topo — somam Ativas + Encerradas, período explícito */}

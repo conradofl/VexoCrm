@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
-import { CAMPAIGN_STATUS_LABELS, type Campaign, type CampaignDispatch, useAllDispatches } from "@/hooks/useCampanhas";
+import { CAMPAIGN_STATUS_LABELS, type Campaign, type CampaignDispatch } from "@/hooks/useCampanhas";
 import { formatRecurrenceBadge, recurrenceStatusText, getCampaignNextRunLabel } from "@/lib/campaignRecurrence";
 import { ListFilterBar } from "@/components/ListFilterBar";
 import { useListFilter } from "@/hooks/useListFilter";
@@ -17,6 +17,7 @@ import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { RecordView, type RecordCardState, type RecordField } from "@/components/records/RecordView";
 import { DispatchKpiCards } from "./DispatchKpiCards";
 import { RecurrenceHistoryDialog } from "./RecurrenceHistoryDialog";
+import { LastUpdatedIndicator } from "@/components/LastUpdatedIndicator";
 
 
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
@@ -38,16 +39,24 @@ interface CampaignsTableProps {
   campaigns: Campaign[];
   loadingCampaigns: boolean;
   dispatches?: CampaignDispatch[];
+  dataUpdatedAt?: number;
+  onRefresh?: () => void;
+  isFetching?: boolean;
   onEditCampaign: (campaign: Campaign) => void;
   onDuplicateCampaign: (campaign: Campaign) => void;
   onDeleteCampaign: (campaign: Campaign) => void;
 }
+
+const NO_DISPATCHES: CampaignDispatch[] = [];
 
 export function CampaignsTable({
   clientId,
   campaigns,
   loadingCampaigns,
   dispatches: dispatchesProp,
+  dataUpdatedAt,
+  onRefresh,
+  isFetching,
   onEditCampaign,
   onDuplicateCampaign,
   onDeleteCampaign,
@@ -55,8 +64,9 @@ export function CampaignsTable({
   const view = useViewMode("campanhas");
   const [historyCampaign, setHistoryCampaign] = useState<Campaign | null>(null);
   const { filtered: filteredCampaigns, controls: filterControls } = useListFilter(campaigns, CAMPAIGNS_FILTER);
-  const { data: hookDispatches = [] } = useAllDispatches(clientId);
-  const effectiveDispatches = dispatchesProp ?? hookDispatches;
+  // Os lotes vêm SÓ pela prop (LeadImports já os tem). Buscar aqui dentro com useAllDispatches puxava useAuth para
+  // a tabela e quebrava quem a renderiza sem o provedor de autenticação (listFilterTabs).
+  const effectiveDispatches = dispatchesProp ?? NO_DISPATCHES;
   const fields = useMemo(() => buildCampaignFields(effectiveDispatches), [effectiveDispatches]);
   const campaignField = (key: string) => fields.find((f) => f.key === key)!;
 
@@ -317,6 +327,13 @@ export function CampaignsTable({
             <CardTitle className="text-base font-bold">Campanhas Configuradas</CardTitle>
             <CardDescription>Clique para ver detalhes, editar as mensagens ou excluir as réguas</CardDescription>
           </div>
+          {dataUpdatedAt != null && (
+            <LastUpdatedIndicator
+              timestamp={dataUpdatedAt}
+              onRefresh={onRefresh}
+              isFetching={isFetching}
+            />
+          )}
         </CardHeader>
 
         <CardContent className="p-4 sm:p-6 pt-0 space-y-4">

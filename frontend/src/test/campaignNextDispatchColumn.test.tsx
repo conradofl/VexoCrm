@@ -228,3 +228,59 @@ describe("BLOCO 4 — Coluna PRÓXIMO DISPARO na lista de campanhas", () => {
     });
   });
 });
+
+// Merge do #156 com o #158: a coluna "Próximo disparo" (dispatches) e o indicador de atualização automática
+// (dataUpdatedAt/onRefresh/isFetching) são coisas diferentes e as duas têm que aparecer juntas.
+describe("[OBRIGATÓRIO] coluna 'Próximo disparo' e 'Atualizado há Xs' na mesma tabela, sem um apagar o outro", () => {
+  it("com dispatches E dataUpdatedAt: a data do próximo disparo e o indicador aparecem; recarregar chama onRefresh", () => {
+    const campanha: Campaign = {
+      ...baseCampaign,
+      id: "camp-juntos",
+      name: "Campanha Com Os Dois",
+      status: "scheduled",
+      scheduled_for: null, // a data só pode vir do lote (prop dispatches)
+    };
+    const lote: CampaignDispatch = {
+      id: "disp-juntos",
+      campaign_id: "camp-juntos",
+      client_id: "cliente-teste",
+      name: "Disparo Agendado",
+      steps: [],
+      trigger_type: "scheduled",
+      scheduled_at: "2026-11-20T17:30:00.000Z",
+      status: "scheduled",
+      sent_count: 0,
+      failed_count: 0,
+      triggered_at: null,
+      finished_at: null,
+      error_message: null,
+      created_at: "2026-10-10T10:00:00.000Z",
+      updated_at: "2026-10-10T10:00:00.000Z",
+    };
+    const onRefresh = vi.fn();
+
+    renderWithProviders(
+      <CampaignsTable
+        clientId="cliente-teste"
+        campaigns={[campanha]}
+        loadingCampaigns={false}
+        dispatches={[lote]}
+        dataUpdatedAt={Date.now() - 12_000}
+        onRefresh={onRefresh}
+        isFetching={false}
+        onEditCampaign={vi.fn()}
+        onDuplicateCampaign={vi.fn()}
+        onDeleteCampaign={vi.fn()}
+      />
+    );
+
+    clickList();
+
+    expect(screen.getByRole("columnheader", { name: /Próximo disparo/i })).toBeDefined();
+    expect(within(screen.getByTestId("campaign-row-camp-juntos")).getByText(/20\/11/i)).toBeDefined();
+    const indicador = screen.getByTestId("last-updated-indicator");
+    expect(indicador.textContent).toMatch(/Atualizado há \d+s/);
+    fireEvent.click(screen.getByRole("button", { name: /Recarregar dados/i }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+});

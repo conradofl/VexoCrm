@@ -41,6 +41,10 @@ import {
 } from "../../campaign-outbound.js";
 import { markCampaignLeadWaitingReply } from "../../campaign/dispatch.js";
 import {
+  extractCampaignProgress,
+  isLeadBlockedByActiveCycleProgress,
+} from "../../campaign/dispatch.js";
+import {
   generateCampaignCopySuggestion,
   generateCampaignTemplateVariants,
   getGroqCampaignAiStatus,
@@ -59,6 +63,7 @@ import {
   getNextSendWindowOpening,
   resolveSendWindowConfig,
   adjustDateToSendWindow,
+  getPartsInTimezone,
 } from "../../services/sendWindow.js";
 import {
   bodyTouchesRecurrence,
@@ -322,12 +327,18 @@ export async function isLeadMessagesIsGroupColumnAvailable(pool, isMissingSchema
 let _dispatchRunsClaimSchemaEnsured = false;
 let _dueDispatchTimerStarted = false;
 let _dueDispatchInterval = null;
+let _lastEmptyHeartbeatAt = 0;
+
+export function resetSchedulerHeartbeatForTest() {
+  _lastEmptyHeartbeatAt = 0;
+}
 
 export function stopDueDispatchScheduler() {
   if (_dueDispatchInterval) {
     clearInterval(_dueDispatchInterval);
     _dueDispatchInterval = null;
     _dueDispatchTimerStarted = false;
+    _lastEmptyHeartbeatAt = 0;
     console.log("[campaign-dispatch-scheduler] scheduler de disparos avulsos parado.");
   }
 }
@@ -2148,11 +2159,19 @@ export function registerCampaignsRoutes(app, deps) {
         .limit(limit);
 
       if (fetchErr) throw fetchErr;
-      if (!dispatches || dispatches.length === 0) {
-        return { success: true, processed: 0, items: [], recurrence };
+      const dueCount = dispatches ? dispatches.length : 0;
+      if (dueCount === 0) {
+        const nowMs = Date.now();
+        // Não poluir: no máximo uma linha a cada 10 minutos quando não houver nada vencido
+        if (nowMs - _lastEmptyHeartbeatAt >= 10 * 60 * 1000) {
+          _lastEmptyHeartbeatAt = nowMs;
+          console.log(`[campaign-dispatch-scheduler] heartbeat (pid=${process.pid}): 0 lotes vencidos encontrados, 0 processados`);
+        }
+        return { success: true, processed: 0, items: [], skipped: [], recurrence };
       }
 
       const results = [];
+      const skipped = [];
       for (const dispatch of dispatches) {
         try {
           let resumingFromQuota = false;
@@ -2162,6 +2181,16 @@ export function registerCampaignsRoutes(app, deps) {
             const isQuotaPause = errMsg.includes(QUOTA_PAUSE_MARKER);
 
             if (!isSendWindowPause && !isQuotaPause) {
+              const reason = `Lote pausado por motivo não retomável automaticamente: ${dispatch.error_message || "sem mensagem de erro"}`;
+              console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+              skipped.push({
+                id: dispatch.id,
+                campaignId: dispatch.campaign_id,
+                name: dispatch.name,
+                status: dispatch.status,
+                reason,
+                code: "PAUSED_NON_RESUMABLE",
+              });
               continue;
             }
 
@@ -2170,6 +2199,34 @@ export function registerCampaignsRoutes(app, deps) {
 
             // Verifica se está dentro da janela de envio permitida do tenant
             if (!isWithinSendWindow(new Date(), sendWindowConfig)) {
+              const localParts = getPartsInTimezone(new Date(), sendWindowConfig.timezone);
+              const nextOpeningDate = getNextSendWindowOpening(new Date(), sendWindowConfig);
+              const nextOpeningParts = getPartsInTimezone(nextOpeningDate, sendWindowConfig.timezone);
+              const nextOpeningStr = `${nextOpeningParts.timeString} (${nextOpeningParts.day}/${nextOpeningParts.month})`;
+              const daysStr = sendWindowConfig.days.join(",");
+              const windowStr = `${sendWindowConfig.start}–${sendWindowConfig.end} [${daysStr}] (${sendWindowConfig.timezone})`;
+              const reason = `Fora da janela de envio: horário local ${localParts.timeString}, janela ${windowStr}, próxima abertura prevista para ${nextOpeningStr}`;
+              console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+
+              const dbReason = `Pausado — fora da janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}). Retomará na próxima janela (abre ${nextOpeningStr}).`;
+              if (dispatch.error_message !== dbReason) {
+                await supabase
+                  .from("campaign_dispatches")
+                  .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                  .eq("id", dispatch.id);
+              }
+
+              skipped.push({
+                id: dispatch.id,
+                campaignId: dispatch.campaign_id,
+                name: dispatch.name,
+                status: dispatch.status,
+                reason,
+                code: "OUTSIDE_SEND_WINDOW",
+                localTime: localParts.timeString,
+                sendWindow: windowStr,
+                nextOpening: nextOpeningDate.toISOString(),
+              });
               continue;
             }
 
@@ -2180,7 +2237,34 @@ export function registerCampaignsRoutes(app, deps) {
 
             // Verifica se está dentro da janela de envio permitida do tenant
             if (!isWithinSendWindow(new Date(), sendWindowConfig)) {
-              // Permanece aguardando abertura da janela
+              const localParts = getPartsInTimezone(new Date(), sendWindowConfig.timezone);
+              const nextOpeningDate = getNextSendWindowOpening(new Date(), sendWindowConfig);
+              const nextOpeningParts = getPartsInTimezone(nextOpeningDate, sendWindowConfig.timezone);
+              const nextOpeningStr = `${nextOpeningParts.timeString} (${nextOpeningParts.day}/${nextOpeningParts.month})`;
+              const daysStr = sendWindowConfig.days.join(",");
+              const windowStr = `${sendWindowConfig.start}–${sendWindowConfig.end} [${daysStr}] (${sendWindowConfig.timezone})`;
+              const reason = `Fora da janela de envio: horário local ${localParts.timeString}, janela ${windowStr}, próxima abertura prevista para ${nextOpeningStr}`;
+              console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+
+              const dbReason = `Aguardando janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}, abre ${nextOpeningStr})`;
+              if (dispatch.error_message !== dbReason) {
+                await supabase
+                  .from("campaign_dispatches")
+                  .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                  .eq("id", dispatch.id);
+              }
+
+              skipped.push({
+                id: dispatch.id,
+                campaignId: dispatch.campaign_id,
+                name: dispatch.name,
+                status: dispatch.status,
+                reason,
+                code: "OUTSIDE_SEND_WINDOW",
+                localTime: localParts.timeString,
+                sendWindow: windowStr,
+                nextOpening: nextOpeningDate.toISOString(),
+              });
               continue;
             }
           }
@@ -2214,7 +2298,28 @@ export function registerCampaignsRoutes(app, deps) {
               const passos = plan.shouldUseReplyFlow && plan.immediateSteps.length > 0 ? plan.immediateSteps : plan.enabledSteps;
               const needed = Math.max(countBurstSteps(passos), 1);
               if (currentUsage + needed > limit) {
-                // a cota de hoje ainda não comporta o próximo lead: continua pausado até o dia seguinte
+                const reason = `Cota do chip insuficiente: cota diária ${limit}, uso atual ${currentUsage}, necessário para o próximo lead ${needed} (faltam ${(currentUsage + needed) - limit})`;
+                console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+
+                const dbReason = `Pausado — cota diária do chip atingida (${currentUsage}/${limit} msgs hoje, necessário ${needed} para próximo lead). Retomará amanhã. ${QUOTA_PAUSE_MARKER}`;
+                if (dispatch.error_message !== dbReason) {
+                  await supabase
+                    .from("campaign_dispatches")
+                    .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                    .eq("id", dispatch.id);
+                }
+
+                skipped.push({
+                  id: dispatch.id,
+                  campaignId: dispatch.campaign_id,
+                  name: dispatch.name,
+                  status: dispatch.status,
+                  reason,
+                  code: "INSUFFICIENT_QUOTA",
+                  limit,
+                  currentUsage,
+                  needed,
+                });
                 continue;
               }
             }
@@ -2225,12 +2330,25 @@ export function registerCampaignsRoutes(app, deps) {
           // Fica 'scheduled' e tenta de novo no proximo tick. O indice unico parcial e a ultima barreira (abaixo).
           const concorrente = pgDatabasePool ? await findConcurrentRunningDispatch(pgDatabasePool, dispatch.id) : null;
           if (concorrente) {
-            console.log("[campaign-dispatch-scheduler] outro lote da mesma campanha em andamento, aguardando", {
-              dispatchId: dispatch.id,
+            const reason = `Outro lote da mesma campanha em andamento (lote bloqueador: ${concorrente.id})`;
+            console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+            const dbReason = `Aguardando conclusão de outro lote da mesma campanha (${concorrente.name || concorrente.id})`;
+            if (dispatch.error_message !== dbReason) {
+              await supabase
+                .from("campaign_dispatches")
+                .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                .eq("id", dispatch.id);
+            }
+            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign", blockingDispatchId: concorrente.id });
+            skipped.push({
+              id: dispatch.id,
               campaignId: dispatch.campaign_id,
+              name: dispatch.name,
+              status: dispatch.status,
+              reason,
+              code: "BLOCKED_SAME_CAMPAIGN",
               blockingDispatchId: concorrente.id,
             });
-            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign", blockingDispatchId: concorrente.id });
             continue;
           }
 
@@ -2250,16 +2368,18 @@ export function registerCampaignsRoutes(app, deps) {
           // 23505 = uq_campaign_dispatches_one_running_occurrence: outra ocorrencia da campanha ganhou a corrida entre a
           // checagem acima e este UPDATE. Nao e falha do lote: continua 'scheduled' e tenta no proximo tick.
           if (claimErr && String(claimErr.code) === "23505") {
+            const reason = "Outra ocorrência da campanha ganhou a corrida no claim (uq_campaign_dispatches_one_running_occurrence)";
+            console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
             results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign" });
+            skipped.push({ id: dispatch.id, campaignId: dispatch.campaign_id, name: dispatch.name, status: dispatch.status, reason, code: "RACE_CONDITION_CLAIM" });
             continue;
           }
           if (claimErr) throw claimErr;
           if (!claimed || claimed.length === 0) {
-            console.log("[campaign-dispatch-scheduler] disparo ja reivindicado por outro ciclo, pulando", {
-              dispatchId: dispatch.id,
-              campaignId: dispatch.campaign_id,
-            });
+            const reason = "Disparo já reivindicado por outro ciclo ou processo";
+            console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
             results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "already_claimed" });
+            skipped.push({ id: dispatch.id, campaignId: dispatch.campaign_id, name: dispatch.name, status: dispatch.status, reason, code: "ALREADY_CLAIMED" });
             continue;
           }
 
@@ -2288,7 +2408,10 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
-      return { success: true, processed: results.length, items: results, recurrence };
+      const processedCount = results.filter((r) => r.status === "success").length;
+      console.log(`[campaign-dispatch-scheduler] tick (pid=${process.pid}): ${dueCount} lote(s) vencido(s) encontrado(s), processados: ${processedCount}, pulados: ${skipped.length}`);
+
+      return { success: true, processed: processedCount, items: results, skipped, recurrence };
     } catch (err) {
       console.error("[campaign-dispatch-scheduler] global check failed:", err);
       return { success: false, error: err.message };
@@ -2298,6 +2421,7 @@ export function registerCampaignsRoutes(app, deps) {
   // Native interval scheduler for scheduled independent dispatches
   if (!_dueDispatchTimerStarted) {
     _dueDispatchTimerStarted = true;
+    console.log(`[campaign-dispatch-scheduler] agendador iniciado (pid=${process.pid}, interval=30000ms)`);
     _dueDispatchInterval = setInterval(async () => {
       try {
         await runDueIndependentDispatches({ limit: 10 });
@@ -2330,7 +2454,12 @@ export function registerCampaignsRoutes(app, deps) {
       const stalledNotifyResult = pgDatabasePool
         ? await syncDailyStalledNotificationsForAllTenants(pgDatabasePool)
         : null;
-      res.json({ campaigns: result, independentDispatches: dispatchResult, stalledNotifications: stalledNotifyResult });
+      res.json({
+        campaigns: result,
+        independentDispatches: dispatchResult,
+        skipped: dispatchResult?.skipped || [],
+        stalledNotifications: stalledNotifyResult,
+      });
     } catch (error) {
       console.error("campaign run-due error:", error);
       sendError(
@@ -2572,7 +2701,25 @@ export function registerCampaignsRoutes(app, deps) {
       excludeDispatchId: dispatchId,
     });
 
-    if (leads.length === 0) {
+    // Trava por ciclo: o lead não repete o passo 1 dentro da MESMA sequência em andamento.
+    // Para ocorrência recorrente: cada ocorrência é um ciclo NOVO; progresso de ocorrência anterior não bloqueia.
+    const cycleLeads = [];
+    for (const l of leads) {
+      const progress = extractCampaignProgress(l.normalized_data || {}, campaign.id);
+      if (isLeadBlockedByActiveCycleProgress({ progress, occurrence, campaignId: campaign.id, dispatchId })) {
+        console.log("[campaign-dispatch] lead pulado: sequencia ja em andamento neste ciclo", {
+          dispatchId,
+          campaignId: campaign.id,
+          leadId: l.id,
+          phone: maskPhoneForLog(l.telefone),
+          status: progress.status,
+        });
+        continue;
+      }
+      cycleLeads.push(l);
+    }
+
+    if (cycleLeads.length === 0) {
       let totalSent = 0;
       let totalFailed = 0;
       let totalInvalid = 0;
@@ -2620,10 +2767,10 @@ export function registerCampaignsRoutes(app, deps) {
     }
 
     // ── Item 2: Validação prévia de números via Evolution API com cache ─────────
-    let validLeads = leads;
-    if (leads.length > 0) {
+    let validLeads = cycleLeads;
+    if (cycleLeads.length > 0) {
       try {
-        const candidatePhones = leads
+        const candidatePhones = cycleLeads
           .map((l) => normalizeString(l.telefone).replace(/\D/g, ""))
           .filter(Boolean);
 
@@ -2637,7 +2784,7 @@ export function registerCampaignsRoutes(app, deps) {
         const invalidLeads = [];
         validLeads = [];
 
-        for (const l of leads) {
+        for (const l of cycleLeads) {
           const cleanPhone = normalizeString(l.telefone).replace(/\D/g, "");
           const validation = cleanPhone ? validationMap.get(cleanPhone) : null;
 
@@ -3269,6 +3416,8 @@ export function registerCampaignsRoutes(app, deps) {
             dispatchedAt: sentAt || new Date().toISOString(),
             nextStepIndex: primeiroPassoAposResposta,
             status: "aguardando_usuario",
+            dispatchId,
+            occurrenceAt: occurrence?.occurrenceAt || null,
           }).catch((err) => {
             console.warn("[campaign-dispatch] falha ao gravar progresso de espera", {
               dispatchId,

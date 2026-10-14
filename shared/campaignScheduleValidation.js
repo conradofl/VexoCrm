@@ -1,6 +1,6 @@
 /**
  * Validação de data de agendamento de campanhas compartilhada entre frontend e backend.
- * 
+ *
  * Regra:
  * - O input é datetime-local com precisão de MINUTO.
  * - Compara contra o início do minuto corrente (start of minute).
@@ -26,7 +26,7 @@ export function getStartOfMinute(now = Date.now()) {
 
 /**
  * Determina se uma data de agendamento está no passado.
- * 
+ *
  * @param {string|number|Date|null|undefined} scheduledAt - Data a ser testada (ISO string, datetime local ou timestamp)
  * @param {object} [options]
  * @param {number} [options.graceMs=0] - Folga em milissegundos (ex: BACKEND_SCHEDULE_GRACE_MS)

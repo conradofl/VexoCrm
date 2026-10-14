@@ -105,9 +105,18 @@ export async function readOccurrenceInfo(pool, dispatchId) {
     );
     const row = rows[0];
     const v = row?.recurrence_variant_offset;
-    return { isOccurrence: Boolean(row?.recurrence_occurrence_at), variantOffset: Number.isInteger(v) ? v : null };
+    const occurrenceAt = row?.recurrence_occurrence_at
+      ? (row.recurrence_occurrence_at instanceof Date
+          ? row.recurrence_occurrence_at.toISOString()
+          : new Date(row.recurrence_occurrence_at).toISOString())
+      : null;
+    return {
+      isOccurrence: Boolean(row?.recurrence_occurrence_at),
+      occurrenceAt,
+      variantOffset: Number.isInteger(v) ? v : null,
+    };
   } catch (err) {
-    if (isMissingSchema(err)) return { isOccurrence: false, variantOffset: null };
+    if (isMissingSchema(err)) return { isOccurrence: false, occurrenceAt: null, variantOffset: null };
     throw err;
   }
 }

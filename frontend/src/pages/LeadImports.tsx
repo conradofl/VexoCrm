@@ -664,7 +664,13 @@ export default function LeadImports({
   const [submittingStatus, setSubmittingStatus] = useState<string | null>(null);
 
   // Hooks queries
-  const { data: campaigns = [], isLoading: loadingCampaigns, refetch: refetchCampaigns } = useCampanhas(activeClientId || undefined);
+  const {
+    data: campaigns = [],
+    isLoading: loadingCampaigns,
+    dataUpdatedAt: campaignsUpdatedAt,
+    isFetching: fetchingCampaigns,
+    refetch: refetchCampaigns,
+  } = useCampanhas(activeClientId || undefined);
   const { data: dispatches = [], isLoading: loadingDispatches, refetch: refetchDispatches } = useAllDispatches(activeClientId || null);
   const {
     data: consultants = [],
@@ -2449,6 +2455,9 @@ export default function LeadImports({
           campaigns={campaigns}
           loadingCampaigns={loadingCampaigns}
           dispatches={dispatches}
+          dataUpdatedAt={campaignsUpdatedAt}
+          onRefresh={() => void refetchCampaigns()}
+          isFetching={fetchingCampaigns}
           onEditCampaign={handleEditCampaign}
           onDuplicateCampaign={handleDuplicateCampaign}
           onDeleteCampaign={handleDeleteCampaign}
