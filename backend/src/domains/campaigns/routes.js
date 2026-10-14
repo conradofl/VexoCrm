@@ -25,6 +25,7 @@
 
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
+import { isScheduledDateInPast, BACKEND_SCHEDULE_GRACE_MS } from "../../services/campaignScheduleValidation.js";
 import {
   isEvolutionOpenState,
   checkWhatsappNumbers,
@@ -1252,6 +1253,14 @@ export function registerCampaignsRoutes(app, deps) {
     }
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
+    if (scheduledFor) {
+      if (!scheduledDate || Number.isNaN(scheduledDate.getTime())) {
+        return sendError(res, 400, "INVALID_SCHEDULED_AT", "Data e hora de agendamento inválidas");
+      }
+      if (isScheduledDateInPast(scheduledDate.getTime(), { graceMs: BACKEND_SCHEDULE_GRACE_MS })) {
+        return sendError(res, 400, "SCHEDULED_DATE_IN_PAST", "A data e hora do agendamento não podem ser no passado");
+      }
+    }
     let lifecycleStatus = scheduledFor || wantsRecurring ? "scheduled" : "active";
     if (req.body?.status === "draft") {
       lifecycleStatus = "draft";
@@ -1440,7 +1449,19 @@ export function registerCampaignsRoutes(app, deps) {
       }
     }
     
-    if ("scheduledFor" in req.body) updates.scheduled_for = normalizeString(req.body?.scheduledFor) || null;
+    if ("scheduledFor" in req.body) {
+      const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
+      if (scheduledFor) {
+        const scheduledTime = new Date(scheduledFor).getTime();
+        if (Number.isNaN(scheduledTime)) {
+          return sendError(res, 400, "INVALID_SCHEDULED_AT", "Data e hora de agendamento inválidas");
+        }
+        if (isScheduledDateInPast(scheduledTime, { graceMs: BACKEND_SCHEDULE_GRACE_MS })) {
+          return sendError(res, 400, "SCHEDULED_DATE_IN_PAST", "A data e hora do agendamento não podem ser no passado");
+        }
+      }
+      updates.scheduled_for = scheduledFor;
+    }
     if ("startsAt" in req.body) updates.starts_at = normalizeString(req.body?.startsAt) || null;
     if ("endsAt" in req.body) updates.ends_at = normalizeString(req.body?.endsAt) || null;
     if (req.body?.chatbotPromptType) updates.chatbot_prompt_type = normalizeString(req.body.chatbotPromptType);
@@ -4558,6 +4579,18 @@ export function registerCampaignsRoutes(app, deps) {
     const requestedSteps = Array.isArray(body.steps) ? body.steps : [];
     const triggerType = body.triggerType === "scheduled" ? "scheduled" : "manual";
     const scheduledAt = triggerType === "scheduled" ? (normalizeString(body.scheduledAt) || null) : null;
+    if (triggerType === "scheduled") {
+      if (!scheduledAt) {
+        return sendError(res, 400, "MISSING_SCHEDULED_AT", "Data e hora de agendamento são obrigatórias");
+      }
+      const scheduledTime = new Date(scheduledAt).getTime();
+      if (Number.isNaN(scheduledTime)) {
+        return sendError(res, 400, "INVALID_SCHEDULED_AT", "Data e hora de agendamento inválidas");
+      }
+      if (isScheduledDateInPast(scheduledTime, { graceMs: BACKEND_SCHEDULE_GRACE_MS })) {
+        return sendError(res, 400, "SCHEDULED_DATE_IN_PAST", "A data e hora do agendamento não podem ser no passado");
+      }
+    }
     const parsedEvolutionInstanceId = parseOptionalUuid(body.evolutionInstanceId);
     if (parsedEvolutionInstanceId.error) {
       return sendError(res, 400, "INVALID_EVOLUTION_INSTANCE_ID", parsedEvolutionInstanceId.error);
@@ -4692,7 +4725,19 @@ export function registerCampaignsRoutes(app, deps) {
     const patch = {};
     if (body.name != null) patch.name = normalizeString(body.name) || "Disparo";
     if (body.triggerType != null) patch.trigger_type = body.triggerType === "scheduled" ? "scheduled" : "manual";
-    if (body.scheduledAt != null) patch.scheduled_at = normalizeString(body.scheduledAt) || null;
+    if (body.scheduledAt != null) {
+      const parsedSched = normalizeString(body.scheduledAt) || null;
+      if (parsedSched) {
+        const scheduledTime = new Date(parsedSched).getTime();
+        if (Number.isNaN(scheduledTime)) {
+          return sendError(res, 400, "INVALID_SCHEDULED_AT", "Data e hora de agendamento inválidas");
+        }
+        if (isScheduledDateInPast(scheduledTime, { graceMs: BACKEND_SCHEDULE_GRACE_MS })) {
+          return sendError(res, 400, "SCHEDULED_DATE_IN_PAST", "A data e hora do agendamento não podem ser no passado");
+        }
+      }
+      patch.scheduled_at = parsedSched;
+    }
     if (Object.prototype.hasOwnProperty.call(body, "evolutionInstanceId")) {
       const parsedEvInstanceId = parseOptionalUuid(body.evolutionInstanceId);
       if (parsedEvInstanceId.error) {

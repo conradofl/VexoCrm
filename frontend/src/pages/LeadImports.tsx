@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import type { RecurrenceEndType, RecurrencePattern } from "@/lib/campaignRecurrence";
@@ -77,6 +77,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { API_BASE_URL } from "@/lib/api";
 import {
   campaignLocalDateTimeToUtcIso,
+  campaignUtcIsoToLocalDateTime,
   createCampaignStep,
   detectSpreadsheetColumns,
   getLeadField,
@@ -96,6 +97,7 @@ import {
   type FilterRule,
   type StepActionButton,
 } from "@/lib/leadImports/spreadsheet";
+import { isScheduledDateInPast } from "@/lib/campaignScheduleValidation";
 
 import { LeadSourceStep, type PhoneAuditStats } from "./LeadImports/LeadSourceStep";
 import { classifyPhoneAudit } from "@/lib/leadImports/phoneAudit";
@@ -606,8 +608,28 @@ export default function LeadImports({
   const [multiAgendaEnabled, setMultiAgendaEnabled] = useLocalStorage(`vexo_multiAgenda_${activeClientId}`, false);
   const [newConsultantName, setNewConsultantName] = useLocalStorage(`vexo_consultantName_${activeClientId}`, "");
   const [newConsultantLink, setNewConsultantLink] = useLocalStorage(`vexo_consultantLink_${activeClientId}`, "");
-  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
-  const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
+  const [savedTriggerType, setSavedTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
+  const [savedScheduledAt, setSavedScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
+  const [editTriggerType, setEditTriggerType] = useState<"manual" | "scheduled" | "draft">("manual");
+  const [editScheduledAt, setEditScheduledAt] = useState<string>("");
+
+  const newTriggerType = editingCampaignId ? editTriggerType : savedTriggerType;
+  const setNewTriggerType = useCallback((val: "manual" | "scheduled" | "draft" | ((prev: "manual" | "scheduled" | "draft") => "manual" | "scheduled" | "draft")) => {
+    if (editingCampaignId) {
+      setEditTriggerType(val);
+    } else {
+      setSavedTriggerType(val);
+    }
+  }, [editingCampaignId, setSavedTriggerType]);
+
+  const newScheduledAt = editingCampaignId ? editScheduledAt : savedScheduledAt;
+  const setNewScheduledAt = useCallback((val: string | ((prev: string) => string)) => {
+    if (editingCampaignId) {
+      setEditScheduledAt(val);
+    } else {
+      setSavedScheduledAt(val);
+    }
+  }, [editingCampaignId, setSavedScheduledAt]);
   const [isRecurring, setIsRecurring] = useLocalStorage(`vexo_isRecurring_${activeClientId}`, false);
   const [recurrencePattern, setRecurrencePattern] = useLocalStorage<RecurrencePattern>(`vexo_recurrencePattern_${activeClientId}`, "monthly");
   const [recurrenceDayOfMonth, setRecurrenceDayOfMonth] = useLocalStorage<number>(`vexo_recurrenceDayOfMonth_${activeClientId}`, 15);
@@ -1281,6 +1303,26 @@ export default function LeadImports({
   }
 
   async function handleCreateAndDispatch() {
+    if (newTriggerType === "scheduled") {
+      if (!newScheduledAt) {
+        toast({
+          title: "Data e hora obrigatórias",
+          description: "Informe a data e o horário para o agendamento do disparo.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const scheduledIso = campaignLocalDateTimeToUtcIso(newScheduledAt);
+      if (!scheduledIso || isScheduledDateInPast(scheduledIso, { graceMs: 0 })) {
+        toast({
+          title: "Data de agendamento já passou",
+          description: "A data e a hora do disparo agendado já passaram. Escolha uma data e horário futuros.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const enabledSteps = campaignSequence.filter((s) => s.enabled);
     const validation = validateCampaignSubmission({
       activeClientId,
@@ -1393,6 +1435,8 @@ export default function LeadImports({
     setBatchIntervalHours("1");
     setCampaignName("");
     setEditingCampaignId(null);
+    setEditTriggerType("manual");
+    setEditScheduledAt("");
     setCampaignSequence([createCampaignStep("text", 1)]);
     setNewConsultantName("");
     setNewConsultantLink("");
@@ -1412,6 +1456,26 @@ export default function LeadImports({
   }
 
   async function executeCreateAndDispatch() {
+    if (newTriggerType === "scheduled") {
+      if (!newScheduledAt) {
+        toast({
+          title: "Data e hora obrigatórias",
+          description: "Informe a data e o horário para o agendamento do disparo.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const scheduledIso = campaignLocalDateTimeToUtcIso(newScheduledAt);
+      if (!scheduledIso || isScheduledDateInPast(scheduledIso, { graceMs: 0 })) {
+        toast({
+          title: "Data de agendamento já passou",
+          description: "A data e a hora do disparo agendado já passaram. Escolha uma data e horário futuros.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     if (filteredRows.length === 0) {
       toast({
         title: "Nenhum lead selecionado",
@@ -1990,6 +2054,54 @@ export default function LeadImports({
     setRecurrenceMaxOccurrences(c.recurrence_max_occurrences || 12);
     setRecurrenceNoEndConfirmed(Boolean(c.recurrence_no_end_confirmed_at));
 
+    // Restaura Agendamento e Disparos
+    const applyDispatches = (cDispatches: CampaignDispatch[]) => {
+      const pending = cDispatches.filter(d => d.status === "scheduled" || d.status === "draft");
+      const scheduledList = pending
+        .filter(d => d.status === "scheduled" && d.scheduled_at)
+        .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime());
+
+      if (scheduledList.length > 0) {
+        setEditTriggerType("scheduled");
+        setEditScheduledAt(campaignUtcIsoToLocalDateTime(scheduledList[0].scheduled_at));
+      } else if (pending.some(d => d.status === "draft") || c.status === "draft") {
+        setEditTriggerType("draft");
+        setEditScheduledAt("");
+      } else {
+        setEditTriggerType("manual");
+        setEditScheduledAt("");
+      }
+    };
+
+    const currentDispatches = dispatches.filter(d => d.campaign_id === c.id);
+    if (currentDispatches.length > 0) {
+      applyDispatches(currentDispatches);
+    } else if (c.scheduled_for && c.status === "scheduled") {
+      setEditTriggerType("scheduled");
+      setEditScheduledAt(campaignUtcIsoToLocalDateTime(c.scheduled_for));
+    } else if (c.status === "draft") {
+      setEditTriggerType("draft");
+      setEditScheduledAt("");
+    } else {
+      setEditTriggerType("manual");
+      setEditScheduledAt("");
+    }
+
+    getIdToken().then(token => {
+      fetch(`${API_BASE_URL}/api/campaigns/${c.id}/dispatches`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (Array.isArray(data?.dispatches) && data.dispatches.length > 0) {
+            applyDispatches(data.dispatches);
+          }
+        })
+        .catch(err => {
+          console.warn("[handleEditCampaign] Erro ao buscar disparos da campanha:", err);
+        });
+    }).catch(() => {});
+
     setActiveTab("campanha");
     toast({ title: "Carregado para edição", description: `Edite a campanha "${c.name}" no formulário de Novo Disparo.` });
   };
@@ -2026,6 +2138,8 @@ export default function LeadImports({
     setBancoAudienceCriteria(null);
     setLegacyAudienceWarning(null);
     setEditingCampaignId(null);
+    setEditTriggerType("manual");
+    setEditScheduledAt("");
     setCampaignName(`${c.name || "Campanha"} (cópia)`);
     setCampaignLimitPerRun(String(c.limit_per_run || 50));
     setCampaignSequence(passosCopiados);

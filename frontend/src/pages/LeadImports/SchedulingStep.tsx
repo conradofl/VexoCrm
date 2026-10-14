@@ -611,8 +611,10 @@ export function SchedulingStep({
 
             {newTriggerType === "scheduled" && (
               <div className="space-y-1.5 animate-fadeIn">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Data e Hora do Agendamento</label>
+                <label htmlFor="scheduling-datetime-input" className="text-[10px] font-bold text-slate-500 uppercase">Data e Hora do Agendamento</label>
                 <Input
+                  id="scheduling-datetime-input"
+                  aria-label="Data e Hora do Agendamento"
                   type="datetime-local"
                   value={newScheduledAt}
                   onChange={(e) => setNewScheduledAt(e.target.value)}
