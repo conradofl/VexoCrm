@@ -341,4 +341,116 @@ describe("Agendador Observável de Campanhas (Bloco 1)", () => {
     const heartbeats4 = consoleLogs.filter((l) => l.includes("[campaign-dispatch-scheduler] heartbeat"));
     expect(heartbeats4).toHaveLength(2);
   });
+
+  it("[TESTE OBRIGATÓRIO D] a rota run-due devolve o motivo de cada lote pulado", async () => {
+    const originalToken = process.env.CAMPAIGN_SCHEDULER_TOKEN;
+    process.env.CAMPAIGN_SCHEDULER_TOKEN = "test-secret-token";
+
+    try {
+      let routeHandlers;
+      const dummyApp = {
+        get() {},
+        put() {},
+        patch() {},
+        delete() {},
+        use() {},
+        post(path, ...handlers) {
+          if (path === "/api/campaigns/run-due") {
+            routeHandlers = handlers;
+          }
+        },
+      };
+
+      const tables = {
+        campaign_dispatches: [
+          {
+            id: "disp-skipped-test",
+            campaign_id: "camp-1",
+            client_id: TENANT,
+            name: "Lote Pulado por Janela",
+            steps: [{ id: "s1", type: "text", text: "Olá", order: 1 }],
+            trigger_type: "scheduled",
+            scheduled_at: "2026-10-14T08:00:00.000Z",
+            status: "scheduled",
+            evolution_instance_id: null,
+            limit_per_run: 5,
+            offset: 0,
+            error_message: null,
+          },
+        ],
+        campaigns: [{ id: "camp-1", name: "Campanha 1", client_id: TENANT, mode: "campanha", analytics_meta: {} }],
+      };
+
+      const supabase = fakeSupabase(tables);
+
+      const deps = {
+        ensureDb: () => true,
+        getLeadClientN8nSettings: async () => ({
+          send_window_enabled: true,
+          send_window_start: "03:00",
+          send_window_end: "04:00",
+          send_window_days: ["mon", "tue", "wed", "thu", "fri"],
+          send_window_timezone: "America/Sao_Paulo",
+        }),
+        materializeRecurringOccurrences: async () => ({ materialized: 0 }),
+        runCampaignDispatch: vi.fn(),
+        findConcurrentRunningDispatch: async () => null,
+        runDueCampaignDispatches: async () => ({ processed: 0 }),
+        pgDatabasePool: null,
+        requireAppViewAccess: () => (req, res, next) => next(),
+        requireCampaignDispatchAccess: () => (req, res, next) => next(),
+        requireFirebaseAuth: (req, res, next) => next(),
+        requireInternalPageAccess: () => (req, res, next) => next(),
+        resolveAuthorizedClientId: () => TENANT,
+        normalizeString: (s) => String(s || "").trim(),
+        normalizeTenantKey: (s) => String(s || "").trim(),
+        sendError: (res, status, code, message) => {
+          res.status(status).json({ error: { code, message } });
+        },
+        supabase,
+      };
+
+      registerCampaignsRoutes(dummyApp, deps);
+      expect(routeHandlers).toBeDefined();
+
+      const [authMiddleware, actionHandler] = routeHandlers;
+
+      // 1. Testa autenticação
+      const reqAuthFail = { headers: { authorization: "Bearer wrong-token" }, query: {} };
+      let authStatus = null;
+      const resAuthFail = {
+        status: (code) => {
+          authStatus = code;
+          return resAuthFail;
+        },
+        json: () => {},
+      };
+      authMiddleware(reqAuthFail, resAuthFail, () => {});
+      expect(authStatus).toBe(401);
+
+      // 2. Testa chamada autenticada e retorno de lotes pulados
+      const reqSuccess = {
+        headers: { authorization: "Bearer test-secret-token" },
+        body: { limit: 10 },
+        query: {},
+      };
+      let responseData = null;
+      const resSuccess = {
+        json: (data) => {
+          responseData = data;
+        },
+      };
+
+      await actionHandler(reqSuccess, resSuccess);
+
+      expect(responseData).toBeDefined();
+      expect(responseData.skipped).toHaveLength(1);
+      expect(responseData.skipped[0].id).toBe("disp-skipped-test");
+      expect(responseData.skipped[0].code).toBe("OUTSIDE_SEND_WINDOW");
+      expect(responseData.skipped[0].reason).toContain("Fora da janela de envio: horário local");
+      expect(responseData.independentDispatches.skipped).toHaveLength(1);
+    } finally {
+      process.env.CAMPAIGN_SCHEDULER_TOKEN = originalToken;
+    }
+  });
 });

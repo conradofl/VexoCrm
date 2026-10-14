@@ -2429,7 +2429,12 @@ export function registerCampaignsRoutes(app, deps) {
       const stalledNotifyResult = pgDatabasePool
         ? await syncDailyStalledNotificationsForAllTenants(pgDatabasePool)
         : null;
-      res.json({ campaigns: result, independentDispatches: dispatchResult, stalledNotifications: stalledNotifyResult });
+      res.json({
+        campaigns: result,
+        independentDispatches: dispatchResult,
+        skipped: dispatchResult?.skipped || [],
+        stalledNotifications: stalledNotifyResult,
+      });
     } catch (error) {
       console.error("campaign run-due error:", error);
       sendError(
