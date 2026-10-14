@@ -284,6 +284,7 @@ export default function LeadImports({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [bancoAudience, setBancoAudience] = useState<BancoAudienceInfo | null>(null);
   const [bancoAudienceCriteria, setBancoAudienceCriteria] = useState<CampaignAudienceCriteria | null>(null);
+  const [legacyAudienceWarning, setLegacyAudienceWarning] = useState<string | null>(null);
   const [defaultDdd, setDefaultDdd] = useState<string>("34");
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
   const [rawUploadedRows, setRawUploadedRows] = useState<Record<string, unknown>[]>([]);
@@ -964,6 +965,7 @@ export default function LeadImports({
     }
     setBancoAudience(null);
     setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setSelectedFile(file);
     setParseError(null);
     setParsedRows([]);
@@ -1269,6 +1271,7 @@ export default function LeadImports({
     setSelectedFile(null);
     setBancoAudience(null);
     setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setParsedRows([]);
     setFilterRules([]);
     setParseError(null);
@@ -1382,6 +1385,7 @@ export default function LeadImports({
     setSelectedFile(null);
     setBancoAudience(null);
     setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setParsedRows([]);
     setFilterRules([]);
     setBatchingEnabled(false);
@@ -1826,13 +1830,108 @@ export default function LeadImports({
     const seq = normalizeCampaignSequence(c.analytics_meta);
     const limitPerRun = c.limit_per_run || 50;
 
-    setBancoAudience(null);
     setEditingCampaignId(c.id);
     setCampaignName(c.name || "");
     setCampaignLimitPerRun(String(limitPerRun));
     setCampaignSequence(seq.length > 0 ? seq : [createCampaignStep("text", 1)]);
     setSelectedImportId(c.import_id || ALL_IMPORTS_VALUE);
     setSelectedImportIds(Array.isArray(meta.importIds) ? meta.importIds : (c.import_id ? [c.import_id] : []));
+
+    const crit = meta.audienceCriteria;
+    if (crit && typeof crit === "object") {
+      setLegacyAudienceWarning(null);
+      const stages = Array.isArray(crit.stages) ? crit.stages : [];
+      const tags = Array.isArray(crit.tags) ? crit.tags : [];
+      const rules = Array.isArray(crit.rules) ? crit.rules : [];
+      const recordedCount = typeof crit.totalCount === "number" ? crit.totalCount : null;
+
+      // Estado imediato enquanto busca os leads reais
+      setBancoAudienceCriteria(crit);
+      setBancoAudience({
+        description: crit.description || `Público gravado (${recordedCount ?? "?"} leads)`,
+        count: recordedCount ?? 0,
+      });
+
+      fetchCampaignAudience(leadRequest, {
+        clientId: activeClientId,
+        stages,
+        tags,
+        rules,
+        importId: crit.importId ?? null,
+        importScope: (crit.importScope as any) ?? "all",
+      })
+        .then((res) => {
+          if (res.importNotFound) {
+            toast({
+              variant: "destructive",
+              title: "Planilha não encontrada",
+              description: "A planilha associada a este critério não existe mais ou foi removida.",
+            });
+          }
+          if (res.scopeUnavailable) {
+            toast({
+              variant: "destructive",
+              title: "Recorte indisponível",
+              description: res.reason || "O recorte solicitado não está disponível para esta planilha.",
+            });
+          }
+          if (res.truncated) {
+            toast({
+              title: "Público limitado ao teto",
+              description: `O público foi cortado no teto máximo de ${res.total.toLocaleString("pt-BR")} leads.`,
+            });
+          }
+
+          const excluded = new Set(Array.isArray(crit.excludedLeadIds) ? crit.excludedLeadIds : []);
+          const contacts = (res.items || [])
+            .filter((c) => !excluded.has(c.id))
+            .map((c) => ({
+              id: c.id,
+              telefone: c.phone || c.telefone || "",
+              nome: c.nome || "",
+            }));
+          setParsedRows(contacts);
+
+          const actualCount = contacts.length;
+          let desc = crit.description || `Público vindo do Banco de Dados (${actualCount} leads)`;
+
+          if (recordedCount !== null && recordedCount !== actualCount) {
+            desc = `${desc} — carregados ${actualCount} leads (o público mudou desde a montagem: eram ${recordedCount})`;
+            toast({
+              title: "Público mudou desde a montagem",
+              description: `O público mudou desde a montagem: agora são ${actualCount} leads (eram ${recordedCount}).`,
+            });
+          }
+
+          setBancoAudience({
+            description: desc,
+            count: actualCount,
+          });
+
+          setBancoAudienceCriteria({
+            ...crit,
+            clientId: activeClientId,
+            stages,
+            tags,
+            rules,
+            description: desc,
+            totalCount: actualCount,
+          });
+        })
+        .catch((err) => {
+          console.error("[LeadImports] Erro ao recarregar público da campanha na edição:", err);
+          toast({
+            variant: "destructive",
+            title: "Erro ao recarregar público",
+            description: err?.message || "Não foi possível carregar os leads deste público.",
+          });
+        });
+    } else {
+      setBancoAudience(null);
+      setBancoAudienceCriteria(null);
+      setParsedRows([]);
+      setLegacyAudienceWarning("Esta campanha foi criada antes do registro de público e o público precisa ser remontado.");
+    }
 
     // Restaura Loteamento / Batches
     const hasBatchConfig = Boolean(c.limit_per_run && c.limit_per_run > 0);
@@ -1925,6 +2024,7 @@ export default function LeadImports({
 
     setBancoAudience(null);
     setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setEditingCampaignId(null);
     setCampaignName(`${c.name || "Campanha"} (cópia)`);
     setCampaignLimitPerRun(String(c.limit_per_run || 50));
@@ -2111,9 +2211,11 @@ export default function LeadImports({
               missingColumnWarnings={missingColumnWarnings}
               onToggleIncludeMissing={handleToggleIncludeMissing}
               bancoAudience={bancoAudience}
+              legacyAudienceWarning={legacyAudienceWarning}
               onDiscardBancoAudience={() => {
                 setBancoAudience(null);
                 setBancoAudienceCriteria(null);
+                setLegacyAudienceWarning(null);
                 setParsedRows([]);
                 setFilterRules([]);
               }}
