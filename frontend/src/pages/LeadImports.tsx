@@ -2448,6 +2448,7 @@ export default function LeadImports({
           clientId={activeClientId || null}
           campaigns={campaigns}
           loadingCampaigns={loadingCampaigns}
+          dispatches={dispatches}
           onEditCampaign={handleEditCampaign}
           onDuplicateCampaign={handleDuplicateCampaign}
           onDeleteCampaign={handleDeleteCampaign}
