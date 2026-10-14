@@ -4287,6 +4287,7 @@ export function registerCampaignsRoutes(app, deps) {
         importId: resolveCampaignImportSelection(campaign),
         limit: occurrence.isOccurrence ? null : dispatch.limit_per_run ?? campaign.limit_per_run,
         offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
+        segmentation: dispatch.steps?.[0]?.segmentation || campaign.analytics_meta?.segmentation || null,
         excludeDispatchId: dispatchId,
       });
 

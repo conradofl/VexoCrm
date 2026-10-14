@@ -232,10 +232,18 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     ).values()
   );
 
-  // Defeito A: elegibilidade por disparo. Remove da fila todo lead que JÁ tem registro
-  // neste disparo (qualquer status: claimed/sent/failed/skipped) → já tocado = fora.
-  // Escopo é POR DISPARO (excludeDispatchId), não histórico global do lead.
-  let eligibleLeads = leads;
+  // Definição da janela do lote: quando limit/offset são especificados (campanhas divididas em lotes),
+  // os candidatos deste lote são exatamente a fatia [offset, offset + limit).
+  // Quando não há limite (ex.: ocorrência de campanha recorrente cobrindo o público inteiro), cobre todos.
+  let batchLeads = leads;
+  if (limit && Number.isInteger(limit) && limit > 0) {
+    const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
+    batchLeads = batchLeads.slice(start, start + limit);
+  }
+
+  // Defeito A / Elegibilidade por disparo: remove da fila todo lead que JÁ tem registro
+  // neste disparo (qualquer status: claimed/sent/failed/skipped/invalid_number) → já tocado = fora.
+  // Escopo é POR DISPARO (excludeDispatchId), restrito aos alvos DESTE lote.
   if (excludeDispatchId) {
     const { data: touchedRows, error: touchedError } = await supabase
       .from("campaign_dispatch_runs")
@@ -255,7 +263,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
         .filter(Boolean)
     );
     if (touchedLeadIds.size > 0 || touchedPhones.size > 0) {
-      eligibleLeads = leads.filter((lead) => {
+      return batchLeads.filter((lead) => {
         if (lead.id && touchedLeadIds.has(lead.id)) return false;
         const normPhone = normalizeString(lead.telefone).replace(/\D/g, "");
         if (normPhone && touchedPhones.has(normPhone)) return false;
@@ -264,12 +272,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     }
   }
 
-  if (limit && Number.isInteger(limit) && limit > 0) {
-    const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
-    return eligibleLeads.slice(start, start + limit);
-  }
-
-  return eligibleLeads;
+  return batchLeads;
 }
 
 /**
