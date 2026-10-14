@@ -53,6 +53,7 @@ import {
   type CampaignDispatchOptions,
   type CampaignImageAsset,
   type CampaignSequenceStep,
+  type CampaignAudienceCriteria,
 } from "@/hooks/useCampanhas";
 import { DispatchRecipientsDialog } from "./LeadImports/DispatchRecipientsDialog";
 import { DuplicateDispatchWarningDialog } from "./LeadImports/DuplicateDispatchWarningDialog";
@@ -282,6 +283,7 @@ export default function LeadImports({
   // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [bancoAudience, setBancoAudience] = useState<BancoAudienceInfo | null>(null);
+  const [bancoAudienceCriteria, setBancoAudienceCriteria] = useState<CampaignAudienceCriteria | null>(null);
   const [defaultDdd, setDefaultDdd] = useState<string>("34");
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
   const [rawUploadedRows, setRawUploadedRows] = useState<Record<string, unknown>[]>([]);
@@ -824,6 +826,20 @@ export default function LeadImports({
             : (data.criteria.tag ? [data.criteria.tag] : []);
           const rules = Array.isArray(data.criteria.rules) ? data.criteria.rules : [];
 
+          setBancoAudienceCriteria({
+            ...data.criteria,
+            clientId: activeClientId,
+            stages,
+            tags,
+            rules,
+            importId: data.criteria.importId ?? null,
+            importScope: data.criteria.importScope ?? "all",
+            description: data.description || null,
+            totalCount: typeof data.totalCount === "number" ? data.totalCount : null,
+            savedAt: new Date().toISOString(),
+            ...(Array.isArray(data.excludedLeadIds) && data.excludedLeadIds.length > 0 ? { excludedLeadIds: data.excludedLeadIds } : {}),
+          });
+
           fetchCampaignAudience(leadRequest, {
             clientId: activeClientId,
             stages,
@@ -881,6 +897,19 @@ export default function LeadImports({
                 count: actualCount,
               });
 
+              setBancoAudienceCriteria({
+                clientId: activeClientId,
+                stages,
+                tags,
+                rules,
+                importId: data.criteria.importId ?? null,
+                importScope: data.criteria.importScope ?? "all",
+                description: desc,
+                totalCount: actualCount,
+                savedAt: new Date().toISOString(),
+                ...(Array.isArray(data.excludedLeadIds) && data.excludedLeadIds.length > 0 ? { excludedLeadIds: data.excludedLeadIds } : {}),
+              });
+
               toast({
                 title: "Público-Alvo Carregado! 🎯",
                 description: desc,
@@ -934,6 +963,7 @@ export default function LeadImports({
       return;
     }
     setBancoAudience(null);
+    setBancoAudienceCriteria(null);
     setSelectedFile(file);
     setParseError(null);
     setParsedRows([]);
@@ -1238,6 +1268,7 @@ export default function LeadImports({
     setSelectedImportId(ALL_IMPORTS_VALUE);
     setSelectedFile(null);
     setBancoAudience(null);
+    setBancoAudienceCriteria(null);
     setParsedRows([]);
     setFilterRules([]);
     setParseError(null);
@@ -1349,6 +1380,8 @@ export default function LeadImports({
 
   function resetFormAfterSave() {
     setSelectedFile(null);
+    setBancoAudience(null);
+    setBancoAudienceCriteria(null);
     setParsedRows([]);
     setFilterRules([]);
     setBatchingEnabled(false);
@@ -1480,6 +1513,14 @@ export default function LeadImports({
             }
           : {}),
         analyticsMeta: {
+          audienceCriteria: (bancoAudience && bancoAudienceCriteria)
+            ? {
+                ...bancoAudienceCriteria,
+                description: bancoAudience.description || bancoAudienceCriteria.description || null,
+                totalCount: typeof bancoAudience.count === "number" ? bancoAudience.count : (bancoAudienceCriteria.totalCount ?? null),
+                savedAt: bancoAudienceCriteria.savedAt || new Date().toISOString(),
+              }
+            : null,
           // Segmentação unificada: as regras dinâmicas (coluna/operador/valor) viram o
           // filtro de disparo. Mesmo shape do catálogo da empresa e do matcher do backend.
           segmentation: buildSegmentationFromRules(filterRules),
@@ -1883,6 +1924,7 @@ export default function LeadImports({
     }));
 
     setBancoAudience(null);
+    setBancoAudienceCriteria(null);
     setEditingCampaignId(null);
     setCampaignName(`${c.name || "Campanha"} (cópia)`);
     setCampaignLimitPerRun(String(c.limit_per_run || 50));
@@ -2071,6 +2113,7 @@ export default function LeadImports({
               bancoAudience={bancoAudience}
               onDiscardBancoAudience={() => {
                 setBancoAudience(null);
+                setBancoAudienceCriteria(null);
                 setParsedRows([]);
                 setFilterRules([]);
               }}

@@ -76,6 +76,20 @@ export interface CampaignDispatch {
   updated_at: string;
 }
 
+export interface CampaignAudienceCriteria {
+  clientId?: string;
+  stages?: string[];
+  tags?: string[];
+  rules?: any[];
+  importId?: string | null;
+  importScope?: string;
+  description?: string;
+  totalCount?: number;
+  savedAt?: string;
+  excludedLeadIds?: string[];
+  [key: string]: unknown;
+}
+
 export interface CampaignAnalyticsMeta {
   /** Varias planilhas importadas como origem do disparo. */
   importIds?: string[];
@@ -84,6 +98,8 @@ export interface CampaignAnalyticsMeta {
   image?: CampaignImageAsset | null;
   sequence?: CampaignSequenceStep[];
   dispatchOptions?: CampaignDispatchOptions;
+  audienceCriteria?: CampaignAudienceCriteria | null;
+  [key: string]: unknown;
 }
 
 export interface CampaignImageAsset {
