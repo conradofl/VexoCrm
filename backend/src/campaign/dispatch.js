@@ -1337,6 +1337,45 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
   };
 }
 
+/**
+ * Trava por CICLO para impedir que o passo 1 seja repetido para um lead que já
+ * está com a régua em andamento (waitForReply / aguardando_usuario) no mesmo ciclo:
+ * - Para lote avulso: o lead não repete o passo 1 dentro da MESMA sequência em andamento.
+ * - Para ocorrência recorrente: cada ocorrência é um ciclo NOVO; progresso de ocorrência anterior NÃO bloqueia.
+ */
+export function isLeadBlockedByActiveCycleProgress({ progress, occurrence, campaignId, dispatchId }) {
+  if (!progress || typeof progress !== "object") return false;
+  if (progress.campaignId && campaignId && progress.campaignId !== campaignId) return false;
+
+  const isPendingOrWaiting =
+    progress.waitForReply === true &&
+    (progress.status === "aguardando_usuario" || progress.status === "pendente");
+
+  if (!isPendingOrWaiting) return false;
+
+  // Campanha recorrente: cada ocorrência é um ciclo NOVO
+  if (occurrence?.isOccurrence) {
+    const currentOccurrenceAt = occurrence.occurrenceAt
+      ? toComparableCampaignTimestamp(occurrence.occurrenceAt)
+      : null;
+    const progressOccurrenceAt = progress.occurrenceAt
+      ? toComparableCampaignTimestamp(progress.occurrenceAt)
+      : null;
+
+    // Se o progresso é de uma ocorrência anterior (ou sem occurrenceAt registrado):
+    // é um ciclo NOVO, o progresso anterior NÃO bloqueia!
+    if (!progressOccurrenceAt || !currentOccurrenceAt || progressOccurrenceAt !== currentOccurrenceAt) {
+      return false;
+    }
+    // Mesma ocorrência já em andamento: bloqueia repetição do passo 1 no mesmo ciclo
+    return true;
+  }
+
+  // Lote avulso (não recorrente):
+  // O lead não repete o passo 1 dentro da MESMA sequência em andamento
+  return true;
+}
+
 export async function markCampaignLeadWaitingReply({
   clientId,
   lead,
@@ -1349,6 +1388,8 @@ export async function markCampaignLeadWaitingReply({
   nextStepIndex = undefined,
   status = undefined,
   userRepliedAt = undefined,
+  dispatchId = undefined,
+  occurrenceAt = undefined,
 }) {
   if (!supabase || !clientId || !phone) return;
 
@@ -1378,6 +1419,8 @@ export async function markCampaignLeadWaitingReply({
       updatedAt: dispatchedAt,
       completedAt: normalizedStatus === "finalizado" ? dispatchedAt : null,
       lastReplyAt: userRepliedAt || null,
+      dispatchId: dispatchId || null,
+      occurrenceAt: occurrenceAt || null,
     }
     : null;
 

@@ -40,6 +40,10 @@ import {
 } from "../../campaign-outbound.js";
 import { markCampaignLeadWaitingReply } from "../../campaign/dispatch.js";
 import {
+  extractCampaignProgress,
+  isLeadBlockedByActiveCycleProgress,
+} from "../../campaign/dispatch.js";
+import {
   generateCampaignCopySuggestion,
   generateCampaignTemplateVariants,
   getGroqCampaignAiStatus,
@@ -2551,7 +2555,25 @@ export function registerCampaignsRoutes(app, deps) {
       excludeDispatchId: dispatchId,
     });
 
-    if (leads.length === 0) {
+    // Trava por ciclo: o lead não repete o passo 1 dentro da MESMA sequência em andamento.
+    // Para ocorrência recorrente: cada ocorrência é um ciclo NOVO; progresso de ocorrência anterior não bloqueia.
+    const cycleLeads = [];
+    for (const l of leads) {
+      const progress = extractCampaignProgress(l.normalized_data || {}, campaign.id);
+      if (isLeadBlockedByActiveCycleProgress({ progress, occurrence, campaignId: campaign.id, dispatchId })) {
+        console.log("[campaign-dispatch] lead pulado: sequencia ja em andamento neste ciclo", {
+          dispatchId,
+          campaignId: campaign.id,
+          leadId: l.id,
+          phone: maskPhoneForLog(l.telefone),
+          status: progress.status,
+        });
+        continue;
+      }
+      cycleLeads.push(l);
+    }
+
+    if (cycleLeads.length === 0) {
       let totalSent = 0;
       let totalFailed = 0;
       let totalInvalid = 0;
@@ -2599,10 +2621,10 @@ export function registerCampaignsRoutes(app, deps) {
     }
 
     // ── Item 2: Validação prévia de números via Evolution API com cache ─────────
-    let validLeads = leads;
-    if (leads.length > 0) {
+    let validLeads = cycleLeads;
+    if (cycleLeads.length > 0) {
       try {
-        const candidatePhones = leads
+        const candidatePhones = cycleLeads
           .map((l) => normalizeString(l.telefone).replace(/\D/g, ""))
           .filter(Boolean);
 
@@ -2616,7 +2638,7 @@ export function registerCampaignsRoutes(app, deps) {
         const invalidLeads = [];
         validLeads = [];
 
-        for (const l of leads) {
+        for (const l of cycleLeads) {
           const cleanPhone = normalizeString(l.telefone).replace(/\D/g, "");
           const validation = cleanPhone ? validationMap.get(cleanPhone) : null;
 
@@ -3248,6 +3270,8 @@ export function registerCampaignsRoutes(app, deps) {
             dispatchedAt: sentAt || new Date().toISOString(),
             nextStepIndex: primeiroPassoAposResposta,
             status: "aguardando_usuario",
+            dispatchId,
+            occurrenceAt: occurrence?.occurrenceAt || null,
           }).catch((err) => {
             console.warn("[campaign-dispatch] falha ao gravar progresso de espera", {
               dispatchId,
