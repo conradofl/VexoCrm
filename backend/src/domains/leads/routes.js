@@ -1454,11 +1454,22 @@ export function registerLeadsRoutes(app, deps) {
       sendError(res, 400, "INVALID_IMPORT_ID", "importId inválido");
       return;
     }
+    if (req.body?.tags !== undefined && !Array.isArray(req.body?.tags)) {
+      sendError(res, 400, "INVALID_TAGS", "tags deve ser um array.");
+      return;
+    }
+    const rawTags = Array.isArray(req.body?.tags) ? req.body.tags : [];
+    if (rawTags.some((t) => typeof t !== "string")) {
+      sendError(res, 400, "INVALID_TAGS", "tags deve ser um array de strings.");
+      return;
+    }
+    const tags = rawTags.map((t) => t.trim()).filter(Boolean);
     try {
       const result = await queryCampaignAudience(pgDatabasePool, {
         scope: resolveLeadListScope(req, clientId),
         stages: Array.isArray(req.body?.stages) ? req.body.stages.map(String) : [],
         tag: normalizeString(req.body?.tag) || "",
+        tags,
         rules,
         importId,
         importScope,

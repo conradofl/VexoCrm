@@ -543,14 +543,30 @@ export async function queryImportOrigin(pool, { scope, importId }) {
  * O público do assistente de campanha: estágios (igualdade EXATA, como sempre), tag, regras e — novo — uma PLANILHA registrada (importId) com o
  * recorte `importScope` ("all" padrão, "born", "existed"). Linhas enxutas + o total.
  */
-export async function queryCampaignAudience(pool, { scope, stages = [], tag = "", rules = [], importId = null, importScope = "all" }) {
+export async function queryCampaignAudience(pool, { scope, stages = [], tag = "", tags = [], rules = [], importId = null, importScope = "all" }) {
   await useCollation(pool);
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const where = [];
   const wanted = (Array.isArray(stages) ? stages : []).filter(Boolean);
   if (wanted.length > 0 && !wanted.includes("all")) where.push(`e.stage = ANY(${p.add(wanted)}::text[])`);
-  if (tag) where.push(`e.tags @> ARRAY[${p.add(tag)}]::text[]`);
+
+  const rawTags = Array.isArray(tags) ? tags : [];
+  const seenTags = new Set();
+  const lista = [];
+  for (const t of rawTags) {
+    const s = typeof t === "string" ? t.trim() : String(t || "").trim();
+    if (s && !seenTags.has(s)) {
+      seenTags.add(s);
+      lista.push(s);
+    }
+  }
+
+  if (lista.length > 0) {
+    where.push(`e.tags && ${p.add(lista)}::text[]`);
+  } else if (tag && String(tag).trim()) {
+    where.push(`e.tags @> ARRAY[${p.add(String(tag).trim())}]::text[]`);
+  }
   if (importId) {
     const imp = await loadImportRow(pool, scope.clientId, importId);
     if (!imp) return { items: [], total: 0, truncated: false, importNotFound: true };

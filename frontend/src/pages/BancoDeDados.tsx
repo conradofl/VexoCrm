@@ -103,6 +103,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
 import { TagSelect } from "@/components/leads/TagSelect";
+import { TagMultiSelect } from "@/components/leads/TagMultiSelect";
 import { SecondNumberPanel, type SecondNumberSelection } from "@/components/leads/SecondNumberPanel";
 import { MARKETING_CHANNELS, computeMarketingMetricsFromCounts, getLeadSource } from "@/lib/leadChannels";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
@@ -195,21 +196,35 @@ export function toggleStageFilter(current: string[], stageToToggle: string): str
   return next;
 }
 
-export function buildCampaignTitle(stageFilters: string[], tagFilter?: string, count: number = 0, importLabel?: string): string {
+export function buildCampaignTitle(
+  stageFilters: string[],
+  tagFilter?: string | string[],
+  count: number = 0,
+  importLabel?: string
+): string {
   const isAllStages = stageFilters.length === 0 || stageFilters.includes("all");
   const stageLabel = isAllStages
     ? "TODOS OS ESTÁGIOS"
     : stageFilters.map((s) => s.toUpperCase()).join("+");
 
+  const tags = Array.isArray(tagFilter)
+    ? tagFilter.map((t) => t.trim()).filter(Boolean)
+    : (tagFilter && tagFilter.trim() ? [tagFilter.trim()] : []);
+
   let descriptor = stageLabel;
-  if (tagFilter && tagFilter.trim()) {
+  if (tags.length === 1) {
     descriptor = isAllStages
-      ? `Tag: ${tagFilter.trim()}`
-      : `${stageLabel} | Tag: ${tagFilter.trim()}`;
+      ? `Tag: ${tags[0]}`
+      : `${stageLabel} | Tag: ${tags[0]}`;
+  } else if (tags.length > 1) {
+    const tagsLabel = tags.length <= 3 ? tags.join(", ") : `${tags.length} tags`;
+    descriptor = isAllStages
+      ? `Tags: ${tagsLabel}`
+      : `${stageLabel} | Tags: ${tagsLabel}`;
   }
 
   if (importLabel && importLabel.trim()) {
-    descriptor = isAllStages && !(tagFilter && tagFilter.trim()) ? `Planilha: ${importLabel.trim()}` : `${descriptor} | Planilha: ${importLabel.trim()}`;
+    descriptor = isAllStages && tags.length === 0 ? `Planilha: ${importLabel.trim()}` : `${descriptor} | Planilha: ${importLabel.trim()}`;
   }
 
   return `Campanha Funil [${descriptor}] (${count} leads)`;
@@ -225,16 +240,48 @@ export function calculateEffectiveSelectedCount(
 
 export function serializeCampaignFiltersKey(
   stageFilters: string[],
-  tagFilter?: string,
+  tagFilter?: string | string[],
   filterRules?: any[],
   importFilter?: { importId: string; scope: string } | null
 ): string {
+  const normalizedTags = Array.isArray(tagFilter)
+    ? [...tagFilter].map((t) => String(t || "").trim()).filter(Boolean).sort()
+    : (tagFilter && String(tagFilter).trim() ? [String(tagFilter).trim()] : []);
+
   return JSON.stringify({
     ...(importFilter ? { import: importFilter } : {}),
     stages: stageFilters,
-    tag: tagFilter || "",
+    tags: normalizedTags,
+    tag: normalizedTags.length === 1 ? normalizedTags[0] : (normalizedTags.length === 0 ? "" : normalizedTags.join(",")),
     rules: filterRules || [],
   });
+}
+
+export function buildCampaignCriteria({
+  clientId,
+  stageFilters,
+  tagFilters,
+  filterRules = [],
+  importId,
+  importScope = "all",
+}: {
+  clientId: string;
+  stageFilters: string[];
+  tagFilters: string[];
+  filterRules?: DynamicFilterRule[];
+  importId?: string;
+  importScope?: string;
+}): Record<string, any> {
+  const stageCriteria = stageFilters.includes("all") ? [] : stageFilters;
+  const tagCriteria = tagFilters.length > 0 ? tagFilters : [];
+  return {
+    clientId,
+    stages: stageCriteria,
+    tags: tagCriteria,
+    rules: filterRules,
+    importId: importId || undefined,
+    importScope: importScope || "all",
+  };
 }
 
 export function reconcileCampaignSelection(params: {
@@ -709,7 +756,7 @@ export default function BancoDeDados() {
   
   // Funnel Audience Selection State
   const [campaignStageFilters, setCampaignStageFilters] = useState<string[]>(["all"]);
-  const [campaignTagFilter, setCampaignTagFilter] = useState<string>("");
+  const [campaignTagFilters, setCampaignTagFilters] = useState<string[]>([]);
   const [campaignSelectedLeadIds, setCampaignSelectedLeadIds] = useState<string[]>([]);
   const [campaignFunnelFilterRules, setCampaignFunnelFilterRules] = useState<DynamicFilterRule[]>([]);
   // Campanha por PLANILHA registrada (lead_imports), não por rótulo: o público sai de dados.import_ids (procedência verdadeira)
@@ -1578,7 +1625,8 @@ export default function BancoDeDados() {
     setIsCampaignWizardOpen(true);
     setCampaignSourceType("funnel");
     const initialTag = selectedTag || "";
-    setCampaignTagFilter(initialTag);
+    const initialTags = initialTag ? [initialTag] : [];
+    setCampaignTagFilters(initialTags);
     const initialStages = activeTab && activeTab !== "all" ? [activeTab] : ["all"];
     setCampaignStageFilters(initialStages);
     const initialImportId = selectedImportId || "";
@@ -1587,7 +1635,7 @@ export default function BancoDeDados() {
     const initialImportFilter = initialImportId ? { importId: initialImportId, scope: "all" } : null;
     prevFiltersKeyRef.current = serializeCampaignFiltersKey(
       initialStages,
-      initialTag,
+      initialTags,
       campaignFunnelFilterRules,
       initialImportFilter
     );
@@ -1750,7 +1798,7 @@ export default function BancoDeDados() {
   // Público da campanha: o servidor filtra no banco (estágios, tag e regras de campos simples) e devolve linhas enxutas + o total.
   // Regra num campo que não é simples (tags, dados…) é recusada pelo servidor e a tela MOSTRA o motivo, em vez de um "0 leads".
   const campaignImportFilter = campaignImportId ? { importId: campaignImportId, scope: campaignImportScope } : null;
-  const campaignFiltersKey = serializeCampaignFiltersKey(campaignStageFilters, campaignTagFilter, campaignFunnelFilterRules, campaignImportFilter);
+  const campaignFiltersKey = serializeCampaignFiltersKey(campaignStageFilters, campaignTagFilters, campaignFunnelFilterRules, campaignImportFilter);
 
   // As planilhas registradas para o seletor (rota do Banco: não depende de acesso à tela de Planilhas)
   useEffect(() => {
@@ -1788,7 +1836,8 @@ export default function BancoDeDados() {
         const res = await fetchCampaignAudience(leadRequest, {
           clientId,
           stages: campaignStageFilters,
-          tag: campaignTagFilter,
+          tags: campaignTagFilters,
+          tag: campaignTagFilters.length === 1 ? campaignTagFilters[0] : "",
           rules: campaignFunnelFilterRules as any,
           importId: campaignImportId || null,
           importScope: campaignImportScope,
@@ -1879,21 +1928,20 @@ export default function BancoDeDados() {
 
       campaignTitleName = buildCampaignTitle(
         campaignStageFilters,
-        campaignTagFilter,
+        campaignTagFilters,
         effectiveTotalCount,
         campaignImportOrigin?.sourceName
       );
 
       // Bloco 3: "Criar campanha" passa o OBJETO DE CRITÉRIOS do filtro (< 500 bytes), nunca a lista bruta (> 15 MB)
-      const stageCriteria = campaignStageFilters.includes("all") ? [] : campaignStageFilters;
-      const tagCriteria = campaignTagFilter ? [campaignTagFilter] : [];
-      const criteria: Record<string, any> = {
+      const criteria = buildCampaignCriteria({
         clientId,
-        stages: stageCriteria,
-        tags: tagCriteria,
-        importId: campaignImportId || undefined,
-        importScope: campaignImportScope || "all",
-      };
+        stageFilters: campaignStageFilters,
+        tagFilters: campaignTagFilters,
+        filterRules: campaignFunnelFilterRules,
+        importId: campaignImportId,
+        importScope: campaignImportScope,
+      });
       const sheetName = campaignImportOrigin?.sourceName || pastImports.find((i) => i.id === campaignImportId)?.source_name;
       const description = selectionSummary || buildFilterAudienceDescription(criteria, effectiveTotalCount, {
         sheetName,
@@ -1938,12 +1986,19 @@ export default function BancoDeDados() {
     }
 
     if (campaignSourceType !== "funnel") {
+      const formatTagsDesc = (tags: string[]) => {
+        if (tags.length === 0) return "";
+        if (tags.length === 1) return `filtrados por tag "${tags[0]}"`;
+        if (tags.length <= 3) return `filtrados pelas tags ${tags.map((t) => `"${t}"`).join(", ")}`;
+        return `filtrados por ${tags.length} tags`;
+      };
+      const tagDesc = formatTagsDesc(campaignTagFilters);
       const buildPending = (rows: Record<string, any>[]) =>
         JSON.stringify({
           campaignName: campaignTitleName,
           rows,
-          sourceDescription: campaignTagFilter
-            ? `${rows.length} contatos vindos do Banco de Dados, filtrados por tag "${campaignTagFilter}"`
+          sourceDescription: tagDesc
+            ? `${rows.length} contatos vindos do Banco de Dados, ${tagDesc}`
             : `${rows.length} contatos vindos do Banco de Dados`,
         });
       try {
@@ -2824,7 +2879,7 @@ export default function BancoDeDados() {
       setCampaignSelectedLeadIds(found.ids);
       prevFiltersKeyRef.current = serializeCampaignFiltersKey(
         campaignStageFilters,
-        campaignTagFilter,
+        campaignTagFilters,
         campaignFunnelFilterRules
       );
       setIsCampaignWizardOpen(true);
@@ -5286,14 +5341,14 @@ export default function BancoDeDados() {
                     </DropdownMenu>
                   </div>
 
-                  <div>
-                    <label className="text-xs font-semibold text-foreground">Filtrar por Tag</label>
-                    <TagSelect
-                      value={campaignTagFilter}
-                      onChange={setCampaignTagFilter}
+                  <div className="sm:col-span-2">
+                    <TagMultiSelect
+                      selectedTags={campaignTagFilters}
+                      onChange={setCampaignTagFilters}
                       tags={availableTagItems}
                       data-testid="campaign-tag-select"
-                      className="w-full h-9 px-3 mt-1 rounded-md border border-input bg-background text-xs"
+                      label="Filtrar por Tags"
+                      helperText="Entram os leads que tiverem QUALQUER UMA das tags marcadas."
                     />
                   </div>
 

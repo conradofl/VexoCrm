@@ -315,7 +315,15 @@ export async function fetchLeadIds(
 
 export async function fetchCampaignAudience(
   request: LeadRequest,
-  args: { clientId: string; stages: string[]; tag: string; rules: AudienceRule[]; importId?: string | null; importScope?: ImportScope }
+  args: {
+    clientId: string;
+    stages: string[];
+    tag?: string;
+    tags?: string[];
+    rules: AudienceRule[];
+    importId?: string | null;
+    importScope?: ImportScope;
+  }
 ): Promise<AudienceResponse> {
   const res = await request("/api/leads/audience", {
     method: "POST",
@@ -323,7 +331,8 @@ export async function fetchCampaignAudience(
     body: JSON.stringify({
       clientId: args.clientId,
       stages: args.stages,
-      tag: args.tag,
+      tag: args.tag ?? "",
+      ...(args.tags !== undefined ? { tags: args.tags } : {}),
       rules: args.rules,
       ...(args.importId ? { importId: args.importId, importScope: args.importScope ?? "all" } : {}),
     }),

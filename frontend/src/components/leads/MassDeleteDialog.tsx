@@ -27,6 +27,7 @@ import {
   type MassDeleteOptions,
   type MassDeleteReport,
 } from "@/lib/leadMassDelete";
+import { TagMultiSelect } from "@/components/leads/TagMultiSelect";
 
 interface MassDeleteDialogProps {
   open: boolean;
@@ -47,7 +48,6 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: MassDeleteDialogProps) {
   const [selectedTags, setSelectedTags] = useState<string[]>(initialTag ? [initialTag] : []);
-  const [tagSearch, setTagSearch] = useState("");
   const [options, setOptions] = useState<MassDeleteOptions>(DEFAULT_MASS_DELETE_OPTIONS);
   const [typed, setTyped] = useState("");
   const [report, setReport] = useState<MassDeleteReport | null>(null);
@@ -59,7 +59,6 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
   useEffect(() => {
     if (!open) return;
     setSelectedTags(initialTag ? [initialTag] : []);
-    setTagSearch("");
     setOptions(DEFAULT_MASS_DELETE_OPTIONS);
     setTyped("");
     setReport(null);
@@ -90,13 +89,6 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
     setMismatch(null);
     setError(null);
     setExportedCount(null);
-  };
-
-  const toggleTag = (t: string) => {
-    setSelectedTags((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
-    );
-    resetReview();
   };
 
   const handleExport = async () => {
@@ -137,9 +129,6 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
   };
 
   const availableTagsList = tags.data ?? [];
-  const filteredTags = availableTagsList.filter((t) =>
-    t.tag.toLowerCase().includes(tagSearch.toLowerCase().trim())
-  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -167,117 +156,12 @@ export function MassDeleteDialog({ open, onOpenChange, clientId, initialTag }: M
           ) : (
             <div className="space-y-4">
               {/* Seletor com busca e seleção múltipla de tags */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-foreground">
-                    Tags selecionadas ({selectedTags.length})
-                  </label>
-                  {selectedTags.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedTags([]);
-                        resetReview();
-                      }}
-                      className="text-[11px] text-muted-foreground hover:text-foreground underline"
-                    >
-                      Limpar seleção
-                    </button>
-                  )}
-                </div>
-
-                {/* Badges das tags selecionadas */}
-                {selectedTags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 p-2 bg-muted/40 rounded-md border text-xs max-h-20 overflow-y-auto">
-                    {selectedTags.map((t) => (
-                      <span
-                        key={t}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium text-xs"
-                      >
-                        {t}
-                        <button
-                          type="button"
-                          onClick={() => toggleTag(t)}
-                          className="hover:text-rose-500 rounded-full"
-                          aria-label={`Remover tag ${t}`}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Campo de busca para filtrar as tags */}
-                <Input
-                  placeholder="Buscar tags..."
-                  value={tagSearch}
-                  onChange={(e) => setTagSearch(e.target.value)}
-                  className="h-8 text-xs"
-                  aria-label="Buscar tags"
-                />
-
-                {/* Lista rolável de tags com checkboxes */}
-                <div
-                  className="max-h-28 overflow-y-auto rounded-md border bg-background p-1 space-y-0.5 text-xs"
-                  role="group"
-                  aria-label="Lista de tags disponíveis"
-                >
-                {filteredTags.length === 0 ? (
-                  <p className="p-2 text-center text-muted-foreground text-xs">
-                    {tagSearch ? "Nenhuma tag encontrada para esta busca." : "Nenhuma tag disponível."}
-                  </p>
-                ) : (
-                  filteredTags.map((t) => {
-                    const isSelected = selectedTags.includes(t.tag);
-                    return (
-                      <button
-                        type="button"
-                        key={t.tag}
-                        onClick={() => toggleTag(t.tag)}
-                        className={`w-full flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors text-left ${
-                          isSelected ? "bg-primary/10 font-medium" : "hover:bg-muted/60"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${
-                              isSelected
-                                ? "bg-primary border-primary text-primary-foreground font-bold"
-                                : "border-input bg-background"
-                            }`}
-                          >
-                            {isSelected ? "✓" : ""}
-                          </span>
-                          <span>{t.tag}</span>
-                        </div>
-                        <span className="text-[11px] text-muted-foreground">({t.leads} leads)</span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Select oculto para compatibilidade com testes automatizados */}
-              <select
-                aria-label="Tag"
-                value={selectedTags[0] ?? ""}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedTags(val ? [val] : []);
-                  resetReview();
-                }}
-                className="sr-only"
-                tabIndex={-1}
-              >
-                <option value="">Escolha uma tag…</option>
-                {availableTagsList.map((t) => (
-                  <option key={t.tag} value={t.tag}>
-                    {t.tag} ({t.leads})
-                  </option>
-                ))}
-              </select>
-            </div>
+              <TagMultiSelect
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+                onTagChange={resetReview}
+                tags={availableTagsList}
+              />
 
             {preview.isFetching && <p className="text-xs text-muted-foreground">Calculando…</p>}
             {preview.error && (
