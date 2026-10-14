@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Copy, Pencil, Trash2, ChevronDown, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,8 +7,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
-import { CAMPAIGN_STATUS_LABELS, type Campaign } from "@/hooks/useCampanhas";
-import { formatRecurrenceBadge, recurrenceStatusText } from "@/lib/campaignRecurrence";
+import { CAMPAIGN_STATUS_LABELS, type Campaign, type CampaignDispatch } from "@/hooks/useCampanhas";
+import { formatRecurrenceBadge, recurrenceStatusText, getCampaignNextRunLabel } from "@/lib/campaignRecurrence";
 import { ListFilterBar } from "@/components/ListFilterBar";
 import { useListFilter } from "@/hooks/useListFilter";
 import { CAMPAIGNS_FILTER } from "@/lib/leadImportsListFilters";
@@ -21,19 +21,24 @@ import { LastUpdatedIndicator } from "@/components/LastUpdatedIndicator";
 
 
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
-export const CAMPAIGN_FIELDS: RecordField<Campaign>[] = [
-  { key: "name", label: "Campanha", render: (c) => c.name },
-  { key: "state", label: "Estado", render: (c) => CAMPAIGN_STATUS_LABELS[c.status] ?? c.status ?? "Rascunho" },
-  { key: "mode", label: "Modo", render: (c) => (c.mode === "agente" ? "Agente IA" : "Disparo Direto") },
-  { key: "leads", label: "Leads", render: (c) => `${c.limit_per_run} leads por lote` },
-  { key: "date", label: "Criada em", render: (c) => formatDateTime(c.created_at) },
-];
-const campaignField = (key: string) => CAMPAIGN_FIELDS.find((f) => f.key === key)!;
+export function buildCampaignFields(dispatches?: CampaignDispatch[]): RecordField<Campaign>[] {
+  return [
+    { key: "name", label: "Campanha", render: (c) => c.name },
+    { key: "state", label: "Estado", render: (c) => CAMPAIGN_STATUS_LABELS[c.status] ?? c.status ?? "Rascunho" },
+    { key: "mode", label: "Modo", render: (c) => (c.mode === "agente" ? "Agente IA" : "Disparo Direto") },
+    { key: "leads", label: "Leads", render: (c) => `${c.limit_per_run} leads por lote` },
+    { key: "date", label: "Criada em", render: (c) => formatDateTime(c.created_at) },
+    { key: "next_dispatch", label: "Próximo disparo", render: (c) => getCampaignNextRunLabel(c, dispatches) },
+  ];
+}
+
+export const CAMPAIGN_FIELDS: RecordField<Campaign>[] = buildCampaignFields();
 
 interface CampaignsTableProps {
   clientId: string | null;
   campaigns: Campaign[];
   loadingCampaigns: boolean;
+  dispatches?: CampaignDispatch[];
   dataUpdatedAt?: number;
   onRefresh?: () => void;
   isFetching?: boolean;
@@ -42,10 +47,13 @@ interface CampaignsTableProps {
   onDeleteCampaign: (campaign: Campaign) => void;
 }
 
+const NO_DISPATCHES: CampaignDispatch[] = [];
+
 export function CampaignsTable({
   clientId,
   campaigns,
   loadingCampaigns,
+  dispatches: dispatchesProp,
   dataUpdatedAt,
   onRefresh,
   isFetching,
@@ -56,6 +64,11 @@ export function CampaignsTable({
   const view = useViewMode("campanhas");
   const [historyCampaign, setHistoryCampaign] = useState<Campaign | null>(null);
   const { filtered: filteredCampaigns, controls: filterControls } = useListFilter(campaigns, CAMPAIGNS_FILTER);
+  // Os lotes vêm SÓ pela prop (LeadImports já os tem). Buscar aqui dentro com useAllDispatches puxava useAuth para
+  // a tabela e quebrava quem a renderiza sem o provedor de autenticação (listFilterTabs).
+  const effectiveDispatches = dispatchesProp ?? NO_DISPATCHES;
+  const fields = useMemo(() => buildCampaignFields(effectiveDispatches), [effectiveDispatches]);
+  const campaignField = (key: string) => fields.find((f) => f.key === key)!;
 
   const renderDetails = (c: Campaign) => (
     <>
@@ -245,7 +258,7 @@ export function CampaignsTable({
             )}
           </div>
 
-          {/* Linha 3: quantos leads à esquerda e data à direita */}
+          {/* Linha 3: quantos leads à esquerda e data / próximo disparo à direita */}
           <div
             data-testid={`campaign-line-3-${c.id}`}
             className="flex items-center justify-between gap-2 text-xs pt-1 border-t border-border/40 min-w-0"
@@ -257,13 +270,23 @@ export function CampaignsTable({
             >
               {campaignField("leads").render(c)}
             </span>
-            <span
-              data-field="date"
-              data-testid={`campaign-date-${c.id}`}
-              className="text-[11px] text-muted-foreground shrink-0"
-            >
-              {campaignField("date").render(c)}
-            </span>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground shrink-0">
+              <span
+                data-field="date"
+                data-testid={`campaign-date-${c.id}`}
+              >
+                {campaignField("date").render(c)}
+              </span>
+              <span className="text-border">|</span>
+              <span
+                data-field="next_dispatch"
+                data-testid={`campaign-next-dispatch-${c.id}`}
+                className="font-medium text-foreground"
+                title="Próximo disparo"
+              >
+                {campaignField("next_dispatch").render(c)}
+              </span>
+            </div>
           </div>
 
           {recurrenceStatusText(c) && (
@@ -341,7 +364,7 @@ export function CampaignsTable({
               mode={view.mode}
               items={filteredCampaigns}
               getId={(c) => c.id}
-              fields={CAMPAIGN_FIELDS}
+              fields={fields}
               stripeClass={(id) => getStableColor(id).stripe}
               testIdPrefix="campaign"
               labelOf={(c) => c.name}

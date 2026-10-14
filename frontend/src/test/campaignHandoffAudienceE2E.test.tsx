@@ -459,20 +459,15 @@ describe("Handoff de Público do Banco para Campanhas (Resolução do Público R
     });
   });
 
-  // Teste (f) - filterParams registra erro ao receber tags/stages/rules
-  it("f) filterParams registra erro ao receber tags/stages/rules", () => {
+  // Teste (f) - filterParams registra erro ao receber stages/rules (tags agora é suportado oficialmente)
+  it("f) filterParams registra erro ao receber stages/rules", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    // 1. Recebendo tags
-    filterParams({ tags: ["tagA", "tagB"] } as any);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('"tags"'));
-
-    // 2. Recebendo stages
-    errorSpy.mockClear();
+    // 1. Recebendo stages
     filterParams({ stages: ["cold", "in_conversation"] } as any);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('"stages"'));
 
-    // 3. Recebendo rules
+    // 2. Recebendo rules
     errorSpy.mockClear();
     filterParams({ rules: [{ column: "cidade", operator: "equals", value: "SP" }] } as any);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('"rules"'));

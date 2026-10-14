@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import type { RecurrenceEndType, RecurrencePattern } from "@/lib/campaignRecurrence";
@@ -53,6 +53,7 @@ import {
   type CampaignDispatchOptions,
   type CampaignImageAsset,
   type CampaignSequenceStep,
+  type CampaignAudienceCriteria,
 } from "@/hooks/useCampanhas";
 import { DispatchRecipientsDialog } from "./LeadImports/DispatchRecipientsDialog";
 import { DuplicateDispatchWarningDialog } from "./LeadImports/DuplicateDispatchWarningDialog";
@@ -76,6 +77,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { API_BASE_URL } from "@/lib/api";
 import {
   campaignLocalDateTimeToUtcIso,
+  campaignUtcIsoToLocalDateTime,
   createCampaignStep,
   detectSpreadsheetColumns,
   getLeadField,
@@ -95,6 +97,7 @@ import {
   type FilterRule,
   type StepActionButton,
 } from "@/lib/leadImports/spreadsheet";
+import { isScheduledDateInPast } from "@/lib/campaignScheduleValidation";
 
 import { LeadSourceStep, type PhoneAuditStats } from "./LeadImports/LeadSourceStep";
 import { classifyPhoneAudit } from "@/lib/leadImports/phoneAudit";
@@ -282,6 +285,8 @@ export default function LeadImports({
   // Lead spreadsheet upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [bancoAudience, setBancoAudience] = useState<BancoAudienceInfo | null>(null);
+  const [bancoAudienceCriteria, setBancoAudienceCriteria] = useState<CampaignAudienceCriteria | null>(null);
+  const [legacyAudienceWarning, setLegacyAudienceWarning] = useState<string | null>(null);
   const [defaultDdd, setDefaultDdd] = useState<string>("34");
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
   const [rawUploadedRows, setRawUploadedRows] = useState<Record<string, unknown>[]>([]);
@@ -603,8 +608,28 @@ export default function LeadImports({
   const [multiAgendaEnabled, setMultiAgendaEnabled] = useLocalStorage(`vexo_multiAgenda_${activeClientId}`, false);
   const [newConsultantName, setNewConsultantName] = useLocalStorage(`vexo_consultantName_${activeClientId}`, "");
   const [newConsultantLink, setNewConsultantLink] = useLocalStorage(`vexo_consultantLink_${activeClientId}`, "");
-  const [newTriggerType, setNewTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
-  const [newScheduledAt, setNewScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
+  const [savedTriggerType, setSavedTriggerType] = useLocalStorage<"manual" | "scheduled" | "draft">(`vexo_triggerType_${activeClientId}`, "manual");
+  const [savedScheduledAt, setSavedScheduledAt] = useLocalStorage(`vexo_scheduledAt_${activeClientId}`, "");
+  const [editTriggerType, setEditTriggerType] = useState<"manual" | "scheduled" | "draft">("manual");
+  const [editScheduledAt, setEditScheduledAt] = useState<string>("");
+
+  const newTriggerType = editingCampaignId ? editTriggerType : savedTriggerType;
+  const setNewTriggerType = useCallback((val: "manual" | "scheduled" | "draft" | ((prev: "manual" | "scheduled" | "draft") => "manual" | "scheduled" | "draft")) => {
+    if (editingCampaignId) {
+      setEditTriggerType(val);
+    } else {
+      setSavedTriggerType(val);
+    }
+  }, [editingCampaignId, setSavedTriggerType]);
+
+  const newScheduledAt = editingCampaignId ? editScheduledAt : savedScheduledAt;
+  const setNewScheduledAt = useCallback((val: string | ((prev: string) => string)) => {
+    if (editingCampaignId) {
+      setEditScheduledAt(val);
+    } else {
+      setSavedScheduledAt(val);
+    }
+  }, [editingCampaignId, setSavedScheduledAt]);
   const [isRecurring, setIsRecurring] = useLocalStorage(`vexo_isRecurring_${activeClientId}`, false);
   const [recurrencePattern, setRecurrencePattern] = useLocalStorage<RecurrencePattern>(`vexo_recurrencePattern_${activeClientId}`, "monthly");
   const [recurrenceDayOfMonth, setRecurrenceDayOfMonth] = useLocalStorage<number>(`vexo_recurrenceDayOfMonth_${activeClientId}`, 15);
@@ -830,6 +855,20 @@ export default function LeadImports({
             : (data.criteria.tag ? [data.criteria.tag] : []);
           const rules = Array.isArray(data.criteria.rules) ? data.criteria.rules : [];
 
+          setBancoAudienceCriteria({
+            ...data.criteria,
+            clientId: activeClientId,
+            stages,
+            tags,
+            rules,
+            importId: data.criteria.importId ?? null,
+            importScope: data.criteria.importScope ?? "all",
+            description: data.description || null,
+            totalCount: typeof data.totalCount === "number" ? data.totalCount : null,
+            savedAt: new Date().toISOString(),
+            ...(Array.isArray(data.excludedLeadIds) && data.excludedLeadIds.length > 0 ? { excludedLeadIds: data.excludedLeadIds } : {}),
+          });
+
           fetchCampaignAudience(leadRequest, {
             clientId: activeClientId,
             stages,
@@ -887,6 +926,19 @@ export default function LeadImports({
                 count: actualCount,
               });
 
+              setBancoAudienceCriteria({
+                clientId: activeClientId,
+                stages,
+                tags,
+                rules,
+                importId: data.criteria.importId ?? null,
+                importScope: data.criteria.importScope ?? "all",
+                description: desc,
+                totalCount: actualCount,
+                savedAt: new Date().toISOString(),
+                ...(Array.isArray(data.excludedLeadIds) && data.excludedLeadIds.length > 0 ? { excludedLeadIds: data.excludedLeadIds } : {}),
+              });
+
               toast({
                 title: "Público-Alvo Carregado! 🎯",
                 description: desc,
@@ -940,6 +992,8 @@ export default function LeadImports({
       return;
     }
     setBancoAudience(null);
+    setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setSelectedFile(file);
     setParseError(null);
     setParsedRows([]);
@@ -1244,6 +1298,8 @@ export default function LeadImports({
     setSelectedImportId(ALL_IMPORTS_VALUE);
     setSelectedFile(null);
     setBancoAudience(null);
+    setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setParsedRows([]);
     setFilterRules([]);
     setParseError(null);
@@ -1253,6 +1309,26 @@ export default function LeadImports({
   }
 
   async function handleCreateAndDispatch() {
+    if (newTriggerType === "scheduled") {
+      if (!newScheduledAt) {
+        toast({
+          title: "Data e hora obrigatórias",
+          description: "Informe a data e o horário para o agendamento do disparo.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const scheduledIso = campaignLocalDateTimeToUtcIso(newScheduledAt);
+      if (!scheduledIso || isScheduledDateInPast(scheduledIso, { graceMs: 0 })) {
+        toast({
+          title: "Data de agendamento já passou",
+          description: "A data e a hora do disparo agendado já passaram. Escolha uma data e horário futuros.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const enabledSteps = campaignSequence.filter((s) => s.enabled);
     const validation = validateCampaignSubmission({
       activeClientId,
@@ -1355,6 +1431,9 @@ export default function LeadImports({
 
   function resetFormAfterSave() {
     setSelectedFile(null);
+    setBancoAudience(null);
+    setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setParsedRows([]);
     setFilterRules([]);
     setBatchingEnabled(false);
@@ -1362,6 +1441,8 @@ export default function LeadImports({
     setBatchIntervalHours("1");
     setCampaignName("");
     setEditingCampaignId(null);
+    setEditTriggerType("manual");
+    setEditScheduledAt("");
     setCampaignSequence([createCampaignStep("text", 1)]);
     setNewConsultantName("");
     setNewConsultantLink("");
@@ -1381,6 +1462,26 @@ export default function LeadImports({
   }
 
   async function executeCreateAndDispatch() {
+    if (newTriggerType === "scheduled") {
+      if (!newScheduledAt) {
+        toast({
+          title: "Data e hora obrigatórias",
+          description: "Informe a data e o horário para o agendamento do disparo.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const scheduledIso = campaignLocalDateTimeToUtcIso(newScheduledAt);
+      if (!scheduledIso || isScheduledDateInPast(scheduledIso, { graceMs: 0 })) {
+        toast({
+          title: "Data de agendamento já passou",
+          description: "A data e a hora do disparo agendado já passaram. Escolha uma data e horário futuros.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     if (filteredRows.length === 0) {
       toast({
         title: "Nenhum lead selecionado",
@@ -1486,6 +1587,14 @@ export default function LeadImports({
             }
           : {}),
         analyticsMeta: {
+          audienceCriteria: (bancoAudience && bancoAudienceCriteria)
+            ? {
+                ...bancoAudienceCriteria,
+                description: bancoAudience.description || bancoAudienceCriteria.description || null,
+                totalCount: typeof bancoAudience.count === "number" ? bancoAudience.count : (bancoAudienceCriteria.totalCount ?? null),
+                savedAt: bancoAudienceCriteria.savedAt || new Date().toISOString(),
+              }
+            : null,
           // Segmentação unificada: as regras dinâmicas (coluna/operador/valor) viram o
           // filtro de disparo. Mesmo shape do catálogo da empresa e do matcher do backend.
           segmentation: buildSegmentationFromRules(filterRules),
@@ -1791,13 +1900,108 @@ export default function LeadImports({
     const seq = normalizeCampaignSequence(c.analytics_meta);
     const limitPerRun = c.limit_per_run || 50;
 
-    setBancoAudience(null);
     setEditingCampaignId(c.id);
     setCampaignName(c.name || "");
     setCampaignLimitPerRun(String(limitPerRun));
     setCampaignSequence(seq.length > 0 ? seq : [createCampaignStep("text", 1)]);
     setSelectedImportId(c.import_id || ALL_IMPORTS_VALUE);
     setSelectedImportIds(Array.isArray(meta.importIds) ? meta.importIds : (c.import_id ? [c.import_id] : []));
+
+    const crit = meta.audienceCriteria;
+    if (crit && typeof crit === "object") {
+      setLegacyAudienceWarning(null);
+      const stages = Array.isArray(crit.stages) ? crit.stages : [];
+      const tags = Array.isArray(crit.tags) ? crit.tags : [];
+      const rules = Array.isArray(crit.rules) ? crit.rules : [];
+      const recordedCount = typeof crit.totalCount === "number" ? crit.totalCount : null;
+
+      // Estado imediato enquanto busca os leads reais
+      setBancoAudienceCriteria(crit);
+      setBancoAudience({
+        description: crit.description || `Público gravado (${recordedCount ?? "?"} leads)`,
+        count: recordedCount ?? 0,
+      });
+
+      fetchCampaignAudience(leadRequest, {
+        clientId: activeClientId,
+        stages,
+        tags,
+        rules,
+        importId: crit.importId ?? null,
+        importScope: (crit.importScope as any) ?? "all",
+      })
+        .then((res) => {
+          if (res.importNotFound) {
+            toast({
+              variant: "destructive",
+              title: "Planilha não encontrada",
+              description: "A planilha associada a este critério não existe mais ou foi removida.",
+            });
+          }
+          if (res.scopeUnavailable) {
+            toast({
+              variant: "destructive",
+              title: "Recorte indisponível",
+              description: res.reason || "O recorte solicitado não está disponível para esta planilha.",
+            });
+          }
+          if (res.truncated) {
+            toast({
+              title: "Público limitado ao teto",
+              description: `O público foi cortado no teto máximo de ${res.total.toLocaleString("pt-BR")} leads.`,
+            });
+          }
+
+          const excluded = new Set(Array.isArray(crit.excludedLeadIds) ? crit.excludedLeadIds : []);
+          const contacts = (res.items || [])
+            .filter((c) => !excluded.has(c.id))
+            .map((c) => ({
+              id: c.id,
+              telefone: c.phone || c.telefone || "",
+              nome: c.nome || "",
+            }));
+          setParsedRows(contacts);
+
+          const actualCount = contacts.length;
+          let desc = crit.description || `Público vindo do Banco de Dados (${actualCount} leads)`;
+
+          if (recordedCount !== null && recordedCount !== actualCount) {
+            desc = `${desc} — carregados ${actualCount} leads (o público mudou desde a montagem: eram ${recordedCount})`;
+            toast({
+              title: "Público mudou desde a montagem",
+              description: `O público mudou desde a montagem: agora são ${actualCount} leads (eram ${recordedCount}).`,
+            });
+          }
+
+          setBancoAudience({
+            description: desc,
+            count: actualCount,
+          });
+
+          setBancoAudienceCriteria({
+            ...crit,
+            clientId: activeClientId,
+            stages,
+            tags,
+            rules,
+            description: desc,
+            totalCount: actualCount,
+          });
+        })
+        .catch((err) => {
+          console.error("[LeadImports] Erro ao recarregar público da campanha na edição:", err);
+          toast({
+            variant: "destructive",
+            title: "Erro ao recarregar público",
+            description: err?.message || "Não foi possível carregar os leads deste público.",
+          });
+        });
+    } else {
+      setBancoAudience(null);
+      setBancoAudienceCriteria(null);
+      setParsedRows([]);
+      setLegacyAudienceWarning("Esta campanha foi criada antes do registro de público e o público precisa ser remontado.");
+    }
 
     // Restaura Loteamento / Batches
     const hasBatchConfig = Boolean(c.limit_per_run && c.limit_per_run > 0);
@@ -1856,6 +2060,54 @@ export default function LeadImports({
     setRecurrenceMaxOccurrences(c.recurrence_max_occurrences || 12);
     setRecurrenceNoEndConfirmed(Boolean(c.recurrence_no_end_confirmed_at));
 
+    // Restaura Agendamento e Disparos
+    const applyDispatches = (cDispatches: CampaignDispatch[]) => {
+      const pending = cDispatches.filter(d => d.status === "scheduled" || d.status === "draft");
+      const scheduledList = pending
+        .filter(d => d.status === "scheduled" && d.scheduled_at)
+        .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime());
+
+      if (scheduledList.length > 0) {
+        setEditTriggerType("scheduled");
+        setEditScheduledAt(campaignUtcIsoToLocalDateTime(scheduledList[0].scheduled_at));
+      } else if (pending.some(d => d.status === "draft") || c.status === "draft") {
+        setEditTriggerType("draft");
+        setEditScheduledAt("");
+      } else {
+        setEditTriggerType("manual");
+        setEditScheduledAt("");
+      }
+    };
+
+    const currentDispatches = dispatches.filter(d => d.campaign_id === c.id);
+    if (currentDispatches.length > 0) {
+      applyDispatches(currentDispatches);
+    } else if (c.scheduled_for && c.status === "scheduled") {
+      setEditTriggerType("scheduled");
+      setEditScheduledAt(campaignUtcIsoToLocalDateTime(c.scheduled_for));
+    } else if (c.status === "draft") {
+      setEditTriggerType("draft");
+      setEditScheduledAt("");
+    } else {
+      setEditTriggerType("manual");
+      setEditScheduledAt("");
+    }
+
+    getIdToken().then(token => {
+      fetch(`${API_BASE_URL}/api/campaigns/${c.id}/dispatches`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (Array.isArray(data?.dispatches) && data.dispatches.length > 0) {
+            applyDispatches(data.dispatches);
+          }
+        })
+        .catch(err => {
+          console.warn("[handleEditCampaign] Erro ao buscar disparos da campanha:", err);
+        });
+    }).catch(() => {});
+
     setActiveTab("campanha");
     toast({ title: "Carregado para edição", description: `Edite a campanha "${c.name}" no formulário de Novo Disparo.` });
   };
@@ -1889,7 +2141,11 @@ export default function LeadImports({
     }));
 
     setBancoAudience(null);
+    setBancoAudienceCriteria(null);
+    setLegacyAudienceWarning(null);
     setEditingCampaignId(null);
+    setEditTriggerType("manual");
+    setEditScheduledAt("");
     setCampaignName(`${c.name || "Campanha"} (cópia)`);
     setCampaignLimitPerRun(String(c.limit_per_run || 50));
     setCampaignSequence(passosCopiados);
@@ -2075,8 +2331,11 @@ export default function LeadImports({
               missingColumnWarnings={missingColumnWarnings}
               onToggleIncludeMissing={handleToggleIncludeMissing}
               bancoAudience={bancoAudience}
+              legacyAudienceWarning={legacyAudienceWarning}
               onDiscardBancoAudience={() => {
                 setBancoAudience(null);
+                setBancoAudienceCriteria(null);
+                setLegacyAudienceWarning(null);
                 setParsedRows([]);
                 setFilterRules([]);
               }}
@@ -2195,6 +2454,7 @@ export default function LeadImports({
           clientId={activeClientId || null}
           campaigns={campaigns}
           loadingCampaigns={loadingCampaigns}
+          dispatches={dispatches}
           dataUpdatedAt={campaignsUpdatedAt}
           onRefresh={() => void refetchCampaigns()}
           isFetching={fetchingCampaigns}

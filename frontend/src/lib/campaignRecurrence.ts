@@ -108,3 +108,45 @@ export function recurrenceStatusText(c: {
   if (c.next_run_at) return `Próximo envio: ${formatNextRunDate(c.next_run_at)}`;
   return null;
 }
+
+/**
+ * Retorna o rótulo do próximo disparo de uma campanha para a coluna "PRÓXIMO DISPARO":
+ * - recorrente: usar next_run_label (já no fuso do tenant pela API)
+ * - avulsa agendada: data e hora do disparo pendente mais próximo (ou scheduled_for da campanha)
+ * - sem agendamento: traço ("—")
+ */
+export function getCampaignNextRunLabel(
+  c: {
+    id?: string;
+    is_recurring?: boolean | null;
+    next_run_label?: string | null;
+    status?: string | null;
+    scheduled_for?: string | null;
+  },
+  dispatches?: Array<{
+    campaign_id: string;
+    status: string;
+    scheduled_at: string | null;
+  }>
+): string {
+  if (c.is_recurring) {
+    return c.next_run_label || "—";
+  }
+
+  // 1. Disparo pendente mais próximo na lista de disparos
+  if (dispatches && dispatches.length > 0 && c.id) {
+    const pendingDispatches = dispatches
+      .filter((d) => d.campaign_id === c.id && d.status === "scheduled" && Boolean(d.scheduled_at))
+      .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime());
+    if (pendingDispatches.length > 0 && pendingDispatches[0].scheduled_at) {
+      return formatNextRunDate(pendingDispatches[0].scheduled_at) || "—";
+    }
+  }
+
+  // 2. Se a campanha for agendada diretamente (scheduled_for)
+  if ((c.status === "scheduled" || (!c.status && c.scheduled_for)) && c.scheduled_for) {
+    return formatNextRunDate(c.scheduled_for) || "—";
+  }
+
+  return "—";
+}
