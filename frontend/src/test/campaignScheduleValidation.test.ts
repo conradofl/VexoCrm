@@ -3,9 +3,9 @@ import {
   isScheduledDateInPast,
   getStartOfMinute,
   BACKEND_SCHEDULE_GRACE_MS,
-} from "../../../shared/campaignScheduleValidation.js";
+} from "../../../backend/src/services/campaignScheduleValidation.js";
 
-describe("Validação de Data de Agendamento Compartilhada (shared/campaignScheduleValidation.js)", () => {
+describe("Validação de Data de Agendamento Compartilhada (backend/src/services/campaignScheduleValidation.js)", () => {
   it("a) escolher o minuto corrente é ACEITO (hoje é recusado) — este é o caso real", () => {
     // Simula 23:27:45 (45 segundos após o início do minuto)
     const now = new Date("2026-10-14T23:27:45.000Z").getTime();
