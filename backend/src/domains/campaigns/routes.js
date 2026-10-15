@@ -3259,11 +3259,12 @@ export function registerCampaignsRoutes(app, deps) {
 
       try {
         const result = await finalizeRunSent(pgDatabasePool, {
+          clientId,
           dispatchId,
           leadId,
           phone: cleanPhone,
           sentAt,
-          chipId: runChipTracker.take(leadId), // chipId: runChipTracker.take(lead.id)
+          chipId: runChipTracker.take(lead?.id), // chipId: runChipTracker.take(lead.id)
         });
 
         if (result?.rowCount === 0) {

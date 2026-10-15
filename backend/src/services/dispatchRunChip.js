@@ -61,7 +61,17 @@ export const FINALIZE_RUN_SENT_SQL = `UPDATE public.campaign_dispatch_runs SET s
 
 export const FINALIZE_RUN_SENT_BY_PHONE_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid WHERE dispatch_id = $2 AND regexp_replace(phone, '\\D', '', 'g') = $3`;
 
-export async function finalizeRunSent(pool, { dispatchId, leadId = null, phone = null, sentAt, chipId = null }) {
+export const UPDATE_LEAD_LAST_MESSAGE_SQL = `UPDATE public.leads
+   SET last_message_at = $1,
+       last_interaction_at = COALESCE(last_interaction_at, $1),
+       updated_at = now()
+   WHERE client_id = $2
+     AND (
+       ($3::uuid IS NOT NULL AND id = $3::uuid)
+       OR ($4 <> '' AND regexp_replace(COALESCE(telefone, phone), '\\D', '', 'g') = $4)
+     )`;
+
+export async function finalizeRunSent(pool, { clientId = null, dispatchId, leadId = null, phone = null, sentAt, chipId = null }) {
   const safeSentAt = sentAt || new Date().toISOString();
   const safeChipId = typeof chipId === "string" && chipId.trim() !== "" ? chipId.trim() : null;
 
@@ -71,9 +81,22 @@ export async function finalizeRunSent(pool, { dispatchId, leadId = null, phone =
     result = await pool.query(FINALIZE_RUN_SENT_SQL, [safeSentAt, dispatchId, leadId, safeChipId]);
   }
 
-  const cleanPhone = phone ? String(phone).replace(/\D/g, "") : null;
+  const cleanPhone = typeof phone === "string" ? phone.replace(/\D/g, "") : (phone ? String(phone).replace(/\D/g, "") : "");
   if ((!result || result.rowCount === 0) && cleanPhone) {
     result = await pool.query(FINALIZE_RUN_SENT_BY_PHONE_SQL, [safeSentAt, dispatchId, cleanPhone, safeChipId]);
+  }
+
+  const effectiveSentAt = safeSentAt;
+  const rawLeadId = (leadId && leadId !== "__crm__") ? String(leadId).trim() : null;
+  const effectiveLeadId = rawLeadId && UUID_RE.test(rawLeadId) ? rawLeadId : null;
+
+  if (clientId && (effectiveLeadId || cleanPhone)) {
+    await pool.query(
+      UPDATE_LEAD_LAST_MESSAGE_SQL,
+      [effectiveSentAt, clientId, effectiveLeadId, cleanPhone]
+    ).catch((err) => {
+      console.warn("[campaign-dispatch] lead stamp failed:", { dispatchId, leadId, phone: cleanPhone, err: err?.message || err });
+    });
   }
 
   return {

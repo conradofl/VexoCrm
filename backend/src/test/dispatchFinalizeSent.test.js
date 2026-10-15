@@ -43,6 +43,17 @@ const SCHEMA = `
     created_at timestamptz DEFAULT now()
   );
   CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_dispatch_runs_dispatch_lead ON campaign_dispatch_runs (dispatch_id, lead_id);
+  CREATE TABLE IF NOT EXISTS public.leads (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id text NOT NULL,
+    telefone text,
+    phone text,
+    nome text,
+    last_message_at timestamptz,
+    last_interaction_at timestamptz,
+    updated_at timestamptz DEFAULT now(),
+    created_at timestamptz DEFAULT now()
+  );
 `;
 
 const openDbs = [];
@@ -367,5 +378,100 @@ describe("SPEC 1 — finalize_sent", () => {
     );
     expect(rows2[0].status).toBe("sent");
     expect(rows2[0].evolution_instance_id).toBeNull();
+  });
+
+  it("Teste f (Carimbo Lead CRM): Campanha envia para um lead do CRM -> leads.last_message_at e last_interaction_at ficam preenchidos com o sent_at", async () => {
+    const db = await createTestDb();
+    const leadId = "11111111-aaaa-4000-8000-111111111111";
+    const phone = "5511999990001";
+    const sentAt = "2026-10-15T12:00:00.000Z";
+
+    // 1. Cria lead no CRM com timestamps vazios
+    await db.query(
+      `INSERT INTO public.leads (id, client_id, telefone, last_message_at, last_interaction_at)
+       VALUES ($1, $2, $3, NULL, NULL)`,
+      [leadId, T, phone]
+    );
+
+    // 2. Cria registro de envio em claimed
+    await db.query(
+      `INSERT INTO campaign_dispatch_runs (dispatch_id, campaign_id, client_id, lead_id, phone, status, claimed_at)
+       VALUES ($1, $2, $3, $4, $5, 'claimed', now())`,
+      [DISP_ID, CAMP_ID, T, leadId, phone]
+    );
+
+    // 3. Executa finalizeRunSent com clientId
+    const result = await finalizeRunSent(db, {
+      clientId: T,
+      dispatchId: DISP_ID,
+      leadId,
+      phone,
+      sentAt,
+      chipId: null,
+    });
+
+    expect(result.rowCount).toBe(1);
+
+    // 4. Valida que campaign_dispatch_runs foi atualizado
+    const runRes = await db.query(
+      `SELECT status, sent_at FROM campaign_dispatch_runs WHERE dispatch_id = $1 AND lead_id = $2`,
+      [DISP_ID, leadId]
+    );
+    expect(runRes.rows[0].status).toBe("sent");
+
+    // 5. Valida que public.leads foi carimbado: last_message_at e last_interaction_at preenchidos com sent_at
+    const leadRes = await db.query(
+      `SELECT last_message_at, last_interaction_at, updated_at FROM public.leads WHERE id = $1`,
+      [leadId]
+    );
+    expect(leadRes.rows).toHaveLength(1);
+    expect(new Date(leadRes.rows[0].last_message_at).toISOString()).toBe(sentAt);
+    expect(new Date(leadRes.rows[0].last_interaction_at).toISOString()).toBe(sentAt);
+    expect(leadRes.rows[0].updated_at).not.toBeNull();
+  });
+
+  it("Teste g (Carimbo Lead Planilha): Campanha de planilha sem lead_id direto, mas cujo telefone coincide com um lead existente -> leads.last_message_at fica preenchido", async () => {
+    const db = await createTestDb();
+    const existingLeadId = "22222222-bbbb-4000-8000-222222222222";
+    const phone = "5511988887777";
+    const prevInteraction = "2026-10-01T10:00:00.000Z";
+    const sentAt = "2026-10-15T12:30:00.000Z";
+
+    // 1. Cria lead no CRM que ja tinha interacao previa mas sem last_message_at
+    await db.query(
+      `INSERT INTO public.leads (id, client_id, telefone, last_message_at, last_interaction_at)
+       VALUES ($1, $2, $3, NULL, $4)`,
+      [existingLeadId, T, phone, prevInteraction]
+    );
+
+    // 2. Cria registro de envio de planilha SEM lead_id direto (lead_id = NULL)
+    await db.query(
+      `INSERT INTO campaign_dispatch_runs (dispatch_id, campaign_id, client_id, lead_id, phone, status, claimed_at)
+       VALUES ($1, $2, $3, NULL, $4, 'claimed', now())`,
+      [DISP_ID, CAMP_ID, T, phone]
+    );
+
+    // 3. Executa finalizeRunSent passando leadId = null e phone
+    const result = await finalizeRunSent(db, {
+      clientId: T,
+      dispatchId: DISP_ID,
+      leadId: null,
+      phone,
+      sentAt,
+      chipId: null,
+    });
+
+    expect(result.rowCount).toBe(1);
+
+    // 4. Valida que public.leads foi carimbado:
+    // - last_message_at atualizado para sentAt
+    // - last_interaction_at PRESERVADO via COALESCE(last_interaction_at, sentAt)
+    const leadRes = await db.query(
+      `SELECT last_message_at, last_interaction_at FROM public.leads WHERE id = $1`,
+      [existingLeadId]
+    );
+    expect(leadRes.rows).toHaveLength(1);
+    expect(new Date(leadRes.rows[0].last_message_at).toISOString()).toBe(sentAt);
+    expect(new Date(leadRes.rows[0].last_interaction_at).toISOString()).toBe(prevInteraction);
   });
 });
