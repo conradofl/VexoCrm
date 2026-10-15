@@ -210,8 +210,19 @@ export function hasFeatureUnlocked(client: any, featureKey: string): boolean {
       return isModuleInList(modulosAvulsos, "agente_rag") || isModuleInList(modulosAvulsos, "rag");
     }
 
-    // 4. Follow-up & Cadências
-    if (["followup", "fila-de-followup", "calendario", "agenda"].includes(k)) {
+    // 4. Follow-up & Cadências — só com módulo de follow-up contratado.
+    if (["followup", "fila-de-followup"].includes(k)) {
+      return (
+        isModuleInList(modulosAvulsos, "followup") ||
+        isModuleInList(modulosAvulsos, "followup_automations") ||
+        isModuleInList(modulosAvulsos, "fila-de-followup")
+      );
+    }
+
+    // 4b. Calendário — junta campanhas e follow-ups, então abre com QUALQUER um dos dois módulos.
+    // Ramo separado de propósito: quando dividia o ramo do follow-up (8a8fd42), contratar só o
+    // Disparador liberava Follow-up e Fila de Follow-up de graça.
+    if (["calendario", "agenda"].includes(k)) {
       return (
         isModuleInList(modulosAvulsos, "followup") ||
         isModuleInList(modulosAvulsos, "followup_automations") ||

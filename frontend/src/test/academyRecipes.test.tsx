@@ -56,6 +56,12 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
     const { default: OnboardingWizard } = await import("@/pages/OnboardingWizard");
     renderWithProviders(<OnboardingWizard />);
 
+    // UMA varredura pelos botões (nome acessível de cada um), e não onze getByRole: cada getByRole percorre a página
+    // inteira calculando nome acessível, e as onze juntas passavam de 5 s quando a suíte inteira roda em paralelo.
+    const nomesDosBotoes = screen
+      .getAllByRole("button")
+      .map((b) => (b.getAttribute("aria-label") || b.textContent || "").trim());
+
     for (const segmento of [
       "Turismo",
       "Contabilidade",
@@ -69,7 +75,7 @@ describe("Vexo Academy — conteúdo (fundamentos e receitas)", () => {
       "Estética e beleza",
       "Pet shop e clínicas veterinárias",
     ]) {
-      expect(screen.getByRole("button", { name: segmento }), `filtro de segmento "${segmento}" não apareceu`).toBeTruthy();
+      expect(nomesDosBotoes, `filtro de segmento "${segmento}" não apareceu`).toContain(segmento);
     }
   });
 

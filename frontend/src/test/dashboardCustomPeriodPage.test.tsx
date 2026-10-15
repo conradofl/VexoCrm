@@ -26,6 +26,9 @@ vi.mock("@/hooks/useDashboard", async (importOriginal) => {
 });
 vi.mock("@/components/PageShell", () => ({ PageShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 vi.mock("@/hooks/useCrmClient", () => ({ useOptionalCrmClient: () => null }));
+// O cartão de implantação (b763b19) entrou no Dashboard depois deste teste e busca dados com useAuth. Não é o assunto
+// aqui (período personalizado): fica de fora, como o cabeçalho e o PageShell.
+vi.mock("@/components/dashboard/OnboardingProgressCard", () => ({ OnboardingProgressCard: () => null }));
 vi.mock("../pages/Dashboard/DashboardHeader", () => ({
   DashboardHeader: (props: any) => (
     <div>
