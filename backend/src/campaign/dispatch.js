@@ -1385,6 +1385,60 @@ export function isLeadBlockedByActiveCycleProgress({ progress, occurrence, campa
   return true;
 }
 
+/**
+ * Quem JÁ recebeu (ou está recebendo agora) em OUTRO lote da mesma campanha, no MESMO ciclo.
+ *
+ * Ciclo é a mesma noção de isLeadBlockedByActiveCycleProgress / readOccurrenceInfo (commit 40b3c6b):
+ * - ocorrência recorrente: o ciclo é a ocorrência (recurrence_occurrence_at). Quem recebeu na ocorrência anterior
+ *   PODE receber nesta — a recorrente manda de propósito para as mesmas pessoas a cada ocorrência;
+ * - lote avulso: o ciclo é o conjunto dos lotes avulsos da campanha (recurrence_occurrence_at nulo). Sem coluna de
+ *   "execução", não há como separar lotes salvos juntos de lotes salvos depois; para reenviar a mesma campanha às
+ *   mesmas pessoas, duplica-se a campanha.
+ *
+ * Existe porque o lote é fatia por POSIÇÃO e a exclusão por dispatch_id só enxerga o próprio lote: com um lead novo
+ * entrando entre um lote e outro, a fatia desliza e o lead da fronteira recebia de novo no lote seguinte.
+ * A exclusão por dispatch_id continua valendo, como segunda camada.
+ *
+ * Conta 'sent' e 'claimed' (claimed = outro lote está enviando agora). Falha, número inválido e pulado não contam:
+ * essa pessoa não recebeu.
+ *
+ * @returns {Promise<{ phones: Set<string>, leadIds: Set<string> }>}
+ */
+export async function findLeadsAlreadyReachedInCycle(pool, { campaignId, dispatchId, occurrence }) {
+  const vazio = { phones: new Set(), leadIds: new Set() };
+  if (!pool || !campaignId || !dispatchId) return vazio;
+  const recorte = occurrence?.isOccurrence && occurrence.occurrenceAt
+    ? "AND d.recurrence_occurrence_at = $3::timestamptz"
+    : "AND d.recurrence_occurrence_at IS NULL";
+  const params = occurrence?.isOccurrence && occurrence.occurrenceAt
+    ? [campaignId, dispatchId, occurrence.occurrenceAt]
+    : [campaignId, dispatchId];
+  const sql = (comRecorte) => `
+    SELECT r.phone, r.lead_id
+      FROM public.campaign_dispatch_runs r
+      JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+     WHERE r.campaign_id = $1
+       AND r.dispatch_id <> $2
+       AND r.status IN ('sent', 'claimed')
+       ${comRecorte ? recorte : ""}`;
+  let rows;
+  try {
+    ({ rows } = await pool.query(sql(true), params));
+  } catch (err) {
+    // Schema anterior à recorrência (sem recurrence_occurrence_at): não existe ocorrência, todo lote é avulso.
+    if (String(err?.code) !== "42703") throw err;
+    ({ rows } = await pool.query(sql(false), [campaignId, dispatchId]));
+  }
+  const phones = new Set();
+  const leadIds = new Set();
+  for (const row of rows || []) {
+    const digits = normalizeString(row.phone).replace(/\D/g, "");
+    if (digits) phones.add(digits);
+    if (row.lead_id) leadIds.add(String(row.lead_id));
+  }
+  return { phones, leadIds };
+}
+
 export async function markCampaignLeadWaitingReply({
   clientId,
   lead,
