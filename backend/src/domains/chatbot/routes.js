@@ -447,7 +447,7 @@ export function registerChatbotRoutes(app, deps) {
       if (instanceAliases && instanceAliases.length > 0) {
         queryParams.push(instanceAliases);
         const idx = queryParams.length;
-        instanceFilter = `AND instance_name = ANY($${idx})`;
+        instanceFilter = `AND (instance_name = ANY(\$${idx}) OR instance_name IS NULL)`;
       }
 
       let tabCondition = "";
@@ -522,7 +522,7 @@ export function registerChatbotRoutes(app, deps) {
       try {
         // 1. Apura contadores gerais para as abas
         const opIdentifiersForCount = operatorIdentifiers.length > 0 ? operatorIdentifiers : ["__NONE__"];
-        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND instance_name = ANY($2)" : "";
+        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND (instance_name = ANY($2) OR instance_name IS NULL)" : "";
         const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
         countsParams.push(opIdentifiersForCount);
         const opParamIdx = countsParams.length;
@@ -1350,7 +1350,7 @@ export function registerChatbotRoutes(app, deps) {
       if (instanceAliases && instanceAliases.length > 0) {
         queryParams.push(instanceAliases);
         const idx = queryParams.length;
-        instanceFilter = `AND instance_name = ANY($${idx})`;
+        instanceFilter = `AND (instance_name = ANY(\$${idx}) OR instance_name IS NULL)`;
       }
 
       const rawBefore = normalizeString(req.query.beforeTimestamp || req.query.before);

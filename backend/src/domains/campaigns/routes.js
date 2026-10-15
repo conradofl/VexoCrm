@@ -3443,7 +3443,7 @@ export function registerCampaignsRoutes(app, deps) {
       onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
         runChipTracker.record(lead?.id, activeChip);
         try {
-          const rawChip = activeChip?.instanceId || activeChip?.instanceName || instanceName || null;
+          const rawChip = activeChip?.instanceId || activeChip?.instanceName || instanceName || dispatch?.evolution_instance_id || campaign?.evolution_instance_id || null;
           const { canonicalName } = await resolveInstanceIdentifier({ clientId, identifier: rawChip });
           const chipName = canonicalName || rawChip;
           await appendLeadMessage({
