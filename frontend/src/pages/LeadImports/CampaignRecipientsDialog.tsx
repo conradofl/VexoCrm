@@ -32,10 +32,9 @@ import {
   PhoneOff,
   MessageSquareQuote,
 } from "lucide-react";
-import { useCampaignRecipients, type CampaignRecipientItem } from "@/hooks/useCampanhas";
+import { useCampaignRecipients, fetchCampaignsApi, type CampaignRecipientItem } from "@/hooks/useCampanhas";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { API_BASE_URL } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface CampaignRecipientsDialogProps {
@@ -57,7 +56,7 @@ export function CampaignRecipientsDialog({
   const { getIdToken } = useAuth();
   const searchInputId = useId();
 
-  const { data, isLoading, isFetching } = useCampaignRecipients(
+  const { data, isLoading, isFetching, isError, error, refetch } = useCampaignRecipients(
     campaignId,
     statusFilter,
     searchQuery
@@ -68,16 +67,12 @@ export function CampaignRecipientsDialog({
     try {
       setDownloadingCsv(true);
       const token = await getIdToken();
-      const url = new URL(`${API_BASE_URL}/api/campaigns/${campaignId}/recipients`);
-      url.searchParams.set("format", "csv");
-      if (statusFilter && statusFilter !== "all") {
-        url.searchParams.set("status", statusFilter);
-      }
-      if (searchQuery.trim()) {
-        url.searchParams.set("search", searchQuery.trim());
-      }
+      const params = new URLSearchParams();
+      params.set("format", "csv");
+      if (statusFilter && statusFilter !== "all") params.set("status", statusFilter);
+      if (searchQuery.trim()) params.set("search", searchQuery.trim());
 
-      const res = await fetch(url.toString(), {
+      const res = await fetchCampaignsApi(`/api/campaigns/${campaignId}/recipients?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -291,6 +286,15 @@ export function CampaignRecipientsDialog({
             <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
               <p className="text-xs font-medium">Buscando destinatários da campanha...</p>
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-2 text-rose-500 p-4 text-center">
+              <AlertTriangle className="h-6 w-6 text-rose-500" />
+              <p className="text-sm font-semibold">Erro ao carregar destinatários</p>
+              <p className="text-xs text-muted-foreground">{error instanceof Error ? error.message : "Falha na comunicação com o servidor"}</p>
+              <Button size="sm" variant="outline" onClick={() => refetch()} className="mt-2 h-7 text-xs">
+                Tentar novamente
+              </Button>
             </div>
           ) : recipients.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2 text-muted-foreground">

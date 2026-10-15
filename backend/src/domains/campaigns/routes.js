@@ -1254,7 +1254,7 @@ export function registerCampaignsRoutes(app, deps) {
       ? req.body.importIds.map((v) => normalizeString(v)).filter(Boolean)
       : [];
     const importId = isCrmSource ? null : (reqImportIds[0] || reqImportId);
-    
+
     const rawLimit = Number.parseInt(String(req.body?.limitPerRun ?? "50"), 10);
     const limitPerRun = Number.isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, 5000);
     const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
@@ -1264,7 +1264,7 @@ export function registerCampaignsRoutes(app, deps) {
       req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object"
         ? req.body.analyticsMeta
         : {};
-    
+
     if (isCrmSource) {
       analyticsMeta.importSource = "__crm__";
     } else if (reqImportIds.length > 0) {
@@ -1449,7 +1449,7 @@ export function registerCampaignsRoutes(app, deps) {
       const v = Number.parseInt(String(req.body.limitPerRun), 10);
       if (!Number.isNaN(v) && v > 0) updates.limit_per_run = Math.min(v, 500);
     }
-    
+
     let isCrmSourceUpdate = false;
     let updatedImportIds = null;
     if ("importIds" in req.body) {
@@ -1467,7 +1467,7 @@ export function registerCampaignsRoutes(app, deps) {
         updates.import_id = reqImportId;
       }
     }
-    
+
     if ("scheduledFor" in req.body) {
       const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
       if (scheduledFor) {
@@ -1573,7 +1573,7 @@ export function registerCampaignsRoutes(app, deps) {
         Object.assign(updates, recurrence.fields);
         recurrenceWarnings = recurrence.warnings;
       }
-      
+
       if (isCrmSourceUpdate || updatedImportIds !== null || ("importId" in req.body && updates.import_id !== null)) {
          const currentMeta = updates.analytics_meta || current.analytics_meta || {};
          if (isCrmSourceUpdate) {
@@ -2765,7 +2765,7 @@ export function registerCampaignsRoutes(app, deps) {
       let totalSkipped = 0;
       if (pgDatabasePool) {
         const countsRes = await pgDatabasePool.query(
-          `SELECT 
+          `SELECT
              COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
              COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
              COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
@@ -2885,7 +2885,7 @@ export function registerCampaignsRoutes(app, deps) {
       let totalSkipped = 0;
       if (pgDatabasePool) {
         const countsRes = await pgDatabasePool.query(
-          `SELECT 
+          `SELECT
              COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
              COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
              COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
@@ -3533,7 +3533,7 @@ export function registerCampaignsRoutes(app, deps) {
     let totalSkipped = 0;
     if (pgDatabasePool) {
       const countsRes = await pgDatabasePool.query(
-        `SELECT 
+        `SELECT
            COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
            COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
            COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
@@ -3642,7 +3642,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
       const { rows } = await pgDatabasePool.query(
         `
-          SELECT 
+          SELECT
             d.*,
             c.name as campaign_name,
             COALESCE(r.sent_cnt, d.sent_count, 0)::int as sent_count,
@@ -3652,7 +3652,7 @@ export function registerCampaignsRoutes(app, deps) {
           FROM public.campaign_dispatches d
           LEFT JOIN public.campaigns c ON c.id = d.campaign_id
           LEFT JOIN (
-            SELECT 
+            SELECT
               dispatch_id,
               COUNT(*) FILTER (WHERE status = 'sent') as sent_cnt,
               COUNT(*) FILTER (WHERE status = 'failed') as failed_cnt,
@@ -3701,7 +3701,7 @@ export function registerCampaignsRoutes(app, deps) {
 
       const { rows } = await pgDatabasePool.query(
         `
-          SELECT 
+          SELECT
             d.*,
             COALESCE(r.sent_cnt, d.sent_count, 0)::int as sent_count,
             COALESCE(r.failed_cnt, d.failed_count, 0)::int as failed_count,
@@ -3709,7 +3709,7 @@ export function registerCampaignsRoutes(app, deps) {
             COALESCE(r.skipped_cnt, 0)::int as skipped_count
           FROM public.campaign_dispatches d
           LEFT JOIN (
-            SELECT 
+            SELECT
               dispatch_id,
               COUNT(*) FILTER (WHERE status = 'sent') as sent_cnt,
               COUNT(*) FILTER (WHERE status = 'failed') as failed_cnt,
@@ -4268,94 +4268,91 @@ export function registerCampaignsRoutes(app, deps) {
     if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
 
     try {
-      const { data: campaign, error: campErr } = await supabase
-        .from("campaigns")
-        .select("id, name, client_id, import_id, analytics_meta")
-        .eq("id", campaignId)
-        .maybeSingle();
+      // 1. Buscar Campanha (rápida via pool com fallback para supabase)
+      let campaign = null;
+      if (pgDatabasePool) {
+        try {
+          const { rows = [] } = await pgDatabasePool.query(
+            `SELECT id, name, client_id, import_id, analytics_meta FROM public.campaigns WHERE id = $1`,
+            [campaignId]
+          );
+          campaign = rows[0] || null;
+        } catch (poolErr) {
+          console.warn("[campaign-recipients] Falha ao buscar campanha via pool, tentando fallback:", poolErr?.message || poolErr);
+        }
+      }
+      if (!campaign && supabase) {
+        const { data: campData, error: campErr } = await supabase
+          .from("campaigns")
+          .select("id, name, client_id, import_id, analytics_meta")
+          .eq("id", campaignId)
+          .maybeSingle();
+        if (campErr) throw campErr;
+        campaign = campData;
+      }
 
-      if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      if (!campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
 
-      // 1. Obter todos os dispatches da campanha ordenados por offset/created_at
-      const { data: dispatchesData, error: dispErr } = await supabase
-        .from("campaign_dispatches")
-        .select("id, client_id, campaign_id, name, limit_per_run, offset, steps, status, target_count, evolution_instance_id, scheduled_at, created_at")
-        .eq("campaign_id", campaignId)
-        .eq("client_id", authorizedClientId)
-        .order("offset", { ascending: true })
-        .order("created_at", { ascending: true });
+      // 2. Buscar Todos os Disparos Já Realizados da Campanha (instantâneo via SQL com JOIN em lote e lead)
+      let runs = [];
+      if (pgDatabasePool) {
+        try {
+          const { rows = [] } = await pgDatabasePool.query(
+            `
+              SELECT
+                r.id,
+                r.dispatch_id,
+                r.lead_id,
+                r.phone,
+                r.status,
+                r.sent_at,
+                r.error_message,
+                r.created_at,
+                d.name AS dispatch_name,
+                COALESCE(l.nome, 'Sem nome') AS lead_nome
+              FROM public.campaign_dispatch_runs r
+              LEFT JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+              LEFT JOIN public.leads l ON (l.id = r.lead_id OR regexp_replace(l.telefone, '\\D', '', 'g') = regexp_replace(r.phone, '\\D', '', 'g'))
+              WHERE r.client_id = $1 AND r.campaign_id = $2
+              ORDER BY r.created_at ASC
+            `,
+            [authorizedClientId, campaignId]
+          );
+          runs = rows;
+        } catch (runsErr) {
+          console.warn("[campaign-recipients] Falha ao buscar runs via pool, tentando fallback:", runsErr?.message || runsErr);
+        }
+      }
 
-      if (dispErr) throw dispErr;
-      const dispatches = dispatchesData || [];
-      const dispatchMap = new Map(dispatches.map((d) => [d.id, d]));
+      // Fallback para testes/ambientes onde pgDatabasePool não retornar runs mas supabase sim
+      const dispatchMap = new Map();
+      if (runs.length === 0 && supabase) {
+        const { data: runsData } = await supabase
+          .from("campaign_dispatch_runs")
+          .select("id, dispatch_id, lead_id, phone, status, error_message, claimed_at, sent_at, created_at")
+          .eq("campaign_id", campaignId)
+          .order("created_at", { ascending: true });
+        runs = runsData || [];
 
-      // 2. Obter todos os leads candidatos da campanha (via buildDispatchLeads agregando os lotes)
-      const allCandidateLeads = [];
-      const importSelection = resolveCampaignImportSelection(campaign);
-
-      if (dispatches.length > 0) {
-        for (const dispatch of dispatches) {
-          const batchLeads = await buildDispatchLeads({
-            clientId: authorizedClientId,
-            importId: importSelection,
-            limit: dispatch.limit_per_run,
-            offset: dispatch.offset,
-            segmentation: dispatch.steps?.[0]?.segmentation || null,
-            excludeDispatchId: null,
-          });
-          for (const lead of batchLeads) {
-            allCandidateLeads.push({
-              ...lead,
-              dispatchId: dispatch.id,
-              dispatchName: dispatch.name,
-            });
+        try {
+          const { data: dispatchesData } = await supabase
+            .from("campaign_dispatches")
+            .select("id, name")
+            .eq("campaign_id", campaignId)
+            .eq("client_id", authorizedClientId)
+            .order("offset", { ascending: true })
+            .order("created_at", { ascending: true });
+          for (const d of (dispatchesData || [])) {
+            dispatchMap.set(d.id, d.name);
           }
-        }
-      } else {
-        const baseLeads = await buildDispatchLeads({
-          clientId: authorizedClientId,
-          importId: importSelection,
-          limit: null,
-          offset: null,
-          segmentation: null,
-          excludeDispatchId: null,
-        });
-        for (const lead of baseLeads) {
-          allCandidateLeads.push({
-            ...lead,
-            dispatchId: null,
-            dispatchName: null,
-          });
+        } catch {
+          // fallback sem quebra caso encadeamento seja diferente
         }
       }
 
-      // 3. Obter todas as execuções de campaign_dispatch_runs onde campaign_id = :campaignId
-      const { data: runsData, error: runsErr } = await supabase
-        .from("campaign_dispatch_runs")
-        .select("id, dispatch_id, lead_id, phone, status, error_message, claimed_at, sent_at, created_at")
-        .eq("campaign_id", campaignId)
-        .order("created_at", { ascending: true });
-
-      if (runsErr) throw runsErr;
-      const runs = runsData || [];
-
-      const runByDispatchAndLeadId = new Map();
-      const runByDispatchAndPhone = new Map();
-      const runByLeadId = new Map();
-      const runByPhone = new Map();
-      const matchedRunIds = new Set();
-
-      for (const r of runs) {
-        const clean = normalizeString(r.phone).replace(/\D/g, "");
-        if (r.dispatch_id && r.lead_id) runByDispatchAndLeadId.set(`${r.dispatch_id}:${r.lead_id}`, r);
-        if (r.dispatch_id && clean) runByDispatchAndPhone.set(`${r.dispatch_id}:${clean}`, r);
-        if (r.lead_id) runByLeadId.set(r.lead_id, r);
-        if (clean) runByPhone.set(clean, r);
-      }
-
-      // 4. Identificar Respostas com Causalidade de 14 dias para leads com status = 'sent'
+      // 3. Buscar Respostas com Janela Causal de 14 dias para leads com status = 'sent'
       const replyByRunId = new Map();
       const replyByPhone = new Map();
 
@@ -4363,7 +4360,7 @@ export function registerCampaignsRoutes(app, deps) {
         const canonicalPhoneMatch = `(lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})`;
         const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
 
-        const { rows: replyRows } = await pgDatabasePool.query(
+        const { rows: replyRows = [] } = await pgDatabasePool.query(
           `
             SELECT DISTINCT ON (r.id)
               r.id AS run_id,
@@ -4404,16 +4401,38 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
-      // 5. Montar lista de destinatários
-      const recipients = allCandidateLeads.map((lead) => {
+      // 4. Buscar Leads Candidatos Restantes (Pendente / Na Fila) em UMA ÚNICA chamada
+      const importSelection = resolveCampaignImportSelection(campaign);
+      const candidateLeads = await buildDispatchLeads({
+        clientId: authorizedClientId,
+        importId: importSelection,
+        limit: null,
+        offset: null,
+        segmentation: null,
+        excludeDispatchId: null,
+      });
+
+      // 5. Cruzar os candidatos com as runs em memória
+      const runByLeadId = new Map();
+      const runByPhone = new Map();
+      const matchedRunIds = new Set();
+
+      for (const r of runs) {
+        if (r.lead_id) runByLeadId.set(String(r.lead_id), r);
+        const cleanPhone = normalizeString(r.phone).replace(/\D/g, "");
+        if (cleanPhone) runByPhone.set(cleanPhone, r);
+      }
+
+      const recipients = [];
+
+      for (const lead of (candidateLeads || [])) {
         const cleanPhone = normalizeString(lead.telefone).replace(/\D/g, "");
         let run = null;
-        if (lead.dispatchId) {
-          if (lead.id) run = runByDispatchAndLeadId.get(`${lead.dispatchId}:${lead.id}`);
-          if (!run && cleanPhone) run = runByDispatchAndPhone.get(`${lead.dispatchId}:${cleanPhone}`);
+        if (lead.id && runByLeadId.has(String(lead.id))) {
+          run = runByLeadId.get(String(lead.id));
+        } else if (cleanPhone && runByPhone.has(cleanPhone)) {
+          run = runByPhone.get(cleanPhone);
         }
-        if (!run && lead.id) run = runByLeadId.get(lead.id);
-        if (!run && cleanPhone) run = runByPhone.get(cleanPhone);
 
         if (run?.id) matchedRunIds.add(run.id);
 
@@ -4441,11 +4460,11 @@ export function registerCampaignsRoutes(app, deps) {
         const lastInboundText = replyInfo ? replyInfo.lastInboundText : null;
         const failureReason = run?.error_message ? translateDispatchErrorMessage(run.error_message) : null;
         const sentAt = run?.sent_at || null;
-        const dispatchName = lead.dispatchName || (run?.dispatch_id ? dispatchMap.get(run.dispatch_id)?.name : null) || null;
+        const dispatchName = run?.dispatch_name || (run?.dispatch_id ? dispatchMap.get(run.dispatch_id) : null) || null;
 
-        return {
-          leadId: lead.id || lead.lead_id || run?.lead_id || null,
-          nome: lead.nome || "Sem nome",
+        recipients.push({
+          leadId: lead.id || run?.lead_id || null,
+          nome: lead.nome && lead.nome !== "Sem nome" ? lead.nome : (run?.lead_nome || "Sem nome"),
           telefone: lead.telefone || (run ? run.phone : ""),
           status: rawStatus,
           statusLabel,
@@ -4455,8 +4474,8 @@ export function registerCampaignsRoutes(app, deps) {
           lastInboundText,
           failureReason,
           dispatchName,
-        };
-      });
+        });
+      }
 
       // Se houver runs registradas não presentes nos candidatos, inclui para garantir contagem exata
       for (const r of runs) {
@@ -4482,7 +4501,7 @@ export function registerCampaignsRoutes(app, deps) {
 
           recipients.push({
             leadId: r.lead_id || null,
-            nome: "Sem nome",
+            nome: r.lead_nome || "Sem nome",
             telefone: r.phone || "",
             status: r.status || "pending",
             statusLabel,
@@ -4491,7 +4510,7 @@ export function registerCampaignsRoutes(app, deps) {
             repliedAt: replyInfo ? replyInfo.repliedAt : null,
             lastInboundText: replyInfo ? replyInfo.lastInboundText : null,
             failureReason: r.error_message ? translateDispatchErrorMessage(r.error_message) : null,
-            dispatchName: r.dispatch_id ? dispatchMap.get(r.dispatch_id)?.name || null : null,
+            dispatchName: r.dispatch_name || (r.dispatch_id ? dispatchMap.get(r.dispatch_id) : null) || null,
           });
         }
       }
@@ -4693,7 +4712,7 @@ export function registerCampaignsRoutes(app, deps) {
       const { rows, rowCount } = await pgDatabasePool.query(
         `
           UPDATE public.campaign_dispatches
-          SET 
+          SET
             status = 'done',
             error_message = NULL,
             finished_at = COALESCE(finished_at, updated_at, NOW()),

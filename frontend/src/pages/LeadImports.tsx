@@ -2489,6 +2489,7 @@ export default function LeadImports({
         <LeadImportAuditReport
           activeClientId={activeClientId}
           imports={imports}
+          campaigns={campaigns}
           onSelectImportForFollowup={(newImportId) => {
             setSelectedImportId(newImportId);
             setSelectedFile(null);

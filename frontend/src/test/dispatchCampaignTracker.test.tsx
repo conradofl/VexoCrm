@@ -87,7 +87,7 @@ function setupSummary({ active, ended }: { active: any[]; ended: any[] }) {
 }
 
 function expandFirstCard() {
-  const btn = screen.queryByRole("button", { name: /detalhes/i });
+  const btn = screen.queryAllByRole("button", { name: /detalhes/i })[0];
   if (btn) fireEvent.click(btn);
 }
 
@@ -113,7 +113,7 @@ describe("DispatchCampaignTracker", () => {
     expandFirstCard();
 
     // o nome do chip também aparece como opção do filtro por chip: a conferência é dentro do cartão
-    expect(within(screen.getByTestId(/^dispatch-card-/)).getByText(/GD Gabriel/)).toBeTruthy();
+    expect(within(screen.getByTestId(/^dispatch-card-(?!header)/)).getByText(/GD Gabriel/)).toBeTruthy();
     expect(screen.getByText(/100 leads/)).toBeTruthy();
     expect(screen.getByText("70")).toBeTruthy(); // enviados
     expect(screen.getByText("15")).toBeTruthy(); // responderam
@@ -309,7 +309,7 @@ describe("DispatchCampaignTracker", () => {
 
     fireEvent.click(screen.getByText("Encerradas (25)"));
 
-    expect(screen.getAllByTestId(/^dispatch-card-/)).toHaveLength(25);
+    expect(screen.getAllByTestId(/^dispatch-card-(?!header)/)).toHaveLength(25);
     expect(screen.queryByText(/Página 1 de/)).toBeNull();
     const endedCalls = summaryMockFn.mock.calls.filter((c) => c[0] === "ended");
     expect(endedCalls.every((c) => c[1] === 1 && c[2] === 5000)).toBe(true); // uma página só, do tamanho do teto

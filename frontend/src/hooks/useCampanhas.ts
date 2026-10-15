@@ -505,7 +505,7 @@ function shouldRetryCampaignResponse(response: Response) {
   return [502, 503, 504].includes(response.status) || (response.status >= 500 && contentType.includes("text/html"));
 }
 
-async function fetchCampaignsApi(path: string, init: RequestInit) {
+export async function fetchCampaignsApi(path: string, init: RequestInit) {
   let networkError: unknown = null;
   const candidates = getCampaignApiCandidates(path);
 
@@ -1168,14 +1168,17 @@ export function useCampaignRecipients(
     queryFn: async () => {
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
-      const url = new URL(`${API_BASE_URL}/api/campaigns/${campaignId}/recipients`);
+
+      const params = new URLSearchParams();
       if (statusFilter && statusFilter !== "all") {
-        url.searchParams.set("status", statusFilter);
+        params.set("status", statusFilter);
       }
       if (searchQuery && searchQuery.trim()) {
-        url.searchParams.set("search", searchQuery.trim());
+        params.set("search", searchQuery.trim());
       }
-      const res = await fetch(url.toString(), {
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
+      const res = await fetchCampaignsApi(`/api/campaigns/${campaignId}/recipients${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao buscar destinatários da campanha"));
