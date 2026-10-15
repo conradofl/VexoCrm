@@ -247,6 +247,26 @@ function CampaignCard({
   onToggleExpand: () => void;
 }) {
   const color = getStableColor(campaign.campaignId);
+
+  const handleHeaderClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    const interactive = target?.closest("button, a, input, select, textarea, [role='button']");
+    if (interactive && interactive !== e.currentTarget) {
+      return;
+    }
+    onToggleExpand();
+  };
+
+  const handleHeaderKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      const target = e.target as HTMLElement | null;
+      if (target && target.tagName === "BUTTON") return;
+      if (target && target !== e.currentTarget && target.closest("button, a, input, select, textarea, [role='button']")) return;
+      e.preventDefault();
+      onToggleExpand();
+    }
+  };
+
   return (
     <div
       data-testid={`dispatch-card-${campaign.campaignId}`}
@@ -264,7 +284,16 @@ function CampaignCard({
         3. Quantos leads
         4. Data / Próximo agendamento
       */}
-      <div className="flex flex-col gap-2.5">
+      <div
+        data-testid={`dispatch-card-header-${campaign.campaignId}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        aria-label={`Alternar detalhes de ${campaign.campaignName}`}
+        className="flex flex-col gap-2.5 cursor-pointer select-none rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        onClick={handleHeaderClick}
+        onKeyDown={handleHeaderKeyDown}
+      >
         {/* Linha 1: ponto de cor, nome ocupando o espaço disponível, e seta encostada à direita */}
         <div
           data-testid={`dispatch-line-1-${campaign.campaignId}`}
@@ -291,7 +320,10 @@ function CampaignCard({
             variant="ghost"
             size="icon"
             className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 ml-auto"
-            onClick={onToggleExpand}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpand();
+            }}
             aria-expanded={isExpanded}
             aria-label={
               isExpanded

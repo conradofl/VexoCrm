@@ -147,7 +147,7 @@ const renderQueue = () =>
 const renderSheets = () => render(<SavedSheetsCards imports={SHEETS} onViewImport={noop} onDeleteImport={noop} />);
 
 const type = (placeholder: RegExp, text: string) => fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: text } });
-const cards = (prefix: string) => screen.queryAllByTestId(new RegExp(`^${prefix}`));
+const cards = (prefix: string) => screen.queryAllByTestId(new RegExp(`^${prefix}(?!header-)`));
 const pick = (group: string, label: string) =>
   fireEvent.click(within(screen.getByRole("group", { name: group })).getByRole("button", { name: label }));
 
