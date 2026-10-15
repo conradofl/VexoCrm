@@ -150,7 +150,12 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
         .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status")
         .eq("client_id", clientId)
         .not("telefone", "is", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        // Desempate por id: importação em lote grava muitos leads com created_at igual, e em empate o Postgres
+        // devolve ordem arbitrária, que muda entre consultas. O lote é fatia por POSIÇÃO (slice offset/limit)
+        // e a leitura é paginada (range): sem desempate, o mesmo lead caía em dois lotes e recebia duas vezes
+        // (campanha 3206272b, 14/10/2026: 67 envios para 50 telefones). Mesmo critério de leadListQuery.js.
+        .order("id", { ascending: true });
     } else {
       query = supabase
         .from("lead_import_items")
@@ -158,7 +163,8 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
         .eq("client_id", clientId)
         .eq("imported", true)
         .not("telefone", "is", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true }); // desempate: ver comentário acima (lote por posição)
 
       if (Array.isArray(importId)) {
         // Selecao de varias planilhas na tela de disparo: uma campanha pode
