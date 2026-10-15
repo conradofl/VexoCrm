@@ -42,6 +42,7 @@ import {
 import { markCampaignLeadWaitingReply } from "../../campaign/dispatch.js";
 import {
   extractCampaignProgress,
+  findLeadsAlreadyReachedInCycle,
   isLeadBlockedByActiveCycleProgress,
 } from "../../campaign/dispatch.js";
 import {
@@ -2701,10 +2702,41 @@ export function registerCampaignsRoutes(app, deps) {
       excludeDispatchId: dispatchId,
     });
 
+    // Exclusão por ciclo: quem já recebeu em OUTRO lote desta campanha, neste ciclo, não recebe de novo aqui
+    // (ver findLeadsAlreadyReachedInCycle). Fica registrado como 'skipped' com o motivo — conta como processado e
+    // aparece nos destinatários, em vez de sumir ou deixar o lote "interrompido com pendentes".
+    const jaNoCiclo = pgDatabasePool
+      ? await findLeadsAlreadyReachedInCycle(pgDatabasePool, { campaignId: campaign.id, dispatchId, occurrence })
+      : { phones: new Set(), leadIds: new Set() };
+    const leadsDoCiclo = [];
+    for (const l of leads) {
+      const digits = normalizeString(l.telefone).replace(/\D/g, "");
+      const jaRecebeu = (digits && jaNoCiclo.phones.has(digits)) || (l.id && jaNoCiclo.leadIds.has(String(l.id)));
+      if (!jaRecebeu) {
+        leadsDoCiclo.push(l);
+        continue;
+      }
+      console.log("[campaign-dispatch] lead pulado: ja recebeu em outro lote deste ciclo da campanha", {
+        dispatchId,
+        campaignId: campaign.id,
+        leadId: l.id,
+        phone: maskPhoneForLog(l.telefone),
+      });
+      await pgDatabasePool.query(
+        `INSERT INTO public.campaign_dispatch_runs
+           (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
+         VALUES ($1, $2, $3, $4, $5, 'skipped', 'Já recebeu em outro lote deste ciclo da campanha', now(), $6)
+         ON CONFLICT (dispatch_id, lead_id) DO NOTHING`,
+        [dispatchId, campaign.id, clientId, l.id || null, digits, importItemIdOf(l)]
+      ).catch((err) => {
+        console.warn("[campaign-dispatch] falha ao registrar lead pulado por ciclo:", err?.message || err);
+      });
+    }
+
     // Trava por ciclo: o lead não repete o passo 1 dentro da MESMA sequência em andamento.
     // Para ocorrência recorrente: cada ocorrência é um ciclo NOVO; progresso de ocorrência anterior não bloqueia.
     const cycleLeads = [];
-    for (const l of leads) {
+    for (const l of leadsDoCiclo) {
       const progress = extractCampaignProgress(l.normalized_data || {}, campaign.id);
       if (isLeadBlockedByActiveCycleProgress({ progress, occurrence, campaignId: campaign.id, dispatchId })) {
         console.log("[campaign-dispatch] lead pulado: sequencia ja em andamento neste ciclo", {

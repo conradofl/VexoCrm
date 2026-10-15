@@ -71,6 +71,10 @@ afterAll(async () => {
   }
 });
 
+// Cada teste sobe um Postgres em WASM (pglite); com a suíte inteira em paralelo, o limite padrão de 5 s não basta
+// (estourou em 15/10/2026 só na suíte cheia — passa sozinho).
+const PGLITE_TIMEOUT = 60_000;
+
 async function setupTestDb() {
   const pool = await createPgliteDb(SCHEMA);
   await pool.query("INSERT INTO leads_clients (id, name) VALUES ($1, $2)", [CLIENT_ID, "Tenant Dedup"]);
@@ -144,7 +148,7 @@ describe("Detector e Deduplicador Inteligente de Importação", () => {
       const beatrizSample = result.sampleDuplicates.find((s) => s.nome === "Beatriz Santos");
       expect(beatrizSample).toBeDefined();
       expect(beatrizSample.existingTags).toContain("cliente_vip");
-    });
+    }, PGLITE_TIMEOUT);
   });
 
   describe("Endpoint HTTP POST /api/lead-imports/analyze", () => {
@@ -210,7 +214,7 @@ describe("Detector e Deduplicador Inteligente de Importação", () => {
           },
         ],
       });
-    });
+    }, PGLITE_TIMEOUT);
   });
 
   describe("Estratégias de Deduplicação no upsertLeadsBatchByPhone", () => {
@@ -249,7 +253,7 @@ describe("Detector e Deduplicador Inteligente de Importação", () => {
       const leadRes = await pool.query("SELECT tags FROM public.leads WHERE client_id = $1", [CLIENT_ID]);
       expect(leadRes.rows[0].tags).toContain("base_original");
       expect(leadRes.rows[0].tags).toContain("imp_planilha_2");
-    });
+    }, PGLITE_TIMEOUT);
 
     it("estratégia 'skip': ignora leads já existentes, inserindo exclusivamente os novos", async () => {
       const pool = await setupTestDb();
@@ -298,7 +302,7 @@ describe("Detector e Deduplicador Inteligente de Importação", () => {
         [CLIENT_ID]
       );
       expect(novoRes.rows[0].nome).toBe("Novo Contato");
-    });
+    }, PGLITE_TIMEOUT);
 
     it("estratégia 'overwrite': substitui tags e cadastro do lead existente", async () => {
       const pool = await setupTestDb();
@@ -329,6 +333,6 @@ describe("Detector e Deduplicador Inteligente de Importação", () => {
       const leadRes = await pool.query("SELECT nome, tags FROM public.leads WHERE client_id = $1", [CLIENT_ID]);
       expect(leadRes.rows[0].nome).toBe("Nome Sobrescrito");
       expect(leadRes.rows[0].tags).toEqual(["tag_nova"]);
-    });
+    }, PGLITE_TIMEOUT);
   });
 });
