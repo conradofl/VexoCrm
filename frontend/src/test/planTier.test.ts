@@ -149,4 +149,20 @@ describe("planTier resolver", () => {
     expect(hasFeatureUnlocked(tenantWithN8nModulos, "agente")).toBe(false);
     expect(hasFeatureUnlocked(tenantWithN8nModulos, "agente-ia")).toBe(false);
   });
+
+  it("calendário abre com módulo de campanhas OU de follow-up — sem vazar o follow-up para quem só tem campanhas", () => {
+    const soCampanhas = { plan_tier: "modular", n8n_settings: { modulos_avulsos: ["disparador_campanhas"] } };
+    const soFollowup = { plan_tier: "modular", n8n_settings: { modulos_avulsos: ["followup"] } };
+    const nenhum = { plan_tier: "modular", n8n_settings: { modulos_avulsos: [] } };
+
+    expect(hasFeatureUnlocked(soCampanhas, "calendario")).toBe(true);
+    expect(hasFeatureUnlocked(soCampanhas, "agenda")).toBe(true);
+    expect(hasFeatureUnlocked(soCampanhas, "followup")).toBe(false);
+    expect(hasFeatureUnlocked(soCampanhas, "fila-de-followup")).toBe(false);
+
+    expect(hasFeatureUnlocked(soFollowup, "calendario")).toBe(true);
+    expect(hasFeatureUnlocked(soFollowup, "followup")).toBe(true);
+
+    expect(hasFeatureUnlocked(nenhum, "calendario")).toBe(false);
+  });
 });

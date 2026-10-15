@@ -329,8 +329,9 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
         expect(aviso).not.toHaveTextContent(new RegExp(`${outra}: falha simulada`));
       }
       // a lista de tags (escolher tag para montar a campanha) continua funcionando quando a falha NÃO é a das tags
-      if (parte !== "tags") expect(await screen.findByRole("option", { name: "vip" })).toBeInTheDocument();
-      else expect(screen.queryByRole("option", { name: "vip" })).not.toBeInTheDocument();
+      // (o seletor mostra "tag (N leads)" desde 088457e: a tag é identificada pelo nome seguido da contagem)
+      if (parte !== "tags") expect(await screen.findByRole("option", { name: "vip (4.000)" })).toBeInTheDocument();
+      else expect(screen.queryByRole("option", { name: /^vip\b/ })).not.toBeInTheDocument();
       // cartões de origem: valor real quando chegaram; "—" (e não 0) quando falharam
       if (parte === "channels") expect(screen.queryByTitle(/Google Ads: \d+ leads/)).not.toBeInTheDocument();
       else expect(await screen.findByTitle(/Google Ads: 12000 leads/)).toBeInTheDocument();
@@ -359,9 +360,14 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
       const select = await screen.findByTestId("tag-select");
       await waitFor(() => expect(select.querySelectorAll("optgroup").length).toBe(4));
       expect(Array.from(select.querySelectorAll("optgroup")).map((g) => g.getAttribute("label"))).toEqual(["Planilhas", "Grupos e origem", "Rótulos da IA", "Minhas"]);
-      const opcoes = Array.from(select.querySelectorAll("option")).map((o) => o.textContent).filter((t) => t && t !== "Todas as Tags").sort();
+      // nenhuma tag perdida: o VALOR de cada opção é a tag; o texto traz a contagem de leads (088457e)
+      const opcoes = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value")).filter(Boolean).sort();
       expect(opcoes).toEqual(["#Imp-feira_abril", "Follow-up", "VP Ofertas", "agenda-whatsapp", "vip"].sort());
-      expect(select.querySelector('optgroup[label="Planilhas"] option')?.textContent).toBe("#Imp-feira_abril");
+      const textos = Array.from(select.querySelectorAll("option")).map((o) => o.textContent?.trim()).filter((t) => t && t !== "Todas as Tags").sort();
+      expect(textos).toEqual(["#Imp-feira_abril (900)", "Follow-up (152)", "VP Ofertas (1.011)", "agenda-whatsapp (5.050)", "vip (4.000)"].sort());
+      const primeiraPlanilha = select.querySelector('optgroup[label="Planilhas"] option');
+      expect(primeiraPlanilha?.getAttribute("value")).toBe("#Imp-feira_abril");
+      expect(primeiraPlanilha?.textContent?.trim()).toBe("#Imp-feira_abril (900)");
     });
 
     it("campanha por planilha: escolhe a planilha registrada, vê os dois números, e o público pedido leva a planilha e o recorte", async () => {

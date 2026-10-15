@@ -180,6 +180,10 @@ describe("Pilar 3: Campanhas Recorrentes — campaignRecurrence.js", () => {
   });
 });
 
+// pglite sobe um Postgres em WASM por teste; com a suíte inteira em paralelo, o limite padrão de 5 s não basta
+// (falhou uma vez no CI local em 14/10/2026 só na suíte cheia — passa sozinho).
+const PGLITE_TIMEOUT = 60_000;
+
 describe("agendador antigo (runDueCampaignDispatches) não dispara campanha recorrente", () => {
   // A recorrência mora na fila (campaign_dispatches): cada ocorrência vira um lote. Se o caminho antigo também
   // disparasse, a mesma campanha sairia duas vezes para o mesmo público.
@@ -213,7 +217,7 @@ describe("agendador antigo (runDueCampaignDispatches) não dispara campanha reco
       _setPgDatabasePoolForTesting(null);
       await db.close();
     }
-  });
+  }, PGLITE_TIMEOUT);
 
   it("campanha NÃO recorrente vencida continua sendo disparada pelo caminho antigo, como hoje", async () => {
     const { createPgliteDb } = await import("./helpers/pgliteDb.js");
@@ -241,5 +245,5 @@ describe("agendador antigo (runDueCampaignDispatches) não dispara campanha reco
       _setPgDatabasePoolForTesting(null);
       await db.close();
     }
-  });
+  }, PGLITE_TIMEOUT);
 });
