@@ -16,6 +16,8 @@ vi.mock("@/components/ui/use-toast", () => ({
 
 const bulkActionMutate = vi.fn();
 const summaryMockFn = vi.fn();
+const updateCampaignMutateAsync = vi.fn().mockResolvedValue({ id: "camp-1", name: "Novo Nome" });
+const deleteCampaignMutateAsync = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
   const actual: any = await importOriginal();
@@ -24,6 +26,8 @@ vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
     useDispatchSummary: (_clientId: any, scope: string, page: number, pageSize: number) =>
       summaryMockFn(scope, page, pageSize),
     useCampaignDispatchBulkAction: () => ({ mutate: bulkActionMutate, isPending: false }),
+    useUpdateCampaign: () => ({ mutateAsync: updateCampaignMutateAsync, isPending: false }),
+    useDeleteCampaign: () => ({ mutateAsync: deleteCampaignMutateAsync, isPending: false }),
   };
 });
 
@@ -331,5 +335,43 @@ describe("DispatchCampaignTracker", () => {
 
     fireEvent.click(screen.getByText("Encerradas (5025)"));
     expect(await screen.findByText(/Página 1 de 2/)).toBeTruthy();
+  });
+
+  it("permite renomear campanha abrindo o diálogo e salvando o novo nome", async () => {
+    setupSummary({ active: [makeCampaign({ campaignId: "c-rename", campaignName: "Campanha Antiga" })], ended: [] });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    const renameBtn = screen.getByTestId("btn-rename-campaign-c-rename");
+    fireEvent.click(renameBtn);
+
+    const input = screen.getByTestId("input-rename-campaign");
+    expect(input).toHaveValue("Campanha Antiga");
+
+    fireEvent.change(input, { target: { value: "Campanha Nova Renomeada" } });
+    fireEvent.click(screen.getByTestId("btn-submit-rename-campaign"));
+
+    expect(updateCampaignMutateAsync).toHaveBeenCalledWith({
+      id: "c-rename",
+      name: "Campanha Nova Renomeada",
+    });
+  });
+
+  it("permite excluir campanha abrindo o alerta e confirmando a exclusão", async () => {
+    setupSummary({ active: [makeCampaign({ campaignId: "c-delete", campaignName: "Campanha Para Excluir" })], ended: [] });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    expandFirstCard();
+
+    const deleteBtn = screen.getByTestId("btn-delete-campaign-c-delete");
+    fireEvent.click(deleteBtn);
+
+    expect(screen.getByText(/Excluir campanha "Campanha Para Excluir"\?/i)).toBeTruthy();
+
+    const confirmBtn = screen.getByTestId("btn-confirm-delete-campaign");
+    fireEvent.click(confirmBtn);
+
+    expect(deleteCampaignMutateAsync).toHaveBeenCalledWith("c-delete");
   });
 });

@@ -405,7 +405,6 @@ export function registerIntegrationsRoutes(app, deps) {
   app.get(
     "/api/lead-clients/:tenantId/n8n-settings",
     requireFirebaseAuth,
-    requireAdminAccess,
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -414,9 +413,11 @@ export function registerIntegrationsRoutes(app, deps) {
         sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
         return;
       }
+      const authorizedClientId = resolveAuthorizedClientId(req, res, tenantId);
+      if (!authorizedClientId) return;
 
       try {
-        const settings = await getLeadClientN8nSettings(tenantId);
+        const settings = await getLeadClientN8nSettings(authorizedClientId);
         res.json({ item: maskN8nSettings(settings) });
       } catch (error) {
         console.error("lead client n8n settings query error:", error);
@@ -476,7 +477,6 @@ export function registerIntegrationsRoutes(app, deps) {
   app.patch(
     "/api/lead-clients/:tenantId/n8n-settings",
     requireFirebaseAuth,
-    requireAdminAccess,
     async (req, res) => {
       if (!ensureDb(res)) return;
 
@@ -485,24 +485,31 @@ export function registerIntegrationsRoutes(app, deps) {
         sendError(res, 400, "INVALID_TENANT_ID", "Tenant ID must use lowercase letters, numbers and hyphens");
         return;
       }
+      const authorizedClientId = resolveAuthorizedClientId(req, res, tenantId);
+      if (!authorizedClientId) return;
+
+      if (!isManagerOrAdmin(req.authAccess)) {
+        sendError(res, 403, "FORBIDDEN", "Apenas gestores ou administradores podem alterar as configurações do cliente");
+        return;
+      }
 
       try {
         let { data: tenant } = await supabase
           .from("leads_clients")
           .select("id")
-          .eq("id", tenantId)
+          .eq("id", authorizedClientId)
           .maybeSingle();
 
         if (!tenant) {
           await supabase
             .from("leads_clients")
-            .insert({ id: tenantId, name: tenantId })
+            .insert({ id: authorizedClientId, name: authorizedClientId })
             .catch(() => {});
         }
 
-        const existing = await getLeadClientN8nSettings(tenantId);
+        const existing = await getLeadClientN8nSettings(authorizedClientId);
         const savedSettings = await upsertLeadClientN8nSettings(
-          tenantId,
+          authorizedClientId,
           req.body || {},
           req.authAccess,
           existing
@@ -510,7 +517,7 @@ export function registerIntegrationsRoutes(app, deps) {
 
         if (Array.isArray(req.body?.allowedTabs)) {
           try {
-            await propagateTenantPermissions(tenantId, req.body.allowedTabs);
+            await propagateTenantPermissions(authorizedClientId, req.body.allowedTabs);
           } catch (propError) {
             console.error("Failed to propagate tenant permissions to users:", propError);
           }

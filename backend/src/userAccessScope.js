@@ -82,10 +82,6 @@ export function canAssignManagedAccess(requesterAccess = {}, managedAccess = {})
     return false;
   }
 
-  if (managedAccess.permissions?.includes("users.manage")) {
-    return false;
-  }
-
   const requesterClientIds = new Set(getAccessClientIds(requesterAccess));
   const managedClientIds = getAccessClientIds(managedAccess);
 

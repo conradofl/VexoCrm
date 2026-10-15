@@ -58,4 +58,17 @@ describe("user access tenant scope", () => {
     expect(hasUserPermission(tenantManager, "users.manage")).toBe(true);
     expect(canAssignManagedAccess(tenantManager, requestedAccess)).toBe(true);
   });
+
+  it("allows an authorized scoped manager to assign gestor role (including users.manage) inside their tenant", () => {
+    const requestedGestorAccess = {
+      role: "internal",
+      isAdmin: false,
+      accessPreset: "gestor",
+      scopeMode: "assigned_clients",
+      clientIds: ["tenant-a"],
+      permissions: ["dashboard.view", "users.view", "users.manage"],
+    };
+
+    expect(canAssignManagedAccess(tenantManager, requestedGestorAccess)).toBe(true);
+  });
 });

@@ -719,6 +719,9 @@ export function useUpdateCampaign() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["dispatch-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["all-dispatches"] });
+      queryClient.invalidateQueries({ queryKey: ["campaign-dispatches"] });
     },
   });
 }
@@ -778,6 +781,9 @@ export function useDeleteCampaign() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["dispatch-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["all-dispatches"] });
+      queryClient.invalidateQueries({ queryKey: ["campaign-dispatches"] });
     },
   });
 }

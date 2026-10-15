@@ -8,7 +8,7 @@ import { CampaignRecipientsDialog } from "./CampaignRecipientsDialog";
 // Abrir um cartão fecha o anterior (acordeão único).
 // Os quadrados de lote continuam com as cores exatas de estado (verde, vermelho, azul, cinza).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Loader2,
   Pause,
@@ -18,8 +18,18 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -42,6 +52,8 @@ import { getStableColor } from "@/lib/stableColor";
 import {
   useDispatchSummary,
   useCampaignDispatchBulkAction,
+  useUpdateCampaign,
+  useDeleteCampaign,
   DISPATCH_AGGREGATE_STATUS_COLORS,
   DISPATCH_SQUARE_STATE_BY_STATUS,
   DISPATCH_SQUARE_STATE_LABELS,
@@ -274,6 +286,7 @@ function CampaignCard({
   onToggleExpand: () => void;
 }) {
   const color = getStableColor(campaign.campaignId);
+  const [isRenaming, setIsRenaming] = useState(false);
 
   const handleHeaderClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
@@ -340,6 +353,21 @@ function CampaignCard({
             >
               {dispatchField("name").render(campaign)}
             </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              data-testid={`btn-rename-campaign-${campaign.campaignId}`}
+              className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-white/5 shrink-0 opacity-70 hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsRenaming(true);
+              }}
+              aria-label={`Renomear campanha ${campaign.campaignName}`}
+              title="Renomear campanha"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
           </div>
 
           <Button
@@ -419,6 +447,15 @@ function CampaignCard({
         >
           <CampaignDetails campaign={campaign} onOpenDispatch={onOpenDispatch} onOpenCampaignRecipients={onOpenCampaignRecipients} />
         </div>
+      )}
+
+      {isRenaming && (
+        <RenameCampaignDialog
+          campaignId={campaign.campaignId}
+          currentName={campaign.campaignName}
+          isOpen={isRenaming}
+          onClose={() => setIsRenaming(false)}
+        />
       )}
     </div>
   );
@@ -501,6 +538,11 @@ export function CampaignDetails({
             destructive
           />
         )}
+
+        <DeleteCampaignButton
+          campaignId={campaign.campaignId}
+          campaignName={campaign.campaignName}
+        />
       </div>
 
       {/* Barra de progresso: enviado, falhou, restante */}
@@ -783,6 +825,154 @@ function ResumeActionButton({
           <Button className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white" disabled={confirmDisabled} onClick={handleConfirm}>
             Retomar
           </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function RenameCampaignDialog({
+  campaignId,
+  currentName,
+  isOpen,
+  onClose,
+}: {
+  campaignId: string;
+  currentName: string;
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(currentName);
+  const updateCampaign = useUpdateCampaign();
+
+  useEffect(() => {
+    setName(currentName);
+  }, [currentName, isOpen]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === currentName) {
+      onClose();
+      return;
+    }
+    try {
+      await updateCampaign.mutateAsync({ id: campaignId, name: trimmed });
+      toast({
+        title: "Nome da campanha atualizado",
+        description: `Campanha renomeada para "${trimmed}".`,
+      });
+      onClose();
+    } catch (err: any) {
+      toast({
+        title: "Erro ao renomear campanha",
+        description: err?.message || "Tente novamente mais tarde.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[425px]" data-testid={`dialog-rename-campaign-${campaignId}`}>
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Renomear Campanha</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              data-testid="input-rename-campaign"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nome da campanha..."
+              autoFocus
+              disabled={updateCampaign.isPending}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={onClose} disabled={updateCampaign.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              data-testid="btn-submit-rename-campaign"
+              disabled={updateCampaign.isPending || !name.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {updateCampaign.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteCampaignButton({
+  campaignId,
+  campaignName,
+}: {
+  campaignId: string;
+  campaignName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const deleteCampaign = useDeleteCampaign();
+
+  const handleDelete = async () => {
+    try {
+      await deleteCampaign.mutateAsync(campaignId);
+      toast({
+        title: "Campanha excluída",
+        description: `A campanha "${campaignName}" foi excluída com sucesso.`,
+      });
+      setOpen(false);
+    } catch (err: any) {
+      toast({
+        title: "Erro ao excluir campanha",
+        description: err?.message || "Tente novamente mais tarde.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid={`btn-delete-campaign-${campaignId}`}
+          className="h-8 text-xs font-bold rounded-xl px-2.5 border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-400 ml-auto"
+        >
+          <Trash2 className="h-3.5 w-3.5 mr-1" />
+          Excluir Campanha
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent data-testid={`dialog-delete-campaign-${campaignId}`}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir campanha "{campaignName}"?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta ação não pode ser desfeita. Todos os disparos e histórico associados a esta campanha serão removidos.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={deleteCampaign.isPending} className="h-8 text-xs">
+            Cancelar
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              handleDelete();
+            }}
+            disabled={deleteCampaign.isPending}
+            data-testid="btn-confirm-delete-campaign"
+            className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white"
+          >
+            {deleteCampaign.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+            Excluir definitivamente
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
