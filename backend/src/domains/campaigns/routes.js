@@ -85,7 +85,14 @@ import {
   readOccurrenceInfo,
 } from "../../services/campaignRecurrenceOccurrences.js";
 import { getDateKey } from "../../services/analytics.js";
-import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID } from "../../services/canonicalPhone.js";
+import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID, toCanonicalPhone } from "../../services/canonicalPhone.js";
+
+export function normalizeDispatchPhone(phone, lead = null) {
+  const raw = phone || lead?.telefone || lead?.phone || "";
+  const canonical = toCanonicalPhone(raw);
+  if (canonical) return canonical;
+  return normalizeString(raw).replace(/\D/g, "");
+}
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
 import { QUOTA_PAUSE_MARKER, createChipQuotaGate, findInstanceByWebhookUrl } from "../../services/campaignQuotaGate.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
@@ -3168,7 +3175,7 @@ export function registerCampaignsRoutes(app, deps) {
     const claimLead = async ({ lead, phone }) => {
       if (!pgDatabasePool) return true;
 
-      const cleanPhone = normalizeString(phone || lead?.telefone).replace(/\D/g, "");
+      const cleanPhone = normalizeDispatchPhone(phone, lead);
 
       // 1. Checagem dura incondicional no banco de dados
       try {
@@ -3243,17 +3250,50 @@ export function registerCampaignsRoutes(app, deps) {
     // Chip que de fato enviou cada lead, para gravar junto do 'sent': o do rodízio (activeChip) quando houver; senão o
     // dono do webhook de envio (dispatchSettings). Desconhecido fica NULL — nunca o chip configurado da campanha.
     const runChipTracker = createRunChipTracker({ settingsChipId: chipIdFromDispatchSettings(dispatchSettings) });
-    const finalizeLeadSent = async ({ lead, sentAt }) => {
-      if (!pgDatabasePool || !lead?.id) return;
-      await finalizeRunSent(pgDatabasePool, {
-        dispatchId,
-        leadId: lead.id,
-        sentAt,
-        chipId: runChipTracker.take(lead.id),
-      })
-        .catch((err) => {
-          console.warn("[campaign-dispatch] finalize_sent_failed:", err?.message || err);
+    const finalizeLeadSent = async ({ lead, phone, sentAt }) => {
+      if (!pgDatabasePool) return;
+      const targetLead = lead || {};
+      const leadId = targetLead.id || null;
+      const cleanPhone = normalizeDispatchPhone(phone, targetLead);
+      if (!leadId && !cleanPhone) return;
+
+      try {
+        const result = await finalizeRunSent(pgDatabasePool, {
+          dispatchId,
+          leadId,
+          phone: cleanPhone,
+          sentAt,
+          chipId: runChipTracker.take(leadId), // chipId: runChipTracker.take(lead.id)
         });
+
+        if (result?.rowCount === 0) {
+          console.error(
+            `[campaign-dispatch] finalize_sent_zero_rows: mensagem enviada mas nenhuma linha atualizada em campaign_dispatch_runs`,
+            { dispatchId, leadId, phone: cleanPhone }
+          );
+        }
+      } catch (err) {
+        const errorMsg = `[finalize_sent_failed] ${err?.message || err}`;
+        console.error("[campaign-dispatch] finalize_sent_failed:", err?.message || err, {
+          dispatchId,
+          leadId,
+          phone: cleanPhone,
+        });
+        if (db) {
+          await db
+            .from("campaign_dispatches")
+            .update({ error_message: errorMsg, updated_at: new Date().toISOString() })
+            .eq("id", dispatchId)
+            .catch(() => {});
+        } else if (pgDatabasePool) {
+          await pgDatabasePool
+            .query(
+              `UPDATE public.campaign_dispatches SET error_message = $1, updated_at = now() WHERE id = $2`,
+              [errorMsg, dispatchId]
+            )
+            .catch(() => {});
+        }
+      }
     };
 
     const finalizeLeadFailed = async ({ lead, phone, reason }) => {
@@ -3434,7 +3474,7 @@ export function registerCampaignsRoutes(app, deps) {
       },
       onLeadDispatched: async ({ lead, phone, sentAt, lastStep, lastStepIndex }) => {
         sentCount += 1;
-        await finalizeLeadSent({ lead, sentAt });
+        await finalizeLeadSent({ lead, phone, sentAt });
 
         if (usaFluxoDeResposta) {
           await markCampaignLeadWaitingReply({

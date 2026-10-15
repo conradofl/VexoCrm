@@ -59,6 +59,25 @@ export function createRunChipTracker({ settingsChipId = null } = {}) {
 // O MESMO UPDATE que marca como enviado grava o chip: um único comando, sem janela entre "enviado" e "por qual chip".
 export const FINALIZE_RUN_SENT_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid WHERE dispatch_id = $2 AND lead_id = $3`;
 
-export async function finalizeRunSent(pool, { dispatchId, leadId, sentAt, chipId = null }) {
-  return pool.query(FINALIZE_RUN_SENT_SQL, [sentAt || new Date().toISOString(), dispatchId, leadId, chipId]);
+export const FINALIZE_RUN_SENT_BY_PHONE_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid WHERE dispatch_id = $2 AND regexp_replace(phone, '\\D', '', 'g') = $3`;
+
+export async function finalizeRunSent(pool, { dispatchId, leadId = null, phone = null, sentAt, chipId = null }) {
+  const safeSentAt = sentAt || new Date().toISOString();
+  const safeChipId = typeof chipId === "string" && chipId.trim() !== "" ? chipId.trim() : null;
+
+  let result = { rowCount: 0, rows: [] };
+
+  if (leadId) {
+    result = await pool.query(FINALIZE_RUN_SENT_SQL, [safeSentAt, dispatchId, leadId, safeChipId]);
+  }
+
+  const cleanPhone = phone ? String(phone).replace(/\D/g, "") : null;
+  if ((!result || result.rowCount === 0) && cleanPhone) {
+    result = await pool.query(FINALIZE_RUN_SENT_BY_PHONE_SQL, [safeSentAt, dispatchId, cleanPhone, safeChipId]);
+  }
+
+  return {
+    rowCount: result?.rowCount ?? 0,
+    rows: result?.rows ?? [],
+  };
 }
