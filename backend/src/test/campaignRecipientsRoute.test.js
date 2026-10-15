@@ -1,6 +1,6 @@
-// backend/src/test/campaignRecipientsRoute.test.js
 import { describe, expect, it, vi } from "vitest";
 import { registerCampaignsRoutes } from "../domains/campaigns/routes.js";
+import { normalizeString } from "../textNormalize.js";
 
 function fakeRes() {
   const headers = {};
@@ -153,7 +153,7 @@ describe("GET /api/campaigns/:campaignId/recipients", () => {
 
     const deps = {
       ensureDb: () => true,
-      normalizeString: (s) => String(s || "").trim(),
+      normalizeString,
       resolveAuthorizedClientId: () => clientId,
       supabase,
       pgDatabasePool: pool,
@@ -298,5 +298,26 @@ describe("GET /api/campaigns/:campaignId/recipients", () => {
     expect(lines[1]).toContain("Sim");
     expect(lines[1]).toContain("Com certeza, me liga!");
     expect(lines[1]).toContain("Lote 1");
+  });
+
+  it("não quebra com req.query vazio nem com campos nulos (regressão toLowerCase)", async () => {
+    const buildLeads = async () => [
+      { id: "lead-null-1", nome: null, telefone: null },
+      { id: "lead-null-2", nome: "Sem Telefone", telefone: "" },
+    ];
+    const { deps } = makeTestSetup({ buildLeads });
+    const handler = getRouteHandler(deps, "/api/campaigns/:campaignId/recipients");
+
+    const req = {
+      params: { campaignId },
+      query: {}, // Sem status, sem search, sem format
+    };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.recipients).toBeDefined();
+    expect(res.body.counts.all).toBeGreaterThanOrEqual(2);
   });
 });

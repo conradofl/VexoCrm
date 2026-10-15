@@ -4193,9 +4193,10 @@ export function registerCampaignsRoutes(app, deps) {
       });
 
       // Filtro opcional por status na query (?status=sent, ?status=failed, ?status=invalid_number, etc)
-      const filterStatus = normalizeString(req.query.status);
+      const rawFilter = normalizeString(req.query.status);
+      const filterStatus = rawFilter ? rawFilter.toLowerCase() : null;
       const filteredRecipients = filterStatus
-        ? recipients.filter((r) => r.status.toLowerCase() === filterStatus.toLowerCase())
+        ? recipients.filter((r) => String(r.status || "").toLowerCase() === filterStatus)
         : recipients;
 
       const rawFormat = normalizeString(req.query.format);
@@ -4314,7 +4315,21 @@ export function registerCampaignsRoutes(app, deps) {
                 COALESCE(l.nome, 'Sem nome') AS lead_nome
               FROM public.campaign_dispatch_runs r
               LEFT JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-              LEFT JOIN public.leads l ON (l.id = r.lead_id OR regexp_replace(l.telefone, '\\D', '', 'g') = regexp_replace(r.phone, '\\D', '', 'g'))
+              LEFT JOIN LATERAL (
+                SELECT l.nome
+                FROM public.leads l
+                WHERE l.client_id = r.client_id
+                  AND (
+                    l.id = r.lead_id
+                    OR (
+                      r.phone IS NOT NULL AND r.phone <> ''
+                      AND l.telefone IS NOT NULL AND l.telefone <> ''
+                      AND regexp_replace(l.telefone, '\\D', '', 'g') = regexp_replace(r.phone, '\\D', '', 'g')
+                    )
+                  )
+                ORDER BY (l.id = r.lead_id) DESC, l.created_at DESC
+                LIMIT 1
+              ) l ON TRUE
               WHERE r.client_id = $1 AND r.campaign_id = $2
               ORDER BY r.created_at ASC
             `,
@@ -4390,7 +4405,7 @@ export function registerCampaignsRoutes(app, deps) {
             lastInboundText: row.last_inbound_text,
           });
           if (row.run_phone) {
-            const clean = normalizeString(row.run_phone).replace(/\D/g, "");
+            const clean = (normalizeString(row.run_phone) || "").replace(/\D/g, "");
             if (clean) {
               replyByPhone.set(clean, {
                 repliedAt: row.replied_at,
@@ -4402,15 +4417,20 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       // 4. Buscar Leads Candidatos Restantes (Pendente / Na Fila) em UMA ÚNICA chamada
-      const importSelection = resolveCampaignImportSelection(campaign);
-      const candidateLeads = await buildDispatchLeads({
-        clientId: authorizedClientId,
-        importId: importSelection,
-        limit: null,
-        offset: null,
-        segmentation: null,
-        excludeDispatchId: null,
-      });
+      let candidateLeads = [];
+      try {
+        const importSelection = resolveCampaignImportSelection(campaign);
+        candidateLeads = await buildDispatchLeads({
+          clientId: authorizedClientId,
+          importId: importSelection,
+          limit: null,
+          offset: null,
+          segmentation: null,
+          excludeDispatchId: null,
+        });
+      } catch (buildErr) {
+        console.warn("[campaign-recipients] Falha ao construir candidateLeads:", buildErr?.message || buildErr);
+      }
 
       // 5. Cruzar os candidatos com as runs em memória
       const runByLeadId = new Map();
@@ -4419,14 +4439,14 @@ export function registerCampaignsRoutes(app, deps) {
 
       for (const r of runs) {
         if (r.lead_id) runByLeadId.set(String(r.lead_id), r);
-        const cleanPhone = normalizeString(r.phone).replace(/\D/g, "");
+        const cleanPhone = (normalizeString(r.phone) || "").replace(/\D/g, "");
         if (cleanPhone) runByPhone.set(cleanPhone, r);
       }
 
       const recipients = [];
 
       for (const lead of (candidateLeads || [])) {
-        const cleanPhone = normalizeString(lead.telefone).replace(/\D/g, "");
+        const cleanPhone = (normalizeString(lead.telefone) || "").replace(/\D/g, "");
         let run = null;
         if (lead.id && runByLeadId.has(String(lead.id))) {
           run = runByLeadId.get(String(lead.id));
@@ -4436,7 +4456,7 @@ export function registerCampaignsRoutes(app, deps) {
 
         if (run?.id) matchedRunIds.add(run.id);
 
-        const rawStatus = run ? run.status : "pending";
+        const rawStatus = run ? (run.status || "pending") : "pending";
         const statusLabel =
           rawStatus === "sent"
             ? "Enviado"
@@ -4465,7 +4485,7 @@ export function registerCampaignsRoutes(app, deps) {
         recipients.push({
           leadId: lead.id || run?.lead_id || null,
           nome: lead.nome && lead.nome !== "Sem nome" ? lead.nome : (run?.lead_nome || "Sem nome"),
-          telefone: lead.telefone || (run ? run.phone : ""),
+          telefone: lead.telefone || (run ? run.phone : "") || "",
           status: rawStatus,
           statusLabel,
           sentAt,
@@ -4480,7 +4500,7 @@ export function registerCampaignsRoutes(app, deps) {
       // Se houver runs registradas não presentes nos candidatos, inclui para garantir contagem exata
       for (const r of runs) {
         if (!matchedRunIds.has(r.id)) {
-          const cleanPhone = normalizeString(r.phone).replace(/\D/g, "");
+          const cleanPhone = (normalizeString(r.phone) || "").replace(/\D/g, "");
           const replyInfo =
             r.status === "sent"
               ? replyByRunId.get(r.id) || (cleanPhone ? replyByPhone.get(cleanPhone) : null)
@@ -4518,39 +4538,54 @@ export function registerCampaignsRoutes(app, deps) {
       // 6. Contagens consolidadas antes dos filtros
       const counts = {
         all: recipients.length,
-        sent: recipients.filter((r) => r.status === "sent").length,
-        replied: recipients.filter((r) => r.replied).length,
-        failed: recipients.filter((r) => r.status === "failed" || r.status === "invalid_number").length,
-        pending: recipients.filter((r) => r.status === "pending" || r.status === "claimed" || r.status === "skipped").length,
+        sent: recipients.filter((r) => String(r.status || "").toLowerCase() === "sent").length,
+        replied: recipients.filter((r) => Boolean(r.replied)).length,
+        failed: recipients.filter((r) => {
+          const s = String(r.status || "").toLowerCase();
+          return s === "failed" || s === "invalid_number";
+        }).length,
+        pending: recipients.filter((r) => {
+          const s = String(r.status || "").toLowerCase();
+          return s === "pending" || s === "claimed" || s === "skipped";
+        }).length,
       };
 
       // 7. Filtros: status e busca
       let filtered = recipients;
-      const filterStatus = normalizeString(req.query.status).toLowerCase();
+      const rawFilterStatus = normalizeString(req.query.status);
+      const filterStatus = rawFilterStatus ? rawFilterStatus.toLowerCase() : "all";
       if (filterStatus && filterStatus !== "all") {
         if (filterStatus === "replied") {
-          filtered = filtered.filter((r) => r.replied);
+          filtered = filtered.filter((r) => Boolean(r.replied));
         } else if (filterStatus === "sent") {
-          filtered = filtered.filter((r) => r.status === "sent");
+          filtered = filtered.filter((r) => String(r.status || "").toLowerCase() === "sent");
         } else if (filterStatus === "failed") {
-          filtered = filtered.filter((r) => r.status === "failed" || r.status === "invalid_number");
+          filtered = filtered.filter((r) => {
+            const s = String(r.status || "").toLowerCase();
+            return s === "failed" || s === "invalid_number";
+          });
         } else if (filterStatus === "pending") {
-          filtered = filtered.filter((r) => r.status === "pending" || r.status === "claimed" || r.status === "skipped");
+          filtered = filtered.filter((r) => {
+            const s = String(r.status || "").toLowerCase();
+            return s === "pending" || s === "claimed" || s === "skipped";
+          });
         } else {
-          filtered = filtered.filter((r) => r.status.toLowerCase() === filterStatus);
+          filtered = filtered.filter((r) => String(r.status || "").toLowerCase() === filterStatus);
         }
       }
 
-      const search = normalizeString(req.query.search).toLowerCase();
+      const rawSearch = normalizeString(req.query.search);
+      const search = rawSearch ? rawSearch.toLowerCase() : null;
       if (search) {
         const searchClean = search.replace(/\D/g, "");
         filtered = filtered.filter((r) => {
-          const nome = (r.nome || "").toLowerCase();
-          const phone = (r.telefone || "").replace(/\D/g, "");
+          const nome = String(r.nome || "").toLowerCase();
+          const rawTelefone = String(r.telefone || "");
+          const phoneDigits = rawTelefone.replace(/\D/g, "");
           return (
             nome.includes(search) ||
-            (searchClean && phone.includes(searchClean)) ||
-            (r.telefone && r.telefone.toLowerCase().includes(search))
+            (searchClean && phoneDigits.includes(searchClean)) ||
+            rawTelefone.toLowerCase().includes(search)
           );
         });
       }
