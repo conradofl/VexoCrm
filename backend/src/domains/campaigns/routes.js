@@ -3800,15 +3800,24 @@ export function registerCampaignsRoutes(app, deps) {
       const campaignIds = grouped.map((r) => r.campaign_id);
       let repliedMap = {};
       if (campaignIds.length > 0) {
+        const canonicalPhoneMatch = `(lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})`;
+        const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
         const { rows: repliedRows } = await pgDatabasePool.query(
           `
             SELECT r.campaign_id, COUNT(DISTINCT r.phone)::int AS replied_count
             FROM public.campaign_dispatch_runs r
-            WHERE r.client_id = $1 AND r.campaign_id = ANY($2::uuid[])
+            WHERE r.client_id = $1
+              AND r.campaign_id = ANY($2::uuid[])
+              AND r.status = 'sent'
+              AND r.phone <> ''
+              AND r.sent_at IS NOT NULL
               AND EXISTS (
                 SELECT 1 FROM public.lead_messages lm
-                WHERE lm.client_id = $1 AND lm.phone = r.phone
+                WHERE lm.client_id = r.client_id
+                  AND ${canonicalPhoneMatch}
                   AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+                  AND ${lmTimestamp} > r.sent_at
+                  AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
               )
             GROUP BY r.campaign_id
           `,
@@ -4249,6 +4258,341 @@ export function registerCampaignsRoutes(app, deps) {
     } catch (err) {
       console.error("[dispatch-recipients] error:", err);
       sendError(res, 500, "DISPATCH_RECIPIENTS_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // GET /api/campaigns/:campaignId/recipients — Lista completa de destinatários a nível de campanha com status, resposta causal de 14 dias e exportação
+  app.get("/api/campaigns/:campaignId/recipients", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    const campaignId = normalizeString(req.params.campaignId);
+    if (!campaignId) return sendError(res, 400, "MISSING_ID", "Missing campaign id");
+
+    try {
+      const { data: campaign, error: campErr } = await supabase
+        .from("campaigns")
+        .select("id, name, client_id, import_id, analytics_meta")
+        .eq("id", campaignId)
+        .maybeSingle();
+
+      if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
+      // 1. Obter todos os dispatches da campanha ordenados por offset/created_at
+      const { data: dispatchesData, error: dispErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, client_id, campaign_id, name, limit_per_run, offset, steps, status, target_count, evolution_instance_id, scheduled_at, created_at")
+        .eq("campaign_id", campaignId)
+        .eq("client_id", authorizedClientId)
+        .order("offset", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (dispErr) throw dispErr;
+      const dispatches = dispatchesData || [];
+      const dispatchMap = new Map(dispatches.map((d) => [d.id, d]));
+
+      // 2. Obter todos os leads candidatos da campanha (via buildDispatchLeads agregando os lotes)
+      const allCandidateLeads = [];
+      const importSelection = resolveCampaignImportSelection(campaign);
+
+      if (dispatches.length > 0) {
+        for (const dispatch of dispatches) {
+          const batchLeads = await buildDispatchLeads({
+            clientId: authorizedClientId,
+            importId: importSelection,
+            limit: dispatch.limit_per_run,
+            offset: dispatch.offset,
+            segmentation: dispatch.steps?.[0]?.segmentation || null,
+            excludeDispatchId: null,
+          });
+          for (const lead of batchLeads) {
+            allCandidateLeads.push({
+              ...lead,
+              dispatchId: dispatch.id,
+              dispatchName: dispatch.name,
+            });
+          }
+        }
+      } else {
+        const baseLeads = await buildDispatchLeads({
+          clientId: authorizedClientId,
+          importId: importSelection,
+          limit: null,
+          offset: null,
+          segmentation: null,
+          excludeDispatchId: null,
+        });
+        for (const lead of baseLeads) {
+          allCandidateLeads.push({
+            ...lead,
+            dispatchId: null,
+            dispatchName: null,
+          });
+        }
+      }
+
+      // 3. Obter todas as execuções de campaign_dispatch_runs onde campaign_id = :campaignId
+      const { data: runsData, error: runsErr } = await supabase
+        .from("campaign_dispatch_runs")
+        .select("id, dispatch_id, lead_id, phone, status, error_message, claimed_at, sent_at, created_at")
+        .eq("campaign_id", campaignId)
+        .order("created_at", { ascending: true });
+
+      if (runsErr) throw runsErr;
+      const runs = runsData || [];
+
+      const runByDispatchAndLeadId = new Map();
+      const runByDispatchAndPhone = new Map();
+      const runByLeadId = new Map();
+      const runByPhone = new Map();
+      const matchedRunIds = new Set();
+
+      for (const r of runs) {
+        const clean = normalizeString(r.phone).replace(/\D/g, "");
+        if (r.dispatch_id && r.lead_id) runByDispatchAndLeadId.set(`${r.dispatch_id}:${r.lead_id}`, r);
+        if (r.dispatch_id && clean) runByDispatchAndPhone.set(`${r.dispatch_id}:${clean}`, r);
+        if (r.lead_id) runByLeadId.set(r.lead_id, r);
+        if (clean) runByPhone.set(clean, r);
+      }
+
+      // 4. Identificar Respostas com Causalidade de 14 dias para leads com status = 'sent'
+      const replyByRunId = new Map();
+      const replyByPhone = new Map();
+
+      if (pgDatabasePool) {
+        const canonicalPhoneMatch = `(lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})`;
+        const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
+
+        const { rows: replyRows } = await pgDatabasePool.query(
+          `
+            SELECT DISTINCT ON (r.id)
+              r.id AS run_id,
+              r.phone AS run_phone,
+              ${lmTimestamp} AS replied_at,
+              COALESCE(lm.message_text, '') AS last_inbound_text
+            FROM public.campaign_dispatch_runs r
+            JOIN public.lead_messages lm
+              ON lm.client_id = r.client_id
+              AND ${canonicalPhoneMatch}
+              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              AND ${lmTimestamp} > r.sent_at
+              AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+            WHERE r.client_id = $1
+              AND r.campaign_id = $2
+              AND r.status = 'sent'
+              AND r.sent_at IS NOT NULL
+              AND r.phone <> ''
+            ORDER BY r.id, ${lmTimestamp} DESC
+          `,
+          [authorizedClientId, campaignId]
+        );
+
+        for (const row of replyRows) {
+          replyByRunId.set(row.run_id, {
+            repliedAt: row.replied_at,
+            lastInboundText: row.last_inbound_text,
+          });
+          if (row.run_phone) {
+            const clean = normalizeString(row.run_phone).replace(/\D/g, "");
+            if (clean) {
+              replyByPhone.set(clean, {
+                repliedAt: row.replied_at,
+                lastInboundText: row.last_inbound_text,
+              });
+            }
+          }
+        }
+      }
+
+      // 5. Montar lista de destinatários
+      const recipients = allCandidateLeads.map((lead) => {
+        const cleanPhone = normalizeString(lead.telefone).replace(/\D/g, "");
+        let run = null;
+        if (lead.dispatchId) {
+          if (lead.id) run = runByDispatchAndLeadId.get(`${lead.dispatchId}:${lead.id}`);
+          if (!run && cleanPhone) run = runByDispatchAndPhone.get(`${lead.dispatchId}:${cleanPhone}`);
+        }
+        if (!run && lead.id) run = runByLeadId.get(lead.id);
+        if (!run && cleanPhone) run = runByPhone.get(cleanPhone);
+
+        if (run?.id) matchedRunIds.add(run.id);
+
+        const rawStatus = run ? run.status : "pending";
+        const statusLabel =
+          rawStatus === "sent"
+            ? "Enviado"
+            : rawStatus === "invalid_number"
+            ? "Número inválido"
+            : rawStatus === "failed"
+            ? "Falhou"
+            : rawStatus === "skipped"
+            ? "Pulado"
+            : rawStatus === "claimed"
+            ? "Em processamento"
+            : "Na fila";
+
+        const replyInfo =
+          rawStatus === "sent"
+            ? (run?.id ? replyByRunId.get(run.id) : null) || (cleanPhone ? replyByPhone.get(cleanPhone) : null)
+            : null;
+
+        const replied = !!replyInfo;
+        const repliedAt = replyInfo ? replyInfo.repliedAt : null;
+        const lastInboundText = replyInfo ? replyInfo.lastInboundText : null;
+        const failureReason = run?.error_message ? translateDispatchErrorMessage(run.error_message) : null;
+        const sentAt = run?.sent_at || null;
+        const dispatchName = lead.dispatchName || (run?.dispatch_id ? dispatchMap.get(run.dispatch_id)?.name : null) || null;
+
+        return {
+          leadId: lead.id || lead.lead_id || run?.lead_id || null,
+          nome: lead.nome || "Sem nome",
+          telefone: lead.telefone || (run ? run.phone : ""),
+          status: rawStatus,
+          statusLabel,
+          sentAt,
+          replied,
+          repliedAt,
+          lastInboundText,
+          failureReason,
+          dispatchName,
+        };
+      });
+
+      // Se houver runs registradas não presentes nos candidatos, inclui para garantir contagem exata
+      for (const r of runs) {
+        if (!matchedRunIds.has(r.id)) {
+          const cleanPhone = normalizeString(r.phone).replace(/\D/g, "");
+          const replyInfo =
+            r.status === "sent"
+              ? replyByRunId.get(r.id) || (cleanPhone ? replyByPhone.get(cleanPhone) : null)
+              : null;
+          const replied = !!replyInfo;
+          const statusLabel =
+            r.status === "sent"
+              ? "Enviado"
+              : r.status === "invalid_number"
+              ? "Número inválido"
+              : r.status === "failed"
+              ? "Falhou"
+              : r.status === "skipped"
+              ? "Pulado"
+              : r.status === "claimed"
+              ? "Em processamento"
+              : "Na fila";
+
+          recipients.push({
+            leadId: r.lead_id || null,
+            nome: "Sem nome",
+            telefone: r.phone || "",
+            status: r.status || "pending",
+            statusLabel,
+            sentAt: r.sent_at || null,
+            replied,
+            repliedAt: replyInfo ? replyInfo.repliedAt : null,
+            lastInboundText: replyInfo ? replyInfo.lastInboundText : null,
+            failureReason: r.error_message ? translateDispatchErrorMessage(r.error_message) : null,
+            dispatchName: r.dispatch_id ? dispatchMap.get(r.dispatch_id)?.name || null : null,
+          });
+        }
+      }
+
+      // 6. Contagens consolidadas antes dos filtros
+      const counts = {
+        all: recipients.length,
+        sent: recipients.filter((r) => r.status === "sent").length,
+        replied: recipients.filter((r) => r.replied).length,
+        failed: recipients.filter((r) => r.status === "failed" || r.status === "invalid_number").length,
+        pending: recipients.filter((r) => r.status === "pending" || r.status === "claimed" || r.status === "skipped").length,
+      };
+
+      // 7. Filtros: status e busca
+      let filtered = recipients;
+      const filterStatus = normalizeString(req.query.status).toLowerCase();
+      if (filterStatus && filterStatus !== "all") {
+        if (filterStatus === "replied") {
+          filtered = filtered.filter((r) => r.replied);
+        } else if (filterStatus === "sent") {
+          filtered = filtered.filter((r) => r.status === "sent");
+        } else if (filterStatus === "failed") {
+          filtered = filtered.filter((r) => r.status === "failed" || r.status === "invalid_number");
+        } else if (filterStatus === "pending") {
+          filtered = filtered.filter((r) => r.status === "pending" || r.status === "claimed" || r.status === "skipped");
+        } else {
+          filtered = filtered.filter((r) => r.status.toLowerCase() === filterStatus);
+        }
+      }
+
+      const search = normalizeString(req.query.search).toLowerCase();
+      if (search) {
+        const searchClean = search.replace(/\D/g, "");
+        filtered = filtered.filter((r) => {
+          const nome = (r.nome || "").toLowerCase();
+          const phone = (r.telefone || "").replace(/\D/g, "");
+          return (
+            nome.includes(search) ||
+            (searchClean && phone.includes(searchClean)) ||
+            (r.telefone && r.telefone.toLowerCase().includes(search))
+          );
+        });
+      }
+
+      // 8. Formato CSV
+      const rawFormat = normalizeString(req.query.format);
+      if (rawFormat && rawFormat.toLowerCase() === "csv") {
+        const header = [
+          "Nome",
+          "Telefone",
+          "Status",
+          "Data de Envio",
+          "Respondeu",
+          "Data da Resposta",
+          "Última Mensagem",
+          "Motivo Falha",
+          "Lote",
+        ];
+        const esc = (v) => {
+          const s = v == null ? "" : String(v);
+          return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const lines = [header.join(",")];
+        for (const r of filtered) {
+          const sentDateStr = r.sentAt ? new Date(r.sentAt).toLocaleString("pt-BR") : "";
+          const repliedDateStr = r.repliedAt ? new Date(r.repliedAt).toLocaleString("pt-BR") : "";
+          lines.push(
+            [
+              r.nome,
+              r.telefone,
+              r.statusLabel,
+              sentDateStr,
+              r.replied ? "Sim" : "Não",
+              repliedDateStr,
+              r.lastInboundText || "",
+              r.failureReason || "",
+              r.dispatchName || "",
+            ]
+              .map(esc)
+              .join(",")
+          );
+        }
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="destinatarios-${(campaign.name || "campanha").replace(/[^a-zA-Z0-9_-]/g, "_")}.csv"`
+        );
+        return res.send(lines.join("\n"));
+      }
+
+      // 9. Retorno JSON
+      res.json({
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        total: recipients.length,
+        counts,
+        recipients: filtered,
+      });
+    } catch (err) {
+      console.error("[campaign-recipients] error:", err);
+      sendError(res, 500, "CAMPAIGN_RECIPIENTS_FAILED", err instanceof Error ? err.message : "Failed");
     }
   });
 

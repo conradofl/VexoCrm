@@ -1128,6 +1128,62 @@ export function useDispatchRecipients(dispatchId: string | null, statusFilter?: 
   });
 }
 
+export interface CampaignRecipientItem {
+  leadId: string | null;
+  nome: string;
+  telefone: string;
+  status: string;
+  statusLabel: string;
+  sentAt: string | null;
+  replied: boolean;
+  repliedAt: string | null;
+  lastInboundText: string | null;
+  failureReason: string | null;
+  dispatchName: string | null;
+}
+
+export interface CampaignRecipientsResponse {
+  campaignId: string;
+  campaignName: string;
+  total: number;
+  counts: {
+    all: number;
+    sent: number;
+    replied: number;
+    failed: number;
+    pending: number;
+  };
+  recipients: CampaignRecipientItem[];
+}
+
+export function useCampaignRecipients(
+  campaignId: string | null,
+  statusFilter?: string,
+  searchQuery?: string
+) {
+  const { getIdToken } = useAuth();
+  return useQuery<CampaignRecipientsResponse>({
+    queryKey: ["campaign-recipients", campaignId, statusFilter, searchQuery],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const url = new URL(`${API_BASE_URL}/api/campaigns/${campaignId}/recipients`);
+      if (statusFilter && statusFilter !== "all") {
+        url.searchParams.set("status", statusFilter);
+      }
+      if (searchQuery && searchQuery.trim()) {
+        url.searchParams.set("search", searchQuery.trim());
+      }
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao buscar destinatários da campanha"));
+      return res.json();
+    },
+  });
+}
+
 export function useRetryFailedDispatchLeads() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();

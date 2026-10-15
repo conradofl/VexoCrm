@@ -333,7 +333,7 @@ export default function WhatsAppInbox({
 }: WhatsAppInboxProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialPhone = searchParams.get("phone") ?? null;
+  const initialPhone = searchParams.get("phone") || searchParams.get("chatId") || null;
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [selectedInstanceNames, setSelectedInstanceNames] = useState<string[]>([]);

@@ -1,3 +1,4 @@
+import { CampaignRecipientsDialog } from "./CampaignRecipientsDialog";
 // frontend/src/pages/LeadImports/DispatchCampaignTracker.tsx
 //
 // "Cartões compactos e cor por campanha" — Acompanhar Disparos.
@@ -82,6 +83,10 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
   const [tab, setTab] = useState<"active" | "ended">("active");
   const [endedPage, setEndedPage] = useState(1);
   const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
+  const [campaignRecipientsModal, setCampaignRecipientsModal] = useState<{
+    campaignId: string;
+    initialFilter?: string;
+  } | null>(null);
   const view = useViewMode("fila-de-envios");
 
   const activeQuery = useDispatchSummary(clientId, "active", 1, PAGE_SIZE_ENDED);
@@ -196,9 +201,21 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
               expandedId={expandedCampaignId}
               onExpandedChange={setExpandedCampaignId}
               renderCard={(c, { expanded, toggle }) => (
-                <CampaignCard campaign={c} onOpenDispatch={onOpenDispatch} isExpanded={expanded} onToggleExpand={toggle} />
+                <CampaignCard
+                  campaign={c}
+                  onOpenDispatch={onOpenDispatch}
+                  onOpenCampaignRecipients={(cId, filter) => setCampaignRecipientsModal({ campaignId: cId, initialFilter: filter })}
+                  isExpanded={expanded}
+                  onToggleExpand={toggle}
+                />
               )}
-              renderExpanded={(c) => <CampaignDetails campaign={c} onOpenDispatch={onOpenDispatch} />}
+              renderExpanded={(c) => (
+                <CampaignDetails
+                  campaign={c}
+                  onOpenDispatch={onOpenDispatch}
+                  onOpenCampaignRecipients={(cId, filter) => setCampaignRecipientsModal({ campaignId: cId, initialFilter: filter })}
+                />
+              )}
             />
 
             {tab === "ended" && (current.data?.totalForScope ?? 0) > PAGE_SIZE_ENDED && (
@@ -231,6 +248,14 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
           </>
         )}
       </CardContent>
+
+      {campaignRecipientsModal && (
+        <CampaignRecipientsDialog
+          campaignId={campaignRecipientsModal.campaignId}
+          initialFilter={campaignRecipientsModal.initialFilter}
+          onClose={() => setCampaignRecipientsModal(null)}
+        />
+      )}
     </Card>
   );
 }
@@ -238,11 +263,13 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
 function CampaignCard({
   campaign,
   onOpenDispatch,
+  onOpenCampaignRecipients,
   isExpanded,
   onToggleExpand,
 }: {
   campaign: DispatchSummaryCampaign;
   onOpenDispatch: (dispatchId: string) => void;
+  onOpenCampaignRecipients?: (campaignId: string, initialFilter?: string) => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
 }) {
@@ -390,7 +417,7 @@ function CampaignCard({
           data-testid={`dispatch-details-${campaign.campaignId}`}
           className="mt-3.5 pt-3.5 border-t border-border/80 space-y-3 animate-in fade-in duration-150"
         >
-          <CampaignDetails campaign={campaign} onOpenDispatch={onOpenDispatch} />
+          <CampaignDetails campaign={campaign} onOpenDispatch={onOpenDispatch} onOpenCampaignRecipients={onOpenCampaignRecipients} />
         </div>
       )}
     </div>
@@ -401,9 +428,11 @@ function CampaignCard({
 export function CampaignDetails({
   campaign,
   onOpenDispatch,
+  onOpenCampaignRecipients,
 }: {
   campaign: DispatchSummaryCampaign;
   onOpenDispatch: (dispatchId: string) => void;
+  onOpenCampaignRecipients?: (campaignId: string, initialFilter?: string) => void;
 }) {
   const bulkAction = useCampaignDispatchBulkAction();
 
@@ -482,10 +511,38 @@ export function CampaignDetails({
 
       {/* Os quatro números */}
       <div className="grid grid-cols-4 gap-2 text-center p-2 rounded-xl bg-muted/20 border border-border/40">
-        <NumberStat label="Enviados" value={campaign.sentTotal} className="text-emerald-600 dark:text-emerald-400" />
-        <NumberStat label="Responderam" value={campaign.repliedCount} className="text-indigo-600 dark:text-indigo-400" />
-        <NumberStat label="Falharam" value={campaign.failedTotal} className="text-rose-500" />
-        <NumberStat label="Na fila" value={campaign.leadsPending} className="text-slate-500" />
+        <NumberStat
+          label="Enviados"
+          value={campaign.sentTotal}
+          className="text-emerald-600 dark:text-emerald-400"
+          onClick={() => onOpenCampaignRecipients?.(campaign.campaignId, "sent")}
+          title="Clique para ver quem já recebeu e exportar CSV"
+          testId={`stat-sent-${campaign.campaignId}`}
+        />
+        <NumberStat
+          label="Responderam"
+          value={campaign.repliedCount}
+          className="text-indigo-600 dark:text-indigo-400"
+          onClick={() => onOpenCampaignRecipients?.(campaign.campaignId, "replied")}
+          title="Clique para ver quem respondeu e exportar CSV"
+          testId={`stat-replied-${campaign.campaignId}`}
+        />
+        <NumberStat
+          label="Falharam"
+          value={campaign.failedTotal}
+          className="text-rose-500"
+          onClick={() => onOpenCampaignRecipients?.(campaign.campaignId, "failed")}
+          title="Clique para ver destinatários com falha e exportar CSV"
+          testId={`stat-failed-${campaign.campaignId}`}
+        />
+        <NumberStat
+          label="Na fila"
+          value={campaign.leadsPending}
+          className="text-slate-500"
+          onClick={() => onOpenCampaignRecipients?.(campaign.campaignId, "pending")}
+          title="Clique para ver destinatários na fila e exportar CSV"
+          testId={`stat-pending-${campaign.campaignId}`}
+        />
       </div>
 
       {/* Próximo envio com ícone de relógio */}
@@ -531,9 +588,42 @@ export function CampaignDetails({
   );
 }
 
-function NumberStat({ label, value, className }: { label: string; value: number; className?: string }) {
+function NumberStat({
+  label,
+  value,
+  className,
+  onClick,
+  title,
+  testId,
+}: {
+  label: string;
+  value: number;
+  className?: string;
+  onClick?: () => void;
+  title?: string;
+  testId?: string;
+}) {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.key === "Enter" || e.key === " ") && onClick) {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   return (
-    <div>
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
+      title={title}
+      aria-label={title || `${label}: ${value}`}
+      data-testid={testId}
+      className={cn(
+        onClick &&
+          "cursor-pointer hover:bg-muted/50 hover:scale-[1.02] transition-all rounded-lg p-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 select-none"
+      )}
+    >
       <p className={cn("text-sm font-bold font-num", className)}>{value}</p>
       <p className="text-[10px] text-muted-foreground">{label}</p>
     </div>
