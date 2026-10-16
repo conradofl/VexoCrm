@@ -14,6 +14,7 @@ import {
   getSafeEvolutionEndpointLog,
   getLeadClientEvolutionInstances,
   resolveInstanceIdentifier,
+  extractEvolutionInstanceSlug,
 } from "../services/evolution.js";
 import { getLeadClientN8nSettingsStatus } from "../services/n8nSettings.js";
 import { normalizeCampaignAnalyticsMeta } from "../campaign-outbound.js";
@@ -441,14 +442,22 @@ export async function resolveCampaignDispatchSettings(clientId, campaign = {}) {
 
   // 1. Se o usuário selecionou uma instância específica ativa
   if (selectedEvolutionInstanceId) {
-    const selectedInstance = instances.find((instance) => instance.id === selectedEvolutionInstanceId) || null;
+    const selectedInstance =
+      instances.find((instance) => {
+        const slug = extractEvolutionInstanceSlug(instance.dispatch_webhook_url);
+        return (
+          instance.id === selectedEvolutionInstanceId ||
+          instance.name === selectedEvolutionInstanceId ||
+          (slug && slug === selectedEvolutionInstanceId)
+        );
+      }) || null;
     if (selectedInstance && selectedInstance.active !== false && selectedInstance.dispatch_webhook_url) {
       return {
         webhookUrl: normalizeString(selectedInstance.dispatch_webhook_url),
         webhookToken: normalizeString(selectedInstance.dispatch_webhook_token) || null,
         source: "campaign_evolution_instance",
         schemaAvailable: true,
-        selectedEvolutionInstanceId,
+        selectedEvolutionInstanceId: selectedInstance.id,
         selectedEvolutionInstanceName: selectedInstance.name || "Evolution",
         usingCachedCampaignSettings: false,
         tenantSettingsSource: "campaign_evolution_instance",

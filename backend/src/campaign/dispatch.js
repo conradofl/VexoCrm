@@ -25,7 +25,14 @@ import {
   sanitizePhone,
   buildPhoneLookupVariants,
 } from "../services/leadImport.js";
-import { logCampaignDispatch, checkEvolutionInstanceHealth, DEFAULT_REQUEST_TIMEOUT_MS, getLeadClientEvolutionInstances } from "../services/evolution.js";
+import {
+  logCampaignDispatch,
+  checkEvolutionInstanceHealth,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  getLeadClientEvolutionInstances,
+  resolveInstanceIdentifier,
+  extractEvolutionInstanceSlug,
+} from "../services/evolution.js";
 import {
   getSegmentationCatalog,
   isFilterShape,
@@ -1771,16 +1778,38 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   }
 
   let sendingEvolutionInstanceId = null;
-  // Fonte 1: Instância receptora do webhook de resposta
+  // Fonte 1: Instância receptora do webhook de resposta (resolvida canonicamente)
   const incomingInstance = normalizeString(replyPayload.instance || replyPayload.instanceName || replyPayload.instance_name);
   if (incomingInstance) {
-    const instances = await getLeadClientEvolutionInstances(clientId).catch(() => []);
-    const matched = (instances || []).find(
-      (i) => String(i.id).toLowerCase() === incomingInstance.toLowerCase() ||
-             String(i.name || "").toLowerCase() === incomingInstance.toLowerCase()
-    );
-    if (matched) sendingEvolutionInstanceId = matched.id;
+    try {
+      const { chip: resolvedChip } = await resolveInstanceIdentifier({
+        clientId,
+        identifier: incomingInstance,
+        pool: pgDatabasePool,
+      });
+      if (resolvedChip?.id) {
+        sendingEvolutionInstanceId = resolvedChip.id;
+      }
+    } catch {
+      // fallback manual caso a busca lance exceção
+    }
+
+    // Caso não encontre por resolveInstanceIdentifier, busca manual em instances
+    if (!sendingEvolutionInstanceId) {
+      const instances = await getLeadClientEvolutionInstances(clientId).catch(() => []);
+      const incomingLower = incomingInstance.toLowerCase();
+      const matched = (instances || []).find((i) => {
+        const slug = extractEvolutionInstanceSlug(i.dispatch_webhook_url);
+        return (
+          String(i.id).toLowerCase() === incomingLower ||
+          String(i.name || "").toLowerCase() === incomingLower ||
+          (slug && slug.toLowerCase() === incomingLower)
+        );
+      });
+      if (matched?.id) sendingEvolutionInstanceId = matched.id;
+    }
   }
+
   // Fonte 2: O lote original do lead (se ainda não resolvido)
   if (!sendingEvolutionInstanceId && progress?.dispatchId) {
     const { data: disp } = await supabase
@@ -1790,13 +1819,24 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       .maybeSingle();
     if (disp?.evolution_instance_id) sendingEvolutionInstanceId = disp.evolution_instance_id;
   }
-  // Fonte 3: Histórico de envio do lead nesta campanha
+
+  // Fonte 3: Configuração da própria campanha
+  if (!sendingEvolutionInstanceId) {
+    const campaignChipId = normalizeString(
+      campaign.analytics_meta?.dispatchOptions?.evolutionInstanceId ||
+      analyticsMeta?.dispatchOptions?.evolutionInstanceId
+    );
+    if (campaignChipId) sendingEvolutionInstanceId = campaignChipId;
+  }
+
+  // Fonte 4: Histórico de envio do lead nesta campanha (com busca cobrindo variações do 9º dígito)
   if (!sendingEvolutionInstanceId && pgDatabasePool) {
+    const phoneVariants = Array.from(buildPhoneLookupVariants(phone) || [phone]);
     const runRes = await pgDatabasePool.query(
       `SELECT evolution_instance_id FROM public.campaign_dispatch_runs
-       WHERE campaign_id = $1 AND phone = $2 AND evolution_instance_id IS NOT NULL
+       WHERE campaign_id = $1 AND phone = ANY($2::text[]) AND evolution_instance_id IS NOT NULL
        ORDER BY created_at DESC LIMIT 1`,
-      [campaign.id, phone]
+      [campaign.id, phoneVariants]
     ).catch(() => ({ rows: [] }));
     if (runRes.rows[0]?.evolution_instance_id) {
       sendingEvolutionInstanceId = runRes.rows[0].evolution_instance_id;
@@ -1807,23 +1847,44 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     clientId,
     campaignId: campaign.id,
     phone: maskPhoneForLog(phone),
+    incomingInstance,
     sendingEvolutionInstanceId: sendingEvolutionInstanceId || null,
   });
 
-  const campaignWithChip = sendingEvolutionInstanceId
-    ? {
-        ...campaign,
-        analytics_meta: {
-          ...analyticsMeta,
-          dispatchOptions: {
-            ...analyticsMeta?.dispatchOptions,
-            evolutionInstanceId: sendingEvolutionInstanceId,
-          },
-        },
-      }
-    : campaign;
+  const campaignWithChip = {
+    ...campaign,
+  };
+
+  if (sendingEvolutionInstanceId) {
+    campaignWithChip.analytics_meta = {
+      ...analyticsMeta,
+      dispatchOptions: {
+        ...analyticsMeta?.dispatchOptions,
+        evolutionInstanceId: sendingEvolutionInstanceId,
+      },
+    };
+  } else {
+    // TRAVA DE SEGURANÇA ESTRITA: Se o chip receptor não puder ser determinado de forma alguma, NÃO dispare por outro chip aleatório
+    console.error("[campaign-dispatch] Abortando continuação: chip receptor não identificado para evitar envio por chip trocado", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      incomingInstance,
+    });
+    return { continued: false, reason: "ambiguous_chip_recipient" };
+  }
 
   const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaignWithChip);
+
+  // Trava anti-troca de chip: garante que resolveCampaignDispatchSettings não caiu em fallback para outro chip
+  if (sendingEvolutionInstanceId && dispatchSettings.selectedEvolutionInstanceId && dispatchSettings.selectedEvolutionInstanceId !== sendingEvolutionInstanceId) {
+    console.error("[campaign-dispatch] Abortando continuação: configurações resolveram para chip diferente do receptor", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      expectedChip: sendingEvolutionInstanceId,
+      resolvedChip: dispatchSettings.selectedEvolutionInstanceId,
+    });
+    return { continued: false, reason: "chip_mismatch_guard" };
+  }
   const { webhookUrl, webhookToken } = dispatchSettings;
   logCampaignDispatch("info", "settings_resolved", {
     clientId,
